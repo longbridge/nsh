@@ -1359,6 +1359,9 @@ class Player {
       el._applied = 0;
       el.addEventListener("scroll", () => this.scrolled(el), { passive: true });
       el.addEventListener("scrollend", () => this.scrollEnded(el));
+      // The user takes over a smooth scroll of the core's (`op_sb`).
+      const takeOver = () => { el._smooth = null; };
+      for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) el.addEventListener(type, takeOver, { passive: true });
     }
     if (kind === "screen") el.classList.add("nsh-screen");
     if (kind === "modal") el.classList.add("nsh-modal");
@@ -1968,6 +1971,13 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._applied++;
+    // A smooth scroll of the core's in flight moves with it, as on the
+    // native backends: setting the offset would stop it.
+    if (el._smooth) {
+      el._smooth = [el._smooth[0] + dx, el._smooth[1] + dy];
+      el.scrollTo({ left: el._smooth[0], top: el._smooth[1], behavior: "smooth" });
+      return;
+    }
     el.scrollLeft += dx;
     el.scrollTop += dy;
   }
@@ -2061,8 +2071,13 @@ class Player {
         const track = document.createElement("div");
         track.className = "nsh-track";
         track._list = el;
-        // Where the list's cells are: in it, or in its content layer.
-        const host = el._layer ?? el;
+        // Where the list's cells are: in it, or in its content layer; the
+        // cells of a list in the scroll view's viewport are in that list,
+        // which keeps their z-index to itself.
+        const own = el._layer ?? el;
+        const host = cell.parentNode ?? own;
+        track._page = host !== own;
+        if (track._page) host.classList.add("nsh-sticky");
         host.insertBefore(track, cell.parentNode === host ? cell : null);
         track.append(cell);
         cell._track = track;
@@ -2083,6 +2098,18 @@ class Player {
     this.placeFrame(cell);
   }
 
+  /** Where the views around `track` (up to its scroll view) put it in the
+   * scroll view's content along its axis. */
+  trackOrigin(track, horizontal) {
+    const list = track._list;
+    let at = 0;
+    for (let n = track.parentNode; n && n !== list && n !== list._layer; n = n.parentNode) {
+      const f = n._frame;
+      if (f) at += horizontal ? f[0] : f[1];
+    }
+    return at;
+  }
+
   /** Places `cell`'s track along its range of travel and the cell in it:
    * it sticks the distance from its range's start to its frame's from the
    * scroll view's start. */
@@ -2094,16 +2121,21 @@ class Player {
     const horizontal = !!list._horizontal;
     const [at, size] = horizontal ? [f[0], f[2]] : [f[1], f[3]];
     // The last one's range ends past the content: it travels to its end
-    // (not at all before the list's content size arrives).
+    // (not at all before the list's content size arrives). A page list's
+    // ranges end within it, and are in the scroll view's content, where
+    // the list starts at `origin`.
+    const page = cell._track._page;
+    const origin = page ? this.trackOrigin(cell._track, horizontal) : 0;
     const content = list._content?.[horizontal ? 0 : 1] ?? 0;
-    const length = size + Math.max(0, Math.min(range[1] - range[0], content - at - size));
+    const travel = page ? range[1] - range[0] : Math.min(range[1] - range[0], content - at - size);
+    const length = size + Math.max(0, travel);
     const t = cell._track.style;
     t.left = `${f[0]}px`;
     t.top = `${f[1]}px`;
     t.width = `${horizontal ? length : 0}px`;
     t.height = `${horizontal ? 0 : length}px`;
     const s = cell.style;
-    const inset = `${at - range[0]}px`;
+    const inset = `${at + origin - range[0]}px`;
     s.left = horizontal ? inset : "auto";
     s.top = horizontal ? "auto" : inset;
     s.width = `${f[2]}px`;
@@ -2237,6 +2269,7 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    el._smooth = null;
     if (el._driven || el._touchDrag) return;
     // The browser's end of a scroll that ended here (`ownEnd`).
     const own = el._ownEnd;
@@ -2364,7 +2397,7 @@ class Player {
   /** `zoomTo({ scale, x, y, animated })`: content point (x, y) to the middle of the viewport, or the point there now. */
   zoomCommand(el, scale, x, y, animated) {
     if (!this.zooms(el) || !el._frame) return;
-    el._applied++;
+    // Not one of the core's counted scrolls (`ScrollBy`, `ScrollTo`), as on the other platforms.
     const target = this.limitZoom(el, scale, false);
     const fx = el._frame[2] / 2;
     const fy = el._frame[3] / 2;
@@ -3409,6 +3442,7 @@ class Player {
       case "scrollTo":
         if (!el) break;
         el._applied++;
+        el._smooth = args[2] ? [args[0], args[1]] : null;
         el.scrollTo({ left: args[0], top: args[1], behavior: args[2] ? "smooth" : "instant" });
         break;
       case "scrollToEnd":

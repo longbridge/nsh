@@ -440,3 +440,20 @@ tap id:case-props-list-sticky-offset
 expect Offset 0
 prop scroll:text:"Offset 0" stickyHeaderIndices start=-24 end=56, start=96 end=Infinity
 covers [props] stickyHeaderOffset
+# props-list-viewport
+tap id:case-props-list-viewport
+# The list lies below the header at its full length (200 rows of 40) and
+# shows its rows from its start to the viewport's end and a screen more.
+expect Row 0
+expect Row 34
+absent Row 35
+frame id:rows 0 300 390 8000
+# Row 0 sticks to the page's top from the list's start (300) until row 50
+# pushes it out; the page pins it, in its offsets.
+prop scroll:text:"Row 1" stickyHeaderIndices start=300 end=2260
+# The page scrolls it: 5000 down, the rows 4700 into it show.
+scroll id:page 0 5000
+expect Row 120
+origin id:row-120 0 5100
+absent Row 160
+covers [props] viewport

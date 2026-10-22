@@ -93,7 +93,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 |---|---|---|---|
 | `display` | `"flex" \| "grid" \| "block" \| "flow-root" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
 | `boxSizing` | `"border-box" \| "content-box"` | | 尺寸包含边框和内边距，或仅包含内容。默认 `"border-box"`。 |
-| `position` | `"relative" \| "absolute" \| "static" \| "fixed"` | `.relative()`, `.absolute()` | `"static"` 留在文档流中并忽略偏移，绝对定位后代使用最近的非 static 祖先作为包含块。`"fixed"` 保留元素类型，在窗口或模态框根视图中布局和挂载，周围内容滚动时保持不动。默认 `"relative"`。 |
+| `position` | `"relative" \| "absolute" \| "static" \| "fixed" \| "sticky"` | `.relative()`、`.absolute()` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对最近的定位祖先定位（父元素为 `"static"` 时再向上找）。`"static"` 留在文档流中并忽略偏移。`"fixed"` 保留元素类型，在窗口或模态框根视图中布局和挂载，周围内容滚动时保持不动。`"sticky"` 留在文档流中，在其父元素可见时，吸附在外层滚动视图视口起始处 `top`（横向滚动视图中为 `left`）的位置，直到它的末端碰到父元素内容框的末端；它绘制在 `zIndex` 相同的兄弟元素之上。默认 `"relative"`。 |
 | `top` | `DimensionValue` | `.top(…)`、`.inset(…)` | 距父元素上边（绝对定位），或相对自身位置的偏移（相对定位）。 |
 | `right` | `DimensionValue` | `.right(…)` | 距右边的偏移。从右到左布局中表示结束边。 |
 | `bottom` | `DimensionValue` | `.bottom(…)` | 距下边的偏移。 |

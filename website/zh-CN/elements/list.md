@@ -86,6 +86,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `children` | `virtual_list(.., \|at\| row)` | `(item: () => T, index: () => number) => JSX.Element` | | 渲染一行。 |
 | `estimatedItemSize` | `.estimated_item_size(px(..))` | `number` | `50` | 尚未测量的条目尺寸（点）。估值越接近，滚动条越稳定。 |
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
+| `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`：列表在自己的滚动视图中滚动。`"parent"`：列表没有自己的滚动视图，以完整长度排在父视图的布局中，只渲染外层滚动视图视口附近的行，随页面一起滚动（见[页面中的列表](../docs/lists.md#页面中的列表viewportparent)）。在列表创建时确定。 |
 | `numColumns` | `.columns(n)` | `number` | `1` | 每行的条目数（纵向列表）。 |
 | `inverted` | `.inverted()` | `boolean` | `false` | 从末端开始布局，第 0 项在最后（聊天样式）：初始滚动到末端，内容变化时保持与末端的距离。 |
 | `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | 用于非倒序列表：位于内容末端或距末端不超过该点数时，内容增长或视口缩小时列表保持在末端；向上滚得更远时，可见内容保持不动。 |

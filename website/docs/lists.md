@@ -1,6 +1,6 @@
 ---
 title: Lists
-description: Long and endless lists in Rust and TSX - recycling, row identity, columns, sticky headers, inverted chat lists, horizontal lists, loading more, viewability and scrolling to an item.
+description: Long and endless lists in Rust and TSX - recycling, row identity, columns, sticky headers, inverted chat lists, horizontal lists, lists in a page, loading more, viewability and scrolling to an item.
 order: 40
 group: ui
 demo: guide-lists
@@ -159,6 +159,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `children` | `virtual_list(.., row)` | `(item: () => T, index: () => number) => JSX.Element` | | Renders a cell; called once per cell, see [recycling](#how-recycling-works). |
 | `estimatedItemSize` | `.estimated_item_size(px(..))` | `number` | `50` | The size of rows not measured yet, in points. |
 | `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
+| `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`: the list scrolls in a scroll view of its own. `"parent"`: it lies at its full length in the scroll view around it, which scrolls it with the rest of the page (see [lists in a page](#lists-in-a-page-viewportparent)). Chosen when the list is made. |
 | `numColumns` | `.columns(n)` | `number` | `1` | Items per row (vertical lists). |
 | `inverted` | `.inverted()` | `boolean` | `false` | Item 0 at the bottom (chat); starts at the end and keeps its distance from the end. |
 | `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content grows (see below). |
@@ -494,6 +495,41 @@ virtual_list(count, move |at| {
 ```
 
 Right to left, horizontal lists start at the right and run leftwards.
+
+## Lists in a page: viewport="parent"
+
+A page often scrolls as one: a header, a few cards, then a long list, and maybe another list below it. Give the list `viewport="parent"` (`.viewport(ListViewport::Parent)` in Rust) and put it in a `Scroll` with the rest of the page: the list lies in the page at its full length, and the page's scroll view scrolls it with everything else. It still creates only the rows near the page's viewport and recycles their cells, so one page can hold several long lists.
+
+```rust tabs
+scroll()
+    .flex_1()
+    .child(header())
+    .child(
+        virtual_list(count, row)
+            .viewport(ListViewport::Parent)
+            .estimated_item_size(px(56.0))
+            .row_gap(px(6.0)),
+    )
+    .child(footer())
+```
+
+```tsx tabs
+<Scroll style={{ flex: 1 }}>
+  <Header />
+  <List viewport="parent" each={items} estimatedItemSize={56} contentStyle={{ gap: 6 }}>
+    {(item) => <Row item={item()} />}
+  </List>
+  <Footer />
+</Scroll>
+```
+
+- The list is as long as its rows: its height (its width, sideways) comes from its content, as a view's does, and its padding, border and margins work as on a view.
+- Its rows follow the nearest scroll view around it along its axis, or the screen it is on.
+- The page keeps what you read in place, as a browser does: rows that change size wholly above the top of the viewport move the page by as much; while the list's start is in view, rows that grow push what is below them down.
+- `scrollToIndex`, `scrollToEnd` and `initialScrollIndex` scroll the page to the list's rows, within the page's content; `onLoadMore` fires as the list's end comes near the viewport, and `onViewableItemsChange` reports the rows in the page's viewport.
+- `stickyHeaderIndices` and `stickyHeaderOffset` stick rows to the top of the page: a section header stays at the top while its rows scroll under it, until the next one pushes it out, and the last one leaves with the end of its list.
+- How the page scrolls is its scroll view's: set `onScroll` and the other scroll events, `scrollValue`, `refreshing` / `onRefresh`, paging and snapping, `contentInset`, `scrollbar`, `scrollable` and `keyboardDismissMode` on the `Scroll`. Inverted lists and `maintainVisibleContentPosition` are features of a list with a viewport of its own (`viewport="own"`, the default).
+- The viewport is chosen when the list is made: to switch, render a new list.
 
 ## Loading more: onLoadMore
 

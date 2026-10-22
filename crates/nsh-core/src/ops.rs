@@ -998,6 +998,20 @@ pub struct ListContentStyle {
     pub column_gap: Points,
 }
 
+/// What a list scrolls in (`viewport`), fixed when the list is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ListViewport {
+    /// A scroll view of its own (default).
+    #[default]
+    Own,
+    /// The scroll view around it: the list lies in its parent's layout at
+    /// its full length and renders the rows near that scroll view's
+    /// viewport, so headers above it and other lists scroll with it as
+    /// one page.
+    Parent,
+}
+
 /// When list items count as viewable (React Native's `viewabilityConfig`).
 /// Without thresholds, any visible pixel does.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -1585,6 +1599,13 @@ pub enum Prop {
     /// of view); the content scrolls under the space before them.
     #[prop(js = "stickyHeaderOffset", default = Points(0.0), on = LIST)]
     StickyOffset(Points),
+    /// `viewport`: `"parent"` lays the list out at its full length in its
+    /// parent and renders the rows near the viewport of the scroll view
+    /// around it, which scrolls it (a page of headers and lists); `"own"`
+    /// (default) scrolls it in a scroll view of its own. Fixed when the
+    /// list is made.
+    #[prop(js = "viewport", on = LIST)]
+    ListViewport(ListViewport),
     /// `contentStyle`: padding and gaps of the content.
     #[prop(js = "contentStyle", on = LIST)]
     ListContent(ListContentStyle),
