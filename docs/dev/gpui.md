@@ -145,7 +145,9 @@ import -window root -display :170 whole.png        # the display, if the window'
   is in the focus path. They are installed before the tree is drawn: a key listener belongs to the dispatch node
   active when it is added, and painting a native component's element leaves that element's node active (GPUI enters
   each element's node on paint and never leaves it), so listeners added after the tree heard keys only while focus
-  was inside the component. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
+  was inside the component. While focus is inside a component, GPUI gives it each key first (its bindings, then its
+  listeners: the surface listens in the bubble phase), and only the window's shortcuts, the app's bindings and the
+  menu's shortcuts see what it lets through, as from a text field (`input::component_key`). Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
   scrolling, keymap and editing code reads.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,

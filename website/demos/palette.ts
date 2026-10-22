@@ -135,6 +135,16 @@ export const tint = (color: string, alpha: number) => {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 };
 
+/** A pressable under the pointer (`hoverStyle`): a whisper of the text
+ * color over its surface, quieter than pressed and than selected. Leave it
+ * off a disabled control. */
+export const hoverFill = () => ({ backgroundColor: tint(ui().text, 0.05) });
+
+/** The keyboard focus (`focusStyle`, `focus-visible:`): a 2-point ring of
+ * `info` inside the view's edge, so a card's `overflow: hidden` and rounded
+ * corners do not clip it. */
+export const focusRing = () => ({ outlineStyle: "solid" as const, outlineWidth: 2, outlineColor: ui().info, outlineOffset: -2 });
+
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
  * and press Space"); touch density and copy ("Tap") otherwise. */
 export const desktop = __platform.idiom === "desktop";

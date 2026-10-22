@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Radio, RadioGroup } from "nsh/base";
-import { desktop, Log, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, size, Split, ui } from "./palette";
 
 const plans = [
   { id: "starter", label: "Starter", detail: "1 project · 5 GB", price: "Free" },
@@ -37,6 +37,9 @@ function App() {
                     ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                     : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                 }
+                class="active:opacity-70"
+                hoverStyle={cycle() === c() ? undefined : hoverFill()}
+                focusStyle={focusRing()}
                 checkedStyle={ui().raised}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: cycle() === c() ? ui().text : ui().muted }}>{c()}</Text>
@@ -59,6 +62,8 @@ function App() {
                     log(`${item().label} → ${next}`);
                   }}
                   class={`group flex-row items-center gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`}
+                  hoverStyle={item().locked ? undefined : hoverFill()}
+                  focusStyle={focusRing()}
                 >
                   <View
                     style={{

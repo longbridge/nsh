@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
-import { desktop, Log, size, Split, tint, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, size, Split, tint, ui } from "./palette";
 
 // What each section shows: the app switches the content by its own value.
 const sections = [
@@ -67,6 +67,9 @@ function App() {
                     ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                     : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                 }
+                class="active:opacity-70"
+                hoverStyle={section() === s().id ? undefined : hoverFill()}
+                focusStyle={focusRing()}
                 selectedStyle={ui().raised}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: section() === s().id ? ui().text : ui().muted }}>
@@ -110,6 +113,8 @@ function App() {
                   log(`${f().label} pressed`);
                 }}
                 class="active:opacity-70 disabled:opacity-40"
+                hoverStyle={f().locked || folder() === f().id ? undefined : hoverFill()}
+                focusStyle={focusRing()}
                 style={{ flexDirection: "row", alignItems: "center", gap: 6, height: desktop ? size.controlSm : 30, paddingHorizontal: desktop ? 10 : 12, borderRadius: 8 }}
                 selectedStyle={{ backgroundColor: tint(ui().accent, 0.16) }}
               >

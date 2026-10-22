@@ -2244,3 +2244,158 @@ fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
     )));
     assert_eq!(style(initial, c).opacity, 0.5);
 }
+
+const BASE_COLLAPSIBLE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Collapsible } from "nsh/base";
+
+function App() {
+  const open = signal(false);
+  const count = signal(0);
+  return (
+    <View>
+      <Collapsible
+        testID="region"
+        open={open()}
+        class="gap-[4px]"
+        content={<Text>{`Details ${count()}`}</Text>}
+      >
+        <View
+          testID="trigger"
+          role="button"
+          accessibilityState={{ expanded: open() }}
+          onPress={() => open.set(!open())}
+        >
+          <Text>Summary</Text>
+        </View>
+      </Collapsible>
+      <View testID="bump" onPress={() => count.set(count() + 1)} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Collapsible`: its children always, its `content` after
+/// them only while the app's `open` holds, made once and kept, so what is in
+/// it keeps its state and follows the app while collapsed; the trigger is
+/// the app's, with the expanded state it gives screen readers.
+#[test]
+fn a_base_collapsible_places_its_content_while_open() {
+    let (engine, rx) = start(BASE_COLLAPSIBLE);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Summary"));
+    assert!(
+        !first
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Text { text, .. } if text.text.starts_with("Details"))),
+        "collapsed: no content"
+    );
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (region, trigger, bump) = (
+        by_test_id("region"),
+        by_test_id("trigger"),
+        by_test_id("bump"),
+    );
+    let expanded = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == trigger => {
+                    Some(props.accessibility.state.expanded)
+                }
+                _ => None,
+            })
+            .flatten()
+    };
+    assert_eq!(expanded(std::slice::from_ref(&first)), Some(false));
+    // The region itself is no element of its own for screen readers: the
+    // trigger is.
+    let region_props = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == region => Some(props.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        region_props.accessibility.role,
+        nsh_core::AccessibilityRole::None
+    );
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+
+    // Open: the content after the children, in the region.
+    press(trigger);
+    let opened = until(&rx, |b| shows(b, "Details 0"));
+    let text = opened
+        .iter()
+        .find_map(|b| text_ids(b, "Details 0"))
+        .expect("the content shows");
+    assert_eq!(expanded(&opened), Some(true));
+    let parent_of = |batches: &[MountBatch], child: u32| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+    };
+    // The text is in the slot's holder, the holder in the region.
+    let holder = parent_of(&opened, text).expect("the holder");
+    assert_eq!(parent_of(&opened, holder), Some(region));
+
+    // Collapse: the content leaves the tree and is kept.
+    press(trigger);
+    let closed = until(&rx, |b| {
+        b.items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id } if *id == holder))
+    });
+    assert_eq!(expanded(&closed), Some(false));
+    assert!(
+        !closed
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .any(|i| matches!(i, MountItem::Delete { id } if *id == holder || *id == text)),
+        "kept, not released"
+    );
+
+    // While collapsed, it follows the app; open again, it is back as it is.
+    press(bump);
+    press(trigger);
+    let reopened = until(&rx, |b| {
+        b.items.iter().any(
+            |i| matches!(i, MountItem::Insert { parent, child, .. } if *parent == region && *child == holder),
+        )
+    });
+    assert_eq!(expanded(&reopened), Some(true));
+    let all: Vec<&MountBatch> = closed.iter().chain(reopened.iter()).collect();
+    assert!(
+        all.iter().any(|b| shows(b, "Details 1")),
+        "the content followed the app"
+    );
+}

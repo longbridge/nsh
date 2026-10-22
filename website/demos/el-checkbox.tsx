@@ -1,12 +1,13 @@
 import { mount, signal, Text, View } from "nsh";
 import { Checkbox } from "nsh/base";
-import { desktop, Log, Panel, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
 
 // The parts: geometry in classes (`disabled:` dims the row, following the
 // checkbox; `group-checked:` / `group-indeterminate:` show the mark of the
-// indicator's state), colors from the palette by the value the app owns.
+// indicator's state), colors from the palette by the value the app owns;
+// the pointer's hover and the keyboard's focus ring from the palette too.
 const row = `flex-row items-center gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`;
-const indicator = "group size-5 items-center justify-center rounded-md border transition-colors";
+const indicator = "group size-5 items-center justify-center rounded-md border transition-colors motion-reduce:transition-none";
 
 /** The indicator's surface: the accent while checked or indeterminate. */
 const box = (on: boolean) => (on ? ui().accentFill : { ...ui().inset, borderColor: ui().faint });
@@ -72,6 +73,8 @@ function App() {
               log(`Back up everything → ${next}`);
             }}
             class={row}
+            hoverStyle={hoverFill()}
+            focusStyle={focusRing()}
             indicatorClass={indicator}
             indicatorStyle={box(all() || some())}
             indicator={mark()}
@@ -89,6 +92,8 @@ function App() {
                     log(`${item().label} → ${next}`);
                   }}
                   class={row}
+                  hoverStyle={hoverFill()}
+                  focusStyle={focusRing()}
                   indicatorClass={indicator}
                   indicatorStyle={box(selected().includes(item().id))}
                   indicator={mark()}

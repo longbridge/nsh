@@ -1,5 +1,6 @@
 import type { JSX, ScrollProps, Tokens, ViewStyle } from "nsh";
 import { computed, effect, Image, Scroll, signal, Text, token, View } from "nsh";
+import { reduceMotion } from "nsh/accessibility";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
@@ -382,6 +383,20 @@ export const motion = {
 } as const;
 
 /**
+ * A pressable under the pointer (`hoverStyle`): a whisper of the text color
+ * over its surface, quieter than pressed and than selected. Leave it off a
+ * disabled control and off a selected one, whose own fill shows.
+ */
+export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
+
+/**
+ * The keyboard focus (`focusStyle`): a 2-point ring of `info` inside the
+ * view's edge, so a card's rounded clip does not cut it (`offset` 2 puts it
+ * outside, around a filled button).
+ */
+export const focusRing = (offset = -2): ViewStyle => ({ outlineStyle: "solid", outlineWidth: 2, outlineColor: colors.info, outlineOffset: offset });
+
+/**
  * A pressable that sinks a little under the finger and springs back (the
  * spring runs natively; only press in / out reach JS).
  */
@@ -665,7 +680,9 @@ export function Button(props: {
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.label}
-      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }] }}
+      hoverStyle={props.disabled ? undefined : { opacity: 0.88 }}
+      focusStyle={focusRing(2)}
+      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }], borderRadius: small() ? 8 : radius.control }}
     >
       <View
         style={{
@@ -814,7 +831,9 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
     const next = on();
     if (next === shown) return;
     shown = next;
-    t.spring(next ? 1 : 0, motion.settle);
+    // Reduced motion: the knob and the track change in place.
+    if (reduceMotion()) t.set(next ? 1 : 0);
+    else t.spring(next ? 1 : 0, motion.settle);
   });
   return {
     get trackStyle(): ViewStyle {
