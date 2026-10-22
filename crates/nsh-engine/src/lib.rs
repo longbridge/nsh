@@ -2227,7 +2227,7 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
-        Message::Event(id, event, payload) => {
+        Message::Event(id, event, mut payload) => {
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
@@ -2252,6 +2252,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             // values (from JS and from Rust components alike).
             if let (EventKind::ChangeText, EventPayload::Text { text, count }) = (event, &payload) {
                 state.core.input_changed(id, text, *count);
+            }
+            // The platform knows the caret in the input, the core where
+            // the input is.
+            if event == EventKind::CaretMove {
+                state.core.locate_caret(id, &mut payload);
             }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {

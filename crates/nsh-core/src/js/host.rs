@@ -480,6 +480,14 @@ export interface ScrollEvent {
   zoomScale: number;
 }
 
+/** Where an input's caret is: the payload of `onCaretMove`. */
+export interface CaretEvent {
+  /** The caret in the input (its border box), the input's own scrolling applied: as wide as the platform draws it, as tall as its line. Empty until the input is laid out. */
+  bounds: Bounds;
+  /** The caret in the root view the input is in (the surface or its dialog), as of the event: an `Overlay`'s `anchor`. */
+  pageBounds: Bounds;
+}
+
 /** A line of a laid-out text (in the text's content box). */
 export interface TextLayoutLine {
   text: string;
@@ -737,6 +745,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::INPUT,
         "(e: { start: number; end: number }) => void",
         "",
+    ),
+    (
+        EventKind::CaretMove,
+        on::INPUT,
+        "(e: CaretEvent) => void",
+        "The caret moved: with the selection, or as the text scrolled or wrapped again. `bounds` is where it is in the input, `pageBounds` in the root view (an `Overlay`'s `anchor`): an `@` mention's suggestions open there.",
     ),
     (
         EventKind::KeyPress,

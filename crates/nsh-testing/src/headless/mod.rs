@@ -1027,6 +1027,7 @@ impl Headless {
             self.engine
                 .control()
                 .dispatch_event(id, EventKind::ChangeText, payload);
+            self.report_selection(id);
         }
         self.done()
     }
@@ -1151,6 +1152,24 @@ impl Headless {
         self.engine
             .control()
             .dispatch_event(id, EventKind::ChangeText, payload);
+        self.report_selection(id);
+    }
+
+    /// `onSelectionChange` and `onCaretMove` of input `id` after an edit,
+    /// as the platforms report them: the caret at the end of its text
+    /// ([`Screen::input_caret`]).
+    pub(crate) fn report_selection(&self, id: NodeId) {
+        let Some(input) = self.screen.input(id) else {
+            return;
+        };
+        let end = PayloadValue::Number(input.text.encode_utf16().count() as f64);
+        self.send(
+            id,
+            EventKind::SelectionChange,
+            EventPayload::Map(vec![("start", end.clone()), ("end", end)]),
+        );
+        let caret = self.screen.input_caret(id).unwrap_or_default();
+        self.send(id, EventKind::CaretMove, EventPayload::caret(caret));
     }
 
     /// The return key in input `id`.

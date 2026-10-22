@@ -1010,6 +1010,33 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
     }
 }
 
+/// Folds the caret Java reports as numbers (`caretX`, `caretY`,
+/// `caretWidth`, `caretHeight`, in dp) into `onCaretMove`'s `bounds`.
+fn caret_bounds(fields: &mut Vec<(&'static str, PayloadValue)>) {
+    let mut caret = [0.0f32; 4];
+    fields.retain(|(key, value)| {
+        let slot = match *key {
+            "caretX" => 0,
+            "caretY" => 1,
+            "caretWidth" => 2,
+            "caretHeight" => 3,
+            _ => return true,
+        };
+        if let PayloadValue::Number(n) = value {
+            caret[slot] = *n as f32;
+        }
+        false
+    });
+    let [x, y, width, height] = caret;
+    fields.push((
+        "bounds",
+        PayloadValue::Bounds(nsh_core::Bounds {
+            origin: point(px(x), px(y)),
+            size: size(px(width), px(height)),
+        }),
+    ));
+}
+
 /// An event with an object payload: `keys` and `values` (`Double`,
 /// `Boolean` or `String`), or with a single `value` when `keys` is null.
 #[unsafe(no_mangle)]
@@ -1092,11 +1119,18 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "has" => "has",
                 "reason" => "reason",
                 "composing" => "composing",
+                "caretX" => "caretX",
+                "caretY" => "caretY",
+                "caretWidth" => "caretWidth",
+                "caretHeight" => "caretHeight",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {
                 fields.push((key, v));
             }
+        }
+        if kind == EventKind::CaretMove {
+            caret_bounds(&mut fields);
         }
         EventPayload::Map(fields)
     };

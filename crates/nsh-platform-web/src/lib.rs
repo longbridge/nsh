@@ -1157,6 +1157,21 @@ pub unsafe extern "C" fn nsh_event(
             text: text("text"),
             count: num("count") as u32,
         },
+        // `{ bounds: { origin, size } }`, as handlers get it.
+        EventKind::CaretMove => {
+            let caret = value.get("bounds");
+            let n = |part: &str, c: &str| {
+                caret
+                    .and_then(|v| v.get(part))
+                    .and_then(|v| v.get(c))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as f32
+            };
+            EventPayload::caret(nsh_core::Bounds {
+                origin: point(Points(n("origin", "x")), Points(n("origin", "y"))),
+                size: size(Points(n("size", "width")), Points(n("size", "height"))),
+            })
+        }
         _ => match &value {
             serde_json::Value::Object(map) => EventPayload::Map(
                 map.iter()

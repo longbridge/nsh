@@ -167,6 +167,29 @@ impl Editor {
         Some((r.location as u32, (r.location + r.length) as u32))
     }
 
+    /// The caret at the selection's end in `target`'s coordinates, while
+    /// the editor edits: where the text system draws its insertion point.
+    fn caret(&self, target: &NSView) -> Option<Bounds<Points>> {
+        let editing = self.editing()?;
+        let text_view = editing.downcast_ref::<NSTextView>()?;
+        let window = text_view.window()?;
+        let range = text_view.selectedRange();
+        let at = NSRange::new(range.location + range.length, 0);
+        // SAFETY: no actual range is asked for (null).
+        let screen =
+            unsafe { text_view.firstRectForCharacterRange_actualRange(at, std::ptr::null_mut()) };
+        let rect = target.convertRect_fromView(window.convertRectFromScreen(screen), None);
+        Some(Bounds {
+            origin: Point::new(px(rect.origin.x as f32), px(rect.origin.y as f32)),
+            // An empty range's rect has no width; the insertion point is
+            // one point wide.
+            size: Size::new(
+                px((rect.size.width as f32).max(1.0)),
+                px(rect.size.height as f32),
+            ),
+        })
+    }
+
     /// Selects `start..end` (UTF-16, clamped to the text).
     fn select(&self, start: u32, end: u32) -> bool {
         let Some(editor) = self.editing() else {
@@ -250,6 +273,8 @@ pub(crate) struct InputState {
     focused: Cell<bool>,
     /// Selection as last reported (UTF-16).
     selection: Cell<(u32, u32)>,
+    /// The caret as last reported, in the input view.
+    caret: Cell<Bounds<Points>>,
     /// A selection set while the field was not edited, applied when it is.
     pending_selection: Cell<Option<(u32, u32)>>,
     /// The text the engine knows the input has: the last one reported
@@ -400,10 +425,7 @@ impl Ctx {
             return;
         };
         // A programmatic change is reported once, where it ends.
-        if input.applying.get()
-            || input.focusing.get()
-            || !view.state().events.contains(EventKind::SelectionChange)
-        {
+        if input.applying.get() || input.focusing.get() {
             return;
         }
         let editor = input.editor.borrow().clone();
@@ -418,18 +440,37 @@ impl Ctx {
         {
             return;
         }
-        let Some(range) = editor.selection() else {
+        if view.state().events.contains(EventKind::SelectionChange)
+            && let Some(range) = editor.selection()
+            && input.selection.replace(range) != range
+        {
+            self.send(EventKind::SelectionChange, || {
+                EventPayload::Map(vec![
+                    ("start", PayloadValue::Number(range.0 as f64)),
+                    ("end", PayloadValue::Number(range.1 as f64)),
+                ])
+            });
+        }
+        self.caret_moved();
+    }
+
+    /// `onCaretMove` if the caret moved: with the selection, or as the text
+    /// view scrolled or the input was laid out again. Only an editor that
+    /// edits has a caret.
+    fn caret_moved(&self) {
+        let Some((_, view, input)) = self.get() else {
             return;
         };
-        if input.selection.replace(range) == range {
+        if !view.state().events.contains(EventKind::CaretMove) {
             return;
         }
-        self.send(EventKind::SelectionChange, || {
-            EventPayload::Map(vec![
-                ("start", PayloadValue::Number(range.0 as f64)),
-                ("end", PayloadValue::Number(range.1 as f64)),
-            ])
-        });
+        let editor = input.editor.borrow().clone();
+        let Some(caret) = editor.caret(view.ns()) else {
+            return;
+        };
+        if input.caret.replace(caret) != caret {
+            self.send(EventKind::CaretMove, || EventPayload::caret(caret));
+        }
     }
 
     /// Focus entered or left the editor.
@@ -1021,6 +1062,14 @@ define_class!(
 
     unsafe impl NSObjectProtocol for InputDelegate {}
 
+    impl InputDelegate {
+        /// A text view's clip view scrolled.
+        #[unsafe(method(clipBoundsChanged:))]
+        fn clip_bounds_changed(&self, _notification: &NSNotification) {
+            self.ivars().caret_moved();
+        }
+    }
+
     unsafe impl NSControlTextEditingDelegate for InputDelegate {
         #[unsafe(method(controlTextDidChange:))]
         fn control_text_did_change(&self, _notification: &NSNotification) {
@@ -1185,6 +1234,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             clipping: Cell::new(false),
             focused: Cell::new(false),
             selection: Cell::new((0, 0)),
+            caret: Cell::new(Bounds::default()),
             pending_selection: Cell::new(None),
             known: RefCell::new(String::new()),
             composition: RefCell::new(None),
@@ -1243,6 +1293,21 @@ fn new_editor(
         }
         view.setDelegate(Some(ProtocolObject::from_ref(delegate)));
         scroller.setDocumentView(Some(&view));
+        // Scrolling the text moves the caret (`onSelectionChange`).
+        // SAFETY: a scroll view's clip view (an `NSView`), always present.
+        let clip: Retained<NSView> = unsafe { msg_send![&scroller, contentView] };
+        clip.setPostsBoundsChangedNotifications(true);
+        // SAFETY: the delegate answers the selector (`clipBoundsChanged:`);
+        // a selector-based observer goes away with it.
+        unsafe {
+            objc2_foundation::NSNotificationCenter::defaultCenter()
+                .addObserver_selector_name_object(
+                    delegate,
+                    sel!(clipBoundsChanged:),
+                    Some(objc2_app_kit::NSViewBoundsDidChangeNotification),
+                    Some(&clip),
+                );
+        }
         Editor::Area { scroller, view }
     } else {
         let field = if secure {
@@ -1570,6 +1635,7 @@ pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     };
     input.content.set(Some(content));
     place(view, &input);
+    input.cx.caret_moved();
 }
 
 /// An input accessory inserted into `parent`. There is no software

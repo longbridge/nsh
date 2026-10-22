@@ -297,6 +297,10 @@ define_class!(
                 .control
                 .scroll(id, point(px(offset.x as f32), px(offset.y as f32)), applied);
             self.with_mounter(move |m| m.scrolled(id, offset));
+            // A text area scrolling moves its caret.
+            if scroll.downcast_ref::<input::Area>().is_some() {
+                self.caret_moved(scroll);
+            }
         }
 
         /// Zoomable scroll views zoom their zoom view.
@@ -559,6 +563,26 @@ impl EventTarget {
                     ("end", nsh_core::PayloadValue::Number(end as f64)),
                 ]),
             )
+        });
+        self.caret_moved(view);
+    }
+
+    /// `onCaretMove` of the input `view` belongs to if its caret moved:
+    /// with the selection, or as a text area scrolled or the input was laid
+    /// out again, while it edits.
+    pub(crate) fn caret_moved(&self, view: &UIView) {
+        if !view.isFirstResponder() {
+            return;
+        }
+        let Some(caret) = input::caret(view) else {
+            return;
+        };
+        if !input::caret_changed(view, caret) {
+            return;
+        }
+        let id = view.tag() as NodeId;
+        self.with_mounter(move |m| {
+            m.input_event(id, EventKind::CaretMove, EventPayload::caret(caret))
         });
     }
 

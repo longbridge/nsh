@@ -473,6 +473,32 @@ impl Mounter {
         for (_, area) in &self.areas {
             area.batch_applied();
         }
+        self.focused_caret_moved();
+    }
+
+    /// Reports the focused input's caret if the batch moved it (the input
+    /// was laid out again: its text wraps elsewhere).
+    fn focused_caret_moved(&self) {
+        let Some(id) = self.focused else { return };
+        let Some(Slot {
+            native: Native::Input(input),
+            events,
+            ..
+        }) = self.slot(id)
+        else {
+            return;
+        };
+        if !events.contains(EventKind::CaretMove) {
+            return;
+        }
+        let view = input.editor_view();
+        view.layoutIfNeeded();
+        let Some(caret) = crate::input::caret(view) else {
+            return;
+        };
+        if crate::input::caret_changed(view, caret) {
+            self.input_event(id, EventKind::CaretMove, EventPayload::caret(caret));
+        }
     }
 
     /// Node `id`'s view (`nsh test --target ios`).

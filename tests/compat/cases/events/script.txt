@@ -48,6 +48,11 @@ key id:field Backspace
 expect Keys: H i ! Backspace
 event id:field onSelectionChange start=0 end=2
 expect Selection: 0-2
+# The caret moved: in the input and in the root view, where the input is
+# at 0,64.
+expect Caret: none
+event id:field onCaretMove
+expect Caret: bounds,pageBounds bounds page 0,64 0x0
 # Return submits what was typed.
 expect Submitted: nothing
 event id:field onSubmit text=Hi!
@@ -87,6 +92,7 @@ covers [events] onKeyPress
 covers [events] onChange
 covers [events] onSubmit
 covers [events] onSelectionChange
+covers [events] onCaretMove
 covers [events] onContentSizeChange
 covers [props] selectedRange
 # events-layout

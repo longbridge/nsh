@@ -71,6 +71,7 @@ final class Native {
     static final int CANCEL = 60;
     static final int POSITION = 61;
     static final int MOUSE_MOVE = 62;
+    static final int CARET_MOVE = 63;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

@@ -11,8 +11,8 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo, VideoProgress,
-        WebNavigation,
+        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
+        VideoProgress, WebNavigation,
     },
 };
 use crate::{
@@ -519,6 +519,17 @@ impl Input {
         )
     }
 
+    /// The caret moved: with the selection, or as the text scrolled or
+    /// wrapped again ([`CaretEvent`]: where it is, in the input and in the
+    /// root view).
+    pub fn on_caret_move<M>(self, listener: impl IntoListener<CaretEvent, M>) -> Self {
+        self.listen(
+            EventKind::CaretMove,
+            listener.into_listener(),
+            events::caret,
+        )
+    }
+
     /// A key was pressed: the character, `Backspace` or `Enter`.
     pub fn on_key_press<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::KeyPress, listener.into_listener(), events::key)
@@ -778,6 +789,15 @@ impl Overlay {
     pub fn anchor_point(self, point: impl IntoReactive<Point<Points>>) -> Self {
         self.bind_prop(point, |p| {
             Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Point(p)))
+        })
+    }
+
+    /// Places it against a box of the root view: an input's caret
+    /// ([`CaretEvent::page_bounds`]), where suggestions for what is being
+    /// typed open.
+    pub fn anchor_bounds(self, bounds: impl IntoReactive<Bounds<Points>>) -> Self {
+        self.bind_prop(bounds, |b| {
+            Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Bounds(b)))
         })
     }
 

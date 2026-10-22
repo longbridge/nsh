@@ -197,6 +197,7 @@ Events:
 | `onSubmit` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
+| `onCaretMove` | `{ bounds, pageBounds }` | The caret moved: where it is in the input and in the window ([the caret](#the-caret)). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 | `onCompositionChange` | `{ composing, text }` | An input method's composition started, changed or ended (see [Input methods](#input-methods)). |
@@ -422,6 +423,82 @@ const selection = signal<{ start: number; end?: number } | undefined>(undefined)
 <Text>Selected: "{text().slice(range().start, range().end)}"</Text>
 <View onPress={() => selection.set({ start: 0, end: text().length })}><Text>Select all</Text></View>
 ```
+
+## The caret
+
+The caret event (`.on_caret_move(..)`, TSX `onCaretMove`) says where the caret is, so that what belongs at the
+caret can open there: suggestions for an `@` mention, a slash command's menu, an emoji picker. `bounds` is a `Bounds`
+in the input (`origin` and `size`, the input's padding and scrolling applied), as wide as the platform draws the
+caret and as tall as its line; `pageBounds` is the same box in the window (or the dialog the input is in), which an
+overlay takes as its `anchor`. The event comes while the input has the focus, whenever the caret moves: with the
+selection, and when the input's text scrolls or wraps onto other lines. In Rust an overlay is placed against a box
+with `.anchor_bounds(..)`.
+
+```rust tabs
+let draft = signal(String::new());
+let end = signal(0u32);
+let caret = signal(None::<Bounds<Points>>);
+
+view()
+    .child(
+        input()
+            .multiline(true)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_selection_change(move |s: &Selection| end.set(s.end))
+            .on_caret_move(move |e: &CaretEvent| {
+                // Suggestions while the word before the caret starts with "@".
+                let typed = draft.with(|t| utf16_slice(t, 0, end.get()));
+                let word = typed.rsplit(char::is_whitespace).next().unwrap_or("");
+                caret.set(word.starts_with('@').then_some(e.page_bounds));
+            })
+            .p_2(),
+    )
+    .child(when(
+        move || caret.get().is_some(),
+        move || {
+            overlay()
+                .anchor_bounds(move || caret.get().unwrap_or_default())
+                .placement(Placement::Bottom)
+                .align(Align::Start)
+                .offset(px(4.0))
+                .child(text("@ada"))
+                .child(text("@grace"))
+        },
+    ))
+```
+
+```tsx tabs
+import { type Bounds, Input, Overlay, Text, View, signal } from "nsh";
+
+const draft = signal("");
+const end = signal(0);
+const caret = signal<Bounds | null>(null);
+
+<View>
+  <Input
+    multiline
+    value={draft()}
+    onChange={(t) => draft.set(t)}
+    onSelectionChange={(e) => end.set(e.end)}
+    onCaretMove={(e) => {
+      // Suggestions while the word before the caret starts with "@".
+      const word = draft().slice(0, end()).split(/\s/).pop() ?? "";
+      caret.set(word.startsWith("@") ? e.pageBounds : null);
+    }}
+    class="p-2"
+  />
+  <If when={caret()}>
+    <Overlay anchor={caret()} placement="bottom" align="start" offset={4}>
+      <Text>@ada</Text>
+      <Text>@grace</Text>
+    </Overlay>
+  </If>
+</View>;
+```
+
+`pageBounds` is where the caret was when the event came: a page that scrolls under the input moves the input but
+sends no event, so close the suggestions when it scrolls, or anchor them to the input itself.
 
 ## Multiline inputs that grow
 

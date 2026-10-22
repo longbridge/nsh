@@ -219,6 +219,7 @@ events! {
     Cancel = "onCancel": "Escape or the Android back button was pressed while the overlay was the top one listening to it (raised by the core).",
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
+    CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
 
 }
 
@@ -541,6 +542,16 @@ pub enum EventPayload {
         /// Its data.
         data: crate::JsonValue,
     },
+}
+
+impl EventPayload {
+    /// An input's `onCaretMove`: the caret's `bounds` in the input's
+    /// coordinates (its border box, the input's own scrolling applied), as
+    /// the platforms report it. The core adds `pageBounds`
+    /// ([`crate::Core::locate_caret`]).
+    pub fn caret(bounds: Bounds<Points>) -> EventPayload {
+        EventPayload::Map(vec![("bounds", PayloadValue::Bounds(bounds))])
+    }
 }
 
 impl TouchEvent {
@@ -1174,11 +1185,12 @@ pub enum ModalProp {
 /// An overlay option (`<Overlay …>`, [`crate::overlay`]).
 #[derive(Debug, Clone, Copy, PartialEq, HostProps)]
 pub enum OverlayProp {
-    /// `anchor`: the view (a ref) or the point (`{ x, y }` in the root view,
-    /// as touches' `pageX` / `pageY`) it is placed against, following a
-    /// view as it moves; without one it is laid out as a `position: fixed`
-    /// box of its root view.
-    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | null", on = OVERLAY)]
+    /// `anchor`: the view (a ref), the point (`{ x, y }` in the root view,
+    /// as touches' `pageX` / `pageY`) or the box (`{ origin, size }` in the
+    /// root view, as an input's caret `pageBounds`) it is placed against,
+    /// following a view as it moves; without one it is laid out as a
+    /// `position: fixed` box of its root view.
+    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | Bounds | null", on = OVERLAY)]
     Anchor(OverlayAnchor),
     /// `placement`: the side of the anchor it goes on (default `"bottom"`);
     /// the other side when only that one has room.

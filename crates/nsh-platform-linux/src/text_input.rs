@@ -106,6 +106,41 @@ impl Editor {
         }
     }
 
+    /// The caret's bounds in `target`'s coordinates (`onCaretMove`'s
+    /// `bounds`): where the editor draws it, its scrolling applied.
+    fn caret_bounds(&self, target: &gtk::Widget) -> Option<Bounds<Points>> {
+        let (widget, x, y, width, height): (gtk::Widget, f32, f32, f32, f32) = match self {
+            Editor::Line(t) => {
+                let (strong, _) = t.compute_cursor_extents(t.position().max(0) as usize);
+                let w = t.clone().upcast();
+                (w, strong.x(), strong.y(), strong.width(), strong.height())
+            }
+            Editor::Area { view, .. } => {
+                let b = view.buffer();
+                let (strong, _) = view.cursor_locations(Some(&b.iter_at_mark(&b.get_insert())));
+                let (x, y) = view.buffer_to_window_coords(
+                    gtk::TextWindowType::Widget,
+                    strong.x(),
+                    strong.y(),
+                );
+                let w = view.clone().upcast();
+                (
+                    w,
+                    x as f32,
+                    y as f32,
+                    strong.width() as f32,
+                    strong.height() as f32,
+                )
+            }
+        };
+        let origin = widget.compute_point(target, &gtk::graphene::Point::new(x, y))?;
+        Some(Bounds {
+            origin: Point::new(Points(origin.x()), Points(origin.y())),
+            // GTK reports an empty width; its caret is a line one pixel wide.
+            size: Size::new(Points(width.max(1.0)), Points(height)),
+        })
+    }
+
     /// The caret in characters.
     fn caret(&self) -> i32 {
         match self {
@@ -192,6 +227,8 @@ pub(crate) struct InputState {
     focused: Cell<bool>,
     /// Selection as last reported (UTF-16).
     selection: Cell<(u32, u32)>,
+    /// The caret as last reported, in the view.
+    caret: Cell<Bounds<Points>>,
     /// The input method's composition (its preedit text) while one is in
     /// progress: GTK shows it in the editor, outside the text.
     composition: RefCell<Option<String>>,
@@ -324,28 +361,48 @@ impl Ctx {
         };
         // A programmatic change moves the caret in steps; it is reported
         // once, where it ends. After a user edit, with its change.
-        if input.applying.get()
+        if input.applying.get() || input.pending.get() {
+            return;
+        }
+        let editor = input.editor.borrow().clone();
+        if view.state().events.contains(EventKind::SelectionChange) {
+            let (start, end) = editor.selection();
+            let text = editor.text();
+            let range = (
+                char_to_utf16(&text, start as usize),
+                char_to_utf16(&text, end as usize),
+            );
+            if input.selection.replace(range) != range {
+                self.send(EventKind::SelectionChange, || {
+                    EventPayload::Map(vec![
+                        ("start", PayloadValue::Number(range.0 as f64)),
+                        ("end", PayloadValue::Number(range.1 as f64)),
+                    ])
+                });
+            }
+        }
+        self.caret_moved();
+    }
+
+    /// `onCaretMove` while the input edits, if its caret moved: with the
+    /// selection, or as the text view scrolled or the input was laid out
+    /// again.
+    fn caret_moved(&self) {
+        let Some((_, view, input)) = self.get() else {
+            return;
+        };
+        if !input.focused.get()
+            || input.applying.get()
             || input.pending.get()
-            || !view.state().events.contains(EventKind::SelectionChange)
+            || !view.state().events.contains(EventKind::CaretMove)
         {
             return;
         }
         let editor = input.editor.borrow().clone();
-        let (start, end) = editor.selection();
-        let text = editor.text();
-        let range = (
-            char_to_utf16(&text, start as usize),
-            char_to_utf16(&text, end as usize),
-        );
-        if input.selection.replace(range) == range {
-            return;
+        let caret = editor.caret_bounds(view.upcast_ref()).unwrap_or_default();
+        if input.caret.replace(caret) != caret {
+            self.send(EventKind::CaretMove, || EventPayload::caret(caret));
         }
-        self.send(EventKind::SelectionChange, || {
-            EventPayload::Map(vec![
-                ("start", PayloadValue::Number(range.0 as f64)),
-                ("end", PayloadValue::Number(range.1 as f64)),
-            ])
-        });
     }
 
     /// Follows the focus of the window the editor `widget` is shown in.
@@ -562,6 +619,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         pending: Cell::new(false),
         focused: Cell::new(false),
         selection: Cell::new((0, 0)),
+        caret: Cell::new(Bounds::default()),
         composition: RefCell::new(None),
         held: RefCell::new(None),
         cx: std::cell::OnceCell::new(),
@@ -699,6 +757,11 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
             });
             let c = cx.clone();
             buffer.connect_cursor_position_notify(move |_| c.selection_changed());
+            // Scrolling the text moves the caret.
+            let c = cx.clone();
+            scroller
+                .vadjustment()
+                .connect_value_changed(move |_| c.caret_moved());
         }
     }
 
@@ -1115,6 +1178,12 @@ pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     };
     input.content.set(Some(content));
     place(view, &input);
+    // The text wraps again once GTK lays the editor out at its new size
+    // (before idle callbacks run).
+    if let Some(cx) = input.cx.get() {
+        let c = cx.clone();
+        glib::idle_add_local_once(move || c.caret_moved());
+    }
 }
 
 /// An input accessory inserted into `parent`. There is no software

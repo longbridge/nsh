@@ -4,7 +4,8 @@
 // wraps onto more lines; a controlled input whose app changes what was
 // typed, which typing then continues from; what return submits; a masked,
 // a read-only input and one with a selection set by the app, and the colors
-// of placeholders and selections. Each handler shows what it gets as
+// of placeholders and selections; where the caret is, in the input and in
+// the root view (`onCaretMove`). Each handler shows what it gets as
 // text. Its
 // script checks each.
 import { Input, Text, View, signal } from "nsh";
@@ -14,6 +15,7 @@ function App() {
   const keys = signal<string[]>([]);
   const text = signal("");
   const selection = signal("none");
+  const caret = signal("none");
   const size = signal("none");
   let first = -1;
   const upper = signal("");
@@ -29,11 +31,20 @@ function App() {
         onChange={(t) => text.set(t)}
         onSubmit={(e) => submitted.set(e.text)}
         onSelectionChange={(e) => selection.set(`${e.start}-${e.end}`)}
+        onCaretMove={(e) => {
+          const { origin, size } = e.pageBounds;
+          caret.set(
+            `${Object.keys(e).sort().join(",")} ` +
+              `${typeof e.bounds.size.height === "number" ? "bounds" : "no bounds"} ` +
+              `page ${origin.x - e.bounds.origin.x},${origin.y - e.bounds.origin.y} ${size.width}x${size.height}`,
+          );
+        }}
       />
       <Text>Focus: {focus()}</Text>
       <Text>Keys: {keys().join(" ")}</Text>
       <Text>Text: {text()}</Text>
       <Text>Selection: {selection()}</Text>
+      <Text>Caret: {caret()}</Text>
       <Text>Submitted: {submitted()}</Text>
       <Input
         testID="notes"

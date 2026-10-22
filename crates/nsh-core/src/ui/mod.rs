@@ -137,8 +137,8 @@ pub use self::{
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
-        PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent,
+        OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -231,6 +231,7 @@ pub mod prelude {
         CallCx,
         Callback,
         CanvasView,
+        CaretEvent,
         Child,
         Children,
         ClaimRequest,

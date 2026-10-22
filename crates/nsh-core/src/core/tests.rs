@@ -12732,6 +12732,62 @@ fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 54.0, 120.0, 60.0)));
+
+    // A box anchor (an input's caret): below its bottom.
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            10,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Bounds(rect(
+                200.0, 50.0, 1.0, 20.0,
+            ))),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 74.0, 120.0, 60.0)));
+}
+
+#[test]
+fn a_caret_is_located_in_the_root_view() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[("paddingTop", Number(30.0)), ("paddingLeft", Number(12.0))],
+    );
+    add(
+        &mut c,
+        4,
+        Tag::Input,
+        2,
+        &[("width", Number(200.0)), ("height", Number(40.0))],
+    );
+    c.commit().unwrap();
+    let mut payload = EventPayload::caret(rect(25.0, 10.0, 1.0, 18.0));
+    c.locate_caret(4, &mut payload);
+    let EventPayload::Map(fields) = &payload else {
+        panic!("a map");
+    };
+    assert!(fields.contains(&("bounds", PayloadValue::Bounds(rect(25.0, 10.0, 1.0, 18.0)))));
+    assert!(fields.contains(&(
+        "pageBounds",
+        PayloadValue::Bounds(rect(37.0, 40.0, 1.0, 18.0))
+    )));
+
+    // A caret the platform could not place: empty, where the input is.
+    let mut payload = EventPayload::None;
+    c.locate_caret(4, &mut payload);
+    let EventPayload::Map(fields) = &payload else {
+        panic!("a map");
+    };
+    assert!(fields.contains(&("bounds", PayloadValue::Bounds(Bounds::default()))));
+    assert!(fields.contains(&(
+        "pageBounds",
+        PayloadValue::Bounds(rect(12.0, 30.0, 0.0, 0.0))
+    )));
 }
 
 fn touch_down(path: Vec<NodeId>) -> EventPayload {

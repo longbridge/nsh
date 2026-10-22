@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use nsh_core::{
     AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
-    Points, ReturnKeyType, SubmitBehavior, TextAlign,
+    Points, ReturnKeyType, SubmitBehavior, TextAlign, geometry::px,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -40,6 +40,8 @@ pub(crate) struct InputIvars {
     /// A line break typed with a modifier (Shift / Option+Return) is being
     /// inserted: it never submits.
     line_break: Cell<bool>,
+    /// The caret as last reported (`onCaretMove`), in the input.
+    caret: Cell<Bounds<Points>>,
 }
 
 impl Default for InputIvars {
@@ -55,6 +57,7 @@ impl Default for InputIvars {
             caret_hidden: Cell::new(false),
             submit: Cell::new(SubmitBehavior::Newline),
             line_break: Cell::new(false),
+            caret: Cell::new(Bounds::default()),
         }
     }
 }
@@ -87,6 +90,13 @@ define_class!(
             if self.ivars().caret_hidden.get() {
                 return CGRect::ZERO;
             }
+            // SAFETY: calling the superclass implementation.
+            unsafe { msg_send![super(self), caretRectForPosition: position] }
+        }
+
+        /// Where the caret is, drawn or not (`caret()`).
+        #[unsafe(method(nshCaretRectForPosition:))]
+        fn shown_caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
             // SAFETY: calling the superclass implementation.
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
@@ -173,6 +183,13 @@ define_class!(
             unsafe { msg_send![super(self), caretRectForPosition: position] }
         }
 
+        /// Where the caret is, drawn or not (`caret()`).
+        #[unsafe(method(nshCaretRectForPosition:))]
+        fn shown_caret_rect(&self, position: &objc2::runtime::AnyObject) -> CGRect {
+            // SAFETY: calling the superclass implementation.
+            unsafe { msg_send![super(self), caretRectForPosition: position] }
+        }
+
         #[unsafe(method(deleteBackward))]
         fn delete_backward(&self) {
             let empty = self.text().length() == 0;
@@ -244,6 +261,36 @@ pub(crate) fn selection(view: &UIView) -> Option<(u32, u32)> {
         let b: isize = msg_send![view, offsetFromPosition: &*begin, toPosition: &*end];
         Some((a.max(0) as u32, b.max(0) as u32))
     }
+}
+
+/// The caret at the end of the selection of an input view, in the input's
+/// coordinates (its container, which the editor fills), drawn or not.
+pub(crate) fn caret(view: &UIView) -> Option<Bounds<Points>> {
+    // SAFETY: UITextField and UITextView adopt UITextInput; both input
+    // classes answer `nshCaretRectForPosition:`.
+    let rect: CGRect = unsafe {
+        let range: Option<Retained<AnyObject>> = msg_send![view, selectedTextRange];
+        let end: Retained<AnyObject> = msg_send![&range?, end];
+        msg_send![view, nshCaretRectForPosition: &*end]
+    };
+    let rect = match view.superview() {
+        Some(container) => view.convertRect_toView(rect, Some(&container)),
+        None => rect,
+    };
+    Some(Bounds {
+        origin: nsh_core::geometry::point(px(rect.origin.x as f32), px(rect.origin.y as f32)),
+        size: nsh_core::geometry::size(px(rect.size.width as f32), px(rect.size.height as f32)),
+    })
+}
+
+/// Records `caret` as the one reported for input view `view`; false when
+/// it was already.
+pub(crate) fn caret_changed(view: &UIView, caret: Bounds<Points>) -> bool {
+    let ivars = view
+        .downcast_ref::<Field>()
+        .map(|f| f.ivars())
+        .or_else(|| view.downcast_ref::<Area>().map(|a| a.ivars()));
+    ivars.is_none_or(|i| i.caret.replace(caret) != caret)
 }
 
 /// Selects `start..end` (UTF-16 units, clamped to the text).

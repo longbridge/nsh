@@ -87,6 +87,21 @@ final class InputBox extends FrameLayout implements Node {
                     mounter.eventMap(InputBox.this.id, Native.SELECTION_CHANGE, new String[] {"start", "end"},
                             new Object[] {(double) start, (double) end});
                 }
+                // Called while the EditText is made, before `edit` is set.
+                reportCaret(this);
+            }
+
+            @Override
+            protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
+                super.onScrollChanged(left, top, oldLeft, oldTop);
+                reportCaret(this);
+            }
+
+            @Override
+            protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+                super.onSizeChanged(w, h, oldW, oldH);
+                // The text wraps again once laid out at the new size.
+                post(() -> reportCaret(this));
             }
         };
         edit.setBackground(new ColorDrawable(0));
@@ -241,6 +256,37 @@ final class InputBox extends FrameLayout implements Node {
     private void submit() {
         mounter.event(id, Native.SUBMIT_EDITING, edit.getText().toString(), count, 0, 0);
         if (submit == SUBMIT_AND_BLUR) blur();
+    }
+
+    /** The caret as last reported (`onCaretMove`): x, y, width, height in dp. */
+    private final float[] caret = new float[4];
+
+    /**
+     * `onCaretMove` while the input edits, if its caret moved: the caret at the
+     * selection's end, in the input's coordinates (dp; the EditText's padding,
+     * gravity and scrolling applied).
+     */
+    private void reportCaret(android.widget.TextView view) {
+        if (mounter == null || !mounter.wants(id, Native.CARET_MOVE) || !view.hasFocus()) return;
+        android.text.Layout layout = view.getLayout();
+        int end = view.getSelectionEnd();
+        if (layout == null || end < 0) return;
+        int line = layout.getLineForOffset(end);
+        float d = mounter.density;
+        // The EditText sits in the container's padding (the content box).
+        float left = view.getLeft() + view.getTotalPaddingLeft() - view.getScrollX();
+        float top = view.getTop() + view.getTotalPaddingTop() - view.getScrollY();
+        float[] now = {
+            (left + layout.getPrimaryHorizontal(end)) / d,
+            (top + layout.getLineTop(line)) / d,
+            // The cursor drawable is 2dp wide (`selectionColor`'s too).
+            2,
+            (layout.getLineBottom(line) - layout.getLineTop(line)) / d,
+        };
+        if (java.util.Arrays.equals(now, caret)) return;
+        System.arraycopy(now, 0, caret, 0, 4);
+        mounter.eventMap(id, Native.CARET_MOVE, new String[] {"caretX", "caretY", "caretWidth", "caretHeight"},
+                new Object[] {(double) now[0], (double) now[1], (double) now[2], (double) now[3]});
     }
 
     /** `onKeyPress`. */

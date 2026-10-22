@@ -139,6 +139,7 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | 在会提交的输入框中按下了回车键（单行，或 `submitBehavior` 为 `"submit"` / `"blurAndSubmit"`）。 |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | 无 | 输入框获得 / 失去焦点。 |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | 光标或选区移动（UTF-16 单位）。 |
+| `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | 光标随选区移动，或因文本滚动、重新换行而移动：`bounds` 是它在输入框中的位置，`pageBounds` 是它在窗口中的位置，可作为 `Overlay` 的 `anchor`（[表单与键盘](../docs/forms-and-keyboard.md#光标位置)）。 |
 | `onKeyPress` | `.on_key_press(\|key: &str\| ..)` | `{ key }` | 文本变化之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ width, height }` | 文本尺寸变化（多行时按输入框宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 | `onCompositionChange` | `.on_composition_change(\|e: &Composition\| ..)` | `{ composing, text }` | 输入法的组字开始、变化或结束：`text` 是正在组的字（选字前的拼音、变换前的假名），结束时为 `""`。上屏的文本先经 `onChange` 报告，然后才报告结束。 |

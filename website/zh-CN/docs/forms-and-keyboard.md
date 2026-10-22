@@ -197,6 +197,7 @@ let composing = false;
 | `onSubmit` | `{ text }` | 在会提交的输入框中按下回车键（单行，或 `submitBehavior` 为 `"submit"` / `"blurAndSubmit"`）。 |
 | `onFocus` / `onBlur` | | 获得 / 失去焦点。 |
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 码元）。 |
+| `onCaretMove` | `{ bounds, pageBounds }` | 光标移动：它在输入框和窗口中的位置（[光标位置](#光标位置)）。 |
 | `onKeyPress` | `{ key }` | 文本改变之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 | `onCompositionChange` | `{ composing, text }` | 输入法的组字开始、变化或结束（见[输入法](#输入法)）。 |
@@ -420,6 +421,75 @@ const selection = signal<{ start: number; end?: number } | undefined>(undefined)
 <Text>Selected: "{text().slice(range().start, range().end)}"</Text>
 <View onPress={() => selection.set({ start: 0, end: text().length })}><Text>Select all</Text></View>
 ```
+
+## 光标位置
+
+光标事件（`.on_caret_move(..)`，TSX 的 `onCaretMove`）报告光标在哪里，让属于光标处的内容在那里打开：`@` 提及的候选列表、斜杠命令的菜单、表情选择器。`bounds` 是光标在输入框中的 `Bounds`（`origin` 和 `size`，已计入输入框的内边距和滚动），宽度是平台绘制的光标宽度，高度是它所在的行高；`pageBounds` 是同一个矩形在窗口（或输入框所在的对话框）中的位置，可直接作为浮层的 `anchor`。输入框获得焦点时，光标每次移动都会触发这个事件：随选区移动时，以及输入框的文本滚动或重新换行时。在 Rust 中，浮层用 `.anchor_bounds(..)` 相对一个矩形放置。
+
+```rust tabs
+let draft = signal(String::new());
+let end = signal(0u32);
+let caret = signal(None::<Bounds<Points>>);
+
+view()
+    .child(
+        input()
+            .multiline(true)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_selection_change(move |s: &Selection| end.set(s.end))
+            .on_caret_move(move |e: &CaretEvent| {
+                // 光标前的词以 "@" 开头时显示候选。
+                let typed = draft.with(|t| utf16_slice(t, 0, end.get()));
+                let word = typed.rsplit(char::is_whitespace).next().unwrap_or("");
+                caret.set(word.starts_with('@').then_some(e.page_bounds));
+            })
+            .p_2(),
+    )
+    .child(when(
+        move || caret.get().is_some(),
+        move || {
+            overlay()
+                .anchor_bounds(move || caret.get().unwrap_or_default())
+                .placement(Placement::Bottom)
+                .align(Align::Start)
+                .offset(px(4.0))
+                .child(text("@ada"))
+                .child(text("@grace"))
+        },
+    ))
+```
+
+```tsx tabs
+import { type Bounds, Input, Overlay, Text, View, signal } from "nsh";
+
+const draft = signal("");
+const end = signal(0);
+const caret = signal<Bounds | null>(null);
+
+<View>
+  <Input
+    multiline
+    value={draft()}
+    onChange={(t) => draft.set(t)}
+    onSelectionChange={(e) => end.set(e.end)}
+    onCaretMove={(e) => {
+      // 光标前的词以 "@" 开头时显示候选。
+      const word = draft().slice(0, end()).split(/\s/).pop() ?? "";
+      caret.set(word.startsWith("@") ? e.pageBounds : null);
+    }}
+    class="p-2"
+  />
+  <If when={caret()}>
+    <Overlay anchor={caret()} placement="bottom" align="start" offset={4}>
+      <Text>@ada</Text>
+      <Text>@grace</Text>
+    </Overlay>
+  </If>
+</View>;
+```
+
+`pageBounds` 是事件发生时光标所在的位置：页面在输入框下方滚动会移动输入框，但不会触发事件，所以页面滚动时关闭候选列表，或把它锚定到输入框本身。
 
 ## 自动增高的多行输入框
 

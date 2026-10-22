@@ -231,6 +231,9 @@ pub(crate) struct Input {
     /// The edits reported so far ([`nsh_core::EventPayload::Text`]).
     pub(crate) count: u32,
     pub(crate) config: Box<InputConfig>,
+    /// Where its text goes in the view (inside padding and border); the
+    /// whole view until the core says.
+    pub(crate) content: Option<Bounds<Points>>,
 }
 
 /// Where a scroll view is, as its platform view keeps it.
@@ -343,6 +346,11 @@ impl Screen {
             MountItem::Input { id, config } => {
                 if let Some(input) = self.input_mut(*id) {
                     input.config = config.clone();
+                }
+            }
+            MountItem::InputContent { id, content } => {
+                if let Some(input) = self.input_mut(*id) {
+                    input.content = Some(*content);
                 }
             }
             MountItem::InputValue { id, text, count } => {
@@ -1292,6 +1300,48 @@ impl Screen {
         self.nodes.get(&id)?.input.as_ref()
     }
 
+    /// Input `id`'s caret at the end of its text, in the view, as
+    /// [`nsh_core::ApproxTextEngine`] lays the text out: characters `0.55 ×`
+    /// the font size wide, lines `1.2 ×` it tall, wrapped at the content
+    /// box's width when multiline; a single line is centered in the box and
+    /// keeps the caret inside it.
+    pub(crate) fn input_caret(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let view = self.nodes.get(&id)?;
+        let input = view.input.as_ref()?;
+        let content = input
+            .content
+            .unwrap_or_else(|| Bounds::new(Point::default(), view.frame.size));
+        let font = input.config.style.font_size.0;
+        let (advance, line) = (font * 0.55, font * 1.2);
+        let (column, row) = if input.config.multiline {
+            let per_line = ((content.size.width.0 / advance).floor() as usize).max(1);
+            let mut row = 0;
+            let mut column = 0;
+            for (i, part) in input.text.split('\n').enumerate() {
+                let chars = part.chars().count();
+                if i > 0 {
+                    row += 1;
+                }
+                row += chars / per_line;
+                column = chars % per_line;
+            }
+            (column, row)
+        } else {
+            (input.text.chars().count(), 0)
+        };
+        let mut x = content.origin.x.0 + column as f32 * advance;
+        let y = if input.config.multiline {
+            content.origin.y.0 + row as f32 * line
+        } else {
+            x = x.min(content.origin.x.0 + (content.size.width.0 - 1.0).max(0.0));
+            content.origin.y.0 + (content.size.height.0 - line) / 2.0
+        };
+        Some(Bounds::new(
+            nsh_core::geometry::point(Points(x), Points(y)),
+            nsh_core::geometry::size(Points(1.0), Points(line)),
+        ))
+    }
+
     pub(crate) fn input_mut(&mut self, id: NodeId) -> Option<&mut Input> {
         self.nodes.get_mut(&id)?.input.as_mut()
     }
@@ -1386,6 +1436,42 @@ mod tests {
             layout: nsh_core::TextLayout(Arc::new(())),
             content: Bounds::default(),
         }
+    }
+
+    #[test]
+    fn an_input_caret_follows_its_text_as_the_approximate_engine_lays_it_out() {
+        let mut screen = Screen::default();
+        let mut config = nsh_core::InputConfig::default();
+        config.style.font_size = Points(10.0);
+        config.multiline = true;
+        screen.apply(&batch(vec![
+            create(2, ViewKind::Input),
+            frame(2, 0.0, 0.0, 60.0, 100.0),
+            MountItem::Input {
+                id: 2,
+                config: Box::new(config),
+            },
+            MountItem::InputContent {
+                id: 2,
+                content: Bounds::new(
+                    Point::new(Points(4.0), Points(6.0)),
+                    Size::new(Points(55.0), Points(88.0)),
+                ),
+            },
+            insert(1, 2),
+        ]));
+        let caret = |screen: &Screen| {
+            let b = screen.input_caret(2).unwrap();
+            (b.origin.x.0, b.origin.y.0, b.size.height.0)
+        };
+        assert_eq!(caret(&screen), (4.0, 6.0, 12.0));
+        // Ten characters fit a line of 55 points (5.5 each): the twelfth is
+        // the second of the next line.
+        screen.input_mut(2).unwrap().text = "abcdefghijkl".into();
+        assert_eq!(caret(&screen), (4.0 + 2.0 * 5.5, 18.0, 12.0));
+        // A line break starts a line.
+        screen.input_mut(2).unwrap().text = "ab\nc".into();
+        assert_eq!(caret(&screen), (4.0 + 5.5, 18.0, 12.0));
     }
 
     #[test]

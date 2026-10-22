@@ -7,7 +7,7 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
     StatusBarSetting, StatusBarStyle, Viewability,
-    geometry::{Points, point, size},
+    geometry::{Bounds, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
@@ -414,12 +414,24 @@ pub(crate) fn pinch<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     ))
 }
 
-/// `anchor`: a host element (a ref), `{ x, y }`, or nothing.
+/// `anchor`: a host element (a ref), `{ x, y }`, `{ origin, size }`, or
+/// nothing.
 pub(crate) fn overlay_anchor<I: HostInput>(input: &I, _: &mut HostCx) -> Option<OverlayProp> {
+    let bounds = || {
+        let origin = input.field("origin")?;
+        let extent = input.field("size")?;
+        Some(Bounds {
+            origin: point(points(&origin, "x")?, points(&origin, "y")?),
+            size: size(
+                points(&extent, "width")?.max(Points::ZERO),
+                points(&extent, "height")?.max(Points::ZERO),
+            ),
+        })
+    };
     let anchor = match (input.node(), points(input, "x"), points(input, "y")) {
         (Some(id), ..) => OverlayAnchor::Node(id),
         (None, Some(x), Some(y)) => OverlayAnchor::Point(point(x, y)),
-        _ => OverlayAnchor::None,
+        _ => bounds().map_or(OverlayAnchor::None, OverlayAnchor::Bounds),
     };
     Some(OverlayProp::Anchor(anchor))
 }

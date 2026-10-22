@@ -148,6 +148,7 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input gained / lost focus. |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
+| `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | The caret moved, with the selection or as the text scrolled or wrapped: `bounds` is where it is in the input, `pageBounds` in the window, an `Overlay`'s `anchor` ([forms and keyboard](../docs/forms-and-keyboard.md#the-caret)). |
 | `onKeyPress` | `.on_key_press(\|key: &str\| ..)` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ width, height }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 | `onCompositionChange` | `.on_composition_change(\|e: &Composition\| ..)` | `{ composing, text }` | An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen, kana before conversion), `""` once it ends. The committed text reaches `onChange` before the end. |
