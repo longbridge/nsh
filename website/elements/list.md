@@ -112,6 +112,8 @@ with the cell and shows up on another item.
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. In Rust, the rows' identities, so rows keep their cells and sizes when rows come and go before them. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near: load more. |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onLoadMore` fires. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | The start is near, after the user or a scroll command moved the list: load what comes before the first item. |
+| `loadMoreAtStartThreshold` | `.load_more_at_start_threshold(viewports)` | `number` | `1` | How close to the start (in viewports) `onLoadMoreAtStart` fires. |
 | `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | Items became viewable or stopped being viewable. |
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable (below). |
 | `refreshing` | `.refreshing(..)` | `boolean` | | The pull-to-refresh spinner shows. |
@@ -152,6 +154,7 @@ viewable rows, `changed()` the rows that came or went.
 | `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide started / stopped. |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
 | `onLoadMore` | `.on_load_more` | none | Within `loadMoreThreshold` viewports of the end. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start` | none | Within `loadMoreAtStartThreshold` viewports of the start, once per approach after a scroll. |
 | `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }` (`ViewableItems`) | Viewability changed. |
 | `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 

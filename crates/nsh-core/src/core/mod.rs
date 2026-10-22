@@ -2609,7 +2609,9 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Splice(at, removed, inserted) => {
+                let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
                 if let Some(list) = node.list.as_mut() {
+                    list.loads_at_start = loads_at_start;
                     list.splice(at, removed, inserted);
                 }
             }
@@ -2666,6 +2668,11 @@ impl<M: TextEngine> Core<M> {
             Prop::LoadMoreThreshold(threshold) => {
                 if let Some(list) = node.list.as_mut() {
                     list.end_threshold = threshold.max(0.0);
+                }
+            }
+            Prop::LoadMoreAtStartThreshold(threshold) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.start_threshold = threshold.max(0.0);
                 }
             }
             Prop::CellIndex(index) => {
@@ -5435,6 +5442,13 @@ impl<M: TextEngine> Core<M> {
                 .filter_map(|s| s.ready().map(|i| (i, s.cell))),
         );
         let extras = list.extras;
+        // An inverted list that loads at its start keeps its rows in
+        // place when scrolled away from it (`keeps_visible_rows`).
+        self.nodes[key as usize]
+            .list
+            .as_mut()
+            .expect("list")
+            .loads_at_start = events.contains(EventKind::LoadMoreAtStart);
         let mut anchor = 0.0;
         for &(index, cell) in &ready {
             if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
@@ -5570,10 +5584,18 @@ impl<M: TextEngine> Core<M> {
         let list = self.nodes[key as usize].list.as_mut().expect("list");
         list.paced = paced;
         let mut binds = Vec::new();
-        if list.update_window(&mut binds) {
+        let edges = list.update_window(&mut binds);
+        if edges.end {
             self.events.push(crate::ui::JsEvent::Event(
                 id,
                 EventKind::LoadMore,
+                EventPayload::None,
+            ));
+        }
+        if edges.start && events.contains(EventKind::LoadMoreAtStart) {
+            self.events.push(crate::ui::JsEvent::Event(
+                id,
+                EventKind::LoadMoreAtStart,
                 EventPayload::None,
             ));
         }

@@ -625,3 +625,72 @@ fn a_jump_binds_the_visible_rows_first() {
     paced.settle(|_, _| {});
     assert!(paced.shows(90, 120), "{:?}", paced.texts);
 }
+
+/// A list opened at an old page loads the newer one when the user scrolls
+/// back to its start (`onLoadMoreAtStart`), not where it opens; the rows
+/// on screen keep their place as the page arrives above them.
+#[test]
+fn list_loads_more_at_its_start_after_the_user_scrolls_there() {
+    let app = r#"
+import { List, mount, signal, Text, View } from "nsh";
+const rows = signal(Array.from({ length: 100 }, (_, i) => 100 + i));
+const starts = signal(0);
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text>{`starts ${starts()}`}</Text>
+      <List each={rows()} estimatedItemSize={50} style={{ flex: 1 }}
+            onLoadMoreAtStart={() => {
+              starts.set(starts() + 1);
+              rows.update((r) => [...Array.from({ length: 100 }, (_, i) => r[0] - 100 + i), ...r]);
+            }}>
+        {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let (engine, rx, dir) = start(app);
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let shown = texts(&first);
+    assert!(shown.contains(&"starts 0".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"row 100".to_owned()), "{shown:?}");
+    let list = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: ViewKind::Scroll,
+            } => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let scroll = |y: f32| {
+        engine
+            .control()
+            .scroll(list, nsh_core::geometry::point(px(0.0), px(y)), u32::MAX)
+    };
+    let fired = |batches: &[MountBatch], label: &str| {
+        batches.iter().any(|b| texts(b).iter().any(|t| t == label))
+    };
+    let drain = |wait: u64| {
+        std::iter::from_fn(|| rx.recv_timeout(Duration::from_millis(wait)).ok()).collect::<Vec<_>>()
+    };
+    // Where it opens is not an approach; away from the start, nothing.
+    scroll(2000.0);
+    assert!(!fired(&drain(300), "starts 1"), "fired away from the start");
+    // Back near the start: one load, and the rows on screen stay (the new
+    // page is 100 rows of 50 pt above them).
+    scroll(100.0);
+    let batches = drain(500);
+    assert!(fired(&batches, "starts 1"), "onLoadMoreAtStart did not run");
+    let kept = batches.iter().flat_map(|b| &b.items).any(
+        |i| matches!(i, MountItem::ScrollBy { id, dy, .. } if *id == list && *dy == px(5000.0)),
+    );
+    assert!(kept, "the visible rows did not keep their place");
+    // 5000 pt from the start now: nothing more.
+    assert!(!fired(&drain(300), "starts 2"), "fired again");
+    let _ = std::fs::remove_dir_all(&dir);
+}
