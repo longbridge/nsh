@@ -30,6 +30,34 @@ const row = (first: boolean) => ({
   borderTopWidth: first ? 0 : 1,
   borderTopColor: colors.line,
 });
+/** How far a row's hover fill reaches past its content on each side, and its corners. */
+const BLEED = 8;
+
+/**
+ * A row that takes the pointer's hover: `row`'s, its fill reaching `BLEED`
+ * past the content on both sides with rounded corners, and the content where
+ * it was (`start`: more room before it). The hairline above it is a
+ * `Divider`, the length `row`'s top border had; the point it took stays in
+ * the padding, so nothing moves.
+ */
+const hoverRow = (first: boolean, start = 0) => ({
+  ...row(true),
+  marginHorizontal: -BLEED,
+  paddingStart: BLEED + start,
+  paddingEnd: BLEED,
+  paddingTop: size.padding + (first ? 0 : 1),
+  borderRadius: BLEED,
+});
+
+/** The hairline above a `hoverRow` that is not the first. */
+function Divider(props: { show: boolean }) {
+  return (
+    <If when={props.show}>
+      <View style={{ position: "absolute", top: 0, left: BLEED, right: BLEED, height: 1, backgroundColor: colors.line }} />
+    </If>
+  );
+}
+
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
 
@@ -165,7 +193,7 @@ export function Controls() {
             last.set(`${props.label}: ${on ? "on" : "off"}`);
           }}
           // The track at the trailing edge, after the label.
-          style={{ ...row(!!props.first), flexDirection: "row-reverse" }}
+          style={{ ...hoverRow(!!props.first), flexDirection: "row-reverse" }}
           activeStyle={pressed}
           hoverStyle={props.disabled ? undefined : hovered()}
           focusStyle={focusRing()}
@@ -173,6 +201,7 @@ export function Controls() {
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >
+          <Divider show={!props.first} />
           <Label label={props.label} detail={props.detail} />
         </Switch>
       );
@@ -217,7 +246,7 @@ export function Controls() {
               shown.set(on ? KINDS.map((k) => k.name) : []);
               last.set(`Select all: ${on}`);
             }}
-            style={row(true)}
+            style={hoverRow(true)}
             activeStyle={pressed}
             hoverStyle={hovered()}
             focusStyle={focusRing()}
@@ -235,13 +264,14 @@ export function Controls() {
                   last.set(`${kind().name}: ${on}`);
                 }}
                 // One level under "Select all": the boxes line up with its label.
-                style={{ ...row(false), paddingStart: size.control + size.gap }}
+                style={hoverRow(false, size.control + size.gap)}
                 activeStyle={pressed}
                 hoverStyle={hovered()}
                 focusStyle={focusRing()}
                 indicatorStyle={box(has(kind().name) ? "check" : null)}
                 indicator={<BoxMark mark={has(kind().name) ? "check" : null} />}
               >
+                <Divider show />
                 <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{kind().name}</Text>
                 <Text style={{ fontSize: size.detail, color: colors.faint, fontVariant: ["tabular-nums"] }}>{count(kind().count)}</Text>
               </Checkbox>
@@ -268,12 +298,13 @@ export function Controls() {
                   plan.set(p().name);
                   last.set(`Plan: ${p().name}`);
                 }}
-                style={row(i() === 0)}
+                style={hoverRow(i() === 0)}
                 activeStyle={pressed}
                 hoverStyle={p().disabled ? undefined : hovered()}
                 focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
+                <Divider show={i() !== 0} />
                 <Ring on={plan() === p().name} />
                 <Label label={p().name} detail={p().detail} />
                 <Text style={{ fontSize: size.label, color: plan() === p().name ? colors.text : colors.muted, fontVariant: ["tabular-nums"] }}>{p().price}</Text>
@@ -365,11 +396,12 @@ export function Controls() {
             props.set(next);
             last.set(`${props.label}: ${next ? "expanded" : "collapsed"}`);
           }}
-          style={row(!!props.first)}
+          style={hoverRow(!!props.first)}
           activeStyle={pressed}
           hoverStyle={hovered()}
           focusStyle={focusRing()}
         >
+          <Divider show={!props.first} />
           <Label label={props.label} detail={props.detail} />
           {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
           <View
@@ -410,13 +442,14 @@ export function Controls() {
                   originals.set(on);
                   last.set(`Keep originals: ${on ? "on" : "off"}`);
                 }}
-                style={{ ...row(false), flexDirection: "row-reverse", paddingStart: size.gap }}
+                style={{ ...hoverRow(false, size.gap), flexDirection: "row-reverse" }}
                 activeStyle={pressed}
                 hoverStyle={hovered()}
                 focusStyle={focusRing()}
                 trackStyle={look.trackStyle}
                 thumbStyle={look.thumbStyle}
               >
+                <Divider show />
                 <Label label="Keep originals" detail={originals() ? "Edits are saved as copies" : "Edits replace the photo"} />
               </Switch>
             }
