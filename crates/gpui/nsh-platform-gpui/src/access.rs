@@ -719,9 +719,11 @@ fn canvas_nodes(
 ) {
     let Some(drawing) = drawing else { return };
     for (index, part) in drawing.nodes.iter().enumerate() {
-        let mut a = Accessibility::default();
-        a.role = part.role;
-        a.label = Some(part.label.clone());
+        let a = Accessibility {
+            role: part.role,
+            label: Some(part.label.clone()),
+            ..Accessibility::default()
+        };
         let role = role_for(&a, ViewKind::View, false).unwrap_or(Role::Label);
         let mut node = Node::new(role);
         if role == Role::Label {
@@ -1534,13 +1536,15 @@ mod tests {
                 nsh_core::geometry::size(Points(40.0), Points(20.0)),
             )
         };
-        let mut drawing = Drawing::default();
-        drawing.nodes = vec![
-            CanvasNode::new(at(0.0), AxRole::Header, "A"),
-            CanvasNode::new(at(40.0), AxRole::Text, "12")
-                .test_id("cell-a1")
-                .selected(true),
-        ];
+        let drawing = Drawing {
+            nodes: vec![
+                CanvasNode::new(at(0.0), AxRole::Header, "A"),
+                CanvasNode::new(at(40.0), AxRole::Text, "12")
+                    .test_id("cell-a1")
+                    .selected(true),
+            ],
+            ..Drawing::default()
+        };
         let mut state = crate::canvas::CanvasState::default();
         state.drawing = Some(Arc::new(drawing));
         grid.state_mut().canvas = Some(state);
