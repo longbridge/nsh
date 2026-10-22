@@ -11,7 +11,8 @@ a fork of that saved state. Source editing and Git commits happen in your existi
 
 > [!IMPORTANT]
 > This workflow requires Docker Engine and Linux FUSE. Docker runs the control process and Sandbox; FUSE mounts
-> the workspace inside the Sandbox. The steps below describe this Linux deployment.
+> the workspace inside the Sandbox. On macOS, the development command prepares this Linux deployment through
+> a local Docker engine such as OrbStack.
 
 ## What the snapshot saves
 
@@ -35,14 +36,15 @@ Each invocation creates a fresh Store and performs this complete sequence. Snaps
 branches of that invocation. The trial's benefit to measure is the cost of reaching another usable, tested workspace,
 including mount, commit and unmount time.
 
-## Prepare a Linux development machine
+## Prepare the development environment
 
 Use a checkout of the [NSH repository](https://github.com/longbridge/nsh) with:
 
-- Linux and a local ext4, XFS or Btrfs filesystem for Docker's Store volume.
+- A local Linux Docker engine with ext4, XFS or Btrfs for its Store volume, running on Linux or through a macOS
+  environment such as OrbStack.
 - Docker Engine serving API 1.54 or newer; the verified local setup uses Engine 29.7.2.
 - `/dev/fuse`, with Docker permitted to expose that device and `CAP_SYS_ADMIN` to the Sandbox.
-- Git, Python 3.12 or newer, rustup and a C/C++ compiler.
+- Git and Python 3.12 or newer; on Linux, rustup and a C/C++ compiler.
 - Network access to fetch the pinned LayerFS source, Cargo dependencies and runtime image.
 
 The trial builds LayerFS **1.0.0**, pinned to source commit
@@ -53,14 +55,18 @@ describes the Store and Sandbox lifecycle.
 Run these commands from the NSH checkout root:
 
 ```sh
-rustup toolchain install 1.85.1 --profile minimal
-python3 .github/ci/layerfs.py prepare
-python3 .github/ci/layerfs.py smoke
+./scripts/layerfs prepare
+./scripts/layerfs smoke
+./scripts/layerfs status
 ```
 
-`prepare` checks the Docker API, builds the pinned daemon and Node addon with Rust 1.85.1, and builds the runtime
-image. The host build uses the checkout's usual `target/` and Cargo registry. The exact runtime image ID is recorded
-in `.nsh/layerfs/deployment.json`.
+The executable selects Python 3.12 or newer, including Homebrew's installation on macOS, and discovers the socket
+from the active Docker context. Use `--docker-socket PATH` to select a local socket explicitly.
+
+`prepare` checks the Docker API, installs Rust 1.85.1 and builds the pinned daemon, Node addon and runtime image.
+On macOS it prepares these in a temporary Linux build container. It reuses the usual Cargo registry and `target/`,
+including an existing `CARGO_TARGET_DIR` setting. The exact runtime image ID and daemon path are recorded in
+`.nsh/layerfs/deployment.json`. `status` checks the saved build outputs and image and shows the latest validation result.
 
 `smoke` creates `.nsh/layerfs/nsh-<id>/input` from the checkout's **committed `HEAD`**, then imports that input into
 a new Store. To include source edits, commit them to your topic branch before running it. The generated input starts
