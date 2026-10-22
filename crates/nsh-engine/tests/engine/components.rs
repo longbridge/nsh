@@ -2398,3 +2398,161 @@ fn a_base_collapsible_places_its_content_while_open() {
         "the content followed the app"
     );
 }
+
+const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Progress } from "nsh/base";
+
+function App() {
+  const value = signal(40);
+  const loading = signal(false);
+  return (
+    <View>
+      <Progress
+        testID="download"
+        value={value()}
+        indeterminate={loading()}
+        accessibilityLabel="Downloading"
+        class="w-[200px]"
+        trackClass="h-[4px]"
+        indicatorClass={loading() ? "h-full w-[50px]" : "h-full"}
+        indicatorStyle={{ backgroundColor: "#00ff00" }}
+      >
+        <Text>{`${value()}%`}</Text>
+      </Progress>
+      <View testID="more" onPress={() => value.set(value() + 80)} />
+      <View testID="loading" onPress={() => loading.set(!loading())} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Progress`: the progress bar role and its range for
+/// screen readers on its root alone, the value the app owns (clamped to
+/// 0 to 100) as the indicator's share of the track and as the value
+/// screen readers say, and no value while indeterminate, when the
+/// indicator's width is the app's.
+#[test]
+fn a_base_progress_shows_the_apps_value_in_its_indicator() {
+    use nsh_core::{AccessibilityRole, AccessibilityValue};
+    let (engine, rx) = start(BASE_PROGRESS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "40%"));
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (root, more, loading) = (
+        by_test_id("download"),
+        by_test_id("more"),
+        by_test_id("loading"),
+    );
+    // The view inside `parent` (a part; the value is text).
+    let child = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("a part")
+    };
+    let (track, indicator) = (child(root), child(child(root)));
+    let value = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == root => {
+                    Some(props.accessibility.value.clone())
+                }
+                _ => None,
+            })
+            .flatten()
+    };
+    let range = |now| AccessibilityValue {
+        min: Some(0.0),
+        max: Some(100.0),
+        now,
+        text: None,
+    };
+    let width = |batches: &[MountBatch]| frame_of(batches, indicator).map(|f| f.size.width.0);
+
+    // One element for screen readers, the progress bar with its range and
+    // value; its parts are none.
+    let props = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == root => Some(props.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Progressbar);
+    assert_eq!(props.accessibility.accessible, Some(true));
+    assert_eq!(props.accessibility.label.as_deref(), Some("Downloading"));
+    let first = std::slice::from_ref(&first);
+    assert_eq!(value(first), Some(range(Some(40.0))));
+    assert!(first.iter().all(|b| !b.items.iter().any(
+        |i| matches!(i, MountItem::ViewProps { id, .. } if *id == track || *id == indicator)
+    )));
+    // The indicator is the value's share of the track, in the app's look.
+    assert_eq!(width(first), Some(80.0));
+    assert_eq!(
+        first
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == indicator => {
+                    Some(style.background_color.0)
+                }
+                _ => None,
+            }),
+        Some(0x00ff_00ff)
+    );
+
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+    // Past 100: held to the range.
+    press(more);
+    let after = until(&rx, |b| shows(b, "120%"));
+    assert_eq!(value(&after), Some(range(Some(100.0))));
+    assert_eq!(width(&after), Some(200.0));
+
+    // Indeterminate: the range without a value, the app's width.
+    press(loading);
+    let after = until(&rx, |b| {
+        frame_of(std::slice::from_ref(b), indicator).is_some()
+    });
+    assert_eq!(value(&after), Some(range(None)));
+    assert_eq!(width(&after), Some(50.0));
+}

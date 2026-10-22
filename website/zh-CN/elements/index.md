@@ -95,6 +95,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
 | `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
+| `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
 | `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
 | `<SafeAreaView>` | `nsh_base::safe_area_view()` | 让内容避开刘海、系统栏和主屏幕指示条 | [SafeAreaView](./safe-area-view.md) |

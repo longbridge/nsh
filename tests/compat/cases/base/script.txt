@@ -981,6 +981,34 @@ covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
 
+# base-progress
+tap id:case-base-progress
+# The progress bar role, its label, range and value for screen readers;
+# the indicator (30 high, 4 above it) in the track (3 around it, 6
+# below it) makes the bar 46 high.
+expect 40%
+prop id:upload role progressbar
+prop id:upload accessibilityLabel Uploading
+prop id:upload accessibilityValue min=0 max=100 now=40
+frame id:upload 0 20 390 46
+# The app's value, held to the range.
+tap id:more
+expect 120%
+prop id:upload accessibilityValue min=0 max=100 now=100
+# Indeterminate: the range with no value.
+tap id:wait
+prop id:upload accessibilityValue min=0 max=100
+frame id:upload 0 20 390 46
+tap id:wait
+prop id:upload accessibilityValue min=0 max=100 now=100
+covers [nsh/base] Progress
+covers [props] value
+covers [props] Progress.indeterminate
+covers [props] Progress.trackClass
+covers [props] Progress.trackStyle
+covers [props] Progress.indicatorClass
+covers [props] Progress.indicatorStyle
+
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
 expect token up #138a5aff
