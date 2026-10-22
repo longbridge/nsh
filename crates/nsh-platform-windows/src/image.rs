@@ -875,7 +875,7 @@ fn fetch_source(
 
 /// Loads `location` (`uri`'s) for `surface`, as [`fetch`] does.
 fn fetch_at(
-    surface: &Surface,
+    _surface: &Surface,
     location: Option<Location>,
     uri: &str,
     progress: Option<Progress>,
