@@ -157,7 +157,8 @@ import -window root -display :170 whole.png        # the display, if the window'
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets), and gives the host's own sets, which apps reach by name (`nativeModule`,
-  `embedding.md` "Native modules"). Several views are several
+  `embedding.md` "Native modules"); `AppOptions::context` gives a view's engine its own part of the host, which
+  those sets' functions read (`embedding.md` "Each engine's own part of the host"). Several views are several
   engines; nothing is global but the `rt` queue and the key bindings, which are per process. Windows showing surfaces
   are opened with `inactive_frame_interval: None` (GPUI draws unfocused windows at 30 fps by default); a host must set
   it in its own `WindowOptions` too. Embedding in a GPUI Kit app (one GPUI, focus and Tab, overlays, themes, frame
