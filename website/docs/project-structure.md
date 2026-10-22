@@ -127,7 +127,7 @@ Every other key is optional; a TSX app may also leave out the four. A TSX app's 
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 | `tailwind` | object | every build | Extends the Tailwind theme your `class` strings resolve against ([Tailwind](./tailwind.md#theme)). |
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
-| `theme` | string or object | every build | The theme the app's Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme)). |
+| `theme` | string or object | every build | The app's design tokens (shadcn/ui's `cssVars`, over the default `neutral` theme), which token classes, `token()` and Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme), [Theme tokens](./tailwind.md#theme-tokens)). |
 | `statusBar` | object | every build, `package` | The status bar's default under every page and dialog (iOS and Android): `{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`, both optional. Packaged iOS apps show it from the launch screen on ([Status bar](../modules/nsh-base.md#status-bar)). |
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
@@ -172,7 +172,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 }
 ```
 
-`.nsh/tsconfig.json` points the `nsh` imports and your app's crates to `.nsh/types`, includes the globals and asset declarations, and sets the compiler options NSH apps use (`lib`, `jsx`, `strict`, ...). NSH keeps it current: when a new version adds a library or a path, your app has it with the next build, and your `tsconfig.json` stays as you wrote it. Options you add to `tsconfig.json` apply over NSH's.
+`.nsh/tsconfig.json` points the `nsh` imports and your app's crates to `.nsh/types`, includes the globals, asset and token declarations, and sets the compiler options NSH apps use (`lib`, `jsx`, `strict`, ...). NSH keeps it current: when a new version adds a library or a path, your app has it with the next build, and your `tsconfig.json` stays as you wrote it. Options you add to `tsconfig.json` apply over NSH's.
 
 | File in `.nsh/types/nsh/` | Declares |
 |---|---|
@@ -181,6 +181,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `jsx-runtime.d.ts` | The JSX runtime TypeScript resolves through `jsxImportSource` (the `JSX` namespace) |
 | `globals.d.ts` | `If` and `Each`; `console`, timers, `requestAnimationFrame`, `fetch` and the other [global APIs](../modules/globals.md) |
 | `assets.d.ts` | What importing an image or font gives |
+| `tokens.d.ts` | `Tokens`: the app's design tokens, from its `"theme"`, which type [`token()`](../modules/nsh.md#token) |
 | `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/animated`, `nsh/device`, ...) |
 | `base.d.ts` | `nsh/base` |
 

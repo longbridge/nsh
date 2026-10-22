@@ -50,7 +50,10 @@
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the
   surface element's prepaint lays it out at the box's window bounds and prepaints it (`prepaint_as_root`, clipped to the
   clipping ancestors), the tree paints it where it draws the box (NSH content drawn later covers it), and a `BlockMouse`
-  hitbox under it keeps NSH's input away; keys go to it while focus is inside it, and one that returns its widget's
+  hitbox under it keeps NSH's input away; keys go to it first while focus is inside it (GPUI dispatches its key
+  bindings, then its key listeners, then the surface's), and the keys it lets through reach the window's shortcuts,
+  then the app's `nsh/keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
+  typing keys to the component) and the menu's shortcuts, and nothing else of NSH's (`input::component_key`); one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
   scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
   value, window, cx)`, `command(name, args, window, cx)`), so it can update its entities. `render` is also called while
@@ -138,23 +141,22 @@ NSH draws (`src/layers.rs`).
   sheets, popovers and notifications (drawn by `Root` above the content) cover it and take the input, while its app
   keeps running.
 - **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_base::Theme`
-  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the app
+  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one from a theme file (shadcn's
+  `cssVars`, as `nsh.json`'s `"theme"`: `components.md` "The theme"): the app
   renders with its tokens instead of its own theme's (`Core::set_host_tokens`, which win until cleared with
   `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
-  `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
-  keys it lacks keep the app's values. It applies at once and to every app loaded later, in their
+  `bg-sidebar`, `rounded-(--radius)`; every token of the theme, the host's own names too) restyle with it;
+  tokens it lacks keep the app's values. It applies at once and to every app loaded later, in their
   first frame (the surface starts engines with `Engine::start_with`, sending the theme before the start).
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's
-  `src/theme.rs` converts GPUI Kit's active `Theme`: both modes from its `light_theme` / `dark_theme` configs (gpui-kit
-  theme JSON, unset colors null, which NSH skips), then the current mode's colors as GPUI Kit resolved them, so NSH's
-  components match GPUI Kit's widgets; it runs on every change (`cx.observe_global::<Theme>`).
-- **NSH's theme in the host.** An NSH theme file is a gpui-kit theme file (same keys, same `themes` / `mode` /
-  `colors` structure): `ThemeRegistry::global_mut(cx).load_themes_from_str(json)` registers its entries by `name`
-  (give each one), and setting `Theme::global_mut(cx).light_theme` / `dark_theme` to them and calling
-  `Theme::change(mode, …)` applies them to GPUI Kit (the example's violet theme, `themes/violet.json`). Share hex
-  colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
-  reads gradients and `blue-500/50` that NSH rejects.
+  `src/theme.rs` maps GPUI Kit's active `Theme` onto shadcn's tokens: the current mode's colors as GPUI Kit resolved
+  them, each set on the token of the same role (`Theme::set_color`: `background`, `primary`, `muted-foreground`,
+  `border`, `ring`, ...) for both appearances, its radius on `radius` and its font families on `font-sans` /
+  `font-mono` (`set_number`, `set_font`), so NSH's components match GPUI Kit's widgets. It runs again on every
+  change, a mode switch included (`cx.observe_global::<Theme>`), so one appearance's values are always the shown
+  mode's. The example's `themes/violet.json` is the host's own GPUI Kit theme, loaded into GPUI Kit's
+  `ThemeRegistry`; the embedded app takes it on through this mapping.
 - **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
   (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
   of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and

@@ -1339,8 +1339,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         posts.set_notify(Arc::new(move || {
             let _ = wake.send(Message::Wake);
         }));
+        let js_tokens = core.tokens().clone();
         let state = State {
             core,
+            js_tokens,
             frame_requested: false,
             ops: Vec::new(),
             binds: Vec::new(),
@@ -1408,6 +1410,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     &config.ui_sets,
                     posts,
                     &environment,
+                    driver.state.js_tokens.clone(),
                     text_engine,
                     stop,
                     sink,
@@ -1682,6 +1685,9 @@ struct ScrollEvent {
 
 struct State<M: TextEngine> {
     core: Core<M>,
+    /// The design tokens JS has (`token()`): the core's when they were
+    /// last sent.
+    js_tokens: Arc<nsh_core::ui::Tokens>,
     /// What the environment keeps whatever the platform reports
     /// ([`EngineConfig::pinned`]).
     pinned: EnvironmentPins,
@@ -2115,7 +2121,17 @@ impl<M: TextEngine> State<M> {
             self.core.take_events(&mut self.events);
             // Posts the ops queued (in program order) run in another round.
             let posted = script.is_some_and(Script::has_posted);
-            if self.binds.is_empty() && self.events.is_empty() && !posted {
+            // New tokens (the app's theme, the embedding app's) reach what
+            // read them in JS, whose ops come in another round.
+            let retheme = match script {
+                Some(script) if !Arc::ptr_eq(self.core.tokens(), &self.js_tokens) => {
+                    self.js_tokens = self.core.tokens().clone();
+                    script.set_tokens(self.js_tokens.clone());
+                    true
+                }
+                _ => false,
+            };
+            if self.binds.is_empty() && self.events.is_empty() && !posted && !retheme {
                 break;
             }
         }

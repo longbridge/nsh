@@ -46,6 +46,8 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/core.yml"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:

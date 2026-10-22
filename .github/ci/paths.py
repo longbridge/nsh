@@ -116,6 +116,15 @@ def filtered(workflow):
 def main():
     graph = crates()
     failed = False
+    # Merge queues need a result on their synthetic commit as well as on PRs.
+    # Check every PR workflow, including those outside the Rust path graph.
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        events = yaml.safe_load(path.read_text()).get(True, {})
+        if "pull_request" in events:
+            group = events.get("merge_group")
+            if not isinstance(group, dict) or group.get("types") != ["checks_requested"]:
+                failed = True
+                print(f"{path.name} must handle merge_group: checks_requested")
     for name, spec in WORKFLOWS.items():
         want = needed(name, spec, graph)
         if "--print" in sys.argv:

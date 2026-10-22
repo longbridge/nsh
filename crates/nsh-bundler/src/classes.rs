@@ -176,7 +176,7 @@ export function A(p: { on: boolean }) {
         assert_eq!(names, ["bg-chart-up", "rounded-(--radius-card)"]);
         // The app's own theme (`nsh.json` `"theme"`) adds its keys.
         let theme = nsh_base::Theme::from_json(
-            r##"{ "themes": [{ "radius.card": 10, "colors": { "chart.up": "#00ff00" } }] }"##,
+            r##"{ "cssVars": { "theme": { "radius-card": "10px" }, "light": { "chart-up": "#00ff00" } } }"##,
         )
         .unwrap();
         assert!(check(source, SourceType::tsx(), &themed(theme)).is_empty());

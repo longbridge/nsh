@@ -180,6 +180,8 @@ keymap.bind("mod+enter", send, { when: "always" });
 keymap.bind("mod+e", archive, { when: "notEditing" });
 ```
 
+On the GPUI backend, a native component with the keyboard focus counts as a text input, since it may be a text editor. It sees each key first: a key it handles itself never reaches the bindings, and the bindings that fire while text is edited get the keys it lets through.
+
 ## Which binding runs
 
 A key that fires a binding is consumed: it is not typed, the system does not beep, and NSH's own keys do not see it (Escape going back, Tab moving the focus, the arrows scrolling). When several bindings have the same keystroke, the newest one that may fire runs, so a dialog can bind Escape over the screen's binding and the screen's comes back when the dialog's goes. Bindings are checked natively the moment the key is pressed; the handler runs right after, on the engine thread (Rust) or the JS thread (TSX).

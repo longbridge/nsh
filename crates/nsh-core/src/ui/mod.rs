@@ -64,7 +64,7 @@ pub(crate) mod status_bar;
 mod style;
 mod system;
 pub(crate) mod task;
-pub(crate) mod tokens;
+pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
 
@@ -170,7 +170,7 @@ pub use self::{
         Quotas, System, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
-    tokens::{TokenSource, Tokens},
+    tokens::{FONT_MONO, FONT_SANS, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };

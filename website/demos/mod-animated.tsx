@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { ui } from "./palette";
+import { desktop, Panel, Split, ui, wide } from "./palette";
 
 const TRACK = 240;
 const curves: [string, Easing][] = [
@@ -17,15 +17,19 @@ function Button(props: { label: string; onPress: () => void }) {
     <Text
       onPress={props.onPress}
       activeStyle={{ opacity: 0.6 }}
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 10,
-        overflow: "hidden",
-        ...ui().raised,
-        color: ui().text,
-        fontWeight: "600",
-      }}
+      style={
+        desktop
+          ? { alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, overflow: "hidden", ...ui().raised, color: ui().text, fontSize: 13, fontWeight: "600" }
+          : {
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 10,
+              overflow: "hidden",
+              ...ui().raised,
+              color: ui().text,
+              fontWeight: "600",
+            }
+      }
     >
       {props.label}
     </Text>
@@ -35,7 +39,7 @@ function Button(props: { label: string; onPress: () => void }) {
 function App() {
   const dots = curves.map(() => createAnimatedValue(0));
   const spin = createAnimatedValue(0);
-  const status = signal("Tap a button");
+  const status = signal(desktop ? "Click a button" : "Tap a button");
   let there = false;
 
   const race = () => {
@@ -56,6 +60,35 @@ function App() {
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 16 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>Native animation</Text>
+      <Split
+        gap={16}
+        width={360}
+        inspector={
+          wide() ? (
+            <>
+              <Panel title="Animated.parallel · six easings">
+                <View style={{ gap: 10 }}>
+                  <Text style={{ fontSize: 13, color: ui().text }}>{status()}</Text>
+                  <Button label="Race" onPress={race} />
+                </View>
+              </Panel>
+              <Panel title="timing · interpolate">
+                <View style={{ paddingTop: 6 }}>
+                  <Button label="Spin" onPress={turn} />
+                </View>
+              </Panel>
+            </>
+          ) : (
+            <>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Button label="Race" onPress={race} />
+                <Button label="Spin" onPress={turn} />
+              </View>
+              <Text style={{ color: ui().muted }}>{status()}</Text>
+            </>
+          )
+        }
+      >
       <View style={{ gap: 8 }}>
         <Each of={curves}>
           {(c, i) => (
@@ -91,11 +124,7 @@ function App() {
           Rotation and color are interpolated from one animated value.
         </Text>
       </View>
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Button label="Race" onPress={race} />
-        <Button label="Spin" onPress={turn} />
-      </View>
-      <Text style={{ color: ui().muted }}>{status()}</Text>
+      </Split>
     </View>
   );
 }

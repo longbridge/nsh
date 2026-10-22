@@ -634,7 +634,7 @@ each(items, |item: &Item| item.id, move |item, index| {
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> Tailwind 主题只影响应用自己的类。Rust 组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见[用 Rust 开发](../docs/rust.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
+> Tailwind 主题只影响应用自己的类。应用的设计令牌（shadcn/ui 的颜色、`radius`、字体和应用自己的令牌）是它的主题，即 `nsh.json` 的 `"theme"` 键，Rust 组件用它绘制，见[用 Rust 开发](../docs/rust.md#主题)。类名像 Tailwind 引用 `@theme` 变量那样引用这些令牌（`bg-primary`、`bg-up/30`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
 
 ## 相关
 

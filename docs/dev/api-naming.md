@@ -328,6 +328,9 @@ and `Input`'s React Native names follow the rules as well.
 | `Tab::id`, `Tabs::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
 | A tab outside the keyboard focus until its list has roving focus (`Tab`'s doc comment) | each enabled tab is a focus stop, Space / Return press it | `Button`, `Radio` | The keyboard focus follows the view tree, so keyboard users reach every tab; arrow keys, Home / End and roving focus come with the tab list's keyboard model (`gpui-base`'s TODO) |
 | `Tab`'s own layout (`flex`, `items_center`, `justify_center`, a line height of 1) | (none) | `Button` (no layout of its own) | The layout is the app's `class` and `style`, as `Button`'s; centering is `items-center justify-center` |
+| **Collapsible** (`nsh/base`) | | | |
+| `Collapsible::reveal(id, progress)` (`MotionReveal`: the content kept mounted, its measured height times `progress`, clipped) | (left out) | | NSH's layout has no height that is a fraction of the content's own; until the core has one, the app animates what it shows (opacity, a transform) |
+| Children and `content` in the order the builder was called | children first, `content` after them | `gpui-shell`'s `Collapsible` (`materialize/components/collapsible.rs`) | JSX gives a slot no place among the children; what expands goes under what shows always, as in `gpui-shell` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

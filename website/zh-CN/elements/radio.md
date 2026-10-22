@@ -31,12 +31,12 @@ fn plans() -> impl IntoElement {
                     .justify_center()
                     .rounded_full()
                     .border_2()
-                    .border_color(move || theme().border())
+                    .border_color(move || theme().border)
                     .child(
                         view()
                             .size(px(10.0))
                             .rounded_full()
-                            .bg(move || theme().primary())
+                            .bg(move || theme().primary)
                             .opacity(move || if checked() { 1.0_f32 } else { 0.0 }),
                     ),
             )

@@ -52,6 +52,8 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/windows.yml"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:

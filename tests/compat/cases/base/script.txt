@@ -954,3 +954,38 @@ covers [props] disabled
 covers [props] Tab.selectedStyle
 covers [props] accessibilityLabel
 covers [events] onPress
+
+# A collapsible: the summary always, the details only while the app's
+# `open` holds. Collapsed, the region is the trigger's 20 points.
+tap id:case-base-collapsible
+expect Summary
+absent Details 0
+frame id:region 0 20 390 20
+prop id:trigger accessibilityState expanded=false
+# Open: the details after the summary, 4 apart (`class`).
+tap id:trigger
+expect Details 0
+prop id:trigger accessibilityState expanded=true
+frame id:region 0 20 390 54
+frame id:details 0 0 390 30
+# Collapsed again: out of the layout.
+tap id:trigger
+absent Details 0
+frame id:region 0 20 390 20
+# Kept while collapsed: it follows the app and shows the latest.
+tap id:bump
+tap id:trigger
+expect Details 1
+frame id:region 0 20 390 54
+covers [nsh/base] Collapsible
+covers [props] Collapsible.open
+covers [props] Collapsible.content
+
+# The app's design tokens: shadcn's `neutral` with the app's theme over it.
+tap id:case-base-token
+expect token up #138a5aff
+expect token primary #171717ff
+expect token radius-card 14
+style id:up backgroundColor #138a5aff
+style id:primary backgroundColor #17171780
+covers [nsh] token
