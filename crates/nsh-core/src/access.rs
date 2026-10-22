@@ -1079,9 +1079,14 @@ impl Access {
     }
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
-    /// Relative and `asset:` URIs are the app's own files.
+    /// Relative and `asset:` URIs are the app's own files; `data:` URIs and
+    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has.
     pub fn allows_media(&self, uri: &str) -> bool {
-        if !uri.contains("://") || uri.starts_with("asset:") || uri.starts_with("data:") {
+        if !uri.contains("://")
+            || uri.starts_with("asset:")
+            || uri.starts_with("data:")
+            || uri.starts_with("blob:")
+        {
             return true;
         }
         self.allows_http("GET", uri)

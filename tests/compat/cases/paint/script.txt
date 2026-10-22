@@ -121,6 +121,10 @@ nostyle id:filters backdropFilter
 style id:backdrop backdropFilter blur(10)
 style id:backdrops backdropFilter saturate(1.8) blur(20)
 nostyle id:backdrops filter
+style id:glass backdropFilter blur(10)
+style id:glass glassEffect regular
+style id:glass-clear glassEffect clear
+nostyle id:no-glass glassEffect
 style id:blend-normal mixBlendMode normal
 style id:blend-multiply mixBlendMode multiply
 style id:blend-screen mixBlendMode screen
@@ -142,6 +146,7 @@ style id:blend-plus-lighter mixBlendMode plus-lighter
 covers [styles] backgroundImage
 covers [styles] filter
 covers [styles] backdropFilter
+covers [styles] glassEffect
 covers [styles] mixBlendMode
 # paint-misc
 tap id:case-paint-misc

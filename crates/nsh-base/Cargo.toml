@@ -27,3 +27,8 @@ regex.workspace = true
 log.workspace = true
 syntect = { workspace = true, optional = true }
 two-face = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The components' tests run them headless (`tests/base`), without QuickJS.
+nsh-engine.workspace = true
+nsh-testing.workspace = true

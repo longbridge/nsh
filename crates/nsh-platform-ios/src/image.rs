@@ -1,5 +1,6 @@
 //! Image loading: fetch (NSURLSession, reporting progress, or file) once
-//! per URI, downsample-decode with ImageIO on a background queue at each
+//! per URI (a source that carries its bytes, a `data:` URI or a blob, is not
+//! fetched: they are wrapped in an `NSData` without a copy), downsample-decode with ImageIO on a background queue at each
 //! requested pixel size, cache decoded images in an `NSCache` (purged under
 //! memory pressure), coalesce concurrent requests and cancel downloads
 //! nobody waits for. `Image.prefetch` / `getSize` keep the bytes they
@@ -12,7 +13,7 @@
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
-    NodeId,
+    ImageData, NodeId,
     geometry::{Points, Size},
 };
 use objc2::{
@@ -241,11 +242,13 @@ impl ImageLoader {
 
     /// Requests `uri` for `view`, decoded to at most `max_pixels` on its
     /// longer side (0 = natural size); completions come as
-    /// [`LoadEvent::Decoded`].
+    /// [`LoadEvent::Decoded`]. `data` is its bytes, when the source carries
+    /// them (a `data:` URI, a blob): `uri` is then only the cache key.
     pub(crate) fn request(
         &mut self,
         view: NodeId,
         uri: &str,
+        data: Option<&ImageData>,
         max_pixels: u32,
         scale: f64,
         look: Look,
@@ -275,7 +278,10 @@ impl ImageLoader {
                 waiters: vec![view],
             },
         );
-        self.fetch(uri, Want::Decode(key));
+        match data {
+            Some(data) => self.serve(uri, &ns_data(data), Want::Decode(key)),
+            None => self.fetch(uri, Want::Decode(key)),
+        }
         Request::Pending
     }
 
@@ -333,9 +339,8 @@ impl ImageLoader {
                     DispatchQueueGlobalPriority::Default,
                 ))
                 .exec_async(move || {
-                    let result = nsh_core::platform::clipboard::decode_data_uri(&uri)
-                        .map(|(_, bytes)| NSData::with_bytes(&bytes))
-                        .ok_or_else(|| "not a base64 data: URI".to_owned());
+                    let result = nsh_core::image::decode_data_uri(&uri)
+                        .map(|(_, bytes)| NSData::from_vec(bytes));
                     on_main(&notify, LoadEvent::Bytes { uri, result });
                 });
                 None
@@ -527,6 +532,33 @@ impl ImageLoader {
         }
         let path = uri.strip_prefix("file://").unwrap_or(uri);
         path.starts_with('/').then(|| Source::File(path.into()))
+    }
+}
+
+/// `data`'s bytes as an `NSData`, not copied: the `NSData` keeps `data`
+/// alive until it is deallocated.
+fn ns_data(data: &ImageData) -> Retained<NSData> {
+    use std::ffi::c_void;
+
+    use block2::{DynBlock, RcBlock};
+    let keep = data.clone();
+    let bytes = keep.bytes();
+    let (ptr, len) = (bytes.as_ptr() as *mut c_void, bytes.len());
+    // Dropping the block (when the NSData goes) drops `keep`.
+    let dealloc = RcBlock::new(move |_: *mut c_void, _: usize| {
+        let _ = &keep;
+    });
+    let dealloc: &DynBlock<dyn Fn(*mut c_void, usize) + 'static> = &dealloc;
+    // SAFETY: an immutable NSData only reads the bytes, which the
+    // deallocator block keeps alive (`ImageData` is shared and immutable)
+    // for as long as the NSData lives.
+    unsafe {
+        msg_send![
+            NSData::alloc(),
+            initWithBytesNoCopy: ptr,
+            length: len,
+            deallocator: dealloc,
+        ]
     }
 }
 

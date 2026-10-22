@@ -659,6 +659,11 @@ fn window_active(surface: &Surface) -> bool {
 fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     let old = focused(surface);
     if old.as_ref() == view {
+        if view.is_some() {
+            // The host can own the window's focus while this field keeps the surface's.
+            surface.window_focus_requested.set(true);
+            surface.invalidate();
+        }
         return;
     }
     if let Some(old) = &old {
@@ -680,6 +685,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
         && let Some(input) = input_of(view)
     {
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = Some(view.clone()));
+        surface.window_focus_requested.set(true);
         input.focused.set(true);
         input.active.set(window_active(surface));
         input.wake_caret();

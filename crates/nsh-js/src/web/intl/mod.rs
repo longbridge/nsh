@@ -550,6 +550,7 @@ enum Defaults {
 /// The local time zone's name: `TZ`, else the zone `/etc/localtime` links
 /// to (`/var/db/timezone/zoneinfo/Europe/Berlin`); `None` where neither
 /// tells (Android).
+#[cfg(not(target_arch = "wasm32"))]
 fn local_zone_name() -> Option<String> {
     if let Ok(tz) = std::env::var("TZ") {
         let tz = tz.trim_start_matches(':');
@@ -561,6 +562,24 @@ fn local_zone_name() -> Option<String> {
     let target = target.to_string_lossy();
     let (_, name) = target.split_once("zoneinfo/")?;
     Some(name.to_owned())
+}
+
+/// The local time zone's name: the browser's
+/// (`Intl.DateTimeFormat().resolvedOptions().timeZone`, the web runtime's
+/// `nsh.time_zone` import).
+#[cfg(target_arch = "wasm32")]
+fn local_zone_name() -> Option<String> {
+    #[link(wasm_import_module = "nsh")]
+    unsafe extern "C" {
+        /// Writes the name's UTF-8 into `buf` if it fits in `cap` bytes;
+        /// returns its length.
+        fn time_zone(buf: *mut u8, cap: usize) -> usize;
+    }
+    let mut buf = [0u8; 64];
+    // SAFETY: JS writes at most `buf.len()` bytes into it.
+    let len = unsafe { time_zone(buf.as_mut_ptr(), buf.len()) };
+    let name = std::str::from_utf8(buf.get(..len)?).ok()?;
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// An offset time zone (`+08:00`, `-0530`, `+08`) in minutes east.

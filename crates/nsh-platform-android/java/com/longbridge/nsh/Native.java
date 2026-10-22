@@ -107,6 +107,13 @@ final class Native {
      */
     static native String mediaRedirect(long handle, String base, String location);
 
+    /**
+     * The bytes of the in-memory image {@code uri}: a {@code data:} URI's or a
+     * {@code blob:} URL's that a view shows, or an {@code Image.getSize}
+     * {@code data:} URI's; null when there are none.
+     */
+    static native byte[] imageBytes(long handle, String uri);
+
     /** {@code capabilities}: the app's declaration (JSON), {@code app}: its {@code app.json} ({@code id}); null for none. */
     static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app);
 

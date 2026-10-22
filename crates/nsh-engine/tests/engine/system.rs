@@ -65,6 +65,7 @@ mount(() => <Text>{status()}</Text>);
         data_dir: Some(dir.join("data")),
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -150,6 +151,7 @@ mount(() => <Text>{status()}</Text>);"#,
         data_dir: Some(root.join("data")),
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

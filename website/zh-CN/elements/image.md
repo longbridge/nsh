@@ -55,11 +55,36 @@ import logo from "./assets/logo.png";
 | 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ url, size, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
+| `data:` URI | `"data:image/png;base64,iVBOR…"` | URI 中的字节，base64 或百分号编码（`data:image/svg+xml,%3Csvg…`）。 |
+| `blob:` URL | `URL.createObjectURL(blob)` | `Blob` 或 `File` 的字节（TSX）。图片保有这些字节：撤销 URL 后，正在显示它的图片保持完整。 |
+
+来自应用已有字节的图片无需请求即可显示。聊天应用在照片上传期间用它的 blob 显示所选照片，上传完成后把 `src`
+换成照片的 URL：
+
+```rust tabs
+// `data:` URI 中的字节（应用生成或内联收到的图片）。
+image(format!("data:image/png;base64,{encoded}")).size(px(64.0))
+```
+
+```tsx tabs
+import { Image, signal } from "nsh";
+
+const preview = URL.createObjectURL(photo); // 所选的 `File`
+const src = signal(preview);
+upload(photo).then((url) => {
+  src.set(url);
+  URL.revokeObjectURL(preview);
+});
+
+<Image src={src()} style={{ width: 240, height: 180 }} />;
+```
+
+相同的字节是同一张图片：同一张图片无论作为 `data:` URI 还是 blob，都只解码一次并共享缓存。
 
 开发期间资源由开发服务器提供；`nsh build` 和 `nsh package` 会把它们拷贝进应用（Rust crate 用 `registry.assets(assets!())` 发布它的 `assets/` 目录）。参见[图片与资源](../docs/images-and-assets.md)。
 
 > [!NOTE]
-> 应用声明了[能力](../docs/sandbox-and-capabilities.md)时，远程图片从其中列出的主机加载；来自其他主机的图片会以 `onError` 失败。`asset:` URI 始终可以加载。
+> 应用声明了[能力](../docs/sandbox-and-capabilities.md)时，远程图片从其中列出的主机加载；来自其他主机的图片会以 `onError` 失败。`asset:` URI、`data:` URI 和 `blob:` URL 始终可以加载。
 
 ## 属性
 

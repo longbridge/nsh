@@ -76,3 +76,66 @@ covers [fs/promises] rename
 covers [net] connect
 covers [process] run
 covers [process] default
+# base-dock
+tap id:case-base-dock
+# Two groups, the first 200 wide; each shows its tabs (in a row, 60
+# wide: `tabBarClass`, `tabClass`) and its displayed panel, the others
+# placed and hidden.
+expect Tab a*
+expect Tab b
+expect Tab c*
+expect Count a: 0
+expect Count c: 0
+# The other panels are placed (hidden), so they keep their state.
+expect Count b: 0
+expect Layout h([a* b]:200 [c*])
+expect Active a+ c+
+frame parent:parent:parent:id:tab-b 60 0 60 24
+style parent:parent:parent:id:tab-a backgroundColor #336699ff
+prop parent:parent:parent:id:tab-b role tab
+# A press selects a tab: the layout comes back with it displayed.
+tap text:Tab b
+expect Layout h([a b*]:200 [c*])
+expect Active a+ c+ a- b+
+tap text:Tab a
+expect Count a: 0
+tap id:inc-a
+expect Count a: 1
+# A drag of tab a (on a desktop, once it moves) over the middle of c's
+# group shows the drop indicator there; the release merges it into that
+# group, and the panel's content moves with it: its count is kept.
+touch start id:tab-a 10 12
+touch move 40 12
+touch move 290 150
+expect Drop into
+expect Preview a
+style parent:parent:parent:id:drop backgroundColor #ff0000ff
+touch end
+absent Drop into
+absent Preview a
+expect Layout h([b*]:200 [c a*])
+expect Count a: 1
+expect Removed none
+# The ref closes a panel (its group goes), and zooms the group of c.
+tap id:close-b
+expect Layout h([c a*])
+expect Removed b
+tap id:zoom-c
+expect Zoom a
+expect Count a: 1
+tap id:unzoom
+expect Zoom out
+covers [nsh/base] DockArea
+covers [props] DockArea.layout
+covers [props] DockArea.compact
+covers [props] DockArea.tabBarClass
+covers [props] DockArea.tabClass
+covers [props] DockArea.dropIndicatorClass
+covers [props] DockArea.renderTab
+covers [props] DockArea.renderPanel
+covers [props] DockArea.renderDropIndicator
+covers [props] DockArea.renderDragPreview
+covers [events] DockArea.onLayoutChange
+covers [events] DockArea.onPanelRemove
+covers [events] DockArea.onZoomChange
+covers [events] DockArea.onPanelActiveChange

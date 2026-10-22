@@ -59,6 +59,31 @@ The source (`src` and `placeholder`; `image(..)` and `.placeholder(..)` in Rust)
 | An asset | Rust `asset!("logo.png")`, TSX `import logo from "./logo.png"` | An `ImageAsset` `{ url, size, scales? }`, sized in points: a `@2x` file counts half its pixels. With `logo@2x.png` / `logo@3x.png` next to `logo.png`, the variant for the screen's pixel ratio is loaded ([pixel densities](../docs/images-and-assets.md#pixel-densities)). `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported, and `.svg`, sized by its `width` and `height` or `viewBox` ([SVG images](../docs/images-and-assets.md#svg-images)). |
 | A URL | `"https://example.com/a.jpg"` | Downloaded and cached. Downloads of the same URL are shared between views. |
 | An asset path | `"asset:/images/a.png"` | A file of the app's assets. |
+| A `data:` URI | `"data:image/png;base64,iVBOR…"` | Bytes in the URI, base64 or percent-encoded (`data:image/svg+xml,%3Csvg…`). |
+| A `blob:` URL | `URL.createObjectURL(blob)` | The bytes of a `Blob` or `File` (TSX). The image keeps them: revoking the URL leaves an image that shows it whole. |
+
+An image from bytes the app already has shows without a request. A chat shows a picked photo from its blob while it
+uploads, then switches `src` to the photo's URL:
+
+```rust tabs
+// Bytes in a `data:` URI (an image the app made or received inline).
+image(format!("data:image/png;base64,{encoded}")).size(px(64.0))
+```
+
+```tsx tabs
+import { Image, signal } from "nsh";
+
+const preview = URL.createObjectURL(photo); // the picked `File`
+const src = signal(preview);
+upload(photo).then((url) => {
+  src.set(url);
+  URL.revokeObjectURL(preview);
+});
+
+<Image src={src()} style={{ width: 240, height: 180 }} />;
+```
+
+Equal bytes are one image: the same picture as a `data:` URI and as a blob is decoded once and shares the cache.
 
 During development assets are served by the dev server; `nsh build` and `nsh package` copy them into the app (a Rust
 crate ships its `assets/` directory with `registry.assets(assets!())`). See
@@ -66,7 +91,7 @@ crate ships its `assets/` directory with `registry.assets(assets!())`). See
 
 > [!NOTE]
 > When the app declares [capabilities](../docs/sandbox-and-capabilities.md), remote images load from the hosts it
-> lists; an image from any other host fails with `onError`. `asset:` URIs always load.
+> lists; an image from any other host fails with `onError`. `asset:` URIs, `data:` URIs and `blob:` URLs always load.
 
 ## Props
 

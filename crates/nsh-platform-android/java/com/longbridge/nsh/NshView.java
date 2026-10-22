@@ -111,6 +111,9 @@ public class NshView extends FrameLayout {
         // sets no soft input mode, this makes the system resize (and report
         // the keyboard as insets) instead of panning the window.
         setScrollContainer(true);
+        // The back key where the window has no OnBackInvokedCallback in
+        // effect (below Android 13, or `enableOnBackInvokedCallback` off).
+        addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
         // Apps keep their data in <dataDir>/<app id>: nsh in the files
         // directory unless the development host's test session says.
         handle = Native.create(this, density, trace, dataDir.getPath());
@@ -327,12 +330,26 @@ public class NshView extends FrameLayout {
         return Native.connectDevServer(handle, url);
     }
 
-    /** Stops the app. The view can no longer be used. */
+    /**
+     * Stops the app and calls {@link NshComponent#destroy} on each of its
+     * native components. The view can no longer be used.
+     */
     public void destroy() {
         if (handle != 0) {
             Native.destroy(handle);
             handle = 0;
         }
+        mounter.destroyComponents();
+    }
+
+    /**
+     * Called by the native side when the running app stopped because another
+     * one replaced it ({@code Host::load}). Batches the old app sent before
+     * are already queued, so its components go after them and before the
+     * new app's first batch.
+     */
+    void appStopped() {
+        main.post(mounter::destroyComponents);
     }
 
     @Override
@@ -487,15 +504,44 @@ public class NshView extends FrameLayout {
 
     /**
      * Handles the back button for the app: closes modals, pops screens, runs
-     * JS `BackHandler` listeners. Activities on Android 12 and older call it
-     * from {@code onBackPressed} and fall back to the default when it
-     * returns false; newer versions get the press through a callback.
+     * JS `BackHandler` listeners. The view gets the button by itself: through
+     * an {@code OnBackInvokedCallback} it registers while the app wants back
+     * presses where the window dispatches back that way (Android 13+ with
+     * {@code android:enableOnBackInvokedCallback="true"}), else as the back
+     * key, which it takes before the activity's {@code onBackPressed} (and
+     * so before AndroidX's {@code OnBackPressedDispatcher}). Hosts that see
+     * the press first in another way may forward it here, falling back to
+     * their own handling when it returns false.
      *
      * @return whether the app handled the press
      */
     public boolean handleBack() {
         if (exiting || handle == 0) return false;
         return mounter.handleBack();
+    }
+
+    /** The back key's press went to the app (its release does too). */
+    private boolean backKeyDown;
+
+    /**
+     * The back key, as the window dispatches it without an
+     * {@code OnBackInvokedCallback} in effect: no view on the focus path took
+     * it, and the activity is next ({@code onBackPressed}). The app takes it
+     * while it wants back presses; with the callback in effect the window
+     * never sends the key, so a press is never handled twice.
+     */
+    private boolean onBackKey(android.view.KeyEvent e) {
+        if (e.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
+        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+            if (e.getRepeatCount() == 0) {
+                backKeyDown = !exiting && handle != 0 && isShown() && mounter.wantsBack();
+            }
+            return backKeyDown;
+        }
+        if (e.getAction() != android.view.KeyEvent.ACTION_UP || !backKeyDown) return false;
+        backKeyDown = false;
+        if (!e.isCanceled()) handleBack();
+        return true;
     }
 
     /** Whether the app wants back presses (registers the callback). */
