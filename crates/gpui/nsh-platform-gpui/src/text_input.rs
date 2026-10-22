@@ -659,6 +659,11 @@ fn window_active(surface: &Surface) -> bool {
 fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     let old = focused(surface);
     if old.as_ref() == view {
+        if view.is_some() {
+            // The host can own the window's focus while this field keeps the surface's.
+            surface.wants_window_focus.set(true);
+            surface.invalidate();
+        }
         return;
     }
     if let Some(old) = &old {

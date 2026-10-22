@@ -241,4 +241,21 @@ fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut 
     wait_for(&view, cx, "abcd");
     cx.simulate_keystrokes("end backspace");
     wait_for(&view, cx, "abc");
+    // The host can take the keyboard while the surface keeps its focused field.
+    let host_focus = host.read_with(cx, |host, _| host.focus.clone());
+    cx.update(|window, cx| window.focus(&host_focus, cx));
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        let field = crate::text_input::focused(view.surface()).unwrap();
+        crate::text_input::focus(&field);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| {
+        assert!(
+            !host_focus.is_focused(window),
+            "focus() left the keyboard on the embedding host"
+        );
+    });
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "ab");
 }
