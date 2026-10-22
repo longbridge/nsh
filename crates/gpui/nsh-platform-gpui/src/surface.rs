@@ -38,6 +38,7 @@ enum Message {
     Error(AppError),
     Frame,
     HotUpdateFailed,
+    Handled(u64),
 }
 
 thread_local! {
@@ -85,6 +86,10 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         self.send(Message::HotUpdateFailed);
+    }
+
+    fn handled(&self, events: u64) {
+        self.send(Message::Handled(events));
     }
 }
 
@@ -190,6 +195,10 @@ pub(crate) struct Surface {
     pub(crate) shortcuts: RefCell<Vec<ShortcutHandler>>,
     /// How many batches were applied.
     pub(crate) batches: Cell<u64>,
+    /// Events sent to the engine, and how many of them it has handled
+    /// with what they changed applied here.
+    events_sent: Cell<u64>,
+    events_handled: Cell<u64>,
     /// The embedding app's theme ([`crate::AppView::set_theme`]): sent to
     /// every engine the surface starts, before its first frame.
     pub(crate) host_theme: RefCell<Option<nsh_base::Theme>>,
@@ -248,6 +257,8 @@ impl Surface {
             on_resized: RefCell::default(),
             shortcuts: RefCell::default(),
             batches: Cell::new(0),
+            events_sent: Cell::new(0),
+            events_handled: Cell::new(0),
             chrome: Default::default(),
             host_theme: RefCell::new(None),
             host_dark: Cell::new(None),
@@ -354,6 +365,8 @@ impl Surface {
         crate::text_input::surface_stopped(self.key);
         self.js_frame.set(false);
         self.frame_clients.borrow_mut().clear();
+        self.events_sent.set(0);
+        self.events_handled.set(0);
         self.invalidate();
     }
 
@@ -366,7 +379,20 @@ impl Surface {
 
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
-        self.control(|c| c.dispatch_event(id, kind, payload));
+        self.control(|c| {
+            c.dispatch_event(id, kind, payload);
+            self.events_sent.set(self.events_sent.get() + 1);
+        });
+    }
+
+    /// Events sent to the engine so far.
+    pub(crate) fn events_sent(&self) -> u64 {
+        self.events_sent.get()
+    }
+
+    /// Events the engine has handled, with what they changed applied.
+    pub(crate) fn events_handled(&self) -> u64 {
+        self.events_handled.get()
     }
 
     /// The view of node `id`.
@@ -513,6 +539,10 @@ impl Surface {
                     if let Some(f) = handler {
                         f();
                     }
+                }
+                Message::Handled(events) => {
+                    self.events_handled.set(events);
+                    crate::text_input::engine_caught_up(self);
                 }
             }
         }
