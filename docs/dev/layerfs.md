@@ -19,7 +19,7 @@ Stores between hosts or making them the shared CI cache needs a separate qualifi
 
 ## Run locally
 
-Requirements: Linux with a local ext4, XFS or Btrfs Docker volume, a running Docker Engine accessible on
+Requirements: Linux with a local ext4, XFS or Btrfs Docker volume, Docker API 1.54 or newer (the trial uses Engine 29.7.2), accessible on
 `/var/run/docker.sock`, `/dev/fuse`, Git, Python 3.12+, rustup and a C/C++ compiler. Docker must allow the Sandbox
 `CAP_SYS_ADMIN` and FUSE device. The runtime image supplies Node, clang and Rust for commands in Workspaces.
 
@@ -82,7 +82,8 @@ index refresh writes (the original branch otherwise becomes dirty on unmount). B
 
 ## GitHub Actions
 
-Run **LayerFS trial** manually from Actions. It has read-only repository permissions, checks out without stored
+Run **LayerFS trial** manually from Actions. It provisions Docker 29.7.2 and explicitly passes its socket to
+the control container; the pinned SDK uses API 1.54, which older hosted Engines reject. It has read-only repository permissions, checks out without stored
 credentials, builds the pinned source and runs the same local smoke check. Receipts are uploaded on success or
 failure. Each job gets its own Store and normal ephemeral runner lifecycle; no shared Store credentials or external
 storage service is configured. This workflow is separate from the required `check` and `compat` statuses.

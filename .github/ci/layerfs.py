@@ -19,6 +19,9 @@ def run(*args, capture=False):
 
 
 def prepare():
+    api = run('docker', 'version', '--format', '{{.Server.APIVersion}}', capture=True).strip()
+    if tuple(map(int, api.split('.'))) < (1, 54):
+        raise RuntimeError(f'LayerFS 1.0.0 requires Docker API 1.54+, found {api}')
     STATE.mkdir(parents=True, exist_ok=True)
     if not SOURCE.exists():
         run('git', 'clone', '--filter=blob:none', '--no-checkout', '--depth', '1', '--branch', 'v1.0.0',
@@ -42,7 +45,7 @@ def prepare():
     (STATE / 'deployment.json').write_text(json.dumps({'revision': revision, 'image': image}, indent=2))
 
 
-def smoke():
+def smoke(docker_socket="/var/run/docker.sock"):
     deployment = json.loads((STATE / 'deployment.json').read_text())
     name = 'nsh-' + uuid.uuid4().hex[:12]
     state = STATE / name
@@ -71,7 +74,7 @@ def smoke():
     # The Linux SDK opens the same plain local volume as the Sandbox. Host
     # networking lets it reach the daemon's loopback-only published port.
     run('docker', 'run', '--rm', '--network', 'host',
-        '--mount', 'type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock',
+        '--mount', f'type=bind,source={pathlib.Path(docker_socket).resolve()},target=/var/run/docker.sock',
         '--mount', f'type=volume,source={volume},target=/layerfs-store',
         '--mount', f'type=bind,source={state},target=/layerfs-state',
         '--mount', f'type=bind,source={source.resolve()},target=/layerfs-input,readonly',
@@ -86,5 +89,9 @@ def smoke():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['prepare', 'smoke'])
+    parser.add_argument('--docker-socket', default='/var/run/docker.sock')
     args = parser.parse_args()
-    {'prepare': prepare, 'smoke': smoke}[args.command]()
+    if args.command == 'prepare':
+        prepare()
+    else:
+        smoke(args.docker_socket)

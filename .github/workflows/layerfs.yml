@@ -21,6 +21,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # LayerFS pins Docker API 1.54; hosted images can carry an older Engine.
+      - uses: docker/setup-docker-action@v4
+        id: docker
+        with:
+          version: v29.7.2
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.85.1
@@ -34,7 +40,7 @@ jobs:
         run: python3 .github/ci/layerfs.py prepare
 
       - name: Test Git, Cargo, snapshot reuse and branch isolation
-        run: python3 .github/ci/layerfs.py smoke
+        run: python3 .github/ci/layerfs.py smoke --docker-socket '${{ steps.docker.outputs.sock }}'
 
       - name: Upload receipts
         if: always()
