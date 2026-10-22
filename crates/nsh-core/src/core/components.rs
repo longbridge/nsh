@@ -472,6 +472,11 @@ pub(super) struct Components {
     /// id: their answers.
     clipboard_reads: FxHashMap<u32, ClipboardRead>,
     next_clipboard_read: u32,
+    /// URLs being opened (`openUrl`), by request id: their answers.
+    url_opens: FxHashMap<u32, AnswerSlot<bool>>,
+    /// Those not handed to the engine yet ([`Core::take_url_opens`]).
+    url_requests: Vec<(u32, String)>,
+    next_url_open: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -554,6 +559,9 @@ impl Default for Components {
             image_infos: FxHashMap::default(),
             next_image_info: 1,
             clipboard_reads: FxHashMap::default(),
+            url_opens: FxHashMap::default(),
+            url_requests: Vec::new(),
+            next_url_open: 0,
             next_clipboard_read: 1,
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
@@ -4408,6 +4416,22 @@ impl<M: TextEngine> Core<M> {
                     command,
                 });
             }
+            Action::OpenUrl(url, answer) => {
+                if let Err(refused) = crate::open_url::check_url(&url) {
+                    log::warn!(target: "js", "{refused}");
+                    answer.borrow_mut().deliver(false);
+                    return;
+                }
+                if !self.access.allows_open_url(&url) {
+                    answer.borrow_mut().deliver(false);
+                    self.deny(crate::open_url::not_granted(&url));
+                    return;
+                }
+                let id = self.components.next_url_open;
+                self.components.next_url_open = id.wrapping_add(1);
+                self.components.url_opens.insert(id, answer);
+                self.components.url_requests.push((id, url));
+            }
         }
     }
 
@@ -4433,6 +4457,34 @@ impl<M: TextEngine> Core<M> {
         if let Some(answer) = self.components.image_infos.remove(&id) {
             answer.borrow_mut().deliver(size);
         }
+    }
+
+    /// Moves the URLs the app asked to open (`openUrl`, [`crate::ui::open_url`])
+    /// since the last call to `out`, by request id, checked and granted
+    /// ([`crate::open_url`]). The engine asks the embedding app first, then
+    /// answers each with [`Core::answer_open_url`] (the embedding app took
+    /// it) or [`Core::open_url_on_platform`].
+    pub fn take_url_opens(&mut self, out: &mut Vec<(u32, String)>) {
+        out.append(&mut self.components.url_requests);
+    }
+
+    /// Answers URL request `id`: whether the URL opened.
+    pub fn answer_open_url(&mut self, id: u32, opened: bool) {
+        if let Some(answer) = self.components.url_opens.remove(&id) {
+            answer.borrow_mut().deliver(opened);
+        }
+    }
+
+    /// Hands URL request `id` to the platform, which opens `url` and
+    /// reports whether it did ([`crate::EventKind::OpenUrl`] on the root).
+    pub fn open_url_on_platform(&mut self, id: u32, url: String) {
+        if !self.components.url_opens.contains_key(&id) {
+            return;
+        }
+        let _ = self.apply_op(Op::Command {
+            id: crate::ROOT_ID,
+            command: Command::OpenUrl { id, url },
+        });
     }
 
     /// Moves the HTTP requests tasks made (`ui::fetch`) since the last call
@@ -4603,6 +4655,19 @@ impl<M: TextEngine> Core<M> {
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
+                true
+            }
+            EventKind::OpenUrl if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let opened = match payload {
+                    EventPayload::Map(entries) => entries
+                        .iter()
+                        .any(|(k, v)| *k == "opened" && *v == crate::PayloadValue::Bool(true)),
+                    _ => false,
+                };
+                self.answer_open_url(request as u32, opened);
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

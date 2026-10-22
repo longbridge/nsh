@@ -36,7 +36,7 @@ re-exported by `nsh`). Apps import a primitive's tag from `nsh` (`native-pipelin
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
-| `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `pixelRatio()`, `locale()` (accessors), `setColorScheme`, `platform` (a constant: `os`, `version`, `idiom`, `catalyst`, `select`) | `env.rs` |
+| `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `pixelRatio()`, `locale()` (accessors), `setColorScheme`, `platform` (a constant: `os`, `version`, `idiom`, `catalyst`, `select`); `openUrl(url)` (Rust, `nsh_core::runtime`'s `device.rs`: a promise of whether the URL opened outside the app, `nsh_core::open_url`; `sandbox.md`, `embedding.md` "The host channel") | `env.rs` + its registry |
 | `nsh/accessibility` | `screenReaderEnabled()`, `reduceMotion()` (accessors), `announce(message)`, `setAccessibilityFocus(node)` | `env.rs` + its registry (`nsh_core::runtime`) |
 | `nsh/list` (deprecated: `nsh`) | `List` | `list.rs` |
 | `nsh/canvas` (deprecated: `nsh`) | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | `canvas.rs` |

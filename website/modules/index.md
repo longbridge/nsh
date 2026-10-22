@@ -38,7 +38,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
 | `nsh/base` | `Button`; `TextView`, `SelectionArea`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
-| `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` | [nsh/device](./nsh-device.md) |
+| `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform`, `openUrl` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/clipboard` | `Clipboard.writeText`, `Clipboard.readText`, `Clipboard.writeImage`, `Clipboard.readImage`, `Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
 | `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.keys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |

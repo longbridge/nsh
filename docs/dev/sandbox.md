@@ -37,12 +37,13 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
-  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
+  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `openUrl`
+  (`openUrl` of `nsh/device`: `true`, or `{ "schemes": [...] }` for the schemes listed). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
   are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
   newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
   capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
-  retains unrestricted network, webview, status bar and clipboard access. Process execution and filesystem access
+  retains unrestricted network, webview, status bar, clipboard and URL opening access. Process execution and filesystem access
   always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
@@ -112,6 +113,14 @@ buffers are native memory the heap limit does not count, so these bound one call
 eleven bare specifiers and nothing else: `node:` prefixes and other Node modules (`fs`, `child_process`,
 `events`, ...) do not import, so no module reaches files, processes or sockets around these checks. See
 `website/modules/standard-modules.md` for the public surface.
+
+Opening URLs (`openUrl` of `nsh/device`, `TextView`'s `links="open"`; `nsh_core::open_url`) is checked in Rust
+twice before anything leaves the app: the URL (`check_url`: absolute, at most 16 KiB, no whitespace or control
+characters, never `javascript:`, `vbscript:`, `data:`, `blob:`, `file:`, `about:` or `asset:`, which run code or
+reach the app's own data rather than another app; a web address needs a host) and the `openUrl` capability
+(`Capabilities::open_url`: `true`, every scheme, or `{ "schemes": [...] }`; `Access::allows_open_url`), in the
+module's call (a `TypeError`) and again in the core for Rust callers (`false`, logged once). The embedding app's URL
+handler sees only URLs that passed both (`embedding.md` "The host channel").
 
 `nsh/host` (`embedding.md` "The host channel") reaches only what the embedding app handles, so no capability gates
 it; its bounds are checked in Rust (`nsh_core::host_channel`, `nsh-js` `host_channel.rs`): names of 1 to 256 bytes,

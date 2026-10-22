@@ -91,6 +91,11 @@ expect Scheme: dark
 absent Scheme: light
 tap id:system
 expect Scheme: light
+# openUrl: a promise for a web page, a TypeError for a `javascript:` URL.
+expect Open: not opened
+tap id:open
+expect Open: function, refused TypeError
+covers [nsh/device] openUrl
 covers [nsh/device] platform
 covers [nsh/device] pixelRatio
 covers [nsh/device] colorScheme

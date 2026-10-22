@@ -194,6 +194,17 @@ void nsh_host_call_reject(NshHostCall *call, const char *message);
 /// Frees `call` unanswered: the app's call fails. Any thread.
 void nsh_host_call_free(NshHostCall *_Nullable call);
 
+/// Takes the URLs the app opens (`openUrl` of `nsh/device`) before the system
+/// does, replacing the handler it had; a NULL `handler` removes it. `handler`
+/// runs on the main thread with the URL and returns true when the embedding
+/// app took it, false for the system to open it. `release` (optional) is called
+/// with `context`, on any thread, when the handler is replaced or removed or
+/// the app destroyed.
+void nsh_app_set_open_url_handler(NshApp *app,
+                                  bool (*_Nullable handler)(void *_Nullable context, const char *url),
+                                  void *_Nullable context,
+                                  void (*_Nullable release)(void *_Nullable context));
+
 #ifdef __cplusplus
 }
 #endif

@@ -102,6 +102,10 @@ pub struct Screen {
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The URLs the app had the system open (`openUrl`), in order.
+    opened_urls: Vec<String>,
+    /// The `openUrl` requests to answer.
+    url_opens: Vec<u32>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -400,6 +404,11 @@ impl Screen {
             // Headless runs load no images: the size is answered as a
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
+            // Recorded, never opened: a test's machine opens nothing.
+            Command::OpenUrl { id, url } => {
+                self.opened_urls.push(url.clone());
+                self.url_opens.push(*id);
+            }
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
                 if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
@@ -746,6 +755,18 @@ impl Screen {
     /// last call.
     pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.image_infos)
+    }
+
+    /// The URLs the app had the system open (`openUrl`, a `TextView`'s
+    /// links), in order: what reached the platform, past the URL check,
+    /// the `openUrl` capability and the embedding app's URL handler.
+    pub fn opened_urls(&self) -> &[String] {
+        &self.opened_urls
+    }
+
+    /// The `openUrl` requests to answer since the last call.
+    pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.url_opens)
     }
 
     pub(crate) fn take_unsupported(&mut self) -> Vec<&'static str> {

@@ -104,6 +104,20 @@
     `org.json` as maps and lists), the VM as JSON values converted natively.
   - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
     directly ("Native modules", below). The channel's data is the embedding app's own: capabilities do not apply.
+  - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
+    `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
+    opens (`openUrl` of `nsh/device`, `nsh_core::ui::open_url`, a `TextView` with `links="open"`;
+    `nsh_core::open_url`) reach it before the platform, so a host routes its own links through its router. It is a
+    typed hook of the channel, not a named message: the channel is already the view's one object for the host's side,
+    threaded to every engine and through both SDKs' main-thread glue, and a hook of its own takes only what passed
+    the URL check and the `openUrl` capability, where no `host.call` name of the app can reach it or be mistaken for
+    it. The core keeps each request (`Action::OpenUrl` → `Core::take_url_opens`); the engine (`State::open_urls`,
+    after each commit round) runs the handler on the engine thread with an `OpenUrlRequest`, answered once from any
+    thread: `handled()` resolves the app's promise `true` (`Core::answer_open_url`), `decline()` or dropping it
+    hands the URL to the platform (`Message::UrlHandled` → `Core::open_url_on_platform`: `Command::OpenUrl` on the
+    root, answered by `EventKind::OpenUrl` `{ id, opened }`). Without a handler the platform opens it at once. The
+    SDKs' handlers are synchronous on the main thread (Swift `(URL) -> Bool`, Java `boolean openUrl(String)`), reached
+    as the call handlers are.
 - **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
   `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
   change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the

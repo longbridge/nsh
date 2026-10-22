@@ -269,6 +269,24 @@ released unanswered fails the call, and a call of a name with no handler fails a
 not listen to yet are kept until it does, and events sent while no app runs (before `loadBundle`, during a reload) go
 to the next one, so a notification tapped while the app starts still reaches it.
 
+## Links the app opens
+
+The URLs the app opens ([`openUrl`](../modules/nsh-device.md#openurl), a `TextView`'s links with `links="open"`)
+reach `onOpenURL` first, on the main thread: return `true` when the host app handled the URL, such as by routing it
+through its own router, and `false` for the system to open it with `UIApplication.open`. Without `onOpenURL` the
+system opens every URL. URLs reach it after the app's `openUrl` capability allowed them.
+
+```swift
+app.onOpenURL = { url in
+    // The host app's own links open in the host app.
+    if url.scheme == "lb" || url.host == "longbridge.com" {
+        router.open(url)
+        return true
+    }
+    return false
+}
+```
+
 ## Limits
 
 ```swift

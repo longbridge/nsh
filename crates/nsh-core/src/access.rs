@@ -16,11 +16,15 @@
 //!     "sockets": ["mqtt.example.com:8883"]
 //!   },
 //!   "webview": { "hosts": ["*.example.com"] },
-//!   "statusBar": true
+//!   "statusBar": true,
+//!   "openUrl": { "schemes": ["https", "mailto"] }
 //! }
 //! ```
 //!
-//! `network` covers `fetch` (every redirect is checked again), remote
+//! `openUrl` lets the app open URLs outside it (`openUrl` of `nsh/device`,
+//! [`crate::open_url`]: the browser, the mail or phone app, other apps'
+//! schemes): `true` for every scheme, `{ "schemes": [...] }` for those
+//! listed. `network` covers `fetch` (every redirect is checked again), remote
 //! images (also canvas images and `Image.getSize` / `prefetch`) and video
 //! sources; `asset:` URIs are always allowed. WebSockets are HTTP upgrades:
 //! a `ws:` / `wss:` URL is checked as a GET of the same URL over `http:` /
@@ -30,7 +34,8 @@
 //! one. `webview` lists the hosts a web view may show and navigate to (its
 //! pages' own subresources are the web content's business). An app without
 //! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar and the clipboard; raw
+//! unrestricted HTTP, web views, the status bar, the clipboard and opening
+//! URLs; raw
 //! sockets, processes and the filesystem always require an explicit
 //! declaration.
 
@@ -349,6 +354,25 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The URLs the app may open outside it (`openUrl` of `nsh/device`);
+    /// `None`: none.
+    pub open_url: Option<OpenUrlGrant>,
+}
+
+/// Which URLs an app may open outside it (`capabilities.openUrl`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct OpenUrlGrant {
+    /// The schemes it may open, lower case (`https`, `mailto`, `tel`);
+    /// empty: every scheme (`"openUrl": true`).
+    pub schemes: Vec<String>,
+}
+
+impl OpenUrlGrant {
+    /// Whether it grants URLs of `scheme` (lower case).
+    pub fn allows(&self, scheme: &str) -> bool {
+        self.schemes.is_empty() || self.schemes.iter().any(|s| s == scheme)
+    }
 }
 
 /// The parts of a URL the checks look at.
@@ -424,6 +448,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            open_url: Some(OpenUrlGrant::default()),
             ..Self::default()
         }
     }
@@ -449,11 +474,12 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 6] = [
+        const KNOWN: [&str; 7] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
+            "openUrl",
             "process",
             "fs",
         ];
@@ -552,6 +578,46 @@ impl Capabilities {
             caps.clipboard = clipboard
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
+        }
+        if let Some(open_url) = obj.get("openUrl") {
+            match open_url {
+                Value::Bool(granted) => {
+                    caps.open_url = granted.then(OpenUrlGrant::default);
+                }
+                Value::Object(grant) => {
+                    if check(
+                        grant,
+                        "capabilities.openUrl",
+                        &["schemes"],
+                        "capabilities.openUrl",
+                    )? {
+                        let schemes = match grant.get("schemes") {
+                            Some(schemes) => strings(schemes, "capabilities.openUrl.schemes")?,
+                            None => Vec::new(),
+                        };
+                        if schemes.iter().any(|s| {
+                            s.is_empty()
+                                || !s.starts_with(|c: char| c.is_ascii_alphabetic())
+                                || !s
+                                    .chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+                        }) {
+                            return Err(
+                                "capabilities.openUrl.schemes needs URL schemes (`https`, `mailto`)"
+                                    .into(),
+                            );
+                        }
+                        caps.open_url = Some(OpenUrlGrant {
+                            schemes: schemes.iter().map(|s| s.to_ascii_lowercase()).collect(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(
+                        "capabilities.openUrl must be a boolean or an object of `schemes`".into(),
+                    );
+                }
+            }
         }
         if let Some(process) = obj.get("process") {
             let process = object(process, "capabilities.process")?;
@@ -662,6 +728,14 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        obj.insert(
+            "openUrl".into(),
+            match &self.open_url {
+                None => false.into(),
+                Some(grant) if grant.schemes.is_empty() => true.into(),
+                Some(grant) => serde_json::json!({ "schemes": grant.schemes }),
+            },
+        );
         Value::Object(obj)
     }
 
@@ -1135,6 +1209,18 @@ impl Access {
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
+    }
+
+    /// Whether the app may open `url` outside it (`openUrl` of
+    /// `nsh/device`): its scheme is granted.
+    pub fn allows_open_url(&self, url: &str) -> bool {
+        let Some(scheme) = url
+            .split_once(':')
+            .map(|(scheme, _)| scheme.to_ascii_lowercase())
+        else {
+            return false;
+        };
+        self.each(|c| c.open_url.as_ref().is_some_and(|g| g.allows(&scheme)))
     }
 }
 
@@ -1761,5 +1847,51 @@ mod tests {
                 .media_redirect(from, "ftp://b.com/z.png")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn opening_urls_is_granted_by_scheme() {
+        let caps = |json: serde_json::Value| Capabilities::from_json(&json).unwrap();
+        let access =
+            |declared: Capabilities, granted: Option<Capabilities>| Access { declared, granted };
+        let any = access(caps(serde_json::json!({ "openUrl": true })), None);
+        assert!(any.allows_open_url("https://a.com"));
+        assert!(any.allows_open_url("tel:+15550100"));
+        let some = access(
+            caps(serde_json::json!({ "openUrl": { "schemes": ["HTTPS", "mailto"] } })),
+            None,
+        );
+        assert!(some.allows_open_url("https://a.com"));
+        assert!(some.allows_open_url("MAILTO:a@b.c"));
+        assert!(!some.allows_open_url("tel:1"));
+        // The embedding app grants less.
+        let narrowed = access(
+            caps(serde_json::json!({ "openUrl": true })),
+            Some(caps(
+                serde_json::json!({ "openUrl": { "schemes": ["https"] } }),
+            )),
+        );
+        assert!(narrowed.allows_open_url("https://a.com"));
+        assert!(!narrowed.allows_open_url("mailto:a@b.c"));
+        let none = access(caps(serde_json::json!({ "openUrl": false })), None);
+        assert!(!none.allows_open_url("https://a.com"));
+        assert!(!access(caps(serde_json::json!({})), None).allows_open_url("https://a.com"));
+        assert!(Access::default().allows_open_url("https://a.com"));
+        for bad in [
+            serde_json::json!({ "openUrl": "yes" }),
+            serde_json::json!({ "openUrl": { "schemes": ["ht tp"] } }),
+            serde_json::json!({ "openUrl": { "hosts": ["a.com"] } }),
+        ] {
+            assert!(Capabilities::from_json(&bad).is_err(), "{bad}");
+        }
+        // Round trip.
+        for json in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!({ "schemes": ["https"] }),
+        ] {
+            let c = caps(serde_json::json!({ "openUrl": json }));
+            assert_eq!(c.to_json()["openUrl"], json);
+        }
     }
 }

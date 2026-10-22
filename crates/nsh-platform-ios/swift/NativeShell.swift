@@ -80,6 +80,8 @@ private final class ErrorHandlerBox {
 @MainActor
 public final class NshAppView: UIView {
     private let app: OpaquePointer
+    /// What ``onOpenURL`` holds.
+    private var openURLHandler: (@MainActor (URL) -> Bool)?
 
     /// Creates the view. `trace` logs per-commit timings.
     public init(frame: CGRect = .zero, trace: Bool = false) {
@@ -522,6 +524,41 @@ extension NshAppView {
     public func removeHandler(_ name: String) {
         nsh_app_set_host_handler(app, name, nil, nil, nil)
     }
+
+    /// Takes the URLs the app opens (`openUrl` of `nsh/device`, a
+    /// `TextView`'s links when it opens them) before the system does, on the
+    /// main thread: return `true` when the embedding app handled the URL (routed
+    /// it through its own router; the app's `openUrl` resolves `true`), `false`
+    /// for the system to open it (`UIApplication.open`). `nil` (the default):
+    /// the system opens every URL. URLs reach it checked and granted (the
+    /// app's `openUrl` capability).
+    public var onOpenURL: (@MainActor (URL) -> Bool)? {
+        get { openURLHandler }
+        set {
+            openURLHandler = newValue
+            guard let newValue else {
+                return nsh_app_set_open_url_handler(app, nil, nil, nil)
+            }
+            let box = Unmanaged.passRetained(OpenURLHandlerBox(newValue)).toOpaque()
+            nsh_app_set_open_url_handler(
+                app,
+                { context, url in
+                    let box = Unmanaged<OpenURLHandlerBox>.fromOpaque(context!).takeUnretainedValue()
+                    guard let url = URL(string: String(cString: url)) else { return false }
+                    // nsh calls it on the main thread.
+                    return MainActor.assumeIsolated { box.handler(url) }
+                },
+                box,
+                { context in Unmanaged<OpenURLHandlerBox>.fromOpaque(context!).release() }
+            )
+        }
+    }
+}
+
+/// Holds a URL handler for the C callback.
+private final class OpenURLHandlerBox {
+    let handler: @MainActor (URL) -> Bool
+    init(_ handler: @escaping @MainActor (URL) -> Bool) { self.handler = handler }
 }
 
 extension NshAppView {

@@ -1370,6 +1370,13 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::OpenUrl { id: request, url } => out
+            .item("cmd")
+            .num(id)
+            .str("openUrl")
+            .num(*request)
+            .str(url)
+            .end(),
         Command::ReadClipboard {
             id: request,
             has_only,

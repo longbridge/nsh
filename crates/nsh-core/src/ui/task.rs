@@ -79,6 +79,10 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Opens a URL outside the app (checked by
+    /// [`crate::open_url::check_url`]); whether it opened resolves the
+    /// slot.
+    OpenUrl(String, AnswerSlot<bool>),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.

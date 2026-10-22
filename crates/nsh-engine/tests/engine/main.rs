@@ -36,6 +36,7 @@ mod list_bench;
 mod logs;
 mod native;
 mod net;
+mod open_url;
 mod package;
 mod parity;
 mod platform;

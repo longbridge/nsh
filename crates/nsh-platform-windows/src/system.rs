@@ -81,10 +81,10 @@ use windows::{
             SystemInformation::OSVERSIONINFOW,
         },
         UI::{
-            Shell::SetCurrentProcessExplicitAppUserModelID,
+            Shell::{SetCurrentProcessExplicitAppUserModelID, ShellExecuteW},
             WindowsAndMessaging::{
                 GA_ROOT, GetAncestor, PostMessageW, SPI_GETCLIENTAREAANIMATION,
-                SPI_GETSCREENREADER, SYSTEM_PARAMETERS_INFO_ACTION,
+                SPI_GETSCREENREADER, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_ACTION,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_CLOSE,
             },
         },
@@ -435,6 +435,25 @@ fn accent(dark: bool) -> Color {
 // ---------------------------------------------------------------------------
 // Commands
 
+/// Opens `url` with the app registered for its scheme (`ShellExecuteW`'s
+/// `open`): whether one took it. The URL passed `nsh_core::open_url`'s
+/// check, so it names no file or program to run.
+pub(crate) fn open_url(url: &str) -> bool {
+    // SAFETY: plain call with valid NUL-terminated strings.
+    let instance = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            &HSTRING::from(url),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // Above 32 is success; the rest are error codes.
+    instance.0 as isize > 32
+}
+
 /// A command not addressed to a kind of view.
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
@@ -481,6 +500,17 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             EventKind::Clipboard,
             clipboard::files_answer(*id, &clipboard_files()),
         ),
+        Command::OpenUrl { id, url } => {
+            let opened = open_url(url);
+            surface.event(
+                ROOT_ID,
+                EventKind::OpenUrl,
+                EventPayload::Map(vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("opened", PayloadValue::Bool(opened)),
+                ]),
+            );
+        }
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:

@@ -807,6 +807,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::BackPress,
     EventKind::ImageInfo,
     EventKind::Clipboard,
+    EventKind::OpenUrl,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

@@ -66,6 +66,26 @@ public class NshView extends FrameLayout {
         void handle(Object data, NshHostReply reply);
     }
 
+    /**
+     * Takes the URLs the app opens ({@code openUrl} of {@code nsh/device}) before
+     * the system does, on the UI thread. Register it with {@link #setOpenUrlHandler}.
+     */
+    public interface OpenUrlHandler {
+        /**
+         * Called for each URL the app opens, checked and granted (its
+         * {@code openUrl} capability).
+         *
+         * @param url the URL
+         * @return true when the embedding app handled it (routed it through
+         *     its own router; the app's {@code openUrl} resolves true), false
+         *     for the system to open it ({@code Intent.ACTION_VIEW})
+         */
+        boolean openUrl(String url);
+    }
+
+    /** The embedding app's URL handler, or null. */
+    private volatile OpenUrlHandler openUrlHandler;
+
     /** The handlers of the app's calls and posts, by name. */
     private final java.util.Map<String, HostHandler> hostHandlers = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -377,6 +397,33 @@ public class NshView extends FrameLayout {
         if (handler == null) hostHandlers.remove(name);
         else hostHandlers.put(name, handler);
         Native.setHostHandler(handle, name, handler != null);
+    }
+
+    /**
+     * Takes the URLs the app opens ({@code openUrl} of {@code nsh/device}, a
+     * {@code TextView}'s links when it opens them) before the system does,
+     * replacing the handler it had; null (the default): the system opens
+     * every URL.
+     *
+     * @param handler the handler, or null
+     */
+    public void setOpenUrlHandler(OpenUrlHandler handler) {
+        if (handle == 0) return;
+        openUrlHandler = handler;
+        Native.setOpenUrlHandler(handle, handler != null);
+    }
+
+    /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
+    void openUrlMessage(String url, long request) {
+        main.post(() -> {
+            OpenUrlHandler handler = openUrlHandler;
+            boolean handled = false;
+            try {
+                handled = handler != null && handler.openUrl(url);
+            } finally {
+                Native.openUrlReply(request, handled);
+            }
+        });
     }
 
     /** A call ({@code call} != 0) or post of the app; called by libnsh on the engine thread. */

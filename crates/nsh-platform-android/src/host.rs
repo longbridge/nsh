@@ -1095,6 +1095,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "error" => "error",
                 "text" => "text",
                 "has" => "has",
+                "opened" => "opened",
                 "reason" => "reason",
                 "composing" => "composing",
                 _ => continue,
@@ -1581,6 +1582,70 @@ extern "system" fn Java_com_longbridge_nsh_Native_hostReply(
         None => json_value(&mut env, &json, "the answer"),
     };
     call.reply(result);
+}
+
+/// `NshView` takes the URLs the app opens first (`handled`), or no longer
+/// does: the channel hands them to `NshView.openUrlMessage` on the engine
+/// thread, which runs the Java handler on the UI thread and answers with
+/// `openUrlReply`.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setOpenUrlHandler(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    handled: jboolean,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    if handled == 0 {
+        return host.host.remove_open_url_handler();
+    }
+    // The view's reference, not the host's: the channel the host owns keeps
+    // the handler.
+    let view = host.view.clone();
+    host.host.handle_open_url(move |request| {
+        let url = request.url().to_owned();
+        let request = Box::into_raw(Box::new(request)) as jlong;
+        let delivered = with_env(|env| {
+            let url = env.new_string(&url)?;
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    view.as_obj(),
+                    java().view_open_url_message,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[
+                        JValue::Object(&url).as_jni(),
+                        JValue::Long(request).as_jni(),
+                    ],
+                )
+            }
+            .map(|_| true)
+        });
+        if !delivered {
+            // Java never got it: the system opens the URL.
+            // SAFETY: made above and not handed over.
+            drop(unsafe { Box::from_raw(request as *mut nsh_engine::OpenUrlRequest) });
+        }
+    });
+}
+
+/// Answers a URL `NshView.openUrlMessage` got (`handled`: the embedding app
+/// took it; else the system opens it) and frees it. Any thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_openUrlReply(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    request: jlong,
+    handled: jboolean,
+) {
+    if request == 0 {
+        return;
+    }
+    // SAFETY: a request `setOpenUrlHandler`'s handler handed to Java,
+    // answered once.
+    let request = unsafe { Box::from_raw(request as *mut nsh_engine::OpenUrlRequest) };
+    request.answer(handled != 0);
 }
 
 /// Frees a call unanswered: it fails in the app. Any thread.

@@ -236,6 +236,25 @@ never given fails the call once it is collected, and a call of a name with no ha
 the app does not listen to yet are kept until it does, and events sent while no app runs (before `loadAssetBundle`,
 during a reload) go to the next one.
 
+## Links the app opens
+
+The URLs the app opens ([`openUrl`](../modules/nsh-device.md#openurl), a `TextView`'s links with `links="open"`)
+reach the view's `OpenUrlHandler` first, on the UI thread: return `true` when the host app handled the URL, such as by
+routing it through its own router, and `false` for the system to open it with an `ACTION_VIEW` intent. Without a
+handler the system opens every URL. URLs reach it after the app's `openUrl` capability allowed them.
+
+```java
+nsh.setOpenUrlHandler(url -> {
+    Uri uri = Uri.parse(url);
+    // The host app's own links open in the host app.
+    if ("lb".equals(uri.getScheme()) || "longbridge.com".equals(uri.getHost())) {
+        router.open(uri);
+        return true;
+    }
+    return false;
+});
+```
+
 ## Limits
 
 ```java

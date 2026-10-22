@@ -11,6 +11,13 @@
 //! [`HostCall`] (or its [`HostReply`]) to another thread and answer from
 //! there. The SDKs' handlers (Swift, Java) run on the main thread: their
 //! glue hops there.
+//!
+//! The channel also carries the embedding app's URL handler
+//! ([`HostChannel::handle_open_url`]): the URLs the app opens (`openUrl` of
+//! `nsh/device`) reach it before the system, so a host routes them through
+//! its own router. It is a typed hook of the channel rather than a named
+//! message: it takes only what passed the URL check and the `openUrl`
+//! capability, and no app's `host.call` name can reach it.
 
 use std::{
     collections::HashMap,
@@ -27,6 +34,9 @@ use crate::Message;
 
 /// A handler of the app's calls and posts of one name.
 type Handler = Arc<dyn Fn(HostCall) + Send + Sync>;
+
+/// The embedding app's handler of the URLs the app opens.
+type UrlHandler = Arc<dyn Fn(OpenUrlRequest) + Send + Sync>;
 
 /// The embedding app's side of the channel with the apps one of its views
 /// runs: launch parameters, events to the app (`host.on` in TSX), and
@@ -60,6 +70,7 @@ pub struct HostChannel {
 struct Inner {
     params: serde_json::Map<String, JsonValue>,
     handlers: HashMap<String, Handler>,
+    url_handler: Option<UrlHandler>,
     /// The engine running the view's app: its attachment's id and queue.
     engine: Option<(u64, Sender<Message>)>,
     next_engine: u64,
@@ -75,6 +86,7 @@ impl std::fmt::Debug for HostChannel {
         f.debug_struct("HostChannel")
             .field("params", &inner.params)
             .field("handlers", &handlers)
+            .field("url_handler", &inner.url_handler.is_some())
             .field("attached", &inner.engine.is_some())
             .field("pending", &inner.pending.len())
             .finish()
@@ -153,6 +165,44 @@ impl HostChannel {
 
     fn handler(&self, name: &str) -> Option<Handler> {
         self.lock().handlers.get(name).cloned()
+    }
+
+    /// Takes the URLs the app opens (`openUrl` of `nsh/device`, a
+    /// `TextView`'s links) before the system does, replacing the handler
+    /// it had: a host routes them through its own router. The URL passed
+    /// the URL check and the app's `openUrl` capability
+    /// ([`nsh_core::open_url`]). `handler` runs on the engine thread and
+    /// must return quickly: it answers with [`OpenUrlRequest::handled`]
+    /// (the app's `openUrl` resolves `true`) or
+    /// [`OpenUrlRequest::decline`] (the system opens it), at once or from
+    /// any thread later. A request dropped unanswered is declined.
+    pub fn handle_open_url(&self, handler: impl Fn(OpenUrlRequest) + Send + Sync + 'static) {
+        self.lock().url_handler = Some(Arc::new(handler));
+    }
+
+    /// Removes the URL handler: the system opens the app's URLs from now
+    /// on.
+    pub fn remove_open_url_handler(&self) {
+        self.lock().url_handler = None;
+    }
+
+    /// Hands URL request `id` of the engine whose queue is `tx` to the
+    /// embedding app's URL handler; without one, `None`: the system opens
+    /// it.
+    pub(crate) fn open_url(&self, id: u32, url: String, tx: &Sender<Message>) -> Option<()> {
+        let handler = self.lock().url_handler.clone()?;
+        let request = OpenUrlRequest {
+            reply: Some(UrlReply {
+                id,
+                url: url.clone(),
+                tx: tx.clone(),
+            }),
+            url,
+        };
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(request))).is_err() {
+            log::error!("nsh/device: the embedding app's URL handler panicked");
+        }
+        Some(())
     }
 
     /// Attaches the engine whose queue is `tx`: events go to it from now
@@ -323,6 +373,76 @@ impl HostCall {
     /// The reply alone, to answer from elsewhere (`None` for a post).
     pub fn into_reply(mut self) -> Option<HostReply> {
         self.reply.take()
+    }
+}
+
+/// A URL the app opens (`openUrl` of `nsh/device`), as the embedding app's
+/// URL handler gets it ([`HostChannel::handle_open_url`]). Answered once,
+/// from any thread: [`OpenUrlRequest::handled`] when the embedding app
+/// took it, [`OpenUrlRequest::decline`] for the system to open it (also
+/// what dropping it unanswered does).
+#[derive(Default)]
+#[non_exhaustive]
+pub struct OpenUrlRequest {
+    url: String,
+    reply: Option<UrlReply>,
+}
+
+/// Where an [`OpenUrlRequest`]'s answer goes.
+struct UrlReply {
+    id: u32,
+    url: String,
+    tx: Sender<Message>,
+}
+
+impl std::fmt::Debug for OpenUrlRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenUrlRequest")
+            .field("url", &self.url)
+            .finish()
+    }
+}
+
+impl OpenUrlRequest {
+    /// The URL: absolute, of a scheme that opens another app
+    /// ([`nsh_core::open_url::check_url`]).
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The embedding app took the URL (routed it its own way): the app's
+    /// `openUrl` resolves `true` and the system does not open it.
+    pub fn handled(self) {
+        self.answer(true);
+    }
+
+    /// The embedding app leaves the URL to the system, which opens it.
+    pub fn decline(self) {
+        self.answer(false);
+    }
+
+    /// [`OpenUrlRequest::handled`] when `handled`, else
+    /// [`OpenUrlRequest::decline`].
+    pub fn answer(mut self, handled: bool) {
+        if let Some(reply) = self.reply.take() {
+            let _ = reply.tx.send(Message::UrlHandled {
+                id: reply.id,
+                url: reply.url,
+                handled,
+            });
+        }
+    }
+}
+
+impl Drop for OpenUrlRequest {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            let _ = reply.tx.send(Message::UrlHandled {
+                id: reply.id,
+                url: reply.url,
+                handled: false,
+            });
+        }
     }
 }
 

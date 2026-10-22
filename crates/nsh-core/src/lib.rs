@@ -29,6 +29,7 @@ pub mod js;
 pub mod keymap;
 mod mount;
 pub mod navigation;
+pub mod open_url;
 mod ops;
 pub mod overlay;
 pub mod platform;

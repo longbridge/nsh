@@ -1016,6 +1016,81 @@ pub unsafe extern "C" fn nsh_host_call_reject(call: *mut NshHostCall, message: *
     call.0.reject(message);
 }
 
+/// The C function a URL handler calls: true when the embedding app took
+/// the URL.
+type UrlHandlerFn = unsafe extern "C" fn(context: *mut c_void, url: *const c_char) -> bool;
+
+/// A URL handler's C callback and its context; `release` runs when it is
+/// dropped (replaced, removed, or the app destroyed).
+struct CUrlHandler {
+    handler: UrlHandlerFn,
+    context: *mut c_void,
+    release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+}
+
+// SAFETY: `handler` runs on the main thread only (the engine thread's
+// handler hops there) and `release` may run on any thread, as
+// `nsh_app_set_open_url_handler`'s contract says.
+unsafe impl Send for CUrlHandler {}
+// SAFETY: as above; nothing is mutated through a shared reference.
+unsafe impl Sync for CUrlHandler {}
+
+impl Drop for CUrlHandler {
+    fn drop(&mut self) {
+        if let Some(release) = self.release {
+            // SAFETY: the contract of `nsh_app_set_open_url_handler`.
+            unsafe { release(self.context) };
+        }
+    }
+}
+
+/// Takes the URLs the app opens (`openUrl` of `nsh/device`) before the
+/// system does, replacing the handler it had; `handler` `NULL` removes it.
+/// `handler` runs on the main thread with the URL (checked and granted)
+/// and returns true when the embedding app took it (its router opened it),
+/// false for the system to open it. `release` (optional) is called with
+/// `context`, on any thread, when the handler is replaced or removed or the
+/// app destroyed.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `handler` must be safe to call
+/// with `context` on the main thread, and `release` on any thread, until
+/// `release` is called (or, without `release`, until `app` is destroyed).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_open_url_handler(
+    app: *mut NshApp,
+    handler: Option<UrlHandlerFn>,
+    context: *mut c_void,
+    release: Option<unsafe extern "C" fn(context: *mut c_void)>,
+) {
+    // SAFETY: guaranteed by the caller.
+    let channel = unsafe { &*app }.view.host();
+    let Some(handler) = handler else {
+        channel.remove_open_url_handler();
+        if let Some(release) = release {
+            // SAFETY: guaranteed by the caller.
+            unsafe { release(context) };
+        }
+        return;
+    };
+    let callback = std::sync::Arc::new(CUrlHandler {
+        handler,
+        context,
+        release,
+    });
+    channel.handle_open_url(move |request| {
+        // On the engine thread: the C handler runs on the main thread.
+        let callback = callback.clone();
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            let url = CString::new(request.url()).unwrap_or_default();
+            // SAFETY: the contract of `nsh_app_set_open_url_handler`.
+            let handled = unsafe { (callback.handler)(callback.context, url.as_ptr()) };
+            request.answer(handled);
+        });
+    });
+}
+
 /// Frees `call` unanswered: the app's promise rejects. Any thread.
 ///
 /// # Safety

@@ -115,7 +115,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true
+    "clipboard": true,
+    "openUrl": { "schemes": ["https", "mailto"] }
   }
 }
 ```
@@ -175,6 +176,13 @@ allows them without allowing any remote page.
 ### `clipboard`
 
 `"clipboard": true` lets the app read and write the system clipboard ([`nsh/clipboard`](../modules/nsh-clipboard.md)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
+
+### `openUrl`
+
+Lets the app open URLs outside it ([`openUrl`](../modules/nsh-device.md#openurl), a `TextView`'s links with
+`links="open"`): `"openUrl": true` for every scheme, `"openUrl": { "schemes": ["https", "mailto"] }` for the schemes
+listed. A URL whose scheme is not granted throws a `TypeError`. URLs that would run code or reach the app's own data
+(`javascript:`, `data:`, `file:`, ...) are never opened, whatever the capability.
 
 ### Storage
 

@@ -138,6 +138,9 @@ so only load it from your own app's files.
   `host.call(name, data)` and hears its `host.post` (`call.resolve(json)`, `call.reject(message)`, at once or later
   from any thread). Handlers run on the engine thread: hand the call to your GPUI entities (a channel that a
   `cx.spawn` task reads) and answer from there. The macOS, Windows and Linux `AppView`s have the same `host()`.
+  Its `handle_open_url(|request| …)` sees the URLs the app opens ([`openUrl`](../modules/nsh-device.md#openurl))
+  before the system does: `request.handled()` when your app routed the URL itself, `request.decline()` (or dropping
+  the request) for the system to open it with GPUI's `open_url`.
 - `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
   stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
   256 MB heap); the development host runs apps on its own, with `Limits::standalone()`.

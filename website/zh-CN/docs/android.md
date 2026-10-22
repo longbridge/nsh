@@ -223,6 +223,22 @@ nsh.handle("user.profile") { data, reply ->
 
 处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
 
+## 应用打开的链接
+
+应用打开的 URL（[`openUrl`](../modules/nsh-device.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）先交给视图的 `OpenUrlHandler`，在 UI 线程调用：宿主应用自己处理了这个 URL（例如交给自己的路由）时返回 `true`，返回 `false` 则由系统用 `ACTION_VIEW` Intent 打开。没有设置处理函数时，所有 URL 都由系统打开。到达这里的 URL 都已通过应用的 `openUrl` 能力检查。
+
+```java
+nsh.setOpenUrlHandler(url -> {
+    Uri uri = Uri.parse(url);
+    // 宿主应用自己的链接在宿主应用里打开。
+    if ("lb".equals(uri.getScheme()) || "longbridge.com".equals(uri.getHost())) {
+        router.open(uri);
+        return true;
+    }
+    return false;
+});
+```
+
 ## 限制
 
 ```java
