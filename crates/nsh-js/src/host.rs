@@ -640,6 +640,15 @@ impl Host {
                         None => Ok(()),
                     }
                 });
+                // A listener made under an error boundary fails into it.
+                let result = match result {
+                    Err(rquickjs::Error::Exception)
+                        if crate::dom::catch_listener_failure(raw, id) =>
+                    {
+                        Ok(())
+                    }
+                    other => other,
+                };
                 self.report(&cx, result);
             });
             self.run_jobs();
