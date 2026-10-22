@@ -15782,12 +15782,6 @@ mod layout_consistency {
         for step in 0..steps {
             // A commit takes a few changes at once, as a turn does.
             let changes = 1 + rng.below(3);
-            let changes = if std::env::var_os("ONE_CHANGE").is_some() {
-                let _ = changes;
-                1
-            } else {
-                changes
-            };
             for _ in 0..changes {
                 let (ops, what) = change(&mut rng, &mut model, fractions);
                 apply(&mut c, ops);
