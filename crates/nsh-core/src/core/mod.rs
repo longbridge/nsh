@@ -4423,8 +4423,13 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             let boxed = self.layout.layout(layout).expect("taffy layout");
-            let mut content = content_box(boxed);
-            let hidden = boxed.size == taffy::Size::ZERO && self.displays_none(key);
+            // Whatever Taffy keeps for it (`emit_frames_in`).
+            let hidden = self.displays_none(key);
+            let mut content = if hidden {
+                Bounds::default()
+            } else {
+                content_box(boxed)
+            };
             let engine = &self.text_engine;
             let cache = &mut self.measure_cache;
             let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
@@ -4553,11 +4558,45 @@ impl<M: TextEngine> Core<M> {
 
     /// Emits the frame of `key` and its subtree (if changed).
     fn emit_frames(&mut self, key: Key) {
+        let parent = self.nodes[key as usize].parent;
+        let hidden = parent != NO_KEY && self.displays_none(parent);
+        self.emit_frames_in(key, hidden);
+    }
+
+    /// [`Core::emit_frames`] of `key`, `hidden` when a view around it is
+    /// `display: none`. A view in such a subtree has no frame whatever
+    /// Taffy keeps for it: Taffy can leave a node moved into a hidden
+    /// subtree with its former layout (its dirty marking stops at the
+    /// first node whose cache is empty, which hidden nodes' always are),
+    /// and never rounds the absolutely positioned ones there (they are
+    /// rounded through their containing block, which hidden layout does
+    /// not record), so their native views would keep showing at their
+    /// former size in a parent of no size.
+    fn emit_frames_in(&mut self, key: Key, hidden: bool) {
         let node = &self.nodes[key as usize];
         let Some(layout) = node.layout else { return };
         if !node.created {
             return;
         }
+        let hidden = hidden
+            || self
+                .layout
+                .style(layout)
+                .is_ok_and(|s| s.display == taffy::Display::None);
+        if hidden {
+            self.set_frame(key, Bounds::default());
+            if self.nodes[key as usize].kind.is_container() {
+                let children = std::mem::take(&mut self.nodes[key as usize].children);
+                for &child in &children {
+                    if !self.nodes[child as usize].kind.is_root() {
+                        self.emit_frames_in(child, true);
+                    }
+                }
+                self.nodes[key as usize].children = children;
+            }
+            return;
+        }
+        let node = &self.nodes[key as usize];
         let l = self.layout.layout(layout).expect("taffy layout");
         let mut frame = rect(l.location.x, l.location.y, l.size.width, l.size.height);
         // Children of a right-to-left horizontal scroll view: mirrored in
@@ -4613,7 +4652,7 @@ impl<M: TextEngine> Core<M> {
             let children = std::mem::take(&mut self.nodes[key as usize].children);
             for &child in &children {
                 if !self.nodes[child as usize].kind.is_root() {
-                    self.emit_frames(child);
+                    self.emit_frames_in(child, false);
                 }
             }
             self.nodes[key as usize].children = children;
