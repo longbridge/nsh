@@ -159,6 +159,7 @@ fn windows(cx: &mut TestAppContext) {
     quit_and_close_requests_go_to_the_handler_instead_of_acting(cx);
     an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx);
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
+    releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
 }
 
 /// Runs the window until the focused field's text satisfies `done`, and
@@ -182,7 +183,6 @@ fn wait_until(
         std::thread::sleep(Duration::from_millis(10));
     }
 }
-
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
     let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
@@ -506,4 +506,37 @@ fn asset_uris_resolve_in_the_first_directory_that_has_the_file(cx: &mut TestAppC
     let report = wait_until(&view, cx, |t| t.contains('|'));
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(report, "app 2x3|cover 4x5");
+}
+
+fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut TestAppContext) {
+    if !cfg!(target_os = "linux") && !cfg!(windows) {
+        return;
+    }
+    let code = nsh_bundler::compile_module("App.tsx", AUTO_HIDDEN_BAR, &[]).unwrap();
+    let (view, cx) = owned_view(cx, code, |_| {});
+    let full = viewport_height(cx);
+    wait_for(&view, cx, &format!("h {full}"));
+    for shift_first in [false, true] {
+        cx.simulate_modifiers_change(if shift_first {
+            gpui::Modifiers {
+                shift: true,
+                ..Default::default()
+            }
+        } else {
+            gpui::Modifiers::alt()
+        });
+        cx.simulate_modifiers_change(gpui::Modifiers {
+            alt: true,
+            shift: true,
+            ..Default::default()
+        });
+        cx.simulate_modifiers_change(gpui::Modifiers::alt());
+        cx.simulate_modifiers_change(gpui::Modifiers::none());
+        cx.run_until_parked();
+        let height = view.read_with(cx, |view, _| view.surface().size().1);
+        assert_eq!(
+            height, full,
+            "Alt+Shift showed the bar after Shift was released first (shift_first={shift_first})"
+        );
+    }
 }

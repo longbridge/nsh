@@ -182,6 +182,8 @@ pub(crate) struct Chrome {
     bar_items: RefCell<Vec<Bounds<Pixels>>>,
     /// When the menu bar shows (`Window.setMenuBar`).
     menu_bar: Cell<MenuBarMode>,
+    /// Whether Alt is held across modifier changes.
+    alt_down: Cell<bool>,
     /// Alt alone went down: its release toggles an auto-hidden bar.
     alt_armed: Cell<bool>,
     /// Alt alone showed the auto-hidden bar.
@@ -261,11 +263,18 @@ fn bar_shown(surface: &Surface) -> bool {
 pub(crate) fn modifiers_changed(surface: &Surface, m: &Modifiers) {
     let c = &surface.chrome;
     let others = m.ctrl || m.shift || m.meta;
-    if m.alt && !others {
-        c.alt_armed.set(true);
+    let was_alt = c.alt_down.replace(m.alt);
+    if m.alt {
+        if !was_alt {
+            c.alt_armed.set(!others);
+        } else if others {
+            c.alt_armed.set(false);
+        }
+        // Releasing another modifier must not re-arm an Alt press that
+        // was already used as part of a shortcut.
         return;
     }
-    let released_alone = c.alt_armed.replace(false) && !m.alt && !others;
+    let released_alone = c.alt_armed.replace(false) && was_alt && !others;
     if !released_alone || c.menu_bar.get() != MenuBarMode::AutoHide || !bar_available(surface) {
         return;
     }
