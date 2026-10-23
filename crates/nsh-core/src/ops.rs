@@ -221,6 +221,7 @@ events! {
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
     Host = "onHost": "The embedding host answered a [`Command::HostCall`] or sent an event to `nsh/host`'s listeners (root only; payload: [`EventPayload::Json`], `{ type: \"reply\", id, ok, value?, error? }` or `{ type: \"event\", event, payload }`).",
     Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
+    LoadMoreAtStart = "onLoadMoreAtStart": "A list was scrolled close to its start after the user or a scroll command moved it (raised by the core).",
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
 
 }
@@ -1677,6 +1678,9 @@ pub enum Prop {
     /// How close to the end `onLoadMore` fires, in viewports.
     #[prop(js = "loadMoreThreshold", default = 1.0, internal)]
     LoadMoreThreshold(f32),
+    /// How close to the start `onLoadMoreAtStart` fires, in viewports.
+    #[prop(js = "loadMoreAtStartThreshold", default = 1.0, internal)]
+    LoadMoreAtStartThreshold(f32),
     /// The item index a list cell now renders (set by the runtime after
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
@@ -2037,6 +2041,15 @@ pub enum NativeProp {
     /// (250 by default).
     #[prop(js = "progressUpdateInterval", default = 250.0, on = VIDEO)]
     ProgressInterval(f32),
+    /// `audioSession` (videos): what the sound does to the rest of the
+    /// device's audio while it plays (`"default"` when unset: the app's
+    /// audio settings).
+    #[prop(
+        js = "audioSession",
+        reset = NativeProp::AudioSession(crate::AudioSession::Default),
+        on = VIDEO
+    )]
+    AudioSession(crate::AudioSession),
 }
 
 /// A mutation produced by the JS renderer.

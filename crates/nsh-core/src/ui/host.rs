@@ -16,10 +16,10 @@ use super::{
     },
 };
 use crate::{
-    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp, Points,
-    Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
-    StatusBarSetting, SubmitBehavior, Tag, WebSource,
+    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
+    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
+    OverlayProp, Points, Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp,
+    ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -1113,6 +1113,14 @@ impl Video {
     /// Milliseconds between [`Self::on_progress`] events (default 250).
     pub fn progress_interval(self, ms: impl IntoReactive<f32>) -> Self {
         self.bind_prop(ms, |ms: f32| Prop::Native(NativeProp::ProgressInterval(ms)))
+    }
+
+    /// What its sound does to the rest of the device's audio while it
+    /// plays (default: the app's audio settings).
+    pub fn audio_session(self, session: impl IntoReactive<AudioSession>) -> Self {
+        self.bind_prop(session, |session: AudioSession| {
+            Prop::Native(NativeProp::AudioSession(session))
+        })
     }
 
     /// It started loading.

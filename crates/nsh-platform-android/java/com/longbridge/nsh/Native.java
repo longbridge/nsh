@@ -73,7 +73,8 @@ final class Native {
     static final int MOUSE_MOVE = 62;
     static final int HOST = 63;
     static final int PICK = 64;
-    static final int OPEN_URL = 65;
+    static final int LOAD_MORE_AT_START = 65;
+    static final int OPEN_URL = 66;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

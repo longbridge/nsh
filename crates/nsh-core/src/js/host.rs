@@ -719,6 +719,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (EventKind::Refresh, on::SCROLL | on::LIST, "() => void", ""),
     (EventKind::LoadMore, on::LIST, "() => void", ""),
     (
+        EventKind::LoadMoreAtStart,
+        on::LIST,
+        "() => void",
+        "Within `loadMoreAtStartThreshold` viewports of the start, once the user or a scroll command moved the list: load what comes before the first item.",
+    ),
+    (
         EventKind::ChangeText,
         on::INPUT,
         "(text: string) => void",

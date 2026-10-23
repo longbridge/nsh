@@ -2017,8 +2017,10 @@ final class Mounter {
                 int mode = b.getInt();
                 boolean controls = b.getInt() != 0;
                 float interval = b.getFloat();
+                int audioSession = b.getInt();
                 if (v instanceof VideoBox) {
-                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval);
+                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval,
+                            audioSession);
                 }
                 break;
             }

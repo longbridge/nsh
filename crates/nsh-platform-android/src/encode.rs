@@ -18,10 +18,10 @@
 
 use jni::objects::GlobalRef;
 use nsh_core::{
-    AccessibilityRole, AutoCapitalize, AutoFill, BorderStyle, Checked, Color, Command,
-    DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve,
-    LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch,
-    MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle, Checked, Color,
+    Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType,
+    LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation,
+    MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
     ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
     ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE},
@@ -952,6 +952,11 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             });
             e.bool(v.controls);
             e.float(v.progress_interval_ms);
+            e.int(match v.audio_session {
+                AudioSession::Default => 0,
+                AudioSession::Playback => 1,
+                AudioSession::MixWithOthers => 2,
+            });
         }
     }
 }
