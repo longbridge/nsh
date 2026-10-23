@@ -143,6 +143,7 @@ nsh package App.tsx --target web --run
 | `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
 | `app.<digest>.nshc` | TSX 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
 | `harden.<digest>.nshc` | TSX 应用的[沙箱](./sandbox-and-capabilities.md)的加固脚本，同样编译成字节码（1.4 KB） |
+| `host.<digest>.js` | 页面的宿主，即 `nsh.json` 的 `web.host`（[宿主的函数](#宿主的函数)） |
 | `chunks/<name>.<digest>.nshc` | TSX 应用中 `import()` 加载的代码，同样是字节码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
 | `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在注册它们的代码运行前加载，因为文本要用它们测量：在应用启动前，或随导入它们的分块一起加载） |
 | `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
@@ -235,7 +236,65 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
-> [!NOTE]
+## 宿主的函数
+
+在 Web 上，页面就是应用的宿主：它应答 [`nsh/host`](../modules/nsh-host.md) 的 `host.call(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
+
+```js
+const player = await createPlayer(container, {
+  wasm: "./nsh.wasm",
+  host: {
+    async call(name, args) {
+      if (name === "user.info") return { name: "Ada" };
+      throw new Error(`no host function ${name}`);
+    },
+  },
+});
+player.hostEvent("theme", { dark: true });
+```
+
+发布的应用从 `nsh.json` 得到宿主：`web.host` 指向应用目录内的一个 JS 模块（路径相对于 `nsh.json`），它导出 `createHost(player)`。`nsh package --target web` 把它以 `host.<digest>.js` 复制进站点，页面在应用启动前用播放器调用 `createHost`；它返回（或 resolve）的对象就是播放器的 `host`，必须带 `call` 函数，否则页面显示应用无法加载。`createHost` 拿到的播放器从此可以发送事件：
+
+```json
+{
+  "capabilities": {
+    "host": ["user.*"]
+  },
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
+}
+```
+
+```js
+// host.js
+const post = (url) => (args) =>
+  fetch(url, { method: "POST", body: JSON.stringify(args) }).then((r) => r.json());
+
+// 应用可以调用的函数，按完整名字登记。
+const functions = new Map([
+  ["user.info", post("https://api.example.com/user/info")],
+  ["user.settings", post("https://api.example.com/user/settings")],
+]);
+
+export async function createHost(player) {
+  addEventListener("online", () => player.hostEvent("online", {}));
+  return {
+    call(name, args) {
+      const f = functions.get(name);
+      if (!f) throw new Error(`no host function ${name}`);
+      return f(args);
+    },
+  };
+}
+```
+
+宿主按原样的名字在自己的函数表里查找（如上），URL 和路径由宿主自己决定：`capabilities.host` 按名字开头授权（`user.*`），宿主若把名字拼成路径，就可能访问到授权之外的地址。运行时只放行由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成、长度 1 到 128 且不含 `..` 的名字，其他名字的调用直接 reject。前缀授权以分隔符结尾（`bridge.*`）：`bridge*` 也会匹配 `bridgeAdmin`。
+
+应用运行之前发送的事件（比如 `createHost` 里发送的）会在应用启动后立即按顺序送达，应用顶层注册的 `host.on` 监听器能收到它们。监听器注册之前发送的事件不会补发给它：应用通过调用（`host.call("user.info")`）读取启动时的状态，再通过事件跟进变化。
+
+宿主模块运行在应用的页面里，与应用共用页面的 Content-Security-Policy：应用的能力限制了 `network` 时，页面的 `connect-src` 包含页面自身的源、`capabilities.network` 列出的主机和 `web.connect` 列出的主机。`web.connect` 列出宿主模块自己的请求（`fetch`、`XMLHttpRequest`、`WebSocket`）访问的主机，写法与 `capabilities.network.hosts` 的模式相同（`api.example.com`、`*.example.com`、`"*"`），如上面的 `api.example.com`；应用自己的请求仍按它的 `capabilities` 检查。
+
+模块按原样复制，所以它通过绝对 URL 导入其他代码。应用调用的每个函数仍需在 `host` [能力](./sandbox-and-capabilities.md)中声明。`nsh run --target web` 在开发页面上运行它，`nsh test` 会为测试打开的每个应用运行同一个模块，无界面运行或在浏览器中（`--target web`）都一样，从而一起测试应用和它的宿主（[测试](./testing-and-trace.md#页面的宿主)）。
+
 ## 浏览器作为平台
 
 `platform.os` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `platform.idiom`：

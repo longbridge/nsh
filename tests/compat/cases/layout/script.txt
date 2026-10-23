@@ -323,6 +323,28 @@ covers [styles] gridRowEnd
 covers [styles] justifyItems
 covers [styles] justifySelf
 
+# layout-tailwind
+tap id:case-layout-tailwind
+expect Tailwind layout
+frame id:static-style 0 0 50 20
+frame id:static-class 0 20 50 20
+frame id:fixed 5 3 40 10
+frame id:after-fixed 10 10 50 10
+frame id:inline-block-a 0 0 50 20
+frame id:inline-block-b 0 20 50 20
+frame id:space-a 0 0 50 20
+frame id:space-b 60 0 50 20
+frame id:space-c 120 0 50 20
+frame id:overlap-b 40 0 50 20
+frame id:important-space 50 0 30 20
+frame id:static-containing-block -20 -20 10 10
+frame id:rtl-ml 250 0 50 20
+frame id:rtl-mr 240 0 50 20
+frame id:rtl-key 250 0 50 20
+frame id:variant-order 0 0 20 20
+covers [styles] position
+covers [styles] marginRight
+
 # layout-sticky
 tap id:case-layout-sticky
 expect Sticky bar

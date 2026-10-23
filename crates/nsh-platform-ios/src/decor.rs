@@ -185,6 +185,11 @@ impl Decor {
         };
     }
 
+    /// How the image fits the view.
+    pub(crate) fn resize_mode(&self) -> ResizeMode {
+        self.mode
+    }
+
     /// How an image view fits its image (`resizeMode`) and where it places
     /// it (`objectPosition`).
     pub(crate) fn set_fit(&mut self, mode: ResizeMode, position: ObjectPosition) {
@@ -212,13 +217,7 @@ impl Decor {
         });
         let natural = size(px(natural.0), px(natural.1));
         let bounds = size(px(bounds.width as f32), px(bounds.height as f32));
-        let mut fitted = self.mode.fit(natural, bounds, self.position);
-        // `center` keeps an image larger than the view at its natural size
-        // here (cropped), as UIKit's center gravity always showed it.
-        if self.mode == ResizeMode::Center && natural.width.0 > 0.0 && natural.height.0 > 0.0 {
-            fitted.size = natural;
-            fitted.origin = self.position.place(bounds, natural);
-        }
+        let fitted = self.mode.fit(natural, bounds, self.position);
         let frame = CGRect::new(
             CGPoint::new(fitted.origin.x.0 as CGFloat, fitted.origin.y.0 as CGFloat),
             CGSize::new(

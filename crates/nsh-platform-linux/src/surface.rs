@@ -110,6 +110,10 @@ pub(crate) struct Surface {
     /// The embedding app's locale and text size, standing in for the
     /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
     pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
+    /// The embedding app's theme overrides
+    /// ([`crate::AppView::set_theme_overrides`]): sent to every engine the
+    /// surface starts, before its first frame.
+    pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// The tick callback runs.
@@ -156,6 +160,7 @@ impl Surface {
             environment: Cell::new(environment),
             appearance: Cell::default(),
             host_environment: Cell::default(),
+            host_tokens: RefCell::new(None),
             js_frame: Cell::new(false),
             ticking: Cell::new(false),
             on_error: RefCell::new(None),
@@ -237,7 +242,14 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        match Engine::start(config, move || PangoTextEngine::new(family), sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.host_tokens.borrow().clone();
+        let setup = |control: &EngineControl| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        };
+        match Engine::start_with(config, move || PangoTextEngine::new(family), sink, setup) {
             Ok(engine) => {
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]

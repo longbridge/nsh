@@ -87,7 +87,7 @@ pub use crate::{
         TextViewEvent, TextViewLinkPressEvent, TextViewMath, TextViewPart, TextViewParts,
         TextViewProps, TextViewStyles, text_view,
     },
-    theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
+    theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,

@@ -107,7 +107,7 @@ pub(crate) fn set_status_bar(config: StatusBarConfig, view: &UIView) {
 }
 
 /// The controller to present over: the top one of `view`'s window.
-fn top_controller(view: &UIView) -> Option<Retained<UIViewController>> {
+pub(crate) fn top_controller(view: &UIView) -> Option<Retained<UIViewController>> {
     let mut top = view.window()?.rootViewController()?;
     while let Some(next) = top.presentedViewController() {
         if next.isBeingDismissed() {

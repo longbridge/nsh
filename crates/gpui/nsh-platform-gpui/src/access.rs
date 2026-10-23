@@ -660,11 +660,14 @@ fn walk(
             LiveRegion::None => live,
             own => own,
         };
+        let drawing = s.canvas.as_ref().and_then(|c| c.drawing.clone());
         let role = match part {
             Part::Element(r) if !(grouping && is_content(r)) => r,
             Part::Flat => {
+                let id = s.id;
                 drop(s);
                 walk(w, child, &cm, grouping, live, kids);
+                canvas_nodes(w, id, drawing.as_deref(), &cm, kids);
                 continue;
             }
             _ => continue,
@@ -676,6 +679,7 @@ fn walk(
         let mut sub = Vec::new();
         walk(w, child, &cm, folds, live, &mut sub);
         let s = child.state();
+        canvas_nodes(w, s.id, drawing.as_deref(), &cm, &mut sub);
         let (mut node, actions) = describe(child, &s, role, field.as_ref(), live);
         if let Some((x, y, bw, bh)) =
             cm.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)
@@ -697,6 +701,62 @@ fn walk(
             view: s.id,
             node,
             actions,
+        });
+        kids.push(id);
+    }
+}
+
+/// The nodes of canvas `canvas`'s drawing ([`nsh_core::canvas::CanvasNode`])
+/// as elements at their bounds (the canvas drawn with `m`), their ids
+/// added to `kids`. They take no actions: a pointer presses what is under
+/// them.
+fn canvas_nodes(
+    w: &mut Walk<'_>,
+    canvas: NodeId,
+    drawing: Option<&nsh_core::canvas::Drawing>,
+    m: &Mat4,
+    kids: &mut Vec<accesskit::NodeId>,
+) {
+    let Some(drawing) = drawing else { return };
+    for (index, part) in drawing.nodes.iter().enumerate() {
+        let a = Accessibility {
+            role: part.role,
+            label: Some(part.label.clone()),
+            ..Accessibility::default()
+        };
+        let role = role_for(&a, ViewKind::View, false).unwrap_or(Role::Label);
+        let mut node = Node::new(role);
+        if role == Role::Label {
+            node.set_value(&*part.label);
+        } else {
+            node.set_label(&*part.label);
+        }
+        if let Some(id) = &part.test_id {
+            node.set_author_id(&**id);
+        }
+        if part.selected {
+            node.set_selected(true);
+        }
+        let b = part.bounds;
+        if let Some((x, y, bw, bh)) =
+            m.bounds(b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+        {
+            let k = w.scale as f64;
+            node.set_bounds(accesskit::Rect {
+                x0: x as f64 * k,
+                y0: y as f64 * k,
+                x1: (x + bw) as f64 * k,
+                y1: (y + bh) as f64 * k,
+            });
+        }
+        let mut h = std::hash::DefaultHasher::new();
+        ("nsh-canvas", w.key, canvas, index).hash(&mut h);
+        let id = accesskit::NodeId(h.finish());
+        w.out.entries.push(Entry {
+            id,
+            view: canvas,
+            node,
+            actions: Vec::new(),
         });
         kids.push(id);
     }
@@ -1462,6 +1522,53 @@ mod tests {
         assert_eq!(f.label(), Some("Password"));
         assert_eq!(f.value(), None);
         assert!(f.supports_action(Action::SetValue));
+    }
+
+    #[test]
+    fn canvas_nodes_are_elements() {
+        use nsh_core::canvas::{CanvasNode, Drawing};
+        let root = view(0, ViewKind::View, Accessibility::default());
+        root.set_invalidate(Rc::new(|| {}));
+        let grid = view(2, ViewKind::Canvas, Accessibility::default());
+        let at = |x: f32| {
+            nsh_core::geometry::Bounds::new(
+                nsh_core::geometry::point(Points(x), Points(0.0)),
+                nsh_core::geometry::size(Points(40.0), Points(20.0)),
+            )
+        };
+        let drawing = Drawing {
+            nodes: vec![
+                CanvasNode::new(at(0.0), AxRole::Header, "A"),
+                CanvasNode::new(at(40.0), AxRole::Text, "12")
+                    .test_id("cell-a1")
+                    .selected(true),
+            ],
+            ..Drawing::default()
+        };
+        let mut state = crate::canvas::CanvasState::default();
+        state.drawing = Some(Arc::new(drawing));
+        grid.state_mut().canvas = Some(state);
+        grid.insert_before(&root, None);
+        let b = built(&root);
+        assert_eq!(b.top.len(), 2);
+        let entry = |label: &str| {
+            b.entries
+                .iter()
+                .find(|e| e.node.label() == Some(label) || e.node.value() == Some(label))
+                .unwrap_or_else(|| panic!("no node {label}"))
+        };
+        let header = entry("A");
+        assert_eq!(header.node.role(), Role::Heading);
+        assert_eq!(header.view, 2);
+        let cell = entry("12");
+        assert_eq!(cell.node.role(), Role::Label);
+        assert_eq!(cell.node.author_id(), Some("cell-a1"));
+        assert_eq!(cell.node.is_selected(), Some(true));
+        assert!(cell.actions.is_empty());
+        // At the surface's origin (10, 20) and the canvas's (0, 2), in
+        // physical pixels.
+        let r = cell.node.bounds().unwrap();
+        assert_eq!((r.x0, r.y0, r.x1, r.y1), (100.0, 44.0, 180.0, 84.0));
     }
 
     #[test]
