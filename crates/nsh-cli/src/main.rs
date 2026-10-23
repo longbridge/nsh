@@ -52,7 +52,11 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
     if let Some(sets) = &*UI_SETS.read().unwrap_or_else(|e| e.into_inner()) {
         return sets.clone();
     }
-    let sets: Arc<[SetDescription]> = own_sets().iter().map(SetDescription::from).collect();
+    let sets: Arc<[SetDescription]> = own_sets()
+        .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
+        .map(SetDescription::from)
+        .collect();
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets.clone());
     sets
 }
@@ -62,6 +66,7 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
 pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
     let sets: Arc<[SetDescription]> = own_sets()
         .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
         .map(SetDescription::from)
         .chain(app)
         .collect();

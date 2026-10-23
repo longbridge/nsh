@@ -119,7 +119,7 @@ An overlay reports what usually closes a popup and leaves the decision to you:
 
 - `onPressOutside` fires when a finger or a mouse button goes down outside the overlay, its anchor and the overlays
   inside it. The press goes on to what is under it.
-- `onCancel` fires on Escape and the Android back button, for the top overlay that listens to it only. It takes them
+- `onCancel` fires on Escape, the Android back button and VoiceOver's escape gesture on iOS, for the top overlay that listens to it only. It takes them
   before the pages and `BackHandler`.
 
 To block the screen behind a popup, put a second overlay under it with `class="inset-0"` and an `onPress` that closes
@@ -144,7 +144,7 @@ It also takes the [common props](./index.md#common-props) of a view.
 | Event | Rust | Description |
 |---|---|---|
 | `onPressOutside` | `.on_press_outside(\|point\| ..)` | A press went down outside it, its anchor and the overlays inside it (`pagePosition`, a `Point`). |
-| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button, while it is the top overlay listening. |
+| `onCancel` | `.on_cancel(\|\| ..)` | Escape, the Android back button or VoiceOver's escape gesture, while it is the top overlay listening. |
 | `onPosition` | `.on_position(\|position\| ..)` | NSH placed it: `placement` (the side it went on), `bounds` in the root view, and `available` (a `Size`: the room on that side). |
 
 ## Platform notes

@@ -79,7 +79,7 @@ impl<M: TextEngine> Core<M> {
                 y += n.frame.origin.y.0;
             }
             // An overlay is placed in its root view.
-            if n.kind == Kind::Overlay {
+            if n.is_overlay() {
                 break;
             }
             let parent = n.parent;
@@ -137,7 +137,7 @@ impl<M: TextEngine> Core<M> {
             let (mut x0, mut y0, mut x1, mut y1) = (0.0f32, 0.0f32, w, h);
             for &child in &node.children {
                 let c = &self.nodes[child as usize];
-                if c.kind.is_root() || c.layout.is_none() || !c.created || !valid(&c.frame) {
+                if c.is_layout_root() || c.layout.is_none() || !c.created || !valid(&c.frame) {
                     continue;
                 }
                 let f = c.frame;

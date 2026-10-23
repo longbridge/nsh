@@ -853,7 +853,7 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
     let location = resolve(uri, surface.asset_base.borrow().as_ref());
-    fetch_at(surface, location, uri, progress, done)
+    fetch_at(location, uri, progress, done)
 }
 
 /// Loads `source` for `surface` as [`fetch`] does: from its bytes, when it
@@ -867,20 +867,14 @@ fn fetch_source(
     match &source.data {
         Some(data) => {
             let location = Location::Memory(source.uri.to_string(), data.clone());
-            fetch_at(surface, Some(location), &source.uri, progress, done)
+            fetch_at(Some(location), &source.uri, progress, done)
         }
         None => fetch(surface, &source.uri, progress, done),
     }
 }
 
-/// Loads `location` (`uri`'s) for `surface`, as [`fetch`] does.
-fn fetch_at(
-    surface: &Surface,
-    location: Option<Location>,
-    uri: &str,
-    progress: Option<Progress>,
-    done: Done,
-) -> bool {
+/// Loads `location` (`uri`'s), as [`fetch`] does.
+fn fetch_at(location: Option<Location>, uri: &str, progress: Option<Progress>, done: Done) -> bool {
     let Some(location) = location else {
         done(Err(format!("unsupported image source `{uri}`")));
         return true;
@@ -1985,19 +1979,21 @@ mod tests {
             fit(ResizeMode::Stretch, ObjectPosition::CENTER, n, b),
             (0.0, 0.0, 100.0, 100.0)
         );
+        // CSS's `object-fit: none` and `scale-down`.
         assert_eq!(
             fit(ResizeMode::Center, ObjectPosition::CENTER, n, b),
-            (0.0, 25.0, 100.0, 50.0)
+            (-50.0, 0.0, 200.0, 100.0)
         );
         assert_eq!(
-            fit(
-                ResizeMode::Center,
-                ObjectPosition::CENTER,
-                n,
-                (400.0, 400.0)
-            ),
-            (100.0, 150.0, 200.0, 100.0)
+            fit(ResizeMode::ScaleDown, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
         );
+        for mode in [ResizeMode::Center, ResizeMode::ScaleDown] {
+            assert_eq!(
+                fit(mode, ObjectPosition::CENTER, n, (400.0, 400.0)),
+                (100.0, 150.0, 200.0, 100.0)
+            );
+        }
         // `objectPosition`: a tall image covering its box shows its top.
         let top = ObjectPosition::parse("top").unwrap();
         assert_eq!(

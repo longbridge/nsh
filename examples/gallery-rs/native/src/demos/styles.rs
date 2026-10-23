@@ -178,7 +178,6 @@ fn face(
             ],
         )
         .border_color(rim)
-        .perspective(px(800.0))
         .child(
             view().flex_row().justify_between().child(badge).child(
                 text(degrees)
@@ -230,7 +229,8 @@ fn FlipCard() -> impl IntoElement {
             .child(
                 view()
                     .h(px(132.0))
-                    // The bound rotations follow the static perspective.
+                    // The faces' bound rotations are seen from 800pt away.
+                    .perspective(px(800.0))
                     .child(
                         face(
                             [
@@ -677,28 +677,31 @@ fn transforms() -> Card {
                     some("rotateY"),
                     some("Swaying, driven natively"),
                     None,
-                    specimen_box()
-                        .rounded(px(14.0))
-                        .bg(tints::INFO)
-                        .border_1()
-                        .border_color(colors::INFO)
-                        .perspective(px(400.0))
-                        .bind_transform(TransformKind::RotateY, &sway)
-                        .child(label("Y axis", colors::INFO)),
+                    // CSS's `perspective`: the depth of its children.
+                    view().perspective(px(400.0)).child(
+                        specimen_box()
+                            .rounded(px(14.0))
+                            .bg(tints::INFO)
+                            .border_1()
+                            .border_color(colors::INFO)
+                            .bind_transform(TransformKind::RotateY, &sway)
+                            .child(label("Y axis", colors::INFO)),
+                    ),
                 ))
                 .child(tile(
                     "Tilt",
                     some("rotateX: 40deg"),
                     None,
                     None,
-                    specimen_box()
-                        .rounded(px(14.0))
-                        .bg(tints::ACCENT)
-                        .border_1()
-                        .border_color(colors::ACCENT)
-                        .perspective(px(400.0))
-                        .rotate_x(deg(40.0))
-                        .child(label("X axis", colors::ACCENT)),
+                    view().perspective(px(400.0)).child(
+                        specimen_box()
+                            .rounded(px(14.0))
+                            .bg(tints::ACCENT)
+                            .border_1()
+                            .border_color(colors::ACCENT)
+                            .rotate_x(deg(40.0))
+                            .child(label("X axis", colors::ACCENT)),
+                    ),
                 ))
                 .child(tile(
                     "Skew",
