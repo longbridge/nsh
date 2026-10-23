@@ -67,6 +67,12 @@ pub(crate) trait Driver: Send {
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
     fn clipboard(&mut self) -> Result<Option<String>, String>;
+    /// The embedding app sends event `name` with `data` to the app
+    /// (`app.host.send`), which then settles.
+    fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String>;
+    /// The URLs the app opened, in order (`app.openedUrls`): recorded,
+    /// never opened.
+    fn opened_urls(&mut self) -> Result<Vec<String>, String>;
     /// A picture of the app's window, as a PNG.
     fn screenshot(&mut self) -> Result<Vec<u8>, String>;
     /// The app's storage's entries, as a host keeps them (a headless
@@ -205,6 +211,13 @@ impl Driver for Headless {
         self.catch_up();
         Ok(self.screen().clipboard().map(str::to_owned))
     }
+    fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String> {
+        Headless::send_host_event(self, name, data)
+    }
+    fn opened_urls(&mut self) -> Result<Vec<String>, String> {
+        self.catch_up();
+        Ok(self.screen().opened_urls().to_vec())
+    }
     fn screenshot(&mut self) -> Result<Vec<u8>, String> {
         Err(
             "a screenshot needs a real platform, which draws the app: run the test with `--target`"
@@ -307,6 +320,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
         TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
         TestStep::CloseMenu => "closeMenu".to_owned(),
+        TestStep::HostSend { name, .. } => format!("host.send({name})"),
         TestStep::Back => "back".to_owned(),
         TestStep::Wait { ms } => format!("wait({ms})"),
         TestStep::Clock {
@@ -501,6 +515,15 @@ impl Driver for Remote {
     }
     fn clipboard(&mut self) -> Result<Option<String>, String> {
         self.query(TestStep::Clipboard)
+    }
+    fn send_host_event(&mut self, name: &str, data: Value) -> Result<(), String> {
+        self.action(TestStep::HostSend {
+            name: name.into(),
+            data,
+        })
+    }
+    fn opened_urls(&mut self) -> Result<Vec<String>, String> {
+        self.query(TestStep::OpenedUrls)
     }
     fn screenshot(&mut self) -> Result<Vec<u8>, String> {
         use base64::Engine as _;

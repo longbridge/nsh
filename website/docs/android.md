@@ -168,10 +168,14 @@ again replaces the running app. The complete sample is
 | `setFontScale(float scale)` | The text size in place of the system's font size (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `0` follows the system's. |
 | `setThemeOverrides(String json)` | The host's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file in the format of `nsh.json`'s `"theme"`. Its tokens win over the app's of the same names, in light and dark mode, and the app's others stay. Applies at once and to the apps loaded later; `null` gives the app its own theme back. Throws `IllegalArgumentException` for a file that does not parse. |
 | `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the app's own id. |
+| `setCacheOptions(NshCacheOptions options)` | Where the apps loaded next keep their caches, the [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps. Build one with `NshCacheOptions.builder()`: `location(File)`, `systemLocation()` (the default: `nsh` in the cache directory, each app in `<app id>`) or `noDiskCache()`; `imagesMaxMegabytes(int)` (256 by default) or `imagesOff()`. |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
+| `setParams(Object params)` | The launch parameters of the apps loaded next (a `Map` or `JSONObject`): the app reads them at start as `host.params` ([`nsh/host`](../modules/nsh-host.md)). Returns `false` when they are not a JSON object. |
+| `send(String name, Object data)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. Any thread; returns `false` after `destroy()`. |
+| `handle(String name, HostHandler handler)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the UI thread; `null` removes the handler. The handler answers through its `NshHostReply`, once, from any thread. |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
 | `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
 | `destroy()` | Stops the app and calls `destroy()` on each of its native components. The view can no longer be used. |
@@ -181,7 +185,7 @@ again replaces the running app. The complete sample is
 > and QuickJS does not validate bytecode, so `loadBundleFile` takes JS source only. Code the app downloads should come
 > as a [signed package](./signed-packages.md).
 
-`setLimits`, `setGrantedCapabilities` and `setStorageDirectory` apply from the next load: call them before `loadAssetBundle` and friends.
+`setLimits`, `setGrantedCapabilities`, `setStorageDirectory` and `setCacheOptions` apply from the next load: call them before `loadAssetBundle` and friends.
 
 Each app keeps its storage under its own id with no setting: a signed package under the id its release key's certificate vouches for, a bundle under the `id` of its `nsh.json` (`nsh/app.json` among the APK's assets, written by `nsh package`). Call `setStorageDirectory` to keep an app's data somewhere of the host's choosing:
 
@@ -190,6 +194,48 @@ nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
 
+## Talking to the app
+
+The view and the app it runs talk through a channel of their own ([`nsh/host`](../modules/nsh-host.md)): launch
+parameters the app reads at start, events from the host app, and calls and posts from the app, with JSON data (maps,
+lists, strings, numbers and booleans on this side). It needs no view in the app and no native component.
+
+```java
+// Before loading: what the app opens first (`host.params` in TSX).
+nsh.setParams(Map.of("conversation", intent.getStringExtra("conversation")));
+nsh.loadAssetBundle("nsh");
+
+// The app's `await host.call("user.profile", { id })`, on the UI thread.
+nsh.handle("user.profile", (data, reply) -> {
+    Object id = ((Map<?, ?>) data).get("id");
+    api.profile(id, profile -> reply.resolve(Map.of("id", id, "name", profile.name)),
+            error -> reply.reject(error.getMessage()));
+});
+
+// The app's `host.post("analytics", …)`: no answer.
+nsh.handle("analytics", (data, reply) -> analytics.log(data));
+
+// Later: the app hears `host.on("conversation.open", …)`.
+nsh.send("conversation.open", Map.of("id", tappedConversation));
+```
+
+In Kotlin:
+
+```kotlin
+nsh.handle("user.profile") { data, reply ->
+    val id = (data as Map<*, *>)["id"]
+    lifecycleScope.launch {
+        runCatching { api.profile(id) }
+            .onSuccess { reply.resolve(mapOf("id" to id, "name" to it.name)) }
+            .onFailure { reply.reject(it.message ?: "failed") }
+    }
+}
+```
+
+Handlers run on the UI thread; a call waits for its answer in the app without blocking either side. A reply that is
+never given fails the call once it is collected, and a call of a name with no handler fails at once. Events of names
+the app does not listen to yet are kept until it does, and events sent while no app runs (before `loadAssetBundle`,
+during a reload) go to the next one.
 ## Theme overrides
 
 One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,
@@ -207,6 +253,25 @@ nsh.loadAssetBundle("orders");
 
 Call it before or after loading: classes such as `bg-primary` and `rounded-(--radius)` restyle at once, and every app
 loaded later starts with the overrides in its first frame. `setThemeOverrides(null)` gives the app its own theme back.
+
+## Links the app opens
+
+The URLs the app opens ([`openUrl`](../modules/nsh-device.md#openurl), a `TextView`'s links with `links="open"`)
+reach the view's `OpenUrlHandler` first, on the UI thread: return `true` when the host app handled the URL, such as by
+routing it through its own router, and `false` for the system to open it with an `ACTION_VIEW` intent. Without a
+handler the system opens every URL. URLs reach it after the app's `openUrl` capability allowed them.
+
+```java
+nsh.setOpenUrlHandler(url -> {
+    Uri uri = Uri.parse(url);
+    // The host app's own links open in the host app.
+    if ("lb".equals(uri.getScheme()) || "longbridge.com".equals(uri.getHost())) {
+        router.open(uri);
+        return true;
+    }
+    return false;
+});
+```
 
 ## Limits
 

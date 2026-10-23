@@ -502,6 +502,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
+        Command::OpenUrl { id, url } => open_url(surface, *id, url),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -1043,6 +1044,30 @@ fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
 
 /// `Clipboard.readText` / `hasText`: answers read `id` with whether the
 /// clipboard holds text and, unless `has_only`, the text.
+/// Opens `url` with the app the desktop has for its scheme
+/// (`GtkUriLauncher`: the desktop portal in a sandbox, `GAppInfo`
+/// otherwise), parented to the surface's window, and reports whether it
+/// did ([`EventKind::OpenUrl`]).
+fn open_url(surface: &Rc<Surface>, id: u32, url: &str) {
+    let window = surface.root.root().and_downcast::<gtk::Window>();
+    let surface = Rc::downgrade(surface);
+    gtk::UriLauncher::new(url).launch(window.as_ref(), gio::Cancellable::NONE, move |result| {
+        if let Err(err) = &result {
+            log::debug!("linux: opening a URL failed: {err}");
+        }
+        if let Some(surface) = surface.upgrade() {
+            surface.event(
+                ROOT_ID,
+                EventKind::OpenUrl,
+                EventPayload::Map(vec![
+                    ("id", PayloadValue::Number(id as f64)),
+                    ("opened", PayloadValue::Bool(result.is_ok())),
+                ]),
+            );
+        }
+    });
+}
+
 fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let answer = move |surface: &Surface, has: bool, text: Option<String>| {
         let mut fields = vec![

@@ -3502,6 +3502,7 @@ class Player {
         }
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
+      case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
@@ -3565,6 +3566,23 @@ class Player {
    * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
+  // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
+  // new tab, another scheme (mailto:, tel:, ...) through the browser's
+  // handler. Whether the browser let it open (a blocked pop-up is false).
+  openUrl(url) {
+    let opened = null;
+    try {
+      opened = window.open(url, "_blank");
+    } catch (err) {
+      console.warn(`[nsh] openUrl: ${err}`);
+    }
+    // The page opened knows nothing of this one.
+    if (opened) {
+      try { opened.opener = null; } catch {}
+    }
+    return !!opened;
+  }
+
   async readClipboard(request, hasOnly) {
     let text = "";
     try {

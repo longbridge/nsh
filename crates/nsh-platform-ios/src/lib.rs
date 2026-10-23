@@ -53,7 +53,7 @@ mod visual;
 mod web;
 mod zoom;
 
-pub use nsh_engine::{Bundle, Root};
+pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
 
 /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::ui::Registry>>> =

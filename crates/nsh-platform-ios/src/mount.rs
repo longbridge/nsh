@@ -1179,6 +1179,7 @@ impl Mounter {
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
@@ -2133,11 +2134,17 @@ impl Mounter {
     }
 
     /// What the image loader reports.
+    /// The disk cache the images it loads go through.
+    pub(crate) fn set_image_cache(&mut self, cache: Option<nsh_core::image::DiskCache>) {
+        self.images.set_disk_cache(cache);
+    }
+
     pub(crate) fn load_event(&mut self, event: crate::image::LoadEvent) {
         use crate::image::LoadEvent;
         match event {
             LoadEvent::Decoded { key, result } => self.image_loaded(&key, result),
             LoadEvent::Bytes { uri, result } => self.images.bytes_ready(&uri, result),
+            LoadEvent::Download { uri, headers } => self.images.download(&uri, &headers),
             LoadEvent::Progress { uri, loaded, total } => {
                 for id in self.images.waiting(&uri) {
                     let Some(s) = self.slot(id) else { continue };

@@ -222,6 +222,7 @@ events! {
     Host = "onHost": "The embedding host answered a [`Command::HostCall`] or sent an event to `nsh/host`'s listeners (root only; payload: [`EventPayload::Json`], `{ type: \"reply\", id, ok, value?, error? }` or `{ type: \"event\", event, payload }`).",
     Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
     LoadMoreAtStart = "onLoadMoreAtStart": "A list was scrolled close to its start after the user or a scroll command moved it (raised by the core).",
+    OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
 
 }
 
@@ -374,7 +375,8 @@ pub struct HoverEvent {
 
 /// Where the pointer was at a press ([`EventKind::Press`],
 /// [`EventKind::LongPress`], [`EventKind::PressDown`],
-/// [`EventKind::PressUp`]), on backends that know it, in points.
+/// [`EventKind::PressUp`]), with the modifier keys and the click count, on
+/// backends that know it, in points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PressEvent {
     /// Position in the pressed view, its transforms undone (for a pressed
@@ -383,6 +385,11 @@ pub struct PressEvent {
     /// Position in the root view the view is in (the surface, or its
     /// modal), as touches' `page`.
     pub page_position: Point<Points>,
+    /// The modifier keys held when the press began.
+    pub modifiers: crate::keymap::Modifiers,
+    /// Consecutive clicks at the same place: 1 for a click, 2 for a
+    /// double click, ...
+    pub clicks: u32,
 }
 
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
@@ -530,7 +537,8 @@ pub enum EventPayload {
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
-    /// `onPressDown`, `onPressUp`), on backends that know it.
+    /// `onPressDown`, `onPressUp`), with the modifier keys and the click
+    /// count, on backends that know it.
     Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
@@ -1384,6 +1392,17 @@ pub enum Command {
         id: u32,
         /// What to show and how to prepare the images.
         request: crate::picker::PickRequest,
+    },
+    /// Open `url` outside the app (on the root; `openUrl` of `nsh/device`,
+    /// [`crate::open_url`]): the browser, the mail or phone app, the app
+    /// that registered its scheme. Report whether it opened as
+    /// [`EventKind::OpenUrl`] `id`. The core sends it once the URL was
+    /// checked and the embedding app did not take it.
+    OpenUrl {
+        /// The request.
+        id: u32,
+        /// The URL ([`crate::open_url::check_url`] passed it).
+        url: String,
     },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.

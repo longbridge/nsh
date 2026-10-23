@@ -754,6 +754,28 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// Binds a motion's channels: its opacity, and its transform after the
+    /// styles' transforms (translations, then rotations, then the scales,
+    /// `scale` folded into `scale_x` and `scale_y`: 7 steps of a view's 8).
+    fn bind_motion(self, motion: &super::Motion) -> Self {
+        use crate::animation::MotionChannel::*;
+        let mut this = self.bind_opacity(&motion.value(Opacity));
+        for channel in [TranslateX, TranslateY, Rotate, RotateX, RotateY] {
+            if let Some(kind) = channel.transform() {
+                this = this.bind_transform(kind, &motion.value(channel));
+            }
+        }
+        let scale = motion.value(Scale);
+        this.bind_transform(
+            crate::TransformKind::ScaleX,
+            &scale.mul(&motion.value(ScaleX)),
+        )
+        .bind_transform(
+            crate::TransformKind::ScaleY,
+            &scale.mul(&motion.value(ScaleY)),
+        )
+    }
+
     /// Moves it right by an animated value (points).
     fn bind_translate_x(self, value: &impl super::Animated) -> Self {
         self.bind_transform(crate::TransformKind::TranslateX, value)

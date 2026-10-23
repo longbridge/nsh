@@ -8,6 +8,8 @@
 //! Everything here is single-threaded and allocation-conscious: the core runs
 //! on the engine thread, between the JS host and the platform backend.
 
+mod byte_size;
+pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod canvas;
@@ -22,12 +24,14 @@ mod fenwick;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
+pub mod host_channel;
 pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
 mod mount;
 pub mod navigation;
+pub mod open_url;
 mod ops;
 pub mod overlay;
 pub mod picker;

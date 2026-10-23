@@ -196,6 +196,19 @@ final class Mounter {
             long handle = handle();
             return handle == 0 ? null : Native.imageBytes(handle, uri);
         };
+        images.disk = new Images.DiskCache() {
+            @Override
+            public Object lookup(String url) {
+                long handle = handle();
+                return handle == 0 ? null : Native.imageCacheLookup(handle, url);
+            }
+
+            @Override
+            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+                long handle = handle();
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+            }
+        };
         root = new Box(context, this, 1);
         views.put(1, root);
     }
@@ -1928,6 +1941,13 @@ final class Mounter {
                 request.current = b.getInt() != 0;
                 request.view = host;
                 Picker.show(context, request);
+                break;
+            }
+            case 26: {
+                int request = b.getInt();
+                String url = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openUrl(context, url);
+                eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
                 break;
             }
             case 23: {
