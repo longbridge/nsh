@@ -121,7 +121,10 @@ final class Mounter {
     final Images images;
     final SparseArray<View> views = new SparseArray<>();
     private final SparseArray<Dynamic> statics = new SparseArray<>();
+    /** The events each view listens to: kinds below 64 here, ... */
     private final SparseLongArray events = new SparseLongArray();
+    /** ... and kinds 64 and up (`kind - 64`) here. */
+    private final SparseLongArray eventsHigh = new SparseLongArray();
     /** Views listening to touches: the touch trackers run while there are any. */
     int touchListeners;
     /** One per root view (the surface, modals). */
@@ -242,6 +245,10 @@ final class Mounter {
                         linkData[i * 3 + 1] = b.getInt();
                         linkData[i * 3 + 2] = b.getInt();
                         linkEvents[i] = (b.getInt() & 0xffffffffL) | ((long) b.getInt() << 32);
+                        // Kinds 64 and up: spans take presses and hover only,
+                        // all below 64.
+                        b.getInt();
+                        b.getInt();
                     }
                     // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
                     int selectable = b.getInt();
@@ -259,6 +266,9 @@ final class Mounter {
                 case EVENTS: {
                     int id = b.getInt();
                     long mask = (b.getInt() & 0xffffffffL) | ((long) b.getInt() << 32);
+                    long high = (b.getInt() & 0xffffffffL) | ((long) b.getInt() << 32);
+                    if (high != 0) eventsHigh.put(id, high);
+                    else eventsHigh.delete(id);
                     long touch = 1L << Native.TOUCH;
                     if ((events.get(id) & touch) != (mask & touch)) touchListeners += (mask & touch) != 0 ? 1 : -1;
                     events.put(id, mask);
@@ -752,6 +762,7 @@ final class Mounter {
         mirrors.delete(id);
         if ((events.get(id) & (1L << Native.TOUCH)) != 0) touchListeners--;
         events.delete(id);
+        eventsHigh.delete(id);
         slops.remove(id);
         a11y.remove(id);
     }
@@ -1908,6 +1919,17 @@ final class Mounter {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
                 break;
             }
+            case 25: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                request.maxDimension = b.getInt();
+                request.quality = b.getFloat();
+                request.current = b.getInt() != 0;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
             case 23: {
                 int request = b.getInt();
                 boolean hasOnly = b.getInt() != 0;
@@ -1988,8 +2010,10 @@ final class Mounter {
                 int mode = b.getInt();
                 boolean controls = b.getInt() != 0;
                 float interval = b.getFloat();
+                int audioSession = b.getInt();
                 if (v instanceof VideoBox) {
-                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval);
+                    ((VideoBox) v).configure(source, paused, muted, volume, rate, repeat, mode, controls, interval,
+                            audioSession);
                 }
                 break;
             }
@@ -2058,6 +2082,7 @@ final class Mounter {
     // --- Events --------------------------------------------------------------
 
     boolean wants(int id, int kind) {
+        if (kind >= 64) return (eventsHigh.get(id) & (1L << (kind - 64))) != 0;
         return (events.get(id) & (1L << kind)) != 0;
     }
 

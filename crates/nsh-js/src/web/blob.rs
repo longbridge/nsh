@@ -17,10 +17,11 @@ use super::{
 
 /// A blob's bytes and type. The bytes are atomically counted so that an
 /// `<Image>` showing a `blob:` URL hands them to the platform without a
-/// copy ([`Blob::image_data`]).
+/// copy ([`Blob::image_data`]), and a `File` Rust made (a picked photo)
+/// holds the bytes Rust has.
 #[derive(Clone)]
 pub(crate) struct Blob {
-    bytes: Arc<[u8]>,
+    bytes: nsh_core::ImageData,
     start: usize,
     end: usize,
     pub(crate) mime: String,
@@ -36,9 +37,14 @@ impl Object for Blob {
 
 impl Blob {
     pub(crate) fn new(bytes: Vec<u8>, mime: String) -> Blob {
+        Blob::shared(nsh_core::ImageData::new(bytes), mime)
+    }
+
+    /// A blob of the bytes `bytes` holds, shared (not copied).
+    pub(crate) fn shared(bytes: nsh_core::ImageData, mime: String) -> Blob {
         let end = bytes.len();
         Blob {
-            bytes: bytes.into(),
+            bytes,
             start: 0,
             end,
             mime,
@@ -56,6 +62,9 @@ impl Blob {
     /// The blob's bytes for an image source: shared with the blob, not
     /// copied, so revoking its URL or collecting it leaves the image whole.
     pub(crate) fn image_data(&self) -> nsh_core::ImageData {
+        if self.start == 0 && self.end == self.bytes.len() {
+            return self.bytes.clone();
+        }
         nsh_core::ImageData::new(BlobBytes(self.clone()))
     }
 
@@ -335,7 +344,21 @@ pub(crate) fn random_hex() -> String {
 /// The blobs of `blob:` URLs, per context.
 #[derive(Default)]
 pub(crate) struct BlobUrls {
-    map: Vec<(String, Blob)>,
+    map: Vec<BlobUrl>,
+}
+
+struct BlobUrl {
+    url: String,
+    blob: Blob,
+    /// The key and bytes an image source of this URL shows, made once: a
+    /// URL set again hashes nothing, and its sources share their bytes, so
+    /// they compare equal and send nothing new.
+    image: Option<(Arc<str>, nsh_core::ImageData)>,
+}
+
+fn find_blob_url<'a>(cx: Ctx, url: &str) -> Option<&'a mut BlobUrl> {
+    let url = url.split('#').next().unwrap_or(url);
+    blob_urls(cx).map.iter_mut().find(|e| e.url == url)
 }
 
 fn blob_urls<'a>(cx: Ctx) -> &'a mut BlobUrls {
@@ -345,12 +368,7 @@ fn blob_urls<'a>(cx: Ctx) -> &'a mut BlobUrls {
 
 /// The blob `url` names (`blob:…`), if registered.
 pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<Blob> {
-    let url = url.split('#').next().unwrap_or(url);
-    blob_urls(cx)
-        .map
-        .iter()
-        .find(|(u, _)| u == url)
-        .map(|(_, b)| b.clone())
+    find_blob_url(cx, url).map(|e| e.blob.clone())
 }
 
 /// Gives the image source of `prop` its blob's bytes when it is a `blob:`
@@ -366,9 +384,16 @@ pub(crate) fn resolve_image_source(cx: Ctx, prop: &mut nsh_core::Prop) {
     if source.data.is_some() || !source.uri.starts_with("blob:") {
         return;
     }
-    if let Some(blob) = resolve_blob_url(cx, &source.uri) {
-        *source = std::mem::take(source).with_bytes(&blob.mime, blob.image_data());
-    }
+    let Some(entry) = find_blob_url(cx, &source.uri) else {
+        return;
+    };
+    let (uri, data) = entry.image.get_or_insert_with(|| {
+        let data = entry.blob.image_data();
+        let made = nsh_core::ImageSource::default().with_bytes(&entry.blob.mime, data.clone());
+        (made.uri, data)
+    });
+    source.uri = uri.clone();
+    source.data = Some(data.clone());
 }
 
 native!(
@@ -376,7 +401,11 @@ native!(
         let b = blob_of(cx, args.get(0))?
             .ok_or_else(|| js::type_error(cx, "createObjectURL needs a Blob"))?;
         let url = format!("blob:nsh://app/{}", random_hex());
-        blob_urls(cx).map.push((url.clone(), b));
+        blob_urls(cx).map.push(BlobUrl {
+            url: url.clone(),
+            blob: b,
+            image: None,
+        });
         js::string(cx, &url)
     }
 );
@@ -384,7 +413,7 @@ native!(
 native!(
     fn revoke_object_url(cx, this, args) {
         let url = js::to_string(cx, args.get(0))?;
-        blob_urls(cx).map.retain(|(u, _)| *u != url);
+        blob_urls(cx).map.retain(|e| e.url != url);
         Ok(V::undefined())
     }
 );

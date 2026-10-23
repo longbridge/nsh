@@ -219,6 +219,9 @@ events! {
     Cancel = "onCancel": "Escape or the Android back button was pressed while the overlay was the top one listening to it (raised by the core).",
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
+    Host = "onHost": "The embedding host answered a [`Command::HostCall`] or sent an event to `nsh/host`'s listeners (root only; payload: [`EventPayload::Json`], `{ type: \"reply\", id, ok, value?, error? }` or `{ type: \"event\", event, payload }`).",
+    Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
+    LoadMoreAtStart = "onLoadMoreAtStart": "A list was scrolled close to its start after the user or a scroll command moved it (raised by the core).",
 
 }
 
@@ -409,16 +412,21 @@ pub struct TouchEvent {
     pub activated: Option<NodeId>,
 }
 
-/// A set of [`EventKind`]s.
+// Every kind has a bit of [`EventMask`].
+const _: () = assert!(EventKind::ALL.len() <= 128, "EventMask has 128 bits");
+
+/// A set of [`EventKind`]s: one bit per kind, room for 128. Two words, not
+/// a `u128`: views keep it in Objective-C ivars, which take no 16-byte
+/// alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct EventMask(u64);
+pub struct EventMask([u64; 2]);
 
 impl std::ops::BitOr for EventMask {
     type Output = EventMask;
 
     #[inline]
     fn bitor(self, other: EventMask) -> EventMask {
-        EventMask(self.0 | other.0)
+        EventMask([self.0[0] | other.0[0], self.0[1] | other.0[1]])
     }
 }
 
@@ -426,29 +434,31 @@ impl EventMask {
     /// Returns true if `event` is in the set.
     #[inline]
     pub const fn contains(self, event: EventKind) -> bool {
-        self.0 & (1 << event as u8) != 0
+        let k = event as usize;
+        self.0[k / 64] & (1 << (k % 64)) != 0
     }
 
     /// The raw bit set, indexed by `EventKind as u8`.
     #[inline]
-    pub const fn bits(self) -> u64 {
-        self.0
+    pub const fn bits(self) -> u128 {
+        self.0[0] as u128 | (self.0[1] as u128) << 64
     }
 
     /// Adds or removes `event`.
     #[inline]
     pub fn set(&mut self, event: EventKind, enabled: bool) {
+        let k = event as usize;
         if enabled {
-            self.0 |= 1 << event as u8;
+            self.0[k / 64] |= 1 << (k % 64);
         } else {
-            self.0 &= !(1 << event as u8);
+            self.0[k / 64] &= !(1 << (k % 64));
         }
     }
 
     /// Returns true if no event is set.
     #[inline]
     pub const fn is_empty(self) -> bool {
-        self.0 == 0
+        self.0[0] == 0 && self.0[1] == 0
     }
 }
 
@@ -526,6 +536,13 @@ pub enum EventPayload {
     FileDrop(Vec<String>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
+    /// The files the user picked ([`EventKind::Pick`]), with their bytes.
+    Picked {
+        /// The request ([`Command::PickImages`]).
+        id: u32,
+        /// The files, in the order picked; none when cancelled.
+        files: Vec<crate::picker::PickedFile>,
+    },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.
     Native {
@@ -534,6 +551,8 @@ pub enum EventPayload {
         /// Its data.
         data: crate::JsonValue,
     },
+    /// A JSON value handed to JS as it is ([`EventKind::Host`]).
+    Json(crate::JsonValue),
 }
 
 impl TouchEvent {
@@ -561,14 +580,20 @@ pub enum ResizeMode {
     Contain,
     /// Stretch to the box.
     Stretch,
-    /// Center at natural size.
+    /// Center at natural size, cropped where larger than the box (CSS's
+    /// `object-fit: none`).
     Center,
+    /// Center at natural size, shrunk to fit the box where larger (CSS's
+    /// `object-fit: scale-down`, React Native's `center`).
+    #[prop(rename = "scale-down")]
+    ScaleDown,
 }
 
 impl ResizeMode {
     /// Where content of `natural` size goes in a box of `size`: scaled as
-    /// the mode scales it (`Center` shrinks content larger than the box,
-    /// as CSS's `scale-down`), then placed at `position`. The rectangle
+    /// the mode scales it (`Center` keeps the natural size, as CSS's
+    /// `none`; `ScaleDown` shrinks content larger than the box, as CSS's
+    /// `scale-down`), then placed at `position`. The rectangle
     /// may reach outside the box (a covering image), which crops it.
     /// Content without a size fills the box.
     pub fn fit(
@@ -588,7 +613,8 @@ impl ResizeMode {
         let scale = match self {
             ResizeMode::Cover => (size.width.0 / nw).max(size.height.0 / nh),
             ResizeMode::Contain => contain,
-            ResizeMode::Center => contain.min(1.0),
+            ResizeMode::Center => 1.0,
+            ResizeMode::ScaleDown => contain.min(1.0),
             ResizeMode::Stretch => 1.0,
         };
         let content = Size {
@@ -625,8 +651,11 @@ pub struct ImageSource {
 impl ImageSource {
     /// This source with its bytes in hand when its URI holds them: a
     /// `data:` URI decoded (once, when the source is set) and named by a
-    /// short key. Other sources, and `data:` URIs that do not decode, stay
-    /// as they are (the platforms then report the error).
+    /// short key. Other sources stay as they are. A `data:` URI that does
+    /// not decode becomes an empty one (the platforms then report the
+    /// error): left as it is, an app could write another image's key
+    /// (`data:<type>;nsh-key=<digest>`, which has no comma) and ask the
+    /// process-wide caches whether some surface shows those bytes.
     #[must_use]
     pub fn inline(self) -> ImageSource {
         if self.data.is_some() || !self.uri.starts_with("data:") {
@@ -637,7 +666,10 @@ impl ImageSource {
                 let mime = mime.to_owned();
                 self.with_bytes(&mime, bytes.into())
             }
-            Err(_) => self,
+            Err(_) => ImageSource {
+                uri: "data:,".into(),
+                ..self
+            },
         }
     }
 
@@ -1343,9 +1375,32 @@ pub enum Command {
         /// The request.
         id: u32,
     },
+    /// Show the system's picker for images (on the root;
+    /// `Picker.pickImages`), prepare the picked ones as `request` says
+    /// ([`crate::picker`]) and report them as [`EventKind::Pick`]
+    /// ([`EventPayload::Picked`] `id`; no files when cancelled).
+    PickImages {
+        /// The request.
+        id: u32,
+        /// What to show and how to prepare the images.
+        request: crate::picker::PickRequest,
+    },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
+    /// Call function `name` of the app embedding NSH (on the root;
+    /// `nsh/host`'s `host.call`): the platform answers with
+    /// [`EventKind::Host`] `{ type: "reply", id, .. }`. Sent only on
+    /// platforms whose [`crate::platform::Environment::host`] is set, for
+    /// functions the app's `capabilities.host` grants.
+    HostCall {
+        /// The call, echoed by the reply.
+        id: u64,
+        /// The host's function.
+        name: String,
+        /// Its argument (any JSON value; `null` without one).
+        args: crate::JsonValue,
+    },
     /// A call on a registered native component (`ref.command(name, args)`).
     Native {
         /// The command.
@@ -1611,6 +1666,9 @@ pub enum Prop {
     /// How close to the end `onLoadMore` fires, in viewports.
     #[prop(js = "loadMoreThreshold", default = 1.0, internal)]
     LoadMoreThreshold(f32),
+    /// How close to the start `onLoadMoreAtStart` fires, in viewports.
+    #[prop(js = "loadMoreAtStartThreshold", default = 1.0, internal)]
+    LoadMoreAtStartThreshold(f32),
     /// The item index a list cell now renders (set by the runtime after
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
@@ -1695,7 +1753,7 @@ pub enum Prop {
     NativeId(Option<Box<str>>),
     /// An input's caret and selection, the highlight of a `selectable`
     /// text's selection (Rust components; TS sets the `selectionColor`
-    /// style key or `selection:text-*`).
+    /// style key or `selection:bg-*`).
     SelectionColor(Option<Color>),
     /// `autoComplete` (iOS: also `textContentType`): what an input holds, for
     /// autofill (React Native's values, e.g. "username", "current-password",
@@ -1971,6 +2029,15 @@ pub enum NativeProp {
     /// (250 by default).
     #[prop(js = "progressUpdateInterval", default = 250.0, on = VIDEO)]
     ProgressInterval(f32),
+    /// `audioSession` (videos): what the sound does to the rest of the
+    /// device's audio while it plays (`"default"` when unset: the app's
+    /// audio settings).
+    #[prop(
+        js = "audioSession",
+        reset = NativeProp::AudioSession(crate::AudioSession::Default),
+        on = VIDEO
+    )]
+    AudioSession(crate::AudioSession),
 }
 
 /// A mutation produced by the JS renderer.

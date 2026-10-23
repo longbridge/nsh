@@ -33,6 +33,14 @@ app.register(component: "embed.badge") { context in Badge(context) }  // Badge: 
 The component gets its props (`setProp`, JSON as Foundation objects) and commands, emits events with
 `context.emit("tap", ["count": n])` and may report its size with `context.setSize(_:)`.
 
+Theme overrides: "Brand" puts the host's brand over the app's theme. The tokens of a theme file
+(`nsh.json`'s `"theme"` format) win over the app's of the same names, light and dark, and
+classes such as `bg-primary` restyle at once; `nil` gives the app its own theme back:
+
+```swift
+try app.setThemeOverrides(##"{ "cssVars": { "light": { "primary": "#e11d48" } } }"##)
+```
+
 With `NativeShellDev.xcframework`, `try app.connectDevServer(URL(string: "ws://127.0.0.1:8790/ws")!)`
 loads from `nsh dev` instead and reloads on every change.
 

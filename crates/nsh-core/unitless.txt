@@ -141,6 +141,7 @@ ops::NativeProp::ProgressInterval.0                              # time
 ops::NativeProp::Rate.0                                          # a playback rate multiplier
 ops::NativeProp::Volume.0                                        # audio volume, 0..1
 ops::PayloadValue::Number.0                                      # a generic number (a JS value, a recorded slot)
+ops::Prop::LoadMoreAtStartThreshold.0                          # in viewport lengths (a ratio)
 ops::Prop::LoadMoreThreshold.0                                 # in viewport lengths (a ratio)
 ops::Prop::LongPressDelay.0                                      # time
 ops::Prop::MaxFontSizeMultiplier.0                               # a font scale factor
@@ -344,4 +345,9 @@ ui::tokens::Tokens::number ->                                    # a design toke
 ui::tokens::Tokens::numbers ->                                   # a design token: a generic number (a radius, a size, a ratio)
 ui::tokens::Tokens::set_number(value)                            # a design token: a generic number (a radius, a size, a ratio)
 ui::tokens::Token::Number.0                                      # a design token: a generic number (a radius, a size, a ratio)
+ui::virtual_list::VirtualList::load_more_at_start_threshold(viewports)  # in viewport lengths (a ratio)
 ui::virtual_list::VirtualList::load_more_threshold(viewports)  # in viewport lengths (a ratio)
+ui::rows::Rows::column ->                                        # the app's data: numbers of any unit, which a component scales
+ui::rows::Rows::from_columns(columns)                            # the app's data: numbers of any unit, which a component scales
+
+style::TextStyle.line_height_em                                  # a line-height length in multiples of the element font size

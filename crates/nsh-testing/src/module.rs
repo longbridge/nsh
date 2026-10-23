@@ -268,6 +268,7 @@ impl Testing {
                 app,
                 server: server.map(Rc::new),
                 dialog: Rc::default(),
+                pick: Rc::default(),
             },
             storage,
             requests,
@@ -473,6 +474,60 @@ pub struct Dialog {
     pub cancelable: bool,
     /// An action sheet rather than an alert.
     pub sheet: bool,
+}
+
+/// A pick the app asked for (`Picker.pickImages`), as a test reads it.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct Pick {
+    /// The user may pick several.
+    pub multiple: bool,
+    /// At most this many.
+    pub limit: u32,
+    /// The longest side, in pixels, images are scaled down to; `null`:
+    /// kept.
+    pub max_dimension: Option<u32>,
+    /// The quality of the JPEGs encoded (0 to 1); `null`: the default.
+    pub quality: Option<f64>,
+    /// The formats asked for: `"compatible"` or `"current"`.
+    pub format: String,
+}
+
+impl From<&nsh_core::picker::PickRequest> for Pick {
+    fn from(request: &nsh_core::picker::PickRequest) -> Self {
+        Pick {
+            multiple: request.multiple(),
+            limit: request.limit,
+            max_dimension: request.max_dimension.map(|d| d.0.max(0) as u32),
+            quality: request.quality.map(|q| f64::from(q.0)),
+            format: match request.format {
+                nsh_core::picker::PickFormat::Current => "current",
+                _ => "compatible",
+            }
+            .into(),
+        }
+    }
+}
+
+/// A file a test's pick handler gives the app (`app.onPick`).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct PickFile {
+    /// Its name (`"cat.png"`).
+    pub name: String,
+    /// Its media type (`"image/png"`); none: read from its bytes or name.
+    #[prop(rename = "type")]
+    pub mime: Option<String>,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl PickFile {
+    fn into_picked(self) -> nsh_core::picker::PickedFile {
+        nsh_core::picker::PickedFile::new(
+            self.name,
+            self.mime.unwrap_or_default(),
+            nsh_core::ImageData::new(self.data),
+        )
+    }
 }
 
 /// How a wait waits.
@@ -946,7 +1001,12 @@ struct Steps {
     server: Option<Rc<RouteServer>>,
     /// Answers the dialogs the app shows ([`App::on_dialog`]).
     dialog: Rc<RefCell<Option<DialogCallback>>>,
+    /// Answers the picks the app asks for ([`App::on_pick`]).
+    pick: Rc<RefCell<Option<PickCallback>>>,
 }
+
+/// A test's answer to the picks (`app.onPick`).
+type PickCallback = Callback<Pick, Option<Vec<PickFile>>>;
 
 /// A test's answer to the dialogs (`app.onDialog`).
 type DialogCallback = Callback<Dialog, Option<String>>;
@@ -1227,6 +1287,20 @@ impl App {
         *self.steps.dialog.borrow_mut() = Some(handler);
     }
 
+    /// Answers the picks the app asks for from now on (`Picker.pickImages`):
+    /// `handler` gets what the pick asks and returns the files the user
+    /// picks, given as they are (no scaling or conversion), or `null` to
+    /// cancel. Without a handler, every pick is cancelled. Headless runs
+    /// only: a real platform shows its picker.
+    pub fn on_pick(&mut self, #[args(pick)] handler: Callback<Pick, Option<Vec<PickFile>>>) {
+        *self.steps.pick.borrow_mut() = Some(handler);
+    }
+
+    /// The picks the app asked for, in order.
+    pub fn picks(&self) -> Result<Vec<Pick>, String> {
+        self.with(|app| Ok(app.picks()?.iter().map(Pick::from).collect()))
+    }
+
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
@@ -1338,12 +1412,33 @@ impl Steps {
             app,
             server,
             dialog,
+            pick,
         } = self;
         serve(server.as_deref(), on_app(app, f)).await??;
         loop {
             let pending = on_app(app, |a| Ok(a.pending_dialog())).await?;
             let Some(shown) = pending else {
-                return Ok(());
+                let asked = on_app(app, |a| Ok(a.pending_pick())).await?;
+                let Some(asked) = asked else {
+                    return Ok(());
+                };
+                let handler = pick.borrow().clone();
+                let files = match handler {
+                    Some(handler) => handler
+                        .call_async(Pick::from(&asked))
+                        .await?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(PickFile::into_picked)
+                        .collect(),
+                    None => Vec::new(),
+                };
+                serve(
+                    server.as_deref(),
+                    on_app(app, move |a| a.answer_pick(files)),
+                )
+                .await??;
+                continue;
             };
             let handler = dialog.borrow().clone();
             let answer = match handler {

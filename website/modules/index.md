@@ -35,13 +35,15 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 
 | Module | Exports | Page |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
 | `nsh/base` | `Button`; `TextView`, `SelectionArea`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/clipboard` | `Clipboard.writeText`, `Clipboard.readText`, `Clipboard.writeImage`, `Clipboard.readImage`, `Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/picker` | `Picker.pickImages` | [nsh/picker](./nsh-picker.md) |
 | `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.keys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/host` | `host.available`, `host.call`, `host.on` (the embedding app's or page's functions and events) | [nsh/host](./nsh-host.md) |
 | `nsh/keymap` | `keymap.bind` (keyboard shortcuts: `mod+k`, `ctrl+shift+p`, ...) | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`, `nativeModule` (components and functions the embedding app registers) | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `announce`, `setAccessibilityFocus`, `screenReaderEnabled`, `reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |

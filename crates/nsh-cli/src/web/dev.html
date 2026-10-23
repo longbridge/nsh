@@ -42,6 +42,9 @@
   const RUST = {{rust}};
   // The runtime's wasm-bindgen glue (an app's crates that call JS through it).
   const GLUE = {{glue}};
+  // The page's host (`nsh.json` `web.host`): its `createHost(player)` runs
+  // once the player exists, before the first bundle, as on a packaged page.
+  const HOST = {{host}};
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -88,14 +91,25 @@
     return data;
   }
 
+  let host;
   const player = await createPlayer(document.getElementById("app"), {
     wasm: "./nsh.wasm",
     glue: GLUE ?? undefined,
+    host: HOST ? { call: (name, args) => host.call(name, args) } : undefined,
     assetBase: "/assets/",
     readAsset,
     onLog: (level, message) => send({ type: "log", level: levels[level] ?? "info", target: "js", message }),
   });
   window.player = player;
+  if (HOST) {
+    try {
+      host = await (await import(HOST)).createHost(player);
+      if (typeof host?.call !== "function") throw new Error("createHost(player) returned no call(name, args)");
+    } catch (err) {
+      showProblem("nsh.json web.host", String(err?.stack ?? err));
+      host = { call: () => Promise.reject(new Error("nsh.json web.host did not load")) };
+    }
+  }
 
   function device() {
     const ua = navigator.userAgent;

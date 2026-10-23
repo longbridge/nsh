@@ -50,6 +50,7 @@ fn bench_gallery_scroll() {
     });
     host.eval_bytecode(&bytecode).unwrap();
     let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
+    core.set_components(nsh_base::registry());
     let mut ops = Vec::new();
     let mut binds: Vec<ListBind> = Vec::new();
     let list = std::cell::Cell::new(None);
@@ -83,6 +84,10 @@ fn bench_gallery_scroll() {
                 }
             }
             core.take_list_binds(binds);
+            // The overscan the engine paces over frames, all in this one.
+            if binds.is_empty() {
+                core.take_paced_list_binds(usize::MAX, binds);
+            }
             if binds.is_empty() {
                 break;
             }

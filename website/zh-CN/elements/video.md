@@ -88,7 +88,7 @@ function Player() {
 | `rate` | `.rate(..)` | `number` | `1` | 播放速度。 |
 | `repeat` | `.repeat(..)` | `boolean` | `false` | 播放到结尾后从头再播。 |
 | `controls` | `.controls(..)` | `boolean` | `false` | 显示平台的播放控件。 |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | | 视频如何适配其区域。 |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | | 视频如何适配其区域。iOS、macOS 和 Android 将 `"center"` 和 `"scale-down"` 按 `"contain"` 播放，Linux 将两者都按 `"scale-down"` 播放。 |
 | `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | `onProgress` 事件之间的毫秒数。 |
 
 请通过样式给视频一个尺寸，它的尺寸由样式决定。如果需要视频本身的比例，可以用 `onLoad` 报告的尺寸设置宽高比。

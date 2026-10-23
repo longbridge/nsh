@@ -18,8 +18,8 @@
   image (as Core Animation's layer border).
 - **Fit and position**: `resizeMode` (or an `object-*` fit class) sizes the image and the `objectPosition` style
   (`ObjectPosition`, CSS's `object-position`, parsed by `css::object_position`; `object-top`, ... set it) places it, both
-  computed by one function, `ResizeMode::fit` (`center` shrinks what is larger than the box, as CSS's `scale-down`; iOS
-  keeps such an image at its natural size, as its center gravity did). The
+  computed by one function, `ResizeMode::fit` (`center` keeps the natural size, as CSS's `none`, and `scale-down`
+  shrinks what is larger than the box, as CSS's `scale-down`, on every platform). The
   position is the image's, not the view's: it travels in `ImageOptions::position` with `MountItem::Image`, and a change
   sends that item again, not a `ViewStyle`. iOS and macOS show the image in a picture layer inside the clipped image
   layer, framed at the fitted rectangle (the tint and its mask inside it); Android translates its draw matrix by the
@@ -36,13 +36,45 @@
   (`ImageSource::with_bytes`; SHA-256, 128 bits, hex), so cache keys and coalescing hash a few dozen bytes, the
   shadow tree keeps no base64 text, equal bytes share one decode whatever URL named them, and no app can make a
   key another surface's image uses (the caches are per process). The access check lets `data:` and `blob:` through
-  (bytes the app has). iOS, macOS, Windows, Linux and GPUI decode `ImageSource::data` as they do a download's
+  (bytes the app has); only `Image`'s `src` and `placeholder` resolve a `blob:` URL, and a video, a canvas image or
+  `getSize` / `prefetch` given one report the platform's error. A `data:` URI that does not decode becomes `data:,`
+  (shows nothing, `onError`): an app writing a key itself never reaches another surface's cache entry. A `blob:`
+  URL keeps the key and bytes it resolved to (`BlobUrls`), so setting it again hashes nothing and sends nothing new.
+  iOS, macOS, Windows, Linux and GPUI decode `ImageSource::data` as they do a download's
   bytes (`Location::Memory`, served without the download map or the `getSize` data cache; iOS wraps the bytes in an
   `NSData` without a copy); the backends that get only a URI look the bytes up by it in an `InlineImages` (weak
   references: an entry lives while a source holds the bytes): Android's `Images.java` reads `data:` / `blob:` URIs
   through `Native.imageBytes`, the web runtime gets them once per key (`image_bytes`) as a browser blob URL that
   `asset()` maps the key to, revoked (`release_image`) when no source holds them. `Image.getSize` / `prefetch` of a
   `data:` URI decode it on the platform (`nsh_core::image::decode_data_uri`, the one decoder every backend uses).
+- **Picked images** (`nsh/picker`, `nsh_core::picker`): `Picker.pickImages` sends the root `Command::PickImages` with a
+  `PickRequest` checked in Rust (`limit`: 1 for a single pick, at most `MAX_PICKED` = 100; `max_dimension`, `quality`
+  as a `Percentage`, `PickFormat::Compatible` / `Current`); the `picker` capability gates it (denied: `[]` and a log
+  line). What each image becomes is decided by `PickRequest::needs_encoding` from its type and its size with its
+  orientation applied: JPEG, PNG, GIF and WebP stay as they are; another format (HEIC, HEIF, TIFF) becomes a JPEG
+  unless `Current`; an image whose longer side passes `max_dimension` is decoded upright, scaled to fit
+  (`scaled_size`) and encoded again, a PNG as a PNG and anything else as a JPEG of `jpeg_quality()` (0.9 by default);
+  a `quality` re-encodes JPEGs too. Re-encoded images carry no metadata (no EXIF location); kept ones keep theirs.
+  iOS: `PHPickerViewController` (PhotosUI loaded with `dlopen`, as WebKit is; no photo library permission), its
+  `preferredAssetRepresentationMode` compatible (the system turns HEIC into JPEG) or current, ordered selection when
+  several; each item's file is read inside `loadFileRepresentationForTypeIdentifier`'s completion (the file goes when it
+  returns) and prepared with ImageIO (`picker.rs`: `CGImageSourceCreateThumbnailAtIndex` with the transform and the
+  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel` sheet
+  and the same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
+  (`Picker.java`): `MediaStore.ACTION_PICK_IMAGES` (API 33+, or 30+ with SDK extension 2), else `ACTION_GET_CONTENT`
+  for `image/*`, started by a headless retained `android.app.Fragment` added to the view's activity (the embedding app
+  forwards no result); the bytes are read from the content resolver, sized with `BitmapFactory` bounds and the EXIF
+  orientation, and re-encoded with `BitmapFactory` (power-of-two sampling), an orientation `Matrix` and
+  `Bitmap.compress`; `Native.picked` hands them over. Web: an `<input type=file>` (`cancel` answers empty), scaled
+  with `createImageBitmap` (`imageOrientation: "from-image"`) and an `OffscreenCanvas`; `nsh_picked_file` /
+  `nsh_picked` hand the bytes over. Windows (`IFileOpenDialog` on a thread of its own), Linux (`gtk::FileDialog`) and
+  GPUI (`prompt_for_paths`) read the files as they are (`nsh_core::picker::read_files`), offering only the formats
+  `dialog_extensions` lists for the request (with `Compatible`: the four that stay as they are); they scale nothing.
+  Every backend answers once with the root `Pick` event, `EventPayload::Picked { id, files }`, the bytes in
+  `ImageData` (no base64 anywhere); the core cuts the list to the limit and fills in sizes, types and file extensions
+  from the bytes (`PickedFile::fill_in`, `imagesize`), and `nsh-js` makes each a `File` over a `Blob` sharing those
+  bytes, so `URL.createObjectURL(file)` shows it in an `Image` and `fetch` / `FormData` upload it without a copy in JS.
+  An embedder's `PickerBackend` (`EngineConfig::picker`) answers in place of the platform: no command is sent.
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the

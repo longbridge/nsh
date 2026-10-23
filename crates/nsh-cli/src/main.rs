@@ -52,7 +52,11 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
     if let Some(sets) = &*UI_SETS.read().unwrap_or_else(|e| e.into_inner()) {
         return sets.clone();
     }
-    let sets: Arc<[SetDescription]> = own_sets().iter().map(SetDescription::from).collect();
+    let sets: Arc<[SetDescription]> = own_sets()
+        .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
+        .map(SetDescription::from)
+        .collect();
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets.clone());
     sets
 }
@@ -62,6 +66,7 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
 pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
     let sets: Arc<[SetDescription]> = own_sets()
         .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
         .map(SetDescription::from)
         .chain(app)
         .collect();
@@ -158,6 +163,11 @@ enum Command {
         /// apps in (default: the one installed on this machine).
         #[arg(long, value_name = "PATH")]
         browser: Option<PathBuf>,
+        /// The web page's host module (default: `nsh.json` `web.host`), which
+        /// exports `createHost(player)`: in headless runs it answers the
+        /// `nsh/host` calls of each app the tests open and sends its events.
+        #[arg(long, value_name = "JS")]
+        web_host: Option<PathBuf>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -583,6 +593,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             junit,
             target,
             browser,
+            web_host,
         } => test::test(
             &path,
             &entry,
@@ -591,6 +602,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             junit.as_deref(),
             target,
             browser.as_deref(),
+            web_host,
         ),
         Command::Dev {
             entry,

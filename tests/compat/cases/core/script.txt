@@ -112,6 +112,11 @@ frame id:inner2 8 8 374 20
 expect Plum
 absent No plums
 expect Nothing here
+# A viewport of overscan below the visible rows (100 pt): bound after the
+# first frame, never further.
+expect Long 0
+expect Long 4
+absent Long 6
 tap id:add
 expect 4. Item 4
 expect 3. Cherry
@@ -333,3 +338,18 @@ covers [props] margin
 covers [events] onPosition
 covers [events] onPressOutside
 covers [events] onCancel
+# core-error-boundary
+tap id:case-core-error-boundary
+expect Around the boundary
+expect Risky ok
+expect Outer caught fallback of binding
+tap id:break
+expect Caught binding
+absent Risky ok
+expect Around the boundary
+tap id:retry
+expect Risky ok
+tap id:risky
+expect Caught pressed
+expect Break
+covers [nsh] ErrorBoundary
