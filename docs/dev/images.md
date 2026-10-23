@@ -18,8 +18,8 @@
   image (as Core Animation's layer border).
 - **Fit and position**: `resizeMode` (or an `object-*` fit class) sizes the image and the `objectPosition` style
   (`ObjectPosition`, CSS's `object-position`, parsed by `css::object_position`; `object-top`, ... set it) places it, both
-  computed by one function, `ResizeMode::fit` (`center` shrinks what is larger than the box, as CSS's `scale-down`; iOS
-  keeps such an image at its natural size, as its center gravity did). The
+  computed by one function, `ResizeMode::fit` (`center` keeps the natural size, as CSS's `none`, and `scale-down`
+  shrinks what is larger than the box, as CSS's `scale-down`, on every platform). The
   position is the image's, not the view's: it travels in `ImageOptions::position` with `MountItem::Image`, and a change
   sends that item again, not a `ViewStyle`. iOS and macOS show the image in a picture layer inside the clipped image
   layer, framed at the fitted rectangle (the tint and its mask inside it); Android translates its draw matrix by the

@@ -25,6 +25,7 @@ unreachable_pub = "deny"
 private_interfaces = "deny"
 
 [workspace.dependencies]
+unicode-linebreak = "0.1.5"
 nsh-core = { version = "0.2.0", path = "crates/nsh-core" }
 nsh-package = { version = "0.2.0", path = "crates/nsh-package" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.

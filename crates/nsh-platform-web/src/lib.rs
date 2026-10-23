@@ -781,6 +781,7 @@ pub unsafe extern "C" fn nsh_compile(
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
     let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
         .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
         .filter_map(nsh_core::ui::description::SetDescription::of)
         .collect();
     let result = nsh_bundler::compile_module(&name, &source, &sets);

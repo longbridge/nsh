@@ -51,6 +51,10 @@ coalescing interval, with the latest coordinates kept independently per view and
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
+- Gradients mixed in Oklab (`cargo test --release -p nsh-core bench_gradient_oklab -- --ignored --nocapture`, a
+  Tailwind gradient of three stops): ~0.5µs for one of nearly one color (no stop added), ~4.2µs blue / purple / pink
+  (11 stops), ~7.9µs red / lime / blue (33 stops, out of sRGB's gamut halfway), paid when the node's classes apply.
+
 - Rust components vs the same component in TSX (`component_bench`, which writes its screens as `examples/bench` has them; release, minimum of the runs;
   a button written as a Rust component and the same button in TSX, `TsButton.tsx`, styled to draw exactly alike),
   with the Rust button running once (its props bound) and, in brackets, as it rendered again and was diffed before:
@@ -232,3 +236,8 @@ draw a panel.
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.
+
+- Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
+  debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
+  both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes
+  after `+1`. Single runs establish unchanged work counts; timings are a smoke check, not a benchmark.

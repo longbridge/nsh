@@ -330,3 +330,7 @@ ui::tokens::Tokens::numbers ->                                   # a design toke
 ui::tokens::Tokens::set_number(value)                            # a design token: a generic number (a radius, a size, a ratio)
 ui::tokens::Token::Number.0                                      # a design token: a generic number (a radius, a size, a ratio)
 ui::virtual_list::VirtualList::load_more_threshold(viewports)  # in viewport lengths (a ratio)
+ui::rows::Rows::column ->                                        # the app's data: numbers of any unit, which a component scales
+ui::rows::Rows::from_columns(columns)                            # the app's data: numbers of any unit, which a component scales
+
+style::TextStyle.line_height_em                                  # a line-height length in multiples of the element font size

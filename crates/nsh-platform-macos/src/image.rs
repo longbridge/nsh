@@ -1143,10 +1143,15 @@ pub(crate) fn set(
     let restart = {
         let mut guard = view.state_mut();
         let s = &mut *guard;
+        // `center` shows the image at its own size: decoded so, where the
+        // other modes decode it at the view's.
+        let natural = |m: ResizeMode| m == ResizeMode::Center;
+        let same_decode = natural(s.decor.resize_mode()) == natural(mode);
         s.decor.set_fit(mode, options.position);
         let image = s.image.get_or_insert_with(ImageState::default);
         image.surface = surface.key();
-        let same_source = image.source.as_ref().map(|i| &i.uri) == source.map(|i| &i.uri);
+        let same_source =
+            same_decode && image.source.as_ref().map(|i| &i.uri) == source.map(|i| &i.uri);
         let same_look = image.options.placeholder == options.placeholder
             && image.options.blur_radius == options.blur_radius;
         image.options = options.clone();
@@ -1237,12 +1242,18 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
         let blur = nsh_core::blur_radius(filters).0;
         let matrix = nsh_core::compose_color_matrices(filters);
         let (events, id) = (s.events, s.id);
+        // 0: the image's own size, which `center` shows.
+        let natural = s.decor.resize_mode() == ResizeMode::Center;
         let Some(image) = s.image.as_mut() else {
             return;
         };
         image.pending = false;
         let decoding = Decoding {
-            max_pixels: (w.max(h) as CGFloat * scale).ceil() as u32,
+            max_pixels: if natural {
+                0
+            } else {
+                (w.max(h) as CGFloat * scale).ceil() as u32
+            },
             scale,
             blur: ((image.options.blur_radius.0 + blur) as CGFloat * scale).max(0.0),
             matrix,
