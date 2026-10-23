@@ -150,6 +150,11 @@ pub struct AppOptions {
     /// functions read it with `nsh_core::ui::engine_context`, so each view
     /// reaches its own part of the embedding app.
     pub context: nsh_engine::EngineContext,
+    /// The embedding app's channel with the apps the view runs
+    /// (`nsh/host`): their launch parameters, events to them and handlers of
+    /// their calls and posts ([`AppView::host`]). One for every app the view
+    /// loads; a new one by default.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for AppOptions {
@@ -167,6 +172,7 @@ impl Default for AppOptions {
             data_dir: None,
             storage: None,
             context: Default::default(),
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }
@@ -326,6 +332,7 @@ impl AppView {
             context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
+            host: options.host.clone(),
             picker: self.picker.borrow().clone(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
@@ -357,6 +364,16 @@ impl AppView {
         crate::image::set_asset_base(&self.surface, base.clone());
         self.surface.native.set_asset_base(base.clone());
         self.options.borrow_mut().asset_base = base;
+    }
+
+    /// The channel with the apps this view runs (`nsh/host`;
+    /// [`AppOptions::host`]): set their launch parameters
+    /// ([`nsh_engine::HostChannel::set_params`], read when an app starts),
+    /// send them events ([`nsh_engine::HostChannel::send`]) and handle their
+    /// calls and posts ([`nsh_engine::HostChannel::handle`]; handlers run on
+    /// the engine thread). Any thread may use it.
+    pub fn host(&self) -> nsh_engine::HostChannel {
+        self.options.borrow().host.clone()
     }
 
     /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now

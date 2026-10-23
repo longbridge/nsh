@@ -815,6 +815,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Clipboard,
     EventKind::Host,
     EventKind::Pick,
+    EventKind::OpenUrl,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

@@ -525,6 +525,7 @@ impl RootView {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: self.ivars().options.host.clone(),
             picker: None,
         };
         // A test session's app: the test's storage, network and trace.
@@ -628,6 +629,10 @@ pub struct SurfaceOptions {
     pub storage: Option<std::path::PathBuf>,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+    /// The embedding app's channel with the apps (`nsh/host`): launch
+    /// parameters, events and handlers of their calls and posts, one for
+    /// every app the surface runs.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for SurfaceOptions {
@@ -640,6 +645,7 @@ impl Default for SurfaceOptions {
             data_dir: data_dir(),
             storage: None,
             components: crate::component::Components::default(),
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }

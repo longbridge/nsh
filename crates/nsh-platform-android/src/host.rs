@@ -70,6 +70,9 @@ pub(crate) struct Host {
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
+    /// The embedding app's channel with the apps (`nsh/host`; Java
+    /// `NshView.setParams`, `send`, `handle`).
+    host: nsh_engine::HostChannel,
     /// The app's keyboard shortcuts, matched on the UI thread.
     pub(crate) keymap: Mutex<crate::keymap::KeymapState>,
     #[cfg(feature = "dev")]
@@ -176,6 +179,7 @@ impl Host {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: self.host.clone(),
             picker: None,
         };
         let density = self.density;
@@ -526,6 +530,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         access: Mutex::new(Arc::default()),
         host_tokens: Mutex::new(None),
         inline_images: Mutex::default(),
+        host: nsh_engine::HostChannel::new(),
         keymap: Mutex::default(),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
@@ -1166,6 +1171,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "error" => "error",
                 "text" => "text",
                 "has" => "has",
+                "opened" => "opened",
                 "reason" => "reason",
                 "composing" => "composing",
                 _ => continue,
@@ -1556,5 +1562,233 @@ extern "system" fn Java_com_longbridge_nsh_Native_componentSize(
     let host = unsafe { host(handle) };
     if let Some(control) = host.control() {
         control.set_component_size(id as NodeId, Size::new(Points(width), Points(height)));
+    }
+}
+
+/// A Java string argument, `None` for null.
+fn optional_string(env: &mut JNIEnv<'_>, s: &JString<'_>) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    env.get_string(s).ok().map(String::from)
+}
+
+/// JSON text from Java (null: `null`), or why it is not JSON.
+fn json_value(
+    env: &mut JNIEnv<'_>,
+    json: &JString<'_>,
+    what: &str,
+) -> Result<nsh_core::JsonValue, String> {
+    match optional_string(env, json) {
+        None => Ok(nsh_core::JsonValue::Null),
+        Some(text) => {
+            serde_json::from_str(&text).map_err(|err| format!("{what} is not JSON: {err}"))
+        }
+    }
+}
+
+/// The launch parameters of the apps loaded from now on (`host.params`):
+/// a JSON object (null: none). False when it is not one.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setHostParams(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    json: JString<'_>,
+) -> jboolean {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    match json_value(&mut env, &json, "the parameters") {
+        Ok(nsh_core::JsonValue::Null) => host.host.set_params(serde_json::Map::new()),
+        Ok(nsh_core::JsonValue::Object(params)) => host.host.set_params(params),
+        Ok(_) => {
+            log::error!("the parameters are a JSON object");
+            return 0;
+        }
+        Err(err) => {
+            log::error!("{err}");
+            return 0;
+        }
+    }
+    1
+}
+
+/// Sends event `name` with `json` data (null: `null`) to the running app
+/// (`host.on`). False when the name or the data is invalid.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_sendHostEvent(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    name: JString<'_>,
+    json: JString<'_>,
+) -> jboolean {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(name) = optional_string(&mut env, &name) else {
+        return 0;
+    };
+    let sent =
+        json_value(&mut env, &json, "the event data").and_then(|data| host.host.send(name, data));
+    match sent {
+        Ok(()) => 1,
+        Err(err) => {
+            log::error!("{err}");
+            0
+        }
+    }
+}
+
+/// `NshView` handles the app's calls and posts of `name` (`handled`), or no
+/// longer does: the channel hands them to `NshView.hostMessage` on the
+/// engine thread, which runs the Java handler on the UI thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setHostHandler(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    name: JString<'_>,
+    handled: jboolean,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(name) = optional_string(&mut env, &name) else {
+        return;
+    };
+    if handled == 0 {
+        return host.host.remove_handler(&name);
+    }
+    // The view's reference, not the host's: the channel the host owns keeps
+    // the handler.
+    let view = host.view.clone();
+    host.host.handle(name.clone(), move |mut call| {
+        let json = call.take_data().to_string();
+        let call = if call.is_post() {
+            0
+        } else {
+            Box::into_raw(Box::new(call)) as jlong
+        };
+        let delivered = with_env(|env| {
+            let name = env.new_string(&name)?;
+            let json = env.new_string(&json)?;
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    view.as_obj(),
+                    java().view_host_message,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[
+                        JValue::Object(&name).as_jni(),
+                        JValue::Object(&json).as_jni(),
+                        JValue::Long(call).as_jni(),
+                    ],
+                )
+            }
+            .map(|_| true)
+        });
+        if !delivered && call != 0 {
+            // Java never got it: the call fails rather than waits.
+            // SAFETY: made above and not handed over.
+            drop(unsafe { Box::from_raw(call as *mut nsh_engine::HostCall) });
+        }
+    });
+}
+
+/// Answers a call `NshView.hostMessage` got (`json`, or `error` when it
+/// failed) and frees it. Any thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_hostReply(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    call: jlong,
+    json: JString<'_>,
+    error: JString<'_>,
+) {
+    if call == 0 {
+        return;
+    }
+    // SAFETY: a call `setHostHandler`'s handler handed to Java, answered once.
+    let call = unsafe { Box::from_raw(call as *mut nsh_engine::HostCall) };
+    let result = match optional_string(&mut env, &error) {
+        Some(message) => Err(message),
+        None => json_value(&mut env, &json, "the answer"),
+    };
+    call.reply(result);
+}
+
+/// `NshView` takes the URLs the app opens first (`handled`), or no longer
+/// does: the channel hands them to `NshView.openUrlMessage` on the engine
+/// thread, which runs the Java handler on the UI thread and answers with
+/// `openUrlReply`.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setOpenUrlHandler(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    handled: jboolean,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    if handled == 0 {
+        return host.host.remove_open_url_handler();
+    }
+    // The view's reference, not the host's: the channel the host owns keeps
+    // the handler.
+    let view = host.view.clone();
+    host.host.handle_open_url(move |request| {
+        let url = request.url().to_owned();
+        let request = Box::into_raw(Box::new(request)) as jlong;
+        let delivered = with_env(|env| {
+            let url = env.new_string(&url)?;
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    view.as_obj(),
+                    java().view_open_url_message,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[
+                        JValue::Object(&url).as_jni(),
+                        JValue::Long(request).as_jni(),
+                    ],
+                )
+            }
+            .map(|_| true)
+        });
+        if !delivered {
+            // Java never got it: the system opens the URL.
+            // SAFETY: made above and not handed over.
+            drop(unsafe { Box::from_raw(request as *mut nsh_engine::OpenUrlRequest) });
+        }
+    });
+}
+
+/// Answers a URL `NshView.openUrlMessage` got (`handled`: the embedding app
+/// took it; else the system opens it) and frees it. Any thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_openUrlReply(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    request: jlong,
+    handled: jboolean,
+) {
+    if request == 0 {
+        return;
+    }
+    // SAFETY: a request `setOpenUrlHandler`'s handler handed to Java,
+    // answered once.
+    let request = unsafe { Box::from_raw(request as *mut nsh_engine::OpenUrlRequest) };
+    request.answer(handled != 0);
+}
+
+/// Frees a call unanswered: it fails in the app. Any thread.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_hostCallFree(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    call: jlong,
+) {
+    if call != 0 {
+        // SAFETY: as in `hostReply`.
+        drop(unsafe { Box::from_raw(call as *mut nsh_engine::HostCall) });
     }
 }

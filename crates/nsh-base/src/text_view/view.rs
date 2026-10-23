@@ -48,6 +48,13 @@ pub struct TextViewProps {
     /// a pointer), each block on its own.
     #[prop(default)]
     pub selectable: Prop<bool>,
+    /// What a press on a link does: `"report"` (the default) reports it
+    /// (`onLinkPress`) and opens nothing; `"open"` also opens a link to
+    /// another app or site outside the app (`openUrl` of `nsh/device`,
+    /// under the app's `openUrl` capability; the embedding app may route
+    /// it), while anchors in the document (`#…`) are only reported.
+    #[prop(default)]
+    pub links: Prop<TextViewLinks>,
     /// Whether code blocks show the scroll indicator of their horizontal
     /// scroll view (default true).
     #[prop(default = true)]
@@ -102,12 +109,25 @@ pub struct TextViewMath {
     pub display: bool,
 }
 
+/// What a press on a link of a [`TextView`] does (`links`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub enum TextViewLinks {
+    /// It is reported (`onLinkPress`); the app decides what opens.
+    #[default]
+    Report,
+    /// It is reported, then a URL of another app or site (with a scheme:
+    /// `https:`, `mailto:`, ...) opens outside the app
+    /// ([`nsh_core::ui::open_url`]); an anchor in the document (`#…`) is
+    /// only reported.
+    Open,
+}
+
 /// The events of a [`TextView`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum TextViewEvent {
     /// A link was pressed: its URL (`#anchor` for a heading of the
-    /// document, `#footnote-<label>` for a footnote). Nothing opens it:
-    /// the app decides.
+    /// document, `#footnote-<label>` for a footnote). Nothing opens it
+    /// unless `links` is `"open"`: the app decides.
     #[args(event)]
     LinkPress(TextViewLinkPressEvent),
     /// An image that is not in a link was pressed: the image (its `src`,
@@ -370,6 +390,7 @@ struct Cx {
     /// image there is the link's.
     link: std::cell::RefCell<Option<SharedString>>,
     highlighter: Option<CodeHighlighter>,
+    links: TextViewLinks,
     scope: Scope<TextViewEvent>,
 }
 
@@ -400,7 +421,24 @@ impl Cx {
             list_depth: std::cell::Cell::new(0),
             line: std::cell::Cell::new(BODY_SIZE * BODY_LINE),
             link: std::cell::RefCell::new(None),
+            links: props.links.get(),
             scope,
+        }
+    }
+
+    /// What a press on a link to `url` does: reported, and opened outside
+    /// the app when `links` says so.
+    fn link_press(&self, url: SharedString) -> impl Fn() + Clone + 'static {
+        let (scope, links) = (self.scope, self.links);
+        move || {
+            scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                url: url.clone(),
+            }));
+            if links == TextViewLinks::Open && !url.starts_with('#') {
+                // Whether it opened is the platform's to show; a refused
+                // URL or capability is logged.
+                drop(open_url(url.to_string()));
+            }
         }
     }
 
@@ -1194,7 +1232,6 @@ impl Cx {
                 title,
                 content,
             } => {
-                let scope = self.scope;
                 let url = SharedString::from(url.clone());
                 let outer = self.link.replace(Some(url.clone()));
                 let span = self.span(content, key);
@@ -1207,11 +1244,7 @@ impl Cx {
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
-                    .on_press(move || {
-                        scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                            url: url.clone(),
-                        }))
-                    });
+                    .on_press(self.link_press(url));
                 self.part(el, Part::Link).into_element()
             }
             Inline::Image(image) => {
@@ -1302,11 +1335,10 @@ impl Cx {
         let scope = self.scope;
         let pressed = image.clone();
         let is_link = link.is_some();
+        let link = link.map(|url| self.link_press(url));
         // In a link it is the link's; else a press reports the image.
         let press = Some(move || match &link {
-            Some(url) => scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                url: url.clone(),
-            })),
+            Some(press) => press(),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
         });
         let role = if is_link {

@@ -74,6 +74,7 @@ final class Native {
     static final int HOST = 63;
     static final int PICK = 64;
     static final int LOAD_MORE_AT_START = 65;
+    static final int OPEN_URL = 66;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -159,6 +160,27 @@ final class Native {
 
     /** A native component's own size (dp). */
     static native void componentSize(long handle, int id, float width, float height);
+
+    /** The launch parameters (a JSON object; null: none) of the apps loaded next; false if it is not one. */
+    static native boolean setHostParams(long handle, String json);
+
+    /** Sends event {@code name} with {@code json} data (null: none) to the running app; false if invalid. */
+    static native boolean sendHostEvent(long handle, String name, String json);
+
+    /** The app's calls and posts of {@code name} go to {@code NshView.hostMessage} ({@code handled}), or nowhere. */
+    static native void setHostHandler(long handle, String name, boolean handled);
+
+    /** Answers a call {@code hostMessage} got: {@code json}, or {@code error} when it failed. Frees it. */
+    static native void hostReply(long call, String json, String error);
+
+    /** Frees a call unanswered: it fails in the app. */
+    static native void hostCallFree(long call);
+
+    /** The URLs the app opens go to {@code NshView.openUrlMessage} first ({@code handled}), or to the system. */
+    static native void setOpenUrlHandler(long handle, boolean handled);
+
+    /** Answers a URL {@code openUrlMessage} got: whether the embedding app took it. Frees it. */
+    static native void openUrlReply(long request, boolean handled);
 
     /** Root size in dp. */
     static native void resize(long handle, float width, float height);

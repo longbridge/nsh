@@ -332,6 +332,13 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;
+- URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
+  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would (`app.openedUrls()`);
+- the embedding app is the test's (`EngineConfig::host`, `Headless::host`): `open`'s `host.params` are the launch
+  parameters, `host.handlers` the channel's handlers (`module.rs` `host_setup`: a value answers at once, a function's
+  calls go over a channel to `RouteServer`, which `serve` answers on the test file's VM while a step runs, as a route's
+  function; each call and post the handlers get is recorded for `app.host.calls()` / `posts()`), and
+  `app.host.send` is `Headless::send_host_event`, a step;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
@@ -458,7 +465,13 @@ side holds them, outside the app's clock). `open`'s locale, reduced motion and s
 host in the test's setup (`TestEnvironment`, `DevServer::set_test_environment`) and its engine pins them
 (`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports); its clipboard is the
 test's (`EngineConfig::clipboard`: the core serves the app's clipboard commands from a `ClipboardBackend`, here a
-`MemoryClipboard` the agent's model keeps, which `app.clipboard()` reads), so the machine's is never touched.
+`MemoryClipboard` the agent's model keeps, which `app.clipboard()` reads), so the machine's is never touched. The
+test plays the embedding app there too, through the view's own channel (`Model::set_up_engine` on `config.host`):
+`open`'s `host.params` arrive in the setup (`TestEnvironment::host_params`), `app.host.send` is
+`TestStep::HostSend` (the model's `send_host_event`, then the agent settles; the web's page answers
+`SceneQuery::HostSend`), and the channel's URL handler records each URL the app opens and takes it, so nothing
+opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` runs headless only (`open` rejects them):
+the calls would need the test's functions over the dev server.
 
 Routes and storage reach the host through the dev server (`HostOptions`, `DevServer::set_test_storage` and
 `set_test_network`). Before the first bundle, the server sends the test host a `ServerMessage::TestSetup` with the

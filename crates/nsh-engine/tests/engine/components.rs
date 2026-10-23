@@ -83,6 +83,7 @@ pub(crate) fn start_with(
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     };
     (

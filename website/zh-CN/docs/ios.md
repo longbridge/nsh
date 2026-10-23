@@ -199,6 +199,10 @@ final class EmbedController: UIViewController {
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | 在主线程之外验证指定 URL 的包，然后运行它。被拒绝时抛出原因；正在运行的应用保持不变。 |
 | `connectDevServer(_ url: URL) throws` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用不含开发支持的 `NativeShell.xcframework` 时会抛出错误。 |
 | `register(component:_:)` | 注册一个[原生组件](./native-components.md)。 |
+| `params: [String: Any]` | 之后加载的应用的启动参数：应用在启动时以 `host.params` 读取（[`nsh/host`](../modules/nsh-host.md)）。 |
+| `send(_ name: String, _ data: Any? = nil)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。 |
+| `handle(_ name: String, _ handler:)` | 在主线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）：`{ data, reply in … }`，或一个 `async throws` 函数 `{ data in … }`，其结果即调用的回答。 |
+| `removeHandler(_ name: String)` | 移除 `name` 的处理函数：应用对它的调用随即失败。 |
 | `static preferredStatusBarStyle`、`prefersStatusBarHidden`、`preferredStatusBarUpdateAnimation` | 正在运行的应用请求的状态栏设置（其页面和对话框的 `statusBar`、`nsh.json` 的默认值）：在宿主视图控制器的对应重写中返回它们。 |
 
 > [!IMPORTANT]
@@ -216,6 +220,37 @@ app.storageDirectory = FileManager.default
 try app.loadBundle(at: url)
 ```
 
+## 与应用通信
+
+视图与它运行的应用通过一条专属通道通信（[`nsh/host`](../modules/nsh-host.md)）：应用在启动时读取的启动参数、宿主应用发来的事件，以及应用发出的调用和投递，数据都是 JSON（在这一侧是 Foundation 对象）。应用里不需要任何视图，也不需要原生组件。
+
+```swift
+// 加载之前：应用首先打开的内容（TSX 中的 `host.params`）。
+app.params = ["conversation": notification.conversationID]
+try app.loadBundle(at: url)
+
+// 应用的 `await host.call("user.profile", { id })`：返回回答，或抛出错误让调用失败。
+app.handle("user.profile") { data in
+    let id = (data as? [String: Any])?["id"] as? Int ?? 0
+    let profile = try await api.profile(id: id)
+    return ["id": id, "name": profile.name]
+}
+
+// 稍后在任意线程用 reply 回答的处理函数。
+app.handle("photo.pick") { _, reply in
+    picker.present { url in
+        if let url { reply.resolve(url.absoluteString) } else { reply.reject("cancelled") }
+    }
+}
+
+// 应用的 `host.post("analytics", …)`：没有回答。
+app.handle("analytics") { data, _ in analytics.log(data) }
+
+// 之后：应用通过 `host.on("conversation.open", …)` 收到它。
+app.send("conversation.open", ["id": tapped.conversationID])
+```
+
+处理函数在主线程运行；调用在应用中等待回答，不会阻塞任何一方。未回答就被释放的 reply 会让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadBundle` 之前、重新加载期间）发送的事件交给下一个应用，因此应用启动期间点开的通知照样能送到。
 ## 主题覆盖
 
 嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：
@@ -232,6 +267,21 @@ try app.loadBundle(at: url)
 ```
 
 在加载之前或之后调用都可以：`bg-primary`、`rounded-(--radius)` 等类名立即更新样式，之后加载的每个应用在第一帧就带有这些覆盖。`setThemeOverrides(nil)` 恢复应用自己的主题。
+
+## 应用打开的链接
+
+应用打开的 URL（[`openUrl`](../modules/nsh-device.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）先交给 `onOpenURL`，在主线程调用：宿主应用自己处理了这个 URL（例如交给自己的路由）时返回 `true`，返回 `false` 则由系统用 `UIApplication.open` 打开。没有设置 `onOpenURL` 时，所有 URL 都由系统打开。到达这里的 URL 都已通过应用的 `openUrl` 能力检查。
+
+```swift
+app.onOpenURL = { url in
+    // 宿主应用自己的链接在宿主应用里打开。
+    if url.scheme == "lb" || url.host == "longbridge.com" {
+        router.open(url)
+        return true
+    }
+    return false
+}
+```
 
 ## 限制
 
