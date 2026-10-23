@@ -312,8 +312,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
-  (`cargo xtask compat`; `docs/dev/compatibility.md`).
+  change until 0.3.0, the first release recorded. A new API lands with its test, a case in
+  `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens, shadcn/ui's, are the app's to draw with; the one
   exception is `TextView`'s default reading typography, its colors the theme's shadcn tokens (alerts GitHub's alert
