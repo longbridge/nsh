@@ -65,9 +65,13 @@ pub(crate) struct Host {
     storage: Mutex<Option<std::path::PathBuf>>,
     /// What the running app may reach (web view navigations check it).
     access: Mutex<Arc<nsh_engine::Access>>,
+    /// The embedding app's theme overrides (`NshView.setThemeOverrides`).
+    host_tokens: Mutex<Option<nsh_engine::Tokens>>,
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
+    /// The app's keyboard shortcuts, matched on the UI thread.
+    pub(crate) keymap: Mutex<crate::keymap::KeymapState>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
     /// A test session's model of the app (`nsh test --target android`):
@@ -93,9 +97,26 @@ impl Host {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
     }
 
+    /// Hands event `kind` of node `id` to the running app.
+    pub(crate) fn dispatch(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
+        if let Some(control) = self.control() {
+            control.dispatch_event(id, kind, payload);
+        }
+    }
+
     /// The VM limits of the apps loaded from now on.
     pub(crate) fn set_limits(&self, limits: nsh_engine::Limits) {
         *self.limits.lock().expect("limits") = limits;
+    }
+
+    /// The embedding app's theme overrides (`None`: the app's own theme):
+    /// sent to the running app at once, and to every app loaded later
+    /// before its first frame.
+    fn set_host_tokens(&self, tokens: Option<nsh_engine::Tokens>) {
+        *self.host_tokens.lock().expect("tokens") = tokens.clone();
+        if let Some(control) = self.control() {
+            control.set_tokens(tokens);
+        }
     }
 
     /// Runs `app`, replacing the running app.
@@ -127,6 +148,10 @@ impl Host {
             self.app_stopped();
         }
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
+        self.keymap
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         *self.ui.lock().expect("ui") = UiAnimation::default();
         #[allow(unused_mut)]
         let mut config = EngineConfig {
@@ -160,7 +185,14 @@ impl Host {
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
             model.set_up_engine(&mut config);
         }
-        match Engine::start(config, move || AndroidTextEngine { density }, sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.host_tokens.lock().expect("tokens").clone();
+        let setup = |control: &EngineControl| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        };
+        match Engine::start_with(config, move || AndroidTextEngine { density }, sink, setup) {
             Ok(engine) => {
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
@@ -336,7 +368,13 @@ impl MountSink for Sink {
         }
         answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
-        let encoded = encode::encode(batch);
+        let mut encoded = encode::encode(batch);
+        if let Some(keymap) = encoded.keymap.take() {
+            host.keymap
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .set(keymap);
+        }
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
         if !encoded.animation.is_empty() {
             host.animation_queue
@@ -486,7 +524,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
+        host_tokens: Mutex::new(None),
         inline_images: Mutex::default(),
+        keymap: Mutex::default(),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
         #[cfg(feature = "dev")]
@@ -586,6 +626,41 @@ extern "system" fn Java_com_longbridge_nsh_Native_setStorage(
         }
     };
     *host.storage.lock().expect("storage") = dir;
+}
+
+/// The embedding app's theme overrides: a theme file of shadcn/ui's
+/// (`cssVars`, as `nsh.json`'s `"theme"`), whose tokens win over the app's
+/// of the same names (null: the app's own theme again). Applies at once and
+/// to every app loaded later. Returns why the file does not parse (nothing
+/// changes), or null.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setThemeOverrides<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    json: JString<'local>,
+) -> JString<'local> {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let tokens = if json.is_null() {
+        Ok(None)
+    } else {
+        match env.get_string(&json) {
+            Ok(json) => nsh_base::theme_overrides(&String::from(json))
+                .map(Some)
+                .map_err(|err| format!("invalid theme: {err}")),
+            Err(err) => Err(format!("invalid theme: {err}")),
+        }
+    };
+    match tokens {
+        Ok(tokens) => {
+            host.set_host_tokens(tokens);
+            JString::from(JObject::null())
+        }
+        Err(err) => env
+            .new_string(err)
+            .unwrap_or_else(|_| JString::from(JObject::null())),
+    }
 }
 
 /// Whether the running app's web views may navigate to `url`.

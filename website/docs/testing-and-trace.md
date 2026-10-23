@@ -310,7 +310,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
 | `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. Rejects when the item is disabled or missing. |
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does. |
-| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `nsh/keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard: the app's shortcut of it hears it on a desktop or the web (`keymap.bind`, `onKeyCommand`), else the focused input takes a character, Backspace or the return key, else Escape goes back. The phones have no app shortcuts: there it rejects. |
+| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `nsh/keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else the focused input takes a character, Backspace or the return key, else Escape goes back. |
 | `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |
@@ -349,12 +349,40 @@ that only a real platform can do:
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
+- **The page's host answers `nsh/host`** when the app's `nsh.json` names one in `web.host` ([The page's
+  host](#the-pages-host)).
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` resolves `[]`.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
+
+### The page's host
+
+An app published to the web gets its host from its page: `nsh.json` `web.host`, a module exporting
+`createHost(player)` ([Web](./web.md#the-hosts-functions)). Headless runs load that module for each app a test opens,
+before the app starts, in a JavaScript context of its own (timers and `console`, nothing of the browser's, no
+imports): its `call` answers the app's [`host.call`](../modules/nsh-host.md), its `player.hostEvent` reaches
+`host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
+app's call with its message, as on the page, and events sent before the app starts reach its top-level listeners
+once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
+the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them
+(`app.clock.runFor`). In a browser (`--target web`) the development page runs `nsh.json`'s `web.host` for each app as a
+published page does; on the other platforms (`--target`) the apps have no host: `host.available()` is `false`.
+
+```tsx
+// nsh.json: { "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
+import { open, test } from "nsh/test";
+
+test("calls reach the page's host", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:call");
+  await app.waitFor('text:{"n":1}');
+});
+```
+
+`examples/host-echo` has an app, its host and their tests.
 
 ### Expectations
 
@@ -381,8 +409,8 @@ own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
-  back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
-  swiped down on iOS, the back button on Android);
+  back button on Windows and in GPUI, the browser's back button on the web, a sheet swiped down, VoiceOver's escape
+  gesture while a menu, popover or `Sheet` is open, else the header's back button on iOS, the back button on Android);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;

@@ -662,8 +662,10 @@ fn resize_mode(m: ResizeMode) -> &'static str {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        // Centered, scaled down to fit when larger.
-        ResizeMode::Center => "scale-down",
+        // Centered at its natural size.
+        ResizeMode::Center => "none",
+        // The same, scaled down to fit when larger.
+        ResizeMode::ScaleDown => "scale-down",
     }
 }
 
@@ -1420,6 +1422,21 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(asked.max_dimension.map_or(0, |d| d.0.max(1)))
                 .num(asked.quality.map_or(-1.0, |q| q.0))
                 .bool(asked.format == nsh_core::picker::PickFormat::Current)
+                .end();
+        }
+        // The id is written whole (`num` rounds); the page answers with
+        // `onHost` `{ type: "reply" }` (`nsh.js` `hostCall`).
+        Command::HostCall {
+            id: request,
+            name,
+            args,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostCall")
+                .raw(&request.to_string())
+                .str(name)
+                .raw(&args.to_string())
                 .end();
         }
         Command::ImageInfo { id: request, uri } => {

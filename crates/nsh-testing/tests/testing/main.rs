@@ -17,6 +17,7 @@ fn test_run(filter: Option<&str>) -> TestRun {
         filter: filter.map(str::to_owned),
         trace: None,
         host: None,
+        page_host: None,
     }
 }
 
@@ -229,6 +230,24 @@ fn a_manual_clock_moves_as_the_test_says() {
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 7);
+}
+
+#[test]
+fn the_page_s_host_answers_the_apps_tests_open() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/host");
+    let run = |module: Option<&str>, file: &str| {
+        let run = TestRun {
+            page_host: module.map(|m| dir.join(m)),
+            ..test_run(None)
+        };
+        let results = run_file(&run, &dir.join(file), &mut |_| {}).unwrap();
+        let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+        assert!(failed.is_empty(), "{file}: {failed:#?}");
+        results.len()
+    };
+    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 7);
+    assert_eq!(run(None, "NoHost.test.tsx"), 1);
+    assert_eq!(run(Some("none.js"), "Broken.test.tsx"), 1);
 }
 
 #[test]

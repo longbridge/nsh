@@ -1320,6 +1320,13 @@ impl Painter {
         slot
     }
 
+    /// Adds `node`: a part of the drawing that assistive technologies and
+    /// UI tests see as an element of its own ([`crate::canvas::CanvasNode`]).
+    pub fn node(mut self, node: crate::canvas::CanvasNode) -> Self {
+        self.drawing.nodes.push(node);
+        self
+    }
+
     /// Records `op` (one built by hand: its numbers and paints from
     /// [`Self::num`] and [`Self::paint`]).
     pub fn op(mut self, op: CanvasOp) -> Self {

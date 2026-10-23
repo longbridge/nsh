@@ -521,6 +521,12 @@ pub enum SceneQuery {
         /// The span.
         id: u32,
     },
+    /// The canvas containing the node `selector` names, and its center
+    /// in the canvas's coordinates: `[view, {x, y}]`, or `null` for a view.
+    CanvasNode {
+        /// The canvas node's selector.
+        selector: String,
+    },
 
     /// The text input `id` holds.
     InputText {

@@ -722,8 +722,10 @@ fn fit(mode: ResizeMode, natural: (f32, f32), size: (f32, f32)) -> (f32, f32, f3
     }
     let s = match mode {
         ResizeMode::Cover => (w / nw).max(h / nh),
+        // Natural size (cropped where larger).
+        ResizeMode::Center => 1.0,
         // Shrunk to fit, never enlarged.
-        ResizeMode::Center => (w / nw).min(h / nh).min(1.0),
+        ResizeMode::ScaleDown => (w / nw).min(h / nh).min(1.0),
         _ => (w / nw).min(h / nh),
     };
     let (fw, fh) = (nw * s, nh * s);
@@ -1015,10 +1017,16 @@ mod tests {
         let (x, y, w, h) = fit(ResizeMode::Cover, natural, (320.0, 320.0));
         assert_eq!((y, h), (0.0, 320.0));
         assert!(w > 320.0 && x < 0.0);
-        // Center never enlarges.
+        // Center and scale-down never enlarge; center never shrinks.
+        for mode in [ResizeMode::Center, ResizeMode::ScaleDown] {
+            assert_eq!(
+                fit(mode, (100.0, 50.0), (400.0, 200.0)),
+                (150.0, 75.0, 100.0, 50.0)
+            );
+        }
         assert_eq!(
-            fit(ResizeMode::Center, (100.0, 50.0), (400.0, 200.0)),
-            (150.0, 75.0, 100.0, 50.0)
+            fit(ResizeMode::Center, (800.0, 400.0), (400.0, 200.0)),
+            (-200.0, -100.0, 800.0, 400.0)
         );
         // No size yet: the box.
         assert_eq!(

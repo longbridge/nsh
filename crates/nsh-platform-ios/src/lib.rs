@@ -30,6 +30,7 @@ pub mod embed;
 mod image;
 mod input;
 mod interaction;
+mod keymap;
 mod mount;
 mod native_view;
 mod navigation;

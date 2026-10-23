@@ -59,6 +59,7 @@ pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
+mod rows;
 mod scrollable;
 pub(crate) mod services;
 pub(crate) mod status_bar;
@@ -161,6 +162,7 @@ pub use self::{
     renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
+    rows::Rows,
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     style::{
@@ -416,7 +418,7 @@ pub mod prelude {
             os, os_version, pick_images, pixel_ratio, prefetch_image, reduce_motion,
             request_animation_frame, round_to_nearest_pixel, safe_area, screen_reader,
             set_clipboard, set_clipboard_image, set_color_scheme, set_interval, set_timeout, spawn,
-            timer, timer_until, toast, tokens, window,
+            text_metrics, timer, timer_until, toast, tokens, window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
         provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,

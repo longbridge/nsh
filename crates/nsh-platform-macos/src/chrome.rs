@@ -328,6 +328,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
+        // The menu bar is the system's.
+        DesktopCommand::SetMenuBar(_) => {}
         DesktopCommand::PopupMenu { items, at } => {
             // The menu tracks the mouse in a loop of its own: not while the
             // batch is applied. From the run loop, not the main queue: a

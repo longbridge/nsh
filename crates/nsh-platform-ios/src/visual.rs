@@ -151,14 +151,15 @@ pub(crate) fn draws_outside(style: &ViewStyle) -> bool {
             .is_some_and(|e| e.box_shadows.iter().any(|s| !s.inset && s.is_visible()))
 }
 
-/// The view's drop shadow filter, if any (it follows the content's shape).
+/// The view's drop shadow filter, if any (it follows the content's shape):
+/// one is drawn, the widest of the chain's (the last of equals).
 pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
     style
         .effects
         .as_ref()?
         .filters
         .iter()
-        .find_map(|f| match *f {
+        .filter_map(|f| match *f {
             Filter::DropShadow {
                 offset_x,
                 offset_y,
@@ -167,6 +168,7 @@ pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
             } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         })
+        .max_by(|a, b| a.2.total_cmp(&b.2))
 }
 
 /// The opacity factor of the view's filters (`opacity()`).

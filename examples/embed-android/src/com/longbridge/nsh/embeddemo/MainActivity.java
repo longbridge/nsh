@@ -18,11 +18,19 @@ import com.longbridge.nsh.NshView;
  * An existing Android app that embeds a nsh app below its own native UI.
  * The nsh bundle (`nsh build ../embedded`) is packaged as APK
  * assets under `nsh/`; it uses a native component the app registers
- * (`embed.badge`).
+ * (`embed.badge`). "Brand" puts the host's brand over the app's theme
+ * (`setThemeOverrides`).
  */
 public final class MainActivity extends Activity {
     private NshView nsh;
     private int loads;
+    private boolean branded;
+
+    /** The host's brand: the tokens it sets win over the app's, light and dark. */
+    private static final String BRAND = "{ \"cssVars\": {"
+            + " \"theme\": { \"radius\": \"1rem\" },"
+            + " \"light\": { \"primary\": \"#e11d48\", \"primary-foreground\": \"#ffffff\" },"
+            + " \"dark\": { \"primary\": \"#fb7185\", \"primary-foreground\": \"#1c1917\" } } }";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -48,6 +56,11 @@ public final class MainActivity extends Activity {
             count.setText("loaded " + (++loads) + "×");
         });
         column.addView(reload);
+        Button brand = new Button(this);
+        brand.setText("Brand");
+        // null gives the app its own theme back.
+        brand.setOnClickListener(v -> nsh.setThemeOverrides((branded = !branded) ? BRAND : null));
+        column.addView(brand);
         column.addView(count);
 
         // The embedded nsh app, in a bordered frame.

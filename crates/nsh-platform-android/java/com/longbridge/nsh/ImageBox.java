@@ -21,7 +21,7 @@ import android.view.View;
 final class ImageBox extends View implements Node {
     final Decor decor = new Decor();
     final int id;
-    int resizeMode; // 0 cover, 1 contain, 2 stretch, 3 center
+    int resizeMode; // 0 cover, 1 contain, 2 stretch, 3 center, 4 scale-down
     /**
      * {@code objectPosition}: per axis a distance from the start edge (left, top) or, with the axis's bit 1, the
      * end edge; with its bit 2 a fraction of the free space, else pixels. Bits 0-1 are x's, 2-3 y's. The center
@@ -201,10 +201,17 @@ final class ImageBox extends View implements Node {
             case 2:
                 matrix.setScale(w / bw, h / bh);
                 break;
-            case 3: {
+            case 3:
+            case 4: {
                 // Preserve the intrinsic SVG dimensions within the decoded raster, as before.
                 float sx = naturalWidth > 0 ? Math.min(1, naturalWidth / bw) : 1;
                 float sy = naturalHeight > 0 ? Math.min(1, naturalHeight / bh) : 1;
+                if (resizeMode == 4) {
+                    // Scale-down: shrunk to fit the view where larger.
+                    float fit = Math.min(1, Math.min(w / (bw * sx), h / (bh * sy)));
+                    sx *= fit;
+                    sy *= fit;
+                }
                 matrix.setScale(sx, sy);
                 matrix.postTranslate(place(w - bw * sx, positionX, positionFlags), place(h - bh * sy, positionY, positionFlags >> 2));
                 break;

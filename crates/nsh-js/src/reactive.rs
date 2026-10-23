@@ -49,6 +49,15 @@ pub(crate) struct JsData {
     classes: Classes,
     /// The first exception of a round, thrown when the round ends.
     error: Option<JsValue>,
+    /// The context key of error boundaries (`ErrorBoundary`): its value is
+    /// the boundary's signal of the error it shows (owned).
+    boundary_key: JsValue,
+    /// Exceptions error boundaries caught, with the boundary's signal
+    /// (owned): delivered once no computation runs ([`finish`]), as a
+    /// boundary shows its fallback by running again.
+    caught: Vec<(JsValue, JsValue)>,
+    /// How many computations run now (nested).
+    running: u32,
 }
 
 /// A context value set by a provider.
@@ -121,10 +130,28 @@ unsafe impl r::Host for Js {
     }
 
     fn call(self, f: &JsValue, prev: JsValue) -> Option<JsValue> {
+        let cx = self.0;
         let mut args = [prev];
-        let r = call(self.0, *f, &mut args);
+        // SAFETY: short borrows of the graph around the call.
+        unsafe { graph(cx) }.data.running += 1;
+        // SAFETY: `f` and `args` are live values; the call may re-enter the
+        // graph, which holds no reference here.
+        let r = unsafe { qjs::JS_Call(cx, *f, UNDEFINED, 1, args.as_mut_ptr()) };
+        unsafe { graph(cx) }.data.running -= 1;
         self.free(args[0]);
-        r.ok()
+        // SAFETY: inline tag check.
+        if unsafe { qjs::JS_IsException(r) } {
+            // The computation is still the current owner: what fails under
+            // an error boundary goes to it.
+            let exception = unsafe { qjs::JS_GetException(cx) };
+            match lookup(cx, unsafe { graph(cx) }.data.boundary_key) {
+                Some(boundary) => catch(cx, boundary, exception),
+                None => keep_error(cx, exception),
+            }
+            None
+        } else {
+            Some(r)
+        }
     }
 
     #[inline]
@@ -252,6 +279,11 @@ fn unpack(p: *mut c_void) -> (u32, u32) {
 fn take_exception(cx: *mut JsContext) {
     // SAFETY: an exception is pending.
     let exception = unsafe { qjs::JS_GetException(cx) };
+    keep_error(cx, exception);
+}
+
+/// Keeps `exception` (owned) as the round's error, unless one is kept.
+fn keep_error(cx: *mut JsContext, exception: JsValue) {
     // SAFETY: no other reference to the graph is live here.
     let g = unsafe { graph(cx) };
     if g.data.error.is_none() {
@@ -259,6 +291,103 @@ fn take_exception(cx: *mut JsContext) {
     } else {
         // SAFETY: ours.
         unsafe { qjs::JS_FreeValue(cx, exception) };
+    }
+}
+
+/// Error boundary `boundary` (its signal, owned) caught `exception`
+/// (owned): it shows it once no computation runs. The first a boundary
+/// catches wins: the fallback replaces what failed after.
+fn catch(cx: *mut JsContext, boundary: JsValue, exception: JsValue) {
+    // SAFETY: a short borrow; strict equality runs no JS.
+    let g = unsafe { graph(cx) };
+    let known = g
+        .data
+        .caught
+        .iter()
+        .any(|&(b, _)| unsafe { qjs::JS_IsStrictEqual(cx, b, boundary) });
+    if known {
+        // SAFETY: ours.
+        unsafe {
+            qjs::JS_FreeValue(cx, boundary);
+            qjs::JS_FreeValue(cx, exception);
+        }
+    } else {
+        g.data.caught.push((boundary, exception));
+    }
+}
+
+/// The error boundary (its signal, owned) of what owner `owner` (from
+/// [`owner_handle`]) runs, if it is still live and under one.
+pub(crate) fn boundary_of(cx: *mut JsContext, (owner, generation): (u32, u32)) -> Option<JsValue> {
+    // SAFETY: short borrows.
+    let g = unsafe { graph(cx) };
+    if !g.is_live_owner(owner) || !g.live(owner, generation, u32::MAX) {
+        return None;
+    }
+    let key = g.data.boundary_key;
+    find(cx, g.context_of(owner), key)
+}
+
+/// The current owner and its generation, for [`boundary_of`] later
+/// (`NONE` without one).
+pub(crate) fn owner_handle(cx: *mut JsContext) -> (u32, u32) {
+    // SAFETY: a short borrow.
+    let g = unsafe { graph(cx) };
+    let owner = g.owner();
+    if g.is_live_owner(owner) {
+        (owner, g.generation(owner))
+    } else {
+        (r::NONE, 0)
+    }
+}
+
+/// Hands the pending exception to the error boundary of owner `owner`
+/// (from [`owner_handle`]): whether one caught it (else it stays pending).
+/// A listener's failure goes there, as one of a computation does.
+pub(crate) fn catch_pending(cx: *mut JsContext, owner: (u32, u32)) -> bool {
+    let Some(boundary) = boundary_of(cx, owner) else {
+        return false;
+    };
+    // SAFETY: an exception is pending.
+    let exception = unsafe { qjs::JS_GetException(cx) };
+    catch(cx, boundary, exception);
+    let r = finish(cx, UNDEFINED);
+    // SAFETY: inline tag check; what the delivery threw stays pending.
+    !unsafe { qjs::JS_IsException(r) }
+}
+
+/// Hands the pending exception to error boundary `boundary` (its signal,
+/// borrowed).
+pub(crate) fn catch_pending_at(cx: *mut JsContext, boundary: JsValue) {
+    // SAFETY: an exception is pending; a dup for the list.
+    let (exception, boundary) =
+        unsafe { (qjs::JS_GetException(cx), qjs::JS_DupValue(cx, boundary)) };
+    catch(cx, boundary, exception);
+}
+
+/// The context key of error boundaries (borrowed).
+pub(crate) fn boundary_key(cx: *mut JsContext) -> JsValue {
+    unsafe { graph(cx) }.data.boundary_key
+}
+
+/// Shows what error boundaries caught: each boundary's signal is set to
+/// `[error]`, which runs it again (its fallback may fail in turn, for the
+/// boundary above).
+fn deliver_caught(cx: *mut JsContext) {
+    loop {
+        // SAFETY: a short borrow.
+        let caught = std::mem::take(&mut unsafe { graph(cx) }.data.caught);
+        if caught.is_empty() {
+            return;
+        }
+        for (boundary, error) in caught {
+            let mut items = [error];
+            // SAFETY: the array takes the error.
+            let wrapped = unsafe { qjs::JS_NewArrayFrom(cx, 1, items.as_mut_ptr()) };
+            set_signal(cx, boundary, wrapped);
+            // SAFETY: ours.
+            unsafe { qjs::JS_FreeValue(cx, boundary) };
+        }
     }
 }
 
@@ -357,6 +486,11 @@ fn finish(cx: *mut JsContext, value: JsValue) -> JsValue {
         return value;
     }
     g.reset_runs();
+    if g.data.running == 0 && !g.data.caught.is_empty() {
+        deliver_caught(cx);
+    }
+    // SAFETY: short borrow.
+    let g = unsafe { graph(cx) };
     match g.data.error.take() {
         Some(error) => unsafe {
             qjs::JS_FreeValue(cx, value);
@@ -715,7 +849,15 @@ unsafe extern "C" fn set_context(
 
 /// The value of `key` in the current owner's context (owned), if set.
 pub(crate) fn lookup(cx: *mut JsContext, key: JsValue) -> Option<JsValue> {
-    let mut frame = unsafe { graph(cx) }.context();
+    find(cx, unsafe { graph(cx) }.context(), key)
+}
+
+/// The value of `key` in `frame` or a frame it shadows (owned), if set.
+fn find(
+    cx: *mut JsContext,
+    mut frame: Option<std::rc::Rc<r::Frame<Js>>>,
+    key: JsValue,
+) -> Option<JsValue> {
     while let Some(f) = frame {
         if unsafe { qjs::JS_IsStrictEqual(cx, f.data.key, key) } {
             return Some(unsafe { qjs::JS_DupValue(cx, f.data.value) });
@@ -788,6 +930,9 @@ pub(crate) fn new_graph(raw: *mut JsContext) -> Graph {
             cx: raw,
             classes,
             error: None,
+            boundary_key: qjs::JS_NewObject(raw),
+            caught: Vec::new(),
+            running: 0,
         })
     }
 }
@@ -800,6 +945,16 @@ pub(crate) fn free_all(graph: &mut Graph, raw: *mut JsContext) {
         // SAFETY: the graph's own value; no JS runs from here on.
         unsafe { qjs::JS_FreeValue(raw, e) };
     }
+    for (boundary, error) in std::mem::take(&mut graph.data.caught) {
+        // SAFETY: the graph's own values.
+        unsafe {
+            qjs::JS_FreeValue(raw, boundary);
+            qjs::JS_FreeValue(raw, error);
+        }
+    }
+    let key = std::mem::replace(&mut graph.data.boundary_key, UNDEFINED);
+    // SAFETY: the graph's own value.
+    unsafe { qjs::JS_FreeValue(raw, key) };
 }
 
 /// A native function named `name`.

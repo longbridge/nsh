@@ -1,8 +1,10 @@
 // The nsh app the embedding samples (examples/embed-ios, examples/embed-android)
 // run. The badge is a native view of the host app, registered as
 // `embed.badge` (`NshAppView.register(component:)`, `NshView.registerComponent`).
+// The pill is drawn with the theme's tokens, which the host apps override
+// with their brand (`NshAppView.setThemeOverrides`, `NshView.setThemeOverrides`).
 
-import { mount, signal, Text, type YNode } from "nsh";
+import { mount, signal, Text, View, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
 import { SafeAreaView } from "nsh/base";
 
@@ -23,6 +25,9 @@ function App() {
       <Text style={{ color: "#57606a" }}>
         The badge below is a native view of the host app: nsh lays it out, sends it props and gets its events.
       </Text>
+      <View class="self-start rounded-(--radius) bg-primary px-3 py-2">
+        <Text class="text-primary-foreground">Styled by the host app's theme</Text>
+      </View>
       <Badge
         ref={(node) => (badge = node)}
         text={taps() === 0 ? "Tap the native badge" : `Tapped ${taps()}×`}

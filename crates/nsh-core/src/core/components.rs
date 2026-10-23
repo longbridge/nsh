@@ -482,6 +482,10 @@ pub(super) struct Components {
         ),
     >,
     next_pick: u32,
+    /// Calls of the embedding app's functions (`nsh/host`), by request id:
+    /// their answers.
+    host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, String>>>,
+    next_host_call: u64,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -567,6 +571,8 @@ impl Default for Components {
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
+            host_calls: FxHashMap::default(),
+            next_host_call: 1,
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -598,6 +604,12 @@ impl Default for Components {
 }
 
 impl Components {
+    /// Whether `list` is one of the components' own lists (bound in the
+    /// core).
+    pub(super) fn is_virtual_list(&self, list: NodeId) -> bool {
+        self.virtual_lists.contains_key(&list)
+    }
+
     pub(super) fn for_viewport(viewport: crate::Size<crate::Points>) -> Self {
         let mut components = Self::default();
         components.environment.window = viewport;
@@ -4449,6 +4461,28 @@ impl<M: TextEngine> Core<M> {
                     command,
                 });
             }
+            Action::HostCall { name, args, answer } => {
+                if !self.components.environment.host {
+                    answer
+                        .borrow_mut()
+                        .deliver(Err(crate::runtime::host::NO_HOST.into()));
+                    return;
+                }
+                let id = self.components.next_host_call;
+                self.components.next_host_call += 1;
+                self.components.host_calls.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::HostCall { id, name, args },
+                });
+            }
+            // A call timed out (`runtime/host.rs`), its answer dropped: its
+            // slot waits no more.
+            Action::ForgetHostCalls => {
+                self.components
+                    .host_calls
+                    .retain(|_, slot| std::rc::Rc::strong_count(slot) > 1);
+            }
         }
     }
 
@@ -4553,6 +4587,20 @@ impl<M: TextEngine> Core<M> {
                 .deliver(image.filter(|i| !i.url.is_empty())),
             Some(ClipboardRead::Files(slot)) => slot.borrow_mut().deliver(files),
             None => {}
+        }
+    }
+
+    /// The answer to host call `id`: the host's value, or its error. A
+    /// call that timed out (`runtime/host.rs`) takes none: its late answer
+    /// is dropped.
+    pub(super) fn answer_host(&mut self, id: u64, result: Result<crate::JsonValue, String>) {
+        match self.components.host_calls.remove(&id) {
+            Some(answer) if std::rc::Rc::strong_count(&answer) > 1 => {
+                answer.borrow_mut().deliver(result);
+            }
+            _ => {
+                log::debug!(target: "js", "nsh/host: dropped the answer to call {id}, which no longer waits")
+            }
         }
     }
 
@@ -4662,6 +4710,42 @@ impl<M: TextEngine> Core<M> {
                 };
                 let answer = ClipboardAnswer::from_payload(payload);
                 self.answer_clipboard(request as u32, answer);
+                true
+            }
+            // The host's replies; its events go on to `nsh/host`'s
+            // listeners (`nsh-js`).
+            EventKind::Host if id == crate::ROOT_ID => {
+                let EventPayload::Json(reply) = payload else {
+                    return false;
+                };
+                if reply.get("type").and_then(crate::JsonValue::as_str) != Some("reply") {
+                    return false;
+                }
+                // JSON's numbers may come as floats (`1.0`); `1.5` is no
+                // call. Ids stay within JS' safe integers.
+                let call = reply.get("id").and_then(|id| {
+                    id.as_u64().or_else(|| {
+                        id.as_f64()
+                            .filter(|n| {
+                                n.fract() == 0.0 && (1.0..=9_007_199_254_740_991.0).contains(n)
+                            })
+                            .map(|n| n as u64)
+                    })
+                });
+                let Some(call) = call else {
+                    log::debug!(target: "js", "nsh/host: dropped a reply without a call's id: {reply}");
+                    return true;
+                };
+                let result = if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
+                    Ok(reply.get("value").cloned().unwrap_or_default())
+                } else {
+                    Err(reply
+                        .get("error")
+                        .and_then(crate::JsonValue::as_str)
+                        .unwrap_or("nsh/host: the call failed")
+                        .to_owned())
+                };
+                self.answer_host(call, result);
                 true
             }
             EventKind::Insets => {

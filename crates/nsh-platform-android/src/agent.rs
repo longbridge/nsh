@@ -279,6 +279,40 @@ impl Native for AndroidNative {
         });
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::Keystroke;
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::Android).map_err(|e| e.to_string())?;
+        let code = stroke
+            .key
+            .android_keycode()
+            .ok_or_else(|| format!("an Android keyboard has no key {keys:?}"))?;
+        // `KeyEvent.META_*_ON`.
+        let m = stroke.modifiers;
+        let meta = [
+            (m.shift, 0x1),
+            (m.alt, 0x2),
+            (m.ctrl, META_CTRL_ON),
+            (m.cmd, 0x10000),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .fold(0, |meta, (_, bit)| meta | bit);
+        if self.host.upgrade().is_none() {
+            return Err("the app is gone".into());
+        }
+        self.call(|env, class, view| {
+            env.call_static_method(
+                class,
+                "pressKeys",
+                "(Lcom/longbridge/nsh/NshView;II)V",
+                &[JValue::Object(view), JValue::Int(code), JValue::Int(meta)],
+            )
+            .map(drop)
+        });
+        Ok(())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.call(|env, class, view| {
             let s = env

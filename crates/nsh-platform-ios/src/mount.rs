@@ -475,6 +475,11 @@ impl Mounter {
         }
     }
 
+    /// The surface's event target.
+    pub(crate) fn target(&self) -> &Retained<EventTarget> {
+        &self.target
+    }
+
     /// Node `id`'s view (`nsh test --target ios`).
     #[cfg(feature = "dev")]
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
@@ -497,6 +502,22 @@ impl Mounter {
             Native::Input(input) => Some(input.text()),
             _ => None,
         }
+    }
+
+    /// VoiceOver's escape gesture (or the test agent's `back`) reached the
+    /// surface: while the app listens to going back (an overlay's
+    /// `onCancel`, a back listener), the core hears it as the back button
+    /// (the top overlay listening first). Whether it was taken.
+    pub(crate) fn escape(&self) -> bool {
+        if !self
+            .slot(nsh_core::ROOT_ID)
+            .is_some_and(|s| s.events.contains(EventKind::BackPress))
+        {
+            return false;
+        }
+        self.control
+            .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+        true
     }
 
     /// Whether a native animation runs.
@@ -1068,7 +1089,7 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
         }
         false
     }
@@ -1926,9 +1947,13 @@ impl Mounter {
         if !matches!(s.native, Native::Image(_)) {
             return;
         }
+        // `center` shows the image at its own size: decoded so, where the
+        // other modes decode it at the view's.
+        let natural = |m: ResizeMode| m == ResizeMode::Center;
+        let same_decode = natural(s.decor.resize_mode()) == natural(resize_mode);
         s.decor.set_fit(resize_mode, options.position);
-        let same_source =
-            s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
+        let same_source = same_decode
+            && s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
         let same_look = s.image_options.placeholder == options.placeholder
             && s.image_options.blur_radius == options.blur_radius;
         s.image_options = options;
@@ -2000,7 +2025,12 @@ impl Mounter {
                 continue;
             };
             let size = view.bounds().size;
-            let max_pixels = (size.width.max(size.height) * scale).ceil() as u32;
+            // 0: the image's own size, which `center` shows.
+            let max_pixels = if s.decor.resize_mode() == ResizeMode::Center {
+                0
+            } else {
+                (size.width.max(size.height) * scale).ceil() as u32
+            };
             let filters = s
                 .style
                 .effects
