@@ -51,6 +51,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     }
 }
@@ -132,6 +133,7 @@ fn first_error(bundle: Bundle) -> String {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();

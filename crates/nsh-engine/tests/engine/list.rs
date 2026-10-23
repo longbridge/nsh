@@ -128,6 +128,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     };
     (config, dir)

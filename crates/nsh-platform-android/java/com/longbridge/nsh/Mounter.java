@@ -1932,6 +1932,13 @@ final class Mounter {
                 Picker.show(context, request);
                 break;
             }
+            case 26: {
+                int request = b.getInt();
+                String url = (String) objects[b.getInt()];
+                boolean opened = SystemUi.openUrl(context, url);
+                eventMap(1, Native.OPEN_URL, new String[] {"id", "opened"}, new Object[] {(double) request, opened});
+                break;
+            }
             case 23: {
                 int request = b.getInt();
                 boolean hasOnly = b.getInt() != 0;

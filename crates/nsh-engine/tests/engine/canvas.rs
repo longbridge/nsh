@@ -85,6 +85,7 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     };
     (

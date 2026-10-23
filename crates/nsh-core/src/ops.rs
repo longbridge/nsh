@@ -222,6 +222,7 @@ events! {
     Host = "onHost": "The embedding host answered a [`Command::HostCall`] or sent an event to `nsh/host`'s listeners (root only; payload: [`EventPayload::Json`], `{ type: \"reply\", id, ok, value?, error? }` or `{ type: \"event\", event, payload }`).",
     Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
     LoadMoreAtStart = "onLoadMoreAtStart": "A list was scrolled close to its start after the user or a scroll command moved it (raised by the core).",
+    OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
 
@@ -1533,6 +1534,17 @@ pub enum Command {
         id: u32,
         /// What to show and how to prepare the images.
         request: crate::picker::PickRequest,
+    },
+    /// Open `url` outside the app (on the root; `openUrl` of `nsh/device`,
+    /// [`crate::open_url`]): the browser, the mail or phone app, the app
+    /// that registered its scheme. Report whether it opened as
+    /// [`EventKind::OpenUrl`] `id`. The core sends it once the URL was
+    /// checked and the embedding app did not take it.
+    OpenUrl {
+        /// The request.
+        id: u32,
+        /// The URL ([`crate::open_url::check_url`] passed it).
+        url: String,
     },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.

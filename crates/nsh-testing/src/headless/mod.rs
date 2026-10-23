@@ -587,8 +587,9 @@ impl Headless {
     }
 
     /// Does what a platform does after a batch: reports where commands
-    /// moved scroll views, tells modals they show, answers clipboard reads,
-    /// goes back when the app asked, reports finished animations.
+    /// moved scroll views, tells modals they show, answers clipboard reads
+    /// and the URLs opened, goes back when the app asked, reports finished
+    /// animations.
     fn react(&mut self) {
         let control = self.engine.control();
         for id in self.screen.take_scrolled() {
@@ -621,6 +622,15 @@ impl Headless {
                 ),
             ];
             control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
+        }
+        // URLs are recorded (`Screen::opened_urls`) and reported opened, as
+        // a device with an app for every scheme would.
+        for id in self.screen.take_url_opens() {
+            let fields = vec![
+                ("id", PayloadValue::Number(f64::from(id))),
+                ("opened", PayloadValue::Bool(true)),
+            ];
+            control.dispatch_event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields));
         }
         if self.screen.take_back_asked() {
             self.go_back(false);

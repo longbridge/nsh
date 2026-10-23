@@ -166,6 +166,9 @@ setContentView(column);
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
+| `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`nsh/host`](../modules/nsh-host.md)）。不是 JSON 对象时返回 `false`。 |
+| `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用；`destroy()` 后返回 `false`。 |
+| `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
 | `connectDevServer(String url)` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用 release 版 AAR 时返回 `false`。 |
 | `handleBack()` | 让应用处理返回键（关闭对话框、弹出页面、执行 `BackHandler` 监听器）；返回它是否处理了。 |
 | `destroy()` | 停止应用，并对它的每个原生组件调用 `destroy()`。此后该视图不能再使用。 |
@@ -183,6 +186,43 @@ nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
 
+## 与应用通信
+
+视图与它运行的应用通过一条专属通道通信（[`nsh/host`](../modules/nsh-host.md)）：应用在启动时读取的启动参数、宿主应用发来的事件，以及应用发出的调用和投递，数据都是 JSON（在这一侧是 map、list、字符串、数字和布尔值）。应用里不需要任何视图，也不需要原生组件。
+
+```java
+// 加载之前：应用首先打开的内容（TSX 中的 `host.params`）。
+nsh.setParams(Map.of("conversation", intent.getStringExtra("conversation")));
+nsh.loadAssetBundle("nsh");
+
+// 应用的 `await host.call("user.profile", { id })`，在 UI 线程处理。
+nsh.handle("user.profile", (data, reply) -> {
+    Object id = ((Map<?, ?>) data).get("id");
+    api.profile(id, profile -> reply.resolve(Map.of("id", id, "name", profile.name)),
+            error -> reply.reject(error.getMessage()));
+});
+
+// 应用的 `host.post("analytics", …)`：没有回答。
+nsh.handle("analytics", (data, reply) -> analytics.log(data));
+
+// 之后：应用通过 `host.on("conversation.open", …)` 收到它。
+nsh.send("conversation.open", Map.of("id", tappedConversation));
+```
+
+Kotlin 写法：
+
+```kotlin
+nsh.handle("user.profile") { data, reply ->
+    val id = (data as Map<*, *>)["id"]
+    lifecycleScope.launch {
+        runCatching { api.profile(id) }
+            .onSuccess { reply.resolve(mapOf("id" to id, "name" to it.name)) }
+            .onFailure { reply.reject(it.message ?: "failed") }
+    }
+}
+```
+
+处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
 ## 主题覆盖
 
 嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：
@@ -196,6 +236,22 @@ nsh.loadAssetBundle("orders");
 ```
 
 在加载之前或之后调用都可以：`bg-primary`、`rounded-(--radius)` 等类名立即更新样式，之后加载的每个应用在第一帧就带有这些覆盖。`setThemeOverrides(null)` 恢复应用自己的主题。
+
+## 应用打开的链接
+
+应用打开的 URL（[`openUrl`](../modules/nsh-device.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）先交给视图的 `OpenUrlHandler`，在 UI 线程调用：宿主应用自己处理了这个 URL（例如交给自己的路由）时返回 `true`，返回 `false` 则由系统用 `ACTION_VIEW` Intent 打开。没有设置处理函数时，所有 URL 都由系统打开。到达这里的 URL 都已通过应用的 `openUrl` 能力检查。
+
+```java
+nsh.setOpenUrlHandler(url -> {
+    Uri uri = Uri.parse(url);
+    // 宿主应用自己的链接在宿主应用里打开。
+    if ("lb".equals(uri.getScheme()) || "longbridge.com".equals(uri.getHost())) {
+        router.open(uri);
+        return true;
+    }
+    return false;
+});
+```
 
 ## 限制
 

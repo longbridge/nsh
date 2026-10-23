@@ -332,6 +332,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;
+- URLs the app opens (`Command::OpenUrl`) are recorded (`Screen::opened_urls`), never opened, and answered with
+  `onOpenUrl` `{ opened: true }`, as a device with an app for every scheme would;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 

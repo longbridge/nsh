@@ -419,7 +419,7 @@ pub mod prelude {
             clipboard_string, color, component_ref, dark, dismiss_keyboard, element_ref, fetch,
             font_scale, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
             keyboard_height, locale, measure_text, next_frame, on_back_press, on_key, on_key_with,
-            os, os_version, pick_images, pixel_ratio, prefetch_image, reduce_motion,
+            open_url, os, os_version, pick_images, pixel_ratio, prefetch_image, reduce_motion,
             request_animation_frame, round_to_nearest_pixel, safe_area, screen_reader,
             set_clipboard, set_clipboard_image, set_color_scheme, set_interval, set_timeout, spawn,
             text_metrics, timer, timer_until, toast, tokens, window,

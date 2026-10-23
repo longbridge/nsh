@@ -71,6 +71,59 @@
   set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
   answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
   throws a `ReferenceError` naming it.
+- **The host channel** (`nsh/host`; `nsh_engine::HostChannel`, `nsh_core::host_channel`, `nsh-js`
+  `host_channel.rs`): the embedding app and the app talk without a view in between and without Rust of the
+  embedding app's. Every view keeps one channel for every app it loads (Rust `AppView::host()` on iOS, macOS,
+  Linux, Windows and GPUI, `AppOptions::host` / `SurfaceOptions::host` to bring one's own; Swift `NshAppView.params`,
+  `send(_:_:)`, `handle(_:_:)`, `removeHandler(_:)`, C `nsh_app_set_host_params`, `nsh_app_send_host_event`,
+  `nsh_app_set_host_handler`, `nsh_host_call_resolve` / `_reject` / `_free`; Java `NshView.setParams`, `send`,
+  `handle`, `NshView.HostHandler`, `NshHostReply`) and hands it to each engine (`EngineConfig::host`), one channel per
+  surface, no globals.
+  - *Launch parameters*: `set_params(map)` before a load; the engine snapshots them when it starts (`HostChannel::bridge`)
+    and `host.params` reads them synchronously (a JSON object, `{}` without any), fixed for the app's life. Later
+    requests ("open conversation X" from a notification) are events.
+  - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
+    (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
+    is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
+    oldest dropped and logged). Stopping the engine serializes its interrupt and shutdown message with `send`;
+    its attachment recovers events left in the engine queue for the next app under the same lock. In the VM, an
+    event of a name nobody listens to is kept likewise until the first
+    listener of that name is added; a job then delivers what was kept, in order, at the end of the turn that added it
+    (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
+    uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
+    listener unsubscribes during a callback, the rest keep their original order and age in the inbox.
+  - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
+    engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
+    rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
+    elsewhere): `Message::HostReply(id, result)` settles the promise in the engine's next turn. A `HostReply` dropped
+    unanswered rejects ("did not answer"), so a handler that panics (caught) or forgets fails the call rather than
+    leaving it pending; an answer for an engine that stopped goes nowhere. Calls use the platform API's timeout:
+    30 seconds by default, `{ timeout: 0 }` to wait without a deadline, on the app's clock. Calls and posts require
+    `capabilities.host` and the same function-name validation as the platform transport. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
+    handler they are dropped.
+  - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
+    engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in
+    `embed.rs`; Android: `NshView.hostMessage`, called over JNI on the engine thread, posts to the UI thread), where
+    Swift's and Java's handlers run. Android serializes the native part of `send` with taking the handle in
+    `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
+    (Swift `JSONSerialization`, Java
+    `org.json` as maps and lists), the VM as JSON values converted natively.
+  - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
+    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
+  - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
+    `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
+    opens (`openUrl` of `nsh/device`, `nsh_core::ui::open_url`, a `TextView` with `links="open"`;
+    `nsh_core::open_url`) reach it before the platform, so a host routes its own links through its router. It is a
+    typed hook of the channel, not a named message: the channel is already the view's one object for the host's side,
+    threaded to every engine and through both SDKs' main-thread glue, and a hook of its own takes only what passed
+    the URL check and the `openUrl` capability, where no `host.call` name of the app can reach it or be mistaken for
+    it. The core keeps each request (`Action::OpenUrl` → `Core::take_url_opens`); the engine (`State::open_urls`,
+    after each commit round) runs the handler on the engine thread with an `OpenUrlRequest`, answered once from any
+    thread: `handled()` resolves the app's promise `true` (`Core::answer_open_url`), `decline()` or dropping it
+    hands the URL to the platform (`Message::UrlHandled` → `Core::open_url_on_platform`: `Command::OpenUrl` on the
+    root, answered by `EventKind::OpenUrl` `{ id, opened }`). Without a handler the platform opens it at once. The
+    SDKs' handlers are synchronous on the main thread (Swift `(URL) -> Bool`, Java `boolean openUrl(String)`), reached
+    as the call handlers are.
 - **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
   `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
   change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
@@ -191,7 +244,8 @@ NSH draws (`src/layers.rs`).
   change, a mode switch included (`cx.observe_global::<Theme>`), so one appearance's values are always the shown
   mode's. The example's `themes/violet.json` is the host's own GPUI Kit theme, loaded into GPUI Kit's
   `ThemeRegistry`; the embedded app takes it on through this mapping.
-- **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
+- **From NSH to the host.** The app talks to the embedding app through its channel (`AppView::host()`, "The host
+  channel" above: launch parameters, events, calls and posts); through the native components the latter registers
   (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
   of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
   subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
