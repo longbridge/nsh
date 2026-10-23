@@ -58,7 +58,7 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
 on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
 ```
 
-宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `remove()`。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
+平台事件中，宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `remove()`。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
 
 ```ts
 const sub = host.on("loginChanged", (payload) => console.log(payload));
@@ -155,4 +155,4 @@ nsh.send("conversation.open", Map.of("id", "43"));
 参见 [iOS 嵌入](../docs/ios.md#与应用通信)、[Android 嵌入](../docs/android.md#与应用通信) 和 [GPUI](../docs/gpui.md)。
 
 > [!NOTE]
-> 这条通道传递的是嵌入方自己的数据，运行的是它自己的代码：NSH 的[能力](../docs/sandbox-and-capabilities.md)不适用于它。Rust 应用直接通过嵌入方注册的函数调用其 Rust 代码（[`nativeModule`](./nsh-native.md#nativemodule) 和 Rust 导入）。
+> 原生 SDK 的调用和投递与平台调用一样，需要 [`host` 能力](../docs/sandbox-and-capabilities.md#host)授权。Rust 应用直接通过嵌入方注册的函数调用其 Rust 代码（[`nativeModule`](./nsh-native.md#nativemodule) 和 Rust 导入）。

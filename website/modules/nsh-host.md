@@ -58,7 +58,7 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
 on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
 ```
 
-Calls `listener` with the payload of every `event` the host sends, until `remove()`. Events the host sends before the app starts arrive once it does, so listeners registered at the top level of the app receive them; an event sent before a listener registers is not replayed to it. Read the state the app starts with through `host.call`, and follow its changes with `host.on`.
+Platform events call `listener` with the payload of every `event` the host sends, until `remove()`. Events the host sends before the app starts arrive once it does, so listeners registered at the top level of the app receive them; an event sent before a listener registers is not replayed to it. Read the state the app starts with through `host.call`, and follow its changes with `host.on`.
 
 ```ts
 const sub = host.on("loginChanged", (payload) => console.log(payload));
@@ -155,4 +155,4 @@ nsh.send("conversation.open", Map.of("id", "43"));
 See [Embedding on iOS](../docs/ios.md#talking-to-the-app), [Embedding on Android](../docs/android.md#talking-to-the-app) and [GPUI](../docs/gpui.md).
 
 > [!NOTE]
-> The channel carries the embedding app's own data and runs its own code: NSH's [capabilities](../docs/sandbox-and-capabilities.md) do not apply to it. A Rust app reaches the embedding app's Rust directly, through the functions it registers ([`nativeModule`](./nsh-native.md#nativemodule) and Rust imports).
+> Native SDK calls and posts use the same [`host` capability](../docs/sandbox-and-capabilities.md#host) as platform calls. A Rust app reaches the embedding app's Rust directly, through the functions it registers ([`nativeModule`](./nsh-native.md#nativemodule) and Rust imports).
