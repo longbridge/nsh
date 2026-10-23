@@ -121,7 +121,7 @@ NSH 是 Retained Mode 的：每个元素都是平台保留着的视图，一次�
 - **只有变化跨越线程。** 一轮里的变化一起排版，每帧作为一批视图操作交给主线程；没有变化的样式和位置不会发送，没被改到的视图原样不动。
 - **动画在 Native 侧运行。** 时间曲线、弹簧和衰减动画、手势以及与滚动联动的值，都在平台的帧时钟上计算，不经过 JS 逐帧调用（[动画](./animation.md)）。
 
-这适合大多数应用由之组成的界面——聊天、邮件、表单、列表、文档、设置、逐步生成的 AI 回复——每次只有少数视图变化，其余都在等待。这类界面在两次更新之间几乎不占 CPU，在 ProMotion 屏幕上滚动和动画稳定在 120 FPS。在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中，一个每秒更新 1,000 次的 500 行行情表，在 Linux 上用 NSH Rust 编写占用 18% 的单核 CPU，直接用 [GPUI Fast](https://github.com/longbridge/gpui-fast) 编写同样的界面为 20%；对 10 万行排序，在 Rust 里耗时 3.1 ms，与纯 Rust 相当，在 TSX 里为 59 ms——计算应当放在 Rust 模块里（[性能](./performance.md)）。
+这适合大多数应用由之组成的界面——聊天、邮件、表单、列表、文档、设置、逐步生成的 AI 回复——每次只有少数视图变化，其余都在等待。这类界面在两次更新之间几乎不占 CPU，在 ProMotion 屏幕上滚动和动画稳定在 120 FPS。在 [NSH 性能基准](https://github.com/longbridge/nsh-perf-bench)中，一个每秒更新 1,000 次的 500 行行情表，在 Linux 上用 NSH Rust 编写占用 18% 的单核 CPU，直接用 [GPUI Fast](https://github.com/longbridge/gpui-fast) 编写同样的界面为 20%。繁重的计算应当放在 Rust 里：TSX 运行在解释器 QuickJS 上，而 Rust 模块即使由 TSX 调用，也以 Native 速度运行——这样对 10 万行排序约需 3 ms，与纯 Rust 相当（[性能](./performance.md)）。
 
 ## 如何运行
 
