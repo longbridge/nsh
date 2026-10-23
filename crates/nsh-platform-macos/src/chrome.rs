@@ -137,6 +137,8 @@ pub(crate) struct Chrome {
     menu: RefCell<Option<Retained<NSMenu>>>,
     /// Only the toolbar this surface attached; dropping it restores the window.
     toolbar: RefCell<Option<TitleBarToolbar>>,
+    /// A measurement of the area after a resize is queued ([`resized`]).
+    remeasure: Cell<bool>,
 }
 
 impl Drop for Chrome {
@@ -161,6 +163,32 @@ fn full_screen(window: &NSWindow) -> bool {
     window.styleMask().contains(NSWindowStyleMask::FullScreen)
 }
 
+/// The surface resized: full screen and the window's size change the
+/// title bar's area.
+pub(crate) fn resized(surface: &Surface) {
+    let toolbar = surface.chrome.style.get() == TitleBarStyle::Hidden
+        && window(surface).is_some_and(|w| w.toolbar().is_some());
+    if !toolbar {
+        update_area(surface);
+        return;
+    }
+    // A resize runs inside the window's setFrame:, before AppKit has laid
+    // the toolbar out for the new frame (not even layoutIfNeeded can), and
+    // contentLayoutRect is the old frame's. Measure once the frame change
+    // is done; the toolbar's height does not follow the window's, so the
+    // area reported meanwhile stays right. Once per run of resizes.
+    if surface.chrome.remeasure.replace(true) {
+        return;
+    }
+    let key = surface.key();
+    DispatchQueue::main().exec_async(move || {
+        if let Some(surface) = Surface::with_key(key) {
+            surface.chrome.remeasure.set(false);
+            update_area(&surface);
+        }
+    });
+}
+
 /// Tells the app the hidden title bar's area (after a style change, a
 /// resize, full screen).
 pub(crate) fn update_area(surface: &Surface) {
@@ -176,14 +204,15 @@ pub(crate) fn update_area(surface: &Surface) {
                 MainThreadMarker::from(&*window),
             );
             let natural = (frame.size.height - content.size.height) as f32;
-            // A toolbar's native height is determined by AppKit, not the
-            // requested height that selected its style. Include a host's
-            // toolbar too, so the app reserves its actual obscured area.
-            let height = if window.toolbar().is_some() {
-                toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
-            } else {
-                natural
-            };
+            // A toolbar's height is AppKit's, not the requested height that
+            // selected its style: the traffic lights are centered in it.
+            // Measure ours and a host's alike, so the app reserves the
+            // actual obscured area.
+            let measured = window
+                .toolbar()
+                .map(|_| toolbar_height(frame.size.height, window.contentLayoutRect()));
+            let last = surface.environment.get().title_bar.top.0;
+            let height = title_bar_height(natural, measured, last);
             let left = window
                 .standardWindowButton(NSWindowButton::ZoomButton)
                 .map(|zoom| {
@@ -212,13 +241,27 @@ pub(crate) fn update_area(surface: &Surface) {
     }
 }
 
-/// The unobscured rectangle is in window coordinates, including its origin.
-fn toolbar_height(frame_height: f64, layout: NSRect, natural: f32) -> f32 {
-    let height = frame_height - (layout.origin.y + layout.size.height);
-    if height.is_finite() && height > 0.0 {
-        height as f32
-    } else {
-        natural
+/// The tallest area a toolbar can take: a regular toolbar (52 points), a
+/// tab bar below it and a host's toolbar with labels fit with room to
+/// spare. A taller strip is a layout AppKit has not finished.
+const MAX_TOOLBAR_AREA: f32 = 160.0;
+
+/// The area above the unobscured rectangle, which is in window
+/// coordinates, including its origin.
+fn toolbar_height(frame_height: f64, layout: NSRect) -> f32 {
+    (frame_height - (layout.origin.y + layout.size.height)) as f32
+}
+
+/// The hidden title bar's height: the natural bar's without a toolbar,
+/// else the toolbar's `measured` area. A measurement no real toolbar has
+/// (empty, or taller than [`MAX_TOOLBAR_AREA`] mid style change) keeps the
+/// `last` height reported, so the app's bar does not jump for a frame.
+fn title_bar_height(natural: f32, measured: Option<f32>, last: f32) -> f32 {
+    match measured {
+        None => natural,
+        Some(h) if h.is_finite() && h > 0.0 && h <= MAX_TOOLBAR_AREA => h,
+        Some(_) if last > 0.0 => last,
+        Some(_) => natural,
     }
 }
 
@@ -391,20 +434,30 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
         return;
     };
     let hidden = surface.chrome.style.get() == TitleBarStyle::Hidden;
+    // This runs again whenever the window changes, another screen's
+    // backing scale too: AppKit's setters do their work even for the value
+    // the window has, so only what differs is set.
     let mut mask = window.styleMask();
     if hidden {
         mask |= NSWindowStyleMask::FullSizeContentView;
     } else {
         mask &= !NSWindowStyleMask::FullSizeContentView;
     }
-    window.setStyleMask(mask);
+    if window.styleMask() != mask {
+        window.setStyleMask(mask);
+    }
     apply_toolbar(surface, &window, hidden);
-    window.setTitlebarAppearsTransparent(hidden);
-    window.setTitleVisibility(if hidden {
+    if window.titlebarAppearsTransparent() != hidden {
+        window.setTitlebarAppearsTransparent(hidden);
+    }
+    let visibility = if hidden {
         NSWindowTitleVisibility::Hidden
     } else {
         NSWindowTitleVisibility::Visible
-    });
+    };
+    if window.titleVisibility() != visibility {
+        window.setTitleVisibility(visibility);
+    }
     update_area(surface);
     // AppKit can restore the old content size after setStyleMask returns.
     // Reconcile it after that pass, using the current window and style so
@@ -821,20 +874,53 @@ pub(crate) fn window_changed(surface: &Surface) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn toolbar_area_uses_native_geometry_including_its_origin() {
-        let rect = |y, height| NSRect::new(NSPoint::new(0.0, y), NSSize::new(1200.0, height));
-        assert_eq!(toolbar_height(800.0, rect(0.0, 762.0), 22.0), 38.0);
-        assert_eq!(toolbar_height(800.0, rect(12.0, 750.0), 22.0), 38.0);
-        // An embedding host's expanded toolbar occupies its full native area.
-        assert_eq!(toolbar_height(800.0, rect(0.0, 730.0), 22.0), 70.0);
+    fn rect(y: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(0.0, y), NSSize::new(1200.0, height))
     }
 
     #[test]
-    fn incomplete_toolbar_geometry_falls_back_to_the_native_title_bar() {
-        for height in [800.0, 820.0, f64::NAN] {
-            let layout = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1200.0, height));
-            assert_eq!(toolbar_height(800.0, layout, 22.0), 22.0);
+    fn toolbar_area_uses_native_geometry_including_its_origin() {
+        let measured =
+            |frame, layout| title_bar_height(32.0, Some(toolbar_height(frame, layout)), 0.0);
+        assert_eq!(measured(800.0, rect(0.0, 760.0)), 40.0);
+        assert_eq!(measured(800.0, rect(12.0, 748.0)), 40.0);
+        assert_eq!(measured(800.0, rect(0.0, 748.0)), 52.0);
+        // A tab bar below a compact toolbar obscures content too.
+        assert_eq!(measured(800.0, rect(0.0, 724.0)), 76.0);
+        // An embedding host's expanded toolbar occupies its full native area.
+        assert_eq!(measured(800.0, rect(0.0, 730.0)), 70.0);
+    }
+
+    #[test]
+    fn a_real_measurement_replaces_the_last_height() {
+        // From full screen (0), the regular bar (52) and the compact one.
+        for last in [0.0, 52.0, 40.0] {
+            assert_eq!(
+                title_bar_height(32.0, Some(toolbar_height(1129.0, rect(0.0, 1089.0))), last),
+                40.0
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_without_a_toolbar_reports_its_natural_bar() {
+        assert_eq!(title_bar_height(32.0, None, 52.0), 32.0);
+    }
+
+    #[test]
+    fn incomplete_toolbar_geometry_keeps_the_last_height() {
+        // A layout that has not caught up (the window grew by 200 points),
+        // one past the window's top, and none at all.
+        for layout in [
+            rect(0.0, 600.0),
+            rect(0.0, 800.0),
+            rect(0.0, 820.0),
+            rect(0.0, f64::NAN),
+        ] {
+            let measured = Some(toolbar_height(800.0, layout));
+            assert_eq!(title_bar_height(22.0, measured, 38.0), 38.0);
+            // Nothing reported yet: the natural bar.
+            assert_eq!(title_bar_height(22.0, measured, 0.0), 22.0);
         }
     }
 
