@@ -2259,11 +2259,7 @@ impl<M: TextEngine> State<M> {
                 _ => false,
             };
             let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
-            if self.binds.is_empty()
-                && self.events.is_empty()
-                && !posted
-                && !retheme
-                && !more_paced
+            if self.binds.is_empty() && self.events.is_empty() && !posted && !retheme && !more_paced
                 && !urls
             {
                 break;

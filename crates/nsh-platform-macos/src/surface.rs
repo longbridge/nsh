@@ -433,7 +433,7 @@ impl Surface {
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
-        crate::chrome::update_area(self);
+        crate::chrome::resized(self);
         self.await_layout(Size::new(Points(width), Points(height)));
     }
 
