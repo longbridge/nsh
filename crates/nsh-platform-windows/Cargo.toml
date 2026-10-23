@@ -38,7 +38,6 @@ serde_json.workspace = true
 url.workspace = true
 ttf-parser.workspace = true
 ureq.workspace = true
-base64.workspace = true
 crossbeam-channel.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
 nsh-testing = { workspace = true, features = ["agent"], optional = true }

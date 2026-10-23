@@ -8,9 +8,8 @@ group: platforms
 # Android
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
-and `x86_64`. An existing app embeds modules in an `NshView` and loads signed packages it downloads, under limits and
-capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms, for
-apps written in Rust and in TSX. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
+and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
 ## Requirements
@@ -175,7 +174,7 @@ again replaces the running app. The complete sample is
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
 | `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
-| `destroy()` | Stops the app. The view can no longer be used. |
+| `destroy()` | Stops the app and calls `destroy()` on each of its native components. The view can no longer be used. |
 
 > [!IMPORTANT]
 > Compiled bytecode (`.nshc`) only loads from the APK's own assets or from a signed package. Files on storage can be replaced,
@@ -283,15 +282,12 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## Activity setup
 
-- **Back button.** On Android 13 and newer, `NshView` registers its own back callback while the app wants back presses
-  (an open dialog, a pushed page, a `BackHandler` listener). On Android 12 and older, forward the press:
-
-  ```java
-  @Override
-  public void onBackPressed() {
-      if (!nsh.handleBack()) super.onBackPressed();
-  }
-  ```
+- **Back button.** `NshView` gets back presses by itself while the app wants them (an open dialog, a pushed page, a
+  `BackHandler` listener), and leaves them to the activity otherwise. With `android:enableOnBackInvokedCallback="true"`
+  on Android 13 and newer it registers an `OnBackInvokedCallback`; elsewhere (Android 12 and older, or the attribute
+  off) it takes the back key before the activity's `onBackPressed`, so before AndroidX's `OnBackPressedDispatcher`
+  and the fragments' callbacks. No forwarding is needed, in an activity or a fragment. A host that already forwards
+  presses to `handleBack()` keeps working: a press goes to the app once.
 
   For predictive back on Android 13+, set `android:enableOnBackInvokedCallback="true"` on the `<application>`, as
   packaged NSH apps do.

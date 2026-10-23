@@ -363,6 +363,26 @@ function More() {
   return (
     <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={refresh}>
       <View style={{ padding: 16, gap: 16 }}>
+        {/* `position: sticky`: in the flow, then at the top while the page scrolls under it. */}
+        <View
+          style={{
+            position: "sticky",
+            top: 0,
+            flexDirection: "row",
+            alignItems: "baseline",
+            gap: 8,
+            marginHorizontal: -16,
+            marginTop: -8,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            backgroundColor: colors.background,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          }}
+        >
+          <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>More list features</Text>
+          <Text style={{ fontSize: 13, color: colors.faint, fontFamily: mono }}>position: sticky</Text>
+        </View>
         <Section title="Pull to refresh">
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <IconTile name="arrow-down" tint={refreshing() ? colors.accent : colors.text} />
@@ -458,9 +478,10 @@ function More() {
             </View>
           </View>
           <List
+            viewport="parent"
             each={items()}
             estimatedItemSize={48}
-            style={{ height: 196, borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
+            style={{ borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
             empty={
               <View style={{ alignItems: "center", justifyContent: "center", gap: 10, height: 194 }}>
                 <IconTile name="lists" tint={colors.faint} />
@@ -479,7 +500,8 @@ function More() {
           </List>
           <Text style={{ fontSize: 13, color: colors.muted }}>
             <Text style={{ fontFamily: mono, color: colors.text }}>ListEmptyComponent</Text> while empty, separators between rows; changes animate with{" "}
-            <Text style={{ fontFamily: mono, color: colors.text }}>LayoutAnimation</Text>.
+            <Text style={{ fontFamily: mono, color: colors.text }}>LayoutAnimation</Text>. In the page (
+            <Text style={{ fontFamily: mono, color: colors.text }}>viewport="parent"</Text>), the list is as tall as its rows.
           </Text>
         </Section>
       </View>
@@ -487,12 +509,129 @@ function More() {
   );
 }
 
-type ListTab = "grid" | "sections" | "chat" | "more";
+type Entry = { id: number; tone: Tone };
+
+const entries = (from: number, count: number): Entry[] =>
+  Array.from({ length: count }, (_, i) => ({ id: from + i, tone: tones[(from + i) % (tones.length - 1)] }));
+
+/** One row of the page's lists. */
+function EntryRow(props: { entry: Entry; label: string }) {
+  return (
+    <View
+      style={{
+        height: 56,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingHorizontal: 14,
+        borderRadius: radius.inset,
+        borderCurve: "continuous",
+        backgroundColor: colors.raised,
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...finish.raised,
+      }}
+    >
+      <View style={{ width: 8, height: 8, borderRadius: 2.5, backgroundColor: toneColor(props.entry.tone) }} />
+      <Text style={{ flex: 1, fontSize: 15, color: colors.text, fontVariant: ["tabular-nums"] }}>
+        {props.label} {props.entry.id + 1}
+      </Text>
+      <Badge label={props.entry.tone} tone={props.entry.tone} />
+    </View>
+  );
+}
+
+/** A week's heading in the page's first list: it sticks to the top of the
+ * page while its rows scroll under it. */
+function WeekHeading(props: { week: number }) {
+  return (
+    <View
+      style={{
+        height: 34,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 4,
+        // Opaque: rows scroll under it while it sticks.
+        backgroundColor: colors.background,
+      }}
+    >
+      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.accent }}>Week {props.week}</Text>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.line }} />
+    </View>
+  );
+}
+
+type PageRow = Entry | { week: number };
+
+/** Headers and two lists on one page: the lists have no scroll view of
+ * their own (`viewport="parent"`), the page scrolls them as one, and only
+ * their rows near its viewport exist. The first list's week headings stick
+ * to the top of the page. */
+function Page() {
+  // 200 entries, a week heading before every 20.
+  const recent: PageRow[] = entries(0, 200).flatMap((e) => (e.id % 20 === 0 ? [{ week: e.id / 20 + 1 }, e] : [e]));
+  const weeks = recent.flatMap((row, i) => ("week" in row ? [i] : []));
+  const indexOf = (id: number) => recent.findIndex((row) => "id" in row && row.id === id);
+  const archive = signal(entries(0, 100));
+  let list!: YNode;
+  const loadMore = () => {
+    if (archive().length < 500) archive.update((a) => [...a, ...entries(a.length, 100)]);
+  };
+  const heading = (title: string, note: string) => (
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
+      <Text style={{ flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>{title}</Text>
+      <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{note}</Text>
+    </View>
+  );
+  return (
+    <Scroll testID="page" style={{ flex: 1 }}>
+      <View style={{ padding: 16, gap: 10, width: "100%", maxWidth: 720, alignSelf: "center" }}>
+        <Section title="One page, two lists" note={'viewport="parent"'}>
+          <Text style={{ fontSize: 13, color: colors.muted }}>
+            The lists below lie in the page at their full length, and the page scrolls them with this header: only the
+            rows near its viewport exist, in recycled cells.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Action label="Recent 150" icon="arrow-down" onPress={() => list.scrollToIndex({ index: indexOf(149), viewPosition: 0.5 })} />
+            <Action label="End of recent" onPress={() => list.scrollToEnd()} />
+          </View>
+        </Section>
+        {heading("Recent", "200 rows")}
+        <List ref={list} viewport="parent" each={recent} estimatedItemSize={56} stickyHeaderIndices={weeks} contentStyle={{ gap: 6 }}>
+          {(row) => (
+            <If when={"week" in row()} else={<EntryRow entry={row() as Entry} label="Recent" />}>
+              <WeekHeading week={(row() as { week: number }).week} />
+            </If>
+          )}
+        </List>
+        {heading("Archive", `${archive().length} rows`)}
+        <List
+          viewport="parent"
+          each={archive()}
+          estimatedItemSize={56}
+          contentStyle={{ gap: 6 }}
+          onLoadMore={loadMore}
+          footer={
+            <Text style={{ textAlign: "center", color: colors.faint, fontSize: 13, padding: 16 }}>
+              {archive().length < 500 ? "Loading more…" : "End of the archive"}
+            </Text>
+          }
+        >
+          {(entry) => <EntryRow entry={entry()} label="Archived" />}
+        </List>
+      </View>
+    </Scroll>
+  );
+}
+
+type ListTab = "grid" | "sections" | "chat" | "page" | "more";
 
 const tabs = [
   { value: "grid", label: "Grid" },
   { value: "sections", label: "Sections" },
   { value: "chat", label: "Chat" },
+  { value: "page", label: "Page" },
   { value: "more", label: "More" },
 ] as const;
 
@@ -521,6 +660,12 @@ export function Lists() {
             return (
               <Appear flex>
                 <Chat />
+              </Appear>
+            );
+          case "page":
+            return (
+              <Appear flex>
+                <Page />
               </Appear>
             );
           case "more":

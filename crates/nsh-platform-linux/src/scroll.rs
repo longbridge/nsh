@@ -133,7 +133,8 @@ pub(crate) fn can_scroll(view: &NshView, dx: f32, dy: f32) -> bool {
 
 // Sticky cells.
 
-/// Calls `f` with `view`'s child of node `id`.
+/// Calls `f` with the view of node `id` in `view` (a child, or for a list
+/// in the scroll view's viewport, the list's).
 fn with_cell(surface: &Surface, view: &NshView, id: nsh_core::NodeId, f: impl FnOnce(&NshView)) {
     if let Ok(mounter) = surface.mounter.try_borrow() {
         if let Some(cell) = mounter.views.get(&id) {
@@ -141,9 +142,19 @@ fn with_cell(surface: &Surface, view: &NshView, id: nsh_core::NodeId, f: impl Fn
         }
         return;
     }
-    // While a batch is applied: look among the children.
-    if let Some(cell) = view.child_views().into_iter().find(|c| c.id() == id) {
-        f(&cell);
+    // While a batch is applied: look among the children, then deeper (the
+    // cells of a list in the scroll view's viewport are in the list).
+    let mut views = view.child_views();
+    if let Some(cell) = views.iter().find(|c| c.id() == id) {
+        f(cell);
+        return;
+    }
+    while let Some(v) = views.pop() {
+        if v.id() == id {
+            f(&v);
+            return;
+        }
+        views.extend(v.child_views());
     }
 }
 

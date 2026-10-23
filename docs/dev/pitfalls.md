@@ -52,10 +52,25 @@ Things that were found the hard way. Read the section of the area you change bef
   layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
   its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
   `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
-- **Taffy 0.15's `mark_dirty` stops at the first node whose cache is already empty**, taking its ancestors for dirty too. Nodes of a
-  `display: none` subtree always have empty caches while the hidden node above keeps its result, so a view moved in there keeps its
-  former layout: the frame walk gives everything under a `display: none` view an empty frame and its texts an empty content box,
-  whatever Taffy keeps for them (`emit_frames_in`, `flush_text`).
+- **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
+  traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
+  its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
+  above keep theirs, so a view moved in there kept its former layout. `LayoutTree::mark_dirty` clears every cache up to the root, and the
+  tree keeps no hoisted children (only Taffy's rounding pass reads them). The frame walk also gives everything under a `display: none`
+  view an empty frame and its texts an empty content box (`emit_frames_in`, `flush_text`): a hidden subtree is never read.
+- **Relayout boundaries are flex items whose size nothing inside can change** (`LayoutTree::is_boundary`): fixed points both ways, a
+  flex basis of `auto`, `flexShrink: 0`, no baseline alignment. A change inside stops dirtying there and the item is laid out again with
+  what its parent gave it last (`relayout_boundaries`, before the main pass); only when what it gives back differs (overflow, say) is
+  its parent dirtied. Each condition is needed: a percentage basis resolves against a parent of no definite size as `auto` (its
+  content), and shrinking is floored at the content's automatic minimum, so either let the content change the size (the layout
+  consistency harness found the first). Growing is fine: it takes the free space the parent and siblings leave. A restyled node always
+  dirties its parent (`set_style`), a boundary included. Boundaries' frames are emitted after the passes (`commit_round`).
+- **A changed text dirties nothing when it measures as before** (`LayoutTree::measures_as_before`, from `rebuild_text`): every
+  layout above a leaf was computed from the leaf's answers to the inputs it was asked (Taffy calls it under measuring passes and for
+  its final size), so the leaf keeps those answers since its cache was last cleared (`LayoutNode::measured`, at most eight: more come
+  of layouts at many sizes) and measures them again; all the same, and only the text is mounted again. The record is cleared with the
+  cache, never alone: an answer dropped while a layout above still holds what it was computed from would let a change through
+  unseen. Texts with attachments always relayout (their views are placed by the text's final layout).
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped.
@@ -168,6 +183,10 @@ Things that were found the hard way. Read the section of the area you change bef
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
 
+- **iOS, the screen scale**: a `UIView` that draws nothing itself keeps a `contentScaleFactor` of 1 on a 3x screen, and a
+  drawn one raises it while zoomed, so neither is the screen's scale. Images decoded at it came out at a third of their
+  pixels and blurred; the scale is the trait collection's `displayScale` (`Mounter::display_scale`).
+
 ## Android
 
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
@@ -216,6 +235,11 @@ Things that were found the hard way. Read the section of the area you change bef
   `usesCleartextTraffic`; the release AAR does not.
 - **Android, activities**: create the decor view (`getDecorView()`) before asking for the insets controller; apps draw edge to edge
   and get the system bars through `safeArea()`.
+- **Android, the back key without `OnBackInvokedCallback`** (below 13, or `enableOnBackInvokedCallback` off): the window
+  sends `KEYCODE_BACK` down the focus path, then the activity's `onKeyDown` / `onKeyUp` take it (`onBackPressed`), so an
+  unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
+  the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
+  so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
 - **Android widgets**: `MediaPlayer.setPlaybackParams` starts playback (set the rate only while playing) and a paused player draws nothing until
   it seeks; `WebView` JavaScript bridge calls arrive on a binder thread (post to the UI thread).
 - **Android, negative letter spacing**: Minikin adds half the spacing on both sides of each glyph and trims the halves at line edges,
@@ -272,6 +296,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
   scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
   it only stops it.
+- **A menu's backdrop covers the header**: on a touch screen a menu is a sheet over a backdrop on the whole window,
+  so a tap at the header's back button lands on the backdrop and closes the menu (`backdropPress`) instead of going
+  back from a submenu. iOS has no back key, so while the app listens to going back the agent's `back` is VoiceOver's
+  escape gesture on the surface (`RootView`'s `accessibilityPerformEscape`), which the core takes as the back button.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 
@@ -322,6 +350,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
   outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface
   (`input.rs` `native_at`), or a hosted web view gets clicks on what NSH draws over it.
+- `-[NSCursor set]` costs ~2.5–3.5 ms per call on macOS 26 with a customized pointer size or color (it renders the
+  cursor image again, `_AXFMouseCursorGenerator`), even for the cursor already set; and a view's default
+  `cursorUpdate:`, which AppKit calls after views move or are added, sets the arrow. Set the cursor only when it
+  changes while the mouse is still (`input::set_cursor_at`), and answer `cursorUpdate:` with NSH's cursor: a scroll
+  that mounts rows ten times a second otherwise spends a third of those frames setting the same cursor.
+- AppKit's geometry (`hitTest:`, `convertPoint:` / `convertRect:`, `visibleRect`) follows bounds, not a
+  `sublayerTransform`: while a scroll offset is only the container layer's transform, AppKit places every view
+  below it at the last committed offset. Commit it first (`scroll::commit_pending` on a press,
+  `scroll::commit_ancestors` before a conversion); clip and pick by NSH's own placed frames and
+  `scroll::bounds_origin`. A view's logical frame (`ViewState::frame`) misses its sticky shift and RTL mirroring:
+  clip spaces are the placed frames (`ns().frame()`).
 - In `define_class!` methods, an early `return` of a `bool` or `Option<Retained<_>>` does not compile (the macro wraps
   the return type): write the body as one expression.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
@@ -374,6 +413,9 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Testing on simulators and emulators
 
+- **A manual clock stands still while a finger holds**: it moves with the frames the app asks for, and a held finger
+  asks for none, so a hold the app times itself (a `ContextMenu` on a touch screen) never came due on a real
+  platform. The agent's long press moves the clock by the hold, as the headless driver's does.
 - **iOS simulator: launch apps only after `simctl bootstatus -b`**; apps launched while the simulator boots are sent to the
   background when SpringBoard comes up.
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows

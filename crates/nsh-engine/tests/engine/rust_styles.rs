@@ -83,6 +83,7 @@ fn start_root(root: Root) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -137,7 +138,8 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
     assert_eq!(card.borders.widths.top.0, 4.0);
     assert_eq!(card.borders.style, nsh_core::BorderStyle::Dashed);
     assert_eq!(card.corner_radius.top_left, Some(nsh_core::Points(20.0)));
-    assert_eq!(card.transform.ops().len(), 2, "perspective and rotateY");
+    // Its perspective is its children's (CSS's `perspective`).
+    assert_eq!(card.transform.ops().len(), 1, "rotateY");
     assert_eq!(
         card.animation.map(|a| a.keyframes),
         Some(nsh_core::Keyframes::Pulse)

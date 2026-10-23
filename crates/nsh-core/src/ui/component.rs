@@ -274,6 +274,12 @@ pub trait Props: Clone + PartialEq + 'static {
     #[doc(hidden)]
     const LAZY_CHILDREN: bool = false;
 
+    /// TS declares the props generic over `T`, the type of the rows a prop
+    /// takes (`#[props(generic)]`; a prop's type names it, as
+    /// [`super::Rows`] does).
+    #[doc(hidden)]
+    const GENERIC: bool = false;
+
     /// The props (their named types declared in `types`).
     fn spec(types: &mut TsTypes) -> Vec<PropSpec>;
 
@@ -395,6 +401,9 @@ pub struct ComponentSpec {
     /// (`#[prop(lazy)]` on its `Children`): the core tells it with a
     /// `$children` event on the host.
     pub lazy_children: bool,
+    /// Its props are generic over `T`, the type of the rows one takes
+    /// (`#[props(generic)]`), as a component with [`super::Items`] is.
+    pub generic: bool,
 }
 
 impl ComponentSpec {
@@ -413,6 +422,7 @@ impl ComponentSpec {
             methods,
             types,
             lazy_children: C::Props::LAZY_CHILDREN,
+            generic: C::Props::GENERIC,
         }
     }
 
@@ -655,6 +665,9 @@ pub struct Registry {
     assets: Arc<Vec<&'static [super::AssetFile]>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
+    /// The UI sets served under paths of this one's specifier
+    /// ([`Registry::submodule`]).
+    submodules: Arc<Vec<Registry>>,
 }
 
 impl fmt::Debug for Registry {
@@ -841,7 +854,7 @@ impl Registry {
     #[track_caller]
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
-        for set in sets {
+        for set in sets.iter().flat_map(Registry::sets) {
             out.tokens = out.tokens.or(set.tokens);
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
@@ -873,6 +886,45 @@ impl Registry {
     /// ([`Registry::reexport`]).
     pub fn reexports(&self) -> (&[&'static str], &[&'static str]) {
         (&self.reexports.0, &self.reexports.1)
+    }
+
+    /// Serves UI set `set` wherever this one is served, as a module of
+    /// its own under a path of this set's specifier (`nsh/base/plot` of
+    /// `nsh/base`, as `gpui-base`'s `plot` is a module of the crate): a
+    /// family of components whose names (`Line`, `Grid`) only make sense
+    /// together, apart from the set's other exports. Hosts, the toolchain
+    /// and the declarations take the set's submodules with it
+    /// ([`Registry::sets`]), so a list of UI sets names only the set.
+    ///
+    /// # Panics
+    ///
+    /// When `set`'s specifier is not a path under this set's.
+    #[track_caller]
+    pub fn submodule(&mut self, set: Registry) -> &mut Self {
+        let under = match (self.ui_set, set.ui_set) {
+            (Some(parent), Some(child)) => child
+                .strip_prefix(parent)
+                .is_some_and(|rest| rest.len() > 1 && rest.starts_with('/')),
+            _ => false,
+        };
+        assert!(
+            under,
+            "a submodule is a UI set under a path of its set's specifier: {:?} under {:?}",
+            set.ui_set, self.ui_set
+        );
+        Arc::make_mut(&mut self.submodules).push(set);
+        self
+    }
+
+    /// This set and its submodules ([`Registry::submodule`]), each one
+    /// module apps import: what a host serves and the toolchain declares
+    /// for it.
+    pub fn sets(&self) -> Vec<&Registry> {
+        let mut out = vec![self];
+        for sub in self.submodules.iter() {
+            out.extend(sub.sets());
+        }
+        out
     }
 
     /// Exports `values` `nsh-js` makes for the set (`NavStack`, `NavPage`),
@@ -1165,6 +1217,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         // A component with rows is generic over their type, like `List`.
         let (generic, extends) = match spec.items() {
             Some(_) => ("<T>", ", ListItemsProps<T>"),
+            None if spec.generic => ("<T>", ""),
             None => ("", ""),
         };
         // A component with methods: its ref is an object of them.
@@ -1783,6 +1836,24 @@ mod tests {
     )]
     fn a_component_is_registered_once() {
         Registry::new().register::<Stepper>().register::<Stepper>();
+    }
+
+    /// A set's submodules come with it, under paths of its specifier, and
+    /// their components join the core's.
+    #[test]
+    fn a_sets_submodules_come_with_it() {
+        let mut sub = Registry::ui_set("test/set/sub");
+        sub.register::<Stepper>();
+        let mut set = Registry::ui_set("test/set");
+        set.submodule(sub);
+        let specifiers: Vec<_> = set.sets().iter().map(|s| s.specifier()).collect();
+        assert_eq!(specifiers, [Some("test/set"), Some("test/set/sub")]);
+        assert_eq!(Registry::merged(&[set]).specs().len(), 1);
+        // Only a path under the set's own specifier.
+        let elsewhere = std::panic::catch_unwind(|| {
+            Registry::ui_set("test/set").submodule(Registry::ui_set("test/settings"));
+        });
+        assert!(elsewhere.is_err());
     }
 
     #[test]

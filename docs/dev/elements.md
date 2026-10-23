@@ -41,6 +41,11 @@ interface per element group and platform (`InputHostProps`, `IOSInputHostProps`,
 element declares (the root's, the runtime's own) is listed in `INTERNAL_EVENTS`; a test checks every `EventKind` is
 in one of them.
 
+The iOS host prop `backdropMaterial` selects the system material of a `backdropFilter` blur:
+`ultraThin` (default), `thin`, `regular`, `thick`, or `chrome`. Rust uses
+`.backdrop_material(BackdropMaterial::Regular)`. The core keeps the prop separately from the style and
+projects it into `ViewStyle::backdrop_material` when mounting, as it does Android elevation.
+
 ## Primitives only
 
 NSH's runtime provides the primitives and the capabilities; the look of an app is the app's. Styled components are
@@ -62,7 +67,7 @@ text change, may the back button pop, may the sheet close, may this gesture begi
 answered natively from props mounted beforehand, never by asking JS (blocking the main thread drops frames, can deadlock
 and reorders fast input). Events tell JS afterwards. Existing answers: input `maxLength` (`shouldChangeCharactersIn`,
 `InputFilter`), `submitBehavior` (`textFieldShouldReturn`, `textView:shouldChangeTextInRange:`, Android's `OnEditorActionListener` and input connection, AppKit's `doCommandBySelector:`), `popOnSwipe` / `popOnBack` (`gestureRecognizerShouldBegin`,
-`navigationBar:shouldPopItem:`, Android `wantsBack()` / `OnBackInvokedCallback` registration), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
+`navigationBar:shouldPopItem:`, Android `wantsBack()`: the `OnBackInvokedCallback` registration, or, where the window dispatches the back key instead (below 13, `enableOnBackInvokedCallback` off), taking the key in `NshView`'s unhandled key listener, before the activity's `onBackPressed`), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
 (`presentationControllerShouldDismiss`, the dialog's back), `pan` / `pinch` / `hitSlop` / `pointerEvents` /
 `keyboardShouldPersistTaps` / `panActivation` (recognizers), capabilities (`decidePolicyForNavigationAction`, `shouldOverrideUrlLoading`),
 `AlertDialog`'s `closeOnEscape` / `closeOnBackdropPress`. A new capability with such a callback gets a prop (a menu's items, a rule, a flag); what a prop cannot
@@ -79,7 +84,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `checkedStyle`, `indeterminateStyle` (and a `Button`'s `selectedStyle`) on any view (declared in `StateStyleProps`),
   the same as the `active:` / `hover:` / `focus:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` classes:
   the core restyles the view while the platform reports it pressed, hovered or focused, and while its accessibility
-  state is selected, checked or mixed; later
+  state is selected, checked or mixed; a Rust component's touch responder stays pressed from its grant until its
+  touches end, wherever they go (CSS's `:active` until the button is released: a resize handle dragged off its band
+  keeps its `group-active:` look; `Core::hold_pressed`); later
   states win, `disabled` over all (`docs/dev/styles.md`). Press feedback is the app's: the platforms add no fade or
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).
@@ -217,7 +224,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right) and, right to left, swaps the left and right
-  properties (margins, paddings, insets, borders, corners — always) and places the
+  properties (margins, paddings, insets, borders, corners — always: React Native's rule for style keys; Tailwind's
+  physical classes are resolved for the other side right to left, `tailwind::utilities::directed`, so they come out
+  where they say, as in a browser) and places the
   start / end ones (`marginStart`, `start`, `borderTopEndRadius`, ...). A direction change swaps the current taffy style in place
   (an involution), so authored styles need not be kept. Text: `auto` alignment is the right side right to left, left / right
   swap, `writingDirection` sets the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:
@@ -267,8 +276,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   view's coordinates.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
-  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape or the Android back button,
-  to the top overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
+  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or
+  VoiceOver's escape gesture on iOS (`RootView`'s `accessibilityPerformEscape`, as the back button), to the top
+  overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
   the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
 - **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
   JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),

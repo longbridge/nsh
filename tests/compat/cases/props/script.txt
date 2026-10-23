@@ -144,6 +144,9 @@ prop id:photo src https://example.com/b.png
 # One with a URL alone: the defaults.
 prop id:plain src https://example.com/plain.png
 prop id:plain resizeMode cover
+prop id:scale-down resizeMode scale-down
+prop id:object-none resizeMode center
+prop id:object-scale-down resizeMode scale-down
 prop id:plain blurRadius 0
 noprop id:plain placeholder
 noprop id:plain fadeDuration
@@ -413,6 +416,19 @@ pixelratio 1
 prop id:flag src asset:/images/flag.png
 covers [props] src
 covers [props] placeholder
+# props-media-image-inline
+tap id:case-props-media-image-inline
+# A data: URI (base64, and percent-encoded as the placeholder) and a blob:
+# URL show their bytes. The platforms get them under a key of the core's
+# own, which no app sees and which may change between releases, so no
+# step here names it (the engine's `images` tests check it).
+# The upload finished: the remote URL replaces the local preview, and the
+# blob's URL is revoked.
+tap id:uploaded
+prop id:preview src https://example.com/photo.png
+covers [props] src
+covers [globals] URL
+covers [globals] Blob
 # props-list-sticky-offset
 tap id:case-props-list-sticky-offset
 # Items 0 and 3 stick 24 points below the top: each moves with the scroll
@@ -421,3 +437,20 @@ tap id:case-props-list-sticky-offset
 expect Offset 0
 prop scroll:text:"Offset 0" stickyHeaderIndices start=-24 end=56, start=96 end=Infinity
 covers [props] stickyHeaderOffset
+# props-list-viewport
+tap id:case-props-list-viewport
+# The list lies below the header at its full length (200 rows of 40) and
+# shows its rows from its start to the viewport's end and a screen more.
+expect Row 0
+expect Row 34
+absent Row 35
+frame id:rows 0 300 390 8000
+# Row 0 sticks to the page's top from the list's start (300) until row 50
+# pushes it out; the page pins it, in its offsets.
+prop scroll:text:"Row 1" stickyHeaderIndices start=300 end=2260
+# The page scrolls it: 5000 down, the rows 4700 into it show.
+scroll id:page 0 5000
+expect Row 120
+origin id:row-120 0 5100
+absent Row 160
+covers [props] viewport

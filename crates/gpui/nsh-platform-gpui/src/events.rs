@@ -118,6 +118,10 @@ pub(crate) fn install(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if surface.window_focus_requested.take() && !focus.is_focused(window) {
+        let focus = focus.clone();
+        window.defer(cx, move |window, cx| window.focus(&focus, cx));
+    }
     // The focused field's caret shows while the surface has the window's
     // focus; text and input methods come through the input handler.
     let has_focus = window.is_window_active() && focus.is_focused(window);
@@ -336,6 +340,7 @@ pub(crate) fn install(
         if phase != DispatchPhase::Bubble {
             return;
         }
+        crate::chrome::key_pressed(&s);
         let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
             return;
         };
@@ -378,7 +383,12 @@ pub(crate) fn install(
         }
         crate::rt::flush(cx);
     });
-    // The keymap's held key (see `crate::keymap::forget_held`).
+    // The keymap's held key (see `crate::keymap::forget_held`), and Alt
+    // alone showing a menu bar that hides itself.
     let s = surface.clone();
-    window.on_modifiers_changed(move |_, _, _| crate::keymap::forget_held(&s));
+    window.on_modifiers_changed(move |e, _, cx| {
+        crate::keymap::forget_held(&s);
+        crate::chrome::modifiers_changed(&s, &crate::keys::modifiers(&e.modifiers));
+        crate::rt::flush(cx);
+    });
 }

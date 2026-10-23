@@ -547,6 +547,9 @@ pub struct ImageOptions {
     /// `fadeDuration` in milliseconds; the platform's default when `None`
     /// (React Native: 300 on Android, none on iOS).
     pub fade_ms: Option<f32>,
+    /// `objectPosition`: where the image sits in its box once the resize
+    /// mode has sized it ([`crate::ResizeMode::fit`]).
+    pub position: crate::style::ObjectPosition,
 }
 
 /// One instruction for the platform backend.

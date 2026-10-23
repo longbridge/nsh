@@ -121,6 +121,23 @@ nostyle id:filters backdropFilter
 style id:backdrop backdropFilter blur(10)
 style id:backdrops backdropFilter saturate(1.8) blur(20)
 nostyle id:backdrops filter
+style id:mask maskImage linear-gradient(180deg, #000000ff 70%, #00000000)
+nostyle id:no-mask maskImage
+prop id:material ios.backdropMaterial regular
+prop id:material-chrome ios.backdropMaterial chrome
+prop id:no-material ios.backdropMaterial ultraThin
+prop id:material-thin ios.backdropMaterial thin
+prop id:material-thick ios.backdropMaterial thick
+prop id:material-change ios.backdropMaterial regular
+tap id:material-change
+prop id:material-change ios.backdropMaterial chrome
+tap id:material-change
+prop id:material-change ios.backdropMaterial ultraThin
+style id:material-change backdropFilter blur(30)
+style id:glass backdropFilter blur(10)
+style id:glass glassEffect regular
+style id:glass-clear glassEffect clear
+nostyle id:no-glass glassEffect
 style id:blend-normal mixBlendMode normal
 style id:blend-multiply mixBlendMode multiply
 style id:blend-screen mixBlendMode screen
@@ -142,6 +159,9 @@ style id:blend-plus-lighter mixBlendMode plus-lighter
 covers [styles] backgroundImage
 covers [styles] filter
 covers [styles] backdropFilter
+covers [styles] maskImage
+covers [props] ios.backdropMaterial
+covers [styles] glassEffect
 covers [styles] mixBlendMode
 # paint-misc
 tap id:case-paint-misc
@@ -204,6 +224,25 @@ covers [styles] cursor
 covers [styles] tintColor
 covers [styles] transformOrigin
 covers [styles] backfaceVisibility
+# paint-object-position
+tap id:case-paint-object-position
+expect Object position
+# Where each image sits, as edges with offsets: the center by default.
+style id:centered objectPosition left 50% top 50%
+style id:top objectPosition left 50% top 0%
+style id:top-left objectPosition left 0% top 0%
+style id:bottom-right objectPosition left 100% top 100%
+style id:percent objectPosition left 25% top 75%
+style id:lengths objectPosition left 10 top 16
+style id:edges objectPosition right 10 bottom 20%
+style id:class-top objectPosition left 50% top 0%
+prop id:class-top resizeMode cover
+style id:class-bottom-left objectPosition left 0% top 100%
+style id:class-arbitrary objectPosition right 4 top 50%
+style id:changed objectPosition left 50% top 0%
+tap id:flip
+style id:changed objectPosition left 50% top 100%
+covers [styles] objectPosition
 # paint-motion
 tap id:case-paint-motion
 expect Motion
@@ -536,3 +575,32 @@ frame id:icon-bottom 7.7 4.8 4 12
 frame id:icon-middle 7.7 7.3 4 12
 frame id:icon-class 7.7 0 4 12
 covers [styles] verticalAlign
+
+# paint-tailwind
+tap id:case-paint-tailwind
+expect Tailwind paint
+style id:transform-none transform translateX(8) rotate(12deg) scale(0.9)
+style id:property-none transform rotateX(45deg)
+style id:rotate-z transform rotate(12deg) rotateX(45deg) rotate(30deg)
+style id:border-none borderWidth 0
+style id:border-none borderStyle solid
+style id:border-hidden borderTopWidth 0
+style id:border-class borderWidth 0
+style id:outline-dashed outlineStyle dashed
+style id:outline-dashed outlineWidth 2
+style id:outline-none outlineWidth 0
+style id:outline-medium outlineStyle dotted
+style id:outline-medium outlineWidth 3
+style id:current borderColor #ff0000ff
+style id:drop-shadow filter drop-shadow(0 1 2 #0000001a) drop-shadow(0 1 1 #0000000f)
+style id:perspective-child transform translateX(50) translateY(50) perspective(400) translateX(-50) translateY(-50) rotateY(45deg)
+style id:selection selectionColor #ff6600ff
+style id:shadow-color boxShadow 0 1 3 0 #ff0000ff, 0 1 2 -1 #ff0000ff
+style id:shadow-alpha boxShadow 0 1 3 0 #00000033, 0 1 2 -1 #00000033
+style id:drop-shadow-color filter drop-shadow(0 3 3 #ff000080)
+style id:bg-current backgroundColor #ff000080
+style id:perspective-none transform rotateY(45deg)
+style id:palette backgroundColor #79697bff
+covers [styles] borderStyle
+covers [styles] borderWidth
+covers [styles] borderTopWidth

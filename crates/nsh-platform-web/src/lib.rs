@@ -26,6 +26,8 @@ mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
+#[cfg(feature = "js")]
+mod local_time;
 mod net;
 mod storage;
 mod text;
@@ -186,6 +188,9 @@ struct Running {
     js_frame: bool,
     /// The surface's environment (window, appearance).
     environment: Environment,
+    /// The in-memory images (`data:` URIs, blobs) the page has blob URLs
+    /// of, by URI, while a view's source holds their bytes.
+    inline_images: nsh_core::image::InlineImages,
 }
 
 struct Sink;
@@ -548,6 +553,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         })),
         storage: Some(std::sync::Arc::new(storage)),
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -581,6 +587,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             animation: UiAnimation::default(),
             js_frame: false,
             environment,
+            inline_images: Default::default(),
         });
     });
     pump()
@@ -772,6 +779,7 @@ pub unsafe extern "C" fn nsh_compile(
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
     let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
         .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
         .filter_map(nsh_core::ui::description::SetDescription::of)
         .collect();
     let result = nsh_bundler::compile_module(&name, &source, &sets);
@@ -947,6 +955,18 @@ fn flush() {
                     KEYMAP.with(|k| *k.borrow_mut() = keymap);
                     continue;
                 }
+                if let MountItem::Image {
+                    source, options, ..
+                } = item
+                {
+                    for source in source.iter().chain(&options.placeholder) {
+                        if let Some(data) = &source.data
+                            && app.inline_images.register(source)
+                        {
+                            ffi::image_bytes(&source.uri, data);
+                        }
+                    }
+                }
                 if !matches!(
                     item,
                     MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -954,6 +974,9 @@ fn flush() {
                     encode::encode(&mut out, item);
                 }
             }
+        }
+        for uri in app.inline_images.prune() {
+            ffi::release_image(&uri);
         }
         // Bound properties follow the styles just applied.
         app.animation.outputs(&mut out);

@@ -156,8 +156,8 @@ macro_rules! events {
 // The order is part of the platform protocols (`encode.rs`, `Native.java`):
 // append new kinds at the end.
 events! {
-    Press = "onPress": "A tap / click.",
-    LongPress = "onLongPress": "A press held for about half a second.",
+    Press = "onPress": "A tap / click (payload: [`EventPayload::Press`] where the backend knows the pointer, else none).",
+    LongPress = "onLongPress": "A press held for about half a second (payload as `Press`).",
     PanStart = "onPanStart": "A drag started (payload: [`EventPayload::Pan`]).",
     PanEnd = "onPanEnd": "A drag ended (payload: [`EventPayload::Pan`] with velocity).",
     Refresh = "onRefresh": "Pull-to-refresh was triggered on a scroll or list.",
@@ -169,8 +169,8 @@ events! {
     SubmitEditing = "onSubmitEditing" as "onSubmit": "The return key was pressed in an input (payload: [`EventPayload::Text`]).",
     Focus = "onFocus": "An input became focused.",
     Blur = "onBlur": "An input lost focus.",
-    PressDown = "onPressIn" as "onPressDown": "A press went down on a pressable view (a finger, a pen or a mouse button).",
-    PressUp = "onPressOut" as "onPressUp": "The press ended: released, moved away or cancelled.",
+    PressDown = "onPressIn" as "onPressDown": "A press went down on a pressable view (a finger, a pen or a mouse button; payload as `Press`).",
+    PressUp = "onPressOut" as "onPressUp": "The press ended: released, moved away or cancelled (payload as `Press`).",
     Layout = "onLayout": "The frame changed (payload: [`EventPayload::Layout`], relative to the parent).",
     PinchStart = "onPinchStart": "A pinch started (payload: `scale`, `velocity`).",
     PinchEnd = "onPinchEnd": "A pinch ended (payload: `scale`, `velocity`).",
@@ -369,6 +369,19 @@ pub struct HoverEvent {
     pub modifiers: crate::keymap::Modifiers,
 }
 
+/// Where the pointer was at a press ([`EventKind::Press`],
+/// [`EventKind::LongPress`], [`EventKind::PressDown`],
+/// [`EventKind::PressUp`]), on backends that know it, in points.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PressEvent {
+    /// Position in the pressed view, its transforms undone (for a pressed
+    /// span of a text, in that text's view).
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page`.
+    pub page_position: Point<Points>,
+}
+
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
 /// points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -396,16 +409,21 @@ pub struct TouchEvent {
     pub activated: Option<NodeId>,
 }
 
-/// A set of [`EventKind`]s.
+// Every kind has a bit of [`EventMask`].
+const _: () = assert!(EventKind::ALL.len() <= 128, "EventMask has 128 bits");
+
+/// A set of [`EventKind`]s: one bit per kind, room for 128. Two words, not
+/// a `u128`: views keep it in Objective-C ivars, which take no 16-byte
+/// alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct EventMask(u64);
+pub struct EventMask([u64; 2]);
 
 impl std::ops::BitOr for EventMask {
     type Output = EventMask;
 
     #[inline]
     fn bitor(self, other: EventMask) -> EventMask {
-        EventMask(self.0 | other.0)
+        EventMask([self.0[0] | other.0[0], self.0[1] | other.0[1]])
     }
 }
 
@@ -413,29 +431,31 @@ impl EventMask {
     /// Returns true if `event` is in the set.
     #[inline]
     pub const fn contains(self, event: EventKind) -> bool {
-        self.0 & (1 << event as u8) != 0
+        let k = event as usize;
+        self.0[k / 64] & (1 << (k % 64)) != 0
     }
 
     /// The raw bit set, indexed by `EventKind as u8`.
     #[inline]
-    pub const fn bits(self) -> u64 {
-        self.0
+    pub const fn bits(self) -> u128 {
+        self.0[0] as u128 | (self.0[1] as u128) << 64
     }
 
     /// Adds or removes `event`.
     #[inline]
     pub fn set(&mut self, event: EventKind, enabled: bool) {
+        let k = event as usize;
         if enabled {
-            self.0 |= 1 << event as u8;
+            self.0[k / 64] |= 1 << (k % 64);
         } else {
-            self.0 &= !(1 << event as u8);
+            self.0[k / 64] &= !(1 << (k % 64));
         }
     }
 
     /// Returns true if no event is set.
     #[inline]
     pub const fn is_empty(self) -> bool {
-        self.0 == 0
+        self.0[0] == 0 && self.0[1] == 0
     }
 }
 
@@ -506,6 +526,9 @@ pub enum EventPayload {
     Hover(HoverEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
+    /// Where the pointer was at a press (`onPress`, `onLongPress`,
+    /// `onPressDown`, `onPressUp`), on backends that know it.
+    Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// The lines of a text block.
@@ -545,14 +568,60 @@ pub enum ResizeMode {
     Contain,
     /// Stretch to the box.
     Stretch,
-    /// Center at natural size.
+    /// Center at natural size, cropped where larger than the box (CSS's
+    /// `object-fit: none`).
     Center,
+    /// Center at natural size, shrunk to fit the box where larger (CSS's
+    /// `object-fit: scale-down`, React Native's `center`).
+    #[prop(rename = "scale-down")]
+    ScaleDown,
+}
+
+impl ResizeMode {
+    /// Where content of `natural` size goes in a box of `size`: scaled as
+    /// the mode scales it (`Center` keeps the natural size, as CSS's
+    /// `none`; `ScaleDown` shrinks content larger than the box, as CSS's
+    /// `scale-down`), then placed at `position`. The rectangle
+    /// may reach outside the box (a covering image), which crops it.
+    /// Content without a size fills the box.
+    pub fn fit(
+        self,
+        natural: Size<Points>,
+        size: Size<Points>,
+        position: crate::style::ObjectPosition,
+    ) -> Bounds<Points> {
+        let (nw, nh) = (natural.width.0, natural.height.0);
+        if nw <= 0.0 || nh <= 0.0 || self == ResizeMode::Stretch {
+            return Bounds {
+                origin: Point::default(),
+                size,
+            };
+        }
+        let contain = (size.width.0 / nw).min(size.height.0 / nh);
+        let scale = match self {
+            ResizeMode::Cover => (size.width.0 / nw).max(size.height.0 / nh),
+            ResizeMode::Contain => contain,
+            ResizeMode::Center => 1.0,
+            ResizeMode::ScaleDown => contain.min(1.0),
+            ResizeMode::Stretch => 1.0,
+        };
+        let content = Size {
+            width: Points(nw * scale),
+            height: Points(nh * scale),
+        };
+        Bounds {
+            origin: position.place(size, content),
+            size: content,
+        }
+    }
 }
 
 /// An image source.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImageSource {
-    /// `https://…`, `asset:/path` (bundled file) or a file path.
+    /// `https://…`, `asset:/path` (bundled file), a file path, a `data:` URI
+    /// or a `blob:` URL (`URL.createObjectURL`). A source with [`Self::data`]
+    /// goes by a short key instead of a `data:` URI ([`crate::image`]).
     pub uri: Arc<str>,
     /// Natural size in points, when known up front (bundled assets): used
     /// as the intrinsic layout size.
@@ -561,9 +630,49 @@ pub struct ImageSource {
     /// `a@2x.png`, ...): the core mounts the one for the screen's pixel
     /// ratio. Empty for a single file.
     pub scales: ImageScales,
+    /// The image's bytes when they are in memory (a `data:` URI's, the
+    /// blob of a `blob:` URL): the platforms decode these instead of
+    /// loading [`Self::uri`], which stays the cache key.
+    pub data: Option<crate::image::ImageData>,
 }
 
 impl ImageSource {
+    /// This source with its bytes in hand when its URI holds them: a
+    /// `data:` URI decoded (once, when the source is set) and named by a
+    /// short key. Other sources stay as they are. A `data:` URI that does
+    /// not decode becomes an empty one (the platforms then report the
+    /// error): left as it is, an app could write another image's key
+    /// (`data:<type>;nsh-key=<digest>`, which has no comma) and ask the
+    /// process-wide caches whether some surface shows those bytes.
+    #[must_use]
+    pub fn inline(self) -> ImageSource {
+        if self.data.is_some() || !self.uri.starts_with("data:") {
+            return self;
+        }
+        match crate::image::decode_data_uri(&self.uri) {
+            Ok((mime, bytes)) => {
+                let mime = mime.to_owned();
+                self.with_bytes(&mime, bytes.into())
+            }
+            Err(_) => ImageSource {
+                uri: "data:,".into(),
+                ..self
+            },
+        }
+    }
+
+    /// This source showing `data`, of media type `mime` (a blob's bytes),
+    /// named by a digest of the bytes: equal images share their loads and
+    /// cache entries, whatever URL named them.
+    #[must_use]
+    pub fn with_bytes(self, mime: &str, data: crate::image::ImageData) -> ImageSource {
+        ImageSource {
+            uri: crate::image::data_key(mime, &data).into(),
+            data: Some(data),
+            ..self
+        }
+    }
+
     /// The URI to load at `pixel_ratio` device pixels per point: the
     /// variant [`ImageScales::pick`] chooses (`asset:/a.png` at 2 →
     /// `asset:/a@2x.png`), or [`Self::uri`] itself when there are no
@@ -596,6 +705,7 @@ impl ImageSource {
             uri: self.uri_for(pixel_ratio),
             size: self.size,
             scales: ImageScales::NONE,
+            data: self.data.clone(),
         }
     }
 }
@@ -899,6 +1009,20 @@ pub struct ListContentStyle {
     pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
     pub column_gap: Points,
+}
+
+/// What a list scrolls in (`viewport`), fixed when the list is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[non_exhaustive]
+pub enum ListViewport {
+    /// A scroll view of its own (default).
+    #[default]
+    Own,
+    /// The scroll view around it: the list lies in its parent's layout at
+    /// its full length and renders the rows near that scroll view's
+    /// viewport, so headers above it and other lists scroll with it as
+    /// one page.
+    Parent,
 }
 
 /// When list items count as viewable (React Native's `viewabilityConfig`).
@@ -1488,6 +1612,13 @@ pub enum Prop {
     /// of view); the content scrolls under the space before them.
     #[prop(js = "stickyHeaderOffset", default = Points(0.0), on = LIST)]
     StickyOffset(Points),
+    /// `viewport`: `"parent"` lays the list out at its full length in its
+    /// parent and renders the rows near the viewport of the scroll view
+    /// around it, which scrolls it (a page of headers and lists); `"own"`
+    /// (default) scrolls it in a scroll view of its own. Fixed when the
+    /// list is made.
+    #[prop(js = "viewport", on = LIST)]
+    ListViewport(ListViewport),
     /// `contentStyle`: padding and gaps of the content.
     #[prop(js = "contentStyle", on = LIST)]
     ListContent(ListContentStyle),
@@ -1584,7 +1715,7 @@ pub enum Prop {
     NativeId(Option<Box<str>>),
     /// An input's caret and selection, the highlight of a `selectable`
     /// text's selection (Rust components; TS sets the `selectionColor`
-    /// style key or `selection:text-*`).
+    /// style key or `selection:bg-*`).
     SelectionColor(Option<Color>),
     /// `autoComplete` (iOS: also `textContentType`): what an input holds, for
     /// autofill (React Native's values, e.g. "username", "current-password",
@@ -1698,6 +1829,9 @@ pub enum Prop {
     /// `elevation` (Android): the material shadow (points), from the view's shape.
     #[prop(android = "elevation")]
     Elevation(Points),
+    /// The system material of a backdrop blur (iOS, default `ultraThin`).
+    #[prop(ios = "backdropMaterial")]
+    BackdropMaterial(crate::BackdropMaterial),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),

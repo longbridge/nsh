@@ -37,7 +37,7 @@ macro_rules! hues {
         $($(#[$doc])* pub const $name: Hue = Hue($index);)*
 
         /// Every hue, in Tailwind's order.
-        pub const HUES: [Hue; 22] = [$($name),*];
+        pub const HUES: [Hue; 26] = [$($name),*];
     };
 }
 
@@ -86,6 +86,14 @@ hues! {
     NEUTRAL = 20,
     /// `stone`.
     STONE = 21,
+    /// `mauve`.
+    MAUVE = 22,
+    /// `olive`.
+    OLIVE = 23,
+    /// `mist`.
+    MIST = 24,
+    /// `taupe`.
+    TAUPE = 25,
 }
 
 /// `white`.

@@ -133,6 +133,7 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

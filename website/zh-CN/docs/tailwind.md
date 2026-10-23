@@ -66,7 +66,7 @@ view()
 冲突的处理方式：
 
 1. 同一字符串中**靠后的类优先**：`"p-2 p-4"` 的结果是 `p-4`。不需要 `tailwind-merge`：组件可以直接把调用方传入的 `class` 追加在后面。在 Rust 中同样是后调用的方法优先。
-2. **带变体的类在普通类之后应用**，并按 Tailwind 的变体顺序排列（`hover:` 在 `active:` 之前，断点从小到大，`dark:` 最后），与它们在字符串中的位置无关。和 CSS 一样，`odd:bg-a last:bg-b` 会让位于奇数位置的最后一行得到 `bg-a`，因为 Tailwind 把 `odd` 排在 `last` 之后。
+2. **带变体的类在普通类之后应用**，并按 Tailwind 的变体顺序排列（`hover:` 在 `active:` 之前，`max-*:` 从宽到窄，断点从小到大，`dark:` 最后），与它们在字符串中的位置无关。与 Tailwind 一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的类排在后面：深色模式下悬停时 `dark:hover:bg-a dark:bg-b` 是 `bg-a`，宽度小于 `md` 时 `max-md:p-2 max-lg:p-4` 是 `p-2`。和 CSS 一样，`odd:bg-a last:bg-b` 会让位于奇数位置的最后一行得到 `bg-a`，因为 Tailwind 把 `odd` 排在 `last` 之后。
 3. **`style` 优先于类名。**
 4. `!` 让一个类变为 important：`!p-0`。
 
@@ -88,7 +88,7 @@ Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate �
 | `group-active/name:` ... | 同上，针对标记为 `group/name` 的祖先 | `.group_named("name")`；`.group_active_named("name", ..)` 等 |
 | `first:`、`last:`、`odd:`、`even:`、`only:` | 元素自身在兄弟节点中的位置。要按行的位置给行内标签上色，把 `last:text-*` 写在行上，标签会继承它 | 根据行的索引用普通 Rust 判断（`at.is_first()`、`at.is_last()`、`at.index() % 2`） |
 | `placeholder:` | 设置输入框占位文字的样式（`placeholder:text-zinc-400`） | `.placeholder_color(..)` |
-| `selection:` | 设置输入框或可选文本的选区样式（`selection:text-violet-500`） | `.selection_color(..)` |
+| `selection:` | 设置输入框或可选文本的选区高亮颜色，也作用于元素内的输入框和文本（`selection:bg-violet-200`） | `.selection_color(..)` |
 | `dark:` | 系统外观为深色 | `AdaptiveColor`，或 `.dark(\|s\| ..)` |
 | `sm:`、`md:`、`lg:`、`xl:`、`2xl:` | 窗口宽度至少为 640、768、1024、1280、1536 点 | `.style_when(\|\| window().width >= px(768.0), \|s\| ..)` |
 | `max-sm:`、`max-md:` ... | 窗口宽度小于该断点 | 同上，使用 `<` |
@@ -152,12 +152,15 @@ view()
 ## 与 Web 上的 Tailwind 的差异
 
 - **单位是点（point）。** `p-4`（`.p_4()`）是 16 点（1 个间距步长 = 4pt，1rem = 16pt）。以 `px` 写的任意值也按点计算：`p-[13px]`（`.p(px(13.0))`）就是 13pt。
-- **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。没有 `flex` 或 `inline-flex` 的视图保持 NSH 默认的纵向排列。`block` 和 `flow-root` 使用块布局；`inline` 和 `inline-block` 按视图布局（没有行内格式化上下文）。在 Rust 中由 `.flex_row()` 和 `.flex_col()` 设置方向。
+- **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。没有 `flex` 或 `inline-flex` 的视图保持 NSH 默认的纵向排列。`block` 和 `flow-root` 使用块布局，`inline` 和 `inline-block` 也是如此，与浏览器在 flex 或 grid 父元素中的布局一致。在 Rust 中由 `.flex_row()` 和 `.flex_col()` 设置方向。
 - **视图上的文字类会被继承。** 视图上的 `text-*`、`font-*`、`leading-*`、`tracking-*` 等文字工具类（Rust 中的 `.text_color(..)`、`.font_weight(..)` 等）会像 CSS 继承那样传给其内部的文本和输入元素：`<View class="text-white">` 会让其中的标签变成白色。
-- **`space-x-*` / `space-y-*` 是间距**（等同 `gap-x` / `gap-y`）。
+- **每个视图都是独立的盒子。** `overflow-x-hidden` 和 `overflow-y-hidden` 与 `overflow-hidden` 一样裁剪两个方向（滚动由 [scroll](../elements/scroll.md) 元素负责）；`invisible` 隐藏视图及其中的一切；`mix-blend-*` 让视图与其后绘制的一切混合；`block` 盒子的外边距与其子元素的外边距互不合并；`absolute` 视图与 CSS 一样，相对最近的定位祖先放置；`fixed` 让视图在其根视图中布局（其他元素按 `absolute` 定位）。
+- **文本保留空白。** 字符串中的空格和换行按原样绘制，`whitespace-*` 设置换行方式；JSX 编译器会像 JSX 一样合并字面 JSX 文本中的空白。
+- **过渡按属性组生效**：`transition` 对颜色、不透明度、阴影和变换做动画，`transition-all` 还包括圆角和边框宽度；滤镜、背景滤镜、渐变和布局会直接取新值。
+- **`focus-visible:` 即 `focus:`**：元素获得焦点时就会应用。
 - **状态背景色显示在渐变之上。** 在 CSS 中渐变会盖住 `background-color`，因此 `bg-linear-*` 表面上的 `active:bg-*` 永远看不到；在 NSH 中，来自 `active:`、`hover:`、`focus:` 或 `group-*:` 的背景色会在该状态期间替换渐变（除非该状态设置了自己的渐变，例如 `active:from-*`）。`activeStyle` 等状态样式以及动画背景色也是如此。
 - **在 NSH 中属于属性的设置，以类的形式也可用**：`line-clamp-*`、`truncate`、`whitespace-nowrap`、`pointer-events-*`、`object-*`（图片缩放模式）、`select-text`、`caret-*` 和 `placeholder:text-*` 都能使用；若同时设置了对应的显式属性（`numberOfLines`、`pointerEvents`、`resizeMode` 等），以属性为准。在 Rust 中它们是元素的方法（`.number_of_lines(..)`、`.resize_mode(..)` 等）。
-- **支持的范围**：Tailwind 4 中在原生层有意义的工具类和变体。`peer-*` 变体、伪元素（`before:`、`after:`）和任意属性（`[mask-type:luminance]`）会报告为未知类。原生无需处理的纯 Web 工具类（`antialiased`、`will-change-*`、`touch-*`、`scroll-*`、`snap-*`、`overscroll-*`、`box-border` 等）会被接受并忽略。
+- **支持的范围**：Tailwind 4 中在原生层有意义的工具类和变体。`peer-*` 变体、伪元素（`before:`、`after:`）和任意属性（`[mask-type:luminance]`）会报告为未知类；NSH 在原生层没有对应含义的工具类也都是未知类，因此一个类不会有与浏览器不同的含义。渲染提示类（`antialiased`、`will-change-transform`、`appearance-none`、`box-border` 等）会被接受，但不改变任何东西。
 
 其余部分都与 Tailwind 4 文档一致：调色板、透明度修饰符（`bg-black/40`）、任意值（`bg-[#34c759]`、`w-[72px]`、`grid-cols-[1fr_2fr]`）、分数（`w-1/2`、`translate-x-1/2`）、阴影和 ring、渐变（`bg-linear-to-r`、`bg-radial`、`bg-conic` 配合 `from-` / `via-` / `to-`）、滤镜、`backdrop-blur-*`、`mix-blend-*`、变换、`transition-*` 和 `duration-*`、`animate-spin` / `ping` / `pulse` / `bounce`，以及网格，每一项在 Rust 中都有对应的类型化方法。[滤镜与混合](./styling.md#滤镜与混合) 的平台限制对类名同样适用。
 

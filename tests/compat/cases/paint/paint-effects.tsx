@@ -2,7 +2,7 @@
 // keys as the platform receives them: gradients of each kind as the
 // background image (React Native's name too), every filter function,
 // backdrop filters and every blend mode.
-import { Text, View } from "nsh";
+import { Text, View, signal } from "nsh";
 
 const BLENDS = [
   "normal",
@@ -26,6 +26,7 @@ const BLENDS = [
 ] as const;
 
 function App() {
+  const material = signal<"regular" | "chrome" | undefined>("regular");
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>Effects</Text>
@@ -58,6 +59,20 @@ function App() {
       <View testID="no-filter" style={{ height: 4, filter: "none" }} />
       <View testID="backdrop" style={{ height: 4, backdropFilter: "blur(10px)" }} />
       <View testID="backdrops" style={{ height: 4, backdropFilter: "saturate(180%) blur(20px)" }} />
+      <View testID="mask" style={{ height: 4, maskImage: "linear-gradient(black 70%, transparent)" }} />
+      <View testID="no-mask" style={{ height: 4, maskImage: "none" }} />
+      <View testID="material" style={{ height: 4, backdropFilter: "blur(30px)" }} ios={{ backdropMaterial: "regular" }} />
+      <View testID="material-chrome" style={{ height: 4, backdropFilter: "blur(10px)" }} ios={{ backdropMaterial: "chrome" }} />
+      <View testID="no-material" style={{ height: 4, backdropFilter: "blur(10px)" }} ios={{ backdropMaterial: "ultraThin" }} />
+      <View testID="material-thin" style={{ height: 4, backdropFilter: "blur(30px)" }} ios={{ backdropMaterial: "thin" }} />
+      <View testID="material-thick" style={{ height: 4, backdropFilter: "blur(30px)" }} ios={{ backdropMaterial: "thick" }} />
+      <View testID="material-change" ios={{ backdropMaterial: material() }} style={{ height: 20, backdropFilter: "blur(30px)" }}
+        onPress={() => material.set(material() === "regular" ? "chrome" : undefined)}>
+        <Text>Change material</Text>
+      </View>
+      <View testID="glass" style={{ height: 4, backdropFilter: "blur(10px)", glassEffect: "regular" }} />
+      <View testID="glass-clear" style={{ height: 4, glassEffect: "clear" }} />
+      <View testID="no-glass" style={{ height: 4, glassEffect: "none" }} />
       {BLENDS.map((mode) => (
         <View testID={`blend-${mode}`} style={{ height: 2, mixBlendMode: mode }} />
       ))}

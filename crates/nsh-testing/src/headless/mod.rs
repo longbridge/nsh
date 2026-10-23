@@ -48,7 +48,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
-    MountItem, NodeId, PayloadValue, Point, Points, ROOT_ID, Size, SubmitBehavior,
+    MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
     geometry::{point, px},
 };
 use nsh_engine::{
@@ -924,19 +924,78 @@ impl Headless {
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        let at = self
+            .screen
+            .canvas_node(&parsed)
+            .and_then(|(canvas, center)| {
+                self.screen
+                    .bounds_in_root(canvas)
+                    .map(|b| b.origin + center)
+            });
         // The finger, as platforms report it to the views around it that
         // listen to touches (an overlay's `onPressOutside` among them).
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), at);
         }
+        let payload = self.press_payload(id, None);
         for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-            self.send(id, kind, EventPayload::None);
+            self.send(id, kind, payload.clone());
         }
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::End, path);
+            self.send_touch(id, nsh_core::TouchPhase::End, path, at);
         }
         self.done()
+    }
+
+    /// The step `pressAt(<selector>, <x>, <y>)`: [`Headless::press`] with
+    /// the pointer at `at` in the view `selector` names (its top left
+    /// corner). The events tell the view where that is in it and in the
+    /// root.
+    pub fn press_at(&mut self, selector: &str, at: Point<Points>) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("pressAt({selector}, {}, {})", at.x.0, at.y.0));
+        let pick = self.screen.pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
+        // `at` is in the view. The touch reports it in the root, as `press`
+        // reports a canvas node's center.
+        let page = self
+            .screen
+            .bounds_in_root(id)
+            .map(|bounds| bounds.origin + at);
+        let path = self.screen.touch_path(id);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
+        }
+        let payload = self.press_payload(id, Some(at));
+        for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+            self.send(id, kind, payload.clone());
+        }
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::End, path, page);
+        }
+        self.done()
+    }
+
+    /// A press at `at` in `view` (else the view's center), in that view
+    /// and in the root. `None` when the view has no bounds.
+    fn press_payload(&self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+        let Some(bounds) = self.screen.bounds_in_root(view) else {
+            return EventPayload::None;
+        };
+        let position = at.unwrap_or_else(|| {
+            point(
+                Points(bounds.size.width.0 / 2.0),
+                Points(bounds.size.height.0 / 2.0),
+            )
+        });
+        EventPayload::Press(PressEvent {
+            position,
+            page_position: point(
+                Points(bounds.origin.x.0 + position.x.0),
+                Points(bounds.origin.y.0 + position.y.0),
+            ),
+        })
     }
 
     /// The step `longPress(<selector>)`: holds a finger on what `selector`
@@ -951,14 +1010,15 @@ impl Headless {
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
         }
-        self.send(id, EventKind::PressDown, EventPayload::None);
+        let payload = self.press_payload(id, None);
+        self.send(id, EventKind::PressDown, payload.clone());
         self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
-        self.send(id, EventKind::LongPress, EventPayload::None);
-        self.send(id, EventKind::PressUp, EventPayload::None);
+        self.send(id, EventKind::LongPress, payload.clone());
+        self.send(id, EventKind::PressUp, payload);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::End, path);
+            self.send_touch(id, nsh_core::TouchPhase::End, path, None);
         }
         self.done()
     }
@@ -1043,7 +1103,14 @@ impl Headless {
 
     /// A finger going down on (or lifting from) `target`, reported on the
     /// root with the views around it that listen to touches.
-    fn send_touch(&self, target: NodeId, phase: nsh_core::TouchPhase, path: Vec<NodeId>) {
+    fn send_touch(
+        &self,
+        target: NodeId,
+        phase: nsh_core::TouchPhase,
+        path: Vec<NodeId>,
+        at: Option<Point<Points>>,
+    ) {
+        let location = at.and_then(|p| self.screen.bounds_in_root(target).map(|b| p - b.origin));
         let touch = nsh_core::TouchEvent {
             phase,
             timestamp: 0.0,
@@ -1051,8 +1118,8 @@ impl Headless {
                 id: 0,
                 target,
                 path,
-                page: Point::default(),
-                location: Point::default(),
+                page: at.unwrap_or_default(),
+                location: location.unwrap_or_default(),
                 changed: true,
             }],
             activated: None,
@@ -1276,6 +1343,39 @@ mod tests {
             )
     }
 
+    /// A pad under a 10-point strip. A press reports where it was in the
+    /// pad and in the root.
+    #[component]
+    fn PressPoint() -> impl IntoElement {
+        let seen = signal(String::from("none"));
+        view()
+            .child(view().h(px(10.0)))
+            .child(view().test_id("pad").w(px(80.0)).h(px(40.0)).on(
+                EventKind::Press,
+                move |p: &EventPayload| {
+                    let EventPayload::Press(e) = p else {
+                        seen.set("no position".into());
+                        return;
+                    };
+                    seen.set(format!(
+                        "at {:.0} {:.0} in {:.0} {:.0}",
+                        e.position.x.0, e.position.y.0, e.page_position.x.0, e.page_position.y.0
+                    ));
+                },
+            ))
+            .child(text(move || format!("seen: {}", seen.get())))
+    }
+
+    #[test]
+    fn presses_carry_where_the_pointer_was() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
+        app.first_render().unwrap();
+        app.press_at("id:pad", point(px(10.0), px(12.0))).unwrap();
+        app.wait_for("seen: at 10 12 in 10 22").unwrap();
+        app.press("id:pad").unwrap();
+        app.wait_for("seen: at 40 20 in 40 30").unwrap();
+    }
+
     #[test]
     fn steps_press_what_a_text_is_in_and_wait_for_what_it_shows() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
@@ -1306,6 +1406,102 @@ mod tests {
         assert_eq!(steps.first().map(String::as_str), Some("open"));
         assert!(steps.iter().any(|s| s == "press(Add)"), "{steps:?}");
         assert!(steps.iter().any(|s| s == "press(text:Add)"), "{steps:?}");
+    }
+
+    /// A pad under a canvas that takes no touches and draws two cells it
+    /// names as nodes. A press on a cell reaches the pad.
+    #[component]
+    fn Cells() -> impl IntoElement {
+        let pressed = signal(0_u32);
+        let touched = signal((Point::<Points>::default(), Point::<Points>::default()));
+        let cell = |x: f32, label: &str, id: &str| {
+            nsh_core::canvas::CanvasNode::new(
+                Bounds::new(point(px(x), px(0.0)), size(px(100.0), px(40.0))),
+                nsh_core::AccessibilityRole::Text,
+                label,
+            )
+            .test_id(id)
+        };
+        let drawing = Painter::new()
+            .fill_text("12", 4.0, 20.0)
+            .fill_text("Total", 104.0, 20.0)
+            .node(cell(0.0, "12", "cell-a1"))
+            .node(cell(100.0, "Total", "cell-b1").selected(true));
+        view()
+            .child(text(move || format!("pressed: {}", pressed.get())))
+            .child(text(move || {
+                format!(
+                    "touch x: {} local x: {}",
+                    touched.get().0.x.0,
+                    touched.get().1.x.0
+                )
+            }))
+            .child(
+                view()
+                    .w(px(200.0))
+                    .h(px(40.0))
+                    .child(
+                        view()
+                            .test_id("pad")
+                            .absolute()
+                            .size_full()
+                            .on_touch(move |event: &nsh_core::TouchEvent| {
+                                touched.set((event.points[0].page, event.points[0].location))
+                            })
+                            .on_press(move || pressed.update(|n| *n += 1)),
+                    )
+                    .child(
+                        canvas(drawing)
+                            .absolute()
+                            .size_full()
+                            .pointer_events(PointerEvents::None),
+                    ),
+            )
+    }
+
+    #[test]
+    fn a_canvas_nodes_are_found_and_a_press_on_one_reaches_the_view_under_it() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Cells>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("id:cell-b1").unwrap();
+        assert_eq!(app.screen().count("label:Total"), Ok(1));
+        assert!(app.shows("12"));
+        assert_eq!(app.screen().selected("id:cell-b1"), Ok(true));
+        assert_eq!(app.screen().selected("id:cell-a1"), Ok(false));
+        app.press("id:cell-b1").unwrap();
+        app.wait_for("pressed: 1").unwrap();
+        assert!(
+            app.shows("touch x: 150 local x: 150"),
+            "{:?}",
+            app.screen().texts()
+        );
+        app.press("text:12").unwrap();
+        app.wait_for("pressed: 2").unwrap();
+        assert!(
+            app.shows("touch x: 50 local x: 50"),
+            "{:?}",
+            app.screen().texts()
+        );
+    }
+
+    /// The metrics of a line of text in a canvas font.
+    #[component]
+    fn Metrics() -> impl IntoElement {
+        let m = text_metrics("20px system-ui", "abc");
+        text(format!(
+            "{} {} {} {}",
+            m.width.0, m.ascent.0, m.descent.0, m.height.0
+        ))
+    }
+
+    /// The approximate engine's line: characters 0.55 em wide, the line
+    /// 1.2 em with its baseline at the bottom, so the ascent is the line
+    /// and the descent is 0.
+    #[test]
+    fn text_metrics_are_the_engines_line() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Metrics>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("33 24 0 24").unwrap();
     }
 
     /// A name field that says hello and keeps what was sent.

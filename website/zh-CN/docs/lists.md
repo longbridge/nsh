@@ -1,6 +1,6 @@
 ---
 title: 列表
-description: 用 Rust 和 TSX 渲染长列表和无限列表：复用、行标识、多列、吸顶标题、倒置的聊天列表、横向列表、加载更多、可见性，以及滚动到指定条目。
+description: 用 Rust 和 TSX 渲染长列表和无限列表：复用、行标识、多列、吸顶标题、倒置的聊天列表、横向列表、页面中的列表、加载更多、可见性，以及滚动到指定条目。
 order: 40
 group: ui
 demo: guide-lists
@@ -159,6 +159,7 @@ const toggle = (id: number) =>
 | `children` | `virtual_list(.., row)` | `(item: () => T, index: () => number) => JSX.Element` | | 渲染一个单元格；每个单元格调用一次，见[复用](#复用是如何工作的)。 |
 | `estimatedItemSize` | `.estimated_item_size(px(..))` | `number` | `50` | 尚未测量的行的尺寸，单位为点。 |
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
+| `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`：列表在自己的滚动视图中滚动。`"parent"`：列表以完整长度排在外层滚动视图中，随页面其他内容一起滚动（见[页面中的列表](#页面中的列表viewportparent)）。在列表创建时确定。 |
 | `numColumns` | `.columns(n)` | `number` | `1` | 每行的条目数（纵向列表）。 |
 | `inverted` | `.inverted()` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
 | `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | 非倒置列表在距离末尾不超过该点数时，随内容增长停留在末尾（见下文）。 |
@@ -494,6 +495,41 @@ virtual_list(count, move |at| {
 ```
 
 在从右到左布局中，横向列表从右侧开始向左排列。
+
+## 页面中的列表：viewport="parent"
+
+页面常常整体滚动：一个标题、几张卡片，然后是一个长列表，下面可能还有另一个列表。给列表设置 `viewport="parent"`（Rust 中是 `.viewport(ListViewport::Parent)`），并把它和页面的其他内容一起放进 `Scroll`：列表以完整的长度排在页面中，由页面的滚动视图和其他内容一起滚动。它仍然只创建页面视口附近的行并复用单元格，因此一个页面可以容纳多个长列表。
+
+```rust tabs
+scroll()
+    .flex_1()
+    .child(header())
+    .child(
+        virtual_list(count, row)
+            .viewport(ListViewport::Parent)
+            .estimated_item_size(px(56.0))
+            .row_gap(px(6.0)),
+    )
+    .child(footer())
+```
+
+```tsx tabs
+<Scroll style={{ flex: 1 }}>
+  <Header />
+  <List viewport="parent" each={items} estimatedItemSize={56} contentStyle={{ gap: 6 }}>
+    {(item) => <Row item={item()} />}
+  </List>
+  <Footer />
+</Scroll>
+```
+
+- 列表的长度就是它所有行的长度：它的高度（横向时是宽度）由内容决定，和普通视图一样；内边距、边框和外边距也和视图上的效果相同。
+- 它的行跟随沿其方向最近的外层滚动视图，或者它所在的屏幕。
+- 页面会像浏览器一样保持你正在阅读的内容不动：完全位于视口顶部以上的行改变尺寸时，页面随之移动同样的距离；列表开头在视口内时，变高的行会把下面的内容往下推。
+- `scrollToIndex`、`scrollToEnd` 和 `initialScrollIndex` 会在页面内容范围内把页面滚动到列表的行；列表末尾接近视口时触发 `onLoadMore`，`onViewableItemsChange` 报告页面视口中的行。
+- `stickyHeaderIndices` 和 `stickyHeaderOffset` 让行吸附在页面顶部：分组标题停在顶部，它的行从下面滚过，直到下一个标题把它推出；最后一个标题随列表的末尾一起离开。
+- 页面如何滚动由它的滚动视图决定：把 `onScroll` 等滚动事件、`scrollValue`、`refreshing` / `onRefresh`、分页和吸附、`contentInset`、`scrollbar`、`scrollable` 和 `keyboardDismissMode` 设置在 `Scroll` 上。倒置列表和 `maintainVisibleContentPosition` 属于拥有自己视口的列表（`viewport="own"`，默认值）。
+- 视口在列表创建时确定：要切换，请渲染一个新的列表。
 
 ## 加载更多：onLoadMore
 

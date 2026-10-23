@@ -35,6 +35,7 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -242,6 +243,66 @@ fn rust_lists_have_headers_footers_separators_and_empty_views() {
     );
 }
 
+/// A page: a header and a list of 100 rows in the page's viewport.
+#[component]
+fn Page() -> impl IntoElement {
+    scroll().flex_1().child(text("header").h(px(200.0))).child(
+        virtual_list(100, |at| {
+            text(move || format!("row {}", at.index())).h(px(40.0))
+        })
+        .viewport(ListViewport::Parent)
+        .estimated_item_size(px(40.0)),
+    )
+}
+
+#[test]
+fn rust_lists_in_a_pages_viewport_scroll_with_the_page() {
+    let (engine, rx) = start(Root::of::<Page>());
+    let mut tree = Tree::default();
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    tree.apply(&first);
+    tree.drain(&rx);
+    // One scroll view, the page's; the list is a view in it.
+    let scrolls: Vec<u32> = tree
+        .kinds
+        .iter()
+        .filter(|(_, k)| *k == "Scroll")
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(scrolls.len(), 1, "{:?}", tree.kinds);
+    let page = scrolls[0];
+    // The rows from the list's start (200 down) to the viewport's end and
+    // a screen more: 0 to 1488 of the list, 38 rows.
+    let rows = |tree: &Tree| {
+        tree.texts
+            .iter()
+            .filter(|t| t.1.starts_with("row "))
+            .count()
+    };
+    assert!(
+        tree.shows("row 0") && tree.shows("row 37"),
+        "{:?}",
+        tree.texts
+    );
+    assert!(!tree.shows("row 38"));
+    assert_eq!(rows(&tree), 38);
+    let row = tree.find("row 0").unwrap();
+    let list = tree.parents[&tree.parents[&row]];
+    assert_eq!(tree.kinds[&list], "View");
+    assert_eq!(tree.parents[&list], page);
+    // The page scrolls 2000: the list's rows 23 to 87 render, in the
+    // cells there were and a few more.
+    engine.control().scroll(page, point(px(0.0), px(2000.0)), 0);
+    tree.drain(&rx);
+    assert!(
+        tree.shows("row 23") && tree.shows("row 87"),
+        "{:?}",
+        tree.texts
+    );
+    assert!(!tree.shows("row 88"));
+    assert_eq!(rows(&tree), 87 - 23 + 1);
+}
+
 /// A `ListView` with rows of this component and a header.
 #[component]
 fn Stocks() -> impl IntoElement {
@@ -335,6 +396,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

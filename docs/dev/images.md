@@ -16,6 +16,37 @@
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
   decodes them. Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
+- **Fit and position**: `resizeMode` (or an `object-*` fit class) sizes the image and the `objectPosition` style
+  (`ObjectPosition`, CSS's `object-position`, parsed by `css::object_position`; `object-top`, ... set it) places it, both
+  computed by one function, `ResizeMode::fit` (`center` keeps the natural size, as CSS's `none`, and `scale-down`
+  shrinks what is larger than the box, as CSS's `scale-down`, on every platform). The
+  position is the image's, not the view's: it travels in `ImageOptions::position` with `MountItem::Image`, and a change
+  sends that item again, not a `ViewStyle`. iOS and macOS show the image in a picture layer inside the clipped image
+  layer, framed at the fitted rectangle (the tint and its mask inside it); Android translates its draw matrix by the
+  position; Windows, Linux and GPUI draw at the fitted rectangle; the web sets CSS's `object-position` on the `<img>`
+  (and the tint mask's position).
+- **In-memory images** (`nsh_core::image`): `data:` URIs and `blob:` URLs are resolved once, in shared code, and their
+  bytes travel with the source (`ImageSource::data`, an `ImageData`: shared, cloned without a copy, equal by
+  identity). The core decodes a `data:` source (base64 or percent-encoded) when the prop is set
+  (`ImageSource::inline`, in `set_prop`, for TSX and Rust components alike), never per load. A `blob:` URL's blob
+  lives in the JS VM (`nsh-js` `web/blob.rs`): `dom.rs` hands the decoded prop to `blob::resolve_image_source`, which
+  gives the source the blob's bytes (`Blob` keeps them in an `Arc<[u8]>`, so no copy and no base64 in JS); a URL
+  revoked or never made keeps its `blob:` URI and no bytes, and the platform reports `onError`. Revoking a URL later
+  changes nothing: the source holds the bytes. Either way the source then goes by `data:<type>;nsh-key=<digest>`
+  (`ImageSource::with_bytes`; SHA-256, 128 bits, hex), so cache keys and coalescing hash a few dozen bytes, the
+  shadow tree keeps no base64 text, equal bytes share one decode whatever URL named them, and no app can make a
+  key another surface's image uses (the caches are per process). The access check lets `data:` and `blob:` through
+  (bytes the app has); only `Image`'s `src` and `placeholder` resolve a `blob:` URL, and a video, a canvas image or
+  `getSize` / `prefetch` given one report the platform's error. A `data:` URI that does not decode becomes `data:,`
+  (shows nothing, `onError`): an app writing a key itself never reaches another surface's cache entry. A `blob:`
+  URL keeps the key and bytes it resolved to (`BlobUrls`), so setting it again hashes nothing and sends nothing new.
+  iOS, macOS, Windows, Linux and GPUI decode `ImageSource::data` as they do a download's
+  bytes (`Location::Memory`, served without the download map or the `getSize` data cache; iOS wraps the bytes in an
+  `NSData` without a copy); the backends that get only a URI look the bytes up by it in an `InlineImages` (weak
+  references: an entry lives while a source holds the bytes): Android's `Images.java` reads `data:` / `blob:` URIs
+  through `Native.imageBytes`, the web runtime gets them once per key (`image_bytes`) as a browser blob URL that
+  `asset()` maps the key to, revoked (`release_image`) when no source holds them. `Image.getSize` / `prefetch` of a
+  `data:` URI decode it on the platform (`nsh_core::image::decode_data_uri`, the one decoder every backend uses).
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the

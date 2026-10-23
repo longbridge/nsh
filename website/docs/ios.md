@@ -7,10 +7,9 @@ group: platforms
 
 # iOS
 
-NSH apps run on iOS with UIKit views and CoreText text, on devices and in the simulator, from iOS 15.0. The main use is
-embedding: an existing app shows NSH apps in its own views, a Rust root it links or TSX it loads, including signed
-packages it downloads, under limits and capabilities it sets. Running and packaging whole apps work too, as on the
-other platforms. On iOS, `os()` is `Os::Ios` (`platform.os` is `"ios"` in TSX) and TSX's `ios={{…}}` props apply.
+NSH apps run on iOS with UIKit views and CoreText text, on devices and in the simulator, from iOS 15.0. Whole apps run
+and package as on the other platforms, and an existing app can show NSH apps in its own views, a Rust root it links
+or TSX it loads, including signed packages it downloads, under limits and capabilities it sets. On iOS, `os()` is `Os::Ios` (`platform.os` is `"ios"` in TSX) and TSX's `ios={{…}}` props apply.
 
 ## Requirements
 

@@ -11,7 +11,7 @@ NSH checkout 中进行。
 
 > [!IMPORTANT]
 > 这套流程需要 Docker Engine 和 Linux FUSE。Docker 运行控制进程与 Sandbox，FUSE 在 Sandbox 内挂载工作区。
-> 下文的步骤对应这套 Linux 部署。
+> 在 macOS 上，开发命令通过 OrbStack 等本地 Docker 环境准备这套 Linux 部署。
 
 ## 快照保存什么
 
@@ -32,14 +32,14 @@ NSH 的本地验证在第一个分支上运行 `nsh-package` 的测试，保存 
 每次调用都会创建新的 Store，执行上述完整流程。快照在同一次调用的分支之间复用。评估时要测量的是获得另一个可用、
 已测试工作区的完整成本，包括挂载、提交和卸载的耗时。
 
-## 准备 Linux 开发机
+## 准备开发环境
 
 准备 [NSH 仓库](https://github.com/longbridge/nsh) 的 checkout，以及：
 
-- Linux，Docker 的 Store 卷位于本地 ext4、XFS 或 Btrfs 文件系统。
+- 本地 Linux Docker 引擎，其 Store 卷位于 ext4、XFS 或 Btrfs 文件系统；可运行在 Linux 上，或 macOS 的 OrbStack 等环境中。
 - 提供 API 1.54 或更新版本的 Docker Engine；本地验证使用 Engine 29.7.2。
 - `/dev/fuse`，并允许 Docker 将该设备和 `CAP_SYS_ADMIN` 提供给 Sandbox。
-- Git、Python 3.12 或更新版本、rustup 和 C/C++ 编译器。
+- Git 和 Python 3.12 或更新版本；在 Linux 上还需要 rustup 和 C/C++ 编译器。
 - 可获取固定版本 LayerFS 源码、Cargo 依赖和运行镜像的网络连接。
 
 这套流程构建 LayerFS **1.0.0**，固定源码提交为
@@ -50,13 +50,18 @@ Sandbox 的生命周期。
 在 NSH checkout 根目录运行：
 
 ```sh
-rustup toolchain install 1.85.1 --profile minimal
-python3 .github/ci/layerfs.py prepare
-python3 .github/ci/layerfs.py smoke
+./scripts/layerfs prepare
+./scripts/layerfs smoke
+./scripts/layerfs status
 ```
 
-`prepare` 检查 Docker API，用 Rust 1.85.1 构建固定版本的 daemon 和 Node addon，再构建运行镜像。宿主机构建
-使用 checkout 中通常的 `target/` 和 Cargo registry。镜像的精确 ID 记录在 `.nsh/layerfs/deployment.json`。
+入口可直接执行，会自动选择 Python 3.12 或更新版本，也支持 macOS 上的 Homebrew 安装，并从当前 Docker context
+发现 socket。需要指定本地 socket 时，使用 `--docker-socket PATH`。
+
+`prepare` 检查 Docker API，安装 Rust 1.85.1，构建固定版本的 daemon、Node addon 和运行镜像。在 macOS 上，
+这些准备工作在临时 Linux 构建容器中执行。它复用通常的 Cargo registry 和 `target/`，并沿用已有的
+`CARGO_TARGET_DIR` 设置。镜像的精确 ID 和 daemon 路径记录在 `.nsh/layerfs/deployment.json`。
+`status` 检查保存的构建产物和镜像，显示最近一次验证结果。
 
 `smoke` 从 checkout 的**已提交 `HEAD`** 创建 `.nsh/layerfs/nsh-<id>/input`，再将其导入新的 Store。
 要包含源码修改，先将修改提交到自己的主题分支。生成的输入具有独立的新 Git 仓库，构建产物随后在 Sandbox 中生成。

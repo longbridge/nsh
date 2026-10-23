@@ -14,7 +14,7 @@
 //! shadow too.
 
 use nsh_core::{
-    BorderStyle, Borders, Color, CornerRadii, ResizeMode, ViewStyle,
+    BorderStyle, Borders, Color, CornerRadii, ObjectPosition, ResizeMode, ViewStyle,
     geometry::{px, size},
 };
 use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
@@ -23,8 +23,7 @@ use objc2_core_graphics::{CGColor, CGImage, CGMutablePath};
 use objc2_foundation::{NSArray, NSNumber};
 use objc2_quartz_core::{
     CACornerMask, CALayer, CAMediaTiming, CAShapeLayer, CATransaction, kCACornerCurveCircular,
-    kCACornerCurveContinuous, kCAFillRuleEvenOdd, kCAGravityCenter, kCAGravityResize,
-    kCAGravityResizeAspect, kCAGravityResizeAspectFill, kCALineCapRound,
+    kCACornerCurveContinuous, kCAFillRuleEvenOdd, kCAGravityResize, kCALineCapRound,
 };
 use objc2_ui_kit::{UIColor, UIImage, UIView};
 
@@ -59,8 +58,16 @@ pub(crate) struct Decor {
     mask: Option<Retained<CAShapeLayer>>,
     /// Holds the children while the view both clips them and casts a shadow.
     content: Option<Retained<UIView>>,
-    /// Image content (image views only).
+    /// Image content (image views only): clips the picture to the view's
+    /// shape.
     image: Option<Retained<CALayer>>,
+    /// The image itself, inside [`Decor::image`], framed where the resize
+    /// mode and the position put it.
+    picture: Option<Retained<CALayer>>,
+    /// How the image fits.
+    mode: ResizeMode,
+    /// Where the fitted image sits.
+    position: ObjectPosition,
     /// The image, kept to switch between plain and tinted display.
     contents: Option<(Retained<CGImage>, CGFloat)>,
     /// `tintColor`: the image layer shows this color through a mask of the
@@ -76,12 +83,18 @@ pub(crate) struct Decor {
 
 impl Decor {
     /// Decoration of an image view: the image lives in its own clipped
-    /// sublayer, so the view's layer can cast an unclipped shadow.
+    /// sublayer, so the view's layer can cast an unclipped shadow, and in
+    /// a picture layer inside that, framed where it is fitted.
     pub(crate) fn for_image() -> Self {
         let image = CALayer::new();
         image.setMasksToBounds(true);
+        let picture = CALayer::new();
+        // SAFETY: an immutable Core Animation constant.
+        picture.setContentsGravity(unsafe { kCAGravityResize });
+        image.addSublayer(&picture);
         Self {
             image: Some(image),
+            picture: Some(picture),
             sized: true,
             ..Self::default()
         }
@@ -98,13 +111,12 @@ impl Decor {
         self.sized
     }
 
-    /// Shows `image` (or nothing) in an image view.
     /// Shows `image` (fading in over `fade` seconds); an animated image
     /// plays its frames, forever.
     pub(crate) fn set_image(&mut self, image: Option<&UIImage>, fade: f64) {
         // SAFETY: plain getters on a valid image.
         self.contents = image.and_then(|i| unsafe { i.CGImage().map(|cg| (cg, i.scale())) });
-        let Some(layer) = self.image.clone() else {
+        let Some(layer) = self.picture.clone() else {
             return;
         };
         let key = objc2_foundation::ns_string!("frames");
@@ -120,6 +132,7 @@ impl Decor {
         } else {
             quiet(|| self.show_contents());
         }
+        quiet(|| self.fit_contents());
         // SAFETY: plain getters on a valid image.
         let frames = image.and_then(|i| unsafe { i.images().map(|f| (f, i.duration())) });
         if let Some((frames, duration)) = frames.filter(|(f, _)| f.count() > 1)
@@ -145,9 +158,9 @@ impl Decor {
         }
     }
 
-    /// Puts the image into the image layer, or into the tint mask.
+    /// Puts the image into the picture layer, or into the tint mask.
     fn show_contents(&self) {
-        let Some(layer) = &self.image else { return };
+        let Some(layer) = &self.picture else { return };
         let target = match &self.tint {
             Some((_, tint)) => {
                 // SAFETY: clearing the contents.
@@ -172,31 +185,59 @@ impl Decor {
         };
     }
 
-    /// How an image view fits its image.
-    pub(crate) fn set_resize_mode(&self, mode: ResizeMode) {
-        let Some(layer) = &self.image else { return };
-        // SAFETY: immutable Core Animation constants.
-        let gravity = unsafe {
-            match mode {
-                ResizeMode::Cover => kCAGravityResizeAspectFill,
-                ResizeMode::Contain => kCAGravityResizeAspect,
-                ResizeMode::Stretch => kCAGravityResize,
-                ResizeMode::Center => kCAGravityCenter,
-            }
+    /// How the image fits the view.
+    pub(crate) fn resize_mode(&self) -> ResizeMode {
+        self.mode
+    }
+
+    /// How an image view fits its image (`resizeMode`) and where it places
+    /// it (`objectPosition`).
+    pub(crate) fn set_fit(&mut self, mode: ResizeMode, position: ObjectPosition) {
+        if self.mode != mode || self.position != position {
+            self.mode = mode;
+            self.position = position;
+            quiet(|| self.fit_contents());
+        }
+    }
+
+    /// Frames the picture layer (and the tint in it) where the resize mode
+    /// and the position put the image in the image layer, which crops what
+    /// reaches outside.
+    fn fit_contents(&self) {
+        let (Some(layer), Some(picture)) = (&self.image, &self.picture) else {
+            return;
         };
-        quiet(|| {
-            layer.setContentsGravity(gravity);
-            if let Some((_, tint)) = &self.tint
-                && let Some(mask) = tint.mask()
-            {
-                mask.setContentsGravity(gravity);
-            }
+        let bounds = layer.bounds().size;
+        let natural = self.contents.as_ref().map_or((0.0, 0.0), |(cg, scale)| {
+            let scale = scale.max(0.01);
+            (
+                (CGImage::width(Some(cg)) as CGFloat / scale) as f32,
+                (CGImage::height(Some(cg)) as CGFloat / scale) as f32,
+            )
         });
+        let natural = size(px(natural.0), px(natural.1));
+        let bounds = size(px(bounds.width as f32), px(bounds.height as f32));
+        let fitted = self.mode.fit(natural, bounds, self.position);
+        let frame = CGRect::new(
+            CGPoint::new(fitted.origin.x.0 as CGFloat, fitted.origin.y.0 as CGFloat),
+            CGSize::new(
+                fitted.size.width.0 as CGFloat,
+                fitted.size.height.0 as CGFloat,
+            ),
+        );
+        picture.setFrame(frame);
+        if let Some((_, tint)) = &self.tint {
+            let inner = CGRect::new(CGPoint::new(0.0, 0.0), frame.size);
+            tint.setFrame(inner);
+            if let Some(mask) = tint.mask() {
+                mask.setFrame(inner);
+            }
+        }
     }
 
     /// Shows the image in a single color (`tintColor`), or as is.
-    fn set_tint(&mut self, tint: Option<Color>, local: CGRect) {
-        let Some(layer) = self.image.clone() else {
+    fn set_tint(&mut self, tint: Option<Color>) {
+        let Some(layer) = self.picture.clone() else {
             return;
         };
         match (tint, self.tint.clone()) {
@@ -210,7 +251,8 @@ impl Decor {
                 let t = CALayer::new();
                 t.setBackgroundColor(cg_color(color).as_deref());
                 let mask = CALayer::new();
-                mask.setContentsGravity(&layer.contentsGravity());
+                // SAFETY: an immutable Core Animation constant.
+                mask.setContentsGravity(unsafe { kCAGravityResize });
                 // SAFETY: a fresh mask layer owned by the tint layer.
                 unsafe { t.setMask(Some(&mask)) };
                 layer.addSublayer(&t);
@@ -223,12 +265,6 @@ impl Decor {
                 self.show_contents();
             }
             (None, None) => {}
-        }
-        if let Some((_, t)) = &self.tint {
-            t.setFrame(local);
-            if let Some(mask) = t.mask() {
-                mask.setFrame(local);
-            }
         }
     }
 
@@ -358,6 +394,7 @@ impl Decor {
             || stroke
             || ring
             || style.effects.is_some()
+            || style.glass_effect != nsh_core::GlassEffect::None
             || style.outline.is_visible();
 
         // Corners of the layer itself. Core Animation draws nothing for a
@@ -511,9 +548,11 @@ impl Decor {
         }
 
         // Image content follows the view's shape.
-        self.set_tint(style.tint_color.filter(|_| kind == Kind::Image), local);
+        self.set_tint(style.tint_color.filter(|_| kind == Kind::Image));
         if let Some(image) = &self.image {
             image.setFrame(local);
+            // In the same transaction as the image layer's frame.
+            self.fit_contents();
             set_corners(image, r, corners, raw.continuous);
             if shared.is_some() {
                 // SAFETY: clearing the mask.

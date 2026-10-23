@@ -33,7 +33,7 @@ fn public_api_is_typed() {
     unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
 }
 
-use std::{io, rc::Rc, sync::Arc, time::Duration};
+use std::{io, mem::ManuallyDrop, rc::Rc, sync::Arc, time::Duration};
 
 pub use app_directory::app_dir_name;
 use crossbeam_channel::{Receiver, Sender};
@@ -52,7 +52,7 @@ pub use nsh_core::{
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
-    ui::{Root, Tokens},
+    ui::{EngineContext, Root, Tokens},
 };
 #[cfg(feature = "js")]
 pub use nsh_js::BYTECODE_VERSION;
@@ -564,9 +564,9 @@ pub trait MountSink: Send + 'static {
     }
 
     /// JS or a component's task asked for a display frame
-    /// (`requestAnimationFrame`, `ui::ambient::next_frame`): call
-    /// [`EngineControl::frame`] at the next vsync. Requests are not repeated
-    /// until that call.
+    /// (`requestAnimationFrame`, `ui::ambient::next_frame`), or lists have
+    /// overscan cells left to bind: call [`EngineControl::frame`] at the
+    /// next vsync. Requests are not repeated until that call.
     fn request_frame(&self) {}
 
     /// A development update ([`EngineControl::hot_update`]) could not be
@@ -669,6 +669,11 @@ pub struct EngineConfig {
     /// moves (`nsh_core::time::Clock::manual`), which its timers, frames
     /// and `Date` follow.
     pub clock: Clock,
+    /// What the host gives this engine's Rust code, which its UI sets'
+    /// functions and components read while it runs them
+    /// (`nsh_core::ui::engine_context`): a host serving several engines
+    /// tells them apart by it.
+    pub context: EngineContext,
     /// Values of the environment kept whatever the platform reports (a
     /// test's locale, reduced motion and safe area: `nsh test --target`).
     pub pinned: EnvironmentPins,
@@ -762,6 +767,7 @@ impl EngineConfig {
             data_dir: None,
             storage: None,
             clock: Clock::system(),
+            context: EngineContext::default(),
             pinned: EnvironmentPins::default(),
             clipboard: None,
         }
@@ -814,6 +820,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("limits", &self.limits)
             .field("ui_sets", &self.ui_sets)
             .field("clock", &self.clock)
+            .field("context", &self.context)
             .field("pinned", &self.pinned)
             .field("clipboard", &self.clipboard.is_some())
             .finish()
@@ -874,6 +881,16 @@ pub struct HotUpdate {
 /// one frame. Bounded so a list that never settles cannot stall the engine;
 /// leftovers continue next frame.
 const MAX_LIST_ROUNDS: usize = 8;
+
+/// The overscan a turn binds: cells until their ops reach this many (about
+/// as many mount items, which the main thread applies in one go) or their
+/// JS takes [`PACED_BIND_TIME`], at least one. A fast scroll asks for a
+/// screen of cells at once and each bind rebuilds a cell's subtree; what
+/// shows (the viewport, the leading edge, cells whose item moved) binds
+/// regardless, the rest on the next display frames.
+const PACED_BIND_OPS: usize = 150;
+/// See [`PACED_BIND_OPS`].
+const PACED_BIND_TIME: std::time::Duration = std::time::Duration::from_millis(2);
 
 /// A cheap, cloneable handle for sending input to the engine from any thread.
 #[derive(Clone)]
@@ -1094,6 +1111,7 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     raise_thread_priority();
     // The thread's time is the engine's from its first line of JS on.
     let _clock = config.clock.enter();
+    let _context = config.context.enter();
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
@@ -1134,7 +1152,9 @@ fn run<M: TextEngine + 'static, S: MountSink>(
 /// threads to block. Input sent through its [`EngineControl`] is handled
 /// at the next [`LocalEngine::pump`].
 pub struct LocalEngine<M: TextEngine + 'static> {
-    driver: Driver<M>,
+    /// Dropped while this engine's context is the thread's. The guard
+    /// would otherwise end when `drop` returns, before the fields drop.
+    driver: ManuallyDrop<Driver<M>>,
     rx: Receiver<Message>,
     control: EngineControl,
     /// The host's wake ([`LocalEngine::set_wake`]).
@@ -1152,9 +1172,10 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
         let _clock = config.clock.enter();
+        let _context = config.context.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
         Some(LocalEngine {
-            driver,
+            driver: ManuallyDrop::new(driver),
             rx,
             control,
             wake: None,
@@ -1197,6 +1218,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     /// latest (sooner if input arrives); `None`: only for input.
     pub fn pump(&mut self) -> Option<Instant> {
         let _clock = self.driver.clock.enter();
+        let _context = self.driver.context.enter();
         self.pumping
             .store(true, std::sync::atomic::Ordering::SeqCst);
         // Bounded: messages sent while handling (a task waking another)
@@ -1226,6 +1248,18 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     }
 }
 
+impl<M: TextEngine + 'static> Drop for LocalEngine<M> {
+    fn drop(&mut self) {
+        // Cancelling tasks and dropping what they captured reads this
+        // engine's context. `run` keeps its guard across the driver's
+        // drop; this path enters for the drop itself.
+        let _context = self.driver.context.enter();
+        // SAFETY: `driver` is dropped once, here. `ManuallyDrop` keeps
+        // the field drop from dropping it again.
+        unsafe { ManuallyDrop::drop(&mut self.driver) };
+    }
+}
+
 /// One engine's state and the work of one wake-up, whoever drives it.
 struct Driver<M: TextEngine + 'static> {
     state: State<Rc<M>>,
@@ -1241,6 +1275,8 @@ struct Driver<M: TextEngine + 'static> {
     posts: nsh_core::ui::Posts,
     /// The engine's clock, its thread's ([`Clock::enter`]).
     clock: Clock,
+    /// The host's context, its thread's ([`EngineContext::enter`]).
+    context: EngineContext,
     /// When the last display frame ran, on a clock that moves with the
     /// display's frames: the next one comes a frame after it.
     last_frame: Option<Instant>,
@@ -1356,6 +1392,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             touch_move: None,
             hover_moves: Vec::new(),
             hover_moved: None,
+            sets_seen: FxHashMap::default(),
             resized: None,
             pinned: config.pinned,
             net: Net {
@@ -1382,6 +1419,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             last_gc: Instant::now(),
             posts: posts.clone(),
             clock: config.clock.clone(),
+            context: config.context.clone(),
             last_frame: None,
         };
         let eval_us = match &config.app {
@@ -1719,6 +1757,8 @@ struct State<M: TextEngine> {
     hover_moves: Vec<(NodeId, EventKind, EventPayload)>,
     /// When `hover_moves` were last delivered.
     hover_moved: Option<Instant>,
+    /// [`keep_last_sets`]'s buffer, reused.
+    sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
 }
@@ -2004,7 +2044,9 @@ impl<M: TextEngine> State<M> {
     /// for one.
     fn request_frame(&mut self, script: Option<&Script>, sink: &dyn MountSink) {
         if !self.frame_requested
-            && (script.is_some_and(Script::wants_frame) || self.core.wants_frame())
+            && (script.is_some_and(Script::wants_frame)
+                || self.core.wants_frame()
+                || (script.is_some() && self.core.has_paced_list_binds()))
         {
             self.frame_requested = true;
             sink.request_frame();
@@ -2044,8 +2086,11 @@ impl<M: TextEngine> State<M> {
     fn commit(&mut self, script: Option<&Script>) -> Option<MountBatch> {
         let start = Instant::now();
         let mut merged: Option<MountBatch> = None;
+        let mut commits = 0;
         let mut op_count = 0;
         let mut js = std::time::Duration::ZERO;
+        // The overscan bound this turn ([`PACED_BIND_OPS`]).
+        let mut paced = PacedBinds::default();
         for _ in 0..MAX_LIST_ROUNDS {
             // Requests from the previous round (or frame) first.
             let js_start = Instant::now();
@@ -2055,6 +2100,20 @@ impl<M: TextEngine> State<M> {
             if let Some(script) = script {
                 for bind in binds {
                     script.bind_list(bind.list, &bind.binds);
+                }
+                script.take_ops(&mut self.ops);
+                let mut binds = Vec::new();
+                while paced.left() && self.core.has_paced_list_binds() {
+                    let start = Instant::now();
+                    let ops = self.ops.len();
+                    self.core.take_paced_list_binds(1, &mut binds);
+                    for bind in binds.drain(..) {
+                        paced.cells += bind.binds.len();
+                        script.bind_list(bind.list, &bind.binds);
+                    }
+                    script.take_ops(&mut self.ops);
+                    paced.ops += self.ops.len() - ops;
+                    paced.time += start.elapsed();
                 }
             } else {
                 drop(binds);
@@ -2112,6 +2171,7 @@ impl<M: TextEngine> State<M> {
                 }
             }
             if let Some(batch) = self.core.commit() {
+                commits += 1;
                 match &mut merged {
                     Some(m) => extend_frame(&mut m.items, batch.items),
                     None => merged = Some(batch),
@@ -2131,9 +2191,16 @@ impl<M: TextEngine> State<M> {
                 }
                 _ => false,
             };
-            if self.binds.is_empty() && self.events.is_empty() && !posted && !retheme {
+            let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
+            if self.binds.is_empty() && self.events.is_empty() && !posted && !retheme && !more_paced
+            {
                 break;
             }
+        }
+        if commits > 1
+            && let Some(batch) = &mut merged
+        {
+            keep_last_sets(&mut batch.items, &mut self.sets_seen);
         }
         self.committed_since_gc |= op_count > 0;
         if self.perf.is_some() && (op_count > 0 || merged.is_some()) {
@@ -2345,6 +2412,22 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
     true
 }
 
+/// What a turn spent binding overscan cells.
+#[derive(Default)]
+struct PacedBinds {
+    cells: usize,
+    ops: usize,
+    time: std::time::Duration,
+}
+
+impl PacedBinds {
+    /// Whether the turn may bind another: at least one, then within the
+    /// budget.
+    fn left(&self) -> bool {
+        self.cells == 0 || (self.ops < PACED_BIND_OPS && self.time < PACED_BIND_TIME)
+    }
+}
+
 /// Appends a commit's items to the frame's. A scroll view's content size
 /// that the frame already sets is updated to the later size (unless the
 /// view scrolls in between): a row relaid over two commits must not send
@@ -2367,6 +2450,44 @@ fn extend_frame(frame: &mut Vec<nsh_core::MountItem>, items: Vec<nsh_core::Mount
             *s = size;
         }
     }
+}
+
+/// Of the items of a frame merged from several commits that set one part
+/// of a view whole (its frame, style, text, ...), keeps the last: the
+/// platform would apply each in one pass, and a list's rounds (binds, then
+/// the paced ones) relay and restyle the same cells. Once per turn, with
+/// `last` the reused buffer.
+fn keep_last_sets(frame: &mut Vec<nsh_core::MountItem>, last: &mut FxHashMap<(u8, NodeId), usize>) {
+    last.clear();
+    let mut repeated = false;
+    for (k, item) in frame.iter().enumerate() {
+        if let Some(key) = sets_whole(item) {
+            repeated |= last.insert(key, k).is_some();
+        }
+    }
+    if !repeated {
+        return;
+    }
+    let mut k = 0;
+    frame.retain(|item| {
+        k += 1;
+        sets_whole(item).is_none_or(|key| last[&key] == k - 1)
+    });
+}
+
+/// The part of a view an item sets whole, and the view: of two such items
+/// the later is all the view ends up with.
+fn sets_whole(item: &nsh_core::MountItem) -> Option<(u8, nsh_core::NodeId)> {
+    use nsh_core::MountItem;
+    Some(match *item {
+        MountItem::Frame { id, .. } => (0, id),
+        MountItem::Overflow { id, .. } => (1, id),
+        MountItem::ViewStyle { id, .. } => (2, id),
+        MountItem::Text { id, .. } => (3, id),
+        MountItem::Events { id, .. } => (4, id),
+        MountItem::Image { id, .. } => (5, id),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -2491,5 +2612,36 @@ mod tests {
         ];
         super::extend_frame(&mut frame, vec![content(Points(544.0))]);
         assert_eq!(heights(&frame), [313.0, 544.0]);
+    }
+
+    #[test]
+    fn a_frame_sends_a_views_last_frame_once() {
+        use nsh_core::{Bounds, Point};
+        let at = |id, y| MountItem::Frame {
+            id,
+            frame: Bounds::new(
+                Point::new(Points(0.0), Points(y)),
+                Size::new(Points(10.0), Points(10.0)),
+            ),
+        };
+        let mut frame = vec![
+            MountItem::Create {
+                id: 4,
+                kind: nsh_core::ViewKind::View,
+            },
+            at(4, 0.0),
+            at(6, 0.0),
+        ];
+        super::extend_frame(&mut frame, vec![at(4, 50.0)]);
+        super::keep_last_sets(&mut frame, &mut Default::default());
+        assert!(matches!(frame[0], MountItem::Create { id: 4, .. }));
+        let frames: Vec<_> = frame
+            .iter()
+            .filter_map(|m| match m {
+                MountItem::Frame { id, frame } => Some((*id, frame.origin.y.0)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(frames, [(6, 0.0), (4, 50.0)]);
     }
 }

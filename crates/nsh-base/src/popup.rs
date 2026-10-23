@@ -125,6 +125,8 @@ pub(crate) struct SheetMotion {
     panel: Stored<Option<Size<Points>>>,
     /// Going: it leaves the view once its motion's time is over.
     closing: Stored<bool>,
+    /// The panel stays mounted while closed ([`Self::keeping_panel`]).
+    kept: Stored<bool>,
 }
 
 impl SheetMotion {
@@ -143,6 +145,7 @@ impl SheetMotion {
             entering: stored(false),
             panel: stored(None),
             closing: stored(false),
+            kept: stored(false),
         };
         effect(move || {
             let open = open();
@@ -150,6 +153,15 @@ impl SheetMotion {
             untracked(|| motion.follow(open, side));
         });
         motion
+    }
+
+    /// For a panel that stays mounted while closed (a dock's drawer, which
+    /// keeps its panels' state): it keeps its frame, so no layout comes
+    /// to say its size when it opens again, and it comes in from as far
+    /// as it was last laid out.
+    pub(crate) fn keeping_panel(self) -> Self {
+        self.kept.replace(true);
+        self
     }
 
     fn follow(self, open: bool, side: Placement) {
@@ -163,13 +175,22 @@ impl SheetMotion {
             if self.shown.get_untracked() {
                 return;
             }
+            self.fade.set(0.0);
+            self.shown.set(true);
+            // A kept panel laid out before says its size no more.
+            let known = self.kept.get().then(|| self.panel.with(|p| *p)).flatten();
+            if let Some(size) = known {
+                let (x, y) = away(side, size);
+                self.x.set(x);
+                self.y.set(y);
+                self.come_in();
+                return;
+            }
             // Out of sight until the panel is laid out: as far as the window.
             let (x, y) = away(side, window());
             self.x.set(x);
             self.y.set(y);
-            self.fade.set(0.0);
             self.entering.replace(true);
-            self.shown.set(true);
         } else if self.shown.get_untracked() && !self.closing.with(|c| *c) {
             self.entering.replace(false);
             if reduce_motion() {
@@ -183,10 +204,18 @@ impl SheetMotion {
             let (x, y) = away(side, self.size());
             self.x.timing(x, SHEET_OUT_MS, Easing::EaseIn);
             self.y.timing(y, SHEET_OUT_MS, Easing::EaseIn);
-            self.fade.timing(0.0, SHEET_OUT_MS, Easing::EaseIn);
-            // Gone after the motion's time, whether or not its end is
-            // reported (a platform that stops it, one that runs none).
+            let end = self.fade.timing(0.0, SHEET_OUT_MS, Easing::EaseIn);
             let (shown, closing) = (self.shown, self.closing);
+            // Gone when the motion ends: the platform runs it and reports
+            // its end, whatever clock the app's timers follow (a test's
+            // manual one moves only as the test says).
+            spawn(async move {
+                if end.await && closing.replace(false) {
+                    shown.set(false);
+                }
+            });
+            // Or after the motion's time, whether or not its end is
+            // reported (a platform that stops it, one that runs none).
             set_timeout(
                 std::time::Duration::from_millis(SHEET_OUT_MS as u64),
                 move || {
@@ -233,8 +262,14 @@ impl SheetMotion {
         }
         self.x.timing(0.0, SHEET_IN_MS, Easing::EaseOut);
         self.y.timing(0.0, SHEET_IN_MS, Easing::EaseOut);
-        self.fade.timing(1.0, SHEET_IN_MS, Easing::EaseOut);
+        let end = self.fade.timing(1.0, SHEET_IN_MS, Easing::EaseOut);
         let (settled, closing) = (self.settled, self.closing);
+        // There when the motion ends, or after its time (as it goes).
+        spawn(async move {
+            if end.await && !closing.with(|c| *c) {
+                settled.set(true);
+            }
+        });
         set_timeout(
             std::time::Duration::from_millis(SHEET_IN_MS as u64),
             move || {

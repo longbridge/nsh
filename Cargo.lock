@@ -2878,6 +2878,8 @@ dependencies = [
  "markdown",
  "markup5ever_rcdom",
  "nsh-core",
+ "nsh-engine",
+ "nsh-testing",
  "regex",
  "rustc-hash",
  "serde",
@@ -2958,11 +2960,13 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "slab",
  "syn 2.0.119",
  "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
+ "unicode-linebreak",
  "url",
  "windows-sys 0.61.2",
 ]
@@ -3222,7 +3226,6 @@ dependencies = [
 name = "nsh-platform-windows"
 version = "0.2.0"
 dependencies = [
- "base64 0.22.1",
  "crossbeam-channel",
  "image",
  "log",
@@ -6428,6 +6431,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-segmentation"

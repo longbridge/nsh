@@ -145,6 +145,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// What the embedding app gives the engines of the views made with
+    /// these options ([`nsh_engine::EngineConfig::context`]): its UI sets'
+    /// functions read it with `nsh_core::ui::engine_context`, so each view
+    /// reaches its own part of the embedding app.
+    pub context: nsh_engine::EngineContext,
 }
 
 impl Default for AppOptions {
@@ -161,8 +166,24 @@ impl Default for AppOptions {
             limits: Limits::default(),
             data_dir: None,
             storage: None,
+            context: Default::default(),
         }
     }
+}
+
+/// What a person asked of the window an [`AppView`] owns
+/// ([`AppView::own_window`]), handed to [`AppView::on_close_request`]'s
+/// handler instead of being carried out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CloseRequest {
+    /// Quit the app: the reserved quit key (Ctrl+Q, Cmd+Q on macOS) or a
+    /// menu item with the `quit` role.
+    Quit,
+    /// Close the window: Ctrl+W (Cmd+W on macOS) the app does not bind, a
+    /// menu item with the `close` role, `Window.close()`, or the window's
+    /// close button.
+    Close,
 }
 
 /// One nsh surface as a GPUI view: an engine running one app, drawn by
@@ -298,6 +319,7 @@ impl AppView {
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
             clock: Default::default(),
+            context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
         };
@@ -358,6 +380,37 @@ impl AppView {
     /// created from now on.
     pub fn register_component(&self, name: &str, factory: crate::native::ComponentFactory) {
         self.surface.native.components().register(name, factory);
+    }
+
+    /// Makes the window this view is drawn in its own, as
+    /// [`open_app_window`]'s is: the app's title (`Window.setTitle`), title
+    /// bar, application menu (macOS's menu bar, the menu bar drawn above
+    /// the view elsewhere) and window operations act on it, and the
+    /// window's reserved keys are the view's. The embedding app opens the
+    /// window itself (its bounds, its root element: GPUI Kit's `Root`
+    /// around the view, say), best with [`crate::titlebar_options`], and
+    /// calls this once, from the window's build closure.
+    pub fn own_window(&self, window: &Window, cx: &GpuiApp) {
+        let title = window.window_title();
+        crate::chrome::set_standalone(&self.surface, &title, window.window_handle());
+        crate::system::own_window(&self.surface);
+        let surface = Rc::downgrade(&self.surface);
+        window.on_window_should_close(cx, move |window, cx| {
+            surface.upgrade().is_none_or(|surface| {
+                !crate::chrome::ask_to_close(&surface, CloseRequest::Close, window, cx)
+            })
+        });
+    }
+
+    /// Hands the quit and close requests of the window the view owns
+    /// ([`AppView::own_window`]) to `f`, which decides: the reserved quit
+    /// key, Ctrl+W, the `quit` and `close` menu roles, `Window.close()` and
+    /// the window's close button no longer quit or close by themselves.
+    /// `f` runs on the main thread after the event that asked; it quits
+    /// with `cx.quit()` or closes with `window.remove_window()` when the
+    /// embedding app is ready to. Replaces the handler set before.
+    pub fn on_close_request(&self, f: impl Fn(CloseRequest, &mut Window, &mut GpuiApp) + 'static) {
+        *self.surface.chrome.on_close.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Stops the app.
@@ -731,7 +784,7 @@ pub fn open_app_window(
     let bounds = gpui::Bounds::centered(None, size, cx);
     let window_options = gpui::WindowOptions {
         window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
-        titlebar: Some(crate::chrome::titlebar_options(&options.title)),
+        titlebar: Some(crate::titlebar_options(&options.title)),
         app_id: Some(options.app_id.clone()),
         // Linux: the window manager's decorations until the app hides the
         // title bar (`crate::chrome`).
@@ -743,9 +796,8 @@ pub fn open_app_window(
         ..Default::default()
     };
     let handle = cx.open_window(window_options, move |window, cx| {
-        let title = options.title.clone();
         let view: Entity<AppView> = cx.new(|cx| AppView::new(options, window, cx));
-        crate::chrome::set_standalone(view.read(cx).surface(), &title, window.window_handle());
+        view.read(cx).own_window(window, cx);
         match source {
             AppSource::Rust(root) => view.read(cx).load(App::Rust(root)),
             AppSource::Bundle(bundle) => view.read(cx).load(App::Js(bundle)),
@@ -755,7 +807,6 @@ pub fn open_app_window(
             }
         }
         let focus = view.read(cx).focus.clone();
-        crate::system::own_window(view.read(cx).surface());
         window.focus(&focus, cx);
         view
     })?;
