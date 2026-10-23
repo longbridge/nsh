@@ -198,16 +198,16 @@ NSH 为用 AI 编写的软件而设计，完整的应用和生成的界面都是
 
 ## 运行平台
 
-| 平台 | 状态 | 后端 | 说明 |
+| 平台 | 系统要求 | 后端 | 嵌入方式 |
 |---|---|---|---|
-| iOS | 已支持（iOS 15.0+） | UIKit | 真机和模拟器；通过 `NativeShell.xcframework` 嵌入（[iOS](./ios.md)） |
-| Android | 已支持（API 28，Android 9+） | Android 视图 | `arm64-v8a` 和 `x86_64`；通过 `nsh.aar` 嵌入（[Android](./android.md)） |
-| macOS | 已支持（macOS 14+） | AppKit | 独立应用；通过 `AppView` 嵌入（[macOS](./macos.md)） |
-| Windows | 已支持（Windows 10 1809+） | Win32、Direct2D | 独立应用；通过 `AppView` 嵌入（[Windows](./windows.md)） |
-| Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |
-| Web | 已支持（现代浏览器） | HTML | 静态网站；在网页中通过 `createPlayer` 或 iframe 嵌入（[Web](./web.md)） |
-| GPUI（macOS、Windows、Linux） | 已支持 | GPUI | 在 GPUI 和 GPUI Kit 应用中通过 `AppView` 嵌入（[GPUI](./gpui.md)） |
-| Mac Catalyst | 用于开发 | UIKit | `nsh run --target catalyst` 在 Mac 上打开的 iPhone 尺寸窗口，用来像在手机上一样查看应用 |
+| [iOS](./ios.md) | iOS 15.0+ | UIKit | `NativeShell.xcframework` |
+| [Android](./android.md) | Android 9+ | Android 视图 | `nsh.aar` |
+| [macOS](./macos.md) | macOS 14+ | AppKit | `AppView` |
+| [Windows](./windows.md) | Windows 10 1809+ | Win32、Direct2D | `AppView` |
+| [Linux](./linux.md) | GTK 4.14+ | GTK 4 | `AppView` |
+| [Web](./web.md) | 现代浏览器 | HTML | `createPlayer`、iframe |
+| [GPUI](./gpui.md) | 桌面平台 | GPUI | `AppView`（GPUI、GPUI Kit 应用） |
+| Mac Catalyst | macOS | UIKit | 开发用（`--target catalyst`） |
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="一个模块，多个宿主：同一个 bundle 和 Rust 运行时运行在 iOS、Android、Linux、使用 AppKit 的 macOS 和使用 Win32 / Direct2D 的 Windows 上，GPUI 覆盖三个桌面平台，网页则用 HTML 绘制。">

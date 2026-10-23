@@ -198,16 +198,16 @@ NSH is designed for software written with AI, whole apps as much as generated sc
 
 ## Where it runs
 
-| Platform | Status | Backend | Notes |
+| Platform | Requires | Backend | Embedded with |
 |---|---|---|---|
-| iOS | Supported (iOS 15.0+) | UIKit | Devices and the simulator; embedded with `NativeShell.xcframework` ([iOS](./ios.md)) |
-| Android | Supported (API 28, Android 9+) | Android views | `arm64-v8a` and `x86_64`; embedded with `nsh.aar` ([Android](./android.md)) |
-| macOS | Supported (macOS 14+) | AppKit | Standalone apps; embedded with `AppView` ([macOS](./macos.md)) |
-| Windows | Supported (Windows 10 1809+) | Win32, Direct2D | Standalone apps; embedded with `AppView` ([Windows](./windows.md)) |
-| Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |
-| Web | Supported (modern browsers) | HTML | Static sites; embedded in a page with `createPlayer` or an iframe ([Web](./web.md)) |
-| GPUI (macOS, Windows, Linux) | Supported | GPUI | Embedded with `AppView` in GPUI and GPUI Kit apps ([GPUI](./gpui.md)) |
-| Mac Catalyst | For development | UIKit | The iPhone-sized window `nsh run --target catalyst` opens on a Mac, to see an app as on a phone |
+| [iOS](./ios.md) | iOS 15.0+ | UIKit | `NativeShell.xcframework` |
+| [Android](./android.md) | Android 9+ | Android views | `nsh.aar` |
+| [macOS](./macos.md) | macOS 14+ | AppKit | `AppView` |
+| [Windows](./windows.md) | Windows 10 1809+ | Win32, Direct2D | `AppView` |
+| [Linux](./linux.md) | GTK 4.14+ | GTK 4 | `AppView` |
+| [Web](./web.md) | Modern browsers | HTML | `createPlayer`, iframe |
+| [GPUI](./gpui.md) | Desktops | GPUI | `AppView` (GPUI, GPUI Kit apps) |
+| Mac Catalyst | macOS | UIKit | For development (`--target catalyst`) |
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="One module, many hosts: the same bundle and Rust runtime on iOS, Android, Linux, macOS with AppKit and Windows with Win32 / Direct2D, GPUI on all three desktops, and web pages drawn with HTML.">
