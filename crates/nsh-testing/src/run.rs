@@ -462,9 +462,10 @@ impl Session {
         // Loaded before the app starts, as the page's host is: what it
         // sends meanwhile waits for the app.
         let page_host = match &self.run.page_host {
-            Some(module) => {
-                Some(PageHost::start(module).map_err(|e| format!("open({entry:?}): {e}"))?)
-            }
+            Some(module) => Some(
+                PageHost::start(module, clock.clone())
+                    .map_err(|e| format!("open({entry:?}): {e}"))?,
+            ),
             None => None,
         };
         let default = EngineConfig::new(app);

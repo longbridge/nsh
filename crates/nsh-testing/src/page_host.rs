@@ -11,8 +11,9 @@
 //! `player.hostEvent(event, payload)` sends `Host` `{ type: "event" }`;
 //! what is sent before the app's engine runs waits and reaches it in order
 //! once it does. The context has `console` (the log's target `js`, as the
-//! app's), `setTimeout` / `setInterval` and their `clear*`, and nothing of
-//! the browser's;
+//! app's), `setTimeout` / `setInterval` and their `clear*` on the app's
+//! clock (a manual one moves them as it moves the app's timers), and
+//! nothing of the browser's;
 //! imports do not resolve (the page loads the module as it is, so its
 //! imports are absolute URLs a headless run cannot load either).
 //!
@@ -24,9 +25,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{EventKind, EventPayload, JsonValue, ROOT_ID};
-use nsh_engine::EngineControl;
+use nsh_engine::{Clock, EngineControl};
 use rquickjs::{CatchResultExt as _, Ctx, Function, Module, Object, Value};
 
 /// The page's host of one app: where its calls go, and where the host's
@@ -41,7 +42,7 @@ impl PageHost {
     /// when the module does not load, exports no `createHost`, or what
     /// `createHost` returns (or resolves with, as far as its promise
     /// settles at once) has no `call`.
-    pub(crate) fn start(path: &Path) -> Result<PageHost, String> {
+    pub(crate) fn start(path: &Path, clock: Clock) -> Result<PageHost, String> {
         let source = std::fs::read_to_string(path)
             .map_err(|e| format!("nsh.json web.host {}: {e}", path.display()))?;
         let name = path.display().to_string();
@@ -51,7 +52,7 @@ impl PageHost {
         let thread_target = target.clone();
         std::thread::Builder::new()
             .name("nsh-test-page-host".into())
-            .spawn(move || run(&name, source, thread_target, rx, loaded))
+            .spawn(move || run(&name, source, clock, thread_target, rx, loaded))
             .map_err(|e| e.to_string())?;
         load.recv()
             .unwrap_or_else(|_| Err("the host module stopped".into()))
@@ -184,15 +185,17 @@ const GLUE: &str = r#"
 fn run(
     name: &str,
     source: String,
+    clock: Clock,
     target: Arc<Target>,
     calls: Receiver<Call>,
     loaded: Sender<Result<(), String>>,
 ) {
-    let started = Instant::now();
+    // The module's time: milliseconds of the app's clock since it loaded.
+    let origin = clock.now();
     let setup = || -> Result<(rquickjs::Runtime, rquickjs::Context), String> {
         let runtime = rquickjs::Runtime::new().map_err(|e| e.to_string())?;
         let context = rquickjs::Context::full(&runtime).map_err(|e| e.to_string())?;
-        context.with(|cx| install(&cx, name, source, &target, started))?;
+        context.with(|cx| install(&cx, name, source, &target, &clock, origin))?;
         drain(&runtime);
         let failed: String = context.with(|cx| eval(&cx, "__nshFailed()"))?;
         if !failed.is_empty() {
@@ -210,25 +213,28 @@ fn run(
             return;
         }
     };
-    let timers = || {
+    // The clock's alarms wake the thread when the next timer is due.
+    let (wake, woken) = crossbeam_channel::unbounded::<()>();
+    let mut alarm: Option<f64> = None;
+    loop {
         let next = context
             .with(|cx| {
                 let f: Function = cx.globals().get("__nshTimers")?;
-                f.call::<_, f64>((ms(started),))
+                f.call::<_, f64>((ms(&clock, origin),))
             })
             .unwrap_or(-1.0);
         drain(&runtime);
-        next
-    };
-    let mut next = timers();
-    loop {
-        let wait = if next < 0.0 {
-            Duration::from_secs(3600)
-        } else {
-            Duration::from_secs_f64(((next - ms(started)) / 1000.0).max(0.0))
-        };
-        match calls.recv_timeout(wait) {
-            Ok(call) => {
+        if next >= 0.0 && alarm.is_none_or(|at| next < at) {
+            alarm = Some(next);
+            let wake = wake.clone();
+            clock.at(origin + Duration::from_secs_f64(next / 1000.0), move || {
+                let _ = wake.send(());
+            });
+        }
+        crossbeam_channel::select! {
+            recv(calls) -> call => {
+                // The app closed.
+                let Ok(call) = call else { return };
                 let answered = context.with(|cx| -> Result<(), String> {
                     let f: Function = cx.globals().get("__nshCall").map_err(|e| e.to_string())?;
                     let args = call.args.to_string();
@@ -241,12 +247,9 @@ fn run(
                     log::error!(target: "js", "web.host: {err}");
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {}
-            // The app closed.
-            Err(RecvTimeoutError::Disconnected) => return,
+            recv(woken) -> _ => alarm = None,
         }
         drain(&runtime);
-        next = timers();
     }
 }
 
@@ -257,7 +260,8 @@ fn install(
     name: &str,
     source: String,
     target: &Arc<Target>,
-    started: Instant,
+    clock: &Clock,
+    origin: Instant,
 ) -> Result<(), String> {
     let error = |e: rquickjs::Error| e.to_string();
     let globals = cx.globals();
@@ -274,7 +278,11 @@ fn install(
     globals
         .set(
             "__nshNow",
-            Function::new(cx.clone(), move || ms(started)).map_err(error)?,
+            Function::new(cx.clone(), {
+                let clock = clock.clone();
+                move || ms(&clock, origin)
+            })
+            .map_err(error)?,
         )
         .map_err(error)?;
     globals
@@ -318,6 +326,7 @@ fn drain(runtime: &rquickjs::Runtime) {
     }
 }
 
-fn ms(started: Instant) -> f64 {
-    started.elapsed().as_secs_f64() * 1000.0
+/// Milliseconds of `clock` since `origin`.
+fn ms(clock: &Clock, origin: Instant) -> f64 {
+    clock.now().duration_since(origin).as_secs_f64() * 1000.0
 }

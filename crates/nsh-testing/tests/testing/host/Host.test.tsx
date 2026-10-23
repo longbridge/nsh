@@ -40,3 +40,12 @@ test("a call the host does not answer times out on the app's clock", async () =>
   await app.clock.runFor(200);
   await app.waitFor("text:result: rejected: nsh/host: slow timed out after 1000 ms");
 });
+
+test("the host's timers run on the app's clock", async () => {
+  const app = await open("./App.tsx", { clock: {} });
+  await app.press("label:later");
+  await app.clock.runFor(400);
+  expect(app.shows("result: (none)")).toBe(true);
+  await app.clock.runFor(200);
+  await app.waitFor('text:result: "late"');
+});

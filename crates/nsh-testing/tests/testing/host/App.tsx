@@ -28,6 +28,9 @@ function App() {
       <View onPress={call("slow", { timeout: 1000 })} accessibilityLabel="slow">
         <Text>slow</Text>
       </View>
+      <View onPress={call("later")} accessibilityLabel="later">
+        <Text>later</Text>
+      </View>
       <Text>{`result: ${result()}`}</Text>
       <Text>{`ticks: ${JSON.stringify(ticks())}`}</Text>
     </View>
