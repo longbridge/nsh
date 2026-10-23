@@ -161,6 +161,29 @@ define_class!(
             }
         }
 
+        /// VoiceOver's escape gesture (a two-finger scrub) from inside the
+        /// surface, where no screen or modal took it: the app's going back
+        /// (the top overlay's `onCancel` first), as Escape and the back
+        /// button are elsewhere. A menu sheet's backdrop takes no focus,
+        /// so this is how a VoiceOver user leaves it.
+        #[unsafe(method(accessibilityPerformEscape))]
+        fn accessibility_perform_escape(&self) -> bool {
+            let shared = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone());
+            let taken = shared.is_some_and(|shared| {
+                shared
+                    .get(self.mtm())
+                    .try_borrow()
+                    .is_ok_and(|m| m.as_ref().is_some_and(Mounter::escape))
+            });
+            // SAFETY: calling the superclass implementation.
+            taken || unsafe { msg_send![super(self), accessibilityPerformEscape] }
+        }
+
         #[unsafe(method(safeAreaInsetsDidChange))]
         fn safe_area_insets_did_change(&self) {
             // SAFETY: calling the superclass implementation.
@@ -173,6 +196,22 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
             self.publish_environment();
+            let Some(mounter) = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone())
+            else {
+                return;
+            };
+            // On the next turn: a batch being applied may hold the mounter.
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                if let Some(m) = mounter.get(mtm).borrow_mut().as_mut() {
+                    m.traits_changed();
+                }
+            });
         }
     }
 );
@@ -429,6 +468,7 @@ impl RootView {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
             clock: Default::default(),
+            context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
         };

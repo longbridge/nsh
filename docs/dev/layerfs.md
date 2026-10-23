@@ -19,20 +19,31 @@ Stores between hosts or making them the shared CI cache needs a separate qualifi
 
 ## Run locally
 
-Requirements: Linux with a local ext4, XFS or Btrfs Docker volume, Docker API 1.54 or newer (the trial uses Engine 29.7.2), accessible on
-`/var/run/docker.sock`, `/dev/fuse`, Git, Python 3.12+, rustup and a C/C++ compiler. Docker must allow the Sandbox
-`CAP_SYS_ADMIN` and FUSE device. The runtime image supplies Node, clang and Rust for commands in Workspaces.
+Requirements: a local Linux Docker Engine with API 1.54 or newer (the trial uses Engine 29.7.2),
+local ext4, XFS or Btrfs Store volumes, `/dev/fuse`, Git and Python 3.12+. Docker must allow the Sandbox
+`CAP_SYS_ADMIN` and FUSE device. On Linux, preparation uses the host's rustup and C/C++ compiler. On macOS,
+preparation runs in a Linux build container through the active local Docker context (including OrbStack).
+The runtime image supplies Node, clang and Rust for commands in Workspaces.
 
 Run from the NSH checkout root:
 
 ```sh
-rustup toolchain install 1.85.1 --profile minimal
-python3 .github/ci/layerfs.py prepare
-python3 .github/ci/layerfs.py smoke
+./scripts/layerfs prepare
+./scripts/layerfs smoke
+./scripts/layerfs status
 ```
 
-`prepare` verifies the upstream source revision, builds its daemon and Node addon with Cargo 1.85.1 and the
-upstream lockfile, then builds the runtime image. NSH's existing `target/` and Cargo registry are reused.
+The executable entry `scripts/layerfs` selects Python 3.12 or newer from PATH or the standard Homebrew location.
+It resolves the checkout from its own path, so it can be called from another directory. Docker's active context
+selects the socket; `DOCKER_HOST` applies when `DOCKER_CONTEXT` is unset. `--docker-socket PATH` selects a local
+socket explicitly for all operations. `status` checks the saved image and build outputs and shows the latest receipt.
+
+`prepare` verifies the upstream source revision, installs the minimal Rust 1.85.1 toolchain, builds the daemon and
+Node addon with the upstream lockfile, then builds the runtime image. On macOS it also builds
+`nsh-layerfs-build:1.0.0` from `prepare.Dockerfile`, mounts the checkout and existing Cargo registry into a temporary
+Linux container, and builds the same pinned tools there. The container exits after preparation. The existing
+`DOCKER_DEFAULT_PLATFORM` and `CARGO_TARGET_DIR` settings apply; the resulting daemon path is saved in the deployment
+record so later invocations find the same build outputs. NSH's normal `target/` and Cargo registry are reused.
 The runtime starts from `rust:1.98.1-trixie`; the exact image ID is recorded in `.nsh/layerfs/deployment.json`
 and used for every Sandbox in that invocation. The SDK is loaded directly from the pinned source, without npm
 packages or changes to NSH's Rust dependencies.

@@ -322,3 +322,15 @@ covers [styles] gridRowStart
 covers [styles] gridRowEnd
 covers [styles] justifyItems
 covers [styles] justifySelf
+
+# layout-sticky
+tap id:case-layout-sticky
+expect Sticky bar
+# In the flow: its insets say where it sticks, not where it is laid out.
+frame id:sticky-bar 0 100 390 40
+frame id:sticky-heading 0 0 390 30
+# `top: 16`: from 84 (its 100 less 16)
+# until its end meets the end of the content (1140).
+prop scroll:text:"Sticky bar" stickyHeaderIndices start=84 end=1084
+# The heading sticks within its section (50 to 450).
+prop scroll:text:"Sticky heading" stickyHeaderIndices start=50 end=420

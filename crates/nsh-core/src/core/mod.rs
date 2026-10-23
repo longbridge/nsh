@@ -3,8 +3,10 @@ mod components;
 mod list;
 mod measure;
 mod overlay;
+mod parent_viewport;
 mod renders;
 mod services;
+mod sticky;
 #[cfg(test)]
 mod tests;
 mod touch;
@@ -15,7 +17,7 @@ use std::{rc::Rc, sync::Arc};
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
 
-use self::list::{ExtraKind, Follow, ListState, PinTarget};
+use self::list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget};
 pub use self::measure::Measurement;
 use crate::{
     animation::AnimationProp,
@@ -306,6 +308,23 @@ struct ScrollState {
     zoom: f32,
     /// The content offset the platform reported.
     offset: (f32, f32),
+    /// Scrolls the core sent a plain scroll view since its native view was
+    /// made (`ScrollBy` items and `ScrollTo` commands; lists count theirs in
+    /// their state): platforms report how many they applied.
+    issued: u32,
+    /// The lists virtualized against this scroll view (`viewport="parent"`;
+    /// empty for nearly every scroll view).
+    dependents: Vec<Key>,
+    /// While it has such lists: the scrolls issued that the reports do not
+    /// show applied yet.
+    pending: Vec<(u32, PendingScroll)>,
+    /// What its lists asked of it in this commit, sent at its end.
+    asked: Option<parent_viewport::Asked>,
+    /// The sticky cells it was last sent with its lists' (its own too, when
+    /// it is a list), while its lists have any.
+    page_sticky: Vec<list::StickyRange>,
+    /// The ranges of the `position: sticky` views in it.
+    view_sticky: Vec<list::StickyRange>,
 }
 
 impl Default for ScrollState {
@@ -323,6 +342,12 @@ impl Default for ScrollState {
             event_throttle_ms: 0.0,
             zoom: 1.0,
             offset: (0.0, 0.0),
+            issued: 0,
+            dependents: Vec::new(),
+            pending: Vec::new(),
+            asked: None,
+            page_sticky: Vec::new(),
+            view_sticky: Vec::new(),
         }
     }
 }
@@ -392,6 +417,9 @@ struct Node {
     parts: Option<Box<classes::NodeParts>>,
     /// A child's classes read their position among siblings.
     positional_children: bool,
+    /// `position: sticky`: its insets, where it sticks in the viewport of
+    /// the scroll view around it ([`Core::update_sticky_views`]).
+    sticky: Option<Box<taffy::Rect<taffy::LengthPercentageAuto>>>,
     /// The inset padding and margin components set: added to the style's.
     insets: Option<Box<[EdgeInsets; 2]>>,
     events: EventMask,
@@ -440,6 +468,8 @@ struct Node {
     relaid: bool,
     /// `android={{ elevation }}`.
     elevation: Points,
+    /// `ios={{ backdropMaterial }}`.
+    backdrop_material: crate::BackdropMaterial,
     /// A text block: its attachments (inline views and images, in text
     /// order) whose native views are inside its own.
     attached: Vec<NodeId>,
@@ -471,11 +501,24 @@ impl Node {
         events
     }
 
+    /// Where its native view goes among its siblings': by `zIndex`, then a
+    /// sticky view above the others (as above a page's in-flow boxes),
+    /// then in order.
+    fn stack_rank(&self) -> (i32, bool) {
+        (self.z_index, self.sticky.is_some())
+    }
+
     /// The view style as platforms take it: translations by a fraction of
     /// the size resolved with the current frame.
     fn mounted_view_style(&self) -> Box<ViewStyle> {
         let mut style = Box::new(self.view_style.clone());
         style.elevation = self.elevation;
+        style.backdrop_material = self.backdrop_material;
+        // A list in its parent's viewport is a plain view clipping its
+        // cells (a scroll view clips its content).
+        if self.list.as_ref().is_some_and(|l| l.parent) {
+            style.overflow_hidden = true;
+        }
         if style.transform.has_fractions() {
             let size = if self.frame.size.width.is_nan() {
                 Size::default()
@@ -509,6 +552,7 @@ impl Node {
             projected: 0,
             parts: None,
             positional_children: false,
+            sticky: None,
             insets: None,
             events: EventMask::default(),
             z_index: 0,
@@ -539,6 +583,7 @@ impl Node {
             attached: Vec::new(),
             overlay_watched: 0,
             elevation: Points::ZERO,
+            backdrop_material: crate::BackdropMaterial::default(),
             dirty: 0,
             queued: false,
             text_queued: false,
@@ -644,6 +689,26 @@ pub struct Core<M: TextEngine> {
     attachment_blocks: Vec<Key>,
     /// Live list nodes.
     lists: Vec<Key>,
+    /// The lists in their parent's viewport (`viewport="parent"`), outer
+    /// ones first ([`Core::resolve_outer`]).
+    parent_lists: Vec<Key>,
+    /// Views moved in a tree with such lists: their views are found again.
+    outer_moved: bool,
+    /// Such a list changed length: the commit lays the page out again.
+    extent_changed: bool,
+    /// The scroll views such lists asked to scroll in this commit.
+    outer_asked: Vec<Key>,
+    /// The views whose lists' sticky cells changed in this commit.
+    sticky_views: Vec<Key>,
+    /// Views with `position: sticky` ([`Core::update_sticky_views`]).
+    sticky_nodes: Vec<Key>,
+    /// The scroll views their ranges were last sent to.
+    sticky_scrollers: Vec<Key>,
+    /// Sticky views came, went or moved: their ranges are worked out
+    /// again.
+    sticky_changed: bool,
+    /// The warning about `bottom` / `right` sticky insets was logged.
+    sticky_warned: bool,
     /// Live screens, modals and header items.
     roots: Vec<Key>,
     /// Attached input accessories by `nativeID`.
@@ -755,6 +820,15 @@ impl<M: TextEngine> Core<M> {
             clipboard: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
+            parent_lists: Vec::new(),
+            outer_moved: false,
+            extent_changed: false,
+            outer_asked: Vec::new(),
+            sticky_views: Vec::new(),
+            sticky_nodes: Vec::new(),
+            sticky_scrollers: Vec::new(),
+            sticky_changed: false,
+            sticky_warned: false,
             roots: Vec::new(),
             accessories: Default::default(),
             header_heights: (Points(44.0), Points(96.0)),
@@ -953,11 +1027,19 @@ impl<M: TextEngine> Core<M> {
         let Ok(key) = self.key(id) else { return };
         let node = &mut self.nodes[key as usize];
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
+        let mut dependents = false;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.offset = (x, y);
+            if !scroll.dependents.is_empty() {
+                scroll.pending.retain(|&(n, _)| n > applied);
+                dependents = true;
+            }
         }
         if let Some(list) = node.list.as_mut() {
             list.reported(if horizontal { x } else { y }, applied);
+        }
+        if dependents {
+            self.dependents_dirty(key);
         }
     }
 
@@ -1070,7 +1152,8 @@ impl<M: TextEngine> Core<M> {
         let _entered = self.components.runtime.enter();
         // Ops on a component's host go to its component, calls of a UI
         // set's modules to the module; the components learn whether JS
-        // listens to the back button.
+        // listens to the back button and JS's shortcuts even before one
+        // mounts, so a component's own join them rather than replace them.
         if self.components.instances.is_empty()
             && !matches!(
                 op,
@@ -1079,8 +1162,11 @@ impl<M: TextEngine> Core<M> {
                     ..
                 } | Op::Listen {
                     id: ROOT_ID,
-                    event: EventKind::BackPress,
+                    event: EventKind::BackPress | EventKind::KeyCommand,
                     ..
+                } | Op::SetProp {
+                    id: ROOT_ID,
+                    prop: Prop::Keymap(_),
                 }
             )
         {
@@ -1141,6 +1227,26 @@ impl<M: TextEngine> Core<M> {
                     if relink {
                         self.mark_text_block(key);
                     }
+                }
+                // A list in its parent's viewport scrolls with the view
+                // around it: its own scroll events never come.
+                if enabled
+                    && matches!(
+                        event,
+                        EventKind::Scroll
+                            | EventKind::Refresh
+                            | EventKind::ScrollEnd
+                            | EventKind::ScrollDragStart
+                            | EventKind::ScrollDragEnd
+                            | EventKind::MomentumStart
+                            | EventKind::MomentumEnd
+                    )
+                    && self.nodes[key as usize]
+                        .list
+                        .as_ref()
+                        .is_some_and(|l| l.parent)
+                {
+                    self.warn_ignored(key);
                 }
                 Ok(())
             }
@@ -1249,12 +1355,17 @@ impl<M: TextEngine> Core<M> {
     pub fn commit(&mut self) -> Option<MountBatch> {
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
-        // here, and lay out again (JS's lists ask JS, through the engine).
+        // here, and lay out again (JS's lists ask JS, through the engine);
+        // a list in its parent's viewport that changed length lays the
+        // page out again, so it settles in this batch.
         for _ in 0..MAX_VIRTUAL_ROUNDS {
-            if !self.bind_virtual_lists() {
+            if !self.bind_virtual_lists() && !std::mem::take(&mut self.extent_changed) {
                 break;
             }
             self.commit_round();
+        }
+        if !self.outer_asked.is_empty() {
+            self.send_outer_scrolls();
         }
         if self.mount.is_empty() || matches!(self.mount[..], [MountItem::LayoutAnimation(_)]) {
             self.mount.clear();
@@ -1316,6 +1427,7 @@ impl<M: TextEngine> Core<M> {
             answer.borrow_mut().deliver(self.measure(id));
         }
         // On laid out views; dropped for views that were never shown.
+        let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {
             // Answered here, with this commit's layout (null for views that
             // are gone or not shown).
@@ -1326,6 +1438,19 @@ impl<M: TextEngine> Core<M> {
             let Ok(key) = self.key(id) else { continue };
             let node = &self.nodes[key as usize];
             if !node.created {
+                continue;
+            }
+            // A list in its parent's viewport not placed in its view yet
+            // keeps its scroll commands for the update that places it.
+            if node.list.as_ref().is_some_and(|l| l.parent)
+                && matches!(
+                    command,
+                    Command::ScrollTo { .. }
+                        | Command::ScrollToIndex { .. }
+                        | Command::ScrollToEnd { .. }
+                )
+            {
+                kept.push((id, command));
                 continue;
             }
             // Lists resolved theirs in `update_lists`; a scroll view can
@@ -1417,8 +1542,20 @@ impl<M: TextEngine> Core<M> {
                 Command::ScrollToIndex { .. } => continue,
                 _ => {}
             }
+            // Platforms count the scrolls they applied; lists count theirs.
+            if let Command::ScrollTo { x, y, .. } = command
+                && self.nodes[key as usize].kind == Kind::Scroll
+            {
+                let horizontal = self.nodes[key as usize]
+                    .scroll
+                    .as_ref()
+                    .is_some_and(|s| s.horizontal);
+                let to = if horizontal { x.0 } else { y.0 };
+                self.scroll_issued(key, PendingScroll::To(to));
+            }
             self.mount.push(MountItem::Command { id, command });
         }
+        self.commands.append(&mut kept);
     }
 
     #[inline]
@@ -1730,7 +1867,7 @@ impl<M: TextEngine> Core<M> {
             vertical_align,
             direction,
             logical,
-            pending: _,
+            pending,
         } = style;
         if animated
             .iter()
@@ -1747,6 +1884,21 @@ impl<M: TextEngine> Core<M> {
         let rtl = self.resolved_rtl(key);
         crate::style::resolve_normal_alignment(&mut layout);
         crate::style::apply_direction(&mut layout, &mut view, &logical, rtl);
+        // A sticky box's insets say where it sticks, not where it is laid
+        // out.
+        let sticky = pending.sticky_position.then(|| Box::new(layout.inset));
+        if sticky.is_some() {
+            layout.inset = taffy::Rect {
+                left: taffy::LengthPercentageAuto::auto(),
+                right: taffy::LengthPercentageAuto::auto(),
+                top: taffy::LengthPercentageAuto::auto(),
+                bottom: taffy::LengthPercentageAuto::auto(),
+            };
+        }
+        let node = &mut self.nodes[key as usize];
+        if node.sticky != sticky {
+            self.set_sticky(key, sticky);
+        }
         let node = &mut self.nodes[key as usize];
         if let Some([padding, margin]) = node.insets.as_deref() {
             // On top of points; percentages cannot take an addition.
@@ -1772,7 +1924,17 @@ impl<M: TextEngine> Core<M> {
         }
         let flipped = node.rtl != rtl;
         node.rtl = rtl;
-        let view_changed = node.view_style != view;
+        // `objectPosition` is the image's (`MountItem::Image`), not the view's.
+        let position_changed = node.view_style.object_position != view.object_position;
+        let view_changed = if position_changed {
+            node.view_style
+                != ViewStyle {
+                    object_position: node.view_style.object_position,
+                    ..view.clone()
+                }
+        } else {
+            node.view_style != view
+        };
         // A span's background is part of its block's text.
         let span_background_changed = node.inline
             && node.kind == Kind::Text
@@ -1821,6 +1983,9 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         if view_changed {
             flags |= dirty::VIEW;
+        }
+        if position_changed && self.nodes[key as usize].image.is_some() {
+            flags |= dirty::IMAGE;
         }
         if animation_changed {
             flags |= dirty::ANIMATION;
@@ -1910,6 +2075,7 @@ impl<M: TextEngine> Core<M> {
         let id = node.id;
         if let Some(scroll) = node.scroll.as_mut()
             && scroll.horizontal
+            && node.list.as_ref().is_none_or(|l| !l.parent)
         {
             // Back to the start side: the right end right to left (once the
             // content is known again).
@@ -2042,13 +2208,45 @@ impl<M: TextEngine> Core<M> {
             self.set_status_bar(key, setting);
             return Ok(());
         }
+        if let Prop::ListViewport(mode) = prop {
+            self.set_list_viewport(key, mode);
+            return Ok(());
+        }
+        // How a list in its parent's viewport scrolls is the scroll view's
+        // around it.
+        if matches!(
+            prop,
+            Prop::Scroll(_)
+                | Prop::KeyboardDismissMode(_)
+                | Prop::Scrollbar(_)
+                | Prop::Refreshing(_)
+                | Prop::ScrollValue(_)
+                | Prop::Native(NativeProp::Scrollable(_))
+        ) && let Some(list) = self.nodes[key as usize].list.as_mut().filter(|l| l.parent)
+        {
+            list.ignored |= match prop {
+                Prop::Scroll(_)
+                | Prop::KeyboardDismissMode(
+                    KeyboardDismissMode::OnDrag | KeyboardDismissMode::Interactive,
+                )
+                | Prop::Native(NativeProp::Scrollable(false)) => list::ignored::BEHAVIOR,
+                Prop::Scrollbar(false) => list::ignored::SCROLLBAR,
+                Prop::Refreshing(true) => list::ignored::REFRESH,
+                Prop::ScrollValue(Some(_)) => list::ignored::SCROLL_VALUE,
+                _ => 0,
+            };
+            self.warn_ignored(key);
+            return Ok(());
+        }
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
         match prop {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
                     let size = source.as_ref().and_then(|s| s.size);
-                    image.source = source;
+                    // A `data:` URI is decoded here, once, not by every
+                    // platform at every load.
+                    image.source = source.map(ImageSource::inline);
                     flags |= dirty::IMAGE;
                     let layout = node.layout.expect("image layout");
                     if let Some(LeafContext::Image(natural)) =
@@ -2064,7 +2262,9 @@ impl<M: TextEngine> Core<M> {
             Prop::Image(option) => {
                 if let Some(image) = node.image.as_mut() {
                     match option {
-                        ImageProp::Placeholder(source) => image.options.placeholder = source,
+                        ImageProp::Placeholder(source) => {
+                            image.options.placeholder = source.map(ImageSource::inline)
+                        }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
                     }
@@ -2093,6 +2293,14 @@ impl<M: TextEngine> Core<M> {
                     self.sync_layout_style(key);
                     for child in children {
                         self.sync_layout_style(child);
+                    }
+                    if self.nodes[key as usize]
+                        .list
+                        .as_ref()
+                        .is_some_and(|l| l.parent)
+                    {
+                        self.sync_spacer(key, true);
+                        self.outer_moved = true;
                     }
                 }
             }
@@ -2196,21 +2404,33 @@ impl<M: TextEngine> Core<M> {
             Prop::Inverted(inverted) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_inverted(inverted);
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
                 }
             }
             Prop::FollowEnd(threshold) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_follow_end(threshold.map(|t| t.0));
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
                 }
             }
             Prop::StickyIndices(indices) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_sticky(indices);
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
                 }
             }
             Prop::StickyOffset(offset) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_sticky_offset(offset.0);
+                    if list.parent {
+                        self.warn_ignored(key);
+                    }
                 }
             }
             Prop::ListContent(content) => {
@@ -2398,6 +2618,12 @@ impl<M: TextEngine> Core<M> {
                 let value = value.max(Points::ZERO);
                 if node.elevation != value {
                     node.elevation = value;
+                    flags |= dirty::VIEW;
+                }
+            }
+            Prop::BackdropMaterial(value) => {
+                if node.backdrop_material != value {
+                    node.backdrop_material = value;
                     flags |= dirty::VIEW;
                 }
             }
@@ -2834,6 +3060,8 @@ impl<M: TextEngine> Core<M> {
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
+        self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(child);
+        self.sticky_changed |= !self.sticky_nodes.is_empty();
         self.update_direction(child);
         self.groups_changed(child, parent);
         if self.nodes[child as usize]
@@ -2887,7 +3115,14 @@ impl<M: TextEngine> Core<M> {
             // (`sync_overlays`).
             if parent_created && child_kind != Kind::Overlay {
                 self.ensure_created(child);
-                let before = self.native_before(parent, child);
+                let before = match self.nodes[parent as usize].list.as_ref() {
+                    // Below the sticky cells of a list in its parent's
+                    // viewport, which stay on top.
+                    Some(list) if list.parent && !list.sent_sticky.is_empty() => {
+                        self.below_sticky(parent, child)
+                    }
+                    _ => self.native_before(parent, child),
+                };
                 // By the nodes' own ids (the ops may name an alias).
                 self.mount.push(MountItem::Insert {
                     parent: self.nodes[parent as usize].id,
@@ -2923,6 +3158,8 @@ impl<M: TextEngine> Core<M> {
         self.nodes[key as usize].parent = NO_KEY;
         self.groups_changed(key, parent);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
+        self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(key);
+        self.sticky_changed |= !self.sticky_nodes.is_empty();
         let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
@@ -3024,10 +3261,37 @@ impl<M: TextEngine> Core<M> {
             // Deleting the view also detaches it natively.
             self.unlink(key, false);
         }
+        // Out of the view it was virtualized against, before its key is
+        // free for another node.
+        if self.nodes[key as usize]
+            .list
+            .as_ref()
+            .is_some_and(|l| l.parent)
+        {
+            self.forget_outer(key);
+            self.parent_lists.retain(|&k| k != key);
+        }
         let node = self.nodes.remove(key as usize);
         self.slots[id as usize] = 0;
         if node.kind == Kind::List {
             self.lists.retain(|&k| k != key);
+        }
+        if node.sticky.is_some() {
+            self.sticky_nodes.retain(|&k| k != key);
+            self.sticky_changed = true;
+        }
+        if let Some(scroll) = node.scroll.as_ref() {
+            if !scroll.dependents.is_empty() {
+                self.outer_released(&scroll.dependents);
+            }
+            if scroll.asked.is_some() {
+                self.outer_asked.retain(|&k| k != key);
+            }
+            self.sticky_views.retain(|&k| k != key);
+            self.sticky_scrollers.retain(|&k| k != key);
+        }
+        if let Some((spacer, _)) = node.list.as_ref().and_then(|l| l.spacer) {
+            self.layout.remove(spacer).expect("taffy remove");
         }
         if node.kind == Kind::Text {
             self.attachment_blocks.retain(|&k| k != key);
@@ -3076,9 +3340,9 @@ impl<M: TextEngine> Core<M> {
     /// `zIndex`, then in tree order.
     fn native_before(&self, parent: Key, child: Key) -> Option<NodeId> {
         let children = &self.nodes[parent as usize].children;
-        let z = self.nodes[child as usize].z_index;
+        let z = self.nodes[child as usize].stack_rank();
         let pos = children.iter().position(|&c| c == child)?;
-        let mut best: Option<(i32, usize, NodeId)> = None;
+        let mut best: Option<((i32, bool), usize, NodeId)> = None;
         for (i, &c) in children.iter().enumerate() {
             let n = &self.nodes[c as usize];
             if c == child || !n.created || n.layout.is_none() {
@@ -3087,8 +3351,9 @@ impl<M: TextEngine> Core<M> {
             if n.kind == Kind::Overlay {
                 continue;
             }
-            if (n.z_index, i) > (z, pos) && best.is_none_or(|b| (n.z_index, i) < (b.0, b.1)) {
-                best = Some((n.z_index, i, n.id));
+            let rank = n.stack_rank();
+            if (rank, i) > (z, pos) && best.is_none_or(|b| (rank, i) < (b.0, b.1)) {
+                best = Some((rank, i, n.id));
             }
         }
         // Below the overlays shown in it, when it is a root view.
@@ -3189,12 +3454,22 @@ impl<M: TextEngine> Core<M> {
         node.frame = Bounds::UNSET;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;
+            // The new native view counts the core's scrolls from zero.
+            scroll.issued = 0;
+            scroll.pending.clear();
         }
+        // A list in its parent's viewport is a plain view clipping its
+        // cells.
+        let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
         let id = node.id;
         let kind = node.kind;
         // A new native view already has the default style and no listeners.
         let mut flags = 0;
-        if node.view_style != ViewStyle::default() || node.elevation != Points::ZERO {
+        if node.view_style != ViewStyle::default()
+            || node.elevation != Points::ZERO
+            || node.backdrop_material != crate::BackdropMaterial::default()
+            || parent_list
+        {
             flags |= dirty::VIEW;
         }
         if !node.events.is_empty() {
@@ -3211,7 +3486,9 @@ impl<M: TextEngine> Core<M> {
         if node.image.as_ref().is_some_and(|i| i.source.is_some()) {
             flags |= dirty::IMAGE;
         }
-        if let Some(scroll) = &node.scroll {
+        if let Some(scroll) = &node.scroll
+            && !parent_list
+        {
             flags |= dirty::SCROLL;
             if scroll.refreshing {
                 flags |= dirty::REFRESHING;
@@ -3249,7 +3526,11 @@ impl<M: TextEngine> Core<M> {
         }
         self.mount.push(MountItem::Create {
             id,
-            kind: kind.view_kind(),
+            kind: if parent_list {
+                ViewKind::View
+            } else {
+                kind.view_kind()
+            },
         });
         if let Some(component) = self.nodes[key as usize].component.as_mut() {
             match &component.name {
@@ -3275,9 +3556,9 @@ impl<M: TextEngine> Core<M> {
         let original = children.clone();
         if children
             .iter()
-            .any(|&c| self.nodes[c as usize].z_index != 0)
+            .any(|&c| self.nodes[c as usize].stack_rank() != (0, false))
         {
-            children.sort_by_key(|&c| self.nodes[c as usize].z_index);
+            children.sort_by_key(|&c| self.nodes[c as usize].stack_rank());
         }
         for &child in &children {
             let c = &self.nodes[child as usize];
@@ -3383,10 +3664,13 @@ impl<M: TextEngine> Core<M> {
                             .map(|s| s.resolved(ratio)),
                         blur_radius: image.options.blur_radius,
                         fade_ms: image.options.fade_ms,
+                        position: node.view_style.object_position,
                     },
                 });
             }
-            if let Some(scroll) = &node.scroll {
+            if let Some(scroll) = &node.scroll
+                && node.list.as_ref().is_none_or(|l| !l.parent)
+            {
                 if flags & dirty::SCROLL != 0 {
                     self.mount.push(MountItem::ScrollConfig {
                         id,
@@ -4273,8 +4557,18 @@ impl<M: TextEngine> Core<M> {
             };
             let state = list.list.as_ref().expect("list");
             let horizontal = state.horizontal;
-            let size = self.rounded_layout(list_layout).size;
-            let cross = if horizontal { size.height } else { size.width };
+            let l = self.rounded_layout(list_layout);
+            let size = l.size;
+            let cross = if !state.parent {
+                if horizontal { size.height } else { size.width }
+            } else if horizontal {
+                // In its parent's viewport: the cells fill its content box.
+                (size.height - l.border.top - l.border.bottom - l.padding.top - l.padding.bottom)
+                    .max(0.0)
+            } else {
+                (size.width - l.border.left - l.border.right - l.padding.left - l.padding.right)
+                    .max(0.0)
+            };
             let item_cross = state.column(cross, 0).1;
             let extra_cross = state.full_width(cross).1;
             let available = |c: f32| {
@@ -4729,11 +5023,15 @@ impl<M: TextEngine> Core<M> {
                             animated: false,
                         },
                     )),
-                    Some(old) if old.width != size.width => self.mount.push(MountItem::ScrollBy {
-                        id,
-                        dx: size.width - old.width,
-                        dy: Points::ZERO,
-                    }),
+                    Some(old) if old.width != size.width => {
+                        let dx = size.width - old.width;
+                        self.mount.push(MountItem::ScrollBy {
+                            id,
+                            dx,
+                            dy: Points::ZERO,
+                        });
+                        self.scroll_issued(key, PendingScroll::By(dx.0));
+                    }
                     Some(_) => {}
                 }
             }
@@ -4745,341 +5043,441 @@ impl<M: TextEngine> Core<M> {
     fn update_lists(&mut self, relayout: bool) {
         for i in 0..self.lists.len() {
             let key = self.lists[i];
-            let node = &self.nodes[key as usize];
-            if !node.created {
-                continue;
-            }
-            let list = node.list.as_ref().expect("list");
-            if !(relayout || list.dirty || self.commands.iter().any(|c| c.0 == node.id)) {
-                continue;
-            }
-            let (id, events) = (node.id, node.events);
-            let horizontal = list.horizontal;
-            let l = self.rounded_layout(node.layout.expect("list layout"));
-            let (main, cross) = if horizontal {
-                (l.size.width, l.size.height)
-            } else {
-                (l.size.height, l.size.width)
-            };
-            let main_of = |s: taffy::Size<f32>| if horizontal { s.width } else { s.height };
-
-            // Sizes of cells showing their item, and of the extras.
-            let mut ready = std::mem::take(&mut self.cells_scratch);
-            ready.clear();
-            ready.extend(
-                list.slots
-                    .iter()
-                    .filter_map(|s| s.ready().map(|i| (i, s.cell))),
-            );
-            let extras = list.extras;
-            let mut anchor = 0.0;
-            for &(index, cell) in &ready {
-                if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
-                    let size = main_of(self.rounded_layout(cell_layout).size);
-                    let list = self.nodes[key as usize].list.as_mut().expect("list");
-                    anchor += list.measured(index, size);
-                }
-            }
-            for (kind, extra) in [ExtraKind::Header, ExtraKind::Footer, ExtraKind::Empty]
-                .into_iter()
-                .zip(extras)
-            {
-                if let Some(cell_layout) =
-                    self.nodes.get(extra.cell as usize).and_then(|c| c.layout)
-                {
-                    let size = main_of(self.rounded_layout(cell_layout).size);
-                    let list = self.nodes[key as usize].list.as_mut().expect("list");
-                    anchor += list.measured_extra(kind, size);
-                }
-            }
-
-            let list = self.nodes[key as usize].list.as_mut().expect("list");
-            // Not on the first layout: there is nothing to clamp yet.
-            let grew = list.viewport > 0.0 && main > list.viewport;
-            list.viewport = main;
-            list.offset += anchor;
-            // A splice above the viewport already moved the offset.
-            anchor += list.take_splice_anchor();
-            // Inverted lists keep their distance from the end instead;
-            // `maintainVisibleContentPosition` follows the end near it.
-            anchor += list.anchor_end();
-            // The last scroll command's target moves as its cells are
-            // measured: the list follows it.
-            let mut retarget = None;
-            match list.follow_pin(anchor) {
-                Follow::Stay => {}
-                Follow::By(delta) => anchor += delta,
-                Follow::To(offset) => retarget = Some(offset),
-            }
-
-            // Scroll commands for the list, now that sizes are known: the
-            // window follows a jump in this same commit.
-            for (target, command) in &mut self.commands {
-                if *target != id {
-                    continue;
-                }
-                let list = self.nodes[key as usize].list.as_mut().expect("list");
-                let (pin, animated) = match *command {
-                    Command::ScrollToIndex {
-                        index,
-                        animated,
-                        view_position,
-                        view_offset,
-                    } => (
-                        Some(PinTarget::Index {
-                            index,
-                            view_position: view_position.0,
-                            view_offset: view_offset.0,
-                        }),
-                        animated,
-                    ),
-                    Command::ScrollToEnd { animated } => (Some(PinTarget::End), animated),
-                    Command::ScrollTo { animated, .. } => (None, animated),
-                    _ => continue,
-                };
-                let offset = match (pin, &*command) {
-                    (Some(pin), _) => list.target_offset(pin),
-                    (None, &Command::ScrollTo { x, y, .. }) => {
-                        if horizontal {
-                            x.0
-                        } else {
-                            y.0
-                        }
-                    }
-                    _ => continue,
-                };
-                // An offset of the app's own ends the pin.
-                list.pin(pin, offset, animated);
-                // A new command replaces the pin's retargeting.
-                retarget = None;
-                if !animated {
-                    list.jump(offset);
-                }
-                list.issue_scroll_to(offset);
-                let (x, y) = if horizontal {
-                    (Points(offset), Points::ZERO)
-                } else {
-                    (Points::ZERO, Points(offset))
-                };
-                *command = Command::ScrollTo { x, y, animated };
-            }
-            if let Some(offset) = retarget {
-                self.nodes[key as usize]
-                    .list
-                    .as_mut()
-                    .expect("list")
-                    .issue_scroll_to(offset);
-                let (x, y) = if horizontal {
-                    (Points(offset), Points::ZERO)
-                } else {
-                    (Points::ZERO, Points(offset))
-                };
-                let command = Command::ScrollTo {
-                    x,
-                    y,
-                    animated: true,
-                };
-                self.commands.push((id, command));
-            }
-
-            let list = self.nodes[key as usize].list.as_mut().expect("list");
-            let mut binds = Vec::new();
-            if list.update_window(&mut binds) {
-                self.events.push(crate::ui::JsEvent::Event(
-                    id,
-                    EventKind::LoadMore,
-                    EventPayload::None,
-                ));
-            }
-            if !binds.is_empty() {
-                self.list_binds.push(ListBind { list: id, binds });
-            }
-            if events.contains(EventKind::ViewableItemsChange) {
-                let viewable = list.viewable_items();
-                if viewable != list.viewable {
-                    list.viewable = viewable;
-                    let (first, last) =
-                        viewable.map_or((-1.0, -1.0), |(f, l)| (f as f64, l as f64));
-                    self.events.push(crate::ui::JsEvent::Event(
-                        id,
-                        EventKind::ViewableItemsChange,
-                        EventPayload::Map(vec![
-                            ("first", PayloadValue::Number(first)),
-                            ("last", PayloadValue::Number(last)),
-                        ]),
-                    ));
-                }
-            }
-
-            // Position cells that show their item (the window may have
-            // changed which ones). Descendant frames only change when the
-            // cell was laid out again.
-            let list = self.nodes[key as usize].list.as_ref().expect("list");
-            let content_len = list.content_len();
-            let blocks = list.blocks();
-            let sticky = list.sticky_enabled();
-            ready.clear();
-            ready.extend(
-                list.slots
-                    .iter()
-                    .filter_map(|s| s.ready().map(|i| (i, s.cell))),
-            );
-            // Cells left without an item still show their last one. Those
-            // in the render window (the data shrank, the list jumped) would
-            // show through: move them out of sight. Cells the window left
-            // behind while scrolling are out of sight already.
-            let (window_start, window_end) = list.render_window();
-            let hidden: Vec<Key> = list
-                .slots
-                .iter()
-                .filter(|s| s.index.is_none() && s.cell != u32::MAX)
-                .map(|s| s.cell)
-                .collect();
-            for cell in hidden {
-                let frame = self.nodes[cell as usize].frame;
-                if frame.size.width.0.is_nan() {
-                    // Never placed: nothing to see yet.
-                    continue;
-                }
-                let (start, size) = if horizontal {
-                    (frame.origin.x.0, frame.size.width.0)
-                } else {
-                    (frame.origin.y.0, frame.size.height.0)
-                };
-                if start + size <= window_start || start >= window_end {
-                    continue;
-                }
-                let away = if horizontal {
-                    Bounds {
-                        origin: Point::new(Points(-HIDDEN), frame.origin.y),
-                        ..frame
-                    }
-                } else {
-                    Bounds {
-                        origin: Point::new(frame.origin.x, Points(-HIDDEN)),
-                        ..frame
-                    }
-                };
-                if frame != away {
-                    self.set_frame(cell, away);
-                }
-            }
-            let mut sticky_cells = Vec::new();
-            let place = |this: &mut Self, cell: Key, at: f32, row: f32, (x, width): (f32, f32)| {
-                let cell_layout = this.nodes.get(cell as usize).and_then(|c| c.layout)?;
-                let size = this.rounded_layout(cell_layout).size;
-                let list = this.nodes[key as usize].list.as_ref().expect("list");
-                let main_at = list.to_content(at, row.max(main_of(size)));
-                let frame = if horizontal {
-                    rect(main_at, x, size.width, width)
-                } else {
-                    rect(x, main_at, width, size.height)
-                };
-                this.set_frame(cell, frame);
-                if std::mem::take(&mut this.nodes[cell as usize].relaid) {
-                    let children = std::mem::take(&mut this.nodes[cell as usize].children);
-                    for &child in &children {
-                        this.emit_frames(child);
-                    }
-                    this.nodes[cell as usize].children = children;
-                    this.update_overflow(cell);
-                }
-                Some(main_of(size))
-            };
-            for &(index, cell) in &ready {
-                let list = self.nodes[key as usize].list.as_ref().expect("list");
-                let (at, row) = (list.item_at(index), list.row_extent(index));
-                let column = list.column(cross, list.column_of(index));
-                let Some(size) = place(self, cell, at, row, column) else {
-                    continue;
-                };
-                let list = self.nodes[key as usize].list.as_ref().expect("list");
-                if sticky && list.sticky.binary_search(&index).is_ok() {
-                    let range = list.sticky_range(index, self.nodes[cell as usize].id, size);
-                    sticky_cells.push(range);
-                }
-            }
-            let full = self.nodes[key as usize]
+            // Lists in their parent's viewport come after, outer ones first.
+            if self.nodes[key as usize]
                 .list
                 .as_ref()
-                .expect("list")
-                .full_width(cross);
-            for (extra, at) in extras
-                .iter()
-                .zip([blocks.header, blocks.footer, blocks.body])
+                .is_some_and(|l| l.parent)
             {
-                if extra.cell != u32::MAX {
-                    place(self, extra.cell, at, 0.0, full);
+                continue;
+            }
+            self.update_list(key, relayout, None);
+        }
+        if !self.parent_lists.is_empty() {
+            if self.outer_moved {
+                self.resolve_outer();
+            }
+            for i in 0..self.parent_lists.len() {
+                let key = self.parent_lists[i];
+                if !self.nodes[key as usize].created {
+                    continue;
                 }
-            }
-            self.cells_scratch = ready;
-
-            sticky_cells.sort_by_key(|c| c.cell);
-            let list = self.nodes[key as usize].list.as_mut().expect("list");
-            if sticky_cells != list.sent_sticky {
-                let cells = sticky_cells
-                    .iter()
-                    .map(|r| StickyCell {
-                        cell: r.cell,
-                        start: Points(r.start),
-                        end: Points(r.end),
-                    })
-                    .collect();
-                list.sent_sticky = sticky_cells;
-                self.mount.push(MountItem::StickyCells { id, cells });
-            }
-
-            let content = if horizontal {
-                size_pt(content_len, cross)
-            } else {
-                size_pt(cross, content_len)
-            };
-            // Platforms clamp the offset to the content: grow the content
-            // before scrolling, scroll before shrinking it.
-            let old_len = self.nodes[key as usize]
-                .scroll
-                .as_ref()
-                .and_then(|s| s.content)
-                .map_or(0.0, |c| if horizontal { c.width.0 } else { c.height.0 });
-            if anchor != 0.0 {
-                self.nodes[key as usize]
-                    .list
-                    .as_mut()
-                    .expect("list")
-                    .issue_scroll_by(anchor);
-            }
-            let scroll_by = (anchor != 0.0).then(|| {
-                let (dx, dy) = if horizontal {
-                    (Points(anchor), Points::ZERO)
-                } else {
-                    (Points::ZERO, Points(anchor))
+                // Out of the tree, or not placed yet.
+                let Some(outer) = self.outer_input(key) else {
+                    continue;
                 };
-                MountItem::ScrollBy { id, dx, dy }
+                self.update_list(key, relayout, Some(outer));
+            }
+        }
+        if !self.sticky_nodes.is_empty() || !self.sticky_scrollers.is_empty() {
+            self.update_sticky_views(relayout);
+        }
+        if !self.sticky_views.is_empty() {
+            self.send_page_sticky();
+        }
+    }
+
+    /// [`Core::update_lists`] for list `key`; `outer`: where a list in its
+    /// parent's viewport is in the view it is virtualized against.
+    fn update_list(
+        &mut self,
+        key: Key,
+        relayout: bool,
+        outer: Option<parent_viewport::OuterInput>,
+    ) {
+        let moved = match &outer {
+            Some(o) => self.nodes[key as usize]
+                .list
+                .as_mut()
+                .expect("list")
+                .set_outer(o.start, o.offset, o.viewport, o.max, o.settled),
+            None => false,
+        };
+        let node = &self.nodes[key as usize];
+        if !node.created {
+            return;
+        }
+        let list = node.list.as_ref().expect("list");
+        if !(relayout || moved || list.dirty || self.commands.iter().any(|c| c.0 == node.id)) {
+            return;
+        }
+        let (id, events) = (node.id, node.events);
+        let horizontal = list.horizontal;
+        let l = self.rounded_layout(node.layout.expect("list layout"));
+        let (main, cross) = match &outer {
+            // The view's viewport, and the list's content box across.
+            Some(o) => (o.viewport, o.cross),
+            None if horizontal => (l.size.width, l.size.height),
+            None => (l.size.height, l.size.width),
+        };
+        let main_of = |s: taffy::Size<f32>| if horizontal { s.width } else { s.height };
+
+        // Sizes of cells showing their item, and of the extras.
+        let mut ready = std::mem::take(&mut self.cells_scratch);
+        ready.clear();
+        ready.extend(
+            list.slots
+                .iter()
+                .filter_map(|s| s.ready().map(|i| (i, s.cell))),
+        );
+        let extras = list.extras;
+        let mut anchor = 0.0;
+        for &(index, cell) in &ready {
+            if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
+                let size = main_of(self.rounded_layout(cell_layout).size);
+                let list = self.nodes[key as usize].list.as_mut().expect("list");
+                anchor += list.measured(index, size);
+            }
+        }
+        for (kind, extra) in [ExtraKind::Header, ExtraKind::Footer, ExtraKind::Empty]
+            .into_iter()
+            .zip(extras)
+        {
+            if let Some(cell_layout) = self.nodes.get(extra.cell as usize).and_then(|c| c.layout) {
+                let size = main_of(self.rounded_layout(cell_layout).size);
+                let list = self.nodes[key as usize].list.as_mut().expect("list");
+                anchor += list.measured_extra(kind, size);
+            }
+        }
+
+        let list = self.nodes[key as usize].list.as_mut().expect("list");
+        // Not on the first layout: there is nothing to clamp yet.
+        let grew = outer.is_none() && list.viewport > 0.0 && main > list.viewport;
+        list.viewport = main;
+        list.offset += anchor;
+        // A splice above the viewport already moved the offset.
+        anchor += list.take_splice_anchor();
+        // Inverted lists keep their distance from the end instead;
+        // `maintainVisibleContentPosition` follows the end near it.
+        anchor += list.anchor_end();
+        // The last scroll command's target moves as its cells are
+        // measured: the list follows it.
+        let mut retarget = None;
+        match list.follow_pin(anchor) {
+            Follow::Stay => {}
+            Follow::By(delta) => anchor += delta,
+            Follow::To(offset) => retarget = Some(offset),
+        }
+
+        // Scroll commands for the list, now that sizes are known: the
+        // window follows a jump in this same commit. In its parent's
+        // viewport, the view around it scrolls instead.
+        let mut outer_to = None;
+        for (target, command) in &mut self.commands {
+            if *target != id {
+                continue;
+            }
+            let list = self.nodes[key as usize].list.as_mut().expect("list");
+            let (pin, animated) = match *command {
+                Command::ScrollToIndex {
+                    index,
+                    animated,
+                    view_position,
+                    view_offset,
+                } => (
+                    Some(PinTarget::Index {
+                        index,
+                        view_position: view_position.0,
+                        view_offset: view_offset.0,
+                    }),
+                    animated,
+                ),
+                Command::ScrollToEnd { animated } => (Some(PinTarget::End), animated),
+                Command::ScrollTo { animated, .. } => (None, animated),
+                _ => continue,
+            };
+            let offset = match (pin, &*command) {
+                (Some(pin), _) => list.target_offset(pin),
+                (None, &Command::ScrollTo { x, y, .. }) => {
+                    let offset = if horizontal { x.0 } else { y.0 };
+                    if outer.is_some() {
+                        list.clamped(offset)
+                    } else {
+                        offset
+                    }
+                }
+                _ => continue,
+            };
+            // An offset of the app's own ends the pin.
+            list.pin(pin, offset, animated);
+            // A new command replaces the pin's retargeting.
+            retarget = None;
+            if !animated {
+                list.jump(offset);
+            }
+            if let Some(o) = &outer {
+                outer_to = Some((o.start + offset, animated));
+                continue;
+            }
+            list.issue_scroll_to(offset);
+            let (x, y) = if horizontal {
+                (Points(offset), Points::ZERO)
+            } else {
+                (Points::ZERO, Points(offset))
+            };
+            *command = Command::ScrollTo { x, y, animated };
+        }
+        if outer_to.is_some() {
+            // Sent to the view around the list instead.
+            self.commands.retain(|(target, command)| {
+                *target != id
+                    || !matches!(
+                        command,
+                        Command::ScrollTo { .. }
+                            | Command::ScrollToIndex { .. }
+                            | Command::ScrollToEnd { .. }
+                    )
             });
-            // Platforms clamp the offset to the content and the viewport:
-            // scroll before the viewport grows or the content shrinks, and
-            // after the content grows (a shrinking viewport's frame comes
-            // first anyway).
-            let frame_at = grew
-                .then(|| {
-                    self.mount
-                        .iter()
-                        .position(|m| matches!(m, MountItem::Frame { id: f, .. } if *f == id))
+        }
+        if let (Some(offset), Some(o)) = (retarget, &outer) {
+            outer_to = Some((o.start + offset, true));
+        } else if let Some(offset) = retarget {
+            self.nodes[key as usize]
+                .list
+                .as_mut()
+                .expect("list")
+                .issue_scroll_to(offset);
+            let (x, y) = if horizontal {
+                (Points(offset), Points::ZERO)
+            } else {
+                (Points::ZERO, Points(offset))
+            };
+            let command = Command::ScrollTo {
+                x,
+                y,
+                animated: true,
+            };
+            self.commands.push((id, command));
+        }
+
+        let list = self.nodes[key as usize].list.as_mut().expect("list");
+        let mut binds = Vec::new();
+        if list.update_window(&mut binds) {
+            self.events.push(crate::ui::JsEvent::Event(
+                id,
+                EventKind::LoadMore,
+                EventPayload::None,
+            ));
+        }
+        if !binds.is_empty() {
+            self.list_binds.push(ListBind { list: id, binds });
+        }
+        if events.contains(EventKind::ViewableItemsChange) {
+            let viewable = list.viewable_items();
+            if viewable != list.viewable {
+                list.viewable = viewable;
+                let (first, last) = viewable.map_or((-1.0, -1.0), |(f, l)| (f as f64, l as f64));
+                self.events.push(crate::ui::JsEvent::Event(
+                    id,
+                    EventKind::ViewableItemsChange,
+                    EventPayload::Map(vec![
+                        ("first", PayloadValue::Number(first)),
+                        ("last", PayloadValue::Number(last)),
+                    ]),
+                ));
+            }
+        }
+
+        // Position cells that show their item (the window may have
+        // changed which ones). Descendant frames only change when the
+        // cell was laid out again.
+        let list = self.nodes[key as usize].list.as_ref().expect("list");
+        let content_len = list.content_len();
+        let blocks = list.blocks();
+        let sticky = list.sticky_enabled();
+        ready.clear();
+        ready.extend(
+            list.slots
+                .iter()
+                .filter_map(|s| s.ready().map(|i| (i, s.cell))),
+        );
+        // Cells left without an item still show their last one. Those
+        // in the render window (the data shrank, the list jumped) would
+        // show through: move them out of sight. Cells the window left
+        // behind while scrolling are out of sight already.
+        let (window_start, window_end) = list.render_window();
+        // In its parent's viewport, the cells start inside the list's
+        // border and padding.
+        let inset = outer.map_or((0.0, 0.0), |o| o.inset);
+        let hidden: Vec<Key> = list
+            .slots
+            .iter()
+            .filter(|s| s.index.is_none() && s.cell != u32::MAX)
+            .map(|s| s.cell)
+            .collect();
+        for cell in hidden {
+            let frame = self.nodes[cell as usize].frame;
+            if frame.size.width.0.is_nan() {
+                // Never placed: nothing to see yet.
+                continue;
+            }
+            let (start, size) = if horizontal {
+                (frame.origin.x.0 - inset.0, frame.size.width.0)
+            } else {
+                (frame.origin.y.0 - inset.0, frame.size.height.0)
+            };
+            if start + size <= window_start || start >= window_end {
+                continue;
+            }
+            let away = if horizontal {
+                Bounds {
+                    origin: Point::new(Points(-HIDDEN), frame.origin.y),
+                    ..frame
+                }
+            } else {
+                Bounds {
+                    origin: Point::new(frame.origin.x, Points(-HIDDEN)),
+                    ..frame
+                }
+            };
+            if frame != away {
+                self.set_frame(cell, away);
+            }
+        }
+        let mut sticky_cells = Vec::new();
+        let place = |this: &mut Self, cell: Key, at: f32, row: f32, (x, width): (f32, f32)| {
+            let cell_layout = this.nodes.get(cell as usize).and_then(|c| c.layout)?;
+            let size = this.rounded_layout(cell_layout).size;
+            let list = this.nodes[key as usize].list.as_ref().expect("list");
+            let mut main_at = list.to_content(at, row.max(main_of(size)));
+            let mut x = x;
+            if outer.is_some() {
+                main_at += inset.0;
+                x += inset.1;
+            }
+            let frame = if horizontal {
+                rect(main_at, x, size.width, width)
+            } else {
+                rect(x, main_at, width, size.height)
+            };
+            this.set_frame(cell, frame);
+            if std::mem::take(&mut this.nodes[cell as usize].relaid) {
+                let children = std::mem::take(&mut this.nodes[cell as usize].children);
+                for &child in &children {
+                    this.emit_frames(child);
+                }
+                this.nodes[cell as usize].children = children;
+                this.update_overflow(cell);
+            }
+            Some(main_of(size))
+        };
+        for &(index, cell) in &ready {
+            let list = self.nodes[key as usize].list.as_ref().expect("list");
+            let (at, row) = (list.item_at(index), list.row_extent(index));
+            let column = list.column(cross, list.column_of(index));
+            let Some(size) = place(self, cell, at, row, column) else {
+                continue;
+            };
+            let list = self.nodes[key as usize].list.as_ref().expect("list");
+            if sticky && list.sticky.binary_search(&index).is_ok() {
+                let range = list.sticky_range(index, self.nodes[cell as usize].id, size);
+                sticky_cells.push(range);
+            }
+        }
+        let full = self.nodes[key as usize]
+            .list
+            .as_ref()
+            .expect("list")
+            .full_width(cross);
+        for (extra, at) in extras
+            .iter()
+            .zip([blocks.header, blocks.footer, blocks.body])
+        {
+            if extra.cell != u32::MAX {
+                place(self, extra.cell, at, 0.0, full);
+            }
+        }
+        self.cells_scratch = ready;
+
+        sticky_cells.sort_by_key(|c| c.cell);
+        let list = self.nodes[key as usize].list.as_mut().expect("list");
+        if let Some(o) = &outer {
+            // The view around the list pins them, with its other lists'.
+            if sticky_cells != list.sent_sticky {
+                let old = std::mem::replace(&mut list.sent_sticky, sticky_cells);
+                self.page_sticky_changed(key, o.view, &old);
+            }
+        } else if sticky_cells != list.sent_sticky {
+            let cells = sticky_cells
+                .iter()
+                .map(|r| StickyCell {
+                    cell: r.cell,
+                    start: Points(r.start),
+                    end: Points(r.end),
                 })
-                .flatten();
-            match (scroll_by, frame_at) {
-                (Some(item), Some(at)) => {
-                    self.mount.insert(at, item);
-                    self.set_scroll_content(key, content);
-                }
-                (Some(item), None) if content_len < old_len => {
-                    self.mount.push(item);
-                    self.set_scroll_content(key, content);
-                }
-                (item, _) => {
-                    self.set_scroll_content(key, content);
-                    self.mount.extend(item);
-                }
+                .collect();
+            list.sent_sticky = sticky_cells;
+            self.mount.push(MountItem::StickyCells { id, cells });
+            // Its lists in its viewport pin theirs with its own.
+            let scroll = self.nodes[key as usize].scroll.as_ref();
+            if scroll.is_some_and(|s| !s.page_sticky.is_empty()) {
+                self.sticky_views.push(key);
+            }
+        }
+
+        if let Some(o) = &outer {
+            // The view around the list scrolls (the commit sends it at
+            // its end; a scroll to an offset after the anchoring, which
+            // it supersedes), and the list takes its new length in layout.
+            if anchor != 0.0 {
+                self.ask_outer(o.view, None, anchor);
+            }
+            if outer_to.is_some() {
+                self.ask_outer(o.view, outer_to, 0.0);
+            }
+            self.sync_spacer(key, false);
+            return;
+        }
+        let content = if horizontal {
+            size_pt(content_len, cross)
+        } else {
+            size_pt(cross, content_len)
+        };
+        // Platforms clamp the offset to the content: grow the content
+        // before scrolling, scroll before shrinking it.
+        let old_len = self.nodes[key as usize]
+            .scroll
+            .as_ref()
+            .and_then(|s| s.content)
+            .map_or(0.0, |c| if horizontal { c.width.0 } else { c.height.0 });
+        if anchor != 0.0 {
+            self.nodes[key as usize]
+                .list
+                .as_mut()
+                .expect("list")
+                .issue_scroll_by(anchor);
+        }
+        let scroll_by = (anchor != 0.0).then(|| {
+            let (dx, dy) = if horizontal {
+                (Points(anchor), Points::ZERO)
+            } else {
+                (Points::ZERO, Points(anchor))
+            };
+            MountItem::ScrollBy { id, dx, dy }
+        });
+        // Platforms clamp the offset to the content and the viewport:
+        // scroll before the viewport grows or the content shrinks, and
+        // after the content grows (a shrinking viewport's frame comes
+        // first anyway).
+        let frame_at = grew
+            .then(|| {
+                self.mount
+                    .iter()
+                    .position(|m| matches!(m, MountItem::Frame { id: f, .. } if *f == id))
+            })
+            .flatten();
+        match (scroll_by, frame_at) {
+            (Some(item), Some(at)) => {
+                self.mount.insert(at, item);
+                self.set_scroll_content(key, content);
+            }
+            (Some(item), None) if content_len < old_len => {
+                self.mount.push(item);
+                self.set_scroll_content(key, content);
+            }
+            (item, _) => {
+                self.set_scroll_content(key, content);
+                self.mount.extend(item);
             }
         }
     }

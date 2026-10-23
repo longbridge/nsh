@@ -715,6 +715,20 @@ impl Display for Failure {
 
 impl std::error::Error for Failure {}
 
+/// `error` as one message: its chain, then the details of the
+/// [`Failure`] in it (a compiler's diagnostics), for reports that carry a
+/// message instead of printing it (a test's failure).
+pub(crate) fn with_details(error: &anyhow::Error) -> String {
+    let mut message = format!("{error:#}");
+    if let Some(failure) = error.chain().find_map(|e| e.downcast_ref::<Failure>())
+        && !failure.details.trim().is_empty()
+    {
+        message.push('\n');
+        message.push_str(failure.details.trim_end());
+    }
+    message
+}
+
 /// Prints `error`: `error <message>`, and the details of the
 /// [`Failure`] in it.
 pub(crate) fn report(error: &anyhow::Error) {
@@ -851,6 +865,16 @@ pub(crate) fn quiet(cmd: &mut Command) -> std::io::Result<(std::process::Child, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_failures_carry_the_compilers_diagnostics() {
+        let error = failure("building App.tsx failed", "  x `nsh` has no export `If`\n");
+        assert_eq!(
+            with_details(&error),
+            "building App.tsx failed\n  x `nsh` has no export `If`"
+        );
+        assert_eq!(with_details(&anyhow::anyhow!("no entry")), "no entry");
+    }
 
     #[test]
     fn links_and_colors_strip_to_their_text() {

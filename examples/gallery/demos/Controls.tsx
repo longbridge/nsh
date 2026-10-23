@@ -1,8 +1,9 @@
-import { computed, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { cleanup, computed, signal, Text, View } from "nsh";
+import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { reduceMotion } from "nsh/accessibility";
 import { platform } from "nsh/device";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, switchLook } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, switchLook, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -461,6 +462,103 @@ export function Controls() {
     );
   }
 
+  function Transfers() {
+    const sent = signal(0);
+    const running = signal(false);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      running.set(false);
+    };
+    cleanup(stop);
+    // The indeterminate bar's sweep: the app flips its translation, a
+    // transition moves it; it rests in the middle with reduced motion.
+    const end = signal(false);
+    const sweep = setInterval(() => {
+      if (!reduceMotion()) end.set(!end());
+    }, 800);
+    cleanup(() => clearInterval(sweep));
+    const start = () => {
+      if (sent() >= 100) sent.set(0);
+      running.set(true);
+      last.set("Upload: started");
+      timer = setInterval(() => {
+        sent.set(Math.min(100, sent() + 10));
+        if (sent() >= 100) {
+          stop();
+          last.set("Upload: done");
+        }
+      }, 300);
+    };
+    /** A transfer: its label and value over a bar, the value tabular at the trailing edge. */
+    function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; first?: boolean }) {
+      return (
+        <Progress
+          value={props.value}
+          indeterminate={props.indeterminate}
+          // The label row first: the children follow the track.
+          style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
+          trackStyle={{ height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.raised }}
+          indicatorClass={
+            !props.indeterminate
+              ? undefined
+              : reduceMotion()
+                ? "w-1/3 translate-x-full"
+                : `w-1/3 transition-transform duration-700 ease-in-out ${end() ? "translate-x-[200%]" : "translate-x-0"}`
+          }
+          indicatorStyle={{ height: 6, borderRadius: 3, backgroundColor: toneColor("accent") }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
+            <Label label={props.label} detail={props.detail} />
+            <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>
+              {props.indeterminate ? "—" : `${props.value}%`}
+            </Text>
+          </View>
+        </Progress>
+      );
+    }
+    return (
+      <Card icon="controls" title="Progress" subtitle="Transfers: the app owns the value">
+        <View>
+          <Transfer
+            first
+            label="Upload"
+            detail={sent() >= 100 ? "24 photos sent" : running() ? "Sending 24 photos" : "24 photos to send"}
+            value={sent()}
+          />
+          <Transfer label="Backup" detail="Preparing: its size is not known yet" value={0} indeterminate />
+        </View>
+        {/* As wide as their labels with a pointer; sharing the row on a touch screen. */}
+        <View style={{ flexDirection: "row", gap: size.gap, marginTop: size.padding, alignSelf: pointer ? "flex-start" : "stretch" }}>
+          <Button
+            label={running() ? "Pause" : sent() >= 100 ? "Send again" : "Send"}
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            onPress={() => {
+              if (running()) {
+                stop();
+                last.set("Upload: paused");
+              } else start();
+            }}
+          />
+          <Button
+            label="Reset"
+            variant="secondary"
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            disabled={sent() === 0}
+            onPress={() => {
+              stop();
+              sent.set(0);
+              last.set("Upload: reset");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -469,5 +567,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Last]} />;
 }

@@ -64,6 +64,7 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

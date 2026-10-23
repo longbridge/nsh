@@ -36,6 +36,10 @@ pub(crate) struct TouchState {
     /// first.
     paths: Vec<(u32, Vec<NodeId>)>,
     responder: Option<NodeId>,
+    /// The responder whose `active:` styles hold until its touches end,
+    /// wherever they go, as CSS's `:active` holds until the button is
+    /// released ([`Core::hold_pressed`]).
+    pub(super) pressed: Option<NodeId>,
     /// Since the first finger went down, then since the grant.
     gesture: PanGesture,
     /// The responders whose scroll views are blocked, by [`Side`].
@@ -307,6 +311,7 @@ impl<M: TextEngine> Core<M> {
         let state = &mut self.components.touch;
         state.responder = Some(id);
         state.gesture = PanGesture::begin(touch);
+        self.hold_pressed(Some(id));
         let event = self.responder_event_now(about, touch);
         self.responder_event(id, |el| el.grant.as_ref(), event);
         self.block_native(Side::Rust, block.then_some(id));
@@ -314,6 +319,7 @@ impl<M: TextEngine> Core<M> {
 
     fn release_responder(&mut self) {
         self.components.touch.responder = None;
+        self.hold_pressed(None);
         self.block_native(Side::Rust, None);
     }
 

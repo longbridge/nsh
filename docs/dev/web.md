@@ -259,7 +259,15 @@ the end, so tasks woken only there (timers, fetch replies) request no pump of th
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **QuickJS** uses rquickjs' pregenerated bindings (its bindgen run misses `JS_ToCStringLen2` for wasm32) and its
-  vendored wasi-libc; the only libc import is `env.__rquickjs_host_now_us`.
+  vendored wasi-libc; the only libc import is `env.__rquickjs_host_now_us`. Its local time is the browser's: the
+  shim answers `localtime_r` with UTC, so the crate's `build.rs` links with `--wrap=localtime_r` (as do apps' own
+  runtimes, `rust_app.rs` `WEB_BUILD_RS`) and `local_time.rs`'s `__wrap_localtime_r` asks the page for the offset at
+  that time (`nsh.local_offset`: `nsh.js` `localOffset`, seconds east from `getTimezoneOffset()`, so daylight saving
+  time follows the browser's zone); `Intl`'s default zone is the page's too (`nsh.time_zone`: `timeZoneName`,
+  `intl/mod.rs` `local_zone_name`). `web/local-time.test.mjs` tests both helpers in several zones under node; the
+  link wrap itself shows only in a browser: check it by packaging a page that prints `getTimezoneOffset()`, `getHours()` and `resolvedOptions().timeZone` and loading it in
+  headless Chrome under two `TZ`s (`Asia/Shanghai`; `America/New_York`, whose January and July offsets differ): it
+  must print what a headless `nsh test` of the same app prints under the same `TZ`.
 - **32-bit pointers.** The reactive graph packs node handles into QuickJS opaque pointers: 32 bits of id and 32 of
   generation on 64-bit targets, 20 and 11 (under a set top bit) on 32-bit ones (`reactive.rs`, `pack`). Anything that
   stores more than a pointer's worth of bits in an opaque must do the same.
@@ -299,8 +307,9 @@ calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `
 `resize` and a mutation observer on `<html dir lang>`.
 
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
-container at least 600 wide (headless Chromium has no pointer: it measures as a tablet or phone), `pad` for a screen
-whose short side is at least 600, else `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
+container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
+with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
+`phone`; the player's `idiom` option overrides it. `Environment::desktop()`
 (desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key and
 `platform.idiom`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
@@ -556,7 +565,15 @@ range of travel, with no breadth across it, so it takes no pointer events, at `z
 list isolates that z-index (`nsh-sticky`): as natively, a sticky cell never covers the views after the list, such as a
 bar the content scrolls under. The next sticky cell's track starts where it pushes the cell out, the last one's ends
 with the content, and a cell no longer sticky goes back to its frame. Entering a track cancels any frame
-animation already running on the cell, so its content coordinates cannot override the sticky insets.
+animation already running on the cell, so its content coordinates cannot override the sticky insets. The cells of a
+list in the scroll view's viewport (`viewport="parent"`) are in that list: their tracks go there, the list isolates
+their z-index, and their insets add where the list is in the scroll view's content (`trackOrigin`, the frames
+between them); the core bounds their travel by the list's end. Views clip with `overflow: clip`, which, unlike
+`hidden`, makes no scroll container, so `position: sticky` reaches the scroll view through the list.
+
+A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
+as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
+pointer, touch or key takes it over.
 
 ## Platform services
 

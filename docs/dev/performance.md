@@ -24,6 +24,12 @@ coalescing interval, with the latest coordinates kept independently per view and
   ~50µs with caches flushed between frames, but ~60–150µs after the thread sleeps 10ms. The difference is the CPU clocking down while the thread sleeps (Apple CLPC), not the code path; neither QoS (the engine
   thread is USER_INTERACTIVE) nor the Mach time-constraint policy changes it. Judge optimizations by the back-to-back and flushed-cache numbers:
   single-frame `nsh test --trace` timings are dominated by the clock state.
+- Lists in their parent's viewport (`viewport="parent"`; gallery Lists › Page, release, headless,
+  `app.scroll("id:page", 3000)`): 49 commits, 651 ops / 647 mount items, median commit ~90–100µs; once the window is
+  full, a frame that rebinds one row is 6 ops / 8 items (the page's scroll view moves the list; no `ScrollBy` while
+  the rows match their estimates). Lists of their own pay nothing for it: `Bench.tsx --scroll 3000` and the
+  gallery's Lists pages send the same mount items in every commit before and after (1226 ops / 1029 items first,
+  1064 ops / 914 items over 39 scrolling commits), with commit times within the run-to-run spread.
 - On Catalyst (release), rebinding one row while scrolling slowly takes ~0.4ms (clocked down) and rebinding a whole screen of ~32 rows on a
   fast fling 0.9–1.6ms.
 - Host startup (`Host::new`, release): ~75–155µs (clock state). The web APIs add nothing until first used, then ~90µs to

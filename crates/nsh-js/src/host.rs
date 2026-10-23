@@ -640,6 +640,15 @@ impl Host {
                         None => Ok(()),
                     }
                 });
+                // A listener made under an error boundary fails into it.
+                let result = match result {
+                    Err(rquickjs::Error::Exception)
+                        if crate::dom::catch_listener_failure(raw, id) =>
+                    {
+                        Ok(())
+                    }
+                    other => other,
+                };
                 self.report(&cx, result);
             });
             self.run_jobs();
@@ -1112,6 +1121,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             for (key, value) in fields {
                 obj.set(*key, payload_value(cx, value)?)?;
             }
+        }
+        EventPayload::Press(nsh_core::PressEvent {
+            position,
+            page_position,
+        }) => {
+            obj.set("position", point_object(cx, *position)?)?;
+            obj.set("pagePosition", point_object(cx, *page_position)?)?;
         }
         EventPayload::Hover(nsh_core::HoverEvent {
             position,
@@ -1932,6 +1948,32 @@ const report = (v) => text(String(v));
         assert_eq!(Rc::strong_count(&captured), 1);
         assert!(host.shared.system_exit_handler.borrow().is_none());
         host.stop("idempotent stop".into());
+    }
+
+    #[test]
+    fn press_payload_has_both_positions() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::PressEvent {
+            position: point(px(3.0), px(4.5)),
+            page_position: point(px(30.0), px(40.5)),
+        };
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Press(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (3.0, 4.5, 30.0, 40.5)
+            );
+        });
     }
 
     #[test]

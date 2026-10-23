@@ -29,8 +29,10 @@ type JsContext = qjs::JSContext;
 
 const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 
-/// The host props a list forwards as they are.
+/// The host props a list forwards as they are (`viewport` first: the
+/// mode decides how the core takes the others).
 const FORWARDED: &[&str] = &[
+    "viewport",
     "style",
     "testID",
     "horizontal",
@@ -1136,7 +1138,8 @@ pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
     "List",
     crate::modules::Export::Function(list, 1),
     crate::modules::Ts::function(
-        "A virtualized, recycling list on a native scroll view. Only rows near the\n\
+        "A virtualized, recycling list on a native scroll view (or, with\n\
+         `viewport=\"parent\"`, in the scroll view around it). Only rows near the\n\
          viewport exist; the native side decides which, and cells are reused.\n\
          Positions, columns, sticky headers and viewability are computed natively.\n\n\
          Rows are recycled: keep per-item state in your data (keyed by id), not in\n\

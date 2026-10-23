@@ -14,6 +14,7 @@ use nsh_core::{
     geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_testing::agent::{Key, Native};
+use objc2::msg_send;
 use objc2_core_foundation::CGRect;
 use objc2_ui_kit::{UIView, UIWindow};
 use rustc_hash::FxHashMap;
@@ -205,14 +206,18 @@ impl Native for IosNative {
     }
 
     fn back(&self) -> Result<(), String> {
-        // What a user does: a sheet is swiped down, a pushed screen goes
+        // What a user does: a sheet is swiped down; while the app listens
+        // to going back (a menu's or popover's `onCancel`, over the whole
+        // screen), VoiceOver's escape gesture reaches the surface, as the
+        // headless driver's back reaches the core; a pushed screen goes
         // with the header's back button.
         enum Gesture {
             Tap(f64, f64),
             Swipe((f64, f64), (f64, f64)),
+            Escaped,
         }
         let gesture = self
-            .on_main(|_, window| {
+            .on_main(|view, window| {
                 let size = window.bounds().size;
                 if let Some(sheet) = crate::navigation::presented_sheet(window) {
                     let top = sheet
@@ -224,6 +229,14 @@ impl Native for IosNative {
                         (x, top + 20.0),
                         (x, top + size.height * 0.6),
                     ));
+                }
+                // Taken out first: the escape reads the mounter too.
+                let root = view
+                    .with_mounter(|m| m.ui_view(nsh_core::ROOT_ID))
+                    .flatten();
+                // SAFETY: a UIAccessibilityAction method every view has.
+                if root.is_some_and(|r| unsafe { msg_send![&r, accessibilityPerformEscape] }) {
+                    return Ok(Gesture::Escaped);
                 }
                 let button = crate::navigation::back_button(window)
                     .ok_or("the screen shows no back button to go back with")?;
@@ -237,6 +250,7 @@ impl Native for IosNative {
         match gesture {
             Gesture::Tap(x, y) => self.tap(x, y, TAP),
             Gesture::Swipe(from, to) => self.swipe(from, to, Duration::ZERO),
+            Gesture::Escaped => {}
         }
         Ok(())
     }

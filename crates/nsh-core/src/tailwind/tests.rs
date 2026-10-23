@@ -881,3 +881,57 @@ fn styled_in(theme: &Theme, classes: &str) -> Style {
     );
     style
 }
+
+#[test]
+fn object_positions() {
+    use crate::style::{ObjectPosition, PositionAxis as A};
+    let theme = themed();
+    let at = |class: &str| styled_in(&theme, class).view.object_position;
+    assert_eq!(at("object-center"), ObjectPosition::CENTER);
+    assert_eq!(at("object-top"), ObjectPosition::new(A::CENTER, A::START));
+    assert_eq!(at("object-bottom"), ObjectPosition::new(A::CENTER, A::END));
+    assert_eq!(at("object-left"), ObjectPosition::new(A::START, A::CENTER));
+    assert_eq!(at("object-right"), ObjectPosition::new(A::END, A::CENTER));
+    for (a, b) in [
+        ("object-top-left", "object-left-top"),
+        ("object-top-right", "object-right-top"),
+        ("object-bottom-left", "object-left-bottom"),
+        ("object-bottom-right", "object-right-bottom"),
+    ] {
+        assert_eq!(at(a), at(b));
+    }
+    assert_eq!(
+        at("object-top-left"),
+        ObjectPosition::new(A::START, A::START)
+    );
+    assert_eq!(
+        at("object-bottom-right"),
+        ObjectPosition::new(A::END, A::END)
+    );
+    assert_eq!(
+        at("object-[25%_75%]"),
+        ObjectPosition::parse("25% 75%").unwrap()
+    );
+    assert_eq!(
+        at("object-[right_10px_bottom_20%]"),
+        ObjectPosition::parse("right 10px bottom 20%").unwrap()
+    );
+    // `object-fit` stays a prop beside it.
+    let (style, props) = styled_with(
+        "object-cover object-top",
+        ClassEnvironment::default(),
+        (390.0, 844.0),
+        0,
+    );
+    assert_eq!(props.resize_mode, Some(crate::ops::ResizeMode::Cover));
+    assert_eq!(style.view.object_position, at("object-top"));
+    let list = parse(
+        &theme,
+        "object-[sideways] object-[1px_2px_3px] object-middle",
+    );
+    let unknown: Vec<&str> = list.unknown().iter().map(|s| &**s).collect();
+    assert_eq!(
+        unknown,
+        ["object-[sideways]", "object-[1px_2px_3px]", "object-middle"]
+    );
+}

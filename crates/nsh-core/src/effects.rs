@@ -426,6 +426,101 @@ pub fn blur_radius(filters: &[Filter]) -> Points {
         .sum()
 }
 
+/// `ios={{ backdropMaterial }}`: the system material a `backdropFilter` blur draws.
+///
+/// iOS blurs a backdrop with a material rather than a plain Gaussian blur:
+/// each one blurs and tints by a fixed amount, and the thicker it is, the
+/// less of what is behind it comes through. A navigation bar over scrolling
+/// content usually wants a thicker one than the thinnest, which on its own
+/// is too faint to keep its contents legible.
+///
+/// There is no CSS for this -- `backdrop-filter` only describes filters --
+/// so the names follow Apple's `UIBlurEffectStyle.system*Material`.
+///
+/// Read on iOS, where it picks the material; the blur's radius still sets
+/// how strongly it is applied, as an approximation rather than a Gaussian radius.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::ui::PropEnum)]
+pub enum BackdropMaterial {
+    /// The thinnest material, the most of what is behind coming through.
+    #[default]
+    UltraThin,
+    /// Thin.
+    Thin,
+    /// The standard material.
+    Regular,
+    /// Thick, letting little through.
+    Thick,
+    /// The material of system chrome, such as a toolbar.
+    Chrome,
+}
+
+impl BackdropMaterial {
+    /// The iOS prop name ([`BackdropMaterial::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            BackdropMaterial::UltraThin => "ultraThin",
+            BackdropMaterial::Thin => "thin",
+            BackdropMaterial::Regular => "regular",
+            BackdropMaterial::Thick => "thick",
+            BackdropMaterial::Chrome => "chrome",
+        }
+    }
+
+    /// Parses a material name.
+    pub fn parse(s: &str) -> Option<BackdropMaterial> {
+        Some(match s {
+            "ultraThin" => BackdropMaterial::UltraThin,
+            "thin" => BackdropMaterial::Thin,
+            "regular" => BackdropMaterial::Regular,
+            "thick" => BackdropMaterial::Thick,
+            "chrome" => BackdropMaterial::Chrome,
+            _ => return None,
+        })
+    }
+}
+
+/// `glassEffect`: a glass material drawn behind the view's content.
+///
+/// Apple's "Liquid Glass", new in iOS 26. No CSS property describes it --
+/// Safari keeps it to the private `-apple-visual-effect`, and the W3C has
+/// yet to define backdrop refraction (w3c/svgwg#1142) -- so this follows
+/// React Native's `expo-glass-effect` instead.
+///
+/// Drawn on iOS 26 and later. Earlier iOS, and every other platform, draw
+/// the view's `backdropFilter` as before, so give a glass view a blur to
+/// fall back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GlassEffect {
+    /// No glass: `backdropFilter` alone decides what is drawn behind.
+    #[default]
+    None,
+    /// The standard glass material.
+    Regular,
+    /// Clearer glass, taking less color from what is behind it.
+    Clear,
+}
+
+impl GlassEffect {
+    /// The style name ([`GlassEffect::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            GlassEffect::None => "none",
+            GlassEffect::Regular => "regular",
+            GlassEffect::Clear => "clear",
+        }
+    }
+
+    /// Parses a glass effect name.
+    pub fn parse(s: &str) -> Option<GlassEffect> {
+        Some(match s {
+            "none" => GlassEffect::None,
+            "regular" => GlassEffect::Regular,
+            "clear" => GlassEffect::Clear,
+            _ => return None,
+        })
+    }
+}
+
 /// `mixBlendMode`: how the view composites with what is behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(missing_docs)]
@@ -733,6 +828,10 @@ pub struct Effects {
     pub filters: Vec<Filter>,
     /// Filters applied to what is behind the view (blur only on iOS).
     pub backdrop_filters: Vec<Filter>,
+    /// `maskImage`: gradients whose alpha decides how much of the view is
+    /// drawn, top layer first (CSS order). Only gradients: CSS also takes
+    /// images and shapes here, which no platform of NSH draws yet.
+    pub mask_images: Vec<Gradient>,
 }
 
 impl Effects {
@@ -742,6 +841,7 @@ impl Effects {
             && self.background_images.is_empty()
             && self.filters.is_empty()
             && self.backdrop_filters.is_empty()
+            && self.mask_images.is_empty()
     }
 }
 

@@ -38,7 +38,6 @@ nsh-platform-gpui = { version = "0.2.0", path = "nsh-platform-gpui", default-fea
 
 # The same versions as the main workspace's.
 anyhow = "1"
-base64 = "0.22"
 crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"

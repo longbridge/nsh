@@ -411,13 +411,16 @@ impl Headless {
     /// views under it that it left hear `onHoverOut` (from the inside out),
     /// those it came over `onHoverIn` (from the outside in) and take their
     /// `hover:` styles, and the ones listening to `onHoverMove` hear where
-    /// it is. A phone has no mouse: there it fails.
+    /// it is. A browser has one whatever its width (the web in the phone
+    /// idiom included); an iOS or Android phone or tablet has none: there
+    /// it fails.
     pub fn hover(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("hover({selector})"));
-        if !self.environment.desktop() {
+        if !self.environment.desktop() && self.environment.os != nsh_core::platform::Os::Web {
             return Err(
-                "a phone has no mouse to hover with: open the app as a desktop (`platform`)".into(),
+                "a phone has no mouse to hover with: open the app as a desktop or the web (`platform`)"
+                    .into(),
             );
         }
         let pick = self.screen.view(&parsed);
