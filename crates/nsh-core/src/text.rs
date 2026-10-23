@@ -195,16 +195,20 @@ impl ResolvedTextStyle {
         let font_size = style.font_size.unwrap_or(self.font_size);
         // A multiple follows each nested font size (unitless CSS
         // line-height); points stay points.
-        let (line_height, line_height_multiple) =
-            match (style.line_height_multiple, style.line_height) {
-                (Some(m), _) => (m * font_size, m),
-                (None, Some(points)) => (points, 0.0),
-                (None, None) if self.line_height_multiple > 0.0 => (
-                    self.line_height_multiple * font_size,
-                    self.line_height_multiple,
-                ),
-                (None, None) => (self.line_height, 0.0),
-            };
+        let (line_height, line_height_multiple) = match (
+            style.line_height_multiple,
+            style.line_height,
+            style.line_height_em,
+        ) {
+            (_, _, Some(em)) => (em * font_size, 0.0),
+            (Some(m), _, _) => (m * font_size, m),
+            (None, Some(points), _) => (points, 0.0),
+            (None, None, _) if self.line_height_multiple > 0.0 => (
+                self.line_height_multiple * font_size,
+                self.line_height_multiple,
+            ),
+            (None, None, _) => (self.line_height, 0.0),
+        };
         Self {
             color: style.color.unwrap_or(self.color),
             font_size,
@@ -766,13 +770,28 @@ impl TextEngine for ApproxTextEngine {
                 ))
             })
             .collect();
-        TextLayout(Arc::new((size, points)))
+        // Baseline at the bottom of the line: the ascent is the line and
+        // the descent is 0, the same extent attachments are placed against.
+        let metrics = TextLine {
+            width: size.width,
+            height: line,
+            ascender: line,
+            x_height: *font * 0.5,
+            ..TextLine::default()
+        };
+        TextLayout(Arc::new((size, points, metrics)))
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<TextLine> {
+        layout
+            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>, TextLine)>()
+            .map_or_else(Vec::new, |(_, _, line)| vec![line.clone()])
     }
 
     fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
-            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>)>()
-            .map_or_else(Vec::new, |(_, p)| p.clone())
+            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>, TextLine)>()
+            .map_or_else(Vec::new, |(_, p, _)| p.clone())
     }
 
     fn register_font(&self, _: &[u8]) -> Result<(), String> {

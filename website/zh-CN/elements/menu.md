@@ -13,7 +13,7 @@ demo: el-menu
 - 在桌面平台和桌面浏览器中，它是触发元素处的弹出层；指针移到 `Submenu` 的条目上或按下它时，子菜单在条目旁级联展开。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet；`Submenu` 在 sheet 中就地显示它的条目，取代菜单的条目，并由你提供的一行返回上一级。
 
-选择一个条目、外部按压、Escape 和 Android 返回键都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，或在触摸屏上由手指按住触发元素打开。
+选择一个条目、外部按压、Escape、Android 返回键和 VoiceOver 的退出手势都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，或在触摸屏上由手指按住触发元素打开。
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};

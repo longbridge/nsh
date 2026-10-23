@@ -91,7 +91,7 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 | `rate` | `.rate(..)` | `number` | `1` | The playback speed. |
 | `repeat` | `.repeat(..)` | `boolean` | `false` | Plays again from the start at the end. |
 | `controls` | `.controls(..)` | `boolean` | `false` | Shows the platform's playback controls. |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the video fits its box. |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | | How the video fits its box. iOS, macOS and Android play `"center"` and `"scale-down"` as `"contain"`, Linux both as `"scale-down"`. |
 | `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | Milliseconds between `onProgress` events. |
 
 Give the video a size through its styles; its size is the one its styles give it. Use the size `onLoad` reports to set

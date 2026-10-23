@@ -295,6 +295,38 @@ pub unsafe extern "C" fn nsh_app_set_font_scale(app: *mut NshApp, scale: f32) {
         .set_font_scale((scale.is_finite() && scale > 0.0).then_some(scale));
 }
 
+/// The embedding app's theme overrides: a theme file of shadcn/ui's
+/// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`, as
+/// `nsh.json`'s `"theme"`), whose tokens win over the app's of the same
+/// names, light and dark; `NULL` gives the app its own theme back. Applies
+/// at once (classes naming the tokens are resolved again) and to every app
+/// loaded later, from its first frame. Returns why the file does not parse
+/// (nothing changes), or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `json` must be `NULL` or a
+/// NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_theme_overrides(
+    app: *mut NshApp,
+    json: *const c_char,
+) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let json = if json.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { utf8(json, "the theme") }.map(Some)
+    };
+    status(json.and_then(|json| {
+        app.view
+            .set_theme_overrides(json)
+            .map_err(|err| format!("invalid theme: {err}"))
+    }))
+}
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change, showing errors over the app. Returns an error
 /// when the library was built without development support, or `NULL`.

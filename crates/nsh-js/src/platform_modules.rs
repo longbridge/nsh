@@ -2,10 +2,11 @@
 //! (`isAvailable`, `BackHandler.onBackPress` over the registry's module),
 //! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/webview` and
 //! `nsh/video` (their host elements as components, which the compiler
-//! makes in place for their tags), and `nsh/native` (`nativeComponent`: the
+//! makes in place for their tags), `nsh/native` (`nativeComponent`: the
 //! JS face of components the embedding app registers natively;
 //! `nativeModule`: the exports of a UI set it registers, reached by name at
-//! run time).
+//! run time) and `nsh/host` (`available()` and the host's events over the
+//! registry's `call`).
 
 use std::{
     cell::RefCell,
@@ -33,6 +34,8 @@ pub(crate) struct PlatformModules {
     /// `BackHandler.onBackPress` listeners, in order (id, owned
     /// function).
     back: RefCell<Vec<(u32, JsValue)>>,
+    /// `host.on` listeners, in order (id, event, owned function).
+    host_listeners: RefCell<Vec<(u32, String, JsValue)>>,
     next: std::cell::Cell<u32>,
     /// `nativeModule`'s objects, made once per specifier (owned).
     host_modules: RefCell<Vec<(String, JsValue)>>,
@@ -48,6 +51,10 @@ impl PlatformModules {
         for (_, m) in self.host_modules.borrow_mut().drain(..) {
             // SAFETY: as above.
             unsafe { qjs::JS_FreeValue(raw, m) };
+        }
+        for (_, _, f) in self.host_listeners.borrow_mut().drain(..) {
+            // SAFETY: as above.
+            unsafe { qjs::JS_FreeValue(raw, f) };
         }
     }
 }
@@ -262,6 +269,208 @@ export interface BackListeners {
    * pops, else the app exits. The returned function stops listening; a
    * listener added while a component renders stops with the component. */
   onBackPress(listener: () => boolean | void): () => void;
+}
+"#;
+
+// --- nsh/host ---------------------------------------------------------------------------
+
+/// `host`: the registry's module (`call`) with `available()` and the
+/// listeners of the host's events.
+fn host_module(ctx: *mut JsContext) -> JsValue {
+    let host = crate::components::runtime_module(ctx, "nsh/host", "host")
+        // SAFETY: a new object when the runtime has none.
+        .unwrap_or_else(|| unsafe { qjs::JS_NewObject(ctx) });
+    let natives: [(&CStr, reactive::Native, c_int); 2] = [
+        (c"available", host_available, 0),
+        (c"on", add_host_listener, 2),
+    ];
+    for (name, f, length) in natives {
+        let func = reactive::new_function(ctx, name, f, length);
+        // SAFETY: the object takes the function.
+        unsafe { qjs::JS_SetPropertyStr(ctx, host, name.as_ptr(), func) };
+    }
+    host
+}
+
+/// `host.available()`: whether the platform embeds a host that answers
+/// calls (read when called: the environment may change).
+unsafe extern "C" fn host_available(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+) -> JsValue {
+    boolean(crate::env::current(ctx).host)
+}
+
+/// `host.on(event, listener)`: `{ remove() }`.
+unsafe extern "C" fn add_host_listener(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let Some(event) = dom::string_arg(ctx, arg(argc, argv, 0)) else {
+        // SAFETY: throws on a live context.
+        return unsafe { qjs::JS_ThrowTypeError(ctx, c"host.on: an event name".as_ptr()) };
+    };
+    let f = arg(argc, argv, 1);
+    // SAFETY: an inline check.
+    if !unsafe { qjs::JS_IsFunction(ctx, f) } {
+        return unsafe { qjs::JS_ThrowTypeError(ctx, c"host.on: a function".as_ptr()) };
+    }
+    let m = modules(ctx);
+    let id = m.next.get() + 1;
+    m.next.set(id);
+    // SAFETY: a dup the listeners own.
+    let first = {
+        let mut host = m.host_listeners.borrow_mut();
+        host.push((id, event, unsafe { qjs::JS_DupValue(ctx, f) }));
+        host.len() == 1
+    };
+    if first {
+        let on = reactive::new_function(ctx, c"onHost", on_host_event, 1);
+        let r = dom::set_handler(ctx, 1, EventKind::Host, on);
+        // SAFETY: ours.
+        unsafe { qjs::JS_FreeValue(ctx, on) };
+        if let Err(e) = r {
+            return e;
+        }
+    }
+    let remove = native(
+        ctx,
+        remove_host_listener,
+        0,
+        &mut [qjs::JS_NewFloat64(id as f64)],
+    );
+    // SAFETY: a new object taking the function.
+    unsafe {
+        let o = qjs::JS_NewObject(ctx);
+        qjs::JS_SetPropertyStr(ctx, o, c"remove".as_ptr(), remove);
+        o
+    }
+}
+
+unsafe extern "C" fn remove_host_listener(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    let mut id = 0f64;
+    // SAFETY: one data value, the listener's id.
+    unsafe { qjs::JS_ToFloat64(ctx, &mut id, *data) };
+    let (gone, empty) = {
+        let mut host = modules(ctx).host_listeners.borrow_mut();
+        let i = host.iter().position(|(i, ..)| *i == id as u32);
+        (i.map(|i| host.remove(i).2), host.is_empty())
+    };
+    if let Some(f) = gone {
+        // SAFETY: owned.
+        unsafe { qjs::JS_FreeValue(ctx, f) };
+        if empty {
+            let _ = dom::set_handler(ctx, 1, EventKind::Host, UNDEFINED);
+        }
+    }
+    UNDEFINED
+}
+
+/// The root's `Host` events of `type: "event"` (`{ event, payload }`; the
+/// core takes the replies): the listeners of `event`, in the order they
+/// were added, each with `payload`. A listener that throws leaves the next
+/// ones called; the first error is thrown once they all ran.
+unsafe extern "C" fn on_host_event(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let e = arg(argc, argv, 0);
+    let string = |key: &std::ffi::CStr| {
+        // SAFETY: a read of the handler's argument; the result is freed.
+        unsafe {
+            let v = qjs::JS_GetPropertyStr(ctx, e, key.as_ptr());
+            let s = qjs::JS_IsString(v)
+                .then(|| dom::string_arg(ctx, v))
+                .flatten();
+            qjs::JS_FreeValue(ctx, v);
+            s
+        }
+    };
+    if string(c"type").as_deref() != Some("event") {
+        return UNDEFINED;
+    }
+    let event = string(c"event");
+    // SAFETY: an owned result, freed below.
+    let payload = unsafe { qjs::JS_GetPropertyStr(ctx, e, c"payload".as_ptr()) };
+    let listeners: Vec<JsValue> = match &event {
+        Some(event) => modules(ctx)
+            .host_listeners
+            .borrow()
+            .iter()
+            .filter(|(_, e, _)| e == event)
+            // SAFETY: dups for the calls.
+            .map(|&(_, _, f)| unsafe { qjs::JS_DupValue(ctx, f) })
+            .collect(),
+        None => Vec::new(),
+    };
+    let mut first = None;
+    let mut fatal = false;
+    for f in listeners {
+        if !fatal {
+            let mut args = [payload];
+            // SAFETY: a call of an owned function with a borrowed argument,
+            // then its result.
+            unsafe {
+                let r = qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr());
+                if qjs::JS_IsException(r) {
+                    let error = crate::web::js::take_exception(ctx);
+                    // An interrupt stops them all.
+                    if qjs::JS_IsUncatchableError(error.raw()) {
+                        first = Some(error);
+                        fatal = true;
+                    } else {
+                        first.get_or_insert(error);
+                    }
+                } else {
+                    qjs::JS_FreeValue(ctx, r);
+                }
+            }
+        }
+        // SAFETY: ours.
+        unsafe { qjs::JS_FreeValue(ctx, f) };
+    }
+    // SAFETY: ours.
+    unsafe { qjs::JS_FreeValue(ctx, payload) };
+    match first {
+        Some(error) => {
+            let _ = crate::web::js::throw(ctx, error);
+            qjs::JS_EXCEPTION
+        }
+        None => UNDEFINED,
+    }
+}
+
+/// The hand-written exports of `nsh/host` (with the registry's).
+pub(crate) const HOST_EXPORTS: &[Item] = &[(
+    "host",
+    Export::Value(host_module),
+    Ts::value(
+        "The app embedding NSH: `host.call(name, args)` calls one of its functions\n(granted by `capabilities.host` in nsh.json), `host.on(event, f)` hears its\nevents, `host.available()` says whether the platform embeds one.",
+        "hostModule & HostEvents",
+    ),
+)];
+
+/// `nsh/host`'s types (with the runtime registry's module).
+pub(crate) const HOST_TYPES: &str = r#"/** The embedding host's events and whether there is one. */
+export interface HostEvents {
+  /** Whether the platform embeds a host that answers calls; without one,
+   * `call` rejects at once. */
+  available(): boolean;
+  /** Calls `listener` with each `event` the host sends, until `remove()`. */
+  on(event: string, listener: (payload: unknown) => void): { remove(): void };
 }
 "#;
 

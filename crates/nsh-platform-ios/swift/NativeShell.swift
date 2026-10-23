@@ -172,6 +172,20 @@ public final class NshAppView: UIView {
         }
     }
 
+    /// Overrides the app's theme with the host's: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, the format of `nsh.json`'s `"theme"`). Its
+    /// tokens win over the app's of the same names, in light and dark mode;
+    /// the app's others stay, so a branded host sets only what its brand
+    /// changes (`primary`, `radius`, ...). Call it before or after loading:
+    /// it applies at once (classes such as `bg-primary` are resolved again)
+    /// and to every app loaded later, from its first frame. `nil` gives the
+    /// app its own theme back. Throws why the file does not parse; the
+    /// overrides then stay as they were.
+    public func setThemeOverrides(_ json: String?) throws {
+        try check(nsh_app_set_theme_overrides(app, json))
+    }
+
     /// Grants the apps loaded from now on at most these capabilities: JSON in
     /// the form of `nsh.json`'s `capabilities` (`nil`: what each app
     /// declares). A request must be allowed by both.

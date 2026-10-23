@@ -56,8 +56,24 @@ whole canvas. Numbers:
 `docs/dev/performance.md`.
 
 Rust components record drawings with `ui::Painter` (the same operations; `docs/dev/components.md`), measure text
-with `measure_text(font, text)`, on the core's text engine, and hit-test what a painter recorded with the same
+with `measure_text(font, text)` and `text_metrics(font, text)` (its width and the font's ascent, descent and line
+height, from the first line the core's text engine lays it out in: `canvas::line_metrics`), and hit-test what a painter recorded with the same
 `point_in_path` / `point_in_stroke` (`Painter::is_point_in_path` / `is_point_in_stroke` for the current path,
 `path_contains` / `stroke_contains` for a `Path`; animated values count as 0 there too).
 
 The drawing format is documented in `crates/nsh-core/src/canvas.rs`.
+
+**Nodes** (Rust components). A drawing can name parts of what it draws as elements of their own
+(`Painter::node(CanvasNode::new(bounds, role, label))`, with `test_id` and `selected`): a grid's cells, a chart's bars.
+They are the canvas's children to assistive technologies and UI tests, at their bounds in the canvas, with their role,
+name, test id and selected state (`Drawing::nodes`, sent with the drawing). A press on one is a press at its center, as
+a pointer there makes it: it goes to the view under that point that takes presses, so a canvas drawn over the view that
+handles presses (`pointerEvents: "none"`) keeps working. The GPUI backend makes them AccessKit nodes (`access.rs`
+`canvas_nodes`, no actions of their own) and the headless driver views of its model (`label:`, `text:`, `id:` and
+`role:` find them, `press` presses under them, `Screen::selected` reads their selected state as it reads a view's);
+the other backends do not show them yet.
+
+The test model skips hidden subtrees when finding the view under a node and follows visible overflow until a
+clipping view stops it. Headless touches carry the node's center in root and target-local coordinates. A real
+host's agent keeps the center relative to the canvas (`Scene::canvas_node`, `SceneQuery::CanvasNode`), brings
+that point into view, and presses it at the canvas's native position.

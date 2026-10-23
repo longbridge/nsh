@@ -9,7 +9,7 @@ order: 2
 `nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, `token`, the host elements `View`, `Text`, `Scroll`, `Input` and `Overlay`, and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
-import { batch, cleanup, computed, context, effect, Input, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
+import { batch, cleanup, computed, context, effect, ErrorBoundary, Input, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
 ```
 
 NSH's reactivity follows the same model as SolidJS: a component function runs **once**, and the parts of the UI that read signals are updated in place when those signals change. There is no re-render of the component and no virtual DOM. See [Reactivity](../docs/reactivity.md) for the guide.
@@ -211,6 +211,36 @@ function LabeledInput(props: InputProps & { label: string }) {
       <Text>{own.label}</Text>
       <Input {...rest} />
     </View>
+  );
+}
+```
+
+## ErrorBoundary
+
+```ts
+function ErrorBoundary(props: {
+  fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element);
+  children?: JSX.Element;
+}): JSX.Element;
+```
+
+Renders its children, or `fallback` once something under them throws: a component's body, a binding, an effect or an event handler. The part that failed is removed and the fallback shows in its place. `fallback(error, reset)` gets the thrown value and `reset`, which renders the children again; a `fallback` that takes no arguments is shown as it is. A failure goes to the nearest boundary above it, and one in a fallback to the boundary above that. Rust components use `catch_error` ([Error boundaries](../docs/reactivity.md#error-boundaries)).
+
+```tsx
+import { ErrorBoundary, Text, View } from "nsh";
+
+function Feed() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <View>
+          <Text>{error instanceof Error ? error.message : String(error)}</Text>
+          <Text onPress={reset}>Try again</Text>
+        </View>
+      )}
+    >
+      <Posts />
+    </ErrorBoundary>
   );
 }
 ```

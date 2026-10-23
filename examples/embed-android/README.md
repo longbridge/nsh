@@ -20,6 +20,14 @@ nsh.registerComponent("embed.badge", context -> new Badge(this, context));  // B
 The component gets its props (`setProp`, JSON as maps and lists) and commands, emits events with
 `context.emit("tap", data)` and may report its size (dp) with `context.setSize(w, h)`.
 
+Theme overrides: "Brand" puts the host's brand over the app's theme. The tokens of a theme file
+(`nsh.json`'s `"theme"` format) win over the app's of the same names, light and dark, and
+classes such as `bg-primary` restyle at once; `null` gives the app its own theme back:
+
+```java
+nsh.setThemeOverrides("{ \"cssVars\": { \"light\": { \"primary\": \"#e11d48\" } } }");
+```
+
 Signed packages (`nsh publish`; see `docs/dev/signed-packages.md`), e.g. updates the app
 downloads: verify off the UI thread, then run on it.
 

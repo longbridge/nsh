@@ -378,6 +378,38 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// Gives every screen whose view UIKit left empty its parent's bounds.
+///
+/// UIKit sizes a pushed controller's view from the navigation view, which
+/// is still empty when the stack mounts: autoresizing cannot grow a zero
+/// size, so the view keeps an empty frame even once the navigation view
+/// has one. The screen's content is not clipped, so it draws correctly,
+/// but an empty view answers `pointInside:` with false, which ends
+/// `hitTest:` there, and the accessibility snapshot UI tests read drops
+/// the whole subtree under it: the screen is visible and nothing in it
+/// can be touched or found.
+fn size_screens(nav: &UINavigationController) {
+    for controller in nav.viewControllers().iter() {
+        if !controller.isViewLoaded() {
+            continue;
+        }
+        let Some(view) = controller.view() else {
+            continue;
+        };
+        let Some(parent) = view.superview() else {
+            continue;
+        };
+        let size = view.bounds().size;
+        let bounds = parent.bounds();
+        if (size.width <= 0.0 || size.height <= 0.0)
+            && bounds.size.width > 0.0
+            && bounds.size.height > 0.0
+        {
+            view.setFrame(bounds);
+        }
+    }
+}
+
 define_class!(
     /// A stack's navigation controller: the back button asks it before
     /// popping (`navigationBar:shouldPopItem:`), answered from `preventBack`.
@@ -416,32 +448,13 @@ define_class!(
             }
         }
 
-        /// UIKit sizes a pushed controller's view from the navigation view,
-        /// which is still empty when the stack mounts: autoresizing cannot
-        /// grow a zero size, so the view keeps an empty frame even once the
-        /// navigation view has one. The screen's content is not clipped, so
-        /// it draws correctly, but an empty ancestor drops the whole subtree
-        /// from the accessibility snapshot UI tests read: no element inside
-        /// any screen can be found. Give such a view its parent's bounds.
+        /// Whatever a layout pass left empty (a stack that grew after it
+        /// mounted, a window that changed size) is sized here.
         #[unsafe(method(viewDidLayoutSubviews))]
         fn view_did_layout_subviews(&self) {
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
-            for controller in self.viewControllers().iter() {
-                if !controller.isViewLoaded() {
-                    continue;
-                }
-                let Some(view) = controller.view() else { continue };
-                let Some(parent) = view.superview() else { continue };
-                let size = view.bounds().size;
-                let bounds = parent.bounds();
-                if (size.width <= 0.0 || size.height <= 0.0)
-                    && bounds.size.width > 0.0
-                    && bounds.size.height > 0.0
-                {
-                    view.setFrame(bounds);
-                }
-            }
+            size_screens(self);
         }
     }
 );
@@ -489,10 +502,15 @@ define_class!(
         #[unsafe(method(navigationController:didShowViewController:animated:))]
         fn did_show(
             &self,
-            _nav: &UINavigationController,
+            nav: &UINavigationController,
             _controller: &UIViewController,
             _animated: bool,
         ) {
+            // An animated change of screens is deferred to a layout pass of
+            // the navigation view, which puts the screen that arrives in the
+            // hierarchy after `reconcile` has sized what was there: the one
+            // it brought in is only reachable here.
+            size_screens(nav);
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
         }
@@ -636,6 +654,11 @@ impl StackHost {
         self.nav.ivars().applying.set(true);
         self.nav.setViewControllers_animated(&array, animated);
         self.nav.ivars().applying.set(false);
+        // A stack whose size is settled is never laid out again for the
+        // screens it is given, so nothing would size a screen UIKit left
+        // empty until something unrelated (a rotation, a change of
+        // appearance) forces a layout pass.
+        size_screens(&self.nav);
     }
 }
 
