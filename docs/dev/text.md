@@ -6,6 +6,13 @@
   `textAlignVertical` (the core moves the content box down). `adjustsFontSizeToFit` shrinks the fonts (down to
   `minimumFontScale`, at least 0.1) until the text fits its box and lines (`Paragraph::fit`, a binary search in the core).
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  Final layouts are hit-tested by their engine too, in the content box (`TextEngine::hit_test`,
+  `caret_rect`, `range_rects`): the caret position nearest a point (`TextPosition`: a UTF-16 offset and its
+  `Affinity`, which says whether an offset that ends a wrapped line and starts the next is on the earlier line), the
+  caret's line-high box, and the line-high boxes a range covers, appended to the caller's buffer. Each backend's
+  selection and `SelectionArea` hit-test with the same code; an engine that only reports `lines` gets an estimate
+  (each line's characters spread evenly over its width). The headless engine hit-tests whole characters, 0.55 em
+  each, on its one line.
   A text out of the layout (`display: none` on it or on a view around it, `hidden`) is sent with an empty layout (its
   text unchanged, for tests and screen readers): its box is zero, and the web, which does not clip text to its box,
   would still draw the glyphs laid out in it.
