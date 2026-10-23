@@ -93,6 +93,12 @@ covers [events] onChange
 covers [events] onSubmit
 covers [events] onSelectionChange
 covers [events] onCaretMove
+# What the user pasted, reported; the input inserts nothing itself.
+expect Pasted: none
+event id:paste onPaste text=hello
+expect Pasted: hello files 0 uris 0
+covers [events] onPaste
+covers [props] pasteBehavior
 covers [events] onContentSizeChange
 covers [props] selectedRange
 # events-layout

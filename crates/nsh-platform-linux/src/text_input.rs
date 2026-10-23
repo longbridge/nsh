@@ -354,6 +354,31 @@ impl Ctx {
         self.selection_changed();
     }
 
+    /// A paste (Ctrl+V, Shift+Insert, the context menu) into the editor
+    /// `widget`: reports what the clipboard holds (`onPaste`) if the app
+    /// listens, read now, on the user's paste (GTK reads it asynchronously:
+    /// the report may come after the text it inserts); whether the editor
+    /// pastes its text (`pasteBehavior`).
+    fn pasting(&self, widget: &gtk::Widget) -> bool {
+        let Some((surface, view, input)) = self.get() else {
+            return true;
+        };
+        if view.state().events.contains(EventKind::Paste) {
+            let id = view.id();
+            let surface = Rc::downgrade(&surface);
+            crate::system::read_pasted(widget.clipboard(), move |paste| {
+                if let Some(surface) = surface.upgrade() {
+                    surface.event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)));
+                }
+            });
+        }
+        let inserts = input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert;
+        // Its insertion (and the deletion of the selection it replaces)
+        // types no key.
+        input.pasting.set(inserts);
+        inserts
+    }
+
     /// The caret or selection may have moved.
     fn selection_changed(&self) {
         let Some((_, view, input)) = self.get() else {
@@ -688,9 +713,9 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
                 }
             });
             let c = cx.clone();
-            t.connect_paste_clipboard(move |_| {
-                if let Some(input) = c.input.upgrade() {
-                    input.pasting.set(true);
+            t.connect_paste_clipboard(move |t| {
+                if !c.pasting(t.upcast_ref()) {
+                    t.stop_signal_emission_by_name("paste-clipboard");
                 }
             });
             let c = cx.clone();
@@ -740,9 +765,9 @@ fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
                 }
             });
             let c = cx.clone();
-            view.connect_paste_clipboard(move |_| {
-                if let Some(input) = c.input.upgrade() {
-                    input.pasting.set(true);
+            view.connect_paste_clipboard(move |view| {
+                if !c.pasting(view.upcast_ref()) {
+                    view.stop_signal_emission_by_name("paste-clipboard");
                 }
             });
             let c = cx.clone();

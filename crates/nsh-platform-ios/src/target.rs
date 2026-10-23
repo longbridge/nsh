@@ -567,6 +567,13 @@ impl EventTarget {
         self.caret_moved(view);
     }
 
+    /// `onPaste` of input `id`: what the user pasted.
+    pub(crate) fn pasted(&self, id: NodeId, paste: nsh_core::PasteEvent) {
+        self.with_mounter(move |m| {
+            m.input_event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)))
+        });
+    }
+
     /// `onCaretMove` of the input `view` belongs to if its caret moved:
     /// with the selection, or as a text area scrolled or the input was laid
     /// out again, while it edits.

@@ -1130,6 +1130,47 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
+/// What `board` holds, read as the user pastes into an input (`onPaste`):
+/// its text, its image (as PNG) and its local files' `file:` URIs. GTK
+/// reads a clipboard asynchronously: `done` gets it once read.
+pub(crate) fn read_pasted(
+    board: gdk::Clipboard,
+    done: impl FnOnce(nsh_core::PasteEvent) + 'static,
+) {
+    let types = board.formats().union_deserialize_types();
+    let (has_image, has_files) = (
+        types.contains_type(gdk::Texture::static_type()),
+        types.contains_type(gdk::FileList::static_type()),
+    );
+    glib::spawn_future_local(async move {
+        let text = board.read_text_future().await.ok().flatten();
+        let mut paste = nsh_core::PasteEvent::new(text.map(|t| t.to_string()).unwrap_or_default());
+        if has_files
+            && let Ok(value) = board
+                .read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT)
+                .await
+            && let Ok(list) = value.get::<gdk::FileList>()
+        {
+            paste.uris = list
+                .files()
+                .into_iter()
+                .filter(|file| file.path().is_some_and(|path| path.is_absolute()))
+                .map(|file| file.uri().to_string())
+                .collect();
+        }
+        // A file list's icon is no image of the user's.
+        if has_image
+            && paste.uris.is_empty()
+            && let Ok(Some(texture)) = board.read_texture_future().await
+        {
+            paste.files.push(nsh_core::PastedFile::image(
+                texture.save_to_png_bytes().to_vec(),
+            ));
+        }
+        done(paste);
+    });
+}
+
 /// `Clipboard.readFiles`: the `file:` URIs of a file list on the clipboard
 /// (files copied in a file manager).
 fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {

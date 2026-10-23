@@ -17,9 +17,9 @@ use super::{
 };
 use crate::{
     AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp, Points,
-    Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
-    StatusBarSetting, SubmitBehavior, Tag, WebSource,
+    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp,
+    PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation,
+    ScreenProp, ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -65,6 +65,7 @@ crate::static_reactive!(ModalPresentation: ModalPresentation);
 crate::static_reactive!(ResizeMode: ResizeMode);
 crate::static_reactive!(ReturnKeyType: ReturnKeyType);
 crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+crate::static_reactive!(PasteBehavior: PasteBehavior);
 crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
 crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
@@ -452,6 +453,19 @@ impl Input {
         self.bind_prop(behavior, |behavior: SubmitBehavior| {
             Prop::SubmitBehavior(Some(behavior))
         })
+    }
+
+    /// What a paste does (`pasteBehavior`; default: insert its text).
+    /// [`Self::on_paste`] hears what was pasted either way.
+    pub fn paste_behavior(self, behavior: impl IntoReactive<PasteBehavior>) -> Self {
+        self.bind_prop(behavior, Prop::PasteBehavior)
+    }
+
+    /// The user pasted: the text, the files with their bytes (a
+    /// screenshot) and local files' URLs, before the text it inserts is
+    /// reported.
+    pub fn on_paste<M>(self, listener: impl IntoListener<PasteEvent, M>) -> Self {
+        self.listen(EventKind::Paste, listener.into_listener(), events::paste)
     }
 
     /// Focused when it appears.

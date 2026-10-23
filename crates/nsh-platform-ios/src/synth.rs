@@ -237,7 +237,7 @@ pub(crate) fn touch(window: &UIWindow, x: f64, y: f64, phase: Phase) -> bool {
 }
 
 /// The window's first responder (the focused input).
-fn first_responder(window: &UIWindow) -> Option<Retained<AnyObject>> {
+pub(crate) fn first_responder(window: &UIWindow) -> Option<Retained<AnyObject>> {
     // SAFETY: UIWindow's `firstResponder` (private: the responder chain's).
     unsafe { msg_send![window, firstResponder] }
 }

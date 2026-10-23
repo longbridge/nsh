@@ -276,6 +276,29 @@ pub enum ServerMessage {
     },
 }
 
+/// A file a test pastes ([`TestStep::Paste`]).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TestFile {
+    /// Its name.
+    pub name: String,
+    /// Its MIME type.
+    pub mime: String,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl TestFile {
+    /// A file named `name` of type `mime` holding `data`.
+    pub fn new(name: impl Into<String>, mime: impl Into<String>, data: Vec<u8>) -> TestFile {
+        TestFile {
+            name: name.into(),
+            mime: mime.into(),
+            data,
+        }
+    }
+}
+
 /// A step of a test on a host's app, named as `nsh/test` names them: views
 /// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
 /// actions are native input at the view the selector names.
@@ -341,6 +364,18 @@ pub enum TestStep {
     RightClick {
         /// The view.
         selector: String,
+    },
+    /// Pastes into the input (`app.paste`), as the user's paste does with
+    /// this on the clipboard.
+    Paste {
+        /// The input.
+        selector: String,
+        /// The text (empty: none).
+        text: String,
+        /// Files with their bytes (images).
+        files: Vec<TestFile>,
+        /// Local files' `file:` URLs.
+        uris: Vec<String>,
     },
     /// The open context menu's actions (`app.menu`): `null` when none is.
     Menu,

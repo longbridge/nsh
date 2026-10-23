@@ -327,6 +327,49 @@ pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
     clipboard::image_answer(id, true, clipboard::Image::sniff(&bytes))
 }
 
+/// What `board` holds, read as the user pastes into an input (`onPaste`):
+/// its text, its images (as they are in [`IMAGE_TYPES`], else PNG) and its
+/// local files' `file:` URLs (Mac Catalyst).
+pub(crate) fn pasted(board: &objc2_ui_kit::UIPasteboard) -> nsh_core::PasteEvent {
+    // SAFETY: plain getters of the pasteboard, read on the user's paste.
+    unsafe {
+        let mut paste = nsh_core::PasteEvent::new(
+            board
+                .hasStrings()
+                .then(|| board.string())
+                .flatten()
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+        );
+        if board.hasImages() {
+            let first = IMAGE_TYPES
+                .iter()
+                .find_map(|(_, kind)| board.dataForPasteboardType(&NSString::from_str(kind)));
+            match first {
+                Some(data) if board.numberOfItems() <= 1 => {
+                    paste.files.push(nsh_core::PastedFile::image(data.to_vec()));
+                }
+                _ => {
+                    for image in board.images().map(|i| i.to_vec()).unwrap_or_default() {
+                        if let Some(png) = image.png_representation() {
+                            paste.files.push(nsh_core::PastedFile::image(png.to_vec()));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(urls) = board.hasURLs().then(|| board.URLs()).flatten() {
+            paste.uris = urls
+                .iter()
+                .filter(|url| url.isFileURL())
+                .filter_map(|url| url.absoluteString())
+                .map(|s| s.to_string())
+                .collect();
+        }
+        paste
+    }
+}
+
 /// `Clipboard.readFiles`: the `file:` URLs on the general pasteboard
 /// (files copied in the Finder, on Mac Catalyst).
 pub(crate) fn read_clipboard_files(id: u32) -> EventPayload {

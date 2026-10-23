@@ -2259,6 +2259,9 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Input(input) = &mut slot.native {
+            input.set_paste_listens(events.contains(EventKind::Paste));
+        }
         let v = slot.values;
         let any = |kinds: &[EventKind]| kinds.iter().any(|&k| events.contains(k));
         let handles_press = any(&[

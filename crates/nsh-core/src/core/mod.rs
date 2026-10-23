@@ -2977,6 +2977,10 @@ impl<M: TextEngine> Core<M> {
                         c.submit_behavior = behavior;
                         false
                     }
+                    Prop::PasteBehavior(behavior) => {
+                        c.paste_behavior = behavior;
+                        false
+                    }
                     Prop::AutoFocus(on) => {
                         c.auto_focus = on;
                         false

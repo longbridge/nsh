@@ -1996,7 +1996,7 @@ fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
 }
 
 /// True when the clipboard has an image (a PNG or a bitmap).
-fn clipboard_has_image() -> bool {
+pub(crate) fn clipboard_has_image() -> bool {
     use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_DIB};
     // SAFETY: plain queries.
     unsafe {
@@ -2006,7 +2006,7 @@ fn clipboard_has_image() -> bool {
 }
 
 /// The clipboard's image: its PNG, else its bitmap as a BMP file.
-fn clipboard_image() -> Option<Vec<u8>> {
+pub(crate) fn clipboard_image() -> Option<Vec<u8>> {
     use windows::Win32::System::Ole::CF_DIB;
     clipboard_bytes(png_format())
         .or_else(|| clipboard_bytes(u32::from(CF_DIB.0)).and_then(|dib| bmp_file(&dib)))
@@ -2043,7 +2043,7 @@ fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
 
 /// The `file:` URLs of the files on the clipboard (`CF_HDROP`: files
 /// copied in Explorer).
-fn clipboard_files() -> Vec<String> {
+pub(crate) fn clipboard_files() -> Vec<String> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
 
     use windows::Win32::{

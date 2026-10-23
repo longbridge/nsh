@@ -181,6 +181,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |
+| `pasteBehavior` | `"insert" \| "report"` | `"insert"` | What a paste does: insert its text, or nothing ([pasting](#pasting-images-and-files)). |
 | `caret` | `boolean` | `true` | The caret is drawn; `false` hides it. |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | The keyboard's look (iOS). |
 | `selectedRange` | `{ start: number; end?: number }` | | The controlled selection, in UTF-16 units. |
@@ -197,6 +198,7 @@ Events:
 | `onSubmit` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
+| `onPaste` | `{ text, files, uris }` | The user pasted: text, images as `File`s, local files' URLs ([pasting](#pasting-images-and-files)). |
 | `onCaretMove` | `{ bounds, pageBounds }` | The caret moved: where it is in the input and in the window ([the caret](#the-caret)). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
@@ -499,6 +501,53 @@ const caret = signal<Bounds | null>(null);
 
 `pageBounds` is where the caret was when the event came: a page that scrolls under the input moves the input but
 sends no event, so close the suggestions when it scrolls, or anchor them to the input itself.
+
+## Pasting images and files
+
+The paste event (`.on_paste(..)`, TSX `onPaste`) tells what the user pasted, from the keyboard's shortcut, a menu's
+Paste or a keyboard's image: `text`, `files` and `uris`. `files` are what the clipboard held as data, such as a
+screenshot or an image copied from a page or another app: `File`s whose bytes the app can upload or show, named
+`image.png` (or the type it is). `uris` are the `file:` URLs of files copied in a file manager, as a file drop's.
+The platform reads the clipboard as the user pastes, and only then.
+
+The input inserts the pasted text by itself, as it always does: the event comes before the `onChange` of that text.
+Images and files are never inserted, since an input holds text. With `pasteBehavior` `"report"` the input inserts
+nothing, and the app decides what a paste does: send a long text as an attachment, or insert a cleaned-up version.
+The input decides at once, from the prop, because the system asks it on the spot.
+
+```rust tabs
+let attachments = signal(Vec::<PastedFile>::new());
+
+input()
+    .multiline(true)
+    .placeholder("Message")
+    .on_paste(move |e: &PasteEvent| {
+        // A screenshot pasted into the message goes along as an image.
+        attachments.update(|a| a.extend(e.files.iter().cloned()));
+    })
+    .p_2()
+```
+
+```tsx tabs
+import { Input, signal } from "nsh";
+
+const attachments = signal<File[]>([]);
+
+<Input
+  multiline
+  placeholder="Message"
+  onPaste={(e) => {
+    // A screenshot pasted into the message goes along as an image.
+    attachments.update((a) => [...a, ...e.files]);
+  }}
+  class="p-2"
+/>;
+```
+
+Upload a pasted file as any `File`, with `fetch` and `FormData` (`form.append("image", file)`); its bytes stay
+native until they are sent. On Android, keyboards that insert images (GIFs, stickers) report them the same way. On
+Linux the clipboard is read asynchronously, so the event may come after the `onChange` of the text it inserts.
+Masked inputs on macOS keep AppKit's own paste and report nothing.
 
 ## Multiline inputs that grow
 

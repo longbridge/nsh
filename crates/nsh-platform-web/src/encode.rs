@@ -837,6 +837,9 @@ fn input_json(c: &InputConfig) -> String {
     if let Some(m) = c.max_length {
         let _ = write!(s, ",\"maxLength\":{m}");
     }
+    if c.paste_behavior != nsh_core::PasteBehavior::Insert {
+        s.push_str(",\"pasteInserts\":false");
+    }
     s.push('}');
     s
 }

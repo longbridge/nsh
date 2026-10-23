@@ -220,6 +220,7 @@ events! {
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
+    Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
 
 }
 
@@ -410,6 +411,127 @@ pub struct TouchEvent {
     pub activated: Option<NodeId>,
 }
 
+/// What the user pasted into an input ([`EventKind::Paste`]): what the
+/// clipboard held when the user pasted, which the platform read then (the
+/// app never reads the clipboard for it).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PasteEvent {
+    /// The plain text, empty when it held none.
+    pub text: String,
+    /// Files with their bytes: images (a screenshot, an image copied from a
+    /// page or an app), in the platform's order.
+    pub files: Vec<PastedFile>,
+    /// Absolute `file:` URLs of local files copied in a file manager, in the
+    /// platform's order (as [`EventPayload::FileDrop`]'s).
+    pub uris: Vec<String>,
+}
+
+impl EventPayload {
+    /// An `onPaste` payload of fields (`text`; a reported paste with no
+    /// payload is an empty one) made a [`EventPayload::Paste`], as handlers
+    /// read it (`files` and `uris` always there).
+    pub fn into_paste(self) -> EventPayload {
+        match self {
+            EventPayload::Map(fields) => {
+                let text = fields.into_iter().find_map(|(k, v)| match (k, v) {
+                    ("text", PayloadValue::Str(text)) => Some(text),
+                    _ => None,
+                });
+                EventPayload::Paste(Box::new(PasteEvent::new(text.unwrap_or_default())))
+            }
+            EventPayload::None => EventPayload::Paste(Box::default()),
+            payload => payload,
+        }
+    }
+}
+
+impl PasteEvent {
+    /// A paste of `text`, with no files.
+    pub fn new(text: impl Into<String>) -> PasteEvent {
+        PasteEvent {
+            text: text.into(),
+            ..PasteEvent::default()
+        }
+    }
+
+    /// Whether it holds nothing.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.files.is_empty() && self.uris.is_empty()
+    }
+}
+
+/// A file pasted with its bytes ([`PasteEvent::files`]): JS gets a `File`.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PastedFile {
+    /// Its name (`image.png` for an image without one).
+    pub name: String,
+    /// Its MIME type (`image/png`).
+    pub mime: String,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl PastedFile {
+    /// A file named `name` of type `mime` holding `data`.
+    pub fn new(name: impl Into<String>, mime: impl Into<String>, data: Vec<u8>) -> PastedFile {
+        PastedFile {
+            name: name.into(),
+            mime: mime.into(),
+            data,
+        }
+    }
+
+    /// An image of encoded `data` (PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP;
+    /// PNG when unknown), named `image.<extension>`.
+    pub fn image(data: Vec<u8>) -> PastedFile {
+        let (mime, extension) = image_type(&data);
+        PastedFile::new(format!("image.{extension}"), mime, data)
+    }
+}
+
+/// The MIME type and file extension of encoded image `data`.
+fn image_type(data: &[u8]) -> (&'static str, &'static str) {
+    match data {
+        [0xFF, 0xD8, 0xFF, ..] => ("image/jpeg", "jpg"),
+        [b'G', b'I', b'F', b'8', ..] => ("image/gif", "gif"),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => ("image/webp", "webp"),
+        [
+            _,
+            _,
+            _,
+            _,
+            b'f',
+            b't',
+            b'y',
+            b'p',
+            b'h',
+            b'e',
+            b'i',
+            b'c' | b'x',
+            ..,
+        ] => ("image/heic", "heic"),
+        [b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => ("image/tiff", "tiff"),
+        [b'B', b'M', ..] => ("image/bmp", "bmp"),
+        _ => ("image/png", "png"),
+    }
+}
+
 // Every kind has a bit of [`EventMask`].
 const _: () = assert!(EventKind::ALL.len() <= 128, "EventMask has 128 bits");
 
@@ -532,6 +654,8 @@ pub enum EventPayload {
     Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
+    /// What the user pasted into an input.
+    Paste(Box<PasteEvent>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
     /// An event of a registered native component: its name and data (any
@@ -842,6 +966,19 @@ pub enum ReturnKeyType {
     Search,
     /// Send.
     Send,
+}
+
+/// What an input does with what the user pastes (`pasteBehavior`); it
+/// reports it either way (`onPaste`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum PasteBehavior {
+    /// Inserts the pasted text (default). Images and files are never
+    /// inserted: a text input holds text.
+    #[default]
+    Insert,
+    /// Inserts nothing: the app does what it wants with `onPaste`'s text,
+    /// images and files.
+    Report,
 }
 
 /// What return does in an input (`submitBehavior`).
@@ -1704,6 +1841,11 @@ pub enum Prop {
     /// from Shift+Return or Option / Alt+Return on desktops.
     #[prop(js = "submitBehavior", on = INPUT)]
     SubmitBehavior(Option<SubmitBehavior>),
+    /// `pasteBehavior`: what a paste does: `"insert"` (default) inserts its
+    /// text, `"report"` inserts nothing; `onPaste` reports what was pasted
+    /// either way. Decided natively when the user pastes.
+    #[prop(js = "pasteBehavior", on = INPUT)]
+    PasteBehavior(PasteBehavior),
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),

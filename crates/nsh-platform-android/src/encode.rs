@@ -1192,6 +1192,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     });
     e.bool(c.rtl);
     e.bool(c.caret_hidden);
+    // `pasteBehavior`: whether a paste inserts its text.
+    e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
 }
 
 // --- Canvas drawings (`CanvasBox.java`) -------------------------------------

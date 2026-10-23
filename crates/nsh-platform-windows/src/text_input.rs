@@ -1689,7 +1689,10 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             item(
                 Some(MenuRole::Paste),
                 "",
-                editable && crate::system::clipboard_has_text(),
+                editable
+                    && (crate::system::clipboard_has_text()
+                        || (view.state().events.contains(EventKind::Paste)
+                            && crate::system::clipboard_has_image())),
                 0x56,
                 true,
             ),
@@ -1869,8 +1872,28 @@ fn cut(surface: &Surface, view: &NshView, input: &InputState, secure: bool) -> b
     true
 }
 
+/// A paste (Ctrl+V, Shift+Insert, the menu): reports what the clipboard
+/// holds (`onPaste`) if the app listens, then inserts its text as
+/// `pasteBehavior` says. The clipboard is read only here, on the user's
+/// paste.
 fn paste(surface: &Surface, view: &NshView, input: &InputState) {
-    let Some(text) = crate::system::clipboard_text() else {
+    let text = crate::system::clipboard_text();
+    if view.state().events.contains(EventKind::Paste) {
+        let mut paste = nsh_core::PasteEvent::new(text.clone().unwrap_or_default());
+        if let Some(image) = crate::system::clipboard_image() {
+            paste.files.push(nsh_core::PastedFile::image(image));
+        }
+        paste.uris = crate::system::clipboard_files();
+        surface.event(
+            view.id(),
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(paste)),
+        );
+    }
+    if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
+        return;
+    }
+    let Some(text) = text else {
         return;
     };
     let text = pasted(&text, input.multiline());
