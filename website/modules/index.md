@@ -41,6 +41,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/clipboard` | `Clipboard.writeText`, `Clipboard.readText`, `Clipboard.writeImage`, `Clipboard.readImage`, `Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/picker` | `Picker.pickImages` | [nsh/picker](./nsh-picker.md) |
 | `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.keys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/host` | `host.available`, `host.call`, `host.on`, plus native SDK `params` and `post` | [nsh/host](./nsh-host.md) |
 | `nsh/keymap` | `keymap.bind` (keyboard shortcuts: `mod+k`, `ctrl+shift+p`, ...) | [nsh/keymap](./nsh-keymap.md) |

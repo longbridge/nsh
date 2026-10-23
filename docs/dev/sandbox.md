@@ -37,7 +37,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
-  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `host`
+  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`
+  (`nsh/picker`: showing the system's picker, whose picked files reach the app; denied, a pick resolves `[]`), `host`
   (`nsh/host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
   names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
   the call of any other name before it reads the grants, since hosts may put names in paths or URLs;
@@ -48,7 +49,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
   newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
   capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
-  retains unrestricted network, webview, status bar and clipboard access. Process execution, filesystem access and
+  retains unrestricted network, webview, status bar, clipboard and picker access. Process execution, filesystem access and
   the host's functions always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by

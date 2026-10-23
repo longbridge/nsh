@@ -33,11 +33,11 @@
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
-//! host's events need no grant, the host sends them. An app without `"capabilities"` (a
-//! standalone app, its developer's own) retains unrestricted HTTP, web
-//! views, the status bar and the clipboard; raw sockets, processes, the
-//! filesystem and the host's functions always require an explicit
-//! declaration.
+//! host's events need no grant, the host sends them. An app without
+//! `"capabilities"` (a standalone app, its developer's own) retains
+//! unrestricted HTTP, web views, the status bar, the clipboard and the
+//! picker; raw sockets, processes, the filesystem and the host's functions
+//! always require an explicit declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
 //! other key narrows it and is optional: `methods` (any when left out),
@@ -354,6 +354,9 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The app may show the system's picker (`nsh/picker`): the files the
+    /// user picks in it reach the app.
+    pub picker: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -433,6 +436,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            picker: true,
             // The host's functions are never granted without a declaration.
             ..Self::default()
         }
@@ -459,11 +463,12 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 7] = [
+        const KNOWN: [&str; 8] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
+            "picker",
             "process",
             "fs",
             "host",
@@ -563,6 +568,11 @@ impl Capabilities {
             caps.clipboard = clipboard
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
+        }
+        if let Some(picker) = obj.get("picker") {
+            caps.picker = picker
+                .as_bool()
+                .ok_or("capabilities.picker must be a boolean")?;
         }
         if let Some(process) = obj.get("process") {
             let process = object(process, "capabilities.process")?;
@@ -697,6 +707,7 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        obj.insert("picker".into(), self.picker.into());
         // Only when granted: older runtimes read what newer signers write.
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
@@ -1195,6 +1206,11 @@ impl Access {
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
+    }
+
+    /// Whether the app may show the system's picker (`nsh/picker`).
+    pub fn allows_picker(&self) -> bool {
+        self.each(|c| c.picker)
     }
 
     /// Whether `nsh/host` may call the embedding app's function `name`.
@@ -1698,6 +1714,7 @@ mod tests {
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
+        assert!(!access.allows_picker());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
     }
@@ -1786,7 +1803,7 @@ mod tests {
     fn the_embedder_grants_at_most() {
         let a = Access {
             declared: caps(
-                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true }"#,
+                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true }"#,
             ),
             granted: Some(caps(
                 r#"{ "network": { "hosts": ["b.com"] }, "clipboard": true }"#,
@@ -1794,6 +1811,7 @@ mod tests {
         };
         assert!(a.allows_clipboard());
         assert!(!a.allows_http("GET", "https://a.com/"));
+        assert!(!a.allows_picker());
         assert!(a.allows_http("GET", "https://b.com/"));
         assert!(!a.allows_status_bar());
     }

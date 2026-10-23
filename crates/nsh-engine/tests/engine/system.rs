@@ -69,6 +69,7 @@ mount(() => <Text>{status()}</Text>);
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -156,6 +157,7 @@ mount(() => <Text>{status()}</Text>);"#,
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);

@@ -841,6 +841,9 @@ pub struct Core<M: TextEngine> {
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
+    /// Answers the app's picks in place of the platform's picker
+    /// ([`Core::set_picker`]).
+    picker: Option<Arc<dyn crate::picker::PickerBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -890,6 +893,7 @@ impl<M: TextEngine> Core<M> {
             access: Arc::default(),
             denied: Default::default(),
             clipboard: None,
+            picker: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1064,6 +1068,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's clipboard (`None`: the platform's, the default).
     pub fn set_clipboard(&mut self, backend: Option<Arc<dyn crate::clipboard::ClipboardBackend>>) {
         self.clipboard = backend;
+    }
+
+    /// Answers the app's picks (`Picker.pickImages`) with `backend`, an
+    /// embedding app's own picker or a test's files, instead of showing the
+    /// platform's picker (`None`: the platform's, the default).
+    pub fn set_picker(&mut self, backend: Option<Arc<dyn crate::picker::PickerBackend>>) {
+        self.picker = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in

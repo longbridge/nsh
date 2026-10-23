@@ -1407,6 +1407,23 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(*request)
                 .end();
         }
+        // `nsh.js` `pickImages`: the request, the limit, the longest side
+        // (0: any), the quality (-1: none), whether the stored format is
+        // asked for.
+        Command::PickImages {
+            id: request,
+            request: asked,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("pickImages")
+                .num(*request)
+                .num(asked.limit)
+                .num(asked.max_dimension.map_or(0, |d| d.0.max(1)))
+                .num(asked.quality.map_or(-1.0, |q| q.0))
+                .bool(asked.format == nsh_core::picker::PickFormat::Current)
+                .end();
+        }
         // The id is written whole (`num` rounds); the page answers with
         // `onHost` `{ type: "reply" }` (`nsh.js` `hostCall`).
         Command::HostCall {

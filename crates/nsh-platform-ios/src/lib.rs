@@ -35,6 +35,7 @@ mod mount;
 mod native_view;
 mod navigation;
 mod net;
+mod picker;
 mod press;
 mod selection_area;
 mod surface;

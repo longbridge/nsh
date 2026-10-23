@@ -691,6 +691,10 @@ pub struct EngineConfig {
     /// posts. A view keeps one for every app it runs; the default is a
     /// channel of the engine's own, with none of them.
     pub host: HostChannel,
+    /// Answers the app's picks (`Picker.pickImages`) in place of the
+    /// platform's picker: the embedding app's own picker, or a test's
+    /// files; `None`: the platform's.
+    pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -781,6 +785,7 @@ impl EngineConfig {
             pinned: EnvironmentPins::default(),
             clipboard: None,
             host: HostChannel::default(),
+            picker: None,
         }
     }
 }
@@ -835,6 +840,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("pinned", &self.pinned)
             .field("clipboard", &self.clipboard.is_some())
             .field("host", &self.host)
+            .field("picker", &self.picker.is_some())
             .finish()
     }
 }
@@ -1341,6 +1347,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_access(access.clone());
         core.set_storage(app_storage(&config));
         core.set_clipboard(config.clipboard.clone());
+        core.set_picker(config.picker.clone());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);

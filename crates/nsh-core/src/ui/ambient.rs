@@ -427,6 +427,15 @@ pub fn clipboard_files() -> Answer<Vec<String>> {
     answer
 }
 
+/// Shows the system's picker for images and gives the ones the user picked,
+/// prepared as `request` says, none when cancelled (TS:
+/// `Picker.pickImages`), to await in a task.
+pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::picker::PickedFile>> {
+    let (answer, action) = super::services::pick_images(request);
+    act(action);
+    answer
+}
+
 /// The value function `name` of the embedding app returns for `args`
 /// (TS: `host.call`), to await in a task.
 pub(crate) fn host_call(

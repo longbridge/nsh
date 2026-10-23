@@ -2953,6 +2953,7 @@ dependencies = [
  "cap-std",
  "flate2",
  "futures-util",
+ "imagesize 0.15.0",
  "libc",
  "log",
  "nsh-macros",

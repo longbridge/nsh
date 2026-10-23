@@ -526,6 +526,7 @@ impl RootView {
             pinned: Default::default(),
             clipboard: None,
             host: self.ivars().options.host.clone(),
+            picker: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

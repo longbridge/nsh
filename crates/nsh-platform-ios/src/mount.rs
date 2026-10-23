@@ -1160,6 +1160,15 @@ impl Mounter {
             (Command::Dialog(dialog), native) if id == nsh_core::ROOT_ID => {
                 crate::system::show_dialog(&dialog, native.view(), &self.control);
             }
+            (
+                Command::PickImages {
+                    id: request,
+                    request: asked,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => {
+                crate::picker::pick_images(request, asked, native.view(), &self.control);
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)

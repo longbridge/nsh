@@ -283,6 +283,7 @@ impl AppView {
             pinned: Default::default(),
             clipboard: None,
             host: options.host.clone(),
+            picker: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();

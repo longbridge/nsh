@@ -86,6 +86,7 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

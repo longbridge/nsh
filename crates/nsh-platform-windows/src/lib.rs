@@ -42,6 +42,7 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
+mod picker;
 mod render;
 mod scroll;
 mod selection_area;

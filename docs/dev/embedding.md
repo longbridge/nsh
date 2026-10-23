@@ -126,6 +126,14 @@
   engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
   threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
   backend's window tests run two engines reading their own.
+- **The host's own picker** (`nsh_core::picker::PickerBackend`): an embedding app that has a picker of its own answers
+  the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
+  every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any
+  thread), and the core resolves the pick with them (cut to the limit, sizes, types and extensions filled in from the
+  bytes), sending no `Command::PickImages`. The capability check comes first, so a pick the app is not granted never
+  reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
+  needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
+  the view's activity).
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`

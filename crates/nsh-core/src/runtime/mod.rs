@@ -1,6 +1,6 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `Toast`,
-//! `nsh/accessibility`'s commands, all of `nsh/image`, `nsh/clipboard` and
-//! `nsh/storage`,
+//! `nsh/accessibility`'s commands, all of `nsh/image`, `nsh/clipboard`,
+//! `nsh/picker` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -21,6 +21,7 @@ pub(crate) mod host;
 mod image;
 mod net;
 mod os;
+mod picker;
 mod process;
 mod storage;
 mod websocket;
@@ -47,6 +48,8 @@ pub fn registries() -> &'static [Registry] {
         image.module::<image::Image>();
         let mut clipboard = Registry::runtime("nsh/clipboard");
         clipboard.module::<clipboard::Clipboard>();
+        let mut picker = Registry::runtime("nsh/picker");
+        picker.module::<picker::Picker>();
         let mut storage = Registry::runtime("nsh/storage");
         storage.module::<storage::Storage>();
         let mut desktop = Registry::runtime("nsh/desktop");
@@ -73,6 +76,7 @@ pub fn registries() -> &'static [Registry] {
             accessibility,
             image,
             clipboard,
+            picker,
             storage,
             desktop,
             os,

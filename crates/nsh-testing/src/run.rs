@@ -527,6 +527,7 @@ impl Session {
             .unwrap_or_else(|| path.clone());
         // `App` answers dialogs after each step, with the test's handler.
         app.answer_dialogs_myself();
+        app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;

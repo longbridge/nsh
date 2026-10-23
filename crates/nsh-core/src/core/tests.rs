@@ -7934,6 +7934,138 @@ mod components {
         assert_eq!(shown.last().unwrap(), "pasted false None ");
     }
 
+    /// Picks up to two photos when pressed and shows what came.
+    #[component]
+    fn PhotoPicker() -> impl IntoElement {
+        let picked = signal(String::new());
+        view()
+            .child(text(move || format!("picked {}", picked.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let files = pick_images(crate::picker::PickRequest::new(true, 2));
+                spawn(async move {
+                    let files = files.await;
+                    let shown: Vec<String> = files
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "{} {} {}x{} {}",
+                                f.name,
+                                f.mime,
+                                f.size.width.0,
+                                f.size.height.0,
+                                f.data.len()
+                            )
+                        })
+                        .collect();
+                    picked.set(format!("{} [{}]", files.len(), shown.join(", ")));
+                });
+            }))
+    }
+
+    /// A 3×2 PNG's header.
+    fn png_header() -> Vec<u8> {
+        vec![
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0,
+            0, 0, 3, 0, 0, 0, 2, 8, 6, 0, 0, 0,
+        ]
+    }
+
+    fn press_picker(c: &mut Core<FakeEngine>) -> Vec<MountItem> {
+        c.mount_root(&crate::ui::Root::new::<PhotoPicker>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit().map(|b| b.items).unwrap_or_default()
+    }
+
+    #[test]
+    fn picked_files_answer_the_pick() {
+        let mut c = core();
+        let items = press_picker(&mut c);
+        let picks: Vec<_> = items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PickImages { id, request },
+                } => Some((id, request)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(picks.len(), 1);
+        let (id, request) = picks[0];
+        assert_eq!(request.limit, 2);
+        let file = |name: &str| crate::picker::PickedFile {
+            name: name.into(),
+            data: crate::ImageData::new(png_header()),
+            ..Default::default()
+        };
+        // The platform's answer is completed (type, size, extension) and
+        // cut to the request's limit.
+        let files = vec![file("IMG_1"), file("b.png"), file("c.png")];
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Pick,
+            &EventPayload::Picked { id, files }
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 2")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "picked 2 [IMG_1.png image/png 3x2 29, b.png image/png 3x2 29]"
+        );
+    }
+
+    struct TestPicker;
+
+    impl crate::picker::PickerBackend for TestPicker {
+        fn pick_images(&self, request: crate::picker::PickRequest) -> crate::picker::PickFuture {
+            assert_eq!(request.limit, 2);
+            Box::pin(async {
+                vec![crate::picker::PickedFile::new(
+                    "x.png",
+                    "",
+                    crate::ImageData::new(png_header()),
+                )]
+            })
+        }
+    }
+
+    #[test]
+    fn a_picker_of_the_embedder_answers_in_place_of_the_platform() {
+        let mut c = core();
+        c.set_picker(Some(std::sync::Arc::new(TestPicker)));
+        let items = press_picker(&mut c);
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Command { .. })),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 1")));
+        assert_eq!(shown.last().unwrap(), "picked 1 [x.png image/png 3x2 29]");
+    }
+
+    #[test]
+    fn picks_need_the_capability() {
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let items = press_picker(&mut c);
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Command { .. })),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
+        assert_eq!(shown.last().unwrap(), "picked 0 []");
+    }
+
     /// Shows a fallback while a component below it failed; a press tries
     /// again.
     #[component]

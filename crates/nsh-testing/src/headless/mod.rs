@@ -172,6 +172,21 @@ pub enum DialogAnswer {
     Dismiss,
 }
 
+/// Answers a pick: the files the user picks for the request (none: the
+/// picker cancelled).
+type PickHandler =
+    Box<dyn FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile> + Send>;
+
+/// Who answers the picks a step asks for.
+enum Picks {
+    /// Cancelled: no files.
+    Default,
+    /// A test's handler.
+    Handler(PickHandler),
+    /// The caller, after the step ([`Headless::answer_pick`]).
+    Caller,
+}
+
 /// Who answers the dialogs a step shows.
 enum Dialogs {
     /// [`default_answer`].
@@ -231,6 +246,8 @@ pub struct Headless {
     screen: Screen,
     animator: Animator,
     dialogs: Dialogs,
+    /// Who answers the picks.
+    picks: Picks,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -271,6 +288,7 @@ impl Headless {
             screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
+            picks: Picks::Default,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -457,6 +475,53 @@ impl Headless {
     pub fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String> {
         self.answer(answer)?;
         self.done()
+    }
+
+    /// Answers the picks steps ask for (`Picker.pickImages`) with
+    /// `handler`, the files the user picks, instead of cancelling them.
+    pub fn on_pick(
+        &mut self,
+        handler: impl FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile>
+        + Send
+        + 'static,
+    ) {
+        self.picks = Picks::Handler(Box::new(handler));
+    }
+
+    /// Leaves the picks steps ask for to the caller: a step returns with
+    /// one asked ([`Headless::pending_pick`]) until [`Headless::answer_pick`]
+    /// answers it.
+    pub fn answer_picks_myself(&mut self) {
+        self.picks = Picks::Caller;
+    }
+
+    /// The oldest pick asked and not answered yet.
+    pub fn pending_pick(&self) -> Option<nsh_core::picker::PickRequest> {
+        self.screen.pending_pick().map(|(_, request)| request)
+    }
+
+    /// The picks the app asked for so far, in order.
+    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+        self.screen.picks()
+    }
+
+    /// Answers the oldest pick not answered yet with `files` (none: the
+    /// user cancelled), then waits until the app is quiet.
+    pub fn answer_pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        self.pick(files)?;
+        self.done()
+    }
+
+    /// Answers the oldest pick not answered yet.
+    fn pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        let (id, _) = self.screen.pending_pick().ok_or("no pick to answer")?;
+        self.screen.picked();
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Pick,
+            EventPayload::Picked { id, files },
+        );
+        Ok(())
     }
 
     /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
@@ -713,12 +778,25 @@ impl Headless {
         self.settle();
         self.check()?;
         loop {
-            let answer = match (&mut self.dialogs, self.screen.pending_dialog()) {
-                (_, None) | (Dialogs::Caller, _) => return Ok(()),
-                (Dialogs::Default, Some(dialog)) => default_answer(dialog)?,
-                (Dialogs::Handler(handler), Some(dialog)) => handler(dialog),
+            match (&mut self.dialogs, self.screen.pending_dialog()) {
+                (_, None) | (Dialogs::Caller, _) => {}
+                (dialogs, Some(dialog)) => {
+                    let answer = match dialogs {
+                        Dialogs::Handler(handler) => handler(dialog),
+                        _ => default_answer(dialog)?,
+                    };
+                    self.answer(answer)?;
+                    self.settle();
+                    self.check()?;
+                    continue;
+                }
+            }
+            let files = match (&mut self.picks, self.screen.pending_pick()) {
+                (_, None) | (Picks::Caller, _) => return Ok(()),
+                (Picks::Default, Some(_)) => Vec::new(),
+                (Picks::Handler(handler), Some((_, request))) => handler(&request),
             };
-            self.answer(answer)?;
+            self.pick(files)?;
             self.settle();
             self.check()?;
         }
