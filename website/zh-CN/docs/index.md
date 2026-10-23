@@ -125,21 +125,43 @@ NSH 是 Retained Mode 的：每个元素都是平台保留着的视图，一次�
 
 ## 如何运行
 
-工具链是一个 `nsh` 可执行文件，应用经过它有两条路径。
+工具链是一个 `nsh` 可执行文件。应用可以用 Rust、TSX 或两者编写，各自经过一条路径，到达同一个 Rust 引擎。
 
-**用 Rust 编写的应用**是一个 crate。`nsh` 为每个目标构建链接了你的 crate 的运行器，整个应用——组件、状态和事件处理——都是 Native 代码。运行器里完全没有 JavaScript 引擎：在任何平台上，Rust 应用都不包含 QuickJS。
+### Rust 应用
 
-**TSX 应用**（一个模块）是一组带入口的 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
+用 Rust 编写的应用是一个 crate，其中没有任何 JavaScript：
+
+1. **构建。** `nsh` 为每个目标——iOS、Android、macOS、Windows、Linux 或 Web 应用——构建链接了你的 crate 的运行器。组件、状态、事件处理和引擎一起编译成 Native 代码。
+2. **运行。** 应用的根组件以 Rust 形式运行在引擎线程上。运行器里没有 JavaScript 引擎：在任何平台上，Rust 应用都不包含 QuickJS。
+
+### TSX 应用
+
+TSX 应用（一个模块）是一组带入口的 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
 
 1. **构建。** `nsh` 打包模块的文件（使用 rolldown 和 Oxc），并用自己的编译器编译 JSX。对 `nsh` 和 `nsh/*` 的导入保持为导入：运行时以 Native 方式提供它们，所以 bundle 里只有你的代码。bundle 会被编译成 QuickJS 字节码。
-2. **运行。** 在设备上，引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中运行字节码。编译后的 JSX 直接调用 Native 渲染器，JavaScript 只描述界面和处理事件；解析样式、解析 Tailwind 类、比对差异、布局和文本都在 Rust 中完成。
+2. **运行。** 引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中运行字节码，每个视图一个虚拟机。编译后的 JSX 直接调用 Native 渲染器，JavaScript 只描述界面和处理事件；解析样式、解析 Tailwind 类、比对差异、布局和文本都在 Rust 中完成。
 
-从这里开始，两条路径是同一个 Rust 引擎。每一轮的变化被收集起来，由 Taffy（Flexbox 和 CSS Grid）排版，每帧作为一批视图操作交给主线程，主线程把它应用到 Native 视图上。文本在引擎线程上只测量和排版一次（Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量），主线程只负责绘制。把 Rust 与 TSX 页面结合的应用，会为运行这些页面链接 QuickJS。
+### 两者的区别
+
+| | Rust 应用 | TSX 应用 |
+|---|---|---|
+| 编写语言 | Rust | TSX（TypeScript 与 JSX） |
+| 构建产物 | Native 代码，链接进每个目标的运行器 | QuickJS 字节码，由运行时加载 |
+| JavaScript 引擎 | 无 | QuickJS，每个视图一个虚拟机 |
+| 开发时（`nsh run`） | 每次保存后重新构建并重启 | 每次保存后热更新 |
+| 发布之后 | 随应用一起发布 | 也可在运行时以签名包下发，运行在沙箱里 |
+| 适合 | 完整应用、繁重计算、系统相关的工作 | 快速编写的界面、插件、AI 生成的界面 |
+
+两者可以结合：Rust 应用可以承载 TSX 页面，TSX 页面也能导入它的 Rust 组件、模块和类；这样的应用会为运行这些页面链接 QuickJS（[用 Rust 开发](./rust.md)）。
+
+### 共用的引擎
+
+从引擎开始，两条路径完全相同。每一轮的变化被收集起来，由 Taffy（Flexbox 和 CSS Grid）排版，每帧作为一批视图操作交给主线程，主线程把它应用到 Native 视图上。文本在引擎线程上只测量和排版一次（Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量），主线程只负责绘制。
 
 在 Web 上，同一个引擎运行在页面里：浏览器显示用 CSS 设置样式的 HTML 元素，负责滚动、选择文本和处理输入；`nsh package --target web` 把应用发布成一个按内容命名文件的静态网站，可以直接放进任何 CDN（[Web](./web.md)）。
 
 > [!NOTE]
-> 主线程从不等待 JavaScript。系统同步提出的问题（这个输入框能否再接受一个字符、用户能否侧滑返回、这个面板能否关闭）都由你事先设置的属性在 Native 侧回答，比如 `maxLength`、`popOnBack` 或 `closeOnSwipe`。事件随后才到达你的代码。
+> 主线程从不等待应用的代码。系统同步提出的问题（这个输入框能否再接受一个字符、用户能否侧滑返回、这个面板能否关闭）都由事先设置的属性在 Native 侧回答，比如 `maxLength`、`popOnBack` 或 `closeOnSwipe`。事件随后才到达应用的处理函数。
 
 ## 动态界面与 AI 生成的界面
 

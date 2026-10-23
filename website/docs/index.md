@@ -125,21 +125,43 @@ That suits the screens most apps are made of — chats, mail, forms, lists, docu
 
 ## How it runs
 
-The toolchain is a single `nsh` binary, and an app takes one of two paths through it.
+The toolchain is a single `nsh` binary. An app is written in Rust, in TSX, or both, and each takes its own path to the same Rust engine.
 
-**An app written in Rust** is a crate. `nsh` builds the runner of each target with your crate linked in, and the whole app — its components, state and handlers — is native code. The runner has no JavaScript engine at all: QuickJS is not part of a Rust app on any platform.
+### Rust apps
 
-**A TSX app** (a module) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`:
+An app written in Rust is a crate, and nothing in it is JavaScript:
+
+1. **Build.** `nsh` builds the runner of each target — the iOS, Android, macOS, Windows, Linux or web app — with your crate linked in. Components, state, handlers and the engine are compiled together into native code.
+2. **Run.** The app's root component runs on the engine thread as Rust. The runner has no JavaScript engine: QuickJS is not part of a Rust app on any platform.
+
+### TSX apps
+
+A TSX app (a module) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`:
 
 1. **Build.** `nsh` bundles the module's files (with rolldown and Oxc) and compiles the JSX with its own compiler. Imports of `nsh` and `nsh/*` stay imports: the runtime serves them natively, so the bundle holds only your code. The bundle is compiled to QuickJS bytecode.
-2. **Run.** On the device, the engine thread runs the bytecode in [QuickJS](https://github.com/quickjs-ng/quickjs). Compiled JSX calls the native renderer directly, and JavaScript only describes the UI and handles events; parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
+2. **Run.** The engine thread runs the bytecode in [QuickJS](https://github.com/quickjs-ng/quickjs), one VM per view. Compiled JSX calls the native renderer directly, and JavaScript only describes the UI and handles events; parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
 
-From there both paths are the same Rust engine. Changes are collected per turn, laid out with Taffy (flexbox and CSS grid), and handed to the main thread as one batch of view operations per frame; the main thread applies the batch to native views. Text is measured and laid out once on the engine thread (CoreText on Apple platforms, `StaticLayout` on Android, DirectWrite on Windows, Pango on Linux, the browser's font metrics on the web) and only drawn on the main thread. An app that combines Rust with TSX screens links QuickJS to run them.
+### The difference
+
+| | Rust app | TSX app |
+|---|---|---|
+| Written in | Rust | TSX (TypeScript and JSX) |
+| Built into | Native code, linked into each target's runner | QuickJS bytecode, loaded by the runtime |
+| JavaScript engine | None | QuickJS, one VM per view |
+| While developing (`nsh run`) | Rebuilt and restarted on each save | Hot updates on each save |
+| After release | Ships with the app | Also delivered at run time as signed packages, in a sandbox |
+| Suits | Whole apps, heavy computation, system work | Screens written quickly, plugins, AI-generated UI |
+
+The two combine: a Rust app can take TSX screens, and TSX screens import its Rust components, modules and classes; such an app links QuickJS to run them ([Building with Rust](./rust.md)).
+
+### The shared engine
+
+From the engine on, both paths are the same. Changes are collected per turn, laid out with Taffy (flexbox and CSS grid), and handed to the main thread as one batch of view operations per frame; the main thread applies the batch to native views. Text is measured and laid out once on the engine thread (CoreText on Apple platforms, `StaticLayout` on Android, DirectWrite on Windows, Pango on Linux, the browser's font metrics on the web) and only drawn on the main thread.
 
 On the web, the same engine runs in the page: the browser shows HTML elements styled with CSS, scrolls them, selects their text and handles input, and `nsh package --target web` publishes the app as a static site whose files are named by content, ready for any CDN ([Web](./web.md)).
 
 > [!NOTE]
-> The main thread never waits for JavaScript. Questions the system asks synchronously (may this input accept another character, may the user swipe back, may this sheet close) are answered natively from props you set beforehand, such as `maxLength`, `popOnBack` or `closeOnSwipe`. Events reach your code afterwards.
+> The main thread never waits for the app's code. Questions the system asks synchronously (may this input accept another character, may the user swipe back, may this sheet close) are answered natively from props set beforehand, such as `maxLength`, `popOnBack` or `closeOnSwipe`. Events reach the app's handlers afterwards.
 
 ## Dynamic UI and AI-generated UI
 
