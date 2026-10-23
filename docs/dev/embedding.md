@@ -85,10 +85,13 @@
   - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
     (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
     is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
-    oldest dropped and logged). In the VM, an event of a name nobody listens to is kept likewise until the first
+    oldest dropped and logged). Stopping the engine serializes its interrupt and shutdown message with `send`;
+    its attachment recovers events left in the engine queue for the next app under the same lock. In the VM, an
+    event of a name nobody listens to is kept likewise until the first
     listener of that name is added; a job then delivers what was kept, in order, at the end of the turn that added it
     (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
-    uncaught error; the others still run.
+    uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
+    listener unsubscribes during a callback, the rest keep their original order and age in the inbox.
   - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
     engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
     rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
@@ -100,7 +103,9 @@
   - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
     engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in
     `embed.rs`; Android: `NshView.hostMessage`, called over JNI on the engine thread, posts to the UI thread), where
-    Swift's and Java's handlers run. Data crosses the C ABI and JNI as JSON text (Swift `JSONSerialization`, Java
+    Swift's and Java's handlers run. Android serializes the native part of `send` with taking the handle in
+    `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
+    (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
   - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
     directly ("Native modules", below). The channel's data is the embedding app's own: capabilities do not apply.

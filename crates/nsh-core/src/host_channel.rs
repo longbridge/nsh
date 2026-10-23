@@ -82,6 +82,13 @@ impl HostInbox {
         self.events.iter().any(|(n, _)| n == name)
     }
 
+    /// Takes the oldest event named `name`, leaving every other event in
+    /// its original order.
+    pub fn pop(&mut self, name: &str) -> Option<JsonValue> {
+        let index = self.events.iter().position(|(n, _)| n == name)?;
+        self.events.remove(index).map(|(_, data)| data)
+    }
+
     /// Takes the events named `name`, in the order they came.
     pub fn take(&mut self, name: &str) -> Vec<JsonValue> {
         let mut taken = Vec::new();
@@ -138,6 +145,21 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox.take_all(), vec![("b".to_owned(), json!(2))]);
         assert!(inbox.is_empty());
+    }
+
+    #[test]
+    fn popping_one_event_preserves_the_age_of_the_rest() {
+        let mut inbox = HostInbox::default();
+        inbox.push("a".into(), json!(1));
+        inbox.push("b".into(), json!(2));
+        inbox.push("a".into(), json!(3));
+        assert_eq!(inbox.pop("missing"), None);
+        assert_eq!(inbox.pop("a"), Some(json!(1)));
+        assert_eq!(inbox.len(), 2);
+        assert_eq!(
+            inbox.take_all(),
+            vec![("b".to_owned(), json!(2)), ("a".to_owned(), json!(3))]
+        );
     }
 
     #[test]

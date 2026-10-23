@@ -252,11 +252,12 @@ unsafe extern "C" fn deliver_kept_job(cx: Ctx, argc: c_int, argv: *mut Raw) -> R
     let Ok(name) = js::to_string(cx, args.get(0)) else {
         return qjs::JS_EXCEPTION;
     };
-    if !listens(cx, &name) {
-        return UNDEFINED;
-    }
-    let kept = channel(cx).inbox.borrow_mut().take(&name);
-    for data in kept {
+    while listens(cx, &name) {
+        let Some(data) = channel(cx).inbox.borrow_mut().pop(&name) else {
+            break;
+        };
+        // A listener may unsubscribe itself, or dispose its owner. Leave
+        // the remaining events in the inbox for the next listener.
         dispatch(cx, &name, &data);
     }
     UNDEFINED
@@ -508,6 +509,31 @@ globalThis.stop = () => off();
         host.eval_source("stop();").unwrap();
         host.host_event("tick", json!(2));
         assert_eq!(reported(&host), Vec::<String>::new());
+    }
+
+    #[test]
+    fn kept_events_wait_again_when_the_last_listener_unsubscribes() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+globalThis.listen = () => {{
+  const off = host.on("open", (data) => {{ report("first " + data); off(); }});
+}};
+globalThis.listenAgain = () => host.on("open", (data) => report("next " + data));
+"#
+        ))
+        .unwrap();
+        host.host_event("open", json!(1));
+        host.host_event("open", json!(2));
+        host.host_event("open", json!(3));
+        host.eval_source("listen();").unwrap();
+        host.run_jobs();
+        assert_eq!(reported(&host), ["first 1"]);
+        // The first callback removed the only listener. Neither remaining
+        // event has been delivered yet; both still wait, in order.
+        host.eval_source("listenAgain();").unwrap();
+        host.run_jobs();
+        assert_eq!(reported(&host), ["next 2", "next 3"]);
     }
 
     #[test]

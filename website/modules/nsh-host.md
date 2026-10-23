@@ -45,7 +45,7 @@ on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
 
 Listens to the embedding app's event `name`. `listener` gets its data (`null` when it sent none); the listeners of one name run in the order they were added. Returns a function that stops listening, and a listener added while a component renders stops with the component.
 
-Events wait for your app: an event of a name your app does not listen to yet is kept, and comes right after the first listener of its name is added, once the code adding it has run (up to 256 events are kept, then the oldest go). Events the embedding app sends before your app starts, or while it reloads, wait for the app it runs next. So the embedding app can send "open conversation 42" whenever its user taps a notification, and your app hears it whether it is running, starting or about to start.
+Events wait for your app: an event of a name your app does not listen to yet is kept, and comes right after the first listener of its name is added, once the code adding it has run (up to 256 events are kept, then the oldest go). If the last listener stops during delivery, the remaining events keep waiting in their original order. Events the embedding app sends before your app starts, or while it reloads, wait for the app it runs next. So the embedding app can send "open conversation 42" whenever its user taps a notification, and your app hears it whether it is running, starting or about to start.
 
 ```tsx
 host.on<{ id: string }>("conversation.open", ({ id }) => stack.push(<Conversation id={id} />));

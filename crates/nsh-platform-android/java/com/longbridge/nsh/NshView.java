@@ -70,6 +70,8 @@ public class NshView extends FrameLayout {
     private final java.util.Map<String, HostHandler> hostHandlers = new java.util.concurrent.ConcurrentHashMap<>();
 
     long handle;
+    /** Serializes background sends with releasing the native handle. */
+    private final Object hostLock = new Object();
     private final float density;
     private final Box root;
     private final Mounter mounter;
@@ -356,11 +358,16 @@ public class NshView extends FrameLayout {
      *
      * @param name the event
      * @param data JSON as Java objects (see {@link HostHandler#handle}), or null
-     * @return false when the name or the data is invalid
+     * @return false when the view was destroyed, or the name or data is invalid
      */
     public boolean send(String name, Object data) {
-        if (handle == 0 || name == null) return false;
-        return Native.sendHostEvent(handle, name, data == null ? null : Json.stringify(data));
+        if (name == null) return false;
+        // Serialization may call the host's own code. Finish it before
+        // taking the lock and reading the view's current handle.
+        String json = data == null ? null : Json.stringify(data);
+        synchronized (hostLock) {
+            return handle != 0 && Native.sendHostEvent(handle, name, json);
+        }
     }
 
     /**
@@ -415,10 +422,14 @@ public class NshView extends FrameLayout {
      * native components. The view can no longer be used.
      */
     public void destroy() {
-        if (handle != 0) {
-            Native.destroy(handle);
+        long taken;
+        synchronized (hostLock) {
+            taken = handle;
             handle = 0;
         }
+        // A send already in JNI finished before the handle was taken.
+        // Joining the engine needs no Java lock.
+        if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
     }
 

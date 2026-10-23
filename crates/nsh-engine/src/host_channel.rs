@@ -17,7 +17,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     JsonValue,
     host_channel::{HostBridge, HostInbox, check_name},
@@ -155,10 +155,19 @@ impl HostChannel {
         self.lock().handlers.get(name).cloned()
     }
 
+    /// Events sent once JS is interrupted must follow the shutdown
+    /// message, so the attachment can recover them for the next app.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn shutdown(&self, tx: &Sender<Message>, stop: &std::sync::atomic::AtomicBool) {
+        let _inner = self.lock();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = tx.send(Message::Shutdown);
+    }
+
     /// Attaches the engine whose queue is `tx`: events go to it from now
     /// on, those waiting first. Detached when the attachment drops (unless
     /// another engine attached since).
-    pub(crate) fn attach(&self, tx: Sender<Message>) -> HostAttachment {
+    pub(crate) fn attach(&self, tx: Sender<Message>, rx: Receiver<Message>) -> HostAttachment {
         let mut inner = self.lock();
         inner.next_engine += 1;
         let id = inner.next_engine;
@@ -169,6 +178,7 @@ impl HostChannel {
         HostAttachment {
             channel: self.clone(),
             id,
+            rx,
         }
     }
 
@@ -187,14 +197,37 @@ impl HostChannel {
 pub(crate) struct HostAttachment {
     channel: HostChannel,
     id: u64,
+    /// Events behind a shutdown message still belong to this channel.
+    rx: Receiver<Message>,
 }
 
 impl Drop for HostAttachment {
     fn drop(&mut self) {
-        let mut inner = self.channel.lock();
-        if inner.engine.as_ref().is_some_and(|(id, _)| *id == self.id) {
+        let discarded = {
+            let mut inner = self.channel.lock();
+            if !inner.engine.as_ref().is_some_and(|(id, _)| *id == self.id) {
+                return;
+            }
             inner.engine = None;
-        }
+            // Detach and drain under the same lock as `send`: every event
+            // either waits here or is kept by `send` for the next app.
+            let mut messages: Vec<_> = self.rx.try_iter().collect();
+            for message in &mut messages {
+                if let Message::HostEvent(name, data) = message
+                    && let Some((dropped, _)) = inner
+                        .pending
+                        .push(std::mem::take(name), std::mem::take(data))
+                {
+                    log::warn!(
+                        "nsh/host: the app stopped; the oldest kept event (\"{dropped}\") was dropped"
+                    );
+                }
+            }
+            messages
+        };
+        // Other messages can own closures whose destructors reach the
+        // channel. Release them without its lock held.
+        drop(discarded);
     }
 }
 
@@ -373,5 +406,108 @@ impl Drop for HostReply {
             );
             let _ = tx.send(Message::HostReply(self.id, Err(message)));
         }
+    }
+}
+
+#[cfg(all(test, feature = "js", not(target_arch = "wasm32")))]
+mod tests {
+    use std::time::Duration;
+
+    use nsh_core::{ApproxTextEngine, MountBatch};
+    use serde_json::json;
+
+    use super::*;
+    use crate::{Bundle, Engine, EngineConfig, MountSink};
+
+    struct Sink;
+
+    impl MountSink for Sink {
+        fn submit(&self, _: MountBatch) {}
+    }
+
+    #[test]
+    fn events_sent_while_the_engine_stops_reach_the_next_app() {
+        let channel = HostChannel::new();
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        channel.handle("hold", move |_| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        let mut config = EngineConfig::new(Bundle::source(
+            "import { host } from 'nsh/host'; host.post('hold');".to_owned(),
+        ));
+        config.host = channel.clone();
+        let engine = Engine::start(config, || ApproxTextEngine, Sink).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // Hold the engine while the platform drops it, as a reload does
+        // while the old app is still finishing a callback.
+        let stop = engine.stop.clone();
+        let dropping = std::thread::spawn(move || drop(engine));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "shutdown did not start"
+            );
+            std::thread::yield_now();
+        }
+        for id in 1..=3 {
+            channel.send("open", json!(id)).unwrap();
+        }
+        release_tx.send(()).unwrap();
+        dropping.join().unwrap();
+
+        let (seen_tx, seen_rx) = crossbeam_channel::unbounded();
+        channel.handle("seen", move |mut call| {
+            seen_tx.send(call.take_data()).unwrap();
+        });
+        let mut config = EngineConfig::new(Bundle::source(
+            "import { host } from 'nsh/host'; host.on('open', data => host.post('seen', data));"
+                .to_owned(),
+        ));
+        config.host = channel;
+        let engine = Engine::start(config, || ApproxTextEngine, Sink).unwrap();
+        for id in 1..=3 {
+            assert_eq!(
+                seen_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                json!(id)
+            );
+        }
+        assert!(seen_rx.try_recv().is_err());
+        drop(engine);
+    }
+
+    #[test]
+    fn recovered_events_keep_the_queue_limit_and_order() {
+        let channel = HostChannel::new();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let attachment = channel.attach(tx, rx);
+        let limit = nsh_core::host_channel::MAX_QUEUED_EVENTS;
+        for id in 0..limit + 2 {
+            channel.send("open", json!(id)).unwrap();
+        }
+        drop(attachment);
+        let mut inner = channel.lock();
+        let kept = inner.pending.take("open");
+        assert_eq!(kept.len(), limit);
+        assert_eq!(kept[0], json!(2));
+        assert_eq!(kept[limit - 1], json!(limit + 1));
+    }
+
+    #[test]
+    fn an_old_attachment_does_not_detach_its_replacement() {
+        let channel = HostChannel::new();
+        let (old_tx, old_rx) = crossbeam_channel::unbounded();
+        let old = channel.attach(old_tx, old_rx);
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let current = channel.attach(tx, rx.clone());
+        drop(old);
+        channel.send("open", json!(1)).unwrap();
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            Message::HostEvent(name, data) if name == "open" && data == json!(1)
+        ));
+        drop(current);
     }
 }

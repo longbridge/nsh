@@ -1029,6 +1029,8 @@ impl EngineControl {
 pub struct Engine {
     control: EngineControl,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Serializes shutdown with the embedding app's sends.
+    host: HostChannel,
     /// Interrupts running JS when the engine stops.
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -1064,6 +1066,7 @@ impl Engine {
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_stop = stop.clone();
+        let host = config.host.clone();
         let thread = std::thread::Builder::new()
             .name("nsh-engine".into())
             .stack_size(ENGINE_STACK_SIZE)
@@ -1071,6 +1074,7 @@ impl Engine {
         Ok(Engine {
             control: EngineControl { tx },
             thread: Some(thread),
+            host,
             stop,
         })
     }
@@ -1086,8 +1090,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         // Dropped on the platform's main thread: a script still running is
         // aborted rather than waited for.
-        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = self.control.tx.send(Message::Shutdown);
+        self.host.shutdown(&self.control.tx, &self.stop);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -1433,7 +1436,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             clock: config.clock.clone(),
             context: config.context.clone(),
             last_frame: None,
-            _host: config.host.attach(host_tx),
+            _host: config.host.attach(host_tx, rx.clone()),
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
