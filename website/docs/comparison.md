@@ -1,34 +1,56 @@
 ---
 title: Comparing approaches
-description: "How Native Shell compares with React Native, Flutter, Qt, GPUI, Slint, Electron and Tauri, and with web views and server-driven UI for UI delivered after release."
+description: "How Native Shell compares with React Native, Flutter, Qt, GPUI and Slint, with Electron and Tauri, and with web views and server-driven UI for UI delivered after release."
 order: 2
 group: start
 ---
 
 # Comparing approaches
 
-NSH is a framework for whole apps on iOS, Android, macOS, Windows, Linux and the web, and a runtime for UI delivered to apps after release. This page compares it first with the cross-platform frameworks people write apps in, then with the ways apps take UI they did not ship with. The comparison is about architecture — what draws the UI, where it runs, what the app is written in. Several of these frameworks also bring large, long-standing ecosystems.
+NSH is a framework for whole apps on iOS, Android, macOS, Windows, Linux and the web, and a runtime for UI delivered to apps after release. This page compares it first with the cross-platform frameworks people write apps in, then with the ways apps take UI they did not ship with. Green means the capability is available, yellow that it needs more of the app's own work or a separate project, and red that it is not provided; the marks describe availability, not performance. Versions are each framework's documented minimums at the time of writing: check them for the release you use.
+
+Legend: <span class="status status--yes" role="img" aria-label="Yes"></span> Yes · <span class="status status--partial" role="img" aria-label="Partial"></span> Partial · <span class="status status--no" role="img" aria-label="No"></span> No.
 
 ## Cross-platform frameworks
 
-| | What draws it | Platforms | App code | Code delivered after release |
-|---|---|---|---|---|
-| **React Native** | The platform's views on iOS and Android; desktops through separate projects | iOS, Android; Windows and macOS out of tree | JavaScript or TypeScript, with React | Over-the-air updates of trusted app code |
-| **Flutter** | Its own engine draws every pixel | iOS, Android, macOS, Windows, Linux, web | Dart | Not part of the framework |
-| **Qt** | Qt Widgets and Qt Quick, drawn by Qt | Desktops, mobile, embedded systems, web | C++, QML, Python | QML the app loads |
-| **GPUI** ([GPUI Fast](https://github.com/longbridge/gpui-fast)) | Its own GPU renderer | macOS, Windows, Linux | Rust | JavaScript modules with GPUI Shell |
-| **Slint** | Its own renderer | Desktops, embedded systems, Android, web | The Slint language, with Rust, C++, JavaScript or Python | Not part of the framework |
-| **Electron** | Chromium, bundled with the app | macOS, Windows, Linux | HTML, CSS, JavaScript | Web content the app loads |
-| **Tauri** | The system's web view | macOS, Windows, Linux, iOS, Android | HTML, CSS, JavaScript; Rust for the native side | Web content the app loads |
-| **NSH** | Each platform's own UI: UIKit, Android views, AppKit, Win32 with Direct2D, GTK 4, HTML | iOS, Android, macOS, Windows, Linux, web | Rust apps, TSX, or both; the runtime is Rust | Signed TSX packages, verified and sandboxed per view |
+| Capability | NSH | React Native | Flutter | Qt 6 | GPUI | GPUI Fast | Slint |
+|---|---|---|---|---|---|---|---|
+| Drawn by | Platform UI | Platform views | Own engine | Scene graph | Own, GPU | Own, GPU | Own renderer |
+| UI model | Retained | Retained | Retained | Retained | Immediate | Immediate + Retained | Reactive, retained |
+| Language | Rust, TSX | JS, TS | Dart | C++, QML | Rust | Rust | Slint + Rust, C++ |
+| iOS | <span class="status status--yes" role="img" aria-label="Yes"></span> 15+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 15.1+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 15+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 17+ | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Rust |
+| Android | <span class="status status--yes" role="img" aria-label="Yes"></span> 9+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 7+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 7+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 9+ | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| macOS | <span class="status status--yes" role="img" aria-label="Yes"></span> 14+ | <span class="status status--partial" role="img" aria-label="Partial"></span> Separate | <span class="status status--yes" role="img" aria-label="Yes"></span> 12+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 13+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 12+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 12+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 13+ |
+| Windows | <span class="status status--yes" role="img" aria-label="Yes"></span> 10 1809+ | <span class="status status--partial" role="img" aria-label="Partial"></span> Separate | <span class="status status--yes" role="img" aria-label="Yes"></span> 10+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 10 1809+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 10+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 10+ | <span class="status status--yes" role="img" aria-label="Yes"></span> 10+ |
+| Linux | <span class="status status--yes" role="img" aria-label="Yes"></span> GTK 4.14+ | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> Debian 10+ | <span class="status status--yes" role="img" aria-label="Yes"></span> Debian 11+ | <span class="status status--yes" role="img" aria-label="Yes"></span> Vulkan | <span class="status status--yes" role="img" aria-label="Yes"></span> Vulkan | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| Web | <span class="status status--yes" role="img" aria-label="Yes"></span> HTML | <span class="status status--partial" role="img" aria-label="Partial"></span> Library | <span class="status status--yes" role="img" aria-label="Yes"></span> Canvas | <span class="status status--yes" role="img" aria-label="Yes"></span> Canvas | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> Canvas |
+| System text | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> |
+| Per-device UX | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> |
+| No JS runtime | <span class="status status--yes" role="img" aria-label="Yes"></span> Rust apps | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> C++ | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| Signed delivery | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> OTA | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> QML | <span class="status status--partial" role="img" aria-label="Partial"></span> Shell | <span class="status status--partial" role="img" aria-label="Partial"></span> Shell | <span class="status status--no" role="img" aria-label="No"></span> |
+| License | Apache-2.0 | MIT | BSD-3-Clause | LGPL, GPL, commercial | Apache-2.0 | Apache-2.0 | GPL, commercial |
 
-What sets NSH apart:
+Immediate mode builds the UI description again every frame; retained mode keeps it and updates only what changed. GPUI Fast combines the two on GPUI and runs where GPUI runs. "Shell" is [GPUI Shell](https://gpui-kit.com/shell).
 
-- **Each platform's own UI, under one app model.** NSH unifies the components, state, logic and API, and leaves the drawing to each platform: text selection, input methods, accessibility and the system's look come from the platform, and what a new OS release brings to them reaches the app with it ([Introduction](./index.md#what-native-means)).
-- **Interaction that follows the device.** The same `Menu` is a popup at its trigger with a pointer and a sheet from the bottom on a phone; a `ContextMenu` opens on a right click or a held finger. Cross-platform covers interaction, not only code reuse.
-- **Rust first, TSX beside it.** A whole app can be Rust from start to end, with Rust's types, threads and crates and native-speed computation; TSX serves the screens written quickly and the UI delivered after release, on the same engine. One `nsh` executable builds, tests and packages both, and brings its own TSX tooling.
-- **The web as a platform of its own.** On the web, NSH renders HTML elements styled with CSS, and the browser scrolls, selects text and handles input; a published app is a static site, cached and served like any other ([Web](./web.md)).
-- **Plugins and generated UI on the same engine.** The apps NSH builds — and native apps written with each platform's own tools — can host signed TSX modules in a sandbox ([Dynamic UI](./index.md#dynamic-ui-and-ai-generated-ui)).
+NSH is the one framework here that brings all of these together: each platform's own UI and text input, phones, desktops and the web from one app — the web as HTML — Rust apps with no JavaScript runtime, and signed, sandboxed UI delivered after release.
+
+### What the rows mean
+
+- **Drawn by, UI model.** NSH mounts each platform's own views and keeps them (retained mode): a change updates only the views it touched. React Native also mounts platform views, on iOS and Android. Flutter, Qt Quick, GPUI and Slint draw with their own renderers; GPUI builds the element tree each frame (immediate mode), and [GPUI Fast](https://github.com/longbridge/gpui-fast) reuses what did not change.
+- **Platforms.** NSH's minimums are its own ([Platforms](./platforms.md)). The others come from [React Native 0.76](https://reactnative.dev/blog/2024/10/23/release-0.76-new-architecture) (iOS 15.1, Android 7 / API 24; macOS and Windows through the separate react-native-macos and react-native-windows projects, the web through the react-native-web library), [Flutter 3.47](https://docs.flutter.dev/reference/supported-platforms), [Qt 6.10](https://doc.qt.io/qt-6.10/supported-platforms.html), [Zed's requirements](https://zed.dev/docs/installation) for GPUI, and [Slint's platform guides](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/) (iOS from Rust). "Canvas" means the framework draws into a canvas on the page; NSH's web apps are HTML elements styled with CSS, which the browser scrolls, selects and edits ([Web](./web.md)).
+- **System text.** NSH's text fields are the platform's editors — `UITextView`, `EditText`, `NSTextView`, GTK's `TextView`, the browser's — with the system's input methods, selection handles and editing menus; on Windows, NSH's own editor works with DirectWrite and the system's input methods (IMM32). React Native also uses the platform's text inputs. The self-drawn frameworks implement text editing themselves and connect it to the system's input methods.
+- **Per-device UX.** NSH's base components follow the device: the same `Menu` is a popup at its trigger with a pointer and a sheet from the bottom on a phone, and a `ContextMenu` opens on a right click or a held finger. In the others, adapting interaction per device is mostly the app's own work.
+- **No JS runtime.** A Rust app's runners link no JavaScript engine on any platform; TSX is the second path, on the same engine. Qt Quick's QML runs on Qt's JavaScript engine; Qt Widgets in C++ do not.
+- **Signed delivery.** NSH verifies signed `.nshpkg` packages against the keys it trusts and a revocation list, and runs each in a VM with the limits and capabilities the host grants ([Signed packages](./signed-packages.md), [Sandbox and capabilities](./sandbox-and-capabilities.md)). React Native's over-the-air updates ship trusted app code; Qt can load QML files; GPUI apps take JavaScript modules through [GPUI Shell](https://gpui-kit.com/shell).
+
+### What sets NSH apart
+
+- **Native on every platform, in both senses.** Each backend builds on its platform's own views, text and input methods — UIKit, Android views, AppKit, Win32 with Direct2D, GTK 4, HTML — and each platform's interaction comes with them. Text selection, input methods and accessibility are the system's, and what a new OS release brings to them reaches the app ([Introduction](./index.md#what-native-means)).
+- **Phones, desktops and the web from one app.** Six platforms are backends of one framework, with layouts that reshape and input that follows the device; on the web, the app is HTML, published as a static site.
+- **Rust first, with no JavaScript runtime.** A whole app can be Rust from start to end, compiled to native code with Rust's types, threads and crates. TSX is the second path, on the same engine, for screens written quickly ([Building with Rust](./rust.md)).
+- **Retained views for everyday apps.** Chats, forms, lists and documents sit near idle at rest, because a change sends only the views it touched ([Introduction](./index.md#retained-views)).
+- **UI delivered after release, signed and sandboxed.** Apps built with NSH — and native apps written with each platform's own tools — take TSX modules at run time, written by a team or generated by AI ([Dynamic UI](./index.md#dynamic-ui-and-ai-generated-ui)).
+- **One toolchain, for people and agents.** One `nsh` executable creates, runs, tests on real platforms, packages and signs apps for every target.
 
 ### React Native
 
@@ -52,25 +74,30 @@ The two suit different loads. In the [NSH performance benchmark](https://github.
 
 Slint is a declarative UI toolkit with its own language and light renderers, for desktops and embedded devices, used from Rust, C++, JavaScript or Python. Both value native performance; NSH's route is each platform's own UI and interaction, HTML on the web, Rust and TSX as app languages, and AI-driven development across six platforms.
 
+### Electron and Tauri
+
+Electron bundles Chromium and Tauri uses the system's web view: both build desktop apps (and, with Tauri, mobile apps) from web content, with the browser's text and input. NSH builds each platform's own views instead, and renders HTML only on the web itself.
+
 ## UI delivered after release
 
 An app that wants UI it did not ship with — answers generated by a model, features from partners or other teams, screens that change without a release — has a handful of established options, on phones and desktops alike. They differ in what draws the UI, what the delivered code may do, and how much of the app has to change to host them.
 
-| | What draws it | What it can express | Confinement | Fit for generated UI | Cost to the host app |
+| Capability | NSH | Web view | Server-driven UI | Mini-programs | OTA updates |
 |---|---|---|---|---|---|
-| **Web view (H5)** | A browser engine | Anything HTML, CSS and JS can | Same-origin rules; native access through a hand-written bridge | Models write HTML well; the result looks and behaves like a web page | A browser engine per view; a bridge to maintain |
-| **Server-driven UI** | The app's own native views | Only the components and actions the app built in, described in JSON | Total: the schema is the limit | Easy to generate, little to express: no local state or logic beyond what the schema provides | A renderer for every component and its versions, in each app |
-| **Mini-program containers** | Usually a web engine with a proprietary layer | A platform-specific framework and API | The container's permission model | Proprietary dialect, less known to models | A large container SDK |
-| **Over-the-air updates of a cross-platform app** (React Native with a code-push service, for example) | That framework's renderer | The whole framework | None: updates are trusted app code | Code generated per request is not what these updates are for | The app has to be written in that framework |
-| **NSH** | The platform's own UI: UIKit, Android views, AppKit, GTK 4, Win32 with Direct2D, HTML | Components with state, logic, animation and layout; host-registered native views | Signed packages, a VM per view with host-set limits, capabilities granted per view | Designed for it: one TSX module, typed API, headless checks | One view and a library in an existing native app |
+| Drawn by | Platform UI | Browser engine | The app's views | Web engine + layer | Framework renderer |
+| Native look and behavior | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| Own state, logic and layout | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| Host's native components | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Bridge | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--yes" role="img" aria-label="Yes"></span> |
+| Sandbox the host configures | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Same-origin | <span class="status status--yes" role="img" aria-label="Yes"></span> Schema | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--no" role="img" aria-label="No"></span> |
+| Signed, revocable packages | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--no" role="img" aria-label="No"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> |
+| Fit for AI-generated UI | <span class="status status--yes" role="img" aria-label="Yes"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> Web pages | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--partial" role="img" aria-label="Partial"></span> | <span class="status status--no" role="img" aria-label="No"></span> |
+| Cost to the host app | One view and a library | A browser engine per view | A renderer per component | A container SDK | The whole app in the framework |
 
-How NSH differs here:
-
-- **The platform's own UI.** A module is made of the platform's views, so text selection and its menu, input methods, accessibility and scrolling are the system's own — the reason NSH exists next to [GPUI Shell](./index.md#native-shell-and-gpui-shell).
-- **More than a schema.** Server-driven UI only recombines what the app already ships. An NSH module has its own state, logic, animations and layout, so a model can produce an interface the app's developers never anticipated.
-- **Confined by the host.** Delivered code is untrusted. NSH checks signatures and revocations before running anything, gives each view its own VM with memory, call-time and node limits, and lets the host decide which network hosts, web pages and system settings a module may reach ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
-- **Embedded in the app.** The app keeps its toolchain; NSH is a view placed where a module should appear ([Platforms](./platforms.md#embed-in-a-native-app)).
-- **One module, every platform.** The same bundle runs on iOS, Android, macOS, Windows, Linux and the web, each time with that platform's own UI ([Platforms](./platforms.md)).
+- **Web view (H5).** A page in a browser engine: anything HTML can express, with the browser's look and a hand-written bridge to native code.
+- **Server-driven UI.** JSON that recombines the components and actions the app already ships: easy to generate, with no local state or logic beyond what the schema provides.
+- **Mini-program containers.** A platform-specific framework and API on a web engine, inside a large container SDK.
+- **Over-the-air updates** (React Native with a code-push service, for example). The whole framework, but updates are trusted app code, and the app has to be written in that framework.
+- **NSH.** A TSX module with its own state, logic, animation and layout, rendered with the platform's own UI, that can use the host's registered native views. It arrives as a signed package the app verifies, runs in its own VM with memory, call-time and node limits, and reaches only the network hosts, web pages and system settings the host grants ([Sandbox and capabilities](./sandbox-and-capabilities.md)). The host adds one view where the module appears ([Platforms](./platforms.md#embed-in-a-native-app)), and the same bundle runs on every platform. This is the reason NSH exists next to [GPUI Shell](./index.md#native-shell-and-gpui-shell).
 
 ## When another option fits better
 
