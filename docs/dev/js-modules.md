@@ -5,6 +5,11 @@ the capabilities. `nsh/base` (the crate `nsh-base`) is the unstyled foundation e
 pages (and their status bar), dialogs, safe areas, the system's alert dialog and the software keyboard. NSH provides no styled
 components: the look of an app is the app's, drawn from the primitives, or from Rust components in the app's own crate,
 whose UI set is a module of its own (`app/native`; `docs/dev/components.md`, `tooling.md`). Each export has one home.
+A UI set may serve a family of exports whose names only make sense together as a module under a path of its own
+specifier, as `gpui-base`'s `plot` is a module of its crate: a submodule of the set (`Registry::submodule`, such as
+`nsh/base/<family>` of `nsh/base`), served, described and declared wherever the set is (`Registry::sets`: the hosts'
+module tables, the core's components, the toolchain's descriptions, one declaration file per module), so a list of UI
+sets names only the set.
 
 Every module is native: `nsh-js` serves it (`modules.rs`: NSH's own modules by `nsh_core::js::NATIVE_MODULES`, then the
 registries: the runtime's `nsh_core::runtime::registries()` and the UI sets a host serves, `nsh/base` and the app's), and the bundler keeps
@@ -32,7 +37,7 @@ re-exported by `nsh`). Apps import a primitive's tag from `nsh` (`native-pipelin
 
 | Module | Exports | Implemented in (`crates/nsh-js/src`) |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `Image`, `List`, `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`, `WebView`, `Video` (the modules' below, the same values); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs`, `modules.rs` |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary` (`dom.rs`: a memo of the children or the fallback, `native-pipeline.md`), `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `Image`, `List`, `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`, `WebView`, `Video` (the modules' below, the same values); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs`, `modules.rs` |
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
@@ -64,8 +69,9 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   props in them are the generated `IOS…HostProps` / `Android…HostProps`). The renderer
   (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
-  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: input `inputAccessoryViewID` / `textContentType` /
-  `keyboardAppearance`, Dialog `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
+  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
+  backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
+  `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
   `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' trackpad swipes, Windows' touchscreen swipes; a
   prop of several platforms names each: `#[prop(ios = "x", desktop = "x")]`). What two platforms do is a top-level prop, ignored where it does not apply (`presentation`,
   `headerLargeTitle`, `headerBackTitle`, AlertDialog's `closeOnEscape` / `closeOnBackdropPress`; `api-naming.md`).

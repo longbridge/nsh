@@ -21,7 +21,14 @@ import android.view.View;
 final class ImageBox extends View implements Node {
     final Decor decor = new Decor();
     final int id;
-    int resizeMode; // 0 cover, 1 contain, 2 stretch, 3 center
+    int resizeMode; // 0 cover, 1 contain, 2 stretch, 3 center, 4 scale-down
+    /**
+     * {@code objectPosition}: per axis a distance from the start edge (left, top) or, with the axis's bit 1, the
+     * end edge; with its bit 2 a fraction of the free space, else pixels. Bits 0-1 are x's, 2-3 y's. The center
+     * by default.
+     */
+    float positionX = 0.5f, positionY = 0.5f;
+    int positionFlags = 2 | (2 << 2);
     String uri;
     /** Size the pending load decodes at. */
     int requestedPx;
@@ -166,6 +173,16 @@ final class ImageBox extends View implements Node {
     }
 
     /**
+     * Where content starts along one axis, {@code free} pixels being the view's size less the content's (negative
+     * when it overflows): {@code value} from the start or end edge ({@code flags} bit 1), in pixels or ({@code
+     * flags} bit 2) as a fraction of the free space, as CSS's {@code object-position} places it.
+     */
+    private static float place(float free, float value, int flags) {
+        float d = (flags & 2) != 0 ? value * free : value;
+        return (flags & 1) != 0 ? free - d : d;
+    }
+
+    /**
      * Draws {@code image} placed by the resize mode, inside the view's shape; {@code center} uses its intrinsic
      * pixel size within the decoded raster (0: a pixel per pixel).
      */
@@ -184,18 +201,26 @@ final class ImageBox extends View implements Node {
             case 2:
                 matrix.setScale(w / bw, h / bh);
                 break;
-            case 3: {
+            case 3:
+            case 4: {
                 // Preserve the intrinsic SVG dimensions within the decoded raster, as before.
                 float sx = naturalWidth > 0 ? Math.min(1, naturalWidth / bw) : 1;
                 float sy = naturalHeight > 0 ? Math.min(1, naturalHeight / bh) : 1;
+                if (resizeMode == 4) {
+                    // Scale-down: shrunk to fit the view where larger.
+                    float fit = Math.min(1, Math.min(w / (bw * sx), h / (bh * sy)));
+                    sx *= fit;
+                    sy *= fit;
+                }
                 matrix.setScale(sx, sy);
-                matrix.postTranslate((w - bw * sx) / 2, (h - bh * sy) / 2);
+                matrix.postTranslate(place(w - bw * sx, positionX, positionFlags), place(h - bh * sy, positionY, positionFlags >> 2));
                 break;
             }
             default: {
                 float scale = resizeMode == 1 ? Math.min(w / bw, h / bh) : Math.max(w / bw, h / bh);
                 matrix.setScale(scale, scale);
-                matrix.postTranslate((w - bw * scale) / 2, (h - bh * scale) / 2);
+                matrix.postTranslate(
+                        place(w - bw * scale, positionX, positionFlags), place(h - bh * scale, positionY, positionFlags >> 2));
             }
         }
         // Only where the image is (a shader clamps: repeats edge pixels).

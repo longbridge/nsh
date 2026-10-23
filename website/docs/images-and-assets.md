@@ -154,6 +154,20 @@ image(photo).resize_mode(ResizeMode::Contain).size(px(140.0)).bg(rgb(0xeaeef2))
 
 The Tailwind classes `object-cover`, `object-contain`, ... do the same.
 
+### Image position
+
+Where the sized image sits in its box is the `objectPosition` style (`.object_position(..)` and `.object_top()`, ... in Rust), CSS's `object-position`: the center by default. A covering image is cropped around it, a contained one moves within its bands. It takes keywords (`"top"`, `"left bottom"`), percentages and lengths (`"25% 75%"`, `"10px 0"`) and edges with offsets (`"right 10px bottom 20%"`). A tall photo in a chat bubble shows its top this way:
+
+```rust tabs
+image(photo).resize_mode(ResizeMode::Cover).object_top().w(px(220.0)).h(px(160.0)).rounded(px(16.0))
+```
+
+```tsx tabs
+<Image src={photo} resizeMode="cover" style={{ width: 220, height: 160, borderRadius: 16, objectPosition: "top" }} />
+```
+
+The Tailwind classes are Tailwind's: `object-top`, `object-bottom`, `object-left`, `object-right`, `object-center`, `object-top-left`, `object-top-right`, `object-bottom-left`, `object-bottom-right` and arbitrary values (`object-[25%_75%]`).
+
 ## Styling images
 
 Images are views: they take corner radii (also per corner), borders, shadows, opacity and transforms. Corners clip the image.

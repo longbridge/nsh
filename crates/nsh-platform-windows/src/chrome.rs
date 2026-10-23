@@ -324,6 +324,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             *c.menu.borrow_mut() = menu.clone();
             show_menu_bar(surface);
         }
+        // The Win32 menu bar always shows.
+        DesktopCommand::SetMenuBar(_) => {}
         DesktopCommand::PopupMenu { items, at } => popup(
             surface,
             Popup {

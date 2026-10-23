@@ -21,7 +21,7 @@ use std::{
 
 use super::{IntoReactive, Reactive, SharedString};
 use crate::{
-    BlendMode, BoxShadow, Cursor, FontVariant, TransformOrigin, TransitionProps,
+    BlendMode, BoxShadow, Cursor, FontVariant, ObjectPosition, TransformOrigin, TransitionProps,
     color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
@@ -29,7 +29,7 @@ use crate::{
         deg, percentage, point, px, relative,
     },
     style::{Color, PatchValue, StyleDecl, StyleKey},
-    tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
+    tailwind::{self, ClassList, Decl, Part, Rank, Rule, rank, state},
     transform::TransformKind,
 };
 
@@ -226,13 +226,11 @@ impl Variant {
         }
     }
 
-    /// Tailwind's variant order: the highest of its parts.
-    fn rank(self) -> u16 {
-        let mut r = 0;
-        if self.group_states != 0 {
-            r = rank::GROUP;
-        }
-        for (bit, rank) in [
+    /// Its place in Tailwind's variant order: every part's, group
+    /// `group` (`""`: unnamed).
+    fn rank(self, group: &str) -> Rank {
+        let mut r = Rank::default();
+        let keys = [
             (state::HOVERED, rank::HOVER),
             (state::FOCUSED, rank::FOCUS),
             (state::PRESSED, rank::ACTIVE),
@@ -240,13 +238,17 @@ impl Variant {
             (state::SELECTED, rank::SELECTED),
             (state::CHECKED, rank::CHECKED),
             (state::INDETERMINATE, rank::INDETERMINATE),
-        ] {
+        ];
+        for (bit, key) in keys {
+            if self.group_states & bit != 0 {
+                r.add_group(&key, group);
+            }
             if self.states & bit != 0 {
-                r = r.max(rank);
+                r.add(key);
             }
         }
         if self.dark {
-            r = r.max(rank::DARK);
+            r.add(rank::DARK);
         }
         r
     }
@@ -270,19 +272,19 @@ pub(crate) enum ColorPart {
 impl ColorPart {
     fn part(self, c: Hsla) -> Part {
         let c = Color::from(c);
-        // A color with its own alpha replaces the layers' alpha (as
-        // Tailwind's `shadow-black/50`); an opaque one keeps theirs.
-        let own = c.0 & 0xff != 0xff;
+        // The color replaces the layers', alpha too (as Tailwind's
+        // `shadow-red-500`).
         match self {
-            ColorPart::Shadow => Part::ShadowColor(c, own),
-            ColorPart::InsetShadow => Part::InsetShadowColor(c, own),
-            ColorPart::TextShadow => Part::TextShadowColor(c, own),
+            ColorPart::Shadow => Part::ShadowColor(c),
+            ColorPart::InsetShadow => Part::InsetShadowColor(c),
+            ColorPart::TextShadow => Part::TextShadowColor(c),
             ColorPart::Ring => Part::RingColor(c),
             ColorPart::RingOffset => Part::RingOffsetColor(c),
             ColorPart::InsetRing => Part::InsetRingColor(c),
-            ColorPart::From => Part::From(c),
-            ColorPart::Via => Part::Via(c),
-            ColorPart::To => Part::To(c),
+            // Theme and palette colors, which Tailwind writes in OKLCH.
+            ColorPart::From => Part::From(c, false),
+            ColorPart::Via => Part::Via(c, false),
+            ColorPart::To => Part::To(c, false),
         }
     }
 }
@@ -384,6 +386,11 @@ pub(crate) enum Declaration {
     Number(StyleKey, Bits),
     Length(StyleKey, Length),
     Keyword(StyleKey, &'static str),
+    /// What a declaration implies for another property, which any
+    /// declaration of that property overrides wherever it is (an outline
+    /// width's solid style).
+    DefaultKeyword(StyleKey, &'static str),
+    DefaultNumber(StyleKey, Bits),
     Str(StyleKey, SharedString),
     Color(StyleKey, AdaptiveColor),
     /// Tailwind's `text-*` size and line height.
@@ -407,7 +414,12 @@ pub(crate) enum Declaration {
     /// One step of the transform the styles compose (CSS's order:
     /// translate, rotate, scale, then the 3D rotations and skews).
     Transform(TransformKind, Bits),
+    /// `transform: none` (the 3D rotations and the skews).
     TransformNone,
+    /// `translate: none`, `scale: none`, `rotate: none`.
+    TranslateNone,
+    ScaleNone,
+    RotateNone,
     /// `transformOrigin` at points or fractions (`true`) of the size.
     Origin([(bool, Bits); 2]),
     Gradient(GradientShape),
@@ -469,9 +481,35 @@ impl Declaration {
     fn lower(&self, out: &mut Vec<Decl>) {
         let part = |out: &mut Vec<Decl>, p: Part| out.push(Decl::Part(p));
         match self {
-            Declaration::Number(key, n) => out.push(Decl::Set(*key, PatchValue::Number(n.0))),
+            Declaration::Number(key, n) => {
+                out.push(Decl::Set(*key, PatchValue::Number(n.0)));
+                // As the classes': a width's color is `currentColor` unless
+                // a color method sets one.
+                match key {
+                    StyleKey::BorderWidth
+                    | StyleKey::BorderTopWidth
+                    | StyleKey::BorderRightWidth
+                    | StyleKey::BorderBottomWidth
+                    | StyleKey::BorderLeftWidth
+                    | StyleKey::BorderStartWidth
+                    | StyleKey::BorderEndWidth => {
+                        out.push(Decl::CurrentColor(StyleKey::BorderColor))
+                    }
+                    StyleKey::OutlineWidth => out.push(Decl::CurrentColor(StyleKey::OutlineColor)),
+                    _ => {}
+                }
+            }
             Declaration::Length(key, l) => out.push(Decl::Set(*key, length_patch(*l))),
             Declaration::Keyword(key, k) => out.push(Decl::Set(*key, PatchValue::Str((*k).into()))),
+            Declaration::DefaultKeyword(key, k) => {
+                out.push(Decl::Default(*key, PatchValue::Str((*k).into())))
+            }
+            Declaration::DefaultNumber(key, n) => {
+                out.push(Decl::Default(*key, PatchValue::Number(n.0)));
+                if *key == StyleKey::OutlineWidth {
+                    out.push(Decl::CurrentColor(StyleKey::OutlineColor));
+                }
+            }
             Declaration::Str(key, s) => {
                 out.push(Decl::Set(*key, PatchValue::Str(s.as_str().into())))
             }
@@ -483,8 +521,9 @@ impl Declaration {
             Declaration::TextPreset(name) => {
                 if let Some(&(size, line)) = PRESETS.text.get(*name) {
                     out.push(Decl::Set(StyleKey::FontSize, PatchValue::Number(size)));
+                    // As `text-lg`'s: a line height set anywhere wins.
                     if let Some(m) = line {
-                        out.push(Decl::Set(
+                        out.push(Decl::Default(
                             StyleKey::LineHeight,
                             PatchValue::Str(m.to_string().into()),
                         ));
@@ -542,11 +581,14 @@ impl Declaration {
                     TransformKind::RotateY => &[Part::RotateY(v)],
                     TransformKind::SkewX => &[Part::SkewX(v)],
                     TransformKind::SkewY => &[Part::SkewY(v)],
-                    TransformKind::Perspective => &[Part::Perspective(v)],
+                    TransformKind::Perspective => &[Part::Perspective(Some(v))],
                 };
                 out.extend(parts.iter().cloned().map(Decl::Part));
             }
             Declaration::TransformNone => part(out, Part::TransformNone),
+            Declaration::TranslateNone => part(out, Part::TranslateNone),
+            Declaration::ScaleNone => part(out, Part::ScaleNone),
+            Declaration::RotateNone => part(out, Part::RotateNone),
             Declaration::Origin(axes) => {
                 let [x, y] = axes.map(|(fraction, v)| {
                     if fraction {
@@ -868,18 +910,16 @@ impl StyleRefinement {
                 }
             }
             if !decls.is_empty() {
-                let group = (variant.group_states != 0).then(|| {
-                    let name = match variant.group {
-                        0 => "",
-                        g => self.names[g as usize - 1],
-                    };
-                    (name, variant.group_states)
-                });
+                let name = match variant.group {
+                    0 => "",
+                    g => self.names[g as usize - 1],
+                };
+                let group = (variant.group_states != 0).then_some((name, variant.group_states));
                 rules.push(Rule::with(
                     variant.states,
                     group,
                     variant.dark,
-                    variant.rank(),
+                    variant.rank(name),
                     decls,
                 ));
             }
@@ -1669,6 +1709,13 @@ pub trait Styled: Sized {
         self
     }
 
+    /// No border, whatever the widths set before or after (they take no
+    /// space); [`Styled::border_solid`] and the other styles show it again.
+    fn border_none(mut self) -> Self {
+        self.style().keyword(StyleKey::BorderStyle, "none");
+        self
+    }
+
     /// The shape of its rounded corners.
     fn border_curve(mut self, curve: BorderCurve) -> Self {
         self.style().keyword(
@@ -1803,10 +1850,11 @@ pub trait Styled: Sized {
     }
 
     /// An outline `width` wide, outside the border; it takes no space.
+    /// Solid unless a style method says otherwise, before or after it.
     fn outline(mut self, width: impl Into<AbsoluteLength>) -> Self {
         let s = self.style();
         s.number(StyleKey::OutlineWidth, points(width.into()));
-        s.keyword(StyleKey::OutlineStyle, "solid");
+        s.push(Declaration::DefaultKeyword(StyleKey::OutlineStyle, "solid"));
         self
     }
 
@@ -1827,15 +1875,27 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A dashed outline.
+    /// A dashed outline (3 points wide unless [`Styled::outline`] sets a
+    /// width, as CSS's `medium`).
     fn outline_dashed(mut self) -> Self {
-        self.style().keyword(StyleKey::OutlineStyle, "dashed");
+        let s = self.style();
+        s.keyword(StyleKey::OutlineStyle, "dashed");
+        s.push(Declaration::DefaultNumber(
+            StyleKey::OutlineWidth,
+            Bits(3.0),
+        ));
         self
     }
 
-    /// A dotted outline.
+    /// A dotted outline (3 points wide unless [`Styled::outline`] sets a
+    /// width).
     fn outline_dotted(mut self) -> Self {
-        self.style().keyword(StyleKey::OutlineStyle, "dotted");
+        let s = self.style();
+        s.keyword(StyleKey::OutlineStyle, "dotted");
+        s.push(Declaration::DefaultNumber(
+            StyleKey::OutlineWidth,
+            Bits(3.0),
+        ));
         self
     }
 
@@ -2471,7 +2531,7 @@ pub trait Styled: Sized {
         })
     }
 
-    /// Rotates by `angle` around the horizontal axis (3D; with
+    /// Rotates by `angle` around the horizontal axis (3D; in a view with
     /// [`Styled::perspective`] it tilts towards the viewer).
     fn rotate_x(self, angle: impl IntoReactive<Radians>) -> Self {
         transform_with(self, angle, |a: Radians| {
@@ -2500,7 +2560,9 @@ pub trait Styled: Sized {
         })
     }
 
-    /// Looks at its 3D rotations from `distance` away (smaller: stronger).
+    /// Gives its children depth: their 3D rotations are seen from
+    /// `distance` away (smaller: stronger), from its center (CSS's
+    /// `perspective`, `perspective-*`).
     fn perspective(self, distance: impl IntoReactive<AbsoluteLength>) -> Self {
         transform_with(self, distance, |d: AbsoluteLength| {
             (TransformKind::Perspective, points(d))
@@ -2508,21 +2570,35 @@ pub trait Styled: Sized {
     }
 
     /// The step `kind` of its transform, by `amount`. The steps compose in
-    /// CSS's order, whatever the order of the calls: perspective,
-    /// translate, rotate, scale, then the 3D rotations and the skews.
+    /// CSS's order, whatever the order of the calls: translate, rotate,
+    /// scale, then the 3D rotations and the skews.
+    /// [`TransformKind::Perspective`] is [`Styled::perspective`], its
+    /// children's depth.
     fn transform_step(self, kind: TransformKind, amount: impl IntoReactive<f32>) -> Self {
         transform_with(self, amount, move |amount| (kind, amount))
     }
 
-    /// No transform (also none of the steps set before).
-    fn transform_none(mut self) -> Self {
-        let style = self.style();
-        if style.is_bound() {
-            style.bind(|s| s.push(Declaration::TransformNone));
-        } else {
-            style.push(Declaration::TransformNone);
-        }
-        self
+    /// No 3D rotations and skews (CSS's `transform: none`; the
+    /// translation, rotation and scale are properties of their own, which
+    /// [`Styled::translate_none`], [`Styled::rotate_none`] and
+    /// [`Styled::scale_none`] remove).
+    fn transform_none(self) -> Self {
+        transform_reset(self, Declaration::TransformNone)
+    }
+
+    /// No translation (also none set before).
+    fn translate_none(self) -> Self {
+        transform_reset(self, Declaration::TranslateNone)
+    }
+
+    /// No scale (also none set before).
+    fn scale_none(self) -> Self {
+        transform_reset(self, Declaration::ScaleNone)
+    }
+
+    /// No rotation (also none set before; the 3D rotations stay).
+    fn rotate_none(self) -> Self {
+        transform_reset(self, Declaration::RotateNone)
     }
 
     /// The point its transform turns and scales around (the center by
@@ -2590,6 +2666,77 @@ pub trait Styled: Sized {
     fn origin_bottom_right(mut self) -> Self {
         self.style()
             .keyword(StyleKey::TransformOrigin, "bottom right");
+        self
+    }
+
+    /// Where an image sits in its box once its resize mode has sized it
+    /// (CSS's `object-position`; the center by default): a covering image
+    /// is cropped around it.
+    fn object_position(mut self, position: ObjectPosition) -> Self {
+        self.style().push(Declaration::Str(
+            StyleKey::ObjectPosition,
+            position.to_string().into(),
+        ));
+        self
+    }
+
+    /// Shows an image's top left corner (Tailwind's `object-top-left`).
+    fn object_top_left(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "left top");
+        self
+    }
+
+    /// Shows an image's top (Tailwind's `object-top`): a tall image
+    /// covering its box is cropped at the bottom.
+    fn object_top(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "top");
+        self
+    }
+
+    /// Shows an image's top right corner (Tailwind's `object-top-right`).
+    fn object_top_right(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "right top");
+        self
+    }
+
+    /// Shows an image's left side (Tailwind's `object-left`).
+    fn object_left(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "left");
+        self
+    }
+
+    /// Centers an image in its box (Tailwind's `object-center`, the
+    /// default).
+    fn object_center(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "center");
+        self
+    }
+
+    /// Shows an image's right side (Tailwind's `object-right`).
+    fn object_right(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "right");
+        self
+    }
+
+    /// Shows an image's bottom left corner (Tailwind's
+    /// `object-bottom-left`).
+    fn object_bottom_left(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::ObjectPosition, "left bottom");
+        self
+    }
+
+    /// Shows an image's bottom (Tailwind's `object-bottom`).
+    fn object_bottom(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "bottom");
+        self
+    }
+
+    /// Shows an image's bottom right corner (Tailwind's
+    /// `object-bottom-right`).
+    fn object_bottom_right(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::ObjectPosition, "right bottom");
         self
     }
 
@@ -2872,9 +3019,10 @@ pub trait Styled: Sized {
         font_variant(self, FontVariant::SMALL_CAPS, 0)
     }
 
-    /// No number or letter forms (undoes the ones set before).
+    /// The font's own number forms (undoes the number forms set before;
+    /// `small_caps` stays).
     fn normal_nums(self) -> Self {
-        font_variant(self, 0, 0xff)
+        font_variant(self, 0, !FontVariant::SMALL_CAPS)
     }
 
     /// The layout direction of the view and its subtree (by default its
@@ -3186,6 +3334,17 @@ fn transform_with<S: Styled, T: Clone + 'static>(
     s
 }
 
+/// `reset` (`transform_none()`, ...), in order with the bound steps.
+fn transform_reset<S: Styled>(mut s: S, reset: Declaration) -> S {
+    let style = s.style();
+    if style.is_bound() {
+        style.bind(move |st| st.push(reset.clone()));
+    } else {
+        style.push(reset);
+    }
+    s
+}
+
 /// A translation's step: points (a rem at [`REM_SIZE`]) or a fraction of
 /// the size.
 fn translation(
@@ -3330,6 +3489,7 @@ mod tests {
                 .border_dashed(),
             "border-y-3 border-s border-e-2 border-dashed",
         );
+        same(s().border_none().border(px(2.0)), "border-none border-2");
         same(
             s().border(px(3.0)).border_dotted(),
             "border-3 border-dotted",
@@ -3354,6 +3514,11 @@ mod tests {
                 .outline_color(PINK.shade(500)),
             "outline-2 outline-offset-2 outline-dashed outline-pink-500",
         );
+        same(
+            s().outline_dotted().outline(px(2.0)),
+            "outline-dotted outline-2",
+        );
+        same(s().outline_dashed(), "outline-dashed");
         let curved = s().border_curve(BorderCurve::Continuous).lower();
         let mut style = Style::default();
         let _ = style.set_key(StyleKey::BorderCurve, crate::StyleValue::Str("continuous"));
@@ -3577,6 +3742,23 @@ mod tests {
             "perspective-[400px] rotate-y-35 rotate-x-40",
         );
         same(s().scale_x(1.5).skew_y(deg(-3.0)), "scale-x-150 -skew-y-3");
+        same(
+            s().rotate(deg(12.0))
+                .rotate_x(deg(40.0))
+                .skew_x(deg(6.0))
+                .scale(0.9)
+                .transform_none(),
+            "rotate-12 rotate-x-40 skew-x-6 scale-90 transform-none",
+        );
+        same(
+            s().translate_x(px(8.0))
+                .rotate(deg(12.0))
+                .scale(0.9)
+                .translate_none()
+                .rotate_none()
+                .scale_none(),
+            "translate-x-2 rotate-12 scale-90 translate-none rotate-none scale-none",
+        );
         same(
             s().origin_top_left().backface_hidden(),
             "origin-top-left backface-hidden",

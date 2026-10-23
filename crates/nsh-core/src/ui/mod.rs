@@ -59,6 +59,7 @@ pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
+mod rows;
 mod scrollable;
 pub(crate) mod services;
 pub(crate) mod status_bar;
@@ -161,6 +162,7 @@ pub use self::{
     renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
+    rows::Rows,
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     style::{
@@ -183,14 +185,14 @@ pub use crate::geometry::{
     relative, rems, size,
 };
 pub use crate::{
-    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow,
-    ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode,
-    EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps,
-    KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents,
-    PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig,
-    StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin,
-    Viewability,
+    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
+    BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
+    EllipsizeMode, EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode,
+    KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
+    LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation, ModalPresentation,
+    PanActivation, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
+    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent,
+    TransformKind, TransformOrigin, Viewability,
     animation::{Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing},
     color::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
@@ -223,6 +225,7 @@ pub mod prelude {
         Appearance,
         // Host elements and their settings.
         AutoCapitalize,
+        BackdropMaterial,
         BlendMode,
         BorderCurve,
         Bounds,
@@ -293,6 +296,7 @@ pub mod prelude {
         LayoutDirection,
         Length,
         ListLayout,
+        ListViewport,
         Listener,
         Measurement,
         Method,

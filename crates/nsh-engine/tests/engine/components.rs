@@ -1079,7 +1079,7 @@ mount(() => (
       multiline
       style={{ placeholderColor: "#00ff00", selectionColor: "#0000ff" }}
     />
-    <Input class="placeholder:text-white selection:text-black" />
+    <Input class="placeholder:text-white selection:bg-black" />
     <Text selectable style={{ selectionColor: "#ff0000" }}>Pick me</Text>
   </>
 ));

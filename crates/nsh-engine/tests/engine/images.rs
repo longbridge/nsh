@@ -366,3 +366,61 @@ mount(() => (
         ]
     );
 }
+
+/// The image items of `batch` with their bytes: source URI and data.
+fn inline_images(batch: &MountBatch) -> Vec<(String, Option<Vec<u8>>)> {
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Image {
+                source: Some(s), ..
+            } => Some((s.uri.to_string(), s.data.as_ref().map(|d| d.to_vec()))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `blob:` URLs hand the platform their blob's bytes, shared, and keep
+/// them after the URL is revoked; `data:` URIs are decoded by the core and
+/// go by a short key, a digest of their bytes.
+#[test]
+fn data_uris_and_blob_urls_carry_their_bytes() {
+    const APP: &str = r#"import { mount, View, Image } from "nsh";
+
+const blob = new Blob([new Uint8Array([137, 80, 78, 71, 1, 2, 3])], { type: "image/png" });
+const url = URL.createObjectURL(blob);
+const revoked = URL.createObjectURL(new Blob([new Uint8Array([9])]));
+URL.revokeObjectURL(revoked);
+
+mount(() => (
+  <View>
+    <Image src={url} />
+    <Image src="data:image/png;base64,iVBORw==" />
+    <Image src="data:image/svg+xml,%3Csvg%3E" />
+    <Image src={revoked} />
+  </View>
+));
+URL.revokeObjectURL(url);
+"#;
+    let (_engine, rx) = start(APP, 1.0);
+    let mounted: Vec<_> = sent(&rx).iter().flat_map(inline_images).collect();
+    assert_eq!(mounted.len(), 4, "{mounted:?}");
+    // A blob goes by a digest of its bytes, as a `data:` URI does.
+    let (blob_uri, blob_bytes) = &mounted[0];
+    assert!(
+        blob_uri.starts_with("data:image/png;nsh-key="),
+        "{blob_uri}"
+    );
+    assert_eq!(blob_bytes.as_deref(), Some(&[137, 80, 78, 71, 1, 2, 3][..]));
+    let (png, png_bytes) = &mounted[1];
+    assert!(png.starts_with("data:image/png;nsh-key="), "{png}");
+    assert_eq!(png_bytes.as_deref(), Some(&[137, 80, 78, 71][..]));
+    let (svg, svg_bytes) = &mounted[2];
+    assert!(svg.starts_with("data:image/svg+xml;nsh-key="), "{svg}");
+    assert_eq!(svg_bytes.as_deref(), Some(&b"<svg>"[..]));
+    // A revoked URL names no bytes: the platform reports the error.
+    let (revoked, revoked_bytes) = &mounted[3];
+    assert!(revoked.starts_with("blob:"), "{revoked}");
+    assert_eq!(revoked_bytes, &None);
+}

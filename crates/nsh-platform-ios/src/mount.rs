@@ -499,6 +499,22 @@ impl Mounter {
         }
     }
 
+    /// VoiceOver's escape gesture (or the test agent's `back`) reached the
+    /// surface: while the app listens to going back (an overlay's
+    /// `onCancel`, a back listener), the core hears it as the back button
+    /// (the top overlay listening first). Whether it was taken.
+    pub(crate) fn escape(&self) -> bool {
+        if !self
+            .slot(nsh_core::ROOT_ID)
+            .is_some_and(|s| s.events.contains(EventKind::BackPress))
+        {
+            return false;
+        }
+        self.control
+            .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+        true
+    }
+
     /// Whether a native animation runs.
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
@@ -1917,9 +1933,13 @@ impl Mounter {
         if !matches!(s.native, Native::Image(_)) {
             return;
         }
-        s.decor.set_resize_mode(resize_mode);
-        let same_source =
-            s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
+        // `center` shows the image at its own size: decoded so, where the
+        // other modes decode it at the view's.
+        let natural = |m: ResizeMode| m == ResizeMode::Center;
+        let same_decode = natural(s.decor.resize_mode()) == natural(resize_mode);
+        s.decor.set_fit(resize_mode, options.position);
+        let same_source = same_decode
+            && s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
         let same_look = s.image_options.placeholder == options.placeholder
             && s.image_options.blur_radius == options.blur_radius;
         s.image_options = options;
@@ -1991,7 +2011,12 @@ impl Mounter {
                 continue;
             };
             let size = view.bounds().size;
-            let max_pixels = (size.width.max(size.height) * scale).ceil() as u32;
+            // 0: the image's own size, which `center` shows.
+            let max_pixels = if s.decor.resize_mode() == ResizeMode::Center {
+                0
+            } else {
+                (size.width.max(size.height) * scale).ceil() as u32
+            };
             let filters = s
                 .style
                 .effects
@@ -2003,11 +2028,17 @@ impl Mounter {
                 matrix: nsh_core::compose_color_matrices(filters),
             };
             let (source, placeholder) = (
-                s.image.as_ref().map(|s| s.uri.clone()),
-                s.image_options.placeholder.as_ref().map(|s| s.uri.clone()),
+                s.image.as_ref().map(|s| (s.uri.clone(), s.data.clone())),
+                s.image_options
+                    .placeholder
+                    .as_ref()
+                    .map(|s| (s.uri.clone(), s.data.clone())),
             );
-            if let Some(uri) = source {
-                match self.images.request(id, &uri, max_pixels, scale, look) {
+            if let Some((uri, data)) = source {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, look)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -2031,9 +2062,12 @@ impl Mounter {
             }
             // The placeholder, until the image shows.
             let shown = self.slot(id).is_some_and(|s| s.image_shown);
-            if let Some(uri) = placeholder.filter(|_| !shown) {
+            if let Some((uri, data)) = placeholder.filter(|_| !shown) {
                 let plain = crate::image::Look::default();
-                match self.images.request(id, &uri, max_pixels, scale, plain) {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, plain)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -2067,10 +2101,14 @@ impl Mounter {
                 continue;
             }
             // At their natural size: the drawing may scale them anyway.
-            match self
-                .images
-                .request(id, &image.uri, 0, scale, crate::image::Look::default())
-            {
+            match self.images.request(
+                id,
+                &image.uri,
+                None,
+                0,
+                scale,
+                crate::image::Look::default(),
+            ) {
                 Request::Ready(decoded) if decoded.vector => {
                     log::warn!("canvas image failed: {}", not_a_bitmap(&image.uri));
                 }
@@ -3036,14 +3074,18 @@ impl Mounter {
         }
     }
 
-    /// Brings a list's sticky cells above its other cells.
+    /// Brings a list's sticky cells above its other cells (the cells of a
+    /// list in the scroll view's viewport are in that list, where the core
+    /// keeps them on top).
     fn front_sticky(&self, list: NodeId) {
         let (Some(cells), Some(l)) = (self.sticky.get(&list), self.slot(list)) else {
             return;
         };
         let container = l.native.view();
         for c in cells {
-            if let Some(s) = self.slot(c.cell) {
+            if let Some(s) = self.slot(c.cell)
+                && s.native.view().superview().as_deref() == Some(container)
+            {
                 container.bringSubviewToFront(s.native.view());
             }
         }

@@ -616,7 +616,10 @@ impl Surface {
         *self.test_model.borrow_mut() = model;
     }
 
-    fn wants_frames(&self) -> bool {
+    /// Whether the display link should run (animations, frame callbacks,
+    /// a JS frame request): while it does, a bounds commit mid-scroll
+    /// lands on a live frame.
+    pub(crate) fn wants_frames(&self) -> bool {
         self.js_frame.get()
             || self.anim.borrow().animating()
             || !self.frame_callbacks.borrow().is_empty()

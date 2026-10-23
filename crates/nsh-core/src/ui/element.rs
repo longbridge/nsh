@@ -236,6 +236,7 @@ impl Attrs {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
+                data: None,
             })));
         }
         if self.inset_padding != old.inset_padding {
@@ -383,6 +384,7 @@ pub struct ListConfig {
     pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
+    pub(crate) viewport: Option<crate::ListViewport>,
 }
 
 impl ListConfig {
@@ -410,6 +412,9 @@ impl ListConfig {
         }
         if self.follow_end != old.follow_end {
             out.push(Prop::FollowEnd(self.follow_end.map(Points)));
+        }
+        if self.viewport != old.viewport {
+            out.push(Prop::ListViewport(self.viewport.unwrap_or_default()));
         }
     }
 }
@@ -1495,6 +1500,12 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The system material of a backdrop blur (iOS).
+    fn backdrop_material(mut self, material: crate::BackdropMaterial) -> Self {
+        super::host::set(self.node(), Prop::BackdropMaterial(material));
+        self
+    }
+
     /// The id UI tests find it by.
     fn test_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::TestId(Some(id.into())));
@@ -1810,6 +1821,7 @@ impl Image {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
+                data: None,
             })))
         });
         self

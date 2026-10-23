@@ -55,11 +55,36 @@ import logo from "./assets/logo.png";
 | 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ url, size, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
+| `data:` URI | `"data:image/png;base64,iVBOR…"` | URI 中的字节，base64 或百分号编码（`data:image/svg+xml,%3Csvg…`）。 |
+| `blob:` URL | `URL.createObjectURL(blob)` | `Blob` 或 `File` 的字节（TSX）。图片保有这些字节：撤销 URL 后，正在显示它的图片保持完整。 |
+
+来自应用已有字节的图片无需请求即可显示。聊天应用在照片上传期间用它的 blob 显示所选照片，上传完成后把 `src`
+换成照片的 URL：
+
+```rust tabs
+// `data:` URI 中的字节（应用生成或内联收到的图片）。
+image(format!("data:image/png;base64,{encoded}")).size(px(64.0))
+```
+
+```tsx tabs
+import { Image, signal } from "nsh";
+
+const preview = URL.createObjectURL(photo); // 所选的 `File`
+const src = signal(preview);
+upload(photo).then((url) => {
+  src.set(url);
+  URL.revokeObjectURL(preview);
+});
+
+<Image src={src()} style={{ width: 240, height: 180 }} />;
+```
+
+相同的字节是同一张图片：同一张图片无论作为 `data:` URI 还是 blob，都只解码一次并共享缓存。
 
 开发期间资源由开发服务器提供；`nsh build` 和 `nsh package` 会把它们拷贝进应用（Rust crate 用 `registry.assets(assets!())` 发布它的 `assets/` 目录）。参见[图片与资源](../docs/images-and-assets.md)。
 
 > [!NOTE]
-> 应用声明了[能力](../docs/sandbox-and-capabilities.md)时，远程图片从其中列出的主机加载；来自其他主机的图片会以 `onError` 失败。`asset:` URI 始终可以加载。
+> 应用声明了[能力](../docs/sandbox-and-capabilities.md)时，远程图片从其中列出的主机加载；来自其他主机的图片会以 `onError` 失败。`asset:` URI、`data:` URI 和 `blob:` URL 始终可以加载。
 
 ## 属性
 
@@ -68,18 +93,19 @@ import logo from "./assets/logo.png";
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `src` | `image(src)` | `string \| ImageAsset` | | 图片。 |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | `"cover"` | 图片如何适配其盒子。 |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | `"cover"` | 图片如何适配其盒子：`"center"` 以原始尺寸居中显示（CSS 的 `object-fit: none`）；`"scale-down"` 同样居中，较大时缩小以适应。 |
 | `placeholder` | `.placeholder(src)` | `string \| ImageAsset` | | `src` 加载完成前显示的图片；最好是本地资源。 |
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | 以该半径（点）模糊图片（在解码时于主线程外处理一次）。 |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |
 | `tintColor`（样式） | `.tint_color(..)` | `ColorValue` | | 为模板图片（单色绘制的图标）重新着色。 |
+| `objectPosition`（样式） | `.object_position(..)`、`.object_top()` 等 | `string` | `"center"` | `resizeMode` 确定尺寸后图片在盒子中的位置，同 CSS 的 `object-position`（`"top"`、`"25% 75%"`、`"right 10px bottom 20%"`）；覆盖盒子的图片围绕它裁剪。 |
 | `onLoadStart` | `.on_load_start(..)` | `() => void` | | 开始加载。 |
 | `onProgress` | `.on_progress(..)` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
 | `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）；带有变体的图片给出所加载变体的尺寸。 |
 | `onError` | `.on_error(..)` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `.on_load_end(..)` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
-`ImageStyle` 在视图样式之上增加了 `tintColor`：为模板图片（单色绘制的图标）重新着色。
+`ImageStyle` 在视图样式之上增加了 `tintColor`，为模板图片（单色绘制的图标）重新着色；以及 `objectPosition`，决定图片在盒子中的位置（[图片位置](../docs/images-and-assets.md#图片位置)）。
 
 ```rust tabs
 image(ICON).size(px(24.0)).tint_color(rgb(0x0969da))

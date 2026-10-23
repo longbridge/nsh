@@ -23,6 +23,10 @@ unsafe extern "C" {
     );
     #[link_name = "submit"]
     fn js_submit(json: *const u8, len: usize);
+    #[link_name = "image_bytes"]
+    fn js_image_bytes(uri: *const u8, uri_len: usize, data: *const u8, data_len: usize);
+    #[link_name = "release_image"]
+    fn js_release_image(uri: *const u8, uri_len: usize);
     #[link_name = "request_frame"]
     fn js_request_frame();
     #[link_name = "request_pump"]
@@ -141,6 +145,20 @@ pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, italic: bool
 pub(crate) fn submit(json: &str) {
     // SAFETY: the slice is valid for the call; JS copies it.
     unsafe { js_submit(json.as_ptr(), json.len()) }
+}
+
+/// Gives the page the bytes of the in-memory image `uri` (a `data:` URI's,
+/// a blob's): it makes a browser blob URL of them that `<img>` elements
+/// showing `uri` load.
+pub(crate) fn image_bytes(uri: &str, data: &[u8]) {
+    // SAFETY: the slices are valid for the call; JS copies them.
+    unsafe { js_image_bytes(uri.as_ptr(), uri.len(), data.as_ptr(), data.len()) }
+}
+
+/// The page may forget (revoke) the blob URL of the in-memory image `uri`.
+pub(crate) fn release_image(uri: &str) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_release_image(uri.as_ptr(), uri.len()) }
 }
 
 /// Asks for a `requestAnimationFrame` callback (`nsh_frame`).

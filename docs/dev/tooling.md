@@ -410,7 +410,9 @@ view for the app to settle, so a page that is never quiet, a ticking timer, cost
 one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span) and acts there with synthesized input
-(`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
+(`Native`: press, long press (on a manual clock, once the finger has landed, the agent moves the clock by the rest
+of the hold, as the headless driver's hold does: a hold the app times itself, a touch screen's `ContextMenu`, comes
+due), scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
 the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
 (`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the
 agent's calls and the app's batches go on while it tracks; Windows' `TrackPopupMenuEx` ended with `EndMenu` and the
@@ -471,9 +473,11 @@ inside the scroll view that rests (still reporting where it is) before it lifts,
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
 tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
 a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
-Back taps the header's back button (the bar button carrying the back chevron's mask) or swipes a presented sheet
-down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
-`drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
+Back swipes a presented sheet down; else, while the app listens to going back (an overlay's `onCancel`: a menu's
+sheet, whose backdrop covers the header, a popover), it is VoiceOver's escape gesture (`accessibilityPerformEscape`
+on the surface's root view, which hands the core the back press, as the headless driver's back does); else it taps
+the header's back button (the bar button carrying the back chevron's mask); dialogs are answered with a tap on the
+`UIAlertController`'s button; screenshots are `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
@@ -704,8 +708,9 @@ Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
-workflow by hand without a tag, or a pull request that changes it or how xtask builds the distribution (`dist.rs`,
-`android.rs`, `ios.rs`), builds the archives only (the run's artifacts). The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
+workflow by hand without a tag builds the archives only (the run's artifacts): a dry run before tagging, and how to
+check a change to the workflow or to how xtask builds the distribution (`dist.rs`, `android.rs`, `ios.rs`). Pull
+requests and the merge queue never run it: its three builds are CI's longest and held the runners the queue waited for. The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
 The same tag runs `.github/workflows/release-crate.yml`, which publishes the library crates to crates.io (secret

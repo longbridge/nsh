@@ -277,7 +277,7 @@ url.href; // "https://api.example.com/v1/items?page=2&tag=new"
 
 `URLSearchParams`（以及 `Headers`、`FormData`）的迭代器遍历的是创建迭代器那一刻的快照，并且带有迭代器辅助方法（`map`、`filter`、`toArray` 等）。
 
-`URL.createObjectURL(blob)` 返回一个 `blob:` URL，在调用 `revokeObjectURL` 之前都可以用 `fetch`（`GET`）读取。只有 `fetch` 认识这种 URL，`<Image>` 等元素不认识。
+`URL.createObjectURL(blob)` 返回一个 `blob:` URL，在调用 `revokeObjectURL` 之前都可以用 `fetch`（`GET`）读取。`<Image>` 可以把它用作 `src` 或 `placeholder` 显示（[Image](../elements/image.md)）。
 
 ## 文本编码
 

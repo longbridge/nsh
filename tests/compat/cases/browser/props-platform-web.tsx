@@ -14,6 +14,7 @@ function App() {
         accessibilityLabel="Everywhere"
         web={{ accessibilityLabel: "In a browser" } as WebProps}
         android={{ elevation: 6 }}
+        ios={{ backdropMaterial: "thick" }}
         style={{ height: 60 }}
       >
         <Text>Link</Text>

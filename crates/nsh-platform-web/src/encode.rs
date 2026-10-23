@@ -14,8 +14,8 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind, TransitionProps,
-    ViewKind, ViewProps, ViewStyle, WebSource,
+    ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
     ui::PropEnum,
 };
@@ -492,6 +492,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             let f = filters(&effects.backdrop_filters);
             let _ = write!(css, "backdrop-filter:{f};-webkit-backdrop-filter:{f};");
         }
+        if !effects.mask_images.is_empty() {
+            let images: Vec<String> = effects.mask_images.iter().map(gradient).collect();
+            let m = images.join(",");
+            // `-webkit-mask-image` for WebKit, which still needs the prefix.
+            let _ = write!(css, "mask-image:{m};-webkit-mask-image:{m};");
+        }
     }
     if !shadows.is_empty() {
         let _ = write!(css, "box-shadow:{};", shadows.join(","));
@@ -642,13 +648,24 @@ fn image_uri(s: &Option<ImageSource>) -> Option<&str> {
     s.as_ref().map(|s| &*s.uri)
 }
 
+/// An image's `objectPosition` as CSS, empty for the center (the default).
+fn object_position(p: ObjectPosition) -> String {
+    if p == ObjectPosition::CENTER {
+        String::new()
+    } else {
+        p.to_string()
+    }
+}
+
 fn resize_mode(m: ResizeMode) -> &'static str {
     match m {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        // Centered, scaled down to fit when larger.
-        ResizeMode::Center => "scale-down",
+        // Centered at its natural size.
+        ResizeMode::Center => "none",
+        // The same, scaled down to fit when larger.
+        ResizeMode::ScaleDown => "scale-down",
     }
 }
 
@@ -1097,6 +1114,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .opt_str(image_uri(&options.placeholder))
                 .num(options.blur_radius.0)
                 .num(options.fade_ms.unwrap_or(0.0))
+                // CSS's `object-position`; empty for the center.
+                .str(&object_position(options.position))
                 .end();
         }
         MountItem::ScrollConfig {

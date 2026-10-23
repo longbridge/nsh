@@ -12,6 +12,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+unicode-linebreak.workspace = true
 rustc-hash.workspace = true
 slab.workspace = true
 taffy.workspace = true
@@ -23,6 +24,7 @@ log.workspace = true
 resvg = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 url.workspace = true
+sha2.workspace = true
 
 [features]
 # SVG images for the native backends (`svg`: sniffing, sizes and rasters with

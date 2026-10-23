@@ -375,7 +375,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
-        message: format!("{e:#}"),
+        message: crate::ui::with_details(&e),
     })
 }
 
@@ -383,7 +383,12 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
 /// `nsh/test`, and compiled.
 fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     let mut sets = crate::ui_sets().to_vec();
-    sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
+    sets.extend(
+        nsh_testing::test_sets()
+            .iter()
+            .flat_map(nsh_core::ui::Registry::sets)
+            .map(SetDescription::from),
+    );
     bytecode_of(entry, &sets, false)
 }
 
@@ -555,7 +560,8 @@ fn compiler() -> nsh_testing::Compile {
     Arc::new(move |entry: &Path, kind: Entry| {
         let (bytecode, map, capabilities) = match kind {
             Entry::App => {
-                let entry = crate::entry::resolve(entry).map_err(|e| format!("{e:#}"))?;
+                let entry =
+                    crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
                 let cached = built
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -565,7 +571,7 @@ fn compiler() -> nsh_testing::Compile {
                     Some(built) => built,
                     None => {
                         let out = bytecode_of(&entry, &crate::ui_sets(), true)
-                            .map_err(|e| format!("{e:#}"))?;
+                            .map_err(|e| crate::ui::with_details(&e))?;
                         built
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
@@ -574,7 +580,9 @@ fn compiler() -> nsh_testing::Compile {
                     }
                 }
             }
-            Entry::TestFile => test_file_bytecode(entry).map_err(|e| format!("{e:#}"))?,
+            Entry::TestFile => {
+                test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
+            }
         };
         // SAFETY: compiled just now by this runtime.
         let bundle = unsafe { Bundle::bytecode(bytecode) }

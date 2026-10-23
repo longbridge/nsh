@@ -281,6 +281,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
   scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
   it only stops it.
+- **A menu's backdrop covers the header**: on a touch screen a menu is a sheet over a backdrop on the whole window,
+  so a tap at the header's back button lands on the backdrop and closes the menu (`backdropPress`) instead of going
+  back from a submenu. iOS has no back key, so while the app listens to going back the agent's `back` is VoiceOver's
+  escape gesture on the surface (`RootView`'s `accessibilityPerformEscape`), which the core takes as the back button.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 
@@ -331,6 +335,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
   outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface
   (`input.rs` `native_at`), or a hosted web view gets clicks on what NSH draws over it.
+- `-[NSCursor set]` costs ~2.5–3.5 ms per call on macOS 26 with a customized pointer size or color (it renders the
+  cursor image again, `_AXFMouseCursorGenerator`), even for the cursor already set; and a view's default
+  `cursorUpdate:`, which AppKit calls after views move or are added, sets the arrow. Set the cursor only when it
+  changes while the mouse is still (`input::set_cursor_at`), and answer `cursorUpdate:` with NSH's cursor: a scroll
+  that mounts rows ten times a second otherwise spends a third of those frames setting the same cursor.
+- AppKit's geometry (`hitTest:`, `convertPoint:` / `convertRect:`, `visibleRect`) follows bounds, not a
+  `sublayerTransform`: while a scroll offset is only the container layer's transform, AppKit places every view
+  below it at the last committed offset. Commit it first (`scroll::commit_pending` on a press,
+  `scroll::commit_ancestors` before a conversion); clip and pick by NSH's own placed frames and
+  `scroll::bounds_origin`. A view's logical frame (`ViewState::frame`) misses its sticky shift and RTL mirroring:
+  clip spaces are the placed frames (`ns().frame()`).
 - In `define_class!` methods, an early `return` of a `bool` or `Option<Retained<_>>` does not compile (the macro wraps
   the return type): write the body as one expression.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
@@ -383,6 +398,9 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Testing on simulators and emulators
 
+- **A manual clock stands still while a finger holds**: it moves with the frames the app asks for, and a held finger
+  asks for none, so a hold the app times itself (a `ContextMenu` on a touch screen) never came due on a real
+  platform. The agent's long press moves the clock by the hold, as the headless driver's does.
 - **iOS simulator: launch apps only after `simctl bootstatus -b`**; apps launched while the simulator boots are sent to the
   background when SpringBoard comes up.
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows

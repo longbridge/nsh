@@ -382,6 +382,17 @@ pub(super) fn open(
     surface.invalidate();
 }
 
+/// A menu of the menu bar is open.
+pub(super) fn bar_open(surface: &Surface) -> bool {
+    matches!(
+        surface.chrome.open.borrow().as_ref(),
+        Some(Open {
+            kind: Kind::Bar(_),
+            ..
+        })
+    )
+}
+
 /// Closes the open menu, if any.
 pub(super) fn close(surface: &Surface) {
     let open = surface.chrome.open.borrow_mut().take();
@@ -602,7 +613,7 @@ pub(super) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
         let plain = !m.ctrl && !m.alt && !m.shift && !m.meta;
         return event.vk == VK_F10
             && plain
-            && super::bar_shown(surface)
+            && super::bar_available(surface)
             && open_bar(surface, 0, true);
     }
     let (kind_bar, level, highlight, items) = {
@@ -713,7 +724,12 @@ pub(super) fn mnemonic(surface: &Rc<Surface>, pressed: &Shortcut) -> bool {
     let Key::Char(letter) = pressed.key else {
         return false;
     };
-    if !pressed.alt || pressed.ctrl || pressed.meta || pressed.shift || !super::bar_shown(surface) {
+    if !pressed.alt
+        || pressed.ctrl
+        || pressed.meta
+        || pressed.shift
+        || !super::bar_available(surface)
+    {
         return false;
     }
     let index = {
@@ -941,7 +957,7 @@ pub(super) fn bar(surface: &Rc<Surface>, _window: &mut Window, theme: &Theme) ->
 }
 
 /// Lays out the levels drawn for the first time.
-fn lay_out(surface: &Surface, open: &mut Open, window: &Window) {
+fn lay_out(surface: &Surface, open: &mut Open, window: &mut Window) {
     let viewport = window.viewport_size();
     let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
     for i in 0..open.levels.len() {
@@ -959,7 +975,15 @@ fn lay_out(surface: &Surface, open: &mut Open, window: &Window) {
             }
             Anchor::Bar(j) => {
                 let item = surface.chrome.bar_items.borrow().get(j).map(Rect::of);
-                Place::Below(item.unwrap_or_default())
+                match item {
+                    Some(item) if item.w > 0.0 => Place::Below(item),
+                    // The bar was hidden: it is placed in this frame, the
+                    // menu below it in the next.
+                    _ => {
+                        window.refresh();
+                        continue;
+                    }
+                }
             }
             Anchor::Item(l, r) => match open.levels.get(l).and_then(|l| l.geom.as_ref()) {
                 Some(g) => Place::Beside(g.row(r)),
