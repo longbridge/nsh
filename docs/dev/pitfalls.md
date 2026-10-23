@@ -52,10 +52,25 @@ Things that were found the hard way. Read the section of the area you change bef
   layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
   its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
   `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
-- **Taffy 0.15's `mark_dirty` stops at the first node whose cache is already empty**, taking its ancestors for dirty too. Nodes of a
-  `display: none` subtree always have empty caches while the hidden node above keeps its result, so a view moved in there keeps its
-  former layout: the frame walk gives everything under a `display: none` view an empty frame and its texts an empty content box,
-  whatever Taffy keeps for them (`emit_frames_in`, `flush_text`).
+- **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
+  traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
+  its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
+  above keep theirs, so a view moved in there kept its former layout. `LayoutTree::mark_dirty` clears every cache up to the root, and the
+  tree keeps no hoisted children (only Taffy's rounding pass reads them). The frame walk also gives everything under a `display: none`
+  view an empty frame and its texts an empty content box (`emit_frames_in`, `flush_text`): a hidden subtree is never read.
+- **Relayout boundaries are flex items whose size nothing inside can change** (`LayoutTree::is_boundary`): fixed points both ways, a
+  flex basis of `auto`, `flexShrink: 0`, no baseline alignment. A change inside stops dirtying there and the item is laid out again with
+  what its parent gave it last (`relayout_boundaries`, before the main pass); only when what it gives back differs (overflow, say) is
+  its parent dirtied. Each condition is needed: a percentage basis resolves against a parent of no definite size as `auto` (its
+  content), and shrinking is floored at the content's automatic minimum, so either let the content change the size (the layout
+  consistency harness found the first). Growing is fine: it takes the free space the parent and siblings leave. A restyled node always
+  dirties its parent (`set_style`), a boundary included. Boundaries' frames are emitted after the passes (`commit_round`).
+- **A changed text dirties nothing when it measures as before** (`LayoutTree::measures_as_before`, from `rebuild_text`): every
+  layout above a leaf was computed from the leaf's answers to the inputs it was asked (Taffy calls it under measuring passes and for
+  its final size), so the leaf keeps those answers since its cache was last cleared (`LayoutNode::measured`, at most eight: more come
+  of layouts at many sizes) and measures them again; all the same, and only the text is mounted again. The record is cleared with the
+  cache, never alone: an answer dropped while a layout above still holds what it was computed from would let a change through
+  unseen. Texts with attachments always relayout (their views are placed by the text's final layout).
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped.

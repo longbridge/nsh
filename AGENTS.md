@@ -25,7 +25,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 
 ```
 crates/
-  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
+  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
@@ -312,8 +312,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
-  (`cargo xtask compat`; `docs/dev/compatibility.md`).
+  change until 0.3.0, the first release recorded. A new API lands with its test, a case in
+  `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens, shadcn/ui's, are the app's to draw with; the one
   exception is `TextView`'s default reading typography, its colors the theme's shadcn tokens (alerts GitHub's alert

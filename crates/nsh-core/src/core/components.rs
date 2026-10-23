@@ -586,6 +586,12 @@ impl Default for Components {
 }
 
 impl Components {
+    /// Whether `list` is one of the components' own lists (bound in the
+    /// core).
+    pub(super) fn is_virtual_list(&self, list: NodeId) -> bool {
+        self.virtual_lists.contains_key(&list)
+    }
+
     pub(super) fn for_viewport(viewport: crate::Size<crate::Points>) -> Self {
         let mut components = Self::default();
         components.environment.window = viewport;

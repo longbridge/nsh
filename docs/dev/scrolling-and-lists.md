@@ -78,5 +78,13 @@
   every step is reached through a list in parent mode, and a plain scroll view checks an empty list
   (`crates/nsh-core/src/core/parent_viewport.rs`).
 - **List internals** (the window, binding cells, recycling): `crates/nsh-core/src/core/list.rs`.
+- **Paced binding** (the runtime's lists): the window keeps a viewport of overscan on either side, and a fast scroll or
+  a jump assigns a screen of cells at once, each bind rebuilding a cell's subtree. What shows binds in the commit that
+  assigns it: the viewport, two scroll steps ahead of it, sticky items and cells whose item moved (a splice tells them
+  their new index). The rest of the overscan waits in the core (`Slot::requested`: what JS was last asked to show, so
+  nothing stale is queued and cells whose items went are never asked for) and the engine binds it as its per-turn
+  budget allows (`PACED_BIND_OPS` ops or `PACED_BIND_TIME` of JS, at least one cell; nearest the leading edge first,
+  one cell per list in turn), then on the next display frames (`MountSink::request_frame`). Cells assigned but not
+  bound yet are moved out of sight like unassigned ones. Rust components' lists bind in the core, unpaced.
 - **Rust components**: the same props are `Scrollable`'s methods (`scroll()`, `virtual_list(..)`) and
   `VirtualList`'s (header, footer, empty view, separators, sticky rows, viewability); `docs/dev/components.md`.
