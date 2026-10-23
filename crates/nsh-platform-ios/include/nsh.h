@@ -68,6 +68,14 @@ char *_Nullable nsh_app_set_locale(NshApp *app, const char *_Nullable tag);
 /// for Dynamic Type's; 0 follows the system's again.
 void nsh_app_set_font_scale(NshApp *app, float scale);
 
+/// The embedding app's theme overrides: a theme file of shadcn/ui's
+/// (`{ "cssVars": { "theme": {...}, "light": {...}, "dark": {...} } }`, as
+/// `nsh.json`'s `"theme"`), whose tokens win over the app's of the same
+/// names, light and dark; NULL gives the app its own theme back. Applies at
+/// once and to every app loaded later. Returns why the file does not parse,
+/// or NULL.
+char *_Nullable nsh_app_set_theme_overrides(NshApp *app, const char *_Nullable json);
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change. Returns an error without development support,
 /// or NULL.
@@ -159,6 +167,51 @@ void nsh_component_set_size(const NshComponentContext *context, double width, do
 
 /// Frees a component's context.
 void nsh_component_context_free(NshComponentContext *_Nullable context);
+
+/// The launch parameters of the apps `app` loads from now on (`host.params`,
+/// read when an app starts): a JSON object, or NULL for none. Returns why
+/// `json` is not a JSON object, or NULL.
+char *_Nullable nsh_app_set_host_params(NshApp *app, const char *_Nullable json);
+
+/// Sends event `name` with `json` data (NULL: null) to the running app
+/// (`host.on(name, ...)`); kept until it listens to `name`, or for the next
+/// app while none runs. Returns why it cannot, or NULL.
+char *_Nullable nsh_app_send_host_event(NshApp *app, const char *name, const char *_Nullable json);
+
+/// A call of the app (`host.call`), answered once from any thread with
+/// `nsh_host_call_resolve` or `nsh_host_call_reject`, which free it.
+typedef struct NshHostCall NshHostCall;
+
+/// Handles the app's calls (`host.call`) and posts (`host.post`) of `name`,
+/// replacing the handler it had; a NULL `handler` removes it. `handler` runs on
+/// the main thread with the JSON data and, for a call, the call to answer
+/// (NULL for a post). `release` (optional) is called with `context`, on any
+/// thread, when the handler is replaced or removed or the app destroyed.
+void nsh_app_set_host_handler(NshApp *app, const char *name,
+                              void (*_Nullable handler)(void *_Nullable context, const char *json,
+                                                        NshHostCall *_Nullable call),
+                              void *_Nullable context,
+                              void (*_Nullable release)(void *_Nullable context));
+
+/// Answers `call` with `json` (NULL: null) and frees it. Any thread.
+void nsh_host_call_resolve(NshHostCall *call, const char *_Nullable json);
+
+/// Fails `call` with `message` and frees it. Any thread.
+void nsh_host_call_reject(NshHostCall *call, const char *message);
+
+/// Frees `call` unanswered: the app's call fails. Any thread.
+void nsh_host_call_free(NshHostCall *_Nullable call);
+
+/// Takes the URLs the app opens (`openUrl` of `nsh/device`) before the system
+/// does, replacing the handler it had; a NULL `handler` removes it. `handler`
+/// runs on the main thread with the URL and returns true when the embedding
+/// app took it, false for the system to open it. `release` (optional) is called
+/// with `context`, on any thread, when the handler is replaced or removed or
+/// the app destroyed.
+void nsh_app_set_open_url_handler(NshApp *app,
+                                  bool (*_Nullable handler)(void *_Nullable context, const char *url),
+                                  void *_Nullable context,
+                                  void (*_Nullable release)(void *_Nullable context));
 
 #ifdef __cplusplus
 }

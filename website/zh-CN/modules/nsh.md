@@ -9,7 +9,7 @@ order: 2
 `nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll`、`Input` 和 `Overlay`，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
-import { batch, cleanup, computed, context, effect, Input, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
+import { batch, cleanup, computed, context, effect, ErrorBoundary, Input, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
 ```
 
 NSH 的响应式模型与 SolidJS 相同：组件函数只运行**一次**，界面中读取了 signal 的部分会在 signal 变化时就地更新。组件不会重新渲染，也没有虚拟 DOM。教程见[响应式](../docs/reactivity.md)。
@@ -211,6 +211,36 @@ function LabeledInput(props: InputProps & { label: string }) {
       <Text>{own.label}</Text>
       <Input {...rest} />
     </View>
+  );
+}
+```
+
+## ErrorBoundary
+
+```ts
+function ErrorBoundary(props: {
+  fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element);
+  children?: JSX.Element;
+}): JSX.Element;
+```
+
+渲染它的子元素；子元素下的代码抛出异常后（组件函数体、绑定、effect 或事件处理函数），改为渲染 `fallback`。失败的部分被移除，fallback 显示在原处。`fallback(error, reset)` 得到抛出的值和 `reset`，`reset` 重新渲染子元素；不带参数的 `fallback` 按原样显示。失败交给它上方最近的错误边界，fallback 中的失败交给再上一层的错误边界。Rust 组件使用 `catch_error`（[错误边界](../docs/reactivity.md#错误边界)）。
+
+```tsx
+import { ErrorBoundary, Text, View } from "nsh";
+
+function Feed() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <View>
+          <Text>{error instanceof Error ? error.message : String(error)}</Text>
+          <Text onPress={reset}>Try again</Text>
+        </View>
+      )}
+    >
+      <Posts />
+    </ErrorBoundary>
   );
 }
 ```

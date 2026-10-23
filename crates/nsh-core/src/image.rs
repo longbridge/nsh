@@ -44,6 +44,13 @@ impl ImageData {
     }
 }
 
+impl Default for ImageData {
+    /// No bytes.
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
 impl Deref for ImageData {
     type Target = [u8];
 
@@ -258,7 +265,15 @@ mod tests {
         }
         .inline();
         assert_ne!(other.uri, source.uri);
-        // Other URIs and bad data: URIs are left as they are.
+        // A key the app writes itself names nothing: no cache knows it.
+        let forged = ImageSource {
+            uri: source.uri.clone(),
+            ..ImageSource::default()
+        }
+        .inline();
+        assert_eq!(&*forged.uri, "data:,");
+        assert!(forged.data.is_none());
+        // Other URIs are left as they are; bad data: URIs show nothing.
         let remote = ImageSource {
             uri: "https://x.org/a.png".into(),
             ..ImageSource::default()
@@ -271,7 +286,7 @@ mod tests {
             ..ImageSource::default()
         }
         .inline();
-        assert_eq!(&*bad.uri, "data:nocomma");
+        assert_eq!(&*bad.uri, "data:,");
         assert!(bad.data.is_none());
     }
 

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use nsh_macros::PropEnum;
+
 use crate::{
     animation::{AnimationOp, AnimationProp},
     geometry::{Bounds, Points, Size},
@@ -94,11 +96,34 @@ impl Default for WebProps {
     }
 }
 
+/// What a video's sound does to the rest of the device's audio while it
+/// plays: whether it plays in silent mode, whether other apps' audio pauses,
+/// and whether the system treats it as speech. iOS sets the shared
+/// `AVAudioSession` while such a video plays and restores it after; Android
+/// marks the sound as speech and holds audio focus for `Playback`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum AudioSession {
+    /// The app's audio settings (the platform's for video unless the app, or
+    /// the app embedding NSH, set others): nothing is changed.
+    #[default]
+    Default,
+    /// Plays speech: audible in silent mode, other apps' audio pauses while
+    /// it plays (Apple's `playback` category, `spokenAudio` mode; Android's
+    /// speech content type with transient audio focus).
+    Playback,
+    /// Plays speech over other apps' audio, which keeps playing
+    /// (Apple's `playback` category with `mixWithOthers`; Android's speech
+    /// content type without audio focus).
+    MixWithOthers,
+}
+
 /// A video player.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoProps {
     /// The video's URL (or `asset:/` URI).
     pub source: Option<Arc<str>>,
+    /// What its sound does to the rest of the device's audio.
+    pub audio_session: AudioSession,
     /// Paused.
     pub paused: bool,
     /// Muted.
@@ -121,6 +146,7 @@ impl Default for VideoProps {
     fn default() -> Self {
         Self {
             source: None,
+            audio_session: AudioSession::default(),
             paused: false,
             muted: false,
             volume: 1.0,

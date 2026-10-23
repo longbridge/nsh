@@ -29,6 +29,7 @@ final class ScrollBox extends FrameLayout implements Node {
     final Mounter mounter;
     final int id;
     final Decor decor = new Decor();
+    /** The events it listens to, kinds below 64 ({@link Mounter#wants} has all). */
     long events;
     boolean horizontal;
     int dismissMode; // 0 none, 1 on drag, 2 interactive

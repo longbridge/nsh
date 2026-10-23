@@ -134,6 +134,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The embedding app's channel with the apps the view runs
+    /// (`nsh/host`): their launch parameters, events to them and handlers of
+    /// their calls and posts ([`AppView::host`]). One for every app the view
+    /// loads; a new one by default.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for AppOptions {
@@ -152,6 +157,7 @@ impl Default for AppOptions {
             limits: Limits::default(),
             data_dir: None,
             storage: None,
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }
@@ -235,6 +241,16 @@ impl AppView {
         self.container.clone()
     }
 
+    /// The channel with the apps this view runs (`nsh/host`;
+    /// [`AppOptions::host`]): set their launch parameters
+    /// ([`nsh_engine::HostChannel::set_params`], read when an app starts),
+    /// send them events ([`nsh_engine::HostChannel::send`]) and handle their
+    /// calls and posts ([`nsh_engine::HostChannel::handle`]; handlers run on
+    /// the engine thread). Any thread may use it.
+    pub fn host(&self) -> nsh_engine::HostChannel {
+        self.options.borrow().host.clone()
+    }
+
     /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now
     /// on: the JS heap, the stack, the time budgets of loading and of every
     /// other call into JS, and the quotas (nodes, ops). The running app
@@ -266,6 +282,8 @@ impl AppView {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: options.host.clone(),
+            picker: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -335,6 +353,21 @@ impl AppView {
         host.font_scale = scale;
         self.surface.host_environment.set(host);
         crate::system::host_environment_changed(&self.surface);
+    }
+
+    /// The embedding app's theme overrides: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, as `nsh.json`'s `"theme"`), whose tokens
+    /// win over the app's of the same names, light and dark, while the
+    /// app's others stay (a brand's `primary` and `radius`). Classes naming
+    /// them (`bg-primary`) are resolved again at once, and every app loaded
+    /// later starts with them. `None` gives the app its own theme back.
+    /// Fails, changing nothing, on a file that does not parse.
+    pub fn set_theme_overrides(&self, json: Option<&str>) -> Result<(), nsh_base::ThemeError> {
+        let tokens = json.map(nsh_base::theme_overrides).transpose()?;
+        *self.surface.host_tokens.borrow_mut() = tokens.clone();
+        self.surface.control(|c| c.set_tokens(tokens));
+        Ok(())
     }
 
     /// Stops the app.

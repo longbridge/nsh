@@ -52,10 +52,25 @@ Things that were found the hard way. Read the section of the area you change bef
   layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
   its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
   `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
-- **Taffy 0.15's `mark_dirty` stops at the first node whose cache is already empty**, taking its ancestors for dirty too. Nodes of a
-  `display: none` subtree always have empty caches while the hidden node above keeps its result, so a view moved in there keeps its
-  former layout: the frame walk gives everything under a `display: none` view an empty frame and its texts an empty content box,
-  whatever Taffy keeps for them (`emit_frames_in`, `flush_text`).
+- **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
+  traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
+  its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
+  above keep theirs, so a view moved in there kept its former layout. `LayoutTree::mark_dirty` clears every cache up to the root, and the
+  tree keeps no hoisted children (only Taffy's rounding pass reads them). The frame walk also gives everything under a `display: none`
+  view an empty frame and its texts an empty content box (`emit_frames_in`, `flush_text`): a hidden subtree is never read.
+- **Relayout boundaries are flex items whose size nothing inside can change** (`LayoutTree::is_boundary`): fixed points both ways, a
+  flex basis of `auto`, `flexShrink: 0`, no baseline alignment. A change inside stops dirtying there and the item is laid out again with
+  what its parent gave it last (`relayout_boundaries`, before the main pass); only when what it gives back differs (overflow, say) is
+  its parent dirtied. Each condition is needed: a percentage basis resolves against a parent of no definite size as `auto` (its
+  content), and shrinking is floored at the content's automatic minimum, so either let the content change the size (the layout
+  consistency harness found the first). Growing is fine: it takes the free space the parent and siblings leave. A restyled node always
+  dirties its parent (`set_style`), a boundary included. Boundaries' frames are emitted after the passes (`commit_round`).
+- **A changed text dirties nothing when it measures as before** (`LayoutTree::measures_as_before`, from `rebuild_text`): every
+  layout above a leaf was computed from the leaf's answers to the inputs it was asked (Taffy calls it under measuring passes and for
+  its final size), so the leaf keeps those answers since its cache was last cleared (`LayoutNode::measured`, at most eight: more come
+  of layouts at many sizes) and measures them again; all the same, and only the text is mounted again. The record is cleared with the
+  cache, never alone: an answer dropped while a layout above still holds what it was computed from would let a change through
+  unseen. Texts with attachments always relayout (their views are placed by the text's final layout).
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped.
@@ -155,6 +170,14 @@ Things that were found the hard way. Read the section of the area you change bef
   the window's size as `preferredContentSize`. Standalone apps have a white root view (UIKit windows are black).
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
+- **iOS, a side bar's safe area reaches past the bar**: a strip the device keeps along one side of the screen (a
+  foldable's vertical bar) is an inset of the window, and `UINavigationController` passes that inset to the screens it
+  shows without asking whether the stack still reaches the bar, so a stack laid out in a column well clear of it gives
+  its screens the bar's whole width of trailing safe area anyway: UIKit parks scroll indicators that far in from the
+  edge, and `safeAreaInsets()` reads that wide inside the module. `clip_side_safe_area` takes the surplus back with a
+  negative `additionalSafeAreaInsets` worked out from the window and the stack's frame alone. Deriving what UIKit
+  granted by subtracting the compensation already applied looks equivalent and cannot heal: UIKit floors a safe area at
+  zero, so after an overshoot that subtraction returns the value already applied, for good.
 
 - **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
@@ -167,10 +190,21 @@ Things that were found the hard way. Read the section of the area you change bef
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+- **iOS, a hardware keyboard's keys** reach the first responder as presses (`pressesBegan:withEvent:`) before
+  UIKit's text system acts on them: a text input that does not call `super` for a press neither moves its caret,
+  inserts a line break nor types it, and must not call `super` for that key's release either. A held key's press
+  comes once (the text system repeats on its own), so a binding that repeats needs a timer of its own
+  (`keymap.rs`). A press's `responder` is the first responder it went to: presses bubbling up to the root view from
+  an input were matched there already.
 
 - **iOS, the screen scale**: a `UIView` that draws nothing itself keeps a `contentScaleFactor` of 1 on a 3x screen, and a
   drawn one raises it while zoomed, so neither is the screen's scale. Images decoded at it came out at a third of their
   pixels and blurred; the scale is the trait collection's `displayScale` (`Mounter::display_scale`).
+
+- **iOS, secondary clicks**: `buttonMaskRequired` only holds touches that have buttons. A finger has none, so a tap
+  recognizer requiring the secondary button recognized every tap, and as a tap recognizer it cancelled the presses inside
+  (a `ContextMenu`'s trigger opened its menu instead of pressing). The `onContextMenu` recognizer allows only
+  `UITouchTypeIndirectPointer` touches (`mount.rs`).
 
 ## Android
 
@@ -231,6 +265,11 @@ Things that were found the hard way. Read the section of the area you change bef
   so a line is wider than its sum of advances; `TextLayouts.Prepared.desired` adds the largest negative spacing back, or text laid
   out at its natural width wraps (`tracking-tight`).
 
+- **Android, a hardware keyboard's keys** go to the input method first, then down the window's views
+  (`dispatchKeyEvent`, the parents before the focused view): `NshView`, which holds the focus when no input does,
+  sees every key meant for the views inside it. Keys with Control come as `dispatchKeyShortcutEvent` first, where a
+  text field selects all, copies and pastes, so the app's shortcuts are matched there too.
+
 ## Linux, GTK
 
 - **inotify reports reads** (`Access` events), FSEvents does not: file watchers (`nsh dev`, `cargo run`'s xtask) ignore
@@ -281,6 +320,13 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
   scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
   it only stops it.
+- **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
+  UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
+  keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
+- **A menu's backdrop covers the header**: on a touch screen a menu is a sheet over a backdrop on the whole window,
+  so a tap at the header's back button lands on the backdrop and closes the menu (`backdropPress`) instead of going
+  back from a submenu. iOS has no back key, so while the app listens to going back the agent's `back` is VoiceOver's
+  escape gesture on the surface (`RootView`'s `accessibilityPerformEscape`), which the core takes as the back button.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 
@@ -394,6 +440,9 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Testing on simulators and emulators
 
+- **A manual clock stands still while a finger holds**: it moves with the frames the app asks for, and a held finger
+  asks for none, so a hold the app times itself (a `ContextMenu` on a touch screen) never came due on a real
+  platform. The agent's long press moves the clock by the hold, as the headless driver's does.
 - **iOS simulator: launch apps only after `simctl bootstatus -b`**; apps launched while the simulator boots are sent to the
   background when SpringBoard comes up.
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows

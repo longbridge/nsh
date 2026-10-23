@@ -71,6 +71,10 @@ final class Native {
     static final int CANCEL = 60;
     static final int POSITION = 61;
     static final int MOUSE_MOVE = 62;
+    static final int HOST = 63;
+    static final int PICK = 64;
+    static final int LOAD_MORE_AT_START = 65;
+    static final int OPEN_URL = 66;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -97,6 +101,12 @@ final class Native {
 
     /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
     static native void setStorage(long handle, String dir);
+
+    /**
+     * The embedding app's theme overrides (a shadcn/ui theme file, null: the
+     * app's own theme). Returns why the file does not parse, or null.
+     */
+    static native String setThemeOverrides(long handle, String json);
 
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
@@ -142,11 +152,35 @@ final class Native {
 
     static native void packageFree(long pkg);
 
+    /** The images picked for pick {@code id} (none: cancelled); {@code sizes} holds each one's width and height in pixels. */
+    static native void picked(long handle, int id, String[] names, String[] types, byte[][] data, int[] sizes);
+
     /** A native component emitted {@code name} with {@code json} data (null: none). */
     static native void componentEvent(long handle, int id, String name, String json);
 
     /** A native component's own size (dp). */
     static native void componentSize(long handle, int id, float width, float height);
+
+    /** The launch parameters (a JSON object; null: none) of the apps loaded next; false if it is not one. */
+    static native boolean setHostParams(long handle, String json);
+
+    /** Sends event {@code name} with {@code json} data (null: none) to the running app; false if invalid. */
+    static native boolean sendHostEvent(long handle, String name, String json);
+
+    /** The app's calls and posts of {@code name} go to {@code NshView.hostMessage} ({@code handled}), or nowhere. */
+    static native void setHostHandler(long handle, String name, boolean handled);
+
+    /** Answers a call {@code hostMessage} got: {@code json}, or {@code error} when it failed. Frees it. */
+    static native void hostReply(long call, String json, String error);
+
+    /** Frees a call unanswered: it fails in the app. */
+    static native void hostCallFree(long call);
+
+    /** The URLs the app opens go to {@code NshView.openUrlMessage} first ({@code handled}), or to the system. */
+    static native void setOpenUrlHandler(long handle, boolean handled);
+
+    /** Answers a URL {@code openUrlMessage} got: whether the embedding app took it. Frees it. */
+    static native void openUrlReply(long request, boolean handled);
 
     /** Root size in dp. */
     static native void resize(long handle, float width, float height);
@@ -159,6 +193,16 @@ final class Native {
     static native void environment(long handle, float[] values, boolean dark, String locale);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
+
+    /**
+     * A hardware key went down: whether the app's shortcuts ({@code nsh/keymap}) take it.
+     * {@code unicode}: what it types without modifiers ({@code KeyEvent.getUnicodeChar(0)});
+     * {@code repeat}: an auto-repeat; {@code editing}: a text input or hosted view has the focus.
+     */
+    static native boolean keyDown(long handle, int keyCode, int unicode, int meta, boolean repeat, boolean editing);
+
+    /** A hardware key went up: whether its press was taken (then so is its release). */
+    static native boolean keyUp(long handle, int keyCode);
 
     /**
      * {@code onHoverMove} of view {@code id}: the pointer at ({@code x}, {@code y}) in it and at

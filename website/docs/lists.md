@@ -174,6 +174,8 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near (see below). |
 | `loadMoreThreshold` | `.load_more_threshold(..)` | `number` | `1` | How close to the end, in viewports, `onLoadMore` fires. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | The start is near, after a scroll (see below). |
+| `loadMoreAtStartThreshold` | `.load_more_at_start_threshold(..)` | `number` | `1` | How close to the start, in viewports, `onLoadMoreAtStart` fires. |
 | `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info) => void` | | Items became or stopped being viewable. |
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable. |
 | `keyExtractor` | `.keys(..)` | `(item, index) => string` | | The key in viewability tokens; in Rust, the rows' identities. |
@@ -306,7 +308,7 @@ const shown = hidden.mul(-1).add(56);
 
 ## Chat: inverted lists
 
-`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top).
+`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
 
 ```rust tabs
 use nsh_base::keyboard_avoiding_view;
@@ -622,6 +624,70 @@ loadMore();
 ```
 
 Guard against overlapping loads as above: the end may be reported again while a page is on its way.
+
+## Loading at the start: onLoadMoreAtStart
+
+A list can also open in the middle of its data: a chat opened at an old message (a search result, a reply's quote) shows a page around it, with newer messages still to load. `onLoadMoreAtStart` (`.on_load_more_at_start(..)`) fires when the viewport comes within `loadMoreAtStartThreshold` viewports of the start (1 by default), the side of item 0: the top of a list, the bottom of an inverted one. Prepend the page: the rows on screen keep their place while it arrives before them (an inverted list too, once scrolled away from its bottom), and the list fires again on the next approach, or at once when the page left it still near the start.
+
+It fires once the user scrolls there or a scroll command takes the list there (`initialScrollIndex` included), so a list that opens at its newest item asks for nothing, and one opened with `initialScrollIndex` near its start asks for the page before it right away.
+
+```rust tabs
+let messages = signal(page_around(target)); // newest first, ending at an old message
+let loading = stored(false);
+
+let load_newer = move |_: &()| {
+    if loading.replace(true) {
+        return;
+    }
+    let newest = messages.with(|m| m[0].id);
+    spawn(async move {
+        if let Ok(response) = fetch(format!("https://api.example.com/messages?after={newest}")).await {
+            let newer = parse_messages(&response.text());
+            messages.update(|m| {
+                m.splice(0..0, newer);
+            });
+        }
+        loading.replace(false);
+    });
+};
+
+virtual_list(move || messages.with(Vec::len), move |at| message_row(messages, at))
+    .inverted(true)
+    .on_load_more(load_older)
+    .on_load_more_at_start(load_newer)
+    .load_more_at_start_threshold(0.5)
+    .flex_1()
+```
+
+```tsx tabs
+const messages = signal<Message[]>(pageAround(target)); // newest first, ending at an old message
+let loading = false;
+
+const loadNewer = async () => {
+  if (loading) return;
+  loading = true;
+  try {
+    const newest = messages()[0].id;
+    const newer: Message[] = await (await fetch(`https://api.example.com/messages?after=${newest}`)).json();
+    messages.set([...newer, ...messages()]);
+  } finally {
+    loading = false;
+  }
+};
+
+<List
+  each={messages()}
+  inverted
+  style={{ flex: 1 }}
+  onLoadMore={loadOlder}
+  onLoadMoreAtStart={loadNewer}
+  loadMoreAtStartThreshold={0.5}
+>
+  {(message) => <Bubble message={message()} />}
+</List>
+```
+
+Once the newest message is in, stop loading: new messages then arrive at the start as in any chat.
 
 ## Viewability
 

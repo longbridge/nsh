@@ -474,6 +474,61 @@ pub fn measure_line(
     engine.measure(&prepared, None).width
 }
 
+/// How `text` sits on one line in a canvas font ([`line_metrics`]): its
+/// width, and the font's extent above and below the baseline, so a
+/// component can center text in a box or place a caret over it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TextMetrics {
+    /// The advance width (canvas `measureText(text).width`).
+    pub width: Points,
+    /// Above the baseline (`fontBoundingBoxAscent`).
+    pub ascent: Points,
+    /// Below the baseline (`fontBoundingBoxDescent`).
+    pub descent: Points,
+    /// The line's height: ascent, descent and the font's leading.
+    pub height: Points,
+}
+
+/// [`TextMetrics`] of `text` on one line in `font`, by `engine`. Engines
+/// that do not report their lines give the em box's split of the size
+/// (0.8 above the baseline, 0.2 below) and the measured height.
+pub fn line_metrics(
+    engine: &impl crate::text::TextEngine,
+    font: &CanvasFont,
+    text: &str,
+) -> TextMetrics {
+    let mut attributed = crate::text::AttributedText {
+        no_wrap: true,
+        max_lines: 1,
+        ..Default::default()
+    };
+    // An empty line still has the font's extent.
+    attributed.push(if text.is_empty() { " " } else { text }, font.text_style());
+    let prepared = engine.prepare(&attributed);
+    let size = engine.measure(&prepared, None);
+    let width = if text.is_empty() {
+        Points::ZERO
+    } else {
+        size.width
+    };
+    let layout = engine.layout(&prepared, size);
+    match engine.lines(&layout).first() {
+        Some(line) => TextMetrics {
+            width,
+            ascent: line.ascender,
+            descent: line.descender,
+            height: line.height,
+        },
+        None => TextMetrics {
+            width,
+            ascent: Points(font.size.0 * 0.8),
+            descent: Points(font.size.0 * 0.2),
+            height: size.height,
+        },
+    }
+}
+
 /// Where text sits horizontally relative to its x (`textAlign`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum CanvasTextAlign {
@@ -679,6 +734,60 @@ pub struct Drawing {
     pub ops: Vec<CanvasOp>,
     /// The animated values the operations read, by slot.
     pub slots: Vec<crate::animation::NodeId>,
+    /// The parts of what it draws that are elements of their own to
+    /// assistive technologies and UI tests ([`CanvasNode`]), in reading
+    /// order.
+    pub nodes: Vec<CanvasNode>,
+}
+
+/// A part of a canvas's drawing that assistive technologies and UI tests
+/// see as an element of its own: a cell of a grid, a bar of a chart. It
+/// is the canvas's child at `bounds` (points from the canvas's top left),
+/// with its own role, name and test id; a press on it is a press at its
+/// center, as a pointer there makes it, which goes to whatever view is
+/// under that point and takes presses. The GPUI backend and the headless
+/// driver show them; the other backends do not yet.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct CanvasNode {
+    /// Where it is in the canvas.
+    pub bounds: Bounds<Points>,
+    /// What it is to assistive technologies.
+    pub role: crate::AccessibilityRole,
+    /// Its accessible name: the text it shows.
+    pub label: Arc<str>,
+    /// `testID`: an identifier for UI tests.
+    pub test_id: Option<Arc<str>>,
+    /// It is selected (a grid's selected cells).
+    pub selected: bool,
+}
+
+impl CanvasNode {
+    /// A node at `bounds` with `role`, named `label`.
+    pub fn new(
+        bounds: Bounds<Points>,
+        role: crate::AccessibilityRole,
+        label: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            bounds,
+            role,
+            label: label.into(),
+            ..Self::default()
+        }
+    }
+
+    /// With the test id `id`.
+    pub fn test_id(mut self, id: impl Into<Arc<str>>) -> Self {
+        self.test_id = Some(id.into());
+        self
+    }
+
+    /// Selected, or not.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
 }
 
 impl Drawing {

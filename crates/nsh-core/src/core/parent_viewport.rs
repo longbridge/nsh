@@ -146,22 +146,19 @@ impl<M: TextEngine> Core<M> {
         list.set_parent(parent);
         if parent {
             let len = list.content_len();
-            let spacer = self
-                .layout
-                .new_leaf(spacer_style(list.horizontal, len))
-                .expect("taffy leaf");
-            self.layout.add_child(layout, spacer).expect("taffy child");
+            let spacer = self.layout.new_leaf(spacer_style(list.horizontal, len));
+            self.layout.add_child(layout, spacer);
             list.spacer = Some((spacer, len));
             self.parent_lists.push(key);
             self.outer_moved = true;
         } else {
             if let Some((spacer, _)) = list.spacer.take() {
-                self.layout.remove(spacer).expect("taffy remove");
+                self.layout.remove(spacer);
             }
             self.parent_lists.retain(|&k| k != key);
             self.forget_outer(key);
         }
-        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.layout.mark_dirty(layout);
         self.needs_layout = true;
         if let Some(Some(at)) = create {
             let kind = if parent {
@@ -202,8 +199,7 @@ impl<M: TextEngine> Core<M> {
         }
         list.spacer = Some((spacer, new));
         self.layout
-            .set_style(spacer, spacer_style(list.horizontal, new))
-            .expect("taffy style");
+            .set_style(spacer, spacer_style(list.horizontal, new));
         self.needs_layout = true;
         self.extent_changed = true;
     }

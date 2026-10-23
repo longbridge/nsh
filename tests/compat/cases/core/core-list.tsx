@@ -3,7 +3,9 @@
 // `each`, with a header, a footer and separators, rows added when `each`
 // changes, the padding of its content (`contentStyle`,
 // `contentClass`), and what an empty list shows; `Scroll`'s view around its
-// content (`contentStyle`, `contentClass`). Its script checks each.
+// content (`contentStyle`, `contentClass`); the rows of the overscan around
+// the viewport, rendered once the frames after the first bind them. Its
+// script checks each.
 import { Scroll, Text, View, signal } from "nsh";
 import { List } from "nsh/list";
 
@@ -53,6 +55,13 @@ function App() {
       <Scroll testID="scroll2" style={{ height: 80 }} contentClass="p-2">
         <View testID="inner2" style={{ height: 20 }} />
       </Scroll>
+      <List testID="long" each={Array.from({ length: 30 }, (_, i) => i)} style={{ height: 100 }}>
+        {(item) => (
+          <View style={{ height: 40 }}>
+            <Text>Long {item()}</Text>
+          </View>
+        )}
+      </List>
     </View>
   );
 }

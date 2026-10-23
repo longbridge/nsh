@@ -102,6 +102,32 @@ define_class!(
                 backspace_on_empty(self.as_ref());
             }
         }
+
+        /// A hardware keyboard's keys go to the app's shortcuts first
+        /// (`nsh/keymap`): a key a binding takes never reaches the input.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_began(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_ended(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_ended(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
+        }
     }
 );
 
@@ -200,6 +226,32 @@ define_class!(
             // SAFETY: UITextView adopts UIKeyInput.
             let _: () = unsafe { msg_send![self, insertText: &*NSString::from_str("\n")] };
             self.ivars().line_break.set(false);
+        }
+
+        /// A hardware keyboard's keys go to the app's shortcuts first
+        /// (`nsh/keymap`): a key a binding takes never reaches the input.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_began(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_ended(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !crate::keymap::input_ended(self.as_ref(), presses) {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
         }
     }
 );

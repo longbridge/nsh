@@ -49,7 +49,49 @@ public class NshView extends FrameLayout {
         void onError(String message);
     }
 
+    /**
+     * Handles the app's calls ({@code await host.call(name, data)}) and posts
+     * ({@code host.post(name, data)}) of one name ({@code nsh/host}), on the
+     * UI thread. Register it with {@link #handle}.
+     */
+    public interface HostHandler {
+        /**
+         * Called for each call or post.
+         *
+         * @param data its data: JSON as Java objects ({@code String},
+         *     {@code Number}, {@code Boolean}, {@code java.util.List},
+         *     {@code java.util.Map}), or null
+         * @param reply answers a call, once, now or later, from any thread
+         */
+        void handle(Object data, NshHostReply reply);
+    }
+
+    /**
+     * Takes the URLs the app opens ({@code openUrl} of {@code nsh/device}) before
+     * the system does, on the UI thread. Register it with {@link #setOpenUrlHandler}.
+     */
+    public interface OpenUrlHandler {
+        /**
+         * Called for each URL the app opens, checked and granted (its
+         * {@code openUrl} capability).
+         *
+         * @param url the URL
+         * @return true when the embedding app handled it (routed it through
+         *     its own router; the app's {@code openUrl} resolves true), false
+         *     for the system to open it ({@code Intent.ACTION_VIEW})
+         */
+        boolean openUrl(String url);
+    }
+
+    /** The embedding app's URL handler, or null. */
+    private volatile OpenUrlHandler openUrlHandler;
+
+    /** The handlers of the app's calls and posts, by name. */
+    private final java.util.Map<String, HostHandler> hostHandlers = new java.util.concurrent.ConcurrentHashMap<>();
+
     long handle;
+    /** Serializes background sends with releasing the native handle. */
+    private final Object hostLock = new Object();
     private final float density;
     private final Box root;
     private final Mounter mounter;
@@ -62,6 +104,45 @@ public class NshView extends FrameLayout {
         // no view takes it.
         return super.dispatchTouchEvent(e) || tracking;
     }
+
+    /**
+     * A hardware keyboard's keys go to the app's shortcuts ({@code nsh/keymap}) before the focused view
+     * gets them: a key a binding takes is consumed, with its release (the input never sees it).
+     */
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (handle != 0) {
+            int action = e.getAction();
+            if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+                return true;
+            } else if (action == android.view.KeyEvent.ACTION_UP && Native.keyUp(handle, e.getKeyCode())) {
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * Keys with Control come as shortcuts first (the window's input stage offers them before the key
+     * event, and a text field selects all, copies or pastes there): the app's shortcuts take them first.
+     */
+    @Override
+    public boolean dispatchKeyShortcutEvent(android.view.KeyEvent e) {
+        if (handle != 0 && e.getAction() == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+            return true;
+        }
+        return super.dispatchKeyShortcutEvent(e);
+    }
+
+    /** Whether the app's shortcuts take key press {@code e}. */
+    private boolean keymapKey(android.view.KeyEvent e) {
+        // An input or hosted view (a web view, a native component) has the focus: in text.
+        View focus = findFocus();
+        boolean editing = focus != null && focus != this;
+        return Native.keyDown(handle, e.getKeyCode(), e.getUnicodeChar(0), e.getMetaState(),
+                e.getRepeatCount() > 0, editing);
+    }
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private ErrorListener errorListener;
     /** Where `asset:/…` files come from: an http base, a directory, or APK assets. */
@@ -172,6 +253,28 @@ public class NshView extends FrameLayout {
      */
     public void setStorageDirectory(File dir) {
         Native.setStorage(handle, dir == null ? null : dir.getPath());
+    }
+
+    /**
+     * Overrides the app's theme with the host's: a theme file of shadcn/ui's
+     * ({@code { "cssVars": { "theme": {…}, "light": {…}, "dark": {…} } }},
+     * values as CSS writes them, the format of {@code nsh.json}'s
+     * {@code "theme"}). Its tokens win over the app's of the same names, in
+     * light and dark mode; the app's others stay, so a branded host sets only
+     * what its brand changes ({@code primary}, {@code radius}, ...). Call it
+     * before or after loading: it applies at once (classes such as
+     * {@code bg-primary} are resolved again) and to every app loaded later,
+     * from its first frame. Main thread.
+     *
+     * @param json the theme file, or null to give the app its own theme back
+     * @throws IllegalArgumentException when the file does not parse; the
+     *     overrides then stay as they were
+     */
+    public void setThemeOverrides(String json) {
+        String error = Native.setThemeOverrides(handle, json);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
     }
 
     /** The contents of {@code file}, or null when it does not exist. */
@@ -313,6 +416,98 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * The launch parameters of the apps loaded from now on: what the app
+     * reads synchronously at start as {@code host.params} ({@code nsh/host}),
+     * such as the conversation a notification opens. A running app keeps the
+     * parameters it started with; later requests are events ({@link #send}).
+     *
+     * @param params JSON as Java objects (a {@code java.util.Map} or an
+     *     {@code org.json.JSONObject}), or null for none
+     * @return false (and ignored) when they are not a JSON object
+     */
+    public boolean setParams(Object params) {
+        if (handle == 0) return false;
+        return Native.setHostParams(handle, params == null ? null : Json.stringify(params));
+    }
+
+    /**
+     * Sends event {@code name} with {@code data} to the running app: its
+     * {@code host.on(name, listener)} listeners get it ({@code nsh/host}). An
+     * app that does not listen to {@code name} yet keeps the event until it
+     * does; while no app runs, it waits for the next one loaded. Any thread;
+     * it never waits for the app.
+     *
+     * @param name the event
+     * @param data JSON as Java objects (see {@link HostHandler#handle}), or null
+     * @return false when the view was destroyed, or the name or data is invalid
+     */
+    public boolean send(String name, Object data) {
+        if (name == null) return false;
+        // Serialization may call the host's own code. Finish it before
+        // taking the lock and reading the view's current handle.
+        String json = data == null ? null : Json.stringify(data);
+        synchronized (hostLock) {
+            return handle != 0 && Native.sendHostEvent(handle, name, json);
+        }
+    }
+
+    /**
+     * Handles the app's calls ({@code await host.call(name, data)}) and posts
+     * ({@code host.post(name, data)}) of {@code name} on the UI thread,
+     * replacing the handler it had; null removes it. The app's calls of a
+     * name without a handler fail at once.
+     *
+     * @param name the call's name
+     * @param handler the handler, or null
+     */
+    public void handle(String name, HostHandler handler) {
+        if (handle == 0 || name == null) return;
+        if (handler == null) hostHandlers.remove(name);
+        else hostHandlers.put(name, handler);
+        Native.setHostHandler(handle, name, handler != null);
+    }
+
+    /**
+     * Takes the URLs the app opens ({@code openUrl} of {@code nsh/device}, a
+     * {@code TextView}'s links when it opens them) before the system does,
+     * replacing the handler it had; null (the default): the system opens
+     * every URL.
+     *
+     * @param handler the handler, or null
+     */
+    public void setOpenUrlHandler(OpenUrlHandler handler) {
+        if (handle == 0) return;
+        openUrlHandler = handler;
+        Native.setOpenUrlHandler(handle, handler != null);
+    }
+
+    /** A URL the app opens ({@code request}, answered once); called by libnsh on the engine thread. */
+    void openUrlMessage(String url, long request) {
+        main.post(() -> {
+            OpenUrlHandler handler = openUrlHandler;
+            boolean handled = false;
+            try {
+                handled = handler != null && handler.openUrl(url);
+            } finally {
+                Native.openUrlReply(request, handled);
+            }
+        });
+    }
+
+    /** A call ({@code call} != 0) or post of the app; called by libnsh on the engine thread. */
+    void hostMessage(String name, String json, long call) {
+        main.post(() -> {
+            HostHandler handler = hostHandlers.get(name);
+            NshHostReply reply = new NshHostReply(call);
+            if (handler == null) {
+                reply.reject("the embedding app handles no \"" + name + "\"");
+                return;
+            }
+            handler.handle(Json.parse(json), reply);
+        });
+    }
+
+    /**
      * Development: loads from a `nsh dev` server and reloads on every change.
      *
      * @param url the server, {@code ws://host:port/ws}
@@ -335,10 +530,14 @@ public class NshView extends FrameLayout {
      * native components. The view can no longer be used.
      */
     public void destroy() {
-        if (handle != 0) {
-            Native.destroy(handle);
+        long taken;
+        synchronized (hostLock) {
+            taken = handle;
             handle = 0;
         }
+        // A send already in JNI finished before the handle was taken.
+        // Joining the engine needs no Java lock.
+        if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
     }
 
