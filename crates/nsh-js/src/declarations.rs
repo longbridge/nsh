@@ -762,6 +762,7 @@ mod tests {
 
     #[test]
     fn component_host_props_do_not_import_a_modules_pick_type() {
+        PickerTypes::accept(Pick::default());
         let mut registry = nsh_core::ui::Registry::ui_set("test/picker-types");
         registry.module::<PickerTypes>();
         let files = type_definitions(&[registry.into()]);
