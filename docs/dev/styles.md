@@ -61,6 +61,14 @@
   scroll. It draws above its siblings of the same `zIndex` (`Node::stack_rank`), as above a page's in-flow boxes.
   `bottom` / `right` stickiness and a zoomable scroll view are not supported. The `sticky` class keeps the meaning
   v0.2.0 recorded (it sets nothing).
+- **SVG paint** (`fill`, `stroke`, `strokeWidth`, `strokeDasharray`; Tailwind's `fill-*`, `stroke-<color>`,
+  `stroke-<number>`): CSS's properties of SVG shapes, which CSS lets any element set and inherits, so they mean what
+  they mean in a browser: a color, `none` or `currentColor` (the element's text color), a width that is a length, and
+  dashes and gaps as lengths separated by spaces or commas (an odd list repeated, `none`, or lengths adding up to 0
+  for a solid line). They style what Rust components draw on canvases (`nsh/base/plot`'s marks;
+  `Painter::*_from_view`, `canvas.md`), kept per node in `Style::paint` (`PaintStyle`) and resolved by the core when
+  it sends the drawing (`Core::resolved_paint`); views draw nothing with them. `fill-inherit` / `stroke-inherit` set
+  nothing (they inherit already).
 - **Text style inheritance** (CSS-like): a view's text properties (color, font, size, alignment, ...) pass to the texts and inputs
   inside it, so `class="text-white"` on a button styles its label. Inset padding / margin (set by Rust
   components: `SafeAreaView`, `KeyboardAvoidingView`) are added to the resolved padding / margin, so classes and

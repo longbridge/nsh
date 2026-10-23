@@ -3067,6 +3067,7 @@ mod tests {
         let drawing = Drawing {
             ops,
             slots: Vec::new(),
+            ..Default::default()
         };
         record(
             &drawing,
@@ -3127,6 +3128,7 @@ mod tests {
         let drawing = Drawing {
             ops,
             slots: Vec::new(),
+            ..Default::default()
         };
         let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
         let text = WindowTextSystem::new(system.clone());
@@ -3198,6 +3200,7 @@ mod tests {
         let drawing = Drawing {
             ops,
             slots: Vec::new(),
+            ..Default::default()
         };
         let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
         let text = WindowTextSystem::new(system.clone());

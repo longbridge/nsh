@@ -55,7 +55,12 @@ included, with tiny-skia into a pixmap in device pixels: `nsh-platform-gpui` `ca
 whole canvas. Numbers:
 `docs/dev/performance.md`.
 
-Rust components record drawings with `ui::Painter` (the same operations; `docs/dev/components.md`), measure text
+Rust components record drawings with `ui::Painter` (the same operations; `docs/dev/components.md`), paint with the
+canvas view's paint properties (`Painter::fill_style_from_view` and the like: `Drawing::view_paints` names the
+operations whose value is the view's `fill` / `stroke` / `strokeWidth` / `strokeDasharray`, which the core resolves,
+inherited from the views around as CSS inherits them and `currentColor` the view's text color, and sets into the
+drawing it mounts, `Drawing::painted`; a change of those properties, the canvas's or a view's around it, sends the
+drawing again, so no platform knows of it), measure text
 with `measure_text(font, text)`, on the core's text engine, and hit-test what a painter recorded with the same
 `point_in_path` / `point_in_stroke` (`Painter::is_point_in_path` / `is_point_in_stroke` for the current path,
 `path_contains` / `stroke_contains` for a `Path`; animated values count as 0 there too).
