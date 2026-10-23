@@ -85,25 +85,31 @@
   - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
     (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
     is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
-    oldest dropped and logged). In the VM, an event of a name nobody listens to is kept likewise until the first
+    oldest dropped and logged). Stopping the engine serializes its interrupt and shutdown message with `send`;
+    its attachment recovers events left in the engine queue for the next app under the same lock. In the VM, an
+    event of a name nobody listens to is kept likewise until the first
     listener of that name is added; a job then delivers what was kept, in order, at the end of the turn that added it
     (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
-    uncaught error; the others still run.
+    uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
+    listener unsubscribes during a callback, the rest keep their original order and age in the inbox.
   - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
     engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
     rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
     elsewhere): `Message::HostReply(id, result)` settles the promise in the engine's next turn. A `HostReply` dropped
     unanswered rejects ("did not answer"), so a handler that panics (caught) or forgets fails the call rather than
-    leaving it pending; an answer for an engine that stopped goes nowhere. There is no time limit: the embedding app
-    decides. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
+    leaving it pending; an answer for an engine that stopped goes nowhere. Calls use the platform API's timeout:
+    30 seconds by default, `{ timeout: 0 }` to wait without a deadline, on the app's clock. Calls and posts require
+    `capabilities.host` and the same function-name validation as the platform transport. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
     handler they are dropped.
   - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
     engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in
     `embed.rs`; Android: `NshView.hostMessage`, called over JNI on the engine thread, posts to the UI thread), where
-    Swift's and Java's handlers run. Data crosses the C ABI and JNI as JSON text (Swift `JSONSerialization`, Java
+    Swift's and Java's handlers run. Android serializes the native part of `send` with taking the handle in
+    `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
+    (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
   - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
-    directly ("Native modules", below). The channel's data is the embedding app's own: capabilities do not apply.
+    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
     opens (`openUrl` of `nsh/device`, `nsh_core::ui::open_url`, a `TextView` with `links="open"`;
@@ -134,6 +140,14 @@
   engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
   threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
   backend's window tests run two engines reading their own.
+- **The host's own picker** (`nsh_core::picker::PickerBackend`): an embedding app that has a picker of its own answers
+  the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
+  every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any
+  thread), and the core resolves the pick with them (cut to the limit, sizes, types and extensions filled in from the
+  bytes), sending no `Command::PickImages`. The capability check comes first, so a pick the app is not granted never
+  reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
+  needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
+  the view's activity).
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
@@ -144,6 +158,22 @@
   toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
   in classes included, stay as they are. The layout direction stays the system's language's.
+- **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
+  tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
+  Win32; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
+  `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
+  calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and
+  does not set is the default theme's), and a file that does not parse is an error (Swift throws `NshError`, Java an
+  `IllegalArgumentException`, C returns it) that changes nothing. The tokens go to the engine as host tokens
+  (`EngineControl::set_tokens`, `Core::set_host_tokens`): they win over the app's tokens of the same names in both
+  appearances, the app's others stay (`Tokens::over`), and classes naming the changed tokens (`bg-primary`,
+  `rounded-(--radius)`) are resolved again at once, as are Rust components reading `theme()`. Each platform keeps
+  them on its surface and starts every engine with them (`Engine::start_with`), so they are in the first frame of
+  every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
+  token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
+  in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
+  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

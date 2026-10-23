@@ -43,10 +43,11 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/device` | `windowSize`、`colorScheme`、`setColorScheme`、`fontScale`、`pixelRatio`、`locale`、`platform`、`openUrl` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/clipboard` | `Clipboard.writeText`、`Clipboard.readText`、`Clipboard.writeImage`、`Clipboard.readImage`、`Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/picker` | `Picker.pickImages` | [nsh/picker](./nsh-picker.md) |
 | `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.keys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/host` | `host.available`、`host.call`、`host.on`，以及原生 SDK 的 `params`、`post` | [nsh/host](./nsh-host.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`、`nativeModule`（宿主应用注册的原生组件和函数） | [nsh/native](./nsh-native.md) |
-| `nsh/host` | `host`（嵌入方的启动参数、它发来的事件，以及发给它的调用和投递） | [nsh/host](./nsh-host.md) |
 | `nsh/accessibility` | `announce`、`setAccessibilityFocus`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
 | `nsh/ios` | `isAvailable`、`InputAccessoryView` | [nsh/ios](./nsh-ios.md) |
 | `nsh/android` | `isAvailable`、`Toast`、`BackHandler` | [nsh/android](./nsh-android.md) |

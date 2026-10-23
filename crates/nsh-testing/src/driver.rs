@@ -44,6 +44,20 @@ pub(crate) trait Driver: Send {
     /// The oldest dialog not answered yet.
     fn pending_dialog(&mut self) -> Option<Dialog>;
     fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String>;
+    /// The oldest pick (`Picker.pickImages`) not answered yet; a real
+    /// platform shows its picker and has none to answer.
+    fn pending_pick(&mut self) -> Option<nsh_core::picker::PickRequest> {
+        None
+    }
+    /// Answers the oldest pick with `files`.
+    fn answer_pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        drop(files);
+        Err(headless_only("answering a pick"))
+    }
+    /// The picks the app asked for, in order.
+    fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
+        Err(headless_only("`picks()`"))
+    }
     fn texts(&mut self) -> Result<Vec<String>, String>;
     fn count(&mut self, selector: &str) -> Result<usize, String>;
     fn enabled(&mut self, selector: &str) -> Result<bool, String>;
@@ -149,6 +163,16 @@ impl Driver for Headless {
     }
     fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String> {
         Headless::answer_dialog(self, answer)
+    }
+    fn pending_pick(&mut self) -> Option<nsh_core::picker::PickRequest> {
+        Headless::pending_pick(self)
+    }
+    fn answer_pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        Headless::answer_pick(self, files)
+    }
+    fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
+        self.catch_up();
+        Ok(Headless::picks(self))
     }
     fn texts(&mut self) -> Result<Vec<String>, String> {
         self.catch_up();

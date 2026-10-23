@@ -39,6 +39,7 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -401,6 +402,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

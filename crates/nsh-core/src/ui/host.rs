@@ -16,10 +16,10 @@ use super::{
     },
 };
 use crate::{
-    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp, Points,
-    Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
-    StatusBarSetting, SubmitBehavior, Tag, WebSource,
+    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
+    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
+    OverlayProp, Points, Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp,
+    ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -1115,6 +1115,14 @@ impl Video {
         self.bind_prop(ms, |ms: f32| Prop::Native(NativeProp::ProgressInterval(ms)))
     }
 
+    /// What its sound does to the rest of the device's audio while it
+    /// plays (default: the app's audio settings).
+    pub fn audio_session(self, session: impl IntoReactive<AudioSession>) -> Self {
+        self.bind_prop(session, |session: AudioSession| {
+            Prop::Native(NativeProp::AudioSession(session))
+        })
+    }
+
     /// It started loading.
     pub fn on_load_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::LoadStart, listener.into_listener(), events::unit)
@@ -1318,6 +1326,13 @@ impl Painter {
         let slot = self.drawing.slot(node.id());
         self.nodes.push(node);
         slot
+    }
+
+    /// Adds `node`: a part of the drawing that assistive technologies and
+    /// UI tests see as an element of its own ([`crate::canvas::CanvasNode`]).
+    pub fn node(mut self, node: crate::canvas::CanvasNode) -> Self {
+        self.drawing.nodes.push(node);
+        self
     }
 
     /// Records `op` (one built by hand: its numbers and paints from

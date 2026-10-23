@@ -283,6 +283,7 @@ impl AppView {
             pinned: Default::default(),
             clipboard: None,
             host: options.host.clone(),
+            picker: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -352,6 +353,21 @@ impl AppView {
         host.font_scale = scale;
         self.surface.host_environment.set(host);
         crate::system::host_environment_changed(&self.surface);
+    }
+
+    /// The embedding app's theme overrides: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, as `nsh.json`'s `"theme"`), whose tokens
+    /// win over the app's of the same names, light and dark, while the
+    /// app's others stay (a brand's `primary` and `radius`). Classes naming
+    /// them (`bg-primary`) are resolved again at once, and every app loaded
+    /// later starts with them. `None` gives the app its own theme back.
+    /// Fails, changing nothing, on a file that does not parse.
+    pub fn set_theme_overrides(&self, json: Option<&str>) -> Result<(), nsh_base::ThemeError> {
+        let tokens = json.map(nsh_base::theme_overrides).transpose()?;
+        *self.surface.host_tokens.borrow_mut() = tokens.clone();
+        self.surface.control(|c| c.set_tokens(tokens));
+        Ok(())
     }
 
     /// Stops the app.

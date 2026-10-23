@@ -138,6 +138,7 @@ fn fetch_round_trips_through_the_platform_network() {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -248,6 +249,7 @@ fn fetch_stays_within_the_capabilities() {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -317,6 +319,7 @@ fn rust_components_fetch_through_the_platform_network() {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     let mut shown = Vec::new();

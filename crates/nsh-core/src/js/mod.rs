@@ -31,8 +31,8 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/canvas",
     "nsh/list",
     "nsh/image",
-    "nsh/keymap",
     "nsh/host",
+    "nsh/keymap",
 ];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.
@@ -111,7 +111,10 @@ mod tests {
             ("gridTemplateColumns", "string"),
             ("transform", "TransformStep[]"),
             ("tintColor", "ColorValue"),
-            ("display", "\"flex\" | \"grid\" | \"block\" | \"none\""),
+            (
+                "display",
+                "\"flex\" | \"grid\" | \"block\" | \"flow-root\" | \"none\"",
+            ),
         ] {
             assert!(style.contains(&format!("  {name}?: {ts};")), "{name}");
         }
@@ -147,6 +150,7 @@ mod tests {
                 "VideoHostProps",
                 "  onLoad?: (e: { duration: number; size: Size }) => void;",
             ),
+            ("VideoHostProps", "  audioSession?: AudioSession;"),
             (
                 "ScrollingHostProps",
                 "  decelerationRate?: \"normal\" | \"fast\" | number;",

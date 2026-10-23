@@ -1,9 +1,9 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `Toast`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, all of
-//! `nsh/image`, `nsh/clipboard` and
-//! `nsh/storage`,
+//! `nsh/image`, `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
-//! `net`'s sockets, `websocket`'s connections and `fs/promises`' files. Their JS face is made
+//! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
+//! `nsh/host`'s calls. Their JS face is made
 //! from their specs like a UI set's (`nsh-js` `components.rs`), and so are
 //! their declarations ([`crate::ui::declarations`]); `nsh-js` adds what has
 //! to run in JS (the app's listeners, reactive accessors).
@@ -18,9 +18,11 @@ mod clipboard;
 mod desktop;
 mod device;
 mod fs;
+pub(crate) mod host;
 mod image;
 mod net;
 mod os;
+mod picker;
 mod process;
 mod storage;
 mod websocket;
@@ -49,6 +51,8 @@ pub fn registries() -> &'static [Registry] {
         image.module::<image::Image>();
         let mut clipboard = Registry::runtime("nsh/clipboard");
         clipboard.module::<clipboard::Clipboard>();
+        let mut picker = Registry::runtime("nsh/picker");
+        picker.module::<picker::Picker>();
         let mut storage = Registry::runtime("nsh/storage");
         storage.module::<storage::Storage>();
         let mut desktop = Registry::runtime("nsh/desktop");
@@ -68,12 +72,15 @@ pub fn registries() -> &'static [Registry] {
             websocket.module::<websocket::WebSocket>();
             websocket
         };
+        let mut host = Registry::runtime("nsh/host");
+        host.module::<host::Host>();
         vec![
             android,
             accessibility,
             device,
             image,
             clipboard,
+            picker,
             storage,
             desktop,
             os,
@@ -81,6 +88,7 @@ pub fn registries() -> &'static [Registry] {
             process,
             fs,
             websocket,
+            host,
         ]
     })
 }

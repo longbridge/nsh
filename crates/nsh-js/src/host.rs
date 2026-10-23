@@ -816,11 +816,27 @@ impl Host {
 
     /// Earliest timer deadline, if any timer is pending.
     pub fn next_timer(&self) -> Option<Instant> {
-        self.shared.timers.borrow_mut().next_deadline()
+        let timer = self.shared.timers.borrow_mut().next_deadline();
+        let host = self
+            .cx
+            .is_live()
+            .then(|| {
+                self.cx
+                    .with(|cx| crate::host_channel::next_deadline(cx.as_raw().as_ptr()))
+            })
+            .flatten();
+        timer.into_iter().chain(host).min()
     }
 
     /// Runs all timers due at `now`.
     pub fn run_timers(&self, now: Instant) {
+        if self.cx.is_live() {
+            self.guarded(Phase::Call, || {
+                self.cx
+                    .with(|cx| crate::host_channel::expire(cx.as_raw().as_ptr(), now));
+                self.run_jobs();
+            });
+        }
         loop {
             // Release the borrow before calling into JS: callbacks may add timers.
             let Some(callback) = self.shared.timers.borrow_mut().pop_due(now) else {
@@ -1187,10 +1203,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
         }
+        // The core answers picks; JS never gets their files this way.
+        EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
         }
+        EventPayload::Json(value) => return json_value(cx, value),
         EventPayload::TextLayout(lines) => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (i, l) in lines.iter().enumerate() {

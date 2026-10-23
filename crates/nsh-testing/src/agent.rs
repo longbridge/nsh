@@ -433,6 +433,12 @@ pub trait Scene: Send + Sync {
     /// The text view showing span `id` (a nested text that takes presses)
     /// and where in its text the span is (UTF-16 units); `None` for a view.
     fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String>;
+    /// The canvas containing the one node `selector` names, and its
+    /// center in that canvas's coordinates; `None` for an ordinary view.
+    fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
+        let _ = selector;
+        Ok(None)
+    }
     /// Moves the app's manual clock ([`Model::move_clock`]).
     fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String>;
     /// Whether the app runs on a manual clock (`open`'s `clock`), which
@@ -448,6 +454,9 @@ pub trait Scene: Send + Sync {
 }
 
 impl Scene for Model {
+    fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
+        Ok(self.lock().screen.canvas_node(&Selector::parse(selector)?))
+    }
     fn activity(&self) -> Result<Activity, String> {
         let state = self.lock();
         Ok(Activity {
@@ -588,6 +597,7 @@ impl MenuValue {
                 enabled,
                 checked,
                 role: None,
+                when: nsh_core::keymap::When::Always,
             }),
             MenuValue::Submenu {
                 label,
@@ -690,6 +700,9 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
                 .set_viewport(Size::new(Points(*width), Points(*height)))
                 .map(|()| Value::Null),
             SceneQuery::Span { id } => model.span(*id).and_then(|s| json(to_value(s))),
+            SceneQuery::CanvasNode { selector } => {
+                model.canvas_node(selector).and_then(|n| json(to_value(n)))
+            }
             SceneQuery::Clock { change } => model.move_clock(*change).map(|()| Value::Null),
             SceneQuery::HostSend { name, data } => model
                 .send_host_event(name, data.clone())
@@ -731,6 +744,11 @@ impl RemoteScene {
 }
 
 impl Scene for RemoteScene {
+    fn canvas_node(&self, selector: &str) -> Result<Option<(NodeId, Point<Points>)>, String> {
+        self.query(SceneQuery::CanvasNode {
+            selector: selector.into(),
+        })
+    }
     fn activity(&self) -> Result<Activity, String> {
         #[derive(serde::Deserialize)]
         struct Wire {
@@ -908,15 +926,11 @@ pub trait Native: Send + Sync {
     }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
     /// `mod` the platform's command key), on a hardware keyboard: the app's
-    /// shortcuts hear it, else what has the keyboard focus. Platforms
-    /// without app shortcuts (the phones) refuse it.
+    /// shortcuts hear it, else what has the keyboard focus. Every
+    /// platform's agent makes them; one that cannot refuses it.
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         let _ = keys;
-        Err(
-            "this platform has no keyboard shortcuts (`nsh/keymap`) to press: \
-             run the test headless, or on a desktop or the web"
-                .into(),
-        )
+        Err("this platform's test agent presses no hardware keys: run the test headless".into())
     }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);
@@ -1276,6 +1290,9 @@ impl Agent {
                 .set_viewport(Size::new(Points(width), Points(height)))
                 .map(|()| Value::Null),
             SceneQuery::Span { id } => scene.span(id).and_then(|s| json(to_value(s))),
+            SceneQuery::CanvasNode { selector } => {
+                scene.canvas_node(&selector).and_then(|n| json(to_value(n)))
+            }
             SceneQuery::Clock { change } => scene.move_clock(change).map(|()| Value::Null),
             SceneQuery::HostSend { name, data } => {
                 scene.send_host_event(&name, data).map(|()| Value::Null)
@@ -1347,6 +1364,12 @@ impl Agent {
         self.settled()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
+        if let Some((canvas, center)) = self.scene.canvas_node(selector)? {
+            return Ok((
+                id,
+                self.scroll_point_into_view(canvas, selector, Some(center))?,
+            ));
+        }
         let Some((text, start, end)) = self.scene.span(id)? else {
             return Ok((id, self.scroll_into_view(id, selector)?));
         };
@@ -1371,7 +1394,18 @@ impl Agent {
     /// is not: the innermost scroll view around it that hides it scrolls it
     /// towards its own middle, a gesture at a time, as a user would.
     fn scroll_into_view(&self, id: NodeId, selector: &str) -> Result<Point<Points>, String> {
-        let (at, scrolled) = self.bring_into_view(id, selector)?;
+        self.scroll_point_into_view(id, selector, None)
+    }
+
+    /// Brings a point within a view into view (its center when `local`
+    /// is `None`), retaining a canvas node's position through scrolling.
+    fn scroll_point_into_view(
+        &self,
+        id: NodeId,
+        selector: &str,
+        local: Option<Point<Points>>,
+    ) -> Result<Point<Points>, String> {
+        let (at, scrolled) = self.bring_into_view(id, selector, local)?;
         if !scrolled {
             return Ok(at);
         }
@@ -1379,12 +1413,20 @@ impl Agent {
         // before the step acts, once: between the gestures only the view's
         // own movement is waited for ([`Agent::stopped`]).
         self.settled()?;
-        Ok(self.native.bounds(id).map_or(at, |b| b.center()))
+        Ok(self
+            .native
+            .bounds(id)
+            .map_or(at, |b| local.map_or(b.center(), |p| b.origin + p)))
     }
 
     /// [`Agent::scroll_into_view`]'s gestures: the view's middle, and
     /// whether a gesture moved anything.
-    fn bring_into_view(&self, id: NodeId, selector: &str) -> Result<(Point<Points>, bool), String> {
+    fn bring_into_view(
+        &self,
+        id: NodeId,
+        selector: &str,
+        local: Option<Point<Points>>,
+    ) -> Result<(Point<Points>, bool), String> {
         let not_on_screen = || {
             format!(
                 "`{selector}` is not on screen (it has no native view); {}",
@@ -1398,7 +1440,8 @@ impl Agent {
         // elsewhere, as a user moves the finger.
         let mut anchors = [0.5f32, 0.25, 0.75].into_iter().peekable();
         for _ in 0..SCROLLS_INTO_VIEW {
-            let at = self.native.bounds(id).ok_or_else(not_on_screen)?.center();
+            let bounds = self.native.bounds(id).ok_or_else(not_on_screen)?;
+            let at = local.map_or(bounds.center(), |p| bounds.origin + p);
             let viewport = self.native.viewport();
             let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
             if let Some(b) = before
@@ -1783,6 +1826,78 @@ mod tests {
             Ok(())
         }
         fn quit(&self) {}
+    }
+
+    #[test]
+    fn canvas_nodes_keep_their_centers_in_local_and_remote_scenes() {
+        use nsh_core::{
+            EventMask, MountItem, ViewKind,
+            canvas::{CanvasNode, Drawing},
+        };
+        let model = Arc::new(Model::default());
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(40.0)));
+        let mut events = EventMask::default();
+        events.set(EventKind::Press, true);
+        let mut drawing = Drawing::default();
+        drawing.nodes.push(
+            CanvasNode::new(
+                Bounds::new(point(px(100.0), px(0.0)), size(px(100.0), px(40.0))),
+                nsh_core::AccessibilityRole::Text,
+                "cell",
+            )
+            .test_id("cell"),
+        );
+        model.apply(&MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 4,
+                    kind: ViewKind::View,
+                },
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Canvas,
+                },
+                MountItem::Frame {
+                    id: 4,
+                    frame: bounds,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: bounds,
+                },
+                MountItem::Insert {
+                    parent: 1,
+                    child: 4,
+                    before: None,
+                },
+                MountItem::Insert {
+                    parent: 4,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::Events { id: 4, events },
+                MountItem::Canvas {
+                    id: 2,
+                    drawing: Arc::new(drawing),
+                },
+            ],
+        });
+        let remote_model = model.clone();
+        let remote = Arc::new(RemoteScene::new(move |step| {
+            answer(&remote_model, &step).unwrap()
+        }));
+        let (engine, _batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        for scene in [model as Arc<dyn Scene>, remote as Arc<dyn Scene>] {
+            let agent = Agent::new(
+                scene,
+                Box::new(Fake(engine.control(), Arc::new(Mutex::new(Vec::new())))),
+            );
+            // Fake's canvas starts at x=1.5; its pad's center is x=4.
+            assert_eq!(
+                agent.find("id:cell", "pressable view", PickTarget::Pressable),
+                Ok((4, point(px(151.5), px(20.0))))
+            );
+        }
     }
 
     #[test]

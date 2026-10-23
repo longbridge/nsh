@@ -32,6 +32,7 @@ pub mod navigation;
 pub mod open_url;
 mod ops;
 pub mod overlay;
+pub mod picker;
 pub mod platform;
 mod props;
 pub mod reactive;
@@ -71,8 +72,9 @@ pub use crate::{
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     image::ImageData,
     mount::{
-        ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem, NO_NATIVE_HEADER,
-        NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,
+        AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
+        NO_NATIVE_HEADER, NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps,
+        ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,

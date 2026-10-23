@@ -30,7 +30,9 @@
 //!   reported.
 //!
 //! Elsewhere than on macOS the application menu is a menu bar drawn above
-//! the app (not while the title bar is hidden or in full screen), and every
+//! the app (not while the title bar is hidden or in full screen; with
+//! `Window.setMenuBar("autoHide")` only after Alt alone, or while one of
+//! its menus is open), and every
 //! menu (the bar's, context menus) is a popup drawn over the window
 //! ([`menus`]), with keyboard access (F10, Alt + a menu's initial, arrows,
 //! Return, Escape). Window operations need the GPUI window, which batches
@@ -43,7 +45,9 @@
 //! ([`window_key`], one of the surface's window shortcuts); the menu's
 //! shortcuts after `nsh/keymap`'s bindings ([`shortcut`]), so a binding
 //! wins over a menu item of the same keystroke, then Ctrl+W / Cmd+W, which
-//! closes the window unless the app takes it.
+//! closes the window unless the app takes it. Quitting and closing (keys,
+//! roles, `Window.close()`, the close button) go to the embedding app's
+//! handler instead when it set one ([`crate::AppView::on_close_request`]).
 
 mod menus;
 
@@ -75,11 +79,12 @@ pub(crate) fn close_menu(surface: &Surface) -> Result<(), String> {
 }
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
-    desktop::{DesktopCommand, Key, MenuItem, MenuRole, Shortcut, TitleBarStyle},
+    desktop::{DesktopCommand, Key, MenuBarMode, MenuItem, MenuRole, Shortcut, TitleBarStyle},
     geometry::{Edges as Insets, Points},
 };
 
 use crate::{
+    CloseRequest,
     input::{KeyEvent, Modifiers},
     surface::Surface,
 };
@@ -146,6 +151,10 @@ enum Op {
     ShowAll,
 }
 
+/// What the embedding app does instead of quitting or closing the window
+/// ([`crate::AppView::on_close_request`]).
+type CloseHandler = Rc<dyn Fn(CloseRequest, &mut Window, &mut App)>;
+
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
@@ -171,6 +180,14 @@ pub(crate) struct Chrome {
     open: RefCell<Option<menus::Open>>,
     /// The menu bar's items, in window coordinates (from the last frame).
     bar_items: RefCell<Vec<Bounds<Pixels>>>,
+    /// When the menu bar shows (`Window.setMenuBar`).
+    menu_bar: Cell<MenuBarMode>,
+    /// Whether Alt is held across modifier changes.
+    alt_down: Cell<bool>,
+    /// Alt alone went down: its release toggles an auto-hidden bar.
+    alt_armed: Cell<bool>,
+    /// Alt alone showed the auto-hidden bar.
+    revealed: Cell<bool>,
     /// The window as last rendered.
     full_screen: Cell<bool>,
     maximized: Cell<bool>,
@@ -180,6 +197,8 @@ pub(crate) struct Chrome {
     /// Where a press on a `windowDrag` view began (window coordinates),
     /// until the window moves or the button is released.
     drag: Cell<Option<(f32, f32)>>,
+    /// Asked instead of quitting or closing, when set.
+    pub(crate) on_close: RefCell<Option<CloseHandler>>,
 }
 
 /// The surface fills a window of its own titled `title`: the window's
@@ -193,8 +212,11 @@ pub(crate) fn set_standalone(surface: &Surface, title: &str, window: AnyWindowHa
     c.menu_changed.set(true);
 }
 
-/// What GPUI's window gets for its title bar (see the module docs).
-pub(crate) fn titlebar_options(title: &str) -> gpui::TitlebarOptions {
+/// What a GPUI window gets for its title bar when an [`crate::AppView`]
+/// owns it ([`crate::AppView::own_window`]): opened this way, the window
+/// can draw both of `Window.setTitleBar`'s styles later (see the module
+/// docs).
+pub fn titlebar_options(title: &str) -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
         title: Some(title.to_owned().into()),
         appears_transparent: PLATFORM != Platform::Linux,
@@ -215,15 +237,59 @@ fn hidden(surface: &Surface) -> bool {
     surface.chrome.style.get() == TitleBarStyle::Hidden
 }
 
-/// The application menu shows as a menu bar above the app (not on macOS,
-/// whose menu bar is the system's).
-fn bar_shown(surface: &Surface) -> bool {
+/// The application menu can show as a menu bar above the app (not on
+/// macOS, whose menu bar is the system's): F10 and Alt + an initial open
+/// its menus.
+fn bar_available(surface: &Surface) -> bool {
     let c = &surface.chrome;
     PLATFORM != Platform::Mac
         && c.standalone.get()
         && !c.full_screen.get()
         && !hidden(surface)
         && c.menu.borrow().is_some()
+}
+
+/// The menu bar shows: always, or while Alt alone revealed it or one of
+/// its menus is open when it hides itself.
+fn bar_shown(surface: &Surface) -> bool {
+    let c = &surface.chrome;
+    bar_available(surface)
+        && (c.menu_bar.get() == MenuBarMode::Shown || c.revealed.get() || menus::bar_open(surface))
+}
+
+/// The keyboard's modifiers changed: Alt pressed and released alone shows
+/// or hides a bar that hides itself (an open menu of the bar closes), as
+/// in Windows and GNOME apps. Alt with another modifier is a shortcut.
+pub(crate) fn modifiers_changed(surface: &Surface, m: &Modifiers) {
+    let c = &surface.chrome;
+    let others = m.ctrl || m.shift || m.meta;
+    let was_alt = c.alt_down.replace(m.alt);
+    if m.alt {
+        if !was_alt {
+            c.alt_armed.set(!others);
+        } else if others {
+            c.alt_armed.set(false);
+        }
+        // Releasing another modifier must not re-arm an Alt press that
+        // was already used as part of a shortcut.
+        return;
+    }
+    let released_alone = c.alt_armed.replace(false) && was_alt && !others;
+    if !released_alone || c.menu_bar.get() != MenuBarMode::AutoHide || !bar_available(surface) {
+        return;
+    }
+    if menus::bar_open(surface) {
+        c.revealed.set(false);
+        menus::close(surface);
+    } else {
+        c.revealed.set(!c.revealed.get());
+    }
+    surface.invalidate();
+}
+
+/// A key went down: Alt released after it is a shortcut's.
+pub(crate) fn key_pressed(surface: &Surface) {
+    surface.chrome.alt_armed.set(false);
 }
 
 fn push(surface: &Surface, op: Op) {
@@ -276,6 +342,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             *c.menu.borrow_mut() = menu.clone();
             c.menu_changed.set(true);
             menus::menu_changed(surface);
+            surface.invalidate();
+        }
+        DesktopCommand::SetMenuBar(mode) => {
+            c.menu_bar.set(*mode);
+            c.revealed.set(false);
             surface.invalidate();
         }
         DesktopCommand::PopupMenu { items, at } => {
@@ -485,7 +556,9 @@ pub(crate) fn window_key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 
 /// A key down after the app's bindings (`nsh/keymap`): the application
 /// menu's shortcuts, the standalone window's Ctrl+W / Cmd+W and Alt + a
-/// menu's initial. True when it took the key.
+/// menu's initial. True when it took the key. An item whose `when` leaves
+/// the key to the focused field does not take it
+/// ([`MenuAction::fires_while_editing`](nsh_core::desktop::MenuAction::fires_while_editing)).
 pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     let c = &surface.chrome;
     if !c.standalone.get() {
@@ -494,15 +567,19 @@ pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     let Some(pressed) = pressed(event) else {
         return false;
     };
+    let editing = crate::text_input::focused(surface).is_some();
     let found = {
         let menu = c.menu.borrow();
         menu.as_deref().and_then(|items| {
             MenuItem::find_shortcut(items, &pressed)
                 .filter(|a| PLATFORM == Platform::Mac || !mac_only(a.role))
-                .map(|a| (a.id, a.role))
+                .map(|a| (a.id, a.role, !editing || a.fires_while_editing()))
         })
     };
-    if let Some((id, role)) = found {
+    if let Some((id, role, fires)) = found {
+        if !fires {
+            return false;
+        }
         if !event.repeat {
             choose(surface, id, role);
         }
@@ -542,6 +619,21 @@ fn restore_minimized(_window: &Window) {
     }
 }
 
+/// Hands `request` to the embedding app's handler, after the event that
+/// asked (the view may be rendering). False when it set none.
+pub(crate) fn ask_to_close(
+    surface: &Surface,
+    request: CloseRequest,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some(handler) = surface.chrome.on_close.borrow().clone() else {
+        return false;
+    };
+    window.defer(cx, move |window, cx| handler(request, window, cx));
+    true
+}
+
 /// Carries out the queued window operations.
 fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
     let ops = std::mem::take(&mut *surface.chrome.ops.borrow_mut());
@@ -576,8 +668,16 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
                 }
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
-            Op::Close => window.remove_window(),
-            Op::Quit => cx.quit(),
+            Op::Close => {
+                if !ask_to_close(surface, CloseRequest::Close, window, cx) {
+                    window.remove_window();
+                }
+            }
+            Op::Quit => {
+                if !ask_to_close(surface, CloseRequest::Quit, window, cx) {
+                    cx.quit();
+                }
+            }
             Op::Hide => cx.hide(),
             Op::HideOthers => cx.hide_other_apps(),
             Op::ShowAll => cx.unhide_other_apps(),
@@ -685,6 +785,10 @@ pub(crate) fn render(
     }
     if bar_shown(surface) {
         root = root.child(menus::bar(surface, window, &theme));
+    } else {
+        // A menu the keyboard opens from the hidden bar waits for the
+        // bar's items to be placed.
+        c.bar_items.borrow_mut().clear();
     }
     let mut body = div()
         .flex_1()
@@ -955,7 +1059,7 @@ fn control_button(
             match control {
                 Control::Minimize => window.minimize_window(),
                 Control::Maximize => window.zoom_window(),
-                Control::Close => window.remove_window(),
+                Control::Close => push(&s, Op::Close),
             }
             s.invalidate();
             crate::rt::flush(cx);
@@ -1111,6 +1215,7 @@ fn default_mac_menu(title: &str) -> Arc<[MenuItem]> {
             enabled: true,
             checked: None,
             role: Some(role),
+            when: nsh_core::keymap::When::Always,
         })
     };
     let submenu = |label: &str, items: Vec<MenuItem>| MenuItem::Submenu {

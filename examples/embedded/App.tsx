@@ -7,6 +7,7 @@
 // (`openUrl`): a host app may route it itself (`onOpenURL`,
 // `setOpenUrlHandler`), else the system opens it. `App.test.tsx` plays the
 // host app's part.
+// The theme pill takes the host's brand through setThemeOverrides.
 
 import { mount, signal, Text, View, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
@@ -46,6 +47,9 @@ function App() {
       <Text style={{ color: "#57606a" }}>
         The badge below is a native view of the host app: nsh lays it out, sends it props and gets its events.
       </Text>
+      <View class="self-start rounded-(--radius) bg-primary px-3 py-2">
+        <Text class="text-primary-foreground">Styled by the host app's theme</Text>
+      </View>
       <Badge
         ref={(node) => (badge = node)}
         text={taps() === 0 ? "Tap the native badge" : `Tapped ${taps()}×`}

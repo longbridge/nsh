@@ -329,7 +329,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.menu()` | 应用显示的上下文菜单（`Menu.popup`）中的操作：`label`（子菜单中的项写在子菜单名之后，如 `"Share > Mail"`）、`disabled`，可勾选项还有 `checked`；没有打开的菜单时为 `null`。 |
 | `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。该项被禁用或不存在时 reject。 |
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape。 |
-| `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `nsh/keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘：在桌面或 web 上由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。手机没有应用快捷键，在那里会 reject。 |
+| `await app.keyboard.press(keys)` | 按下一个带修饰键的按键，写法同 `nsh/keymap`（`"mod+k"`、`"shift+/"`、`"escape"`；`mod` 是平台的命令键），如同硬件键盘，在所有平台上都可用（手机和平板也可以接硬件键盘）：由应用的对应快捷键接收（`keymap.bind`、`onKeyCommand`），否则由获得焦点的输入框接收字符、Backspace 或回车，否则 Escape 执行返回。 |
 | `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。 |
@@ -343,6 +343,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `app.onDialog(handler)` | 回答应用之后弹出的对话框（`Alert.alert`、操作表）：`handler` 接收对话框（`title`、`message`、`buttons`、`cancelable`、`sheet`），返回要按的按钮文字，返回 `null` 则不按按钮直接关闭。 |
 | `app.dialogs()` | 应用弹出过的对话框，按顺序排列。 |
+| `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`）：`handler` 接收这次选取的要求（`multiple`、`limit`、`maxDimension`、`quality`、`format`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
+| `app.picks()` | 应用发起过的选取，按顺序排列。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
 | `await app.host.send(name, data?)` | 以宿主应用的身份向应用发送事件（`host.on`），然后等待它空闲。见[扮演宿主应用](#扮演宿主应用)。 |
@@ -366,11 +368,36 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 - **对话框会被回答**：由测试的 `onDialog` 回答，否则按它的取消按钮，否则在可以关闭时直接关闭；只能用其他按钮回答的对话框，
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
+- **页面的宿主应答 `nsh/host`**：应用的 `nsh.json` 在 `web.host` 中指定了宿主时（[页面的宿主](#页面的宿主)）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报，`app.openedUrls()` 列出它们。
+- **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` resolve 为 `[]`。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
+
+### 页面的宿主
+
+发布到 Web 的应用从页面得到宿主：`nsh.json` 的 `web.host`，一个导出 `createHost(player)` 的模块
+（[Web](./web.md#宿主的函数)）。无界面运行时，测试每打开一个应用，都会在应用启动前，在独立的 JavaScript 上下文中加载
+这个模块（有定时器和 `console`，没有浏览器的 API，不能 import）：它的 `call` 应答应用的
+[`host.call`](../modules/nsh-host.md)，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
+`call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致；应用启动前发送的事件
+会在应用启动后送到它顶层注册的监听器。`--web-host <module>` 指定另一个模块。应用调用的函数必须列在它的 `capabilities.host` 中，
+与页面上一致。调用的超时和宿主自己的定时器都按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它们。在浏览器中（`--target web`），开发页面像发布的页面一样为每个应用运行 `nsh.json` 的 `web.host`；在其他平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
+
+```tsx
+// nsh.json：{ "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
+import { open, test } from "nsh/test";
+
+test("calls reach the page's host", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:call");
+  await app.waitFor('text:{"n":1}');
+});
+```
+
+`examples/host-echo` 有一个应用、它的宿主和它们的测试。
 
 ### 断言
 

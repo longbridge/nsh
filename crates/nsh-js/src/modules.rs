@@ -28,7 +28,7 @@ use nsh_core::{
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
 use crate::{
-    animated, canvas, components, desktop, dom, env, host_channel, keymap, list, platform_modules,
+    animated, canvas, components, desktop, dom, env, keymap, list, platform_modules,
     reactive::{self, Native},
     touch,
 };
@@ -446,18 +446,18 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: "",
     },
     NativeModule {
+        name: "nsh/host",
+        exports: platform_modules::HOST_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(crate::host_channel::TYPES),
+    },
+    NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
         also: &[],
         moved_to: None,
         types: decl!(keymap::TYPES),
-    },
-    NativeModule {
-        name: "nsh/host",
-        exports: host_channel::EXPORTS,
-        also: &[],
-        moved_to: None,
-        types: decl!(host_channel::TYPES),
     },
 ];
 

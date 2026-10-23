@@ -44,6 +44,12 @@ pub fn check_name(name: &str) -> Result<(), String> {
 /// engine implements it over the embedding app's channel; the answer to a
 /// call comes back to the VM later, by its id.
 pub trait HostBridge {
+    /// Whether the native embedding app configured this channel. A false
+    /// value leaves calls to the platform transport (including the web).
+    fn available(&self) -> bool {
+        true
+    }
+
     /// The launch parameters the embedding app set before the app started
     /// (a JSON object; `{}` without any).
     fn params(&self) -> JsonValue;
@@ -80,6 +86,13 @@ impl HostInbox {
     /// Whether an event named `name` is kept.
     pub fn has(&self, name: &str) -> bool {
         self.events.iter().any(|(n, _)| n == name)
+    }
+
+    /// Takes the oldest event named `name`, leaving every other event in
+    /// its original order.
+    pub fn pop(&mut self, name: &str) -> Option<JsonValue> {
+        let index = self.events.iter().position(|(n, _)| n == name)?;
+        self.events.remove(index).map(|(_, data)| data)
     }
 
     /// Takes the events named `name`, in the order they came.
@@ -138,6 +151,21 @@ mod tests {
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox.take_all(), vec![("b".to_owned(), json!(2))]);
         assert!(inbox.is_empty());
+    }
+
+    #[test]
+    fn popping_one_event_preserves_the_age_of_the_rest() {
+        let mut inbox = HostInbox::default();
+        inbox.push("a".into(), json!(1));
+        inbox.push("b".into(), json!(2));
+        inbox.push("a".into(), json!(3));
+        assert_eq!(inbox.pop("missing"), None);
+        assert_eq!(inbox.pop("a"), Some(json!(1)));
+        assert_eq!(inbox.len(), 2);
+        assert_eq!(
+            inbox.take_all(),
+            vec![("b".to_owned(), json!(2)), ("a".to_owned(), json!(3))]
+        );
     }
 
     #[test]

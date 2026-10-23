@@ -79,6 +79,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -239,6 +240,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
