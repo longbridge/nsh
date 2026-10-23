@@ -97,6 +97,22 @@ fn caret_of_a_wrap_depends_on_affinity() {
 }
 
 #[test]
+fn hit_near_the_end_of_a_wrap_without_dropped_space_stays_upstream() {
+    // "abcd" wrapped after "ab": the line's last stop is the next line's start.
+    let lines = [line(0, 2, 0.0, 2), line(2, 4, 1.0, 2)];
+    let s = [stops(0, "ab"), stops(2, "cd")];
+    let at = hit_test(
+        &lines,
+        |i| s[i].as_slice(),
+        point(Points(19.0), Points(5.0)),
+    );
+    assert_eq!(at, TextPosition::new(2, Affinity::Upstream));
+    // The round trip: the caret stays on the first line, after "ab".
+    let c = caret_rect(&lines, |i| s[i].as_slice(), at).expect("lines");
+    assert_eq!((c.origin.x, c.origin.y), (Points(20.0), Points(0.0)));
+}
+
+#[test]
 fn no_lines_no_caret() {
     let none: [Stop; 0] = [];
     assert!(caret_rect(&[], |_| &none[..], TextPosition::default()).is_none());

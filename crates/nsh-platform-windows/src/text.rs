@@ -3076,7 +3076,7 @@ impl WinLayout {
             .max()
             .or_else(|| self.line_stops(line).map(|s| s.index).min());
         let Some(cluster) = cluster else {
-            return line.info.x;
+            return line.info.x.0;
         };
         let trailing = cluster < offset && offset >= line.info.end;
         let mut edge: Option<f32> = None;
@@ -3086,7 +3086,7 @@ impl WinLayout {
             let e = if right { s.x + s.width } else { s.x };
             edge = Some(edge.map_or(e, |p| if right { p.max(e) } else { p.min(e) }));
         }
-        edge.unwrap_or(line.info.x)
+        edge.unwrap_or(line.info.x.0)
     }
 
     /// The caret at `position` (content coordinates): zero wide, as high as

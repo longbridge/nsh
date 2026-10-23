@@ -113,14 +113,19 @@ pub(crate) fn hit_test<'a>(
     };
     let stops = stops(i);
     let x = p.x.0;
-    if x >= end_x(stops, l.x.0) {
-        let wrapped = l.end > l.start && lines.get(i + 1).is_some_and(|next| next.start == l.end);
-        let affinity = if wrapped {
+    // Where the line wrapped, its end is also the next line's start: the
+    // caret at it stays on this line (upstream).
+    let wrapped = l.end > l.start && lines.get(i + 1).is_some_and(|next| next.start == l.end);
+    let at = |offset: u32| {
+        let affinity = if wrapped && offset == l.end {
             Affinity::Upstream
         } else {
             Affinity::Downstream
         };
-        return TextPosition::new(l.end, affinity);
+        TextPosition::new(offset, affinity)
+    };
+    if x >= end_x(stops, l.x.0) {
+        return at(l.end);
     }
     // The first stop right of `x` exists: `x` is left of the last one.
     let right = stops.partition_point(|s| s.x <= x);
@@ -131,7 +136,7 @@ pub(crate) fn hit_test<'a>(
         (Some(left), None) => left.offset,
         (None, None) => l.start,
     };
-    TextPosition::new(offset, Affinity::Downstream)
+    at(offset)
 }
 
 /// The caret at `position`: zero wide, as high as its line, at the stop of
