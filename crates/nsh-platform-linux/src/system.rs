@@ -501,6 +501,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             read_clipboard_image(surface, *id, *has_only)
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
+        Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -1128,6 +1129,55 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
             answer(&surface, clipboard::image_answer(id, true, image));
         }
     });
+}
+
+/// `Picker.pickImages`: GTK's file dialog (the portal's where there is
+/// one), filtered to the image formats the request takes. The files are
+/// read as they are, on a thread of their own (no scaling or conversion
+/// here: `nsh_core::picker::read_files`).
+fn pick_images(surface: &Rc<Surface>, id: u32, request: nsh_core::picker::PickRequest) {
+    let mut control = None;
+    surface.control(|c| control = Some(c.clone()));
+    let Some(control) = control else { return };
+    let filter = gtk::FileFilter::new();
+    for extension in nsh_core::picker::dialog_extensions(&request) {
+        filter.add_suffix(extension);
+    }
+    let filters = gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&filter);
+    let dialog = gtk::FileDialog::builder().modal(true).build();
+    dialog.set_filters(Some(&filters));
+    dialog.set_default_filter(Some(&filter));
+    let window = surface.root.root().and_downcast::<gtk::Window>();
+    let read = move |paths: Vec<std::path::PathBuf>| {
+        std::thread::spawn(move || {
+            let files = nsh_core::picker::read_files(&paths, &request);
+            control.dispatch_event(ROOT_ID, EventKind::Pick, EventPayload::Picked { id, files });
+        });
+    };
+    if request.multiple() {
+        dialog.open_multiple(window.as_ref(), gio::Cancellable::NONE, move |result| {
+            let paths = result
+                .map(|list| {
+                    (0..list.n_items())
+                        .filter_map(|i| list.item(i).and_downcast::<gio::File>())
+                        .filter_map(|file| file.path())
+                        .collect()
+                })
+                .unwrap_or_default();
+            read(paths);
+        });
+    } else {
+        dialog.open(window.as_ref(), gio::Cancellable::NONE, move |result| {
+            read(
+                result
+                    .ok()
+                    .and_then(|file| file.path())
+                    .into_iter()
+                    .collect(),
+            );
+        });
+    }
 }
 
 /// `Clipboard.readFiles`: the `file:` URIs of a file list on the clipboard

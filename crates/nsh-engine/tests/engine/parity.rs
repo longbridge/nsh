@@ -124,6 +124,7 @@ mount(() => <Text>{{shown()}}</Text>);
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            picker: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         Self {

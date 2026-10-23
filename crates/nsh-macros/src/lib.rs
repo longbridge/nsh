@@ -398,7 +398,7 @@ enum Kind<'a> {
 /// element's `.child(..)`ren). (The derive makes a hidden macro of the
 /// struct's name, which the component's `#[component]` expands, so the
 /// props and the component are of one crate.)
-#[proc_macro_derive(Props, attributes(prop))]
+#[proc_macro_derive(Props, attributes(prop, props))]
 pub fn derive_props(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     props(input)
@@ -424,6 +424,19 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut slot_arms = Vec::new();
     let mut children = None;
     let mut lazy_children = false;
+    // `#[props(generic)]`: TS declares the props generic over `T`, the
+    // type of the rows a prop takes (`data: T[]`).
+    let mut generic = false;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("props")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("generic") {
+                generic = true;
+                Ok(())
+            } else {
+                Err(meta.error("expected `generic`"))
+            }
+        })?;
+    }
     let mut items: Option<Ident> = None;
     let mut items_js: Option<String> = None;
     // Fields of type `Prop<T>`: held in signals by an instance.
@@ -831,6 +844,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
         impl #impl_generics #ui::Props for #name #ty_generics #where_clause {
             const ITEMS: ::core::option::Option<&'static str> = #items_const;
             const LAZY_CHILDREN: bool = #lazy_children;
+            const GENERIC: bool = #generic;
 
             fn spec(types: &mut #ui::TsTypes) -> ::std::vec::Vec<#ui::PropSpec> {
                 let _ = &types;

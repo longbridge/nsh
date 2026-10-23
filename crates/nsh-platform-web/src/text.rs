@@ -26,9 +26,28 @@ const SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Robo
 /// The placeholder character of an inline attachment.
 const OBJECT: char = '\u{fffc}';
 
+/// CSS's generic font families: keywords, never quoted (a quoted one is
+/// a family of that name, which no system has).
+const GENERIC_FAMILIES: &[&str] = &[
+    "serif",
+    "sans-serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+    "ui-serif",
+    "ui-sans-serif",
+    "ui-monospace",
+    "ui-rounded",
+    "math",
+    "emoji",
+    "fangsong",
+];
+
 /// The CSS `font` shorthand of a style.
 pub(crate) fn css_font(style: &ResolvedTextStyle) -> String {
     let family = match style.font_family {
+        Some(f) if GENERIC_FAMILIES.contains(&&*f.name()) => format!("{}, {SYSTEM_FONT}", f.name()),
         Some(f) => format!("\"{}\", {SYSTEM_FONT}", f.name()),
         None => SYSTEM_FONT.to_owned(),
     };

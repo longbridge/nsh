@@ -177,6 +177,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        picker: None,
     };
     let engine = Engine::start(
         config,
@@ -330,6 +331,7 @@ fn entry_edits_keep_navigation_and_state() {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            picker: None,
         };
         let engine = Engine::start(
             config,

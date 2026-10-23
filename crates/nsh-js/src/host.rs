@@ -640,6 +640,15 @@ impl Host {
                         None => Ok(()),
                     }
                 });
+                // A listener made under an error boundary fails into it.
+                let result = match result {
+                    Err(rquickjs::Error::Exception)
+                        if crate::dom::catch_listener_failure(raw, id) =>
+                    {
+                        Ok(())
+                    }
+                    other => other,
+                };
                 self.report(&cx, result);
             });
             self.run_jobs();
@@ -1145,10 +1154,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
         }
+        // The core answers picks; JS never gets their files this way.
+        EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
         }
+        EventPayload::Json(value) => return json_value(cx, value),
         EventPayload::TextLayout(lines) => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (i, l) in lines.iter().enumerate() {
