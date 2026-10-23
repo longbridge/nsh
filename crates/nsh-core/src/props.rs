@@ -380,6 +380,12 @@ pub enum LayoutCurve {
         /// Damping ratio: 1 does not overshoot.
         damping: f32,
     },
+    /// The software keyboard's motion (`type: "keyboard"`): the curve the
+    /// system moves its keyboard with, timed from when the keyboard
+    /// started to move, so that what makes room for it moves with it (the
+    /// duration is the keyboard's, `keyboard_duration`). Where there is no
+    /// software keyboard, or nothing moved it, it eases in and out.
+    Keyboard,
 }
 
 /// The property animated when views appear or disappear.

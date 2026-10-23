@@ -27,6 +27,7 @@ function App() {
   const spring = Animated.sampleSpring({ toValue: 1, damping: 40 });
   const decay = Animated.sampleDecay({ velocity: 1000, from: 0 });
   const custom = LayoutAnimation.create(250, LayoutAnimation.Types.linear, LayoutAnimation.Properties.opacity);
+  const keyboard = LayoutAnimation.create(250, LayoutAnimation.Types.keyboard);
   const width = signal(50);
   return (
     <View testID="root" style={{ flex: 1, paddingTop: 64 }}>
@@ -57,6 +58,7 @@ function App() {
         <Text>Grow</Text>
       </View>
       <View testID="box" style={{ width: width(), height: 20 }} />
+      <Text>Keyboard: {keyboard.update?.type}</Text>
     </View>
   );
 }
