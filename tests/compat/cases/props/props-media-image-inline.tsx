@@ -1,9 +1,8 @@
 // A case of the API's test suite (docs/dev/compatibility.md): images whose
 // bytes the app already has. A `data:` URI (base64, and percent-encoded as
 // a placeholder) and a `blob:` URL of `URL.createObjectURL` show their
-// bytes, which go by a digest of them (the same bytes, the same image). A
-// chat shows a picked photo from its blob until the upload finishes, then
-// switches `src` to the remote URL and revokes the blob's.
+// bytes. A chat shows a picked photo from its blob until the upload
+// finishes, then switches `src` to the remote URL and revokes the blob's.
 import { Image, View, signal } from "nsh";
 
 // A 1 × 1 PNG.

@@ -499,6 +499,22 @@ impl Mounter {
         }
     }
 
+    /// VoiceOver's escape gesture (or the test agent's `back`) reached the
+    /// surface: while the app listens to going back (an overlay's
+    /// `onCancel`, a back listener), the core hears it as the back button
+    /// (the top overlay listening first). Whether it was taken.
+    pub(crate) fn escape(&self) -> bool {
+        if !self
+            .slot(nsh_core::ROOT_ID)
+            .is_some_and(|s| s.events.contains(EventKind::BackPress))
+        {
+            return false;
+        }
+        self.control
+            .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+        true
+    }
+
     /// Whether a native animation runs.
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {

@@ -109,7 +109,11 @@ pub fn compile_tsx(entry: impl AsRef<Path>, ui_sets: &[Registry]) -> Result<Bund
 /// `entry` built against `ui_sets`: its bytecode and source map.
 #[cfg(feature = "bundle")]
 fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>), String> {
-    let sets: Vec<SetDescription> = ui_sets.iter().map(SetDescription::from).collect();
+    let sets: Vec<SetDescription> = ui_sets
+        .iter()
+        .flat_map(Registry::sets)
+        .map(SetDescription::from)
+        .collect();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,

@@ -11,6 +11,7 @@ use gpui::{
     AnyElement, App as GpuiApp, Entity, Focusable, IntoElement, Styled, TestAppContext,
     VisualTestContext, Window, div,
 };
+use nsh_core::ui::Root;
 
 use crate::{App, AppOptions, AppView, Bundle, NativeComponent};
 
@@ -645,9 +646,7 @@ fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
     let (view, cx) =
         cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
     view.update(cx, |view, _| {
-        view.load(App::Rust(
-            nsh_core::ui::Root::of::<press_point::PressPoint>(),
-        ))
+        view.load(App::Rust(Root::of::<press_point::PressPoint>()))
     });
     cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
     wait_for(&view, cx, "none");

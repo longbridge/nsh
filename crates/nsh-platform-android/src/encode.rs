@@ -202,14 +202,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 ] {
                     e.float(v);
                 }
-                // Pressable spans: start, end, node, events (low, high).
+                // Pressable spans: start, end, node, events (four ints,
+                // lowest first).
                 e.int(text.links.len() as i32);
                 for l in &text.links {
                     e.int(l.start as i32);
                     e.int(l.end as i32);
                     e.int(l.node as i32);
-                    e.int(l.events.bits() as u32 as i32);
-                    e.int((l.events.bits() >> 32) as u32 as i32);
+                    mask(&mut e, l.events);
                 }
                 // `selectable`: 1 asked for, 0 refused (`false`: out of
                 // selection areas too), 2 unset.
@@ -223,10 +223,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
                 e.int(id as i32);
-                // A bit set indexed by `EventKind as u8`, as a Java long.
-                let bits = events.bits();
-                e.int(bits as u32 as i32);
-                e.int((bits >> 32) as u32 as i32);
+                mask(&mut e, events);
             }
             MountItem::Image {
                 id,
@@ -880,6 +877,15 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
             }
             e.int(0);
         }
+    }
+}
+
+/// An [`nsh_core::EventMask`]: a bit set indexed by `EventKind as u8`, as
+/// four ints, lowest first (two Java longs: `Events`).
+fn mask(e: &mut Encoded, events: nsh_core::EventMask) {
+    let bits = events.bits();
+    for word in 0..4 {
+        e.int((bits >> (32 * word)) as u32 as i32);
     }
 }
 
