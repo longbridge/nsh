@@ -919,7 +919,7 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
     let location = resolve(uri, surface.asset_base.borrow().as_ref());
-    fetch_at(location, uri, progress, done)
+    fetch_at(location, uri, disk_cache(surface, uri), progress, done)
 }
 
 /// Loads `source` for `surface` as [`fetch`] does: from its bytes, when it
@@ -933,14 +933,20 @@ fn fetch_source(
     match &source.data {
         Some(data) => {
             let location = Location::Memory(source.uri.to_string(), data.clone());
-            fetch_at(Some(location), &source.uri, progress, done)
+            fetch_at(Some(location), &source.uri, None, progress, done)
         }
         None => fetch(surface, &source.uri, progress, done),
     }
 }
 
-/// Loads `location` (`uri`'s), as [`fetch`] does.
-fn fetch_at(location: Option<Location>, uri: &str, progress: Option<Progress>, done: Done) -> bool {
+/// Loads `location` (`uri`'s) through `cache`, as [`fetch`] does.
+fn fetch_at(
+    location: Option<Location>,
+    uri: &str,
+    cache: Option<DiskCache>,
+    progress: Option<Progress>,
+    done: Done,
+) -> bool {
     let Some(location) = location else {
         done(Err(format!("unsupported image source `{uri}`")));
         return true;
@@ -961,7 +967,7 @@ fn fetch_at(location: Option<Location>, uri: &str, progress: Option<Progress>, d
         spawn(Job {
             key,
             location,
-            cache: disk_cache(surface, uri),
+            cache,
             progress: listens,
         });
     }
