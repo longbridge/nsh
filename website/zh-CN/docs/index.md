@@ -129,7 +129,7 @@ NSH 是 Retained Mode 的：每个元素都是平台保留着的视图，一次�
 
 ### Rust 应用
 
-用 Rust 编写的应用是一个 crate，其中没有任何 JavaScript：
+Rust 应用是一个 crate，完全用 Rust 与 Native 开发，无 JavaScript runtime：
 
 1. **构建。** `nsh` 为每个目标——iOS、Android、macOS、Windows、Linux 或 Web 应用——构建链接了你的 crate 的运行器。组件、状态、事件处理和引擎一起编译成 Native 代码。
 2. **运行。** 应用的根组件以 Rust 形式运行在引擎线程上。运行器里没有 JavaScript 引擎：在任何平台上，Rust 应用都不包含 QuickJS。

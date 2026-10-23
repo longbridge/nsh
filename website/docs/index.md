@@ -129,7 +129,7 @@ The toolchain is a single `nsh` binary. An app is written in Rust, in TSX, or bo
 
 ### Rust apps
 
-An app written in Rust is a crate, and nothing in it is JavaScript:
+A Rust app is a crate, built entirely with Rust and Native, with no JavaScript runtime:
 
 1. **Build.** `nsh` builds the runner of each target — the iOS, Android, macOS, Windows, Linux or web app — with your crate linked in. Components, state, handlers and the engine are compiled together into native code.
 2. **Run.** The app's root component runs on the engine thread as Rust. The runner has no JavaScript engine: QuickJS is not part of a Rust app on any platform.
