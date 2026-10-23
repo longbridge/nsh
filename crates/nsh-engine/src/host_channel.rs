@@ -18,9 +18,11 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
+#[cfg(feature = "js")]
+use nsh_core::host_channel::HostBridge;
 use nsh_core::{
     JsonValue,
-    host_channel::{HostBridge, HostInbox, check_name},
+    host_channel::{HostInbox, check_name},
 };
 
 use crate::Message;
@@ -76,6 +78,7 @@ impl std::fmt::Debug for HostChannel {
         f.debug_struct("HostChannel")
             .field("params", &inner.params)
             .field("handlers", &handlers)
+            .field("configured", &inner.configured)
             .field("attached", &inner.engine.is_some())
             .field("pending", &inner.pending.len())
             .finish()
@@ -157,6 +160,7 @@ impl HostChannel {
         self.lock().handlers.remove(name);
     }
 
+    #[cfg(feature = "js")]
     fn handler(&self, name: &str) -> Option<Handler> {
         self.lock().handlers.get(name).cloned()
     }
@@ -190,6 +194,7 @@ impl HostChannel {
 
     /// The bridge an app's `nsh/host` reaches this channel through, from
     /// the engine whose queue is `tx`: its parameters as they are now.
+    #[cfg(feature = "js")]
     pub(crate) fn bridge(&self, tx: Sender<Message>) -> EngineBridge {
         EngineBridge {
             params: JsonValue::Object(self.params()),
@@ -239,12 +244,14 @@ impl Drop for HostAttachment {
 
 /// What an engine's `nsh/host` reaches of the channel
 /// ([`nsh_core::host_channel::HostBridge`]).
+#[cfg(feature = "js")]
 pub(crate) struct EngineBridge {
     params: JsonValue,
     channel: HostChannel,
     tx: Sender<Message>,
 }
 
+#[cfg(feature = "js")]
 impl EngineBridge {
     /// Runs `handler` with `call`; a handler that panics drops the call,
     /// which fails it in the app.
@@ -257,6 +264,7 @@ impl EngineBridge {
     }
 }
 
+#[cfg(feature = "js")]
 impl HostBridge for EngineBridge {
     fn available(&self) -> bool {
         self.channel.lock().configured
