@@ -125,13 +125,16 @@ NSH 是 Retained Mode 的：每个元素都是平台保留着的视图，一次�
 
 ## 如何运行
 
-工具链是一个 `nsh` 可执行文件。用 Rust 编写的应用是一个 crate：`nsh` 为每个目标构建链接了你的 crate 的运行器，它的根组件直接在引擎上运行。TSX 应用（一个模块）是一组带入口的 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
+工具链是一个 `nsh` 可执行文件，应用经过它有两条路径。
+
+**用 Rust 编写的应用**是一个 crate。`nsh` 为每个目标构建链接了你的 crate 的运行器，整个应用——组件、状态和事件处理——都是 Native 代码。运行器里完全没有 JavaScript 引擎：在任何平台上，Rust 应用都不包含 QuickJS。
+
+**TSX 应用**（一个模块）是一组带入口的 `.tsx` / `.ts` 文件，入口通常是 `App.tsx`：
 
 1. **构建。** `nsh` 打包模块的文件（使用 rolldown 和 Oxc），并用自己的编译器编译 JSX。对 `nsh` 和 `nsh/*` 的导入保持为导入：运行时以 Native 方式提供它们，所以 bundle 里只有你的代码。bundle 会被编译成 QuickJS 字节码。
-2. **运行。** 在设备上，引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中运行字节码。编译后的 JSX 直接调用 Native 渲染器；一次 JavaScript 轮次中的变化被收集起来，由 Taffy（Flexbox 和 CSS Grid）排版，然后每帧作为一批视图操作交给主线程。
-3. **渲染。** 主线程把这一批操作应用到 Native 视图上。文本在引擎线程上只测量和排版一次（Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量），主线程只负责绘制。
+2. **运行。** 在设备上，引擎线程在 [QuickJS](https://github.com/quickjs-ng/quickjs) 中运行字节码。编译后的 JSX 直接调用 Native 渲染器，JavaScript 只描述界面和处理事件；解析样式、解析 Tailwind 类、比对差异、布局和文本都在 Rust 中完成。
 
-Rust 应用从第 2 步开始走同样的路径，由它的组件以 Native 方式代替 QuickJS 运行。在 TSX 应用里，JavaScript 只描述界面和处理事件，因此解释器里的工作量很小。解析样式、解析 Tailwind 类、比对差异、布局和文本都在 Rust 中完成。
+从这里开始，两条路径是同一个 Rust 引擎。每一轮的变化被收集起来，由 Taffy（Flexbox 和 CSS Grid）排版，每帧作为一批视图操作交给主线程，主线程把它应用到 Native 视图上。文本在引擎线程上只测量和排版一次（Apple 平台用 CoreText，Android 用 `StaticLayout`，Windows 用 DirectWrite，Linux 用 Pango，Web 用浏览器的字体度量），主线程只负责绘制。把 Rust 与 TSX 页面结合的应用，会为运行这些页面链接 QuickJS。
 
 在 Web 上，同一个引擎运行在页面里：浏览器显示用 CSS 设置样式的 HTML 元素，负责滚动、选择文本和处理输入；`nsh package --target web` 把应用发布成一个按内容命名文件的静态网站，可以直接放进任何 CDN（[Web](./web.md)）。
 

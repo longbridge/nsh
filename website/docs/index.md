@@ -125,13 +125,16 @@ That suits the screens most apps are made of — chats, mail, forms, lists, docu
 
 ## How it runs
 
-The toolchain is a single `nsh` binary. An app written in Rust is a crate: `nsh` builds the runner of each target with your crate linked in, and its root component runs on the engine directly. A TSX app (a module) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`:
+The toolchain is a single `nsh` binary, and an app takes one of two paths through it.
+
+**An app written in Rust** is a crate. `nsh` builds the runner of each target with your crate linked in, and the whole app — its components, state and handlers — is native code. The runner has no JavaScript engine at all: QuickJS is not part of a Rust app on any platform.
+
+**A TSX app** (a module) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`:
 
 1. **Build.** `nsh` bundles the module's files (with rolldown and Oxc) and compiles the JSX with its own compiler. Imports of `nsh` and `nsh/*` stay imports: the runtime serves them natively, so the bundle holds only your code. The bundle is compiled to QuickJS bytecode.
-2. **Run.** On the device, the engine thread runs the bytecode in [QuickJS](https://github.com/quickjs-ng/quickjs). Compiled JSX calls the native renderer directly; changes are collected during one JavaScript turn, laid out with Taffy (flexbox and CSS grid), and handed to the main thread as one batch of view operations per frame.
-3. **Render.** The main thread applies the batch to native views. Text is measured and laid out once on the engine thread (CoreText on Apple platforms, `StaticLayout` on Android, DirectWrite on Windows, Pango on Linux, the browser's font metrics on the web) and only drawn on the main thread.
+2. **Run.** On the device, the engine thread runs the bytecode in [QuickJS](https://github.com/quickjs-ng/quickjs). Compiled JSX calls the native renderer directly, and JavaScript only describes the UI and handles events; parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
 
-A Rust app takes the same path from step 2 on, with its components running natively in place of QuickJS. In a TSX app, JavaScript only describes the UI and handles events, so the work done in the interpreter is small. Parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
+From there both paths are the same Rust engine. Changes are collected per turn, laid out with Taffy (flexbox and CSS grid), and handed to the main thread as one batch of view operations per frame; the main thread applies the batch to native views. Text is measured and laid out once on the engine thread (CoreText on Apple platforms, `StaticLayout` on Android, DirectWrite on Windows, Pango on Linux, the browser's font metrics on the web) and only drawn on the main thread. An app that combines Rust with TSX screens links QuickJS to run them.
 
 On the web, the same engine runs in the page: the browser shows HTML elements styled with CSS, scrolls them, selects their text and handles input, and `nsh package --target web` publishes the app as a static site whose files are named by content, ready for any CDN ([Web](./web.md)).
 
