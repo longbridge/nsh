@@ -5,7 +5,10 @@
 //! moves and releases while a press that began there lasts (GPUI captures
 //! nothing: the listeners see every event of the window), wheel and
 //! touchpad scrolls the hitbox should handle, and keys while the surface's
-//! focus handle is in the focus path. Positions become root coordinates
+//! focus handle is in the focus path. Keys are heard in the bubble phase:
+//! while one of the surface's native components has the focus, GPUI gives
+//! it each key first (its bindings, then its listeners) and nsh sees only
+//! what it let through ([`crate::input::component_key`]). Positions become root coordinates
 //! (the surface's origin in the window subtracted); times are seconds of
 //! the surface's clock. Each handler ends with [`crate::rt::flush`].
 //!
@@ -115,6 +118,10 @@ pub(crate) fn install(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if surface.window_focus_requested.take() && !focus.is_focused(window) {
+        let focus = focus.clone();
+        window.defer(cx, move |window, cx| window.focus(&focus, cx));
+    }
     // The focused field's caret shows while the surface has the window's
     // focus; text and input methods come through the input handler.
     let has_focus = window.is_window_active() && focus.is_focused(window);
@@ -330,21 +337,24 @@ pub(crate) fn install(
 
     let s = surface.clone();
     window.on_key_event(move |e: &KeyDownEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || crate::native::focused(&s, window) {
+        if phase != DispatchPhase::Bubble {
             return;
         }
+        crate::chrome::key_pressed(&s);
         let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
             return;
         };
-        let handled = crate::input::key(
-            &s,
-            KeyEvent {
-                vk,
-                down: true,
-                repeat: e.is_held,
-                modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
-            },
-        );
+        let event = KeyEvent {
+            vk,
+            down: true,
+            repeat: e.is_held,
+            modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
+        };
+        let handled = if crate::native::focused(&s, window) {
+            crate::input::component_key(&s, event)
+        } else {
+            crate::input::key(&s, event)
+        };
         if handled {
             cx.stop_propagation();
             window.prevent_default();
@@ -354,24 +364,31 @@ pub(crate) fn install(
 
     let s = surface.clone();
     window.on_key_event(move |e: &KeyUpEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || crate::native::focused(&s, window) {
+        if phase != DispatchPhase::Bubble {
             return;
         }
         let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
             return;
         };
-        crate::input::key(
-            &s,
-            KeyEvent {
-                vk,
-                down: false,
-                repeat: false,
-                modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
-            },
-        );
+        let event = KeyEvent {
+            vk,
+            down: false,
+            repeat: false,
+            modifiers: crate::keys::modifiers(&e.keystroke.modifiers),
+        };
+        if crate::native::focused(&s, window) {
+            crate::input::component_key(&s, event);
+        } else {
+            crate::input::key(&s, event);
+        }
         crate::rt::flush(cx);
     });
-    // The keymap's held key (see `crate::keymap::forget_held`).
+    // The keymap's held key (see `crate::keymap::forget_held`), and Alt
+    // alone showing a menu bar that hides itself.
     let s = surface.clone();
-    window.on_modifiers_changed(move |_, _, _| crate::keymap::forget_held(&s));
+    window.on_modifiers_changed(move |e, _, cx| {
+        crate::keymap::forget_held(&s);
+        crate::chrome::modifiers_changed(&s, &crate::keys::modifiers(&e.modifiers));
+        crate::rt::flush(cx);
+    });
 }

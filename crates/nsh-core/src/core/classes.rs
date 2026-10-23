@@ -7,15 +7,28 @@ use std::sync::Arc;
 
 use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
+    geometry::{Points, Size},
     mount::MountItem,
     ops::NodeId,
     platform::{Appearance, ColorScheme},
-    style::{Style, StylePatch, ViewStyle},
+    props::PointerEvents,
+    style::{Color, Style, StylePatch, ViewStyle},
     tailwind::{
         ClassEnvironment, ClassList, ClassProps, Context, Rule, Theme, deps, position, rank, state,
     },
     text::TextEngine,
 };
+
+/// The text color an inline style sets (`color`).
+fn inline_color(patch: &StylePatch) -> Option<Color> {
+    patch.decls().iter().rev().find_map(|d| match d {
+        crate::style::StyleDecl::Set(crate::style::StyleKey::Color, value) => Some(match value {
+            crate::style::PatchValue::Str(s) => Color::parse(s),
+            _ => None,
+        }),
+        _ => None,
+    })?
+}
 
 /// The states the platform reports ([`Core::set_states`]).
 const REPORTED: u8 = state::PRESSED | state::HOVERED | state::FOCUSED;
@@ -53,7 +66,7 @@ pub(super) enum Part {
 
 impl Part {
     /// The state bits and rank of a state style.
-    fn state(self) -> Option<(u8, u16)> {
+    fn state(self) -> Option<(u8, crate::tailwind::Key)> {
         Some(match self {
             Part::Active => (state::PRESSED, rank::ACTIVE),
             Part::Hover => (state::HOVERED, rank::HOVER),
@@ -156,8 +169,12 @@ impl<M: TextEngine> Core<M> {
 
     /// [`Self::set_states`] by key.
     fn set_node_states(&mut self, key: Key, states: u8) {
+        let held = self.held_pressed() == Some(key);
         let node = &mut self.nodes[key as usize];
-        let new = node.states & !REPORTED | states & REPORTED;
+        let mut new = node.states & !REPORTED | states & REPORTED;
+        if held {
+            new |= state::PRESSED;
+        }
         if new == node.states {
             return;
         }
@@ -181,6 +198,38 @@ impl<M: TextEngine> Core<M> {
                     self.states_changed(k);
                 }
                 k = parent;
+            }
+        }
+    }
+
+    /// The node whose pressed state the touch responder holds.
+    fn held_pressed(&self) -> Option<Key> {
+        self.components
+            .touch
+            .pressed
+            .and_then(|id| self.key(id).ok())
+    }
+
+    /// Holds the `active:` (and `group-active:`) state on the components'
+    /// touch responder `id` until its touches end (`None`): a drag that
+    /// leaves its view, which the platform stops reporting as pressed,
+    /// keeps it pressed, as CSS's `:active` holds until the button is
+    /// released. The one held before is released.
+    pub(super) fn hold_pressed(&mut self, id: Option<NodeId>) {
+        let before = self.held_pressed();
+        self.components.touch.pressed = id;
+        if let Some(key) = before {
+            let node = &mut self.nodes[key as usize];
+            if node.states & state::PRESSED != 0 {
+                node.states &= !state::PRESSED;
+                self.states_changed(key);
+            }
+        }
+        if let Some(key) = self.held_pressed() {
+            let node = &mut self.nodes[key as usize];
+            if node.states & state::PRESSED == 0 {
+                node.states |= state::PRESSED;
+                self.states_changed(key);
             }
         }
     }
@@ -272,10 +321,70 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The steps of its parent's perspective that `key`'s transform starts
+    /// with as mounted ([`Self::mounted_view_style`]): 5, or 0 without one.
+    /// Only a view that turns out of its plane (`rotateX`, `rotateY`) shows
+    /// a perspective; a flat one stays as it is.
+    pub(super) fn perspective_steps(&self, key: Key) -> u8 {
+        let node = &self.nodes[key as usize];
+        let has = node.parent != NO_KEY
+            && !node.inline
+            && self.nodes[node.parent as usize].child_perspective.is_some()
+            && node.view_style.transform.ops().iter().any(|op| {
+                matches!(
+                    op.kind,
+                    crate::transform::TransformKind::RotateX
+                        | crate::transform::TransformKind::RotateY
+                )
+            });
+        if has { 5 } else { 0 }
+    }
+
     /// The view style of `key` as platforms take it: fractional
-    /// translations resolved.
+    /// translations resolved, its parent's perspective composed in.
     pub(super) fn mounted_view_style(&self, key: Key) -> Box<ViewStyle> {
-        self.nodes[key as usize].mounted_view_style()
+        let node = &self.nodes[key as usize];
+        let mut style = node.mounted_view_style();
+        let parent = node.parent;
+        if parent == NO_KEY || node.inline {
+            return style;
+        }
+        let parent = &self.nodes[parent as usize];
+        let Some(distance) = parent
+            .child_perspective
+            .filter(|_| self.perspective_steps(key) > 0)
+        else {
+            return style;
+        };
+        // CSS: the parent's perspective, around its center, applies to the
+        // child's plane: `translate(-d) perspective() translate(d)` before
+        // its own transform, `d` its origin's distance from that center.
+        let size = |s: Size<Points>| if s.width.is_nan() { Size::default() } else { s };
+        let (own, parent_size) = (size(node.frame.size), size(parent.frame.size));
+        let origin = if node.frame.size.width.is_nan() {
+            crate::geometry::Point::default()
+        } else {
+            node.frame.origin
+        };
+        let (offset, _) = style.transform_origin.offset(own);
+        let dx = origin.x.0 + own.width.0 / 2.0 + offset.x.0 - parent_size.width.0 / 2.0;
+        let dy = origin.y.0 + own.height.0 / 2.0 + offset.y.0 - parent_size.height.0 / 2.0;
+        use crate::transform::{Transform, TransformKind as T};
+        let mut composed = Transform::IDENTITY;
+        for (kind, value) in [
+            (T::TranslateX, -dx),
+            (T::TranslateY, -dy),
+            (T::Perspective, distance.0),
+            (T::TranslateX, dx),
+            (T::TranslateY, dy),
+        ] {
+            let _ = composed.push(kind, value);
+        }
+        for op in style.transform.ops() {
+            let _ = composed.push(op.kind, op.value);
+        }
+        style.transform = composed;
+        style
     }
 
     /// Sets the inline style of `key`'s `part` (`None`: removes it).
@@ -766,11 +875,217 @@ impl<M: TextEngine> Core<M> {
         0
     }
 
+    /// The margins `key`'s parent gives it (`space-*`): it is an element
+    /// child, and not the last.
+    fn space_of(&self, key: Key) -> Option<&crate::tailwind::Space> {
+        let node = &self.nodes[key as usize];
+        let parent = node.parent;
+        if parent == NO_KEY || node.inline {
+            return None;
+        }
+        let space = self.nodes[parent as usize]
+            .class_props
+            .as_ref()?
+            .space
+            .as_ref()?;
+        let last = self.nodes[parent as usize]
+            .children
+            .iter()
+            .rev()
+            .find(|&&c| self.is_element_child(c))?;
+        (*last != key && self.is_element_child(key)).then_some(space)
+    }
+
+    /// A child that counts among its siblings (`:last-child`, `first:`):
+    /// not a raw text, not a tooltip's overlay.
+    fn is_element_child(&self, key: Key) -> bool {
+        self.nodes[key as usize].kind != Kind::RawText && !self.is_tooltip_overlay(key)
+    }
+
+    /// `parent`'s children changed (`moved` joined it, or one left): the
+    /// ones whose `space-*` margin that changes are styled again, the one
+    /// that joined, and the last two, one of which was last before.
+    pub(super) fn spacing_changed(&mut self, parent: Key, moved: Key) {
+        let spacing = self.nodes[parent as usize]
+            .class_props
+            .as_ref()
+            .is_some_and(|p| p.space.is_some());
+        if !spacing && (moved == NO_KEY || !self.nodes[moved as usize].spaced) {
+            return;
+        }
+        let mut keys = [moved, NO_KEY, NO_KEY];
+        let mut elements = self.nodes[parent as usize]
+            .children
+            .iter()
+            .rev()
+            .filter(|&&c| self.is_element_child(c));
+        keys[1] = elements.next().copied().unwrap_or(NO_KEY);
+        keys[2] = elements.next().copied().unwrap_or(NO_KEY);
+        for (i, k) in keys.into_iter().enumerate() {
+            if k == NO_KEY || keys[..i].contains(&k) {
+                continue;
+            }
+            let (now, was) = (self.space_of(k).is_some(), self.nodes[k as usize].spaced);
+            // The one that moved may have left another `space-*` parent,
+            // whose margin it still has.
+            if now != was || i == 0 && now {
+                self.restyle(k);
+            }
+        }
+    }
+
     /// Resolves `key`'s style from its classes and inline style.
     pub(super) fn restyle(&mut self, key: Key) {
+        let mut base = Style::default();
+        // Under its own classes and style, as `:where()` is in CSS.
+        let space = self.space_of(key);
+        if let Some(space) = space {
+            space.apply(&mut base, false);
+        }
+        let spaced = space.is_some();
+        let node = &mut self.nodes[key as usize];
+        node.spaced = spaced;
+        // The color it is styled with (`currentColor`, `sync_colors`).
+        node.color_used = node.inherited_color;
+        // CSS's `ch` (`max-w-prose`): the `0` of the font it inherits, or of
+        // its own once its classes set one.
+        let reads_ch = self.nodes[key as usize]
+            .classes
+            .as_ref()
+            .is_some_and(|c| c.deps() & deps::CH != 0);
+        let node = &mut self.nodes[key as usize];
+        if node.reads_ch != reads_ch {
+            if reads_ch {
+                self.ch_readers += 1;
+            } else {
+                self.ch_readers -= 1;
+            }
+            node.reads_ch = reads_ch;
+        }
+        let inherited_font = reads_ch.then(|| self.inherited_text_style(key));
+        let mut ch = match inherited_font {
+            Some(font) => self.zero_advance(font),
+            None => crate::tailwind::DEFAULT_CH,
+        };
+        let mut style;
+        let mut props;
+        match inherited_font {
+            None => {
+                style = base;
+                props = ClassProps::default();
+                self.resolve_classes(key, ch, &mut style, &mut props);
+            }
+            // Again with its own font's, once its classes set one.
+            Some(inherited) => loop {
+                style = base.clone();
+                props = ClassProps::default();
+                self.resolve_classes(key, ch, &mut style, &mut props);
+                let own = self.zero_advance(inherited.inherit(&style.text));
+                if own == ch {
+                    break;
+                }
+                ch = own;
+            },
+        }
+        if reads_ch {
+            let node = &mut self.nodes[key as usize];
+            node.ch = ch;
+            let id = node.id;
+            self.ch_styled.push((key, id));
+        }
+        self.set_class_props(key, props);
+        let id = self.nodes[key as usize].id;
+        let _ = self.set_style(id, style);
+    }
+
+    /// A moved subtree or a changed font can change every descendant's `ch`.
+    pub(super) fn ch_changed(&mut self, key: Key) {
+        if self.ch_readers == 0 {
+            return;
+        }
+        let mut stack = vec![key];
+        while let Some(k) = stack.pop() {
+            let node = &self.nodes[k as usize];
+            if node
+                .classes
+                .as_ref()
+                .is_some_and(|c| c.deps() & deps::CH != 0)
+            {
+                self.ch_styled.push((k, node.id));
+            }
+            stack.extend_from_slice(&node.children);
+        }
+    }
+
+    /// The nodes with lengths in `ch` styled since the last commit are
+    /// styled again where the font they now inherit (the tree complete)
+    /// gives another `ch` than they were styled with.
+    pub(super) fn sync_ch(&mut self) {
+        if self.ch_styled.is_empty() {
+            return;
+        }
+        let styled = std::mem::take(&mut self.ch_styled);
+        for (key, id) in styled {
+            if self.nodes.get(key as usize).is_none_or(|n| n.id != id) {
+                continue;
+            }
+            let font = self.inherited_text_style(key);
+            let font = font.inherit(&self.nodes[key as usize].text_style);
+            if self.zero_advance(font) != self.nodes[key as usize].ch {
+                self.restyle(key);
+            }
+        }
+        // Styled just now, with the fonts in place.
+        self.ch_styled.clear();
+    }
+
+    /// The nodes queued by [`Self::inherit_color`] are styled again where
+    /// the text color they inherit is not the one they were styled with.
+    pub(super) fn sync_colors(&mut self) {
+        if self.color_changed.is_empty() {
+            return;
+        }
+        for (key, id) in std::mem::take(&mut self.color_changed) {
+            let Some(node) = self.nodes.get_mut(key as usize) else {
+                continue;
+            };
+            if node.id != id {
+                continue;
+            }
+            node.color_queued = false;
+            if node.inherited_color != node.color_used {
+                self.restyle(key);
+            }
+        }
+    }
+
+    /// The advance of `font`'s `0`, CSS's `ch` (cached per font).
+    pub(super) fn zero_advance(&mut self, font: crate::text::ResolvedTextStyle) -> f32 {
+        let at = (
+            font.font_family,
+            font.font_size.0.to_bits(),
+            font.font_weight,
+            font.italic,
+        );
+        if let Some(&w) = self.zero_advances.get(&at) {
+            return w;
+        }
+        let mut text = crate::text::AttributedText::default();
+        text.push("0", font);
+        let prepared = self.text_engine.prepare(&text);
+        let w = self.text_engine.measure(&prepared, None).width.0;
+        // Fonts are few; a bound keeps scaled sizes from growing it.
+        if self.zero_advances.len() >= 64 {
+            self.zero_advances.clear();
+        }
+        self.zero_advances.insert(at, w);
+        w
+    }
+
+    /// `key`'s classes and inline style over `style`, `ch` the advance of
+    /// its font's `0`.
+    fn resolve_classes(&mut self, key: Key, ch: f32, style: &mut Style, props: &mut ClassProps) {
         let node = &self.nodes[key as usize];
-        let mut style = Style::default();
-        let mut props = ClassProps::default();
         if let Some(classes) = node.classes.clone() {
             let group = |name: &str| self.group_states(key, name);
             let pos = if classes.deps() & deps::POSITION != 0 {
@@ -783,25 +1098,170 @@ impl<M: TextEngine> Core<M> {
             let cx = Context {
                 env: self.class_env,
                 window,
-                rtl: node.rtl,
+                // The direction it lays out in once styled (a node created
+                // detached takes the root's), so its sided classes land
+                // right the first time.
+                rtl: self.resolved_rtl(key),
                 states: node.states | node.projected,
                 position: pos,
                 group: &group,
             };
             let inline = &node.inline_style;
-            classes.apply(&cx, self.tailwind.theme(), &mut style, &mut props, |s| {
-                inline.apply(s)
+            let current = crate::tailwind::CurrentColor {
+                inherited: node.inherited_color,
+                inline: inline_color(inline),
+            };
+            classes.apply_with(&cx, self.tailwind.theme(), current, ch, style, props, |s| {
+                inline.apply(s);
+                if let Some(space) = self.space_of(key) {
+                    space.apply(s, true);
+                }
             });
             if positional {
                 let parent = self.nodes[key as usize].parent;
                 self.nodes[parent as usize].positional_children = true;
             }
         } else {
-            node.inline_style.apply(&mut style);
+            node.inline_style.apply(style);
+            if let Some(space) = self.space_of(key) {
+                space.apply(style, true);
+            }
         }
-        self.set_class_props(key, props);
-        let id = self.nodes[key as usize].id;
-        let _ = self.set_style(id, style);
+    }
+
+    /// `key`'s children inherit text color `color` (`None`: React Native's
+    /// black) from it: those whose `currentColor` it changes are styled
+    /// again, and the change goes on below those that set no color of their
+    /// own.
+    pub(super) fn inherit_color(&mut self, key: Key, color: Option<Color>) {
+        let stack = self.nodes[key as usize].children.clone();
+        self.pass_color(stack, color);
+    }
+
+    /// [`Self::inherit_color`] for `key` itself, which joined a parent
+    /// passing `color`.
+    pub(super) fn inherit_color_from(&mut self, key: Key, color: Option<Color>) {
+        self.pass_color(vec![key], color);
+    }
+
+    fn pass_color(&mut self, mut stack: Vec<Key>, color: Option<Color>) {
+        while let Some(k) = stack.pop() {
+            let node = &mut self.nodes[k as usize];
+            if node.inherited_color == color {
+                continue;
+            }
+            node.inherited_color = color;
+            // Styled again as the commit starts, where the color it was
+            // styled with is not the one it inherits then (a subtree built
+            // from the inside out passes through several).
+            if !node.color_queued
+                && node
+                    .classes
+                    .as_ref()
+                    .is_some_and(|c| c.deps() & deps::CURRENT_COLOR != 0)
+            {
+                node.color_queued = true;
+                let id = node.id;
+                self.color_changed.push((k, id));
+            }
+            let node = &self.nodes[k as usize];
+            if node.text_style.color.is_none() {
+                stack.extend_from_slice(&node.children);
+            }
+        }
+    }
+
+    /// The outermost of `key` and its ancestors whose classes say
+    /// `pointer-events-none`, with no `pointer-events-auto` above it: the
+    /// top of the region `key`'s class `pointer-events` depends on.
+    pub(super) fn pointer_region(&self, key: Key) -> Option<Key> {
+        let mut top = None;
+        let mut k = key;
+        while k != NO_KEY {
+            let node = &self.nodes[k as usize];
+            match node.class_props.as_ref().and_then(|c| c.pointer_events) {
+                Some(PointerEvents::None) => top = Some(k),
+                // Above an `auto`, nothing reaches below it.
+                Some(_) if top.is_some() => return top,
+                _ => {}
+            }
+            k = node.parent;
+        }
+        top
+    }
+
+    /// `parent` gained or lost a child: the region it is in follows.
+    pub(super) fn pointer_events_moved(&mut self, parent: Key) {
+        if let Some(top) = self.pointer_region(parent) {
+            self.update_pointer_events(top);
+        }
+    }
+
+    /// What the views of `top`'s subtree mount for the `pointer-events-*`
+    /// classes, as CSS's inherited `pointer-events`: a view that is
+    /// `none` (its own class, else the nearest one above) is no target;
+    /// it mounts `box-none` when a `pointer-events-auto` inside it is one,
+    /// `none` when it holds none and the view above it lets touches
+    /// through (the top of the region), and nothing more below a `none`.
+    /// Only the views whose value changed are mounted again.
+    pub(super) fn update_pointer_events(&mut self, top: Key) {
+        let inherited = {
+            let parent = self.nodes[top as usize].parent;
+            let mut k = parent;
+            let mut found = None;
+            while k != NO_KEY {
+                let node = &self.nodes[k as usize];
+                if let Some(v) = node.class_props.as_ref().and_then(|c| c.pointer_events) {
+                    found = Some(v);
+                    break;
+                }
+                k = node.parent;
+            }
+            found
+        };
+        self.mark_pointer_auto(top, inherited);
+        // `top` is the outermost `none` (or a view without one): nothing
+        // above it blocks touches natively.
+        let mut stack = vec![(top, inherited, false)];
+        while let Some((k, inherited, blocked)) = stack.pop() {
+            let node = &self.nodes[k as usize];
+            let own = node.class_props.as_ref().and_then(|c| c.pointer_events);
+            let effective = own.or(inherited);
+            let mounted = match effective {
+                Some(PointerEvents::None) if node.pointer_auto_inside => PointerEvents::BoxNone,
+                // A view above already blocks the subtree.
+                Some(PointerEvents::None) if blocked => PointerEvents::Auto,
+                Some(PointerEvents::None) => PointerEvents::None,
+                _ => PointerEvents::Auto,
+            };
+            let blocked = blocked || mounted == PointerEvents::None;
+            for &c in &node.children {
+                stack.push((c, effective, blocked));
+            }
+            if self.nodes[k as usize].class_pointer != mounted {
+                self.nodes[k as usize].class_pointer = mounted;
+                self.mark(k, dirty::VIEW_PROPS);
+            }
+        }
+    }
+
+    /// Sets `pointer_auto_inside` over `key`'s subtree (`inherited`: the
+    /// class value above it); returns whether a `pointer-events-auto` is in
+    /// it or it is one under a `none`.
+    fn mark_pointer_auto(&mut self, key: Key, inherited: Option<PointerEvents>) -> bool {
+        let own = self.nodes[key as usize]
+            .class_props
+            .as_ref()
+            .and_then(|c| c.pointer_events);
+        let effective = own.or(inherited);
+        let children = std::mem::take(&mut self.nodes[key as usize].children);
+        let mut inside = false;
+        for &c in &children {
+            inside |= self.mark_pointer_auto(c, effective);
+        }
+        self.nodes[key as usize].children = children;
+        self.nodes[key as usize].pointer_auto_inside = inside;
+        inside || own == Some(PointerEvents::Auto) && inherited == Some(PointerEvents::None)
     }
 
     /// Applies the node props classes set (explicit props win).
@@ -816,19 +1276,35 @@ impl<M: TextEngine> Core<M> {
             || old.selectable != props.selectable
             || old.ellipsize != props.ellipsize
             || old.no_wrap != props.no_wrap;
-        let view_props = old.pointer_events != props.pointer_events;
+        let pointer = old.pointer_events != props.pointer_events;
+        let none = Some(crate::props::PointerEvents::None);
+        match (old.pointer_events == none, props.pointer_events == none) {
+            (false, true) => self.pointer_none_classes += 1,
+            (true, false) => self.pointer_none_classes -= 1,
+            _ => {}
+        }
+        let node = &mut self.nodes[key as usize];
         let image = old.resize_mode != props.resize_mode;
+        let space = old.space != props.space;
         let input = old.placeholder_color != props.placeholder_color
             || old.caret_color != props.caret_color
             || old.selection_color != props.selection_color;
         let selection = old.selection_color != props.selection_color;
+        let (props_no_wrap, props_selectable) = (props.no_wrap, props.selectable);
         node.class_props = (props != ClassProps::default()).then(|| Box::new(props));
         let kind = node.kind;
         if paragraph && kind == Kind::Text {
             self.mark_text_block(key);
         }
-        if view_props {
-            self.mark(key, dirty::VIEW_PROPS);
+        if (old.no_wrap != props_no_wrap || old.selectable != props_selectable || selection)
+            && kind != Kind::Text
+        {
+            // The texts inside inherit them.
+            self.mark_inheriting_text(key);
+        }
+        if pointer {
+            let top = self.pointer_region(key).unwrap_or(key);
+            self.update_pointer_events(top);
         }
         if image {
             self.mark(key, dirty::IMAGE);
@@ -838,6 +1314,15 @@ impl<M: TextEngine> Core<M> {
         }
         if input && kind == Kind::Input {
             self.mark(key, dirty::INPUT);
+        }
+        if space {
+            // The margins of its children.
+            let children = self.nodes[key as usize].children.clone();
+            for child in children {
+                if self.is_element_child(child) && !self.nodes[child as usize].inline {
+                    self.restyle(child);
+                }
+            }
         }
     }
 }

@@ -26,6 +26,8 @@ mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
+#[cfg(feature = "js")]
+mod local_time;
 mod net;
 mod storage;
 mod text;
@@ -186,6 +188,9 @@ struct Running {
     js_frame: bool,
     /// The surface's environment (window, appearance).
     environment: Environment,
+    /// The in-memory images (`data:` URIs, blobs) the page has blob URLs
+    /// of, by URI, while a view's source holds their bytes.
+    inline_images: nsh_core::image::InlineImages,
 }
 
 struct Sink;
@@ -329,9 +334,10 @@ fn page() -> Environment {
 /// (`"phone"`, `"pad"`, `"desktop"`), `locale` (a BCP 47 tag), `rtl`,
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
-/// covers) and `appleKeyboard` (the browser runs on an Apple platform: its
-/// shortcuts are Apple's); missing keys keep their value. Called before [`nsh_start`]
-/// and on every change; the idiom is the one at start, as on every
+/// covers), `appleKeyboard` (the browser runs on an Apple platform: its
+/// shortcuts are Apple's) and `host` (the page answers `nsh/host` calls:
+/// `createPlayer`'s `host`); missing keys keep their value. Called before [`nsh_start`]
+/// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
 /// # Safety
@@ -385,6 +391,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         .map(|&v| nsh_core::Points(v));
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
+    env.host = flag("host").unwrap_or(env.host);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -543,13 +550,18 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         ui_sets: ui_sets(),
         runtime: None,
         data_dir: Some("/app-data".into()),
+        // The browser keeps what it downloads in its HTTP cache.
+        cache: nsh_engine::CacheOptions::off(),
         filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {
             namespace,
         })),
         storage: Some(std::sync::Arc::new(storage)),
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
@@ -581,6 +593,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             animation: UiAnimation::default(),
             js_frame: false,
             environment,
+            inline_images: Default::default(),
         });
     });
     pump()
@@ -772,6 +785,7 @@ pub unsafe extern "C" fn nsh_compile(
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
     let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
         .iter()
+        .flat_map(nsh_core::ui::Registry::sets)
         .filter_map(nsh_core::ui::description::SetDescription::of)
         .collect();
     let result = nsh_bundler::compile_module(&name, &source, &sets);
@@ -947,6 +961,18 @@ fn flush() {
                     KEYMAP.with(|k| *k.borrow_mut() = keymap);
                     continue;
                 }
+                if let MountItem::Image {
+                    source, options, ..
+                } = item
+                {
+                    for source in source.iter().chain(&options.placeholder) {
+                        if let Some(data) = &source.data
+                            && app.inline_images.register(source)
+                        {
+                            ffi::image_bytes(&source.uri, data);
+                        }
+                    }
+                }
                 if !matches!(
                     item,
                     MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -954,6 +980,9 @@ fn flush() {
                     encode::encode(&mut out, item);
                 }
             }
+        }
+        for uri in app.inline_images.prune() {
+            ffi::release_image(&uri);
         }
         // Bound properties follow the styles just applied.
         app.animation.outputs(&mut out);
@@ -1135,6 +1164,7 @@ pub unsafe extern "C" fn nsh_event(
             text: text("text"),
             count: num("count") as u32,
         },
+        EventKind::Host => EventPayload::Json(value),
         _ => match &value {
             serde_json::Value::Object(map) => EventPayload::Map(
                 map.iter()
@@ -1189,6 +1219,64 @@ pub unsafe extern "C" fn nsh_event(
         },
     };
     send(|app| app.control.dispatch_event(id, kind, payload))
+}
+
+thread_local! {
+    /// The files of the pick `nsh.js` is answering ([`nsh_picked_file`]).
+    static PICKED: RefCell<Vec<nsh_core::picker::PickedFile>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A file picked for the pick `nsh.js` is answering (`Picker.pickImages`):
+/// its name, its type, its bytes, its size in pixels (0: unknown) and when
+/// it was last changed (ms since the Unix epoch). [`nsh_picked`] sends them.
+///
+/// # Safety
+///
+/// The three ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn nsh_picked_file(
+    name: *const u8,
+    name_len: usize,
+    mime: *const u8,
+    mime_len: usize,
+    ptr: *const u8,
+    len: usize,
+    width: u32,
+    height: u32,
+    last_modified: f64,
+) {
+    // SAFETY: guaranteed by the caller.
+    let (name, mime, data) = unsafe {
+        (
+            string(name, name_len),
+            string(mime, mime_len),
+            bytes(ptr, len).to_vec(),
+        )
+    };
+    let mut file = nsh_core::picker::PickedFile::new(name, mime, nsh_core::ImageData::new(data));
+    if width > 0 && height > 0 {
+        file.size = size(DevicePixels(width as i32), DevicePixels(height as i32));
+    }
+    if last_modified.is_finite() && last_modified >= 0.0 {
+        file.last_modified =
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(last_modified as u64));
+    }
+    PICKED.with_borrow_mut(|files| files.push(file));
+}
+
+/// Answers pick `request` with the files [`nsh_picked_file`] gave (none:
+/// cancelled).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_picked(request: u32) -> f64 {
+    let files = PICKED.with_borrow_mut(std::mem::take);
+    send(|app| {
+        app.control.dispatch_event(
+            ROOT_ID,
+            EventKind::Pick,
+            EventPayload::Picked { id: request, files },
+        )
+    })
 }
 
 /// Touches, as JSON `{ phase, time, points: [{ id, target, path, pageX,

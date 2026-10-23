@@ -151,6 +151,13 @@ impl Browser {
                 "--disable-background-timer-throttling",
                 "--disable-backgrounding-occluded-windows",
                 "--disable-renderer-backgrounding",
+                // Headless, the browser finds no input device and reports no
+                // pointer (`pointer: none`, `hover: none`), so pages measure
+                // as touch screens; the test drives a mouse: a fine pointer
+                // that hovers (Blink's `PointerType` / `HoverType`, as
+                // Playwright launches it).
+                "--blink-settings=primaryPointerType=4,availablePointerTypes=4,\
+                 primaryHoverType=2,availableHoverTypes=2",
                 "about:blank",
             ])
             .stdin(Stdio::null());

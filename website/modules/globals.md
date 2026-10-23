@@ -277,7 +277,7 @@ url.href; // "https://api.example.com/v1/items?page=2&tag=new"
 
 The iterators of `URLSearchParams` (and of `Headers` and `FormData`) iterate over a snapshot taken when the iterator was created, and have the iterator helpers (`map`, `filter`, `toArray`, ...).
 
-`URL.createObjectURL(blob)` returns a `blob:` URL that `fetch` (with `GET`) can read until `revokeObjectURL` is called. Such URLs are understood by `fetch` only, not by `<Image>` or other elements.
+`URL.createObjectURL(blob)` returns a `blob:` URL that `fetch` (with `GET`) can read until `revokeObjectURL` is called. `<Image>` shows one as its `src` or `placeholder` ([Image](../elements/image.md)).
 
 ## Text encoding
 
@@ -686,7 +686,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).fo
 Without `locales`, the device's locale is used: its region format (iOS `NSLocale.currentLocale`, Android `Locale.getDefault()`), `en-US` in `nsh test` and on the web.
 
 - **Numbers**: the `decimal`, `percent`, `currency` (`currencyDisplay` `symbol`, `narrowSymbol`, `code`) and `unit` (common units: lengths, masses, durations, data sizes, temperatures, speeds) styles; `minimumIntegerDigits`, `minimum` / `maximumFractionDigits`, `minimum` / `maximumSignificantDigits`, `roundingPriority`, `trailingZeroDisplay`, `useGrouping`, `signDisplay`; `standard`, `scientific`, `engineering` and `compact` notation (`compactDisplay` `short` / `long`). Rounding is half away from zero, on the number as written (`1.005` rounds to `1.01`, as in browsers). `format` also takes BigInts and decimal strings, exactly. `formatToParts` and `resolvedOptions` work as in browsers.
-- **Dates**: `weekday`, `year`, `month` (`numeric`, `2-digit`, `short`, `long`, `narrow`), `day`, `hour`, `minute`, `second`, `fractionalSecondDigits`, `hour12` / `hourCycle`, `timeZoneName` and `dateStyle` / `timeStyle`, in the Gregorian calendar. `timeZone` takes the device's zone, `UTC` or an offset (`"+08:00"`); other zone names throw a `RangeError` (there is no time zone database).
+- **Dates**: `weekday`, `year`, `month` (`numeric`, `2-digit`, `short`, `long`, `narrow`), `day`, `hour`, `minute`, `second`, `fractionalSecondDigits`, `hour12` / `hourCycle`, `timeZoneName` and `dateStyle` / `timeStyle`, in the Gregorian calendar. `timeZone` takes the device's zone (in a browser, the browser's), `UTC` or an offset (`"+08:00"`); other zone names throw a `RangeError` (there is no time zone database).
 - **Locales**: the locale data is a table of common languages (English, German, French, Spanish, Italian, Portuguese, Dutch, Russian, Swedish, Polish, Turkish, Indonesian, Vietnamese, Thai, Hindi, Chinese, Japanese, Korean) with their regional variants (`en-GB`, `en-IN`, `de-CH`, `es-MX`, `pt-PT`, `zh-TW`, ...), not the whole of CLDR, so details can differ from a browser's output. A locale without data falls back to the next one asked for, then the device's, then `en-US`; Russian, Swedish, Polish, Turkish, Indonesian, Vietnamese, Thai and Hindi dates have no month names (their months are written as numbers, their weekdays in English). Digits are always Latin.
 - **Not there**: `Intl.Collator` (`String.prototype.localeCompare` is QuickJS's, which ignores the locale), `PluralRules`, `RelativeTimeFormat`, `ListFormat`, `DisplayNames`, `Segmenter` and `Intl.Locale`; `currencySign: "accounting"` and `currencyDisplay: "name"` format as `standard` and `code`.
 

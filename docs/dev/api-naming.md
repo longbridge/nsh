@@ -85,7 +85,10 @@ go elsewhere under these rules rather than into them.
   Apple platforms, the Windows / Super key elsewhere), as GPUI's `MouseMoveEvent { position, modifiers }` (decided by
   the user, 2026-10-21). The frozen responder events keep React Native's `locationX` / `pageX`.
 - **Intent over geometry**: an event says what the app should do when the act has a name (`onLoadMore`, as
-  `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`).
+  `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`). Its counterpart at
+  the start is the same act at the other end, `onLoadMoreAtStart` / `loadMoreAtStartThreshold` (React Native's
+  `onStartReached`): the edge named as `Start` / `End` are, the act kept, and no `Newer` / `Older` that holds for a
+  chat but not for every list.
 - **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
   (`onChange(text)`, `onOpenChange(open, reason)`); every other event passes one object, even with one field
   (`onLinkPress({ url })`, `onSubmit({ text })`), so a later field is an addition. An event with nothing to report
@@ -331,6 +334,10 @@ and `Input`'s React Native names follow the rules as well.
 | **Collapsible** (`nsh/base`) | | | |
 | `Collapsible::reveal(id, progress)` (`MotionReveal`: the content kept mounted, its measured height times `progress`, clipped) | (left out) | | NSH's layout has no height that is a fraction of the content's own; until the core has one, the app animates what it shows (opacity, a transform) |
 | Children and `content` in the order the builder was called | children first, `content` after them | `gpui-shell`'s `Collapsible` (`materialize/components/collapsible.rs`) | JSX gives a slot no place among the children; what expands goes under what shows always, as in `gpui-shell` |
+| **Progress** (`nsh/base`) | | | |
+| `ProgressTrack`, `ProgressIndicator` (components the app nests in `Progress`) | `trackClass` / `trackStyle`, `indicatorClass` / `indicatorStyle` of `Progress` | `progress.rs` `ProgressTrack`, `ProgressIndicator`; `Switch`'s `trackClass` | Parts, as `Switch`'s: `Progress` renders the track, the indicator inside it, then its children, so only the progress bar is an accessibility element |
+| The indicator's width (the app's, from its own copy of the value) | `value` percent of the track's width while determinate; an app's `w-*` / `width` on the indicator wins | `gpui-component`'s `Progress` (`progress/progress.rs`: the indicator `.w(relative(value / 100))`) | The progress bar renders the indicator, so it sizes it by the value it already has; while `indeterminate` the width is the app's |
+| `Progress::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

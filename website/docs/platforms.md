@@ -9,7 +9,7 @@ group: platforms
 
 NSH runs on phones, desktops and the web: iOS, Android, macOS, Windows, Linux, GPUI and web pages. Each has a backend of its own that draws with the platform's own UI, so an app is UIKit views on an iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: the reactive graph, the renderer, Taffy layout, the components and the native modules are the same Rust code everywhere, so one app runs on all of them. An app written in Rust is that code and your crate, with no JavaScript VM; a TSX app runs its modules on QuickJS on top of it ([Building with Rust](./rust.md)).
 
-On every platform, NSH's main use is the same: apps embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop them with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates), and the same app can also be packaged as an installable app (`nsh package`), a supported second use.
+On every platform, an app is used the same two ways: packaged as an installable app of that platform (`nsh package`), or embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop it with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates).
 
 ## At a glance
 

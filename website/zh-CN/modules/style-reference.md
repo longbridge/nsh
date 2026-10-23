@@ -81,7 +81,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 | `Hsla` / `AdaptiveColor`：`rgb(0x2563eb)`、`hsla(…)`, 主题颜色（`theme().primary`） |
 | `AnimatedNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 | `AnimatedValue` / `AnimatedNode`，用 `.bind_opacity(&v)`、`.bind_background(&v)`、`.bind_translate_x(&v)` 等绑定 |
 
-采用 CSS 语法的字符串（`boxShadow`、`backgroundImage`、`filter`、`gridTemplateColumns` 等）中，长度可写 `px` 或裸数字（都是点）、`pt`，或 `rem`（16 点）。
+采用 CSS 语法的字符串（`boxShadow`、`backgroundImage`、`filter`、`gridTemplateColumns` 等）中，长度可写 `px` 或裸数字（都是点）、`pt`（与 CSS 相同，为 4/3 点），或 `rem`（16 点）。
 
 ## LayoutStyle
 
@@ -91,8 +91,9 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
-| `display` | `"flex" \| "grid" \| "block" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
-| `position` | `"relative" \| "absolute"` | `.relative()`、`.absolute()` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对父元素定位。默认 `"relative"`。 |
+| `display` | `"flex" \| "grid" \| "block" \| "flow-root" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
+| `boxSizing` | `"border-box" \| "content-box"` | | 尺寸包含边框和内边距，或仅包含内容。默认 `"border-box"`。 |
+| `position` | `"relative" \| "absolute" \| "static" \| "fixed" \| "sticky"` | `.relative()`、`.absolute()` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对最近的定位祖先定位（父元素为 `"static"` 时再向上找）。`"static"` 留在文档流中并忽略偏移。`"fixed"` 保留元素类型，在窗口或模态框根视图中布局和挂载，周围内容滚动时保持不动。`"sticky"` 留在文档流中，在其父元素可见时，吸附在外层滚动视图视口起始处 `top`（横向滚动视图中为 `left`）的位置，直到它的末端碰到父元素内容框的末端；它绘制在 `zIndex` 相同的兄弟元素之上。默认 `"relative"`。 |
 | `top` | `DimensionValue` | `.top(…)`、`.inset(…)` | 距父元素上边（绝对定位），或相对自身位置的偏移（相对定位）。 |
 | `right` | `DimensionValue` | `.right(…)` | 距右边的偏移。从右到左布局中表示结束边。 |
 | `bottom` | `DimensionValue` | `.bottom(…)` | 距下边的偏移。 |
@@ -235,7 +236,7 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 | `borderLeftColor` | `ColorValue` | `.border_l_color(c)` | 左边。 |
 | `borderStartColor` | `ColorValue` | `.border_s_color(c)` | 起始边。 |
 | `borderEndColor` | `ColorValue` | `.border_e_color(c)` | 结束边。 |
-| `borderStyle` | `"solid" \| "dashed" \| "dotted"` | `.border_solid()`、`.border_dashed()`、`.border_dotted()` | 线型。默认 `"solid"`。 |
+| `borderStyle` | `"solid" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.border_solid()`、`.border_dashed()`、`.border_dotted()`、`.border_none()` | 线型。默认 `"solid"`。`"none"` 和 `"hidden"` 与 CSS 一样，无论宽度在之前还是之后设置，都不绘制边框，也不占布局空间。 |
 
 ### 圆角
 
@@ -260,7 +261,7 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 |---|---|---|---|
 | `outlineWidth` | `number` | `.outline(w)` | 线宽。 |
 | `outlineColor` | `ColorValue` | `.outline_color(c)` | 颜色。 |
-| `outlineStyle` | `"solid" \| "double" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.outline_dashed()`、`.outline_dotted()`、`.outline_none()` | 线型。 |
+| `outlineStyle` | `"solid" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.outline_dashed()`、`.outline_dotted()`、`.outline_none()` | 线型。 |
 | `outlineOffset` | `number` | `.outline_offset(o)` | 与边框外缘的距离；负值向内。 |
 
 ### 阴影
@@ -315,10 +316,10 @@ view().p_4().rounded(px(12.0)).bg(white()).shadow([
 | `scale`、`scaleX`、`scaleY` | `number`（倍数） | `.scale(f)`、`.scale_x(f)`、`.scale_y(f)`；`.bind_scale(&v)` | 支持 |
 | `rotate`、`rotateZ`、`rotateX`、`rotateY` | `number`（度）或 `string`（`"45deg"`、`"0.5rad"`） | `.rotate(deg(…))`、`.rotate_x(…)`、`.rotate_y(…)`；`.bind_rotate(&v)` | 支持 |
 | `skewX`、`skewY` | `number`（度）或 `string` | `.skew_x(…)`、`.skew_y(…)` | 不支持 |
-| `perspective` | `number` | `.perspective(d)` | 不支持 |
+| `perspective` | `number` | 父视图的 `.perspective(d)`（CSS 的 `perspective` 属性） | 不支持 |
 
 ```rust tabs
-view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
+view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
 ```
 
 ```tsx tabs
@@ -334,6 +335,7 @@ view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
+| `glassEffect` | `"none" \| "regular" \| "clear"` | `ViewStyle::glass_effect`（`GlassEffect`） | 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
 > [!WARNING]
@@ -434,7 +436,7 @@ view()
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
 | `placeholderColor` | `ColorValue` | 输入框的 `.placeholder_color(c)` | `<Input>` 占位文字的颜色（`placeholder:text-*`）。 |
-| `selectionColor` | `ColorValue` | 输入框或文本的 `.selection_color(c)` | `<Input>` 的光标和选区、可选 `<Text>` 的选区高亮和选择柄（`selection:text-*`）；默认为平台的强调色。 |
+| `selectionColor` | `ColorValue` | 输入框或文本的 `.selection_color(c)` | `<Input>` 的光标和选区、可选 `<Text>` 的选区高亮和选择柄（`selection:bg-*`）；默认为平台的强调色。 |
 
 ### 文字阴影
 
@@ -454,6 +456,7 @@ view()
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
 | `tintColor` | `ColorValue` | 图片的 `.tint_color(c)` | 为模板图片重新着色（所有不透明像素都变成这个颜色），用于单色图标。 |
+| `objectPosition` | `string` | 图片的 `.object_position(p)`、`.object_top()` 等 | `resizeMode` 确定尺寸后图片在盒子中的位置，同 CSS 的 `object-position`：关键字、百分比与长度（`"top"`、`"left bottom"`、`"25% 75%"`、`"right 10px bottom 20%"`）。覆盖盒子的图片围绕它裁剪。默认居中。 |
 
 图片如何填充盒子由 `<Image>` 的 `resizeMode` 属性决定，不是样式；见 [image](../elements/image.md)。
 
@@ -476,3 +479,5 @@ view()
 - [Tailwind 参考](./tailwind-reference.md)：支持的全部工具类和变体。
 - [布局](../docs/layout.md)：flexbox 和网格的实际用法。
 - [view](../elements/view.md)、[text](../elements/text.md)、[image](../elements/image.md)：这些样式所作用的元素。
+
+`width`、`height` 和 `flexBasis` 也接受 `"min-content"`、`"max-content"` 和 `"fit-content"`，由 Taffy 计算。

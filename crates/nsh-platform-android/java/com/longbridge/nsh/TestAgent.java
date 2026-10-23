@@ -187,6 +187,25 @@ final class TestAgent {
         });
     }
 
+    /**
+     * Presses the key `code` (`KeyEvent.KEYCODE_*`) with `meta` (`KeyEvent.META_*`) on a hardware
+     * keyboard: the window's view hierarchy gets it from its root, as the window's input stage
+     * (ViewRootImpl) hands it over after the input method: with Control as a shortcut first.
+     */
+    static void pressKeys(NshView host, int code, int meta) {
+        onMain(() -> {
+            View window = target(host);
+            long now = SystemClock.uptimeMillis();
+            KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, meta,
+                    KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD);
+            if ((meta & KeyEvent.META_CTRL_ON) == 0 || !window.dispatchKeyShortcutEvent(down)) {
+                window.dispatchKeyEvent(down);
+            }
+            window.dispatchKeyEvent(KeyEvent.changeAction(down, KeyEvent.ACTION_UP));
+            return null;
+        });
+    }
+
     /** The text input `id` holds; null when it is no input. */
     static String inputText(NshView host, int id) {
         return onMain(() -> {
@@ -250,7 +269,8 @@ final class TestAgent {
     /**
      * Whether something moves: a view's place, offset, scroll position or
      * opacity changed since the last look (a screen sliding in, a dialog
-     * fading, a list gliding after a fling), whatever animates it.
+     * fading, a list gliding after a fling), whatever animates it, or a
+     * scroll view drew (its overscroll stretch relaxing).
      */
     static boolean animating(NshView host) {
         Boolean moving = onMain(() -> {
@@ -276,6 +296,7 @@ final class TestAgent {
         h = h * 31 + Float.floatToIntBits(v.getScaleX());
         h = h * 31 + v.getScrollX();
         h = h * 31 + v.getScrollY();
+        if (v instanceof ScrollBox) h = h * 31 + ((ScrollBox) v).frames;
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) h = h * 31 + signature(g.getChildAt(i));

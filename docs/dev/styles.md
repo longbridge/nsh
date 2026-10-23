@@ -11,22 +11,24 @@
 - **Tailwind** (`class` / `classList` on every element): JS only passes the strings; the core resolves them (how, and
   what is cached: `crates/nsh-core/src/tailwind/mod.rs`, `core/classes.rs`). The inline `style` always wins over classes; a key set to `undefined` sets nothing, so the class value (or the default) stays, while `null` sets the default.
   Later utilities win over earlier ones (components append a `class` prop, no `tailwind-merge`); variant rules apply
-  after plain ones in Tailwind's variant order. Display follows CSS: `flex` / `inline-flex` are rows unless a direction
+  after plain ones in Tailwind's variant order: a rule's `Rank` is its variants' places highest first, compared as
+  Tailwind compares the bit sets of a candidate's variants (`group-*` by inner state, then name; breakpoints by unit
+  name, then value, `max-*` widest first), so `dark:hover:` follows `dark:`. Display follows CSS: `flex` / `inline-flex` are rows unless a direction
   utility says otherwise, wherever it is in the string (`flex-col flex` is a column; the implied row is a
   `Decl::Default`, applied before every rule), while views without them keep React Native's column; `block` /
-  `flow-root` use Taffy's block layout; `inline` / `inline-block` lay out as views (there is no inline formatting
-  context). Variants: `dark:`, `sm:`…`2xl:` / `max-*:` / `min-[..]:`, `portrait:` /
+  `flow-root` use Taffy's block layout, and so do `inline` / `inline-block`: a browser blockifies inline boxes in flex
+  and grid containers, which every NSH parent but a block is (there is no inline formatting context). Variants: `dark:`, `sm:`…`2xl:` / `max-*:` / `min-[..]:`, `portrait:` /
   `landscape:`, `ios:` / `android:` / `web:`, `rtl:` / `ltr:`, `motion-safe:` / `motion-reduce:`, `active:` / `hover:` /
   `focus:` / `focus-within:` / `disabled:` / `enabled:` / `selected:` (`accessibilityState.selected`, a `Button`'s
   `selected`) / `checked:` (`accessibilityState.checked`, not mixed) / `indeterminate:` (`accessibilityState.checked`
   mixed, CSS's `:indeterminate`), `group-*:` (named groups `group/name`), `first:` / `last:` /
-  `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only: the `placeholderColor` / `selectionColor`
-  style keys), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
+  `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
+  `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, a `Button`'s `selectedStyle`), resolved the same
   way: later states win, `disabled` over all. `selected`, `checked` and `indeterminate` are value states the core sets
-  from the accessibility state (never reported by the platform), below the interaction states: `checked` and
-  `indeterminate` (one rank: a view is never both), then `selected`, then `hover`, `focus`, `active` (gpui-base's order
-  of value states). `disabled` (any element) applies `disabled:` and drops
+  from the accessibility state (never reported by the platform), below the interaction states: `checked`, then
+  `indeterminate` (Tailwind's order), then `selected`, then `hover`, `focus`, `active` (gpui-base's order of value
+  states). `disabled` (any element) applies `disabled:` and drops
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
@@ -51,11 +53,76 @@
   their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Class-only settings
   that are props in React Native (`line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*`,
-  `caret-*`) lose to explicit props; `placeholder:text-*` / `selection:text-*` lose to the `placeholderColor` /
-  `selectionColor` style keys. Not supported: `peer-*`, pseudo-elements, arbitrary CSS
-  properties; `space-x/y-*` are gaps.
+  `caret-*`) lose to explicit props; `placeholder:text-*` / `selection:bg-*` lose to the `placeholderColor` /
+  `selectionColor` style keys. Not supported, so unknown: `peer-*`, pseudo-elements, arbitrary CSS properties, and every
+  utility without a native meaning (`order-*`, `transform-3d`, `select-all`, `border-double`, intrinsic min/max constraints,
+  `snap-*`, `scroll-*`, `overscroll-*`, `touch-*`, `isolate`) or without CSS in Tailwind (a negative
+  where Tailwind has none: `-gap-4`, `-p-2`; fractions and `full` on padding, margin and gaps; non-integer `z-*`; bare
+  `inset-shadow` without a theme value). Rendering hints are accepted and do nothing (`ignored` in
+  `tailwind/mod.rs`: `antialiased`, `will-change-*`'s values, ...). `space-x/y-*` (and `-reverse`) are margins on each
+  element child but the last, as Tailwind's `:where(& > :not(:last-child))`: the parent's `ClassProps::space`, which
+  the core applies to a child's style before its classes and inline style (`classes.rs` `space_of`), so the child's
+  own margins win. An important space utility is applied after normal child styles and before the child's important classes; an insert or removal restyles only the children whose last-ness changed (`spacing_changed`).
+- **`ch`**: `w-/min-w-/max-w-prose` are Tailwind's `65ch`, the advance of the node's font's `0` (`Decl::Ch`; the core
+  measures it with the text engine, cached per font, `Core::zero_advance`): the font it inherits, or its own once its
+  classes set one. Such classes depend on `deps::CH`; a font change around them restyles them (`mark_inheriting_text`),
+  including text nodes and reparented subtrees; the ones styled in a batch are checked again as the commit starts, with the tree in place (`sync_ch`). Without a
+  tree (`ClassList::apply`), `1ch` is 8 points. An app's theme `container.prose` (points) replaces it.
+- **`perspective-*`** (and the typed `.perspective()`) is CSS's `perspective`: depth for the children, seen from the
+  view's center (`Style::perspective`). The core composes `translate(-d) perspective() translate(d)` before the
+  own transform of each child that turns out of its plane (`rotateX` / `rotateY`; a flat one looks the same), `d` its
+  origin's distance from the parent's center (`classes.rs` `mounted_view_style`; sent again when either frame changes;
+  the child's animated steps move by those five, `perspective_steps`). iOS, macOS, the web and the desktops draw it
+  exactly; Android decomposes the matrix into its view properties, a camera distance about the child's own pivot. The
+  inline `transform: [{ perspective }]` stays a step of the view's own transform (React Native).
+- **Boxes** (kept, documented in the guide): `overflow-x-hidden` / `overflow-y-hidden` clip both axes and never scroll
+  (views are no scroll containers; CSS's other axis would be scrollable); `invisible` hides the subtree (`setHidden`,
+  `View.INVISIBLE`; CSS's `visible` child would show); `mix-blend-*` blends with everything drawn behind (no stacking
+  context isolates it); `block` boxes never collapse margins with their children (an unset `align-content` resolves to
+  `flex-start`, which makes taffy's block a formatting context); strings keep their whitespace (`whitespace-*` sets
+  wrapping only; the JSX compiler collapses literal JSX text); `transition` / `transition-all` animate their groups
+  (`TransitionProps`: colors, opacity, transform, shadows, shape), and filters, backdrop filters, gradients and layout
+  take their new values at once; `focus-visible:` is `focus:` (the state bits, a `u8`, have none left for a focus's
+  origin, which only the desktops and the web report).
+- **Layout values**: `box-content` / `box-border` select Taffy's content-box / border-box sizing. Width and
+  height accept `min-content`, `max-content` and `fit-content` (`w/h/size-min/max/fit`); min-content text measures
+  each Unicode line-breaking segment with the platform text engine and caches the widest one. `flow-root` uses
+  Taffy's flow-root display. Intrinsic min/max constraints remain unknown classes.
+- **`position`**: `static` uses Taffy's static positioning: it stays in flow, ignores insets and lets absolute
+  descendants use the nearest positioned ancestor. The core converts containing-block offsets to native-parent
+  coordinates. `fixed` retains the element's kind and uses Taffy's fixed positioning in a root-sized overlay wrapper
+  (`overlay.rs`, `sync_fixed`); its native view mounts in the surface or modal root and returns to its logical parent
+  when fixed positioning is removed.
+- **`position: "sticky"`** is laid out `relative` with its insets kept as where it sticks (`Node::sticky`): after
+  layout the core gives it a range of travel in the offsets of the nearest scroll view or own list around it (from its
+  place less its `top`, or `left` in a horizontal one, to where its end meets its parent's content box) and sends it
+  with that view's sticky list rows (`core/sticky.rs`, `MountItem::StickyCells`), which the platforms pin on every
+  scroll. It draws above its siblings of the same `zIndex` (`Node::stack_rank`), as above a page's in-flow boxes.
+  `bottom` / `right` stickiness and a zoomable scroll view are not supported. The `sticky` class sets it, as
+  Tailwind's does.
+- **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
+  font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
+- **`pointer-events-*` classes** inherit as CSS's `pointer-events` (the `pointerEvents` prop keeps React Native's
+  subtree meaning, and wins): a view that is `none` by its own class or the nearest one above mounts `box-none` when a
+  `pointer-events-auto` inside it is a target, `none` at the top of what it blocks, and nothing below that
+  (`classes.rs` `update_pointer_events`, run over a region when a class, an insert or a removal changes it; the node
+  keeps what it mounts, `class_pointer`, so only changes are sent; `pointer_none_classes` counts the views with
+  `none`, so apps without one skip it).
+- **`currentColor`**: a border, an outline or a ring whose classes set a width and no color (`border`, `outline-2`,
+  `ring`; preflight's `border: 0 solid`) is drawn in the node's text color: its inline style's, its classes', else the one
+  it inherits, else black (`CurrentColor`, `Decl::CurrentColor`; such classes depend on `deps::CURRENT_COLOR`). Each node
+  keeps the color it inherits (`inherited_color`): an insert compares it with its new parent's, and a change of a node's
+  color passes down to the descendants that set none (`Core::inherit_color`), restyling those that read it. Inline
+  styles keep React Native's black.
+- **Right to left**, classes are physical as in a browser: `pl-*`, `ml-*`, `left-*`, `border-l*`, `rounded-l*` /
+  `-tl` ..., `text-left` / `text-right` keep their side, while style keys keep React Native's swap. The core swaps every
+  left / right property of a node right to left (`apply_direction`), so a class names the other side there
+  (`utilities::directed`, applied with the node's resolved direction; such classes depend on `deps::RTL`), and the
+  swap puts it back. `text-end` is React Native's `right`, which the swap makes the end.
 - **Text style inheritance** (CSS-like): a view's text properties (color, font, size, alignment, ...) pass to the texts and inputs
-  inside it, so `class="text-white"` on a button styles its label. Inset padding / margin (set by Rust
+  inside it, so `class="text-white"` on a button styles its label. So do its `whitespace-*` / `text-wrap` / `text-nowrap`
+  (and `truncate`'s no wrapping) and `select-*` classes, as CSS's `white-space` and `user-select: auto` (`Core::inherited_text_props`:
+  the text's own, else the nearest view's that says; `select-auto` says none, so it takes the view's). Inset padding / margin (set by Rust
   components: `SafeAreaView`, `KeyboardAvoidingView`) are added to the resolved padding / margin, so classes and
   styles keep their own.
 - **Effects** (styles and classes; `effects.rs`): `boxShadow` (CSS syntax, several, `inset`; also `shadow-*` / `ring-*`),
@@ -64,13 +131,22 @@
   (a `DefiniteLength::Absolute` position: `Gradient::resolve_stops` places them against `Gradient::line_length` of the box when it is
   drawn, so every native backend passes the view's size; Android's `Decor.Gradient.resolve` does the same for the
   gradients `encode.rs` sends as written, with their stop count negated; the web hands them to the browser as `px`), or
-  at angles around conic ones (fractions of a turn), up to two per stop; transition hints are not parsed; a gradient
+  at angles around conic ones (fractions of a turn), up to two per stop; transition hints are not parsed; colors mix as in
+  CSS (`in <space>`: `color-mix()`'s spaces and hue methods; without one, sRGB when every color is a legacy one, else
+  Oklab; Tailwind's utilities `in oklab`), which the core gives the platforms, all drawing sRGB, as stops sampled in that
+  space between each two placed in one unit (`css::interpolate_stops`: bisected until a segment is within about one
+  8-bit step of the curve, at most 32 per pair); a gradient
   that does not parse is logged (inline styles, `bg-[…]` classes, Rust components' `Style`); but press feedback must show, so a background color an interaction state sets (`active:` / `hover:` / `focus:` /
   `focus-within:` / `group-*:` classes, Rust components' `.active(..)`, on a nested component's element too, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`) or a native
   animation drives (`Animated` `backgroundColor`) replaces the gradients, unless that state sets a gradient of its own:
   done in the core, so every platform shows it alike), `filter` (`brightness`, `contrast`,
   `grayscale`, `hue-rotate`, `invert`, `saturate`, `sepia`, `opacity`, `blur`, `drop-shadow`; color filters are composed into one
-  matrix), `backdropFilter` (blur), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
+  matrix), `backdropFilter` (blur; iOS chooses its system material through the
+  `ios={{ backdropMaterial }}` prop: `ultraThin` by default, then `thin`, `regular`, `thick`, `chrome`;
+  the radius approximates strength as a fraction of the material, rather than a Gaussian radius), `glassEffect`
+  (Apple's Liquid Glass, drawn in the `backdropFilter`'s place on iOS 26 and later and nowhere else, so give a glass
+  view a blur to fall back to), `maskImage` (a gradient whose alpha decides how much of the view is drawn, its backdrop
+  filter included; iOS and web, the topmost layer of several), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
   duration, delay, easing) and `animation*` (Tailwind's `spin` / `ping` / `pulse` / `bounce`), `display: grid` with
   `gridTemplateColumns/Rows` (line names: `grid.rs` turns them into taffy's `grid_template_*_names`, one set per
   line between components, a `repeat()` counting as one), `gridAutoFlow/Columns/Rows`, `gridColumn/Row(Start/End)` (by
@@ -99,15 +175,18 @@
   `RenderEffect`, drawn clipped under the view's background.
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
-  `drop-shadow` before API 31.
+  `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,
+  the widest of the chain's (the last of equals; the web, Linux, Windows and GPUI draw every layer a class or
+  style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest).
 - **View styles**: `backgroundColor`, `borderWidth` / `borderColor` (also per side: `borderTopWidth`, `borderLeftColor`, ...),
-  `borderStyle` (`solid` / `dashed` / `dotted`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`
+  `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever
+  order the widths come in, as `outlineStyle: "none"` does, `Pending`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`
   (`continuous`: corners easing into the edges, Figma's 60% corner smoothing, shrinking to circular where the box is too
   small, so pills stay pills; the outline geometry is `nsh_core::shape::rounded_rect`, ported to `Decor.java`; iOS layers that
   draw their own corners use `cornerCurve`), `overflow`, `opacity`,
   `transform` (translate / scale / rotate / rotateX / rotateY / skew / perspective, applied right to left like CSS; Android has no
   skew), `zIndex` (stable order of the native views), `shadowColor` / `shadowOffset` / `shadowOpacity` / `shadowRadius` (RN
-  defaults: offset `(0, -3)`, radius 3, opacity 0), `tintColor` (images), `android={{ elevation }}` (a prop, not a style: Android's material shadow, with
+  defaults: offset `(0, -3)`, radius 3, opacity 0), `tintColor` (images), `objectPosition` (images: where the fitted image sits, CSS's `object-position`; `images.md`), `android={{ elevation }}` (a prop, not a style: Android's material shadow, with
   `shadowColor` from API 28), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
   Android sets the pivot), `backfaceVisibility` (iOS `doubleSided`; Android hides the view while its rotations turn it away). `style` may be an array of styles merged left to right
   (falsy entries skipped), decoded in Rust. In one style object (an array is flattened into one, as React Native does) a

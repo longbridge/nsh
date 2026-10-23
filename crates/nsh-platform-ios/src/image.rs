@@ -1,9 +1,13 @@
 //! Image loading: fetch (NSURLSession, reporting progress, or file) once
-//! per URI, downsample-decode with ImageIO on a background queue at each
+//! per URI (a source that carries its bytes, a `data:` URI or a blob, is not
+//! fetched: they are wrapped in an `NSData` without a copy), downsample-decode with ImageIO on a background queue at each
 //! requested pixel size, cache decoded images in an `NSCache` (purged under
 //! memory pressure), coalesce concurrent requests and cancel downloads
 //! nobody waits for. `Image.prefetch` / `getSize` keep the bytes they
-//! fetched for the views that show them next.
+//! fetched for the views that show them next. Remote images go through the
+//! surface's disk cache ([`nsh_core::image::DiskCache`]): it is read on a
+//! background queue, and a download starts (revalidating a stale copy)
+//! only when it holds no fresh one.
 //!
 //! SVG images (sniffed from their bytes) are drawn by [`nsh_core::svg`] at
 //! the requested pixel size instead, then blurred, filtered, tinted and
@@ -12,8 +16,9 @@
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
-    NodeId,
+    ImageData, NodeId,
     geometry::{Points, Size},
+    image::{CacheHeaders, DiskCache, Fetched, Lookup},
 };
 use objc2::{
     AnyThread, DefinedClass, Message, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
@@ -23,10 +28,10 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::CGImage;
 use objc2_foundation::{
-    NSCache, NSData, NSDataReadingOptions, NSError, NSHTTPURLResponse, NSObject, NSObjectProtocol,
-    NSString, NSURL, NSURLRequest, NSURLResponse, NSURLSession, NSURLSessionDataDelegate,
-    NSURLSessionDataTask, NSURLSessionDelegate, NSURLSessionResponseDisposition, NSURLSessionTask,
-    NSURLSessionTaskDelegate,
+    NSCache, NSData, NSDataReadingOptions, NSError, NSHTTPURLResponse, NSMutableURLRequest,
+    NSObject, NSObjectProtocol, NSString, NSURL, NSURLRequest, NSURLResponse, NSURLSession,
+    NSURLSessionDataDelegate, NSURLSessionDataTask, NSURLSessionDelegate,
+    NSURLSessionResponseDisposition, NSURLSessionTask, NSURLSessionTaskDelegate,
 };
 use objc2_image_io::{
     CGImageSource, kCGImageSourceCreateThumbnailFromImageAlways,
@@ -141,6 +146,13 @@ pub(crate) enum LoadEvent {
         id: u32,
         result: Result<(u32, u32), String>,
     },
+    /// The disk cache holds no fresh copy of `uri`: download it with
+    /// `headers` (a stale copy's validators), passed back to
+    /// [`ImageLoader::download`].
+    Download {
+        uri: String,
+        headers: Vec<(&'static str, String)>,
+    },
 }
 
 // SAFETY: NSData is immutable and thread-safe; the rest is plain data.
@@ -194,6 +206,8 @@ pub(crate) struct ImageLoader {
     notify: Notify,
     /// What the app may load, checked at every redirect.
     access: std::sync::Arc<nsh_engine::Access>,
+    /// The disk cache remote images go through.
+    disk: Option<DiskCache>,
 }
 
 impl ImageLoader {
@@ -219,7 +233,13 @@ impl ImageLoader {
             asset_base,
             notify,
             access,
+            disk: None,
         }
+    }
+
+    /// The disk cache remote images go through.
+    pub(crate) fn set_disk_cache(&mut self, disk: Option<DiskCache>) {
+        self.disk = disk;
     }
 
     /// Cache key: the same URI decoded at different sizes (or blurred or
@@ -241,11 +261,13 @@ impl ImageLoader {
 
     /// Requests `uri` for `view`, decoded to at most `max_pixels` on its
     /// longer side (0 = natural size); completions come as
-    /// [`LoadEvent::Decoded`].
+    /// [`LoadEvent::Decoded`]. `data` is its bytes, when the source carries
+    /// them (a `data:` URI, a blob): `uri` is then only the cache key.
     pub(crate) fn request(
         &mut self,
         view: NodeId,
         uri: &str,
+        data: Option<&ImageData>,
         max_pixels: u32,
         scale: f64,
         look: Look,
@@ -275,7 +297,10 @@ impl ImageLoader {
                 waiters: vec![view],
             },
         );
-        self.fetch(uri, Want::Decode(key));
+        match data {
+            Some(data) => self.serve(uri, &ns_data(data), Want::Decode(key)),
+            None => self.fetch(uri, Want::Decode(key)),
+        }
         Request::Pending
     }
 
@@ -307,10 +332,37 @@ impl ImageLoader {
             return;
         }
         let notify = self.notify.clone();
+        let remote = uri.starts_with("http://") || uri.starts_with("https://");
         let task = match self.resolve(uri) {
+            // The disk cache is read off the main thread; the download
+            // starts from there (`LoadEvent::Download`) unless it holds a
+            // fresh copy.
+            Some(Source::Url(_)) if remote && self.disk.is_some() => {
+                let cache = self.disk.clone().expect("a disk cache");
+                let uri = uri.to_owned();
+                DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+                    DispatchQueueGlobalPriority::Default,
+                ))
+                .exec_async(move || {
+                    let event = match cache.lookup(&uri) {
+                        Lookup::Fresh(bytes) => LoadEvent::Bytes {
+                            uri,
+                            result: Ok(ns_data(&bytes)),
+                        },
+                        lookup => LoadEvent::Download {
+                            headers: lookup.request_headers(),
+                            uri,
+                        },
+                    };
+                    on_main(&notify, event);
+                });
+                None
+            }
             Some(Source::Url(url)) => Some(crate::image::download(
                 &url,
                 uri.to_owned(),
+                &[],
+                None,
                 notify,
                 self.access.clone(),
             )),
@@ -333,9 +385,8 @@ impl ImageLoader {
                     DispatchQueueGlobalPriority::Default,
                 ))
                 .exec_async(move || {
-                    let result = nsh_core::platform::clipboard::decode_data_uri(&uri)
-                        .map(|(_, bytes)| NSData::with_bytes(&bytes))
-                        .ok_or_else(|| "not a base64 data: URI".to_owned());
+                    let result = nsh_core::image::decode_data_uri(&uri)
+                        .map(|(_, bytes)| NSData::from_vec(bytes));
                     on_main(&notify, LoadEvent::Bytes { uri, result });
                 });
                 None
@@ -359,6 +410,31 @@ impl ImageLoader {
                 wants: vec![want],
             },
         );
+    }
+
+    /// Downloads `uri` through the disk cache, with `headers` (main thread),
+    /// unless nobody waits for it any more.
+    pub(crate) fn download(&mut self, uri: &str, headers: &[(&'static str, String)]) {
+        // Gone (nobody waits), or started by an earlier lookup of a request
+        // made again.
+        if self.downloads.get(uri).is_none_or(|d| d.task.is_some()) {
+            return;
+        }
+        let Some(url) = url(uri) else {
+            self.bytes_ready(uri, Err(format!("bad URL {uri}")));
+            return;
+        };
+        let task = crate::image::download(
+            &url,
+            uri.to_owned(),
+            headers,
+            self.disk.clone(),
+            self.notify.clone(),
+            self.access.clone(),
+        );
+        if let Some(download) = self.downloads.get_mut(uri) {
+            download.task = Some(task);
+        }
     }
 
     /// The bytes of a download arrived (main thread).
@@ -530,6 +606,33 @@ impl ImageLoader {
     }
 }
 
+/// `data`'s bytes as an `NSData`, not copied: the `NSData` keeps `data`
+/// alive until it is deallocated.
+fn ns_data(data: &ImageData) -> Retained<NSData> {
+    use std::ffi::c_void;
+
+    use block2::{DynBlock, RcBlock};
+    let keep = data.clone();
+    let bytes = keep.bytes();
+    let (ptr, len) = (bytes.as_ptr() as *mut c_void, bytes.len());
+    // Dropping the block (when the NSData goes) drops `keep`.
+    let dealloc = RcBlock::new(move |_: *mut c_void, _: usize| {
+        let _ = &keep;
+    });
+    let dealloc: &DynBlock<dyn Fn(*mut c_void, usize) + 'static> = &dealloc;
+    // SAFETY: an immutable NSData only reads the bytes, which the
+    // deallocator block keeps alive (`ImageData` is shared and immutable)
+    // for as long as the NSData lives.
+    unsafe {
+        msg_send![
+            NSData::alloc(),
+            initWithBytesNoCopy: ptr,
+            length: len,
+            deallocator: dealloc,
+        ]
+    }
+}
+
 /// An object moved to another thread.
 struct Shared<T>(T);
 
@@ -581,6 +684,8 @@ struct DownloadIvars {
     uri: String,
     notify: Notify,
     access: std::sync::Arc<nsh_engine::Access>,
+    /// The disk cache it goes through.
+    cache: Option<DiskCache>,
     data: std::sync::Mutex<DownloadState>,
 }
 
@@ -589,6 +694,7 @@ struct DownloadState {
     bytes: Vec<u8>,
     total: u64,
     status: isize,
+    headers: CacheHeaders,
     reported: Option<std::time::Instant>,
 }
 
@@ -640,13 +746,26 @@ define_class!(
         ) {
             let ivars = self.ivars();
             let state = std::mem::take(&mut *ivars.data.lock().expect("download"));
-            let result = match error {
-                Some(e) => Err(e.localizedDescription().to_string()),
-                None if state.status >= 400 => Err(format!("HTTP {}", state.status)),
-                None if (300..400).contains(&state.status) => {
+            let result = match (&ivars.cache, error) {
+                // Delegates run on the session's queue, off the main
+                // thread: the cache's file IO is done here.
+                (Some(cache), error) => {
+                    let response = match error {
+                        Some(e) => Err(e.localizedDescription().to_string()),
+                        None => Ok(Fetched::new(
+                            state.status as u16,
+                            state.headers,
+                            state.bytes,
+                        )),
+                    };
+                    cache.complete(&ivars.uri, response).map(|b| ns_data(&b))
+                }
+                (None, Some(e)) => Err(e.localizedDescription().to_string()),
+                (None, None) if state.status >= 400 => Err(format!("HTTP {}", state.status)),
+                (None, None) if (300..400).contains(&state.status) => {
                     Err(format!("redirect refused (HTTP {})", state.status))
                 }
-                None => Ok(NSData::with_bytes(&state.bytes)),
+                (None, None) => Ok(NSData::from_vec(state.bytes)),
             };
             on_main(
                 &ivars.notify,
@@ -671,6 +790,9 @@ define_class!(
             state.total = response.expectedContentLength().max(0) as u64;
             if let Some(http) = response.downcast_ref::<NSHTTPURLResponse>() {
                 state.status = http.statusCode();
+                if self.ivars().cache.is_some() {
+                    state.headers = cache_headers(http);
+                }
             }
             drop(state);
             completion.call((NSURLSessionResponseDisposition::Allow,));
@@ -706,22 +828,57 @@ define_class!(
     }
 );
 
-/// Downloads `url`, reporting progress and then [`LoadEvent::Bytes`].
+/// The caching headers of `response`.
+fn cache_headers(response: &NSHTTPURLResponse) -> CacheHeaders {
+    let (keys, values) = response.allHeaderFields().to_vecs();
+    let pairs: Vec<(String, String)> = keys
+        .iter()
+        .zip(values.iter())
+        .filter_map(|(k, v)| {
+            let k = k.downcast_ref::<NSString>()?;
+            let v = v.downcast_ref::<NSString>()?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect();
+    CacheHeaders::from_pairs(pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+}
+
+/// Downloads `url` with `headers` (a revalidation's conditions), through
+/// `cache` when there is one, reporting progress and then
+/// [`LoadEvent::Bytes`].
 fn download(
     url: &NSURL,
     uri: String,
+    headers: &[(&'static str, String)],
+    cache: Option<DiskCache>,
     notify: Notify,
     access: std::sync::Arc<nsh_engine::Access>,
 ) -> Retained<NSURLSessionDataTask> {
+    let cached = cache.is_some();
     let delegate = ImageDownload::alloc().set_ivars(DownloadIvars {
         uri,
         notify,
         access,
+        cache,
         data: std::sync::Mutex::new(DownloadState::default()),
     });
     // SAFETY: NSObject's designated initializer.
     let delegate: Retained<ImageDownload> = unsafe { msg_send![super(delegate), init] };
-    let task = NSURLSession::sharedSession().dataTaskWithURL(url);
+    let request = NSMutableURLRequest::requestWithURL(url);
+    if cached {
+        // The disk cache answers for these: the shared URL cache must not
+        // serve a copy it never saw (nor hide a revalidation's 304).
+        request.setCachePolicy(
+            objc2_foundation::NSURLRequestCachePolicy::ReloadIgnoringLocalCacheData,
+        );
+    }
+    for (name, value) in headers {
+        request.setValue_forHTTPHeaderField(
+            Some(&NSString::from_str(value)),
+            &NSString::from_str(name),
+        );
+    }
+    let task = NSURLSession::sharedSession().dataTaskWithRequest(&request);
     // The task keeps its delegate until it completes.
     task.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     task.resume();
@@ -890,7 +1047,7 @@ fn decode(data: &CFData, d: Decoding) -> Option<DecodedImage> {
 
 /// The pixel size of the first image, as displayed (EXIF orientations 5–8
 /// turn it a quarter).
-fn source_size(source: &CGImageSource) -> (u32, u32) {
+pub(crate) fn source_size(source: &CGImageSource) -> (u32, u32) {
     use objc2_image_io::{
         kCGImagePropertyOrientation, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
     };

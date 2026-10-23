@@ -36,6 +36,7 @@ const isAvailable: boolean;
 const Window: {
   setTitle(title: string): void;
   setTitleBar(style: "default" | "hidden", height?: number): void;
+  setMenuBar(mode: "shown" | "autoHide"): void;
   minimize(): void;
   toggleMaximize(): void;
   toggleFullScreen(): void;
@@ -57,6 +58,7 @@ Rust 列给出 `nsh_core::ui::desktop` 中的函数。
 |---|---|---|
 | `setTitle(title)` | | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
 | `setTitleBar(style, height?)` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `"hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`"default"` 恢复系统标题栏（Rust：`set_title_bar(TitleBarStyle::Default, None)`）。 |
+| `setMenuBar(mode)` | `set_menu_bar(mode)` | 在 GPUI 应用的 Windows 和 Linux 上，窗口把应用菜单绘制成应用上方的菜单栏：`"shown"`（默认）始终显示；`"autoHide"` 在单独按下并松开 Alt 后显示，再次单独按 Alt 时隐藏，与 Windows 和 GNOME 应用一致。两种模式下 F10 和 Alt 加菜单首字母都会打开菜单，菜单打开期间菜单栏显示。macOS 的菜单栏是系统的。 |
 | `minimize()` | | 最小化窗口。 |
 | `toggleMaximize()` | | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | | 进入或退出全屏。 |
@@ -174,6 +176,7 @@ type MenuItem =
       label?: string;
       role?: MenuRole;
       shortcut?: string;
+      when?: "always" | "auto" | "notEditing";
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
@@ -186,6 +189,7 @@ type MenuItem =
 | `label` | 菜单项显示的文字。带 role 的菜单项省略时使用自己的默认文字。 |
 | `onSelect` | 菜单项被选中时调用，无论是点击还是快捷键。 |
 | `shortcut` | 快捷键：修饰键和一个按键用 `+` 连接，例如 `"mod+n"`、`"mod+shift+z"`、`"alt+f4"` 或 `"f11"`。修饰键见下表。按键可以是字母、数字和标点，写作它在美式键盘上不按 Shift 时输入的字符（`,`、`/`；`?` 写作 `"shift+/"`），也可以是名称：`plus`（`=` / `+` 键，也可写 `=`）、`minus`（也可写 `-`）、`space`、`enter`（`return`）、`escape`（`esc`）、`tab`、`backspace`、`delete`（`del`）、`insert`、方向键 `up`、`down`、`left`、`right`（`arrowup` 等）、`home`、`end`、`pageup`、`pagedown`、`f1`–`f24`。大小写不影响（`"Mod+Shift+N"` 就是 `"mod+shift+n"`；大写字母表示同一个键，并不意味着 Shift），推荐全小写的写法。无效的快捷键（`"mod-n"`、`"mod++"`、`"mod+?"`）会抛出错误并给出正确的写法。`nsh/keymap` 使用同样的按键写法。菜单按各平台自己的样式显示快捷键（macOS 上是 `⇧⌘N`，Windows 上是 `Ctrl+Shift+N`）。 |
+| `when` | 在 GPUI 后端上，输入框获得键盘焦点时快捷键何时选中该菜单项：`"always"`（默认）、`"auto"`（除非输入框自己使用这个按键：输入字符、移动光标或删除的键，以及编辑快捷键，和 [`nsh/keymap`](./nsh-keymap) 的绑定相同）或 `"notEditing"`。菜单项让出的键交给输入框。 |
 | `disabled` | `true` 时菜单项变灰（默认 `false`）。 |
 | `checked` | 设置（为 `true` 或 `false`）后菜单项带勾选标记。 |
 | `submenu` | 让菜单项成为子菜单（需要 `label`）。 |
@@ -216,7 +220,9 @@ Role：
 
 带 role 的菜单项默认使用平台的文字和快捷键，除非自己设置（macOS 会在 `about`、`hide` 和 `quit` 中加上应用名）。
 
-菜单快捷键的优先级最高，和原生应用一样：菜单项占用的按键不会再传给获得焦点的输入框，也不会触发 NSH 自己的按键处理。只有 [`nsh/keymap`](./nsh-keymap) 中相同按键组合的绑定排在它们前面。所以编辑快捷键（`mod+c`、`mod+v`、`mod+x`、`mod+a`、`mod+z`）只交给编辑类 role（它们会把按键转给输入框），也不要使用不带修饰键的键（`escape`、方向键、字母），否则输入框和返回导航就收不到它们了。
+菜单快捷键的优先级最高，和原生应用一样：菜单项占用的按键不会再传给获得焦点的输入框，也不会触发 NSH 自己的按键处理。只有 [`nsh/keymap`](./nsh-keymap) 中相同按键组合的绑定排在它们前面。所以编辑快捷键（`mod+c`、`mod+v`、`mod+x`、`mod+a`、`mod+z`）只交给编辑类 role（它们会把按键转给输入框），也不要使用不带修饰键的键（`escape`、方向键、字母），否则输入框和返回导航就收不到它们了。在 GPUI 后端上，`when: "auto"` 让菜单项和输入框共用按键：没有输入框获得焦点时，`delete` 或 `mod+z` 选中菜单项；有输入框获得焦点时，它们编辑文本。
+
+在 GPUI 后端上，拥有键盘焦点的原生组件先看到每个按键。它自己处理的按键不会到达快捷键表或菜单。它放过的按键按输入框获得焦点时的规则进入 `nsh/keymap`，然后再到菜单。
 
 ```tsx
 import { effect, signal } from "nsh";

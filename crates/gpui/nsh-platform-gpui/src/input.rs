@@ -132,6 +132,18 @@ pub(crate) struct Modifiers {
     pub(crate) meta: bool,
 }
 
+impl Modifiers {
+    /// As the core's modifiers (`meta` is its `cmd`).
+    fn core(self) -> nsh_core::keymap::Modifiers {
+        nsh_core::keymap::Modifiers {
+            ctrl: self.ctrl,
+            alt: self.alt,
+            shift: self.shift,
+            cmd: self.meta,
+        }
+    }
+}
+
 /// A mouse, touch or pen event.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PointerEvent {
@@ -780,12 +792,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             let event = nsh_core::ContextMenuEvent {
                 position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
                 page_position: nsh_core::geometry::point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: modifiers.ctrl,
-                    alt: modifiers.alt,
-                    shift: modifiers.shift,
-                    cmd: modifiers.meta,
-                },
+                modifiers: modifiers.core(),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
@@ -919,9 +926,10 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     // The window's shortcuts (full screen, the dev host's reload) work
     // wherever the focus is.
     let shortcut = surface.shortcuts.borrow().iter().any(|f| f(&event));
+    let editing = crate::text_input::focused(surface).is_some();
     let handled = shortcut
         || crate::system::key(surface, &event)
-        || crate::keymap::key(surface, &event)
+        || crate::keymap::key(surface, &event, editing)
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
@@ -934,6 +942,27 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || tab(surface, &event);
     if handled && event.modifiers.alt {
         input.alt_combo.set(true);
+    }
+    handled
+}
+
+/// A key from the window while one of the surface's native components has
+/// the keyboard focus; true when handled. GPUI gives the component the key
+/// first (its key bindings, then its key listeners), so this sees only
+/// keys the component let through: the window's shortcuts, then the app's
+/// bindings as while a text field is edited (a binding whose `when` is
+/// `auto` leaves typing keys to the component), then the menu's shortcuts.
+/// Every other key stays the component's.
+pub(crate) fn component_key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
+    if !event.down {
+        crate::keymap::released(surface, &event);
+        return event.vk == VK_MENU && surface.input.alt_combo.replace(false);
+    }
+    let handled = surface.shortcuts.borrow().iter().any(|f| f(&event))
+        || crate::keymap::key(surface, &event, true)
+        || crate::chrome::shortcut(surface, &event);
+    if handled && event.modifiers.alt {
+        surface.input.alt_combo.set(true);
     }
     handled
 }
@@ -1320,7 +1349,7 @@ fn down(
     let press = if native {
         None
     } else {
-        find_press(surface, &hit.view, &views, x, y)
+        find_press(surface, &hit.view, &views, x, y, modifiers, clicks)
     };
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
@@ -1367,21 +1396,23 @@ fn down(
                 generation,
                 SCROLL_PRESS_DELAY,
                 |surface, p| {
+                    let at = (p.x, p.y);
                     if let Some(press) = &mut p.press {
-                        press_in(surface, press);
+                        press_in(surface, press, at);
                     }
                 },
             );
         } else {
-            press_in(surface, press);
+            press_in(surface, press, (x, y));
         }
         if press.events.contains(EventKind::LongPress) {
             let delay = press.long_delay.max(0.0) as u64;
             after(surface, key, generation, delay, |surface, p| {
+                let at = (p.x, p.y);
                 let Some(press) = &mut p.press else { return };
-                press_in(surface, press);
+                press_in(surface, press, at);
                 press.long = true;
-                press_event(surface, press.node, EventKind::LongPress);
+                press_event(surface, press, EventKind::LongPress, at);
             });
         }
     }
@@ -1545,13 +1576,14 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free => {
             if let Some(mut press) = p.press.take() {
+                let at = (p.x, p.y);
                 if cancelled {
-                    press_out(surface, &mut press, false);
+                    press_out(surface, &mut press, false, at);
                 } else {
                     // A quick tap inside a scroll view: the press in now.
-                    press_in(surface, &mut press);
+                    press_in(surface, &mut press, at);
                     let inside = released_inside(&press.view, p.x, p.y);
-                    press_out(surface, &mut press, inside);
+                    press_out(surface, &mut press, inside, at);
                 }
             }
         }
@@ -1643,6 +1675,8 @@ fn find_press(
     views: &[NshView],
     x: f32,
     y: f32,
+    modifiers: Modifiers,
+    clicks: u32,
 ) -> Option<Press> {
     let generation = surface.input.next_gen.get();
     surface.input.next_gen.set(generation + 1);
@@ -1659,13 +1693,16 @@ fn find_press(
             if let Some(link) = link
                 && has_press(link.events)
             {
-                return Some(Press::new(
-                    target.clone(),
-                    link.node,
-                    link.events,
-                    s.props.long_press_delay,
-                    generation,
-                ));
+                return Some(
+                    Press::new(
+                        target.clone(),
+                        link.node,
+                        link.events,
+                        s.props.long_press_delay,
+                        generation,
+                    )
+                    .clicked(modifiers.core(), clicks),
+                );
             }
         }
     }
@@ -1679,32 +1716,41 @@ fn find_press(
                 s.props.long_press_delay,
                 generation,
             )
+            .clicked(modifiers.core(), clicks)
         })
     })
 }
 
-fn press_in(surface: &Rc<Surface>, press: &mut Press) {
+fn press_in(surface: &Rc<Surface>, press: &mut Press, at: (f32, f32)) {
     if let Some(kind) = press.press_in() {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
 /// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
-/// and it was no long press.
-fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
+/// and it was no long press. `at` is the pointer in root coordinates.
+fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool, at: (f32, f32)) {
     for kind in press.press_out(fire) {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
-fn press_event(surface: &Surface, node: NodeId, kind: EventKind) {
-    log::debug!(target: "nsh::input", "{} on {node}", kind.prop_name());
-    surface.event(node, kind, EventPayload::None);
+/// Sends `kind` of `press` with the pointer at `(x, y)` (root coordinates).
+fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, f32)) {
+    log::debug!(target: "nsh::input", "{} on {}", kind.prop_name(), press.node);
+    let (location_x, location_y) = local(&press.view, x, y);
+    let event = nsh_core::PressEvent {
+        position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
+        page_position: nsh_core::geometry::point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
+    };
+    surface.event(press.node, kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
     if let Some(mut press) = p.press.take() {
-        press_out(surface, &mut press, false);
+        press_out(surface, &mut press, false, (p.x, p.y));
     }
 }
 
@@ -2054,12 +2100,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
         let event = nsh_core::HoverEvent {
             position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
             page_position: nsh_core::geometry::point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: modifiers.ctrl,
-                alt: modifiers.alt,
-                shift: modifiers.shift,
-                cmd: modifiers.meta,
-            },
+            modifiers: modifiers.core(),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }

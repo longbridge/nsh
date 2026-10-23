@@ -124,6 +124,10 @@ components and modules to the CLI, which then does the rest itself, and the runn
 package. The first build of a new Rust app compiles your crate and NSH's core, about 60 crates. `nsh test` runs
 the app's tests headless in a runner of your crate built the same way.
 
+On Linux, your crate selects optional platform features. Enable `webview` on your
+`nsh-platform-linux` dependency to use web views; this links WebKitGTK 6.0, which must be installed to build and run
+the app. The generated runner inherits that choice through Cargo feature unification.
+
 During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
 the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
 (`src/main.rs`), and native apps that embed NSH mount a Rust root with `AppSource::Rust` on the `AppView` of macOS,

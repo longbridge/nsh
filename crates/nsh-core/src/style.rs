@@ -8,8 +8,8 @@ use taffy::{
 use crate::{
     css,
     effects::{
-        BlendMode, BoxShadow, Cursor, Effects, Filter, Gradient, KeyframeAnimation, Keyframes,
-        Outline, Transition, TransitionProps,
+        BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
+        KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
     },
     geometry::{
         AbsoluteLength, Corners, DefiniteLength, Edges, Percentage, Point, Points, REM_SIZE, Size,
@@ -495,12 +495,19 @@ pub struct ViewStyle {
     pub elevation: Points,
     /// `transformOrigin`: the point transforms act around.
     pub transform_origin: TransformOrigin,
+    /// `objectPosition`: where an image sits in its box (image views; the
+    /// platforms take it from [`crate::mount::ImageOptions::position`]).
+    pub object_position: ObjectPosition,
     /// `backfaceVisibility: "hidden"`: invisible when turned away.
     pub backface_hidden: bool,
     /// Layered / inset shadows, gradients and filters.
     pub effects: Option<Arc<Effects>>,
     /// `mixBlendMode`.
     pub blend_mode: BlendMode,
+    /// The iOS material from `ios={{ backdropMaterial }}`, projected at mount time.
+    pub backdrop_material: BackdropMaterial,
+    /// `glassEffect`.
+    pub glass_effect: GlassEffect,
     /// `outline*`.
     pub outline: Outline,
     /// `visibility: "hidden"`: not drawn and not touchable, still laid out.
@@ -601,6 +608,121 @@ impl TransformOrigin {
             y: y.unwrap_or(fraction(0.5)),
             z,
         })
+    }
+}
+
+/// One axis of a CSS `<position>`: a distance from the start edge (left,
+/// top) or the end edge (right, bottom). Percentages are fractions of the
+/// free space: the box's size less the content's (negative when the
+/// content overflows), as CSS's `object-position` resolves them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct PositionAxis {
+    /// Measured from the end edge (right, bottom) instead of the start.
+    pub from_end: bool,
+    /// The distance from that edge.
+    pub offset: DefiniteLength,
+}
+
+impl Default for PositionAxis {
+    /// The center.
+    fn default() -> Self {
+        Self::CENTER
+    }
+}
+
+impl PositionAxis {
+    /// The start edge (`left`, `top`, `0%`).
+    pub const START: Self = Self::start(DefiniteLength::Fraction(Percentage(0.0)));
+    /// The center (`center`, `50%`).
+    pub const CENTER: Self = Self::start(DefiniteLength::Fraction(Percentage(0.5)));
+    /// The end edge (`right`, `bottom`, `100%`).
+    pub const END: Self = Self::start(DefiniteLength::Fraction(Percentage(1.0)));
+
+    /// `offset` from the start edge.
+    pub const fn start(offset: DefiniteLength) -> Self {
+        Self {
+            from_end: false,
+            offset,
+        }
+    }
+
+    /// `offset` from the end edge.
+    pub const fn end(offset: DefiniteLength) -> Self {
+        Self {
+            from_end: true,
+            offset,
+        }
+    }
+
+    /// Where content starts along this axis, from the box's start edge,
+    /// given the `free` space (the box's size less the content's).
+    pub fn resolve(&self, free: Points) -> Points {
+        let d = self
+            .offset
+            .to_points(AbsoluteLength::Points(free), REM_SIZE);
+        if self.from_end { free - d } else { d }
+    }
+}
+
+/// `objectPosition`: where an image sits in its box once
+/// `resizeMode` / `object-fit` has sized it, as CSS's `object-position`
+/// places it (the center by default). The parts of a covering image
+/// outside the box are cropped.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct ObjectPosition {
+    /// Horizontal.
+    pub x: PositionAxis,
+    /// Vertical.
+    pub y: PositionAxis,
+}
+
+impl ObjectPosition {
+    /// The center (the default).
+    pub const CENTER: Self = Self {
+        x: PositionAxis::CENTER,
+        y: PositionAxis::CENTER,
+    };
+
+    /// A position of two axes.
+    pub const fn new(x: PositionAxis, y: PositionAxis) -> Self {
+        Self { x, y }
+    }
+
+    /// Parses CSS's `<position>` as `object-position` takes it: one or two
+    /// keywords, percentages or lengths (`top`, `left bottom`, `25% 75%`,
+    /// `10px 0`), or edges with offsets (`right 10px bottom 20%`).
+    pub fn parse(s: &str) -> Option<Self> {
+        css::object_position(s)
+    }
+
+    /// The top left corner of content of `content` size placed in a box of
+    /// `size`.
+    pub fn place(&self, size: Size<Points>, content: Size<Points>) -> Point<Points> {
+        point(
+            self.x.resolve(size.width - content.width),
+            self.y.resolve(size.height - content.height),
+        )
+    }
+}
+
+impl std::fmt::Display for ObjectPosition {
+    /// CSS's four-value form (`left 50% top 10px`), which every position
+    /// can be written in.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let length = |l: DefiniteLength| match l {
+            DefiniteLength::Absolute(a) => format!("{}px", a.to_points(REM_SIZE).0),
+            DefiniteLength::Fraction(p) => format!("{}%", p.0 * 100.0),
+        };
+        write!(
+            f,
+            "{} {} {} {}",
+            if self.x.from_end { "right" } else { "left" },
+            length(self.x.offset),
+            if self.y.from_end { "bottom" } else { "top" },
+            length(self.y.offset),
+        )
     }
 }
 
@@ -706,9 +828,12 @@ impl Default for ViewStyle {
             tint_color: None,
             elevation: Points::ZERO,
             transform_origin: TransformOrigin::CENTER,
+            object_position: ObjectPosition::CENTER,
             backface_hidden: false,
             effects: None,
             blend_mode: BlendMode::Normal,
+            backdrop_material: BackdropMaterial::UltraThin,
+            glass_effect: GlassEffect::None,
             outline: Outline::NONE,
             hidden: false,
             cursor: Cursor::Auto,
@@ -745,6 +870,8 @@ pub struct TextStyle {
     pub line_height: Option<Points>,
     /// Block alignment (only meaningful on a text block).
     pub text_align: Option<TextAlign>,
+    /// Physical class alignment, preserved across direction changes in descendants.
+    pub text_align_physical: bool,
     /// Font family; `None` inherits (the system font at the root).
     pub font_family: Option<FontFamily>,
     /// Italic (`fontStyle`).
@@ -754,7 +881,10 @@ pub struct TextStyle {
     /// Extra space between characters in ems of this node's font size
     /// (`"0.05em"`); overrides `letter_spacing` when set after it.
     pub letter_spacing_em: Option<f32>,
-    /// Line height as a multiple of the font size (`"1.5"`, `"1.5em"`),
+    /// A line-height length relative to this node's font size (`em` or
+    /// a percentage), resolved before inheritance.
+    pub line_height_em: Option<f32>,
+    /// Line height as a multiple of the font size (`"1.5"`),
     /// inherited as a multiple.
     pub line_height_multiple: Option<f32>,
     /// Underline / strikethrough.
@@ -838,11 +968,16 @@ pub struct Style {
     pub logical: Logical,
     /// Values that only show together with another property.
     pub(crate) pending: Pending,
+    /// CSS's `perspective` (`perspective-*`, `Styled::perspective`): the
+    /// depth the view gives its children's 3D transforms, seen from its
+    /// center; the core composes it into their transforms.
+    pub perspective: Option<Points>,
 }
 
 /// Values of properties that take effect only together with another one,
 /// kept so that the result does not depend on the order they are set in:
-/// `outlineWidth` under `outlineStyle: "none"` (no outline, as in CSS),
+/// `outlineWidth` under `outlineStyle: "none"` and the border widths under
+/// `borderStyle: "none"` (no outline, no border, as in CSS),
 /// `animationDuration` and the other `animation*` keys before
 /// `animationName`.
 #[derive(Clone, Copy, Default)]
@@ -851,6 +986,17 @@ pub(crate) struct Pending {
     outline_width: Points,
     /// `outlineStyle: "none"` / `"hidden"`.
     outline_hidden: bool,
+    /// The border widths as set: top, right, bottom, left.
+    border_widths: [Points; 4],
+    /// `borderStartWidth`, `borderEndWidth` as set.
+    border_logical: [Option<Points>; 2],
+    /// `borderStyle: "none"` / `"hidden"`: every used width is 0.
+    border_hidden: bool,
+    /// `position: "fixed"`: laid out and mounted in its root view's box.
+    pub(crate) fixed_position: bool,
+    /// `position: "sticky"`: laid out as `relative`, its insets where it
+    /// sticks in the viewport of the scroll view around it.
+    pub(crate) sticky_position: bool,
     /// `animationDuration`.
     animation_duration: Option<f32>,
     /// `animationDelay`.
@@ -1039,6 +1185,7 @@ impl Default for Style {
             direction: None,
             logical: Logical::default(),
             pending: Pending::default(),
+            perspective: None,
         }
     }
 }
@@ -1126,20 +1273,21 @@ macro_rules! style_keys {
 }
 
 style_keys! {
-    Display = "display": Layout "\"flex\" | \"grid\" | \"block\" | \"none\"",
-    Position = "position": Layout "\"relative\" | \"absolute\"",
+    Display = "display": Layout "\"flex\" | \"grid\" | \"block\" | \"flow-root\" | \"none\"",
+    BoxSizing = "boxSizing": Layout "\"border-box\" | \"content-box\"" "The box that width and height include.",
+    Position = "position": Layout "\"relative\" | \"absolute\" | \"static\" | \"fixed\" | \"sticky\"" "`static` stays in flow and lets absolute descendants use the nearest positioned ancestor as their containing block. `fixed` lays an element out in its root view and mounts it above that root view's children. `sticky`: in the flow, and while its parent shows it stays `top` (in a horizontal scroll view `left`) from the start of the viewport of the scroll view around it, as far as the end of its parent's content box; it draws above its siblings of the same `zIndex`.",
     FlexDirection = "flexDirection": Layout "\"row\" | \"column\" | \"row-reverse\" | \"column-reverse\"",
     FlexWrap = "flexWrap": Layout "\"wrap\" | \"nowrap\" | \"wrap-reverse\"",
     Flex = "flex": Layout "number",
     FlexGrow = "flexGrow": Layout "number",
     FlexShrink = "flexShrink": Layout "number",
-    FlexBasis = "flexBasis": Layout "DimensionValue",
+    FlexBasis = "flexBasis": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
     JustifyContent = "justifyContent": Layout "Exclude<Distribute, \"stretch\"> | \"stretch\"",
     AlignItems = "alignItems": Layout "Align",
     AlignSelf = "alignSelf": Layout "Align | \"auto\"",
     AlignContent = "alignContent": Layout "Distribute",
-    Width = "width": Layout "DimensionValue",
-    Height = "height": Layout "DimensionValue",
+    Width = "width": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
+    Height = "height": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
     MinWidth = "minWidth": Layout "LengthValue",
     MinHeight = "minHeight": Layout "LengthValue",
     MaxWidth = "maxWidth": Layout "LengthValue",
@@ -1176,10 +1324,12 @@ style_keys! {
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
+    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included.",
+    GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
     OutlineColor = "outlineColor": View "ColorValue",
-    OutlineStyle = "outlineStyle": View "\"solid\" | \"double\" | \"dashed\" | \"dotted\" | \"none\" | \"hidden\"",
+    OutlineStyle = "outlineStyle": View "\"solid\" | \"dashed\" | \"dotted\" | \"none\" | \"hidden\"",
     OutlineOffset = "outlineOffset": View "number" "Distance from the border edge (negative: inside).",
     Visibility = "visibility": View "\"visible\" | \"hidden\" | \"collapse\"" "Hidden views keep their space.",
     Cursor = "cursor": View "\"auto\" | \"default\" | \"context-menu\" | \"alias\" | \"copy\" | \"cell\" | \"pointer\" | \"text\" | \"vertical-text\" | \"wait\" | \"progress\" | \"help\" | \"crosshair\" | \"move\" | \"all-scroll\" | \"grab\" | \"grabbing\" | \"not-allowed\" | \"no-drop\" | \"zoom-in\" | \"zoom-out\" | \"col-resize\" | \"e-resize\" | \"w-resize\" | \"ew-resize\" | \"row-resize\" | \"n-resize\" | \"s-resize\" | \"ns-resize\" | \"ne-resize\" | \"nw-resize\" | \"se-resize\" | \"sw-resize\" | \"nesw-resize\" | \"nwse-resize\" | \"none\"" "The pointer over the view (pointers and desktops).",
@@ -1237,9 +1387,10 @@ style_keys! {
     BorderRightColor = "borderRightColor": View "ColorValue",
     BorderBottomColor = "borderBottomColor": View "ColorValue",
     BorderLeftColor = "borderLeftColor": View "ColorValue",
-    BorderStyle = "borderStyle": View "\"solid\" | \"dashed\" | \"dotted\"",
+    BorderStyle = "borderStyle": View "\"solid\" | \"dashed\" | \"dotted\" | \"none\" | \"hidden\"" "`none` and `hidden`: no border whatever the widths (they take no space).",
     BorderCurve = "borderCurve": View "\"circular\" | \"continuous\"" "`continuous`: corners whose curvature eases into the edges (iOS app icons).",
     TintColor = "tintColor": Image "ColorValue" "Recolors a template image.",
+    ObjectPosition = "objectPosition": Image "string" "Where the image sits in its box once `resizeMode` has sized it, as CSS's `object-position`: keywords, percentages and lengths (`\"top\"`, `\"left bottom\"`, `\"25% 75%\"`, `\"right 10px bottom 20%\"`). A covering image is cropped around it. Default the center.",
     BackfaceVisibility = "backfaceVisibility": View "\"visible\" | \"hidden\"" "`\"hidden\"`: invisible while turned away (3D rotations).",
     TransformOrigin = "transformOrigin": View "string | (number | string)[]" "The point `transform` acts around: keywords, percentages and lengths (\"top left\", \"50% 0\", `[10, 20]`). Default the center.",
     Opacity = "opacity": View "number | AnimatedNode",
@@ -1261,7 +1412,7 @@ style_keys! {
     TextTransform = "textTransform": Text "\"none\" | \"uppercase\" | \"lowercase\" | \"capitalize\"",
     TextAlign = "textAlign": Text "\"auto\" | \"left\" | \"center\" | \"right\" | \"justify\"",
     PlaceholderColor = "placeholderColor": Text "ColorValue" "An input's placeholder (`placeholder:text-*`).",
-    SelectionColor = "selectionColor": Text "ColorValue" "An input's caret and selection, a selectable text's selection highlight (`selection:text-*`).",
+    SelectionColor = "selectionColor": Text "ColorValue" "An input's caret and selection, a selectable text's selection highlight (`selection:bg-*`).",
     VerticalAlign = "verticalAlign": View "\"baseline\" | \"text-top\" | \"text-bottom\" | \"middle\"" "Where a view or image inside a `<Text>` sits in its line (CSS `vertical-align`, `align-*`): its bottom on the baseline (the default), its top or bottom at the top or bottom of the text's font, or its middle half the font's x height above the baseline. The line grows to hold it.",
 }
 
@@ -1554,6 +1705,16 @@ impl Len {
             Len::Auto => Err(StyleError::InvalidValue),
         }
     }
+}
+
+/// Intrinsic sizes are delegated to Taffy's sizing algorithms.
+fn dimension(value: StyleValue<'_>) -> Result<Dimension, StyleError> {
+    Ok(match value {
+        StyleValue::Str("min-content") => Dimension::min_content(),
+        StyleValue::Str("max-content") => Dimension::max_content(),
+        StyleValue::Str("fit-content") => Dimension::fit_content(),
+        value => Len::parse(value)?.dim(),
+    })
 }
 
 /// A zero-default length: `null` resets to 0 rather than `auto`.
@@ -1885,17 +2046,38 @@ impl Style {
         sides: &[usize],
         value: StyleValue<'_>,
     ) -> Result<(), StyleError> {
-        let w = number(value, 0.0)?.max(0.0);
-        let v = LengthPercentage::length(w);
+        let w = px(number(value, 0.0)?.max(0.0));
         for &side in sides {
-            *self.view.borders.width_mut(side) = px(w);
-            let b = &mut self.layout.border;
-            match side {
-                0 => b.top = v,
-                1 => b.right = v,
-                2 => b.bottom = v,
-                _ => b.left = v,
+            self.pending.border_widths[side] = w;
+            if !self.pending.border_hidden {
+                self.set_used_border_width(side, w);
             }
+        }
+        Ok(())
+    }
+
+    /// The width side `side` lays out and draws with.
+    fn set_used_border_width(&mut self, side: usize, w: Points) {
+        *self.view.borders.width_mut(side) = w;
+        let v = LengthPercentage::length(w.0);
+        let b = &mut self.layout.border;
+        match side {
+            0 => b.top = v,
+            1 => b.right = v,
+            2 => b.bottom = v,
+            _ => b.left = v,
+        }
+    }
+
+    fn set_logical_border_width(
+        &mut self,
+        i: usize,
+        value: StyleValue<'_>,
+    ) -> Result<(), StyleError> {
+        let w = opt_points(value)?.map(|w| w.max(Points::ZERO));
+        self.pending.border_logical[i] = w;
+        if !self.pending.border_hidden {
+            self.logical.border_width[i] = w;
         }
         Ok(())
     }
@@ -1910,6 +2092,24 @@ impl Style {
             self.view.borders.colors[side] = c;
         }
         Ok(())
+    }
+
+    /// Sets color property `key` (`borderColor`, `outlineColor`) to `color`;
+    /// other keys are left as they are.
+    pub(crate) fn set_color(&mut self, key: StyleKey, color: Color) {
+        match key {
+            StyleKey::BorderColor => self.view.borders.colors = [color; 4],
+            StyleKey::OutlineColor => self.view.outline.color = color,
+            StyleKey::BackgroundColor => self.view.background_color = color,
+            StyleKey::BorderTopColor => self.view.borders.colors[0] = color,
+            StyleKey::BorderRightColor => self.view.borders.colors[1] = color,
+            StyleKey::BorderBottomColor => self.view.borders.colors[2] = color,
+            StyleKey::BorderLeftColor => self.view.borders.colors[3] = color,
+            StyleKey::BorderStartColor => self.logical.border_color[0] = Some(color),
+            StyleKey::BorderEndColor => self.logical.border_color[1] = Some(color),
+            StyleKey::TextDecorationColor => self.text.decoration_color = Some(color),
+            _ => debug_assert!(false, "set_color({key:?})"),
+        }
     }
 
     /// Sets one property using its React Native name.
@@ -1930,16 +2130,30 @@ impl Style {
                     None | Some("flex") => Display::Flex,
                     Some("grid") => Display::Grid,
                     Some("block") => Display::Block,
+                    Some("flow-root") => Display::FlowRoot,
                     Some("none") => Display::None,
                     Some(_) => return Err(StyleError::InvalidValue),
                 }
             }
+            StyleKey::BoxSizing => {
+                l.box_sizing = match keyword(value)? {
+                    None | Some("border-box") => taffy::BoxSizing::BorderBox,
+                    Some("content-box") => taffy::BoxSizing::ContentBox,
+                    _ => return Err(StyleError::InvalidValue),
+                };
+            }
             StyleKey::Position => {
-                l.position = match keyword(value)? {
-                    None | Some("relative") => Position::Relative,
-                    Some("absolute") => Position::Absolute,
+                let (position, fixed, sticky) = match keyword(value)? {
+                    None | Some("relative") => (Position::Relative, false, false),
+                    Some("absolute") => (Position::Absolute, false, false),
+                    Some("fixed") => (Position::Fixed, true, false),
+                    Some("static") => (Position::Static, false, false),
+                    Some("sticky") => (Position::Relative, false, true),
                     Some(_) => return Err(StyleError::InvalidValue),
-                }
+                };
+                l.position = position;
+                self.pending.fixed_position = fixed;
+                self.pending.sticky_position = sticky;
             }
             StyleKey::FlexDirection => {
                 l.flex_direction = match keyword(value)? {
@@ -1977,7 +2191,7 @@ impl Style {
             }
             StyleKey::FlexGrow => l.flex_grow = number(value, 0.0)?,
             StyleKey::FlexShrink => l.flex_shrink = number(value, 0.0)?,
-            StyleKey::FlexBasis => l.flex_basis = Len::parse(value)?.dim(),
+            StyleKey::FlexBasis => l.flex_basis = dimension(value)?,
             StyleKey::JustifyContent => l.justify_content = align_content(value)?,
             StyleKey::AlignItems => {
                 l.align_items = align_items(value)?.unwrap_or(AlignItems::STRETCH)
@@ -1989,8 +2203,8 @@ impl Style {
                 }
             }
             StyleKey::AlignContent => l.align_content = align_content(value)?,
-            StyleKey::Width => l.size.width = Len::parse(value)?.dim(),
-            StyleKey::Height => l.size.height = Len::parse(value)?.dim(),
+            StyleKey::Width => l.size.width = dimension(value)?,
+            StyleKey::Height => l.size.height = dimension(value)?,
             StyleKey::MinWidth => l.min_size.width = min_len(value)?,
             StyleKey::MinHeight => l.min_size.height = min_len(value)?,
             StyleKey::MaxWidth => l.max_size.width = Len::parse(value)?.lpa(),
@@ -2077,12 +2291,8 @@ impl Style {
             StyleKey::PaddingEnd => self.logical.padding[1] = opt_lp(value)?,
             StyleKey::Start => self.logical.inset[0] = opt_lpa(value)?,
             StyleKey::End => self.logical.inset[1] = opt_lpa(value)?,
-            StyleKey::BorderStartWidth => {
-                self.logical.border_width[0] = opt_points(value)?.map(|w| w.max(Points::ZERO))
-            }
-            StyleKey::BorderEndWidth => {
-                self.logical.border_width[1] = opt_points(value)?.map(|w| w.max(Points::ZERO))
-            }
+            StyleKey::BorderStartWidth => self.set_logical_border_width(0, value)?,
+            StyleKey::BorderEndWidth => self.set_logical_border_width(1, value)?,
             StyleKey::BorderStartColor => self.logical.border_color[0] = color(value)?,
             StyleKey::BorderEndColor => self.logical.border_color[1] = color(value)?,
             StyleKey::BorderTopStartRadius => self.logical.radius[0] = opt_points(value)?,
@@ -2120,11 +2330,32 @@ impl Style {
             StyleKey::BorderBottomColor => self.set_border_color(&[2], value)?,
             StyleKey::BorderLeftColor => self.set_border_color(&[3], value)?,
             StyleKey::BorderStyle => {
-                self.view.borders.style = match keyword(value)? {
-                    None | Some("solid") => BorderStyle::Solid,
-                    Some("dashed") => BorderStyle::Dashed,
-                    Some("dotted") => BorderStyle::Dotted,
+                // `none` (and `hidden`, the same outside tables) draws and
+                // lays out no border whatever the widths, set before or
+                // after it (CSS).
+                let (style, hidden) = match keyword(value)? {
+                    None | Some("solid") => (BorderStyle::Solid, false),
+                    Some("dashed") => (BorderStyle::Dashed, false),
+                    Some("dotted") => (BorderStyle::Dotted, false),
+                    Some("none") | Some("hidden") => (BorderStyle::Solid, true),
                     Some(_) => return Err(StyleError::InvalidValue),
+                };
+                self.view.borders.style = style;
+                if hidden != self.pending.border_hidden {
+                    self.pending.border_hidden = hidden;
+                    for side in 0..4 {
+                        let w = if hidden {
+                            Points::ZERO
+                        } else {
+                            self.pending.border_widths[side]
+                        };
+                        self.set_used_border_width(side, w);
+                    }
+                    self.logical.border_width = if hidden {
+                        [None; 2]
+                    } else {
+                        self.pending.border_logical
+                    };
                 }
             }
             StyleKey::BorderCurve => {
@@ -2135,6 +2366,12 @@ impl Style {
                 }
             }
             StyleKey::TintColor => self.view.tint_color = color(value)?,
+            StyleKey::ObjectPosition => {
+                self.view.object_position = match keyword(value)? {
+                    None => ObjectPosition::CENTER,
+                    Some(s) => ObjectPosition::parse(s).ok_or(StyleError::InvalidValue)?,
+                }
+            }
             StyleKey::BackfaceVisibility => {
                 self.view.backface_hidden = match keyword(value)? {
                     None | Some("visible") => false,
@@ -2164,24 +2401,37 @@ impl Style {
             StyleKey::LineHeight => {
                 // Numbers are points (React Native); strings may be a
                 // multiple of the font size (`"1.5"`, `"1.5em"`) or points.
-                let (points, multiple) = match value {
+                let (points, multiple, em) = match value {
                     StyleValue::Str(s)
                         if s.ends_with("px") || s.ends_with("pt") || s.ends_with("rem") =>
                     {
                         (
                             Some(px(css::length(s).ok_or(StyleError::InvalidValue)?)),
                             None,
+                            None,
                         )
                     }
-                    StyleValue::Str(s) => {
-                        let n = css::number(s.strip_suffix("em").unwrap_or(s))
-                            .ok_or(StyleError::InvalidValue)?;
-                        (None, Some(n.max(0.0)))
+                    StyleValue::Str(s) if s.ends_with('%') || s.ends_with("em") => {
+                        let n = if let Some(n) = s.strip_suffix('%') {
+                            css::number(n).map(|n| n / 100.0)
+                        } else {
+                            css::number(s.strip_suffix("em").unwrap())
+                        }
+                        .filter(|n| *n >= 0.0)
+                        .ok_or(StyleError::InvalidValue)?;
+                        (None, None, Some(n))
                     }
-                    v => (opt_points(v)?, None),
+                    StyleValue::Str(s) => {
+                        let n = css::number(s)
+                            .filter(|n| *n >= 0.0)
+                            .ok_or(StyleError::InvalidValue)?;
+                        (None, Some(n), None)
+                    }
+                    v => (opt_points(v)?, None, None),
                 };
                 self.text.line_height = points;
                 self.text.line_height_multiple = multiple;
+                self.text.line_height_em = em;
             }
             StyleKey::FontFamily => {
                 self.text.font_family = keyword(value)?.map(|name| FontFamily::new(name.trim()))
@@ -2265,6 +2515,7 @@ impl Style {
                 }
             }
             StyleKey::TextAlign => {
+                self.text.text_align_physical = false;
                 self.text.text_align = match keyword(value)? {
                     None => None,
                     Some("auto") => Some(TextAlign::Auto),
@@ -2291,6 +2542,14 @@ impl Style {
                 };
                 self.edit_effects(|e| e.background_images = list);
             }
+            StyleKey::MaskImage => {
+                let list = match keyword(value)? {
+                    None => Vec::new(),
+                    Some("none") => Vec::new(),
+                    Some(s) => css::gradients(s).ok_or(StyleError::InvalidValue)?,
+                };
+                self.edit_effects(|e| e.mask_images = list);
+            }
             StyleKey::Filter => {
                 let list = match keyword(value)? {
                     None => Vec::new(),
@@ -2304,6 +2563,12 @@ impl Style {
                     Some(s) => css::filters(s).ok_or(StyleError::InvalidValue)?,
                 };
                 self.edit_effects(|e| e.backdrop_filters = list);
+            }
+            StyleKey::GlassEffect => {
+                self.view.glass_effect = match keyword(value)? {
+                    None => GlassEffect::None,
+                    Some(s) => GlassEffect::parse(s).ok_or(StyleError::InvalidValue)?,
+                }
             }
             StyleKey::MixBlendMode => {
                 self.view.blend_mode = match keyword(value)? {
@@ -2326,7 +2591,7 @@ impl Style {
                 // `none` draws no outline whatever the width, set before
                 // or after it (CSS).
                 let (style, hidden) = match keyword(value)? {
-                    None | Some("solid") | Some("double") => (BorderStyle::Solid, false),
+                    None | Some("solid") => (BorderStyle::Solid, false),
                     Some("dashed") => (BorderStyle::Dashed, false),
                     Some("dotted") => (BorderStyle::Dotted, false),
                     Some("none") | Some("hidden") => (BorderStyle::Solid, true),
@@ -2752,6 +3017,41 @@ mod tests {
     }
 
     #[test]
+    fn border_style_none_hides_the_border_in_any_order() {
+        use StyleValue::{Null, Number, Str};
+        for none in ["none", "hidden"] {
+            in_any_order(
+                &[
+                    ("borderStyle", Str(none)),
+                    ("borderWidth", Number(3.0)),
+                    ("borderTopWidth", Number(4.0)),
+                    ("borderStartWidth", Number(5.0)),
+                ],
+                |s| {
+                    assert!(!s.view.borders.is_visible());
+                    assert_eq!(s.view.borders.widths.to_array(), [Points::ZERO; 4]);
+                    assert_eq!(s.layout.border.top, LengthPercentage::length(0.0));
+                    assert_eq!(s.layout.border.left, LengthPercentage::length(0.0));
+                    assert_eq!(s.logical.border_width, [None; 2]);
+                },
+            );
+        }
+        // A later style showing it again gets the widths back.
+        let mut s = Style::default();
+        s.set("borderWidth", Number(3.0)).unwrap();
+        s.set("borderEndWidth", Number(1.0)).unwrap();
+        s.set("borderStyle", Str("none")).unwrap();
+        s.set("borderStyle", Str("dashed")).unwrap();
+        assert_eq!(s.view.borders.widths.to_array(), [px(3.0); 4]);
+        assert_eq!(s.layout.border.right, LengthPercentage::length(3.0));
+        assert_eq!(s.logical.border_width, [None, Some(px(1.0))]);
+        assert_eq!(s.view.borders.style, BorderStyle::Dashed);
+        s.set("borderStyle", Str("hidden")).unwrap();
+        s.set("borderStyle", Null).unwrap();
+        assert_eq!(s.view.borders.widths.to_array(), [px(3.0); 4]);
+    }
+
+    #[test]
     fn animation_keys_apply_in_any_order() {
         use StyleValue::{Number, Str};
         in_any_order(
@@ -2890,6 +3190,67 @@ mod tests {
         );
         assert_eq!(
             s.set("fontStyle", StyleValue::Str("oblique")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn mask_image_parses() {
+        let mut s = Style::default();
+        assert!(s.view.effects.is_none());
+        s.set(
+            "maskImage",
+            StyleValue::Str("linear-gradient(black 70%, transparent)"),
+        )
+        .unwrap();
+        let masks = &s.view.effects.as_ref().unwrap().mask_images;
+        assert_eq!(masks.len(), 1);
+        // `none`, and the null of a style that was taken off, both clear it.
+        s.set("maskImage", StyleValue::Str("none")).unwrap();
+        assert!(
+            s.view
+                .effects
+                .as_ref()
+                .is_none_or(|e| e.mask_images.is_empty())
+        );
+        s.set(
+            "maskImage",
+            StyleValue::Str("linear-gradient(black, transparent)"),
+        )
+        .unwrap();
+        s.set("maskImage", StyleValue::Null).unwrap();
+        assert!(
+            s.view
+                .effects
+                .as_ref()
+                .is_none_or(|e| e.mask_images.is_empty())
+        );
+        assert_eq!(
+            s.set("maskImage", StyleValue::Str("url(a.png)")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn glass_effect_parses() {
+        let mut s = Style::default();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("regular")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Regular);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Clear);
+        // `none`, and the null of a style that was taken off, both clear it.
+        s.set("glassEffect", StyleValue::Str("none")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        s.set("glassEffect", StyleValue::Null).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Str("frosted")),
+            Err(StyleError::InvalidValue)
+        );
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Number(1.0)),
             Err(StyleError::InvalidValue)
         );
     }

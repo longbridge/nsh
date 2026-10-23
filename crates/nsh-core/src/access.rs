@@ -16,11 +16,16 @@
 //!     "sockets": ["mqtt.example.com:8883"]
 //!   },
 //!   "webview": { "hosts": ["*.example.com"] },
-//!   "statusBar": true
+//!   "statusBar": true,
+//!   "host": ["getUserInfo", "bridge.*"],
+//!   "openUrl": { "schemes": ["https", "mailto"] }
 //! }
 //! ```
 //!
-//! `network` covers `fetch` (every redirect is checked again), remote
+//! `openUrl` lets the app open URLs outside it (`openUrl` of `nsh/device`,
+//! [`crate::open_url`]: the browser, the mail or phone app, other apps'
+//! schemes): `true` for every scheme, `{ "schemes": [...] }` for those
+//! listed. `network` covers `fetch` (every redirect is checked again), remote
 //! images (also canvas images and `Image.getSize` / `prefetch`) and video
 //! sources; `asset:` URIs are always allowed. WebSockets are HTTP upgrades:
 //! a `ws:` / `wss:` URL is checked as a GET of the same URL over `http:` /
@@ -28,11 +33,15 @@
 //! `network.sockets` grants raw TCP (`net.connect`) to exact `host:port`
 //! pairs only: no wildcards, and neither `hosts` nor `http` grants imply
 //! one. `webview` lists the hosts a web view may show and navigate to (its
-//! pages' own subresources are the web content's business). An app without
+//! pages' own subresources are the web content's business). `host` lists
+//! the functions of the embedding app `nsh/host` may call: names (1 to 128
+//! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
+//! name), or prefixes of them ending in `*` (`true`: all of them); the
+//! host's events need no grant, the host sends them. An app without
 //! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar and the clipboard; raw
-//! sockets, processes and the filesystem always require an explicit
-//! declaration.
+//! unrestricted HTTP, web views, the status bar, the clipboard, the picker
+//! and opening URLs; raw sockets, processes, the filesystem and the host's
+//! functions always require an explicit declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
 //! other key narrows it and is optional: `methods` (any when left out),
@@ -349,6 +358,32 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The app may show the system's picker (`nsh/picker`): the files the
+    /// user picks in it reach the app.
+    pub picker: bool,
+    /// The functions of the embedding app `nsh/host` may call: names, or
+    /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
+    /// without a declaration ([`Capabilities::all`]).
+    pub host: Vec<String>,
+    /// The URLs the app may open outside it (`openUrl` of `nsh/device`);
+    /// `None`: none.
+    pub open_url: Option<OpenUrlGrant>,
+}
+
+/// Which URLs an app may open outside it (`capabilities.openUrl`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct OpenUrlGrant {
+    /// The schemes it may open, lower case (`https`, `mailto`, `tel`);
+    /// empty: every scheme (`"openUrl": true`).
+    pub schemes: Vec<String>,
+}
+
+impl OpenUrlGrant {
+    /// Whether it grants URLs of `scheme` (lower case).
+    pub fn allows(&self, scheme: &str) -> bool {
+        self.schemes.is_empty() || self.schemes.iter().any(|s| s == scheme)
+    }
 }
 
 /// The parts of a URL the checks look at.
@@ -411,8 +446,8 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
 
 impl Capabilities {
     /// Legacy unrestricted APIs for apps without a declaration. Socket,
-    /// process and filesystem grants stay empty and always require explicit
-    /// opt-in.
+    /// process, filesystem and host function grants stay empty and always
+    /// require explicit opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
@@ -424,6 +459,9 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            picker: true,
+            open_url: Some(OpenUrlGrant::default()),
+            // The host's functions are never granted without a declaration.
             ..Self::default()
         }
     }
@@ -449,13 +487,16 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 6] = [
+        const KNOWN: [&str; 9] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
+            "picker",
+            "openUrl",
             "process",
             "fs",
+            "host",
         ];
         let obj = object(value, "capabilities")?;
         for key in obj.keys().filter(|k| !KNOWN.contains(&k.as_str())) {
@@ -553,6 +594,51 @@ impl Capabilities {
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
         }
+        if let Some(picker) = obj.get("picker") {
+            caps.picker = picker
+                .as_bool()
+                .ok_or("capabilities.picker must be a boolean")?;
+        }
+        if let Some(open_url) = obj.get("openUrl") {
+            match open_url {
+                Value::Bool(granted) => {
+                    caps.open_url = granted.then(OpenUrlGrant::default);
+                }
+                Value::Object(grant) => {
+                    if check(
+                        grant,
+                        "capabilities.openUrl",
+                        &["schemes"],
+                        "capabilities.openUrl",
+                    )? {
+                        let schemes = match grant.get("schemes") {
+                            Some(schemes) => strings(schemes, "capabilities.openUrl.schemes")?,
+                            None => Vec::new(),
+                        };
+                        if schemes.iter().any(|s| {
+                            s.is_empty()
+                                || !s.starts_with(|c: char| c.is_ascii_alphabetic())
+                                || !s
+                                    .chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+                        }) {
+                            return Err(
+                                "capabilities.openUrl.schemes needs URL schemes (`https`, `mailto`)"
+                                    .into(),
+                            );
+                        }
+                        caps.open_url = Some(OpenUrlGrant {
+                            schemes: schemes.iter().map(|s| s.to_ascii_lowercase()).collect(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(
+                        "capabilities.openUrl must be a boolean or an object of `schemes`".into(),
+                    );
+                }
+            }
+        }
         if let Some(process) = obj.get("process") {
             let process = object(process, "capabilities.process")?;
             if check(
@@ -600,6 +686,30 @@ impl Capabilities {
                     }
                 }
             }
+        }
+        if let Some(host) = obj.get("host") {
+            caps.host = match host {
+                Value::Bool(all) => {
+                    if *all {
+                        vec!["*".into()]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => {
+                    let names = strings(host, "capabilities.host")
+                        .map_err(|e| format!("{e} (or a boolean)"))?;
+                    if let Some(bad) = names.iter().find(|n| match n.strip_suffix('*') {
+                        Some(prefix) => !prefix.is_empty() && !valid_host_name(prefix),
+                        None => !valid_host_name(n),
+                    }) {
+                        return Err(format!(
+                            "capabilities.host: invalid function `{bad}` (a name of {HOST_NAME_CHARS}, or a prefix of them ending in `*`)"
+                        ));
+                    }
+                    names
+                }
+            };
         }
         Ok(caps)
     }
@@ -662,6 +772,19 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        obj.insert("picker".into(), self.picker.into());
+        // Only when granted: older runtimes read what newer signers write.
+        if !self.host.is_empty() {
+            obj.insert("host".into(), self.host.clone().into());
+        }
+        obj.insert(
+            "openUrl".into(),
+            match &self.open_url {
+                None => false.into(),
+                Some(grant) if grant.schemes.is_empty() => true.into(),
+                Some(grant) => serde_json::json!({ "schemes": grant.schemes }),
+            },
+        );
         Value::Object(obj)
     }
 
@@ -673,6 +796,13 @@ impl Capabilities {
             || self.network.http.iter().any(|g| g.allows(method, url))
     }
 
+    fn allows_host(&self, name: &str) -> bool {
+        self.host.iter().any(|g| match g.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => g == name,
+        })
+    }
+
     fn allows_webview(&self, url: &UrlParts<'_>) -> bool {
         matches!(url.scheme.as_str(), "http" | "https")
             && self
@@ -680,6 +810,20 @@ impl Capabilities {
                 .as_ref()
                 .is_some_and(|hosts| hosts.iter().any(|h| h.matches(&url.host)))
     }
+}
+
+/// What host function names (`nsh/host`) are made of, for messages.
+pub const HOST_NAME_CHARS: &str = "1 to 128 of A-Z a-z 0-9 _ . : -, without `..`";
+
+/// Whether `name` may name a function of the embedding host: 1 to 128 of
+/// `[A-Za-z0-9_.:-]`, without `..`. Hosts may put a name in a path or a URL,
+/// so no name escapes the prefix a grant gives it.
+pub fn valid_host_name(name: &str) -> bool {
+    (1..=128).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+        && !name.contains("..")
 }
 
 fn valid_command(command: &str) -> bool {
@@ -1079,9 +1223,14 @@ impl Access {
     }
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
-    /// Relative and `asset:` URIs are the app's own files.
+    /// Relative and `asset:` URIs are the app's own files; `data:` URIs and
+    /// `blob:` URLs (`URL.createObjectURL`) are bytes the app already has.
     pub fn allows_media(&self, uri: &str) -> bool {
-        if !uri.contains("://") || uri.starts_with("asset:") || uri.starts_with("data:") {
+        if !uri.contains("://")
+            || uri.starts_with("asset:")
+            || uri.starts_with("data:")
+            || uri.starts_with("blob:")
+        {
             return true;
         }
         self.allows_http("GET", uri)
@@ -1130,6 +1279,28 @@ impl Access {
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
+    }
+
+    /// Whether the app may show the system's picker (`nsh/picker`).
+    pub fn allows_picker(&self) -> bool {
+        self.each(|c| c.picker)
+    }
+
+    /// Whether `nsh/host` may call the embedding app's function `name`.
+    pub fn allows_host(&self, name: &str) -> bool {
+        self.each(|c| c.allows_host(name))
+    }
+
+    /// Whether the app may open `url` outside it (`openUrl` of
+    /// `nsh/device`): its scheme is granted.
+    pub fn allows_open_url(&self, url: &str) -> bool {
+        let Some(scheme) = url
+            .split_once(':')
+            .map(|(scheme, _)| scheme.to_ascii_lowercase())
+        else {
+            return false;
+        };
+        self.each(|c| c.open_url.as_ref().is_some_and(|g| g.allows(&scheme)))
     }
 }
 
@@ -1628,7 +1799,64 @@ mod tests {
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
+        assert!(!access.allows_picker());
+        assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
+    }
+
+    #[test]
+    fn host_functions_need_an_explicit_grant() {
+        // Undeclared, the other capabilities are all granted; the host's
+        // functions are not.
+        let all = Access::all();
+        assert!(all.allows_clipboard());
+        assert!(!all.allows_host("getUserInfo"));
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let every = access(r#"{ "host": true }"#);
+        assert!(every.allows_host("getUserInfo") && every.allows_host("bridge.call"));
+        assert!(!access(r#"{ "host": false }"#).allows_host("getUserInfo"));
+        let listed = access(r#"{ "host": ["getUserInfo", "bridge.*"] }"#);
+        assert!(listed.allows_host("getUserInfo"));
+        assert!(listed.allows_host("bridge.share"));
+        assert!(!listed.allows_host("getUserInfoX"));
+        assert!(!listed.allows_host("bridge"));
+        assert!(Capabilities::from_json(&serde_json::json!({ "host": ["a*b"] })).is_err());
+        assert!(Capabilities::from_json(&serde_json::json!({ "host": [""] })).is_err());
+        // The embedding app may grant less.
+        let narrowed = Access {
+            declared: caps(r#"{ "host": true }"#),
+            granted: Some(caps(r#"{ "host": ["bridge.*"] }"#)),
+        };
+        assert!(narrowed.allows_host("bridge.call") && !narrowed.allows_host("getUserInfo"));
+    }
+
+    #[test]
+    fn host_function_names_and_grants_keep_to_their_charset() {
+        for good in ["getUserInfo", "user.info", "a-b_c:d.E9", &"a".repeat(128)] {
+            assert!(valid_host_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            "user.x/../../admin",
+            "a..b",
+            "user x",
+            "a\\b",
+            "caf\u{e9}",
+            "ok\u{0}",
+            "a*",
+            &"a".repeat(129),
+        ] {
+            assert!(!valid_host_name(bad), "{bad:?}");
+        }
+        let parses =
+            |grant: &str| Capabilities::from_json(&serde_json::json!({ "host": [grant] })).is_ok();
+        assert!(parses("*") && parses("user.*") && parses("user.info"));
+        for bad in ["user/*", "a..*", "../*", "a b", "**"] {
+            assert!(!parses(bad), "{bad}");
+        }
     }
 
     #[test]
@@ -1660,7 +1888,7 @@ mod tests {
     fn the_embedder_grants_at_most() {
         let a = Access {
             declared: caps(
-                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true }"#,
+                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true }"#,
             ),
             granted: Some(caps(
                 r#"{ "network": { "hosts": ["b.com"] }, "clipboard": true }"#,
@@ -1668,6 +1896,7 @@ mod tests {
         };
         assert!(a.allows_clipboard());
         assert!(!a.allows_http("GET", "https://a.com/"));
+        assert!(!a.allows_picker());
         assert!(a.allows_http("GET", "https://b.com/"));
         assert!(!a.allows_status_bar());
     }
@@ -1756,5 +1985,51 @@ mod tests {
                 .media_redirect(from, "ftp://b.com/z.png")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn opening_urls_is_granted_by_scheme() {
+        let caps = |json: serde_json::Value| Capabilities::from_json(&json).unwrap();
+        let access =
+            |declared: Capabilities, granted: Option<Capabilities>| Access { declared, granted };
+        let any = access(caps(serde_json::json!({ "openUrl": true })), None);
+        assert!(any.allows_open_url("https://a.com"));
+        assert!(any.allows_open_url("tel:+15550100"));
+        let some = access(
+            caps(serde_json::json!({ "openUrl": { "schemes": ["HTTPS", "mailto"] } })),
+            None,
+        );
+        assert!(some.allows_open_url("https://a.com"));
+        assert!(some.allows_open_url("MAILTO:a@b.c"));
+        assert!(!some.allows_open_url("tel:1"));
+        // The embedding app grants less.
+        let narrowed = access(
+            caps(serde_json::json!({ "openUrl": true })),
+            Some(caps(
+                serde_json::json!({ "openUrl": { "schemes": ["https"] } }),
+            )),
+        );
+        assert!(narrowed.allows_open_url("https://a.com"));
+        assert!(!narrowed.allows_open_url("mailto:a@b.c"));
+        let none = access(caps(serde_json::json!({ "openUrl": false })), None);
+        assert!(!none.allows_open_url("https://a.com"));
+        assert!(!access(caps(serde_json::json!({})), None).allows_open_url("https://a.com"));
+        assert!(Access::default().allows_open_url("https://a.com"));
+        for bad in [
+            serde_json::json!({ "openUrl": "yes" }),
+            serde_json::json!({ "openUrl": { "schemes": ["ht tp"] } }),
+            serde_json::json!({ "openUrl": { "hosts": ["a.com"] } }),
+        ] {
+            assert!(Capabilities::from_json(&bad).is_err(), "{bad}");
+        }
+        // Round trip.
+        for json in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!({ "schemes": ["https"] }),
+        ] {
+            let c = caps(serde_json::json!({ "openUrl": json }));
+            assert_eq!(c.to_json()["openUrl"], json);
+        }
     }
 }

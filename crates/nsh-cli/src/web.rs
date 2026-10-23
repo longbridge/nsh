@@ -13,6 +13,7 @@
 //! snippets.<digest>/<crate>-<hash>/ the JS snippets the glue imports, under their own paths
 //! app.<digest>.nshc                the app's bundle, compiled to QuickJS bytecode
 //! harden.<digest>.nshc             the sandbox's hardening, compiled likewise
+//! host.<digest>.js                 the page's host (`nsh.json` `web.host`), when the app has one
 //! chunks/<name>.<digest>.nshc      what `import()` loads, fetched when first imported
 //! assets/<path>.<digest>.<ext>     `asset:/<path>`, loaded from its URL when used
 //! icons/<size>.<digest>.png        favicon, apple-touch-icon, the manifest's
@@ -146,6 +147,16 @@ pub(crate) fn package(
         }
         assets.insert(asset.path.clone(), url.into());
     }
+    // The page imports it as it is: one module, its imports absolute URLs.
+    let host = match &config.web.host {
+        Some(path) => {
+            let path = crate::package::web_host_module(options.entry, path)?;
+            let bytes = fs::read(&path)
+                .with_context(|| format!("read nsh.json web.host {}", path.display()))?;
+            Some(site.add("host.js", &bytes)?)
+        }
+        None => None,
+    };
     let icons = match &config.icon {
         Some(icon) => Icons::write(&site, icon)?,
         None => Icons::default(),
@@ -167,6 +178,7 @@ pub(crate) fn package(
         "fonts": fonts,
         "chunkFonts": chunk_fonts,
         "chunks": chunks,
+        "host": host,
     });
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
@@ -185,7 +197,11 @@ pub(crate) fn package(
             .map(|path| assets[path].as_str().unwrap_or_default().to_owned())
             .collect::<Vec<_>>(),
         app: &app,
-        connect: connect_src(built.capabilities.as_ref()).as_deref(),
+        connect: connect_src(
+            built.capabilities.as_ref(),
+            &page_connect(&config.web.connect)?,
+        )
+        .as_deref(),
     });
     fs::write(dir.join("index.html"), html)?;
     step.done(format!(
@@ -275,7 +291,8 @@ pub(crate) type Files = Vec<(String, Vec<u8>)>;
 /// one when its Rust code changes (the session starts again), and a page
 /// that reconnects to a server with another one loads again.
 /// `rust`: a Rust app's runtime (`nsh.json` `"root"`), whose page runs its
-/// root rather than the bundles the server sends.
+/// root rather than the bundles the server sends. The page still names its
+/// host module as `{{host}}`: [`with_page_host`] fills it in for an app.
 pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(String, Files)> {
     let read = |path: &Path| fs::read(path).with_context(|| format!("read {}", path.display()));
     let ui_sets = serde_json::to_string(&ui_sets())?;
@@ -325,6 +342,34 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
     files.extend(snippets);
     Ok((page, files))
 }
+
+/// The dev host's page and files ([`dev_host`]) for the app at `entry`:
+/// with its page's host module (`nsh.json` `web.host`) as `nsh-host.js`,
+/// read now (a change takes another session), or none.
+pub(crate) fn with_page_host(
+    (page, mut files): (String, Files),
+    entry: &Path,
+) -> anyhow::Result<(String, Files)> {
+    let module = crate::package::read_config(entry)?
+        .web
+        .host
+        .map(|host| crate::package::web_host_module(entry, &host))
+        .transpose()?;
+    let host = match module {
+        Some(path) => {
+            let bytes = fs::read(&path)
+                .with_context(|| format!("read nsh.json web.host {}", path.display()))?;
+            files.retain(|(name, _)| name != PAGE_HOST);
+            files.push((PAGE_HOST.to_owned(), bytes));
+            format!("\"./{PAGE_HOST}\"")
+        }
+        None => "null".to_owned(),
+    };
+    Ok((page.replace("{{host}}", &host), files))
+}
+
+/// Where the dev host serves the page's host module ([`with_page_host`]).
+const PAGE_HOST: &str = "nsh-host.js";
 
 /// The app's appearance (`nsh.json` `appearance`): the page's background
 /// and theme color before the app draws.
@@ -520,14 +565,33 @@ fn manifest(name: &str, id: &str, appearance: Appearance, icons: &Icons) -> Stri
     serde_json::to_string_pretty(&manifest).unwrap_or_default()
 }
 
+/// `nsh.json` `web.connect`, checked as `capabilities.network.hosts` are:
+/// patterns of letters, digits, `.`, `-`, `:` and brackets (nothing that
+/// could end a CSP source).
+fn page_connect(hosts: &[String]) -> anyhow::Result<Vec<nsh_core::access::HostPattern>> {
+    hosts
+        .iter()
+        .map(|host| {
+            nsh_core::access::HostPattern::new(host)
+                .map_err(|e| anyhow::anyhow!("nsh.json web.connect: {e}"))
+        })
+        .collect()
+}
+
 /// The page's `connect-src` when the app restricts the hosts it reaches
 /// (`capabilities.network`): the browser then refuses every request, and
 /// every redirect hop, to another host, which nsh cannot see (the browser
 /// follows redirects before telling). `'self'` stays: the page loads the
 /// runtime, the code and the fonts with `fetch`, and the app's relative
 /// URLs reach its own origin (nsh still checks those against the
-/// declaration). `None`: no declaration, or one that allows any host.
-fn connect_src(capabilities: Option<&nsh_core::access::Capabilities>) -> Option<String> {
+/// declaration). `page`: the hosts the page's host module reaches
+/// (`web.connect`), allowed to the page alone: nsh checks the app's
+/// requests against its declaration before the browser sees them. `None`:
+/// no declaration, or one (or `page`) that allows any host.
+fn connect_src(
+    capabilities: Option<&nsh_core::access::Capabilities>,
+    page: &[nsh_core::access::HostPattern],
+) -> Option<String> {
     let network = &capabilities?.network;
     let mut sources = vec!["'self'".to_owned()];
     let mut add = |scheme: &str, host: &str, port: Option<u16>| {
@@ -548,7 +612,7 @@ fn connect_src(capabilities: Option<&nsh_core::access::Capabilities>) -> Option<
             sources.push(source);
         }
     };
-    for host in &network.hosts {
+    for host in network.hosts.iter().chain(page) {
         let host = host.as_str();
         if host == "*" {
             return None;
@@ -731,6 +795,37 @@ mod tests {
     }
 
     #[test]
+    fn the_dev_page_runs_the_apps_page_host() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-dev-host-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let entry = dir.join("App.tsx");
+        let base = || ("const HOST = {{host}};".to_owned(), Files::new());
+        // No nsh.json, or one without `web.host`: no host.
+        let (page, files) = with_page_host(base(), &entry).unwrap();
+        assert_eq!(page, "const HOST = null;");
+        assert!(files.is_empty());
+        fs::write(dir.join("host.js"), "export function createHost() {}").unwrap();
+        fs::write(dir.join("nsh.json"), r#"{ "web": { "host": "host.js" } }"#).unwrap();
+        let (page, files) = with_page_host(base(), &entry).unwrap();
+        assert_eq!(page, "const HOST = \"./nsh-host.js\";");
+        assert_eq!(
+            files,
+            [(
+                "nsh-host.js".to_owned(),
+                b"export function createHost() {}".to_vec()
+            )]
+        );
+        // Outside the app's directory: refused, as `nsh package` does.
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "web": { "host": "../host.js" } }"#,
+        )
+        .unwrap();
+        assert!(with_page_host(base(), &entry).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn the_dev_page_knows_its_runtime() {
         let dir = std::env::temp_dir().join(format!("nsh-web-dev-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -752,7 +847,8 @@ mod tests {
             page.contains(&format!("const RUNTIME = \"{first}\";")),
             "{page}"
         );
-        assert!(!page.contains("{{"), "{page}");
+        // The page's host is the app's (`with_page_host`).
+        assert!(!page.replace("{{host}}", "").contains("{{"), "{page}");
         assert!(page.contains("const UI_SETS = [\"nsh/base\"];"));
         fs::write(&runtime.wasm, "two").unwrap();
         assert_ne!(version(&dev_host(&runtime, false).unwrap().1), first);
@@ -974,9 +1070,9 @@ mod tests {
     fn requests_are_limited_to_the_declared_hosts() {
         let caps =
             |json: serde_json::Value| nsh_core::access::Capabilities::from_json(&json).unwrap();
-        assert_eq!(connect_src(None), None);
+        assert_eq!(connect_src(None, &[]), None);
         assert_eq!(
-            connect_src(Some(&caps(serde_json::json!({ "clipboard": true })))).as_deref(),
+            connect_src(Some(&caps(serde_json::json!({ "clipboard": true }))), &[]).as_deref(),
             Some("'self'")
         );
         let declared = caps(serde_json::json!({ "network": {
@@ -984,7 +1080,7 @@ mod tests {
             "http": [{ "host": "api.example.com", "methods": ["GET"] }],
         } }));
         assert_eq!(
-            connect_src(Some(&declared)).as_deref(),
+            connect_src(Some(&declared), &[]).as_deref(),
             Some(
                 "'self' http://api.example.com:* https://api.example.com:* ws://api.example.com:* wss://api.example.com:* http://*.cdn.example.com:* https://*.cdn.example.com:* ws://*.cdn.example.com:* wss://*.cdn.example.com:* http://localhost:8080 https://localhost:8080 ws://localhost:8080 wss://localhost:8080"
             )
@@ -995,7 +1091,7 @@ mod tests {
             { "host": "legacy.example.com", "methods": ["GET"], "schemes": ["ws"], "port": 9000 }
         ]} }));
         assert_eq!(
-            connect_src(Some(&constrained)).as_deref(),
+            connect_src(Some(&constrained), &[]).as_deref(),
             Some(
                 "'self' https://secure.example.com:8443 wss://secure.example.com:8443 https://upload.example.com:9443 ws://legacy.example.com:9000"
             )
@@ -1004,7 +1100,7 @@ mod tests {
             { "host": "*", "methods": ["GET"], "schemes": ["https"], "port": 443 }
         ]} }));
         assert_eq!(
-            connect_src(Some(&wildcard)).as_deref(),
+            connect_src(Some(&wildcard), &[]).as_deref(),
             Some("'self' https://*:443 wss://*:443")
         );
         let ipv6 = caps(serde_json::json!({ "network": {"http": [
@@ -1012,11 +1108,30 @@ mod tests {
             { "host": "[::2]", "methods": ["GET"], "schemes": ["https"] }
         ]} }));
         assert_eq!(
-            connect_src(Some(&ipv6)).as_deref(),
+            connect_src(Some(&ipv6), &[]).as_deref(),
             Some("'self' http://[::1]:9877 ws://[::1]:9877 https://[::2]:* wss://[::2]:*")
         );
         let any = caps(serde_json::json!({ "network": { "hosts": ["*"] } }));
-        assert_eq!(connect_src(Some(&any)), None);
+        assert_eq!(connect_src(Some(&any), &[]), None);
+        // The page's host module's hosts (`web.connect`) join the app's; any
+        // host there lifts the restriction too; none without a declaration.
+        let page = page_connect(&["auth.example.com".into()]).unwrap();
+        assert_eq!(
+            connect_src(Some(&caps(serde_json::json!({}))), &page).as_deref(),
+            Some(
+                "'self' http://auth.example.com:* https://auth.example.com:* ws://auth.example.com:* wss://auth.example.com:*"
+            )
+        );
+        assert_eq!(connect_src(None, &page), None);
+        let anywhere = page_connect(&["*".into()]).unwrap();
+        assert_eq!(
+            connect_src(Some(&caps(serde_json::json!({}))), &anywhere),
+            None
+        );
+        // Nothing that could end a CSP source.
+        for bad in ["a.com; script-src *", "'unsafe-inline'", "a b", ""] {
+            assert!(page_connect(&[bad.into()]).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -36,6 +36,7 @@ const isAvailable: boolean;
 const Window: {
   setTitle(title: string): void;
   setTitleBar(style: "default" | "hidden", height?: number): void;
+  setMenuBar(mode: "shown" | "autoHide"): void;
   minimize(): void;
   toggleMaximize(): void;
   toggleFullScreen(): void;
@@ -57,6 +58,7 @@ The Rust column names the functions of `nsh_core::ui::desktop`.
 |---|---|---|
 | `setTitle(title)` | | The window's title: the title bar, the taskbar or Dock, the window switcher. |
 | `setTitleBar(style, height?)` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `"default"` brings the system's title bar back (Rust: `set_title_bar(TitleBarStyle::Default, None)`). |
+| `setMenuBar(mode)` | `set_menu_bar(mode)` | On Windows and Linux in GPUI apps, where the window draws the application menu as a bar above the app: `"shown"` (the default) shows it always; `"autoHide"` shows it after Alt is pressed and released alone, until Alt alone hides it again, as in Windows and GNOME apps. F10 and Alt with a menu's initial open a menu either way, and the bar shows while it is open. macOS's menu bar is the system's. |
 | `minimize()` | | Minimizes the window. |
 | `toggleMaximize()` | | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | | Enters or leaves full screen. |
@@ -174,6 +176,7 @@ type MenuItem =
       label?: string;
       role?: MenuRole;
       shortcut?: string;
+      when?: "always" | "auto" | "notEditing";
       disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
@@ -186,6 +189,7 @@ type MenuItem =
 | `label` | What the item shows. A role's item has a label of its own without it. |
 | `onSelect` | Called when the item is chosen, by a click or its shortcut. |
 | `shortcut` | Its keyboard shortcut: modifiers and one key joined by `+`, such as `"mod+n"`, `"mod+shift+z"`, `"alt+f4"` or `"f11"`. The modifiers are in the table below. Keys are letters, digits and punctuation, written as the character the key types on a US keyboard without Shift (`,`, `/`; `"shift+/"` for `?`), or a name: `plus` (the `=` / `+` key, also `=`), `minus` (also `-`), `space`, `enter` (`return`), `escape` (`esc`), `tab`, `backspace`, `delete` (`del`), `insert`, the arrows `up`, `down`, `left`, `right` (`arrowup`, …), `home`, `end`, `pageup`, `pagedown`, `f1`–`f24`. Case does not matter (`"Mod+Shift+N"` is `"mod+shift+n"`; a capital letter is the same key, not Shift), and lowercase is the recommended style. An invalid shortcut (`"mod-n"`, `"mod++"`, `"mod+?"`) throws an error that gives the right spelling. `nsh/keymap` takes the same keystrokes. Menus show it in the platform's own style (`⇧⌘N` on macOS, `Ctrl+Shift+N` on Windows). |
+| `when` | When the shortcut chooses the item while a text field has the keyboard focus, on the GPUI backend: `"always"` (the default), `"auto"` (unless the field uses the key itself: keys that type, move the caret or delete, and the editing shortcuts, as with [`nsh/keymap`](./nsh-keymap)'s bindings) or `"notEditing"`. A key the item leaves goes to the field. |
 | `disabled` | `true` grays the item out (default `false`). |
 | `checked` | Set (to `true` or `false`) for an item with a check mark. |
 | `submenu` | Makes the item a submenu (it needs a `label`). |
@@ -216,7 +220,9 @@ Roles:
 
 A role's item has the platform's label and shortcut unless it sets its own (macOS adds the app's name to `about`, `hide` and `quit`).
 
-Menu shortcuts come first, as in native apps: a key an item takes never reaches the focused text field or NSH's own keys. Only a binding of [`nsh/keymap`](./nsh-keymap) of the same keystroke comes before them. So give the editing shortcuts (`mod+c`, `mod+v`, `mod+x`, `mod+a`, `mod+z`) only to the edit roles, which pass them to the text field, and avoid keys without a modifier (`escape`, the arrows, letters), which would take them from text fields and from back navigation.
+Menu shortcuts come first, as in native apps: a key an item takes never reaches the focused text field or NSH's own keys. Only a binding of [`nsh/keymap`](./nsh-keymap) of the same keystroke comes before them. So give the editing shortcuts (`mod+c`, `mod+v`, `mod+x`, `mod+a`, `mod+z`) only to the edit roles, which pass them to the text field, and avoid keys without a modifier (`escape`, the arrows, letters), which would take them from text fields and from back navigation. On the GPUI backend, `when: "auto"` lets an item share a key with text fields: `delete` or `mod+z` choose the item while no field has the focus and edit the text while one has it.
+
+On the GPUI backend, a native component with the keyboard focus sees each key first. A key it handles itself never reaches the keymap or the menu. A key it lets through reaches the keymap as if a text field were focused, then the menu.
 
 ```tsx
 import { effect, signal } from "nsh";

@@ -39,6 +39,10 @@ const IDLE_MS: u32 = 1200;
 /// Runs the tests `path` names, of the app whose entry is `entry`: a test
 /// file, the test files in a directory (an app's), or an app's entry with
 /// the steps standard input gives.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the flags of `nsh test`, one each"
+)]
 pub(crate) fn test(
     path: &Path,
     entry: &Path,
@@ -47,6 +51,7 @@ pub(crate) fn test(
     junit: Option<&Path>,
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
+    web_host: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -79,6 +84,25 @@ pub(crate) fn test(
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
+    if web_host.is_some() && target.is_some() {
+        bail!(
+            "--web-host goes with headless runs: --target web takes nsh.json's web.host, the other targets have no page host"
+        );
+    }
+    // The page's host of headless runs: `--web-host`, else nsh.json's.
+    // Absolute: an app's headless runner opens it too.
+    let page_host = match web_host {
+        Some(module) => Some(
+            dunce::canonicalize(&module)
+                .with_context(|| format!("the web host module {}", ui::path(&module)))?,
+        ),
+        None if target.is_none() => crate::package::read_config(entry)?
+            .web
+            .host
+            .map(|host| crate::package::web_host_module(entry, &host))
+            .transpose()?,
+        None => None,
+    };
     let host = target
         .map(|target| crate::test_host::starter(target, browser, &work_dir))
         .transpose()?;
@@ -94,6 +118,7 @@ pub(crate) fn test(
                 filter,
                 trace,
                 verbose: ui::verbose(),
+                page_host,
             };
             in_runner(&app, &request, &shown, &mut tally)?;
         }
@@ -105,6 +130,7 @@ pub(crate) fn test(
                 filter,
                 trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
                 host,
+                page_host,
             };
             for file in &files {
                 let shown = shown(file);
@@ -346,7 +372,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map) = match kind {
+        let (bytecode, map, capabilities) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -371,28 +397,34 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
         Ok(Reply::Js {
             bytecode: file,
             source_map,
+            capabilities,
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
-        message: format!("{e:#}"),
+        message: crate::ui::with_details(&e),
     })
 }
 
 /// The entry made for a test file, bundled against the app's sets and
 /// `nsh/test`, and compiled.
-fn test_file_bytecode(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     let mut sets = crate::ui_sets().to_vec();
-    sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
+    sets.extend(
+        nsh_testing::test_sets()
+            .iter()
+            .flat_map(nsh_core::ui::Registry::sets)
+            .map(SetDescription::from),
+    );
     bytecode_of(entry, &sets, false)
 }
 
+/// A compiled entry: its bytecode, its source map and the capabilities its
+/// `nsh.json` declares (JSON), which the app runs under, as on a device.
+type Compiled = (Vec<u8>, Option<String>, Option<String>);
+
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map; `announce`: saying so.
-fn bytecode_of(
-    entry: &Path,
-    sets: &[SetDescription],
-    announce: bool,
-) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+/// source map and declared capabilities; `announce`: saying so.
+fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
@@ -412,7 +444,8 @@ fn bytecode_of(
         ));
     }
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
-    Ok((bytecode, bundle.source_map))
+    let capabilities = bundle.capabilities.map(|c| c.to_json().to_string());
+    Ok((bytecode, bundle.source_map, capabilities))
 }
 
 /// Prints how a test of the file shown as `file` ended: a line, and for a
@@ -549,12 +582,12 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 /// serves (each entry once), and the entries made for test files against
 /// them and `nsh/test`, in this process.
 fn compiler() -> nsh_testing::Compile {
-    type Bytecode = (Vec<u8>, Option<String>);
-    let built: Mutex<HashMap<PathBuf, Bytecode>> = Mutex::new(HashMap::new());
+    let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map) = match kind {
+        let (bytecode, map, capabilities) = match kind {
             Entry::App => {
-                let entry = crate::entry::resolve(entry).map_err(|e| format!("{e:#}"))?;
+                let entry =
+                    crate::entry::resolve(entry).map_err(|e| crate::ui::with_details(&e))?;
                 let cached = built
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -564,7 +597,7 @@ fn compiler() -> nsh_testing::Compile {
                     Some(built) => built,
                     None => {
                         let out = bytecode_of(&entry, &crate::ui_sets(), true)
-                            .map_err(|e| format!("{e:#}"))?;
+                            .map_err(|e| crate::ui::with_details(&e))?;
                         built
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
@@ -573,13 +606,14 @@ fn compiler() -> nsh_testing::Compile {
                     }
                 }
             }
-            Entry::TestFile => test_file_bytecode(entry).map_err(|e| format!("{e:#}"))?,
+            Entry::TestFile => {
+                test_file_bytecode(entry).map_err(|e| crate::ui::with_details(&e))?
+            }
         };
         // SAFETY: compiled just now by this runtime.
-        Ok(Built::Js(
-            Box::new(unsafe { Bundle::bytecode(bytecode) }),
-            map,
-        ))
+        let bundle = unsafe { Bundle::bytecode(bytecode) }
+            .with_capabilities_json(capabilities.as_deref())?;
+        Ok(Built::Js(Box::new(bundle), map))
     })
 }
 

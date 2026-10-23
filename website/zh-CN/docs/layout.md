@@ -251,7 +251,7 @@ Tailwind 的断点（`sm:`、`md:` 等）以及 `portrait:` / `landscape:` 不�
 应用的布局方向跟随系统语言，视图的 `direction` 样式（`"ltr"`、`"rtl"` 或 `"inherit"`；Rust 中为 `.direction(LayoutDirection::Rtl)`）设置其子树的方向。当应用以从右到左方式布局时：
 
 - 行从右侧开始排列；
-- `left` 和 `right` 属性（外边距、内边距、位置、边框、圆角）左右互换；
+- `left` 和 `right` 样式键（外边距、内边距、位置、边框、圆角）与 React Native 一样左右互换；Tailwind 的物理方向类则与浏览器一样保持原侧：`pl-4`、`ml-2`、`left-0`、`border-l`、`rounded-tl-lg` 和 `text-left` 仍在左侧（`ps-4`、`ms-2`、`start-0`、`border-s`、`rounded-ss-lg` 和 `text-start` 跟随方向）；
 - `start` 和 `end` 属性始终表示起始侧和结束侧：`marginStart`、`marginEnd`、`paddingStart`、`paddingEnd`、`start`、`end`、`borderStartWidth`、`borderTopStartRadius` 等（Rust 中的 `.ms(..)`、`.me(..)`、`.ps(..)`、`.pe(..)`、`.border_s(..)`、`.rounded_ss(..)` 等）；
 - `textAlign: "auto"` 的文字右对齐，原生控件也会镜像。
 

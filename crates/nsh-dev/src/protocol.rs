@@ -140,6 +140,10 @@ pub struct TestEnvironment {
     /// the platform shows, as a headless app's does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<f64>,
+    /// The launch parameters the app reads as `host.params` (`nsh/host`):
+    /// the embedding app's, which the test plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_params: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// How a test moves its app's manual clock ([`TestEnvironment::clock`];
@@ -347,6 +351,18 @@ pub enum TestStep {
     /// The text on the test's clipboard (`app.clipboard`): `null` when it
     /// holds none.
     Clipboard,
+    /// The embedding app sends event `name` with `data` to the app
+    /// (`app.host.send`; `nsh/host`'s `host.on`), then the app settles.
+    HostSend {
+        /// The event.
+        name: String,
+        /// Its data.
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// The URLs the app opened (`app.openedUrls`; `openUrl` of
+    /// `nsh/device`), in order: recorded, never opened.
+    OpenedUrls,
     /// Chooses the open context menu's action (`app.chooseMenuItem`).
     ChooseMenuItem {
         /// Its label (a submenu's: `"Share > Mail"`).
@@ -490,6 +506,17 @@ pub enum SceneQuery {
     Menu,
     /// The text on the test's clipboard, or `null`.
     Clipboard,
+    /// The embedding app sends event `name` with `data` to the app
+    /// ([`TestStep::HostSend`]).
+    HostSend {
+        /// The event.
+        name: String,
+        /// Its data.
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// The URLs the app opened, in order ([`TestStep::OpenedUrls`]).
+    OpenedUrls,
     /// The open context menu was chosen from or closed.
     MenuClosed,
     /// The app's storage: its entries.
@@ -520,6 +547,12 @@ pub enum SceneQuery {
     Span {
         /// The span.
         id: u32,
+    },
+    /// The canvas containing the node `selector` names, and its center
+    /// in the canvas's coordinates: `[view, {x, y}]`, or `null` for a view.
+    CanvasNode {
+        /// The canvas node's selector.
+        selector: String,
     },
 
     /// The text input `id` holds.

@@ -288,8 +288,8 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
   repeat?: boolean;
 }
 
-/** The app's keyboard shortcuts (desktop platforms; elsewhere bindings are
- * kept but no key fires them). A keystroke is modifiers and a key joined by
+/** The app's keyboard shortcuts: on the desktops, the web, and iOS and
+ * Android with a hardware keyboard. A keystroke is modifiers and a key joined by
  * `+`, in any case (lowercase is the recommended style; a capital letter is
  * the same key, not Shift): `"mod+k"`, `"ctrl+shift+p"`, `"alt+enter"`, `"escape"`,
  * `"f5"`, `"mod+plus"`. Modifiers: `mod` (`cmdorctrl`): Command on Apple

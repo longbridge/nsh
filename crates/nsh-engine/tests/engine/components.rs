@@ -26,7 +26,7 @@ fn start_in(app: &str, environment: Environment) -> (Engine, Receiver<MountBatch
 
 /// [`start_in`] with the capabilities the app declares (JSON, `nsh.json`'s
 /// `capabilities` form) and an `nsh.json`.
-fn start_with(
+pub(crate) fn start_with(
     app: &str,
     environment: Environment,
     capabilities: Option<&str>,
@@ -78,10 +78,14 @@ fn start_with(
         ui_sets,
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -208,7 +212,10 @@ fn a_stateful_component_steps_while_held_on((engine, rx): (Engine, Receiver<Moun
 }
 
 /// The batches until `done` holds for one (or nothing came for 500ms).
-fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -> Vec<MountBatch> {
+pub(crate) fn until(
+    rx: &Receiver<MountBatch>,
+    mut done: impl FnMut(&MountBatch) -> bool,
+) -> Vec<MountBatch> {
     let mut batches = Vec::new();
     while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
         let stop = done(&batch);
@@ -220,8 +227,50 @@ fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -
     batches
 }
 
-fn shows(batch: &MountBatch, wanted: &str) -> bool {
+pub(crate) fn shows(batch: &MountBatch, wanted: &str) -> bool {
     text_ids(batch, wanted).is_some()
+}
+
+const KEYED_CHILDREN: &str = r#"import { mount, signal, Text } from "nsh";
+import { Group } from "test/ui";
+
+const items = signal([{ id: "a", label: "A1" }, { id: "b", label: "B1" }]);
+// New objects, the same keys: the rows are kept.
+setTimeout(() => items.set([{ id: "a", label: "A2" }, { id: "b", label: "B2" }]), 50);
+
+mount(() => (
+  <Group>
+    <Each of={items()} key={(i: { id: string }) => i.id}>
+      {(item) => <Text>{item().label}</Text>}
+    </Each>
+  </Group>
+));
+"#;
+
+/// A component's children made by a keyed `<Each>` keep their rows when
+/// the items change: the children's expression is not made again.
+#[test]
+fn a_components_keyed_children_keep_their_rows() {
+    let (_engine, rx) = start(KEYED_CHILDREN);
+    let batches = until(&rx, |b| shows(b, "A2"));
+    let first = &batches[0];
+    let a = text_ids(first, "A1").expect("A1 shown");
+    let last = batches.last().unwrap();
+    assert_eq!(
+        text_ids(last, "A2"),
+        Some(a),
+        "the row's text is updated in place"
+    );
+    let deleted = batches[1..]
+        .iter()
+        .flat_map(|b| &b.items)
+        .any(|i| matches!(i, MountItem::Delete { id } if *id % 2 == 0));
+    assert!(!deleted, "no row of the app's is made again");
+    let removed = batches[1..]
+        .iter()
+        .flat_map(|b| &b.items)
+        .any(|i| matches!(i, MountItem::Remove { id } if *id % 2 == 0));
+    assert!(!removed, "the moved row stays in its wrapper");
 }
 
 const LAZY_SHEET: &str = r#"import { mount, signal, untracked, Text } from "nsh";
@@ -1066,6 +1115,71 @@ fn clipboard_images_and_files_reach_js() {
     );
 }
 
+const PICKER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh/picker";
+
+const shown = signal("");
+setTimeout(async () => {
+  const images = await Picker.pickImages({ multiple: true, limit: 3, maxDimension: 1024 });
+  const [{ file, size }] = images;
+  const bytes = await file.bytes();
+  const url = URL.createObjectURL(file);
+  shown.set(
+    `${images.length} ${file instanceof File} ${file.name} ${file.type} ${file.size} ${size.width}x${size.height} ${bytes.slice(1, 4).join(",")} ${url.startsWith("blob:")} ${file.lastModified}`,
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_images_reach_js_as_files() {
+    let (engine, rx) = start(PICKER);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickImages { id, request },
+            } = item
+            {
+                asked = Some(*request);
+                let mut file = nsh_core::picker::PickedFile::new(
+                    "IMG_0042.HEIC",
+                    "image/jpeg",
+                    nsh_core::ImageData::new(vec![0xff, 0xd8, 0xff, 0xe0, 0, 0]),
+                );
+                file.size = Size::new(
+                    nsh_core::geometry::DevicePixels(1024),
+                    nsh_core::geometry::DevicePixels(768),
+                );
+                file.last_modified = Some(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_700_000_000_000),
+                );
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: vec![file],
+                    },
+                );
+            }
+        }
+        shows(
+            batch,
+            "1 true IMG_0042.jpg image/jpeg 6 1024x768 216,255,224 true 1700000000000",
+        )
+    });
+    let asked = asked.expect("a pick");
+    assert_eq!(asked.limit, 3);
+    assert_eq!(
+        asked.max_dimension,
+        Some(nsh_core::geometry::DevicePixels(1024))
+    );
+}
+
 const INPUT_TRAITS: &str = r##"import { mount, Input, Text } from "nsh";
 
 mount(() => (
@@ -1078,7 +1192,7 @@ mount(() => (
       multiline
       style={{ placeholderColor: "#00ff00", selectionColor: "#0000ff" }}
     />
-    <Input class="placeholder:text-white selection:text-black" />
+    <Input class="placeholder:text-white selection:bg-black" />
     <Text selectable style={{ selectionColor: "#ff0000" }}>Pick me</Text>
   </>
 ));
@@ -1420,6 +1534,7 @@ fn menus_reach_the_platform_and_call_back() {
         enabled: true,
         checked: None,
         role: None,
+        when: nsh_core::keymap::When::Always,
     };
     let quit = MenuAction {
         id: 0,
@@ -1428,6 +1543,7 @@ fn menus_reach_the_platform_and_call_back() {
         enabled: true,
         checked: None,
         role: Some(MenuRole::Quit),
+        when: nsh_core::keymap::When::Always,
     };
     assert_eq!(
         &*menu,
@@ -2397,4 +2513,162 @@ fn a_base_collapsible_places_its_content_while_open() {
         all.iter().any(|b| shows(b, "Details 1")),
         "the content followed the app"
     );
+}
+
+const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Progress } from "nsh/base";
+
+function App() {
+  const value = signal(40);
+  const loading = signal(false);
+  return (
+    <View>
+      <Progress
+        testID="download"
+        value={value()}
+        indeterminate={loading()}
+        accessibilityLabel="Downloading"
+        class="w-[200px]"
+        trackClass="h-[4px]"
+        indicatorClass={loading() ? "h-full w-[50px]" : "h-full"}
+        indicatorStyle={{ backgroundColor: "#00ff00" }}
+      >
+        <Text>{`${value()}%`}</Text>
+      </Progress>
+      <View testID="more" onPress={() => value.set(value() + 80)} />
+      <View testID="loading" onPress={() => loading.set(!loading())} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Progress`: the progress bar role and its range for
+/// screen readers on its root alone, the value the app owns (clamped to
+/// 0 to 100) as the indicator's share of the track and as the value
+/// screen readers say, and no value while indeterminate, when the
+/// indicator's width is the app's.
+#[test]
+fn a_base_progress_shows_the_apps_value_in_its_indicator() {
+    use nsh_core::{AccessibilityRole, AccessibilityValue};
+    let (engine, rx) = start(BASE_PROGRESS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "40%"));
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (root, more, loading) = (
+        by_test_id("download"),
+        by_test_id("more"),
+        by_test_id("loading"),
+    );
+    // The view inside `parent` (a part; the value is text).
+    let child = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("a part")
+    };
+    let (track, indicator) = (child(root), child(child(root)));
+    let value = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == root => {
+                    Some(props.accessibility.value.clone())
+                }
+                _ => None,
+            })
+            .flatten()
+    };
+    let range = |now| AccessibilityValue {
+        min: Some(0.0),
+        max: Some(100.0),
+        now,
+        text: None,
+    };
+    let width = |batches: &[MountBatch]| frame_of(batches, indicator).map(|f| f.size.width.0);
+
+    // One element for screen readers, the progress bar with its range and
+    // value; its parts are none.
+    let props = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == root => Some(props.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Progressbar);
+    assert_eq!(props.accessibility.accessible, Some(true));
+    assert_eq!(props.accessibility.label.as_deref(), Some("Downloading"));
+    let first = std::slice::from_ref(&first);
+    assert_eq!(value(first), Some(range(Some(40.0))));
+    assert!(first.iter().all(|b| !b.items.iter().any(
+        |i| matches!(i, MountItem::ViewProps { id, .. } if *id == track || *id == indicator)
+    )));
+    // The indicator is the value's share of the track, in the app's look.
+    assert_eq!(width(first), Some(80.0));
+    assert_eq!(
+        first
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == indicator => {
+                    Some(style.background_color.0)
+                }
+                _ => None,
+            }),
+        Some(0x00ff_00ff)
+    );
+
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+    // Past 100: held to the range.
+    press(more);
+    let after = until(&rx, |b| shows(b, "120%"));
+    assert_eq!(value(&after), Some(range(Some(100.0))));
+    assert_eq!(width(&after), Some(200.0));
+
+    // Indeterminate: the range without a value, the app's width.
+    press(loading);
+    let after = until(&rx, |b| {
+        frame_of(std::slice::from_ref(b), indicator).is_some()
+    });
+    assert_eq!(value(&after), Some(range(None)));
+    assert_eq!(width(&after), Some(50.0));
 }

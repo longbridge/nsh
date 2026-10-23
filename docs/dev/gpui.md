@@ -145,17 +145,26 @@ import -window root -display :170 whole.png        # the display, if the window'
   is in the focus path. They are installed before the tree is drawn: a key listener belongs to the dispatch node
   active when it is added, and painting a native component's element leaves that element's node active (GPUI enters
   each element's node on paint and never leaves it), so listeners added after the tree heard keys only while focus
-  was inside the component. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
+  was inside the component. While focus is inside a component, GPUI gives it each key first (its bindings, then its
+  listeners: the surface listens in the bubble phase), and only the window's shortcuts, the app's bindings and the
+  menu's shortcuts see what it lets through, as from a text field (`input::component_key`). Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
   scrolling, keymap and editing code reads.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,
   cx))`, then `load(App::Js(bundle))` or `load(App::Rust(root))`; it renders a `SurfaceElement` and is `Focusable`.
   `open_app_window` opens one in a window of a running GPUI app; `run_app` runs one app on its own, as the development
-  host does (one `AppView` filling a window, the process quits when the last window closes). `register_component`
+  host does (one `AppView` filling a window, the process quits when the last window closes). A host that opens the
+  window itself (its bounds, a GPUI Kit `Root` around the view) calls `AppView::own_window` in the window's build
+  closure, best with the window opened with `titlebar_options`: the app's title, title bar, application menu and window
+  operations then act on that window, as on `open_app_window`'s. `AppView::on_close_request` hands the owned window's
+  quit and close requests (the reserved quit key, Ctrl+W, the `quit` and `close` roles, `Window.close()`, the close
+  button) to the host, which quits or closes when it is ready (after saving, say). `AssetBase::Directories` looks
+  `asset:/` paths up in several directories in order (the app's files, then the host's). `register_component`
   registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets), and gives the host's own sets, which apps reach by name (`nativeModule`,
-  `embedding.md` "Native modules"). Several views are several
+  `embedding.md` "Native modules"); `AppOptions::context` gives a view's engine its own part of the host, which
+  those sets' functions read (`embedding.md` "Each engine's own part of the host"). Several views are several
   engines; nothing is global but the `rt` queue and the key bindings, which are per process. Windows showing surfaces
   are opened with `inactive_frame_interval: None` (GPUI draws unfocused windows at 30 fps by default); a host must set
   it in its own `WindowOptions` too. Embedding in a GPUI Kit app (one GPUI, focus and Tab, overlays, themes, frame
@@ -179,7 +188,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
 | Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux, with roles, names, states, values and actions; the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
 | Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0 |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere; context menus are popups drawn over the window with keyboard access |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere (always, or with `Window.setMenuBar("autoHide")` only after Alt alone, and while one of its menus is open); its shortcuts are matched on key downs after `nsh/keymap`'s bindings and before the focused field (`chrome::shortcut`), except an item whose `when` leaves the field the key (`MenuAction::fires_while_editing`); context menus are popups drawn over the window with keyboard access |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
 | Networking | `nsh_engine::net` | ureq, the stack Windows and Linux use |
 | Dev | `dev.rs` | `AppView::connect_dev_server` (also what `AppSource::DevServer` runs): the dev client on its own thread (reconnecting with a backoff); its events, runtime errors and the reload key drained by a foreground task of the view, which ends when the view connects again; the status line and the error overlay are GPUI elements over the surface; the surface reports errors to the overlay and to the embedding app's `on_error` alike |

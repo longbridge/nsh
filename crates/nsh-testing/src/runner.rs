@@ -26,7 +26,7 @@ use crate::run::{Built, Entry, TestResult, TestRun, run_file};
 
 /// The version of the [`TestRequest`], [`RunnerMessage`] and [`Reply`]
 /// formats: `nsh` and the runner it built speak the same.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 4;
 
 /// What `nsh` asks of a runner: the test files to run and how.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +46,8 @@ pub struct TestRequest {
     pub trace: bool,
     /// Forwards debug lines (`nsh -v`).
     pub verbose: bool,
+    /// The web page's host module ([`TestRun::page_host`]).
+    pub page_host: Option<PathBuf>,
 }
 
 /// A line a runner writes on its standard error for `nsh`.
@@ -110,6 +112,9 @@ pub enum Reply {
         bytecode: PathBuf,
         /// The source map's file.
         source_map: Option<PathBuf>,
+        /// The capabilities the app declares (JSON), which it runs under.
+        #[serde(default)]
+        capabilities: Option<String>,
     },
     /// The entry is the app's Rust root, which the runner makes.
     Root,
@@ -199,6 +204,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
             Reply::Js {
                 bytecode,
                 source_map,
+                capabilities,
             } => {
                 let bytes = std::fs::read(&bytecode)
                     .map_err(|e| format!("read {}: {e}", bytecode.display()))?;
@@ -211,7 +217,9 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
                 };
                 // SAFETY: nsh compiled it for this runner just now, for the
                 // QuickJS build it links (the request's version, checked).
-                Ok(Built::Js(Box::new(unsafe { Bundle::bytecode(bytes) }), map))
+                let bundle = unsafe { Bundle::bytecode(bytes) }
+                    .with_capabilities_json(capabilities.as_deref())?;
+                Ok(Built::Js(Box::new(bundle), map))
             }
             Reply::Root => root
                 .map(|root| Built::Rust(root()))
@@ -230,6 +238,7 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
         // On a real platform, `nsh` runs the test files itself: the apps run
         // in hosts built with the app's crates.
         host: None,
+        page_host: request.page_host,
     };
     for file in &request.files {
         let mut report = |result: &TestResult| {
@@ -290,6 +299,7 @@ mod tests {
         let reply = Reply::Js {
             bytecode: "/app/.nsh/test/build/1.nshc".into(),
             source_map: None,
+            capabilities: Some(r#"{"network":{"hosts":["api.test"]}}"#.into()),
         };
         let line = serde_json::to_string(&reply).unwrap();
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);

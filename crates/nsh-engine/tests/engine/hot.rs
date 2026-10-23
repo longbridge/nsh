@@ -172,10 +172,14 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(
         config,
@@ -324,10 +328,14 @@ fn entry_edits_keep_navigation_and_state() {
             ui_sets: sets.to_vec(),
             runtime: None,
             data_dir: None,
+            cache: nsh_engine::CacheOptions::off(),
             storage: None,
             clock: Default::default(),
+            context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: Default::default(),
+            picker: None,
         };
         let engine = Engine::start(
             config,
