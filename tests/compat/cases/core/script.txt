@@ -320,3 +320,18 @@ covers [props] margin
 covers [events] onPosition
 covers [events] onPressOutside
 covers [events] onCancel
+# core-error-boundary
+tap id:case-core-error-boundary
+expect Around the boundary
+expect Risky ok
+expect Outer caught fallback of binding
+tap id:break
+expect Caught binding
+absent Risky ok
+expect Around the boundary
+tap id:retry
+expect Risky ok
+tap id:risky
+expect Caught pressed
+expect Break
+covers [nsh] ErrorBoundary

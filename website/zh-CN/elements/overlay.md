@@ -107,7 +107,7 @@ function MoreButton() {
 浮层报告通常会关闭弹出层的操作，由你来决定是否关闭：
 
 - 手指或鼠标按键在浮层、它的锚点以及它内部的浮层之外按下时，触发 `onPressOutside`。这次按压会继续传给下面的内容。
-- 按下 Escape 和 Android 返回键时触发 `onCancel`，只发给监听它的最上层浮层。它先于页面和 `BackHandler` 收到这些按键。
+- 按下 Escape、Android 返回键或在 iOS 上使用 VoiceOver 的退出手势时触发 `onCancel`，只发给监听它的最上层浮层。它先于页面和 `BackHandler` 收到这些按键。
 
 要挡住弹出层后面的屏幕，在它下面再放一个 `class="inset-0"`、带有关闭两者的 `onPress` 的浮层：[Sheet](./sheet.md) 和 [Popover](./popover.md) 在手机上的呈现方式就是这样实现的。
 
@@ -134,7 +134,7 @@ function MoreButton() {
 | 事件 | Rust | 说明 |
 |---|---|---|
 | `onPressOutside` | `.on_press_outside(\|point\| ..)` | 一次按压在它、它的锚点以及它内部的浮层之外按下（`pagePosition`，一个 `Point`）。 |
-| `onCancel` | `.on_cancel(\|\| ..)` | Escape 或 Android 返回键，在它是监听这些按键的最上层浮层时。 |
+| `onCancel` | `.on_cancel(\|\| ..)` | Escape、Android 返回键或 VoiceOver 的退出手势，在它是监听这些操作的最上层浮层时。 |
 | `onPosition` | `.on_position(\|position\| ..)` | NSH 放置了它：`placement`（它所在的一侧）、在根视图中的 `bounds`，以及 `available`（一个 `Size`：这一侧的可用空间）。 |
 
 <a id="platform-notes"></a>

@@ -110,7 +110,10 @@ mod tests {
             ("gridTemplateColumns", "string"),
             ("transform", "TransformStep[]"),
             ("tintColor", "ColorValue"),
-            ("display", "\"flex\" | \"grid\" | \"block\" | \"none\""),
+            (
+                "display",
+                "\"flex\" | \"grid\" | \"block\" | \"flow-root\" | \"none\"",
+            ),
         ] {
             assert!(style.contains(&format!("  {name}?: {ts};")), "{name}");
         }

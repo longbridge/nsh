@@ -15,7 +15,7 @@ A menu is a list of actions its trigger opens. One structure serves every device
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the
   sheet in place of the menu's, with a row of yours leading back.
 
-Choosing an item, a press outside, Escape and the Android back button close it. `ContextMenu` is the same menu opened
+Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
 by the secondary button (a right click) at the pointer, or by a finger held on its trigger on touch screens.
 
 ```rust tabs

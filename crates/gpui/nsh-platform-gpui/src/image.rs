@@ -119,6 +119,30 @@ pub enum AssetBase {
     Http(String),
     /// A directory on disk.
     Directory(PathBuf),
+    /// Directories on disk, looked in in order: a file is the first
+    /// directory's that has it (the app's own files, then an embedding
+    /// app's, say).
+    Directories(Vec<PathBuf>),
+}
+
+impl AssetBase {
+    /// The file of `path` (relative, `/`-separated) on disk: in the first
+    /// of [`AssetBase::Directories`] that has it, else in the first (where
+    /// reading it fails, naming that path). `None` over HTTP.
+    pub(crate) fn file(&self, path: &str) -> Option<PathBuf> {
+        match self {
+            AssetBase::Http(_) => None,
+            AssetBase::Directory(dir) => Some(dir.join(path)),
+            AssetBase::Directories(dirs) => {
+                let mut files = dirs.iter().map(|dir| dir.join(path));
+                let first = files.next()?;
+                if first.exists() {
+                    return Some(first);
+                }
+                Some(files.find(|file| file.exists()).unwrap_or(first))
+            }
+        }
+    }
 }
 
 /// Reads `asset:/…` files for the engine (fonts), on the engine thread.
@@ -178,7 +202,7 @@ fn resolve(uri: &str, base: Option<&AssetBase>) -> Option<Location> {
                 let sep = if base.ends_with('/') { "" } else { "/" };
                 Some(Location::Url(format!("{base}{sep}{path}")))
             }
-            AssetBase::Directory(dir) => Some(Location::File(dir.join(path))),
+            dirs => dirs.file(path).map(Location::File),
         };
     }
     if uri.starts_with("http://") || uri.starts_with("https://") {
@@ -2129,19 +2153,21 @@ mod tests {
             fit(ResizeMode::Stretch, ObjectPosition::CENTER, n, b),
             (0.0, 0.0, 100.0, 100.0)
         );
+        // CSS's `object-fit: none` and `scale-down`.
         assert_eq!(
             fit(ResizeMode::Center, ObjectPosition::CENTER, n, b),
-            (0.0, 25.0, 100.0, 50.0)
+            (-50.0, 0.0, 200.0, 100.0)
         );
         assert_eq!(
-            fit(
-                ResizeMode::Center,
-                ObjectPosition::CENTER,
-                n,
-                (400.0, 400.0)
-            ),
-            (100.0, 150.0, 200.0, 100.0)
+            fit(ResizeMode::ScaleDown, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
         );
+        for mode in [ResizeMode::Center, ResizeMode::ScaleDown] {
+            assert_eq!(
+                fit(mode, ObjectPosition::CENTER, n, (400.0, 400.0)),
+                (100.0, 150.0, 200.0, 100.0)
+            );
+        }
         // `objectPosition`: a tall image covering its box shows its top.
         let top = ObjectPosition::parse("top").unwrap();
         assert_eq!(

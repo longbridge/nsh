@@ -295,6 +295,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
   UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
   keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
+- **A menu's backdrop covers the header**: on a touch screen a menu is a sheet over a backdrop on the whole window,
+  so a tap at the header's back button lands on the backdrop and closes the menu (`backdropPress`) instead of going
+  back from a submenu. iOS has no back key, so while the app listens to going back the agent's `back` is VoiceOver's
+  escape gesture on the surface (`RootView`'s `accessibilityPerformEscape`), which the core takes as the back button.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 

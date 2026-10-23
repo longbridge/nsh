@@ -662,8 +662,10 @@ fn resize_mode(m: ResizeMode) -> &'static str {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        // Centered, scaled down to fit when larger.
-        ResizeMode::Center => "scale-down",
+        // Centered at its natural size.
+        ResizeMode::Center => "none",
+        // The same, scaled down to fit when larger.
+        ResizeMode::ScaleDown => "scale-down",
     }
 }
 

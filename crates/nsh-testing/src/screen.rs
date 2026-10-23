@@ -14,13 +14,19 @@ use std::{
 
 use nsh_core::{
     AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
-    MountBatch, MountItem, NodeId, PanActivation, Point, Points, Size, ViewKind, ui::PropEnum,
+    MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
+    ui::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
+
+/// The ids the model gives a canvas's nodes ([`nsh_core::canvas::CanvasNode`]),
+/// counting down from the top of the id space, where the core and JS
+/// never reach.
+const FIRST_CANVAS_NODE: NodeId = NodeId::MAX;
 
 /// Whether view `v` shows a text `want` matches: its own, or an input's
 /// (what it holds, or while empty its placeholder).
@@ -124,6 +130,10 @@ pub struct Screen {
     /// The window's size, when the driver knows it: what lies outside it
     /// (and no scroll view brings in) is not on screen.
     viewport: Option<Size<Points>>,
+    /// The nodes each canvas's drawing has, as views of the model.
+    canvas_nodes: HashMap<NodeId, Vec<NodeId>>,
+    /// The id the next canvas node gets.
+    next_canvas_node: NodeId,
 }
 
 #[derive(Debug, Default)]
@@ -145,6 +155,9 @@ struct View {
     role: AccessibilityRole,
     /// It takes no presses (`disabled`, its accessibility state).
     disabled: bool,
+    /// It is selected (`selected`, its accessibility state; a canvas node's
+    /// `selected`).
+    selected: bool,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -169,6 +182,10 @@ struct View {
     span: Option<Span>,
     /// The spans of a text view's text that take presses.
     spans: Vec<NodeId>,
+    /// Which touches it and its subtree receive (`pointerEvents`).
+    pointer_events: PointerEvents,
+    /// A node of a canvas's drawing, not a view of its own.
+    canvas_node: bool,
 }
 
 /// A span of a text view's text that takes presses ([`nsh_core::TextLink`]).
@@ -289,6 +306,7 @@ impl Screen {
             }
             MountItem::Delete { id } => {
                 self.drop_spans(*id);
+                self.canvas(*id, &[]);
                 self.detach(*id);
                 self.nodes.remove(id);
                 self.children.remove(id);
@@ -322,9 +340,11 @@ impl Screen {
                 view.label = props.accessibility.label.clone();
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
+                view.selected = props.accessibility.state.selected;
                 view.long_press_delay = props.long_press_delay;
                 view.selection_area = props.selection_area;
                 view.pan_activation = props.pan_activation;
+                view.pointer_events = props.pointer_events;
             }
             MountItem::Keymap(keymap) => self.keymap = Some(keymap.clone()),
             MountItem::TrackStates { id, states } => {
@@ -333,6 +353,7 @@ impl Screen {
             MountItem::Gestures { id, values } => {
                 self.nodes.entry(*id).or_default().gestures = *values;
             }
+            MountItem::Canvas { id, drawing } => self.canvas(*id, &drawing.nodes),
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
             }
@@ -380,6 +401,47 @@ impl Screen {
             }
             _ => {}
         }
+    }
+
+    /// The nodes of canvas `id`'s drawing become its children in the
+    /// model, in place of those it had.
+    fn canvas(&mut self, id: NodeId, nodes: &[nsh_core::canvas::CanvasNode]) {
+        for old in self.canvas_nodes.remove(&id).unwrap_or_default() {
+            self.detach(old);
+            self.nodes.remove(&old);
+        }
+        if nodes.is_empty() {
+            return;
+        }
+        let mut ids = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            if self.next_canvas_node == 0 {
+                self.next_canvas_node = FIRST_CANVAS_NODE;
+            }
+            let child = self.next_canvas_node;
+            self.next_canvas_node -= 1;
+            self.nodes.insert(
+                child,
+                View {
+                    parent: Some(id),
+                    test_id: node.test_id.clone(),
+                    label: Some(node.label.clone()),
+                    // What it names is drawn: it shows as text does.
+                    text: Some(node.label.to_string()),
+                    frame: node.bounds,
+                    role: node.role,
+                    selected: node.selected,
+                    canvas_node: true,
+                    ..View::default()
+                },
+            );
+            ids.push(child);
+        }
+        self.children
+            .entry(id)
+            .or_default()
+            .extend(ids.iter().copied());
+        self.canvas_nodes.insert(id, ids);
     }
 
     /// What a platform view does with `command`, as far as the model
@@ -603,7 +665,20 @@ impl Screen {
                 inner = if scroll.locked {
                     inner.within(bounds)
                 } else if inner.shows(&bounds) {
-                    Clip::All
+                    // Any of its content scrolls into view, nothing before
+                    // its start along its axis: lists park the cells they do
+                    // not use there. Across it nothing is clipped (the
+                    // headless text engine puts inline views on one line).
+                    let far = Points(f32::MAX / 4.0);
+                    let start = if scroll.horizontal {
+                        Point::new(content.x, -far)
+                    } else {
+                        Point::new(-far, content.y)
+                    };
+                    Clip::Within(Bounds::new(
+                        start,
+                        Size::new(Points(f32::MAX), Points(f32::MAX)),
+                    ))
                 } else {
                     Clip::Within(Bounds::default())
                 };
@@ -898,6 +973,18 @@ impl Screen {
         }
     }
 
+    /// Whether the view `selector` names is selected (its accessibility
+    /// state, or a canvas node's `selected`); an error when none or several
+    /// match.
+    pub fn selected(&self, selector: &str) -> Result<bool, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self.nodes.get(&id).is_some_and(|v| v.selected)),
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
     /// The views on screen `selector` matches, in the order a user's eyes
     /// find them ([`Screen::by_layer`]): each part looks inside what the
     /// one before matched.
@@ -977,11 +1064,81 @@ impl Screen {
         }
     }
 
+    /// The center of canvas node `id` in the root; `None` for a view.
+    pub(crate) fn canvas_node_center(&self, id: NodeId) -> Option<Point<Points>> {
+        if !self.nodes.get(&id)?.canvas_node {
+            return None;
+        }
+        Some(self.bounds_in_root(id)?.center())
+    }
+
+    /// The canvas containing the one node `selector` names, and its
+    /// center in that canvas's coordinates; `None` for ordinary views.
+    pub(crate) fn canvas_node(&self, selector: &Selector) -> Option<(NodeId, Point<Points>)> {
+        let [id] = self.resolve(selector)[..] else {
+            return None;
+        };
+        let view = self.nodes.get(&id)?;
+        view.canvas_node
+            .then_some((view.parent?, view.frame.center()))
+    }
+
+    /// The view a pointer at `at` (in the root) reaches: the topmost,
+    /// innermost one there that receives touches. Canvas nodes are not views.
+    fn hit_pointer(&self, at: Point<Points>) -> NodeId {
+        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
+        self.hit_in(ROOT, at, &attached).unwrap_or(ROOT)
+    }
+
+    fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
+        let view = self.nodes.get(&id);
+        let receives = view.map_or(PointerEvents::Auto, |v| v.pointer_events);
+        if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
+            return None;
+        }
+        let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
+        // Unclipped children can receive a pointer outside their parent's box.
+        if !inside
+            && (receives == PointerEvents::BoxOnly
+                || view.is_some_and(|v| v.clips || v.scroll.is_some()))
+        {
+            return None;
+        }
+        if receives != PointerEvents::BoxOnly
+            && let Some(children) = self.children.get(&id)
+        {
+            for &child in children.iter().rev() {
+                let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
+                if node || !attached.contains(&child) {
+                    continue;
+                }
+                if let Some(hit) = self.hit_in(child, at, attached) {
+                    return Some(hit);
+                }
+            }
+        }
+        (inside && receives != PointerEvents::BoxNone).then_some(id)
+    }
+
     /// The view a press on the selector's match goes to: it, or its nearest
     /// pressable ancestor (a text inside a button); [`Pick::Disabled`] when
     /// it or a view on the way is disabled.
     pub(crate) fn pressable(&self, selector: &Selector) -> Pick {
         let matches = self.resolve(selector);
+        if let [id] = matches[..]
+            && let Some(at) = self.canvas_node_center(id)
+        {
+            let Some(target) = self.up_to(self.hit_pointer(at), |v| {
+                v.events.contains(EventKind::Press)
+            }) else {
+                return Pick::None;
+            };
+            return if self.disabled_from(target, None) {
+                Pick::Disabled
+            } else {
+                Pick::One(target)
+            };
+        }
         if !matches.is_empty()
             && matches.iter().all(|id| {
                 let target = self.up_to(*id, |v| v.events.contains(EventKind::Press));
@@ -1187,7 +1344,6 @@ impl Screen {
     /// View `id`'s bounds in the root's points: its frame moved by those
     /// of the views around it and the offsets of the scroll views around
     /// it (transforms aside).
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
         if let Some((text, ..)) = self.span(id) {
             return self.bounds_in_root(text);
@@ -1341,6 +1497,81 @@ impl Screen {
 mod tests {
     use super::*;
 
+    /// A canvas over a pressable pad, both inside a plain container.
+    fn canvas_screen() -> Screen {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Canvas),
+            create(6, ViewKind::View),
+            frame(2, 0.0, 0.0, 200.0, 40.0),
+            frame(4, 0.0, 0.0, 200.0, 40.0),
+            frame(6, 0.0, 0.0, 200.0, 40.0),
+            insert(1, 2),
+            insert(2, 6),
+            insert(2, 4),
+        ]));
+        screen.nodes.get_mut(&4).unwrap().pointer_events = PointerEvents::None;
+        screen
+            .nodes
+            .get_mut(&6)
+            .unwrap()
+            .events
+            .set(EventKind::Press, true);
+        screen.canvas(
+            4,
+            &[nsh_core::canvas::CanvasNode::new(
+                Bounds::new(Point::default(), Size::new(Points(100.0), Points(40.0))),
+                AccessibilityRole::Text,
+                "cell",
+            )
+            .test_id("cell")],
+        );
+        screen
+    }
+
+    #[test]
+    fn canvas_presses_skip_hidden_subtrees() {
+        let mut screen = canvas_screen();
+        screen.apply(&batch(vec![
+            create(8, ViewKind::View),
+            create(10, ViewKind::View),
+            frame(8, 0.0, 0.0, 200.0, 40.0),
+            frame(10, 0.0, 0.0, 200.0, 40.0),
+            insert(2, 8),
+            insert(8, 10),
+            style(8, |s| s.hidden = true),
+        ]));
+        screen
+            .nodes
+            .get_mut(&10)
+            .unwrap()
+            .events
+            .set(EventKind::Press, true);
+        assert_eq!(
+            screen.pressable(&Selector::parse("id:cell").unwrap()),
+            Pick::One(6)
+        );
+    }
+
+    #[test]
+    fn canvas_presses_reach_visible_overflow_but_respect_clipping() {
+        let mut screen = canvas_screen();
+        screen.apply(&batch(vec![
+            frame(2, 0.0, 0.0, 100.0, 40.0),
+            frame(4, 100.0, 0.0, 100.0, 40.0),
+            frame(6, 100.0, 0.0, 100.0, 40.0),
+        ]));
+        let selector = Selector::parse("id:cell").unwrap();
+        assert_eq!(screen.count("id:cell"), Ok(1));
+        assert_eq!(screen.pressable(&selector), Pick::One(6));
+        screen.nodes.get_mut(&2).unwrap().clips = true;
+        assert_eq!(screen.pressable(&selector), Pick::None);
+        screen.nodes.get_mut(&2).unwrap().clips = false;
+        screen.nodes.get_mut(&2).unwrap().pointer_events = PointerEvents::BoxOnly;
+        assert_eq!(screen.pressable(&selector), Pick::None);
+    }
+
     fn batch(items: Vec<MountItem>) -> MountBatch {
         MountBatch { items }
     }
@@ -1463,9 +1694,15 @@ mod tests {
             insert(10, 12),
             insert(2, 14),
             insert(14, 16),
+            // A cell a list parked before the start of its content.
+            create(18, ViewKind::Text),
+            text(18, "parked"),
+            frame(18, 0.0, -1.0e6, 100.0, 20.0),
+            insert(14, 18),
         ]));
         // Without `overflow: hidden` a view of no height shows what it
-        // holds; a row far down a scroll view scrolls into view.
+        // holds; a row far down a scroll view scrolls into view, nothing
+        // before its start does.
         assert_eq!(shown(&screen), "shown clipped row");
         screen.apply(&batch(vec![style(10, |s| s.overflow_hidden = true)]));
         assert_eq!(shown(&screen), "shown row");

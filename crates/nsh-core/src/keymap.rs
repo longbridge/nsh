@@ -467,7 +467,7 @@ impl Keystroke {
         let m = self.modifiers;
         match self.key {
             Key::F(_) => false,
-            Key::Char(c) => !(m.cmd || m.ctrl) || matches!(c, 'a' | 'c' | 'v' | 'x' | 'z'),
+            Key::Char(c) => !(m.cmd || m.ctrl) || matches!(c, 'a' | 'c' | 'v' | 'x' | 'y' | 'z'),
             _ => true,
         }
     }
@@ -993,6 +993,8 @@ mod tests {
         assert!(edits("cmd+left"));
         assert!(edits("cmd+c"));
         assert!(edits("cmd+shift+z"));
+        assert!(edits("ctrl+y"));
+        assert!(edits("cmd+y"));
         assert!(!edits("cmd+k"));
         assert!(!edits("ctrl+shift+p"));
         assert!(!edits("f5"));

@@ -568,14 +568,20 @@ pub enum ResizeMode {
     Contain,
     /// Stretch to the box.
     Stretch,
-    /// Center at natural size.
+    /// Center at natural size, cropped where larger than the box (CSS's
+    /// `object-fit: none`).
     Center,
+    /// Center at natural size, shrunk to fit the box where larger (CSS's
+    /// `object-fit: scale-down`, React Native's `center`).
+    #[prop(rename = "scale-down")]
+    ScaleDown,
 }
 
 impl ResizeMode {
     /// Where content of `natural` size goes in a box of `size`: scaled as
-    /// the mode scales it (`Center` shrinks content larger than the box,
-    /// as CSS's `scale-down`), then placed at `position`. The rectangle
+    /// the mode scales it (`Center` keeps the natural size, as CSS's
+    /// `none`; `ScaleDown` shrinks content larger than the box, as CSS's
+    /// `scale-down`), then placed at `position`. The rectangle
     /// may reach outside the box (a covering image), which crops it.
     /// Content without a size fills the box.
     pub fn fit(
@@ -595,7 +601,8 @@ impl ResizeMode {
         let scale = match self {
             ResizeMode::Cover => (size.width.0 / nw).max(size.height.0 / nh),
             ResizeMode::Contain => contain,
-            ResizeMode::Center => contain.min(1.0),
+            ResizeMode::Center => 1.0,
+            ResizeMode::ScaleDown => contain.min(1.0),
             ResizeMode::Stretch => 1.0,
         };
         let content = Size {
@@ -1708,7 +1715,7 @@ pub enum Prop {
     NativeId(Option<Box<str>>),
     /// An input's caret and selection, the highlight of a `selectable`
     /// text's selection (Rust components; TS sets the `selectionColor`
-    /// style key or `selection:text-*`).
+    /// style key or `selection:bg-*`).
     SelectionColor(Option<Color>),
     /// `autoComplete` (iOS: also `textContentType`): what an input holds, for
     /// autofill (React Native's values, e.g. "username", "current-password",
