@@ -71,6 +71,34 @@
   through `Native.imageBytes`, the web runtime gets them once per key (`image_bytes`) as a browser blob URL that
   `asset()` maps the key to, revoked (`release_image`) when no source holds them. `Image.getSize` / `prefetch` of a
   `data:` URI decode it on the platform (`nsh_core::image::decode_data_uri`, the one decoder every backend uses).
+- **Picked images** (`nsh/picker`, `nsh_core::picker`): `Picker.pickImages` sends the root `Command::PickImages` with a
+  `PickRequest` checked in Rust (`limit`: 1 for a single pick, at most `MAX_PICKED` = 100; `max_dimension`, `quality`
+  as a `Percentage`, `PickFormat::Compatible` / `Current`); the `picker` capability gates it (denied: `[]` and a log
+  line). What each image becomes is decided by `PickRequest::needs_encoding` from its type and its size with its
+  orientation applied: JPEG, PNG, GIF and WebP stay as they are; another format (HEIC, HEIF, TIFF) becomes a JPEG
+  unless `Current`; an image whose longer side passes `max_dimension` is decoded upright, scaled to fit
+  (`scaled_size`) and encoded again, a PNG as a PNG and anything else as a JPEG of `jpeg_quality()` (0.9 by default);
+  a `quality` re-encodes JPEGs too. Re-encoded images carry no metadata (no EXIF location); kept ones keep theirs.
+  iOS: `PHPickerViewController` (PhotosUI loaded with `dlopen`, as WebKit is; no photo library permission), its
+  `preferredAssetRepresentationMode` compatible (the system turns HEIC into JPEG) or current, ordered selection when
+  several; each item's file is read inside `loadFileRepresentationForTypeIdentifier`'s completion (the file goes when it
+  returns) and prepared with ImageIO (`picker.rs`: `CGImageSourceCreateThumbnailAtIndex` with the transform and the
+  longer side, `CGImageDestination` with `kCGImageDestinationLossyCompressionQuality`). macOS: an `NSOpenPanel` sheet
+  and the same ImageIO preparation (`nsh-platform-macos` `picker.rs`, tested with `sips`' HEIC). Android
+  (`Picker.java`): `MediaStore.ACTION_PICK_IMAGES` (API 33+, or 30+ with SDK extension 2), else `ACTION_GET_CONTENT`
+  for `image/*`, started by a headless retained `android.app.Fragment` added to the view's activity (the embedding app
+  forwards no result); the bytes are read from the content resolver, sized with `BitmapFactory` bounds and the EXIF
+  orientation, and re-encoded with `BitmapFactory` (power-of-two sampling), an orientation `Matrix` and
+  `Bitmap.compress`; `Native.picked` hands them over. Web: an `<input type=file>` (`cancel` answers empty), scaled
+  with `createImageBitmap` (`imageOrientation: "from-image"`) and an `OffscreenCanvas`; `nsh_picked_file` /
+  `nsh_picked` hand the bytes over. Windows (`IFileOpenDialog` on a thread of its own), Linux (`gtk::FileDialog`) and
+  GPUI (`prompt_for_paths`) read the files as they are (`nsh_core::picker::read_files`), offering only the formats
+  `dialog_extensions` lists for the request (with `Compatible`: the four that stay as they are); they scale nothing.
+  Every backend answers once with the root `Pick` event, `EventPayload::Picked { id, files }`, the bytes in
+  `ImageData` (no base64 anywhere); the core cuts the list to the limit and fills in sizes, types and file extensions
+  from the bytes (`PickedFile::fill_in`, `imagesize`), and `nsh-js` makes each a `File` over a `Blob` sharing those
+  bytes, so `URL.createObjectURL(file)` shows it in an `Image` and `fetch` / `FormData` upload it without a copy in JS.
+  An embedder's `PickerBackend` (`EngineConfig::picker`) answers in place of the platform: no command is sent.
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the

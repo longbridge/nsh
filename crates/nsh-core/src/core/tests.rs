@@ -1516,7 +1516,8 @@ fn scroll_content_is_sent_once_per_batch() {
 }
 
 /// Plays JS: creates a cell per new slot, renders a fixed-height
-/// row for each bind and confirms the index.
+/// row for each bind and confirms the index; the overscan too, as an
+/// engine with time to spare does.
 fn render_binds(
     c: &mut Core<FakeEngine>,
     next_id: &mut u32,
@@ -1525,6 +1526,7 @@ fn render_binds(
 ) -> usize {
     let mut binds = Vec::new();
     c.take_list_binds(&mut binds);
+    c.take_paced_list_binds(usize::MAX, &mut binds);
     let mut count = 0;
     for bind in binds {
         for (slot, index) in bind.binds {
@@ -7932,6 +7934,138 @@ mod components {
         assert_eq!(shown.last().unwrap(), "pasted false None ");
     }
 
+    /// Picks up to two photos when pressed and shows what came.
+    #[component]
+    fn PhotoPicker() -> impl IntoElement {
+        let picked = signal(String::new());
+        view()
+            .child(text(move || format!("picked {}", picked.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let files = pick_images(crate::picker::PickRequest::new(true, 2));
+                spawn(async move {
+                    let files = files.await;
+                    let shown: Vec<String> = files
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "{} {} {}x{} {}",
+                                f.name,
+                                f.mime,
+                                f.size.width.0,
+                                f.size.height.0,
+                                f.data.len()
+                            )
+                        })
+                        .collect();
+                    picked.set(format!("{} [{}]", files.len(), shown.join(", ")));
+                });
+            }))
+    }
+
+    /// A 3×2 PNG's header.
+    fn png_header() -> Vec<u8> {
+        vec![
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0,
+            0, 0, 3, 0, 0, 0, 2, 8, 6, 0, 0, 0,
+        ]
+    }
+
+    fn press_picker(c: &mut Core<FakeEngine>) -> Vec<MountItem> {
+        c.mount_root(&crate::ui::Root::new::<PhotoPicker>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit().map(|b| b.items).unwrap_or_default()
+    }
+
+    #[test]
+    fn picked_files_answer_the_pick() {
+        let mut c = core();
+        let items = press_picker(&mut c);
+        let picks: Vec<_> = items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::PickImages { id, request },
+                } => Some((id, request)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(picks.len(), 1);
+        let (id, request) = picks[0];
+        assert_eq!(request.limit, 2);
+        let file = |name: &str| crate::picker::PickedFile {
+            name: name.into(),
+            data: crate::ImageData::new(png_header()),
+            ..Default::default()
+        };
+        // The platform's answer is completed (type, size, extension) and
+        // cut to the request's limit.
+        let files = vec![file("IMG_1"), file("b.png"), file("c.png")];
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Pick,
+            &EventPayload::Picked { id, files }
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 2")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "picked 2 [IMG_1.png image/png 3x2 29, b.png image/png 3x2 29]"
+        );
+    }
+
+    struct TestPicker;
+
+    impl crate::picker::PickerBackend for TestPicker {
+        fn pick_images(&self, request: crate::picker::PickRequest) -> crate::picker::PickFuture {
+            assert_eq!(request.limit, 2);
+            Box::pin(async {
+                vec![crate::picker::PickedFile::new(
+                    "x.png",
+                    "",
+                    crate::ImageData::new(png_header()),
+                )]
+            })
+        }
+    }
+
+    #[test]
+    fn a_picker_of_the_embedder_answers_in_place_of_the_platform() {
+        let mut c = core();
+        c.set_picker(Some(std::sync::Arc::new(TestPicker)));
+        let items = press_picker(&mut c);
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Command { .. })),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 1")));
+        assert_eq!(shown.last().unwrap(), "picked 1 [x.png image/png 3x2 29]");
+    }
+
+    #[test]
+    fn picks_need_the_capability() {
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let items = press_picker(&mut c);
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Command { .. })),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("picked 0")));
+        assert_eq!(shown.last().unwrap(), "picked 0 []");
+    }
+
     /// Shows a fallback while a component below it failed; a press tries
     /// again.
     #[component]
@@ -11537,6 +11671,110 @@ mod views {
         );
     }
 
+    /// How many rows [`Board`] shows, and how many of its values change
+    /// on each tick (the first cell of as many rows).
+    const BOARD_ROWS: usize = 80;
+    const BOARD_TICKING: usize = 40;
+
+    #[derive(Clone, Copy, PartialEq, Props)]
+    struct BoardProps {
+        /// Its cells have a size of their own: what their text says moves
+        /// nothing around them.
+        fixed: bool,
+        /// Each tick changes how wide the changing values are (a sign comes
+        /// and goes); otherwise they keep their width, but for the rare
+        /// digit a price gains (the tests' text engine gives every
+        /// character one width, as tabular figures have).
+        widening: bool,
+    }
+
+    /// A page of high-frequency updates, a quote board: 80 rows of a
+    /// mark and five cells (about a thousand nodes), the first cells of 40
+    /// rows changing together on each press.
+    #[component]
+    fn Board(props: BoardProps) -> impl IntoElement {
+        let (fixed, widening) = (props.fixed, props.widening);
+        let ticks: Vec<Signal<u32>> = (0..BOARD_TICKING).map(|_| signal(0)).collect();
+        let pressed = ticks.clone();
+        let cell = move |content: Text| {
+            let cell = view().p_1().child(content);
+            if fixed {
+                cell.w(px(56.0)).h(px(24.0))
+            } else {
+                cell
+            }
+        };
+        view()
+            .on_press(move |_: &()| {
+                batch(|| {
+                    for tick in &pressed {
+                        tick.update(|t| *t += 7);
+                    }
+                })
+            })
+            .children((0..BOARD_ROWS).map(|row| {
+                let first = match ticks.get(row) {
+                    Some(&tick) => text(move || {
+                        let t = tick.get();
+                        let sign = if widening && t % 2 == 1 { "+" } else { "" };
+                        format!("{sign}{}.{:02}", 9 + t / 3, t % 100)
+                    }),
+                    None => text(format!("{row}.00")),
+                };
+                view()
+                    .flex_row()
+                    .items_center()
+                    .p_1()
+                    .gap_2()
+                    .child(view().size(px(12.0)).bg(rgb(0x22aa66)))
+                    .child(cell(first))
+                    .children((1..5).map(move |col| cell(text(format!("r{row} c{col}")))))
+            }))
+    }
+
+    /// `cargo test --release -p nsh-core bench_high_frequency -- --ignored --nocapture`
+    ///
+    /// The cost of a commit when many values of a large page change at
+    /// once and often: [`Board`] with fixed cells, and with cells that
+    /// take their text's size, the values keeping their widths or not.
+    #[test]
+    #[ignore]
+    fn bench_high_frequency() {
+        for (fixed, widening, label) in [
+            (true, false, "fixed cells"),
+            (false, false, "content-sized cells, same widths"),
+            (false, true, "content-sized cells, new widths"),
+        ] {
+            let mut c = core();
+            c.mount_root(&Root::new::<Board>(move || BoardProps { fixed, widening }));
+            let first = c.commit().unwrap();
+            let nodes = first
+                .items
+                .iter()
+                .filter(|i| matches!(i, MountItem::Create { .. }))
+                .count();
+            let host = root_host(&first);
+            let n = 2000;
+            let (mut event, mut commit) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+            let mut items = 0;
+            for _ in 0..n {
+                let start = std::time::Instant::now();
+                c.component_event(host, EventKind::Press, &EventPayload::None);
+                let mid = std::time::Instant::now();
+                items += c.commit().map_or(0, |b| b.items.len());
+                event += mid - start;
+                commit += mid.elapsed();
+            }
+            eprintln!(
+                "high frequency ({label}, {nodes} views, {BOARD_TICKING} values a tick): \
+                 {:?} per event, {:?} per commit, {} mount items",
+                event / n,
+                commit / n,
+                items / n as usize
+            );
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq, Props)]
     struct ShownProps {
         value: crate::ui::Prop<SharedString>,
@@ -14815,7 +15053,7 @@ fn own_lists_have_no_spacer_and_scroll_themselves() {
     assert!(c.parent_lists.is_empty());
     let key = c.key(4).unwrap();
     let layout = c.nodes[key as usize].layout.unwrap();
-    assert!(c.layout.children(layout).unwrap().is_empty());
+    assert!(c.layout.children(layout).is_empty());
     let key = c.key(2).unwrap();
     assert!(
         c.nodes[key as usize]
@@ -15043,6 +15281,8 @@ fn render_lists_binds(
 ) {
     let mut binds = Vec::new();
     c.take_list_binds(&mut binds);
+    // The overscan too, as an engine with time to spare binds it.
+    c.take_paced_list_binds(usize::MAX, &mut binds);
     for bind in binds {
         let list_cells = cells.entry(bind.list).or_default();
         for (slot, index) in bind.binds {
@@ -15687,12 +15927,6 @@ mod layout_consistency {
         for step in 0..steps {
             // A commit takes a few changes at once, as a turn does.
             let changes = 1 + rng.below(3);
-            let changes = if std::env::var_os("ONE_CHANGE").is_some() {
-                let _ = changes;
-                1
-            } else {
-                changes
-            };
             for _ in 0..changes {
                 let (ops, what) = change(&mut rng, &mut model, fractions);
                 apply(&mut c, ops);
@@ -16223,4 +16457,195 @@ fn sticky_views_in_a_horizontal_scroll_view_stick_at_their_left() {
     apply(&mut c, ops);
     let batch = c.commit().unwrap();
     assert_eq!(sticky_of(&batch, 2), Some(vec![(4, 50.0, 1050.0)]));
+}
+
+#[test]
+fn a_relayout_boundary_that_overflows_more_lays_its_parent_out_again() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(200.0))]),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            // A size of fixed points that does not shrink: a change inside
+            // cannot change it.
+            style_op(
+                3,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                    ("flexShrink", StyleValue::Number(0.0)),
+                ],
+            ),
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("height", StyleValue::Number(10.0))]),
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    // Within the box: its parent's layout stands.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("height", StyleValue::Number(40.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 4).unwrap().size.height, px(40.0));
+    assert!(frame_of(&batch, 3).is_none());
+    // Out of it: the scroll view's content takes the overflow.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("height", StyleValue::Number(500.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 4).unwrap().size.height, px(500.0));
+    let content = batch.items.iter().find_map(|i| match i {
+        MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
+        _ => None,
+    });
+    assert_eq!(content, Some(500.0));
+}
+
+#[test]
+fn a_text_that_measures_as_before_lays_nothing_out_again() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "9.07".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(
+                6,
+                &[
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let first = c.commit().unwrap();
+    let after = frame_of(&first, 6).unwrap().origin.x;
+    let root = c.nodes[c.root as usize].layout.unwrap();
+    // As wide as before (the tests' engine gives each character one width):
+    // nothing to lay out again, the text mounted again.
+    c.apply(Op::SetText {
+        id: 5,
+        text: "9.14".into(),
+    })
+    .unwrap();
+    c.flush_dirty();
+    assert!(!c.needs_layout && !c.layout.dirty(root));
+    let batch = c.commit().unwrap();
+    assert!(
+        matches!(&batch.items[..], [MountItem::Text { id: 4, text, .. }] if text.text == "9.14")
+    );
+    // Wider: laid out again, and its sibling moves.
+    c.apply(Op::SetText {
+        id: 5,
+        text: "+9.21".into(),
+    })
+    .unwrap();
+    c.flush_dirty();
+    assert!(c.needs_layout && c.layout.dirty(root));
+    let batch = c.commit().unwrap();
+    assert!(frame_of(&batch, 4).is_some());
+    assert!(frame_of(&batch, 6).unwrap().origin.x > after);
+}
+
+#[test]
+fn audio_session_reaches_the_video() {
+    // A lesson's speech plays in silent mode: the prop reaches the
+    // platform's player.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Video,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(crate::NativeProp::AudioSession(
+                    crate::AudioSession::Playback,
+                )),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let items = c.commit().unwrap();
+    let props = items
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::NativeProps {
+                id: 2,
+                props: crate::NativeProps::Video(v),
+            } => Some(v),
+            _ => None,
+        })
+        .expect("the video's props");
+    assert_eq!(props.audio_session, crate::AudioSession::Playback);
 }

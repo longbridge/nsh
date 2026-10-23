@@ -132,6 +132,18 @@ pub(crate) struct Modifiers {
     pub(crate) meta: bool,
 }
 
+impl Modifiers {
+    /// As the core's modifiers (`meta` is its `cmd`).
+    fn core(self) -> nsh_core::keymap::Modifiers {
+        nsh_core::keymap::Modifiers {
+            ctrl: self.ctrl,
+            alt: self.alt,
+            shift: self.shift,
+            cmd: self.meta,
+        }
+    }
+}
+
 /// A mouse, touch or pen event.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PointerEvent {
@@ -780,12 +792,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             let event = nsh_core::ContextMenuEvent {
                 position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
                 page_position: nsh_core::geometry::point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: modifiers.ctrl,
-                    alt: modifiers.alt,
-                    shift: modifiers.shift,
-                    cmd: modifiers.meta,
-                },
+                modifiers: modifiers.core(),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
@@ -1342,7 +1349,7 @@ fn down(
     let press = if native {
         None
     } else {
-        find_press(surface, &hit.view, &views, x, y)
+        find_press(surface, &hit.view, &views, x, y, modifiers, clicks)
     };
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
@@ -1668,6 +1675,8 @@ fn find_press(
     views: &[NshView],
     x: f32,
     y: f32,
+    modifiers: Modifiers,
+    clicks: u32,
 ) -> Option<Press> {
     let generation = surface.input.next_gen.get();
     surface.input.next_gen.set(generation + 1);
@@ -1684,13 +1693,16 @@ fn find_press(
             if let Some(link) = link
                 && has_press(link.events)
             {
-                return Some(Press::new(
-                    target.clone(),
-                    link.node,
-                    link.events,
-                    s.props.long_press_delay,
-                    generation,
-                ));
+                return Some(
+                    Press::new(
+                        target.clone(),
+                        link.node,
+                        link.events,
+                        s.props.long_press_delay,
+                        generation,
+                    )
+                    .clicked(modifiers.core(), clicks),
+                );
             }
         }
     }
@@ -1704,6 +1716,7 @@ fn find_press(
                 s.props.long_press_delay,
                 generation,
             )
+            .clicked(modifiers.core(), clicks)
         })
     })
 }
@@ -1729,6 +1742,8 @@ fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, 
     let event = nsh_core::PressEvent {
         position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
         page_position: nsh_core::geometry::point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
     };
     surface.event(press.node, kind, EventPayload::Press(event));
 }
@@ -2085,12 +2100,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
         let event = nsh_core::HoverEvent {
             position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
             page_position: nsh_core::geometry::point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: modifiers.ctrl,
-                alt: modifiers.alt,
-                shift: modifiers.shift,
-                cmd: modifiers.meta,
-            },
+            modifiers: modifiers.core(),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }

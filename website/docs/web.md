@@ -150,6 +150,7 @@ page and files named after their content.
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
 | `app.<digest>.nshc` | A TSX app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
 | `harden.<digest>.nshc` | With a TSX app, the [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
+| `host.<digest>.js` | The page's host, `nsh.json` `web.host` ([the host's functions](#the-hosts-functions)) |
 | `chunks/<name>.<digest>.nshc` | With a TSX app, what `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
 | `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
@@ -256,6 +257,65 @@ A page that runs code it does not own, as an app embedding NSH does, gives it li
 With `nsh-playground.wasm`, `player.runSource(tsx, name, options)` compiles TSX first, runs it with `run`'s options and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`. The website's playground runs its visitors' code with `{ limits: "" }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
+
+## The host's functions
+
+On the web the page is the app's host: it answers [`nsh/host`](../modules/nsh-host.md)'s `host.call(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it; a throw or a rejection rejects the app's call with the error's message. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
+
+```js
+const player = await createPlayer(container, {
+  wasm: "./nsh.wasm",
+  host: {
+    async call(name, args) {
+      if (name === "user.info") return { name: "Ada" };
+      throw new Error(`no host function ${name}`);
+    },
+  },
+});
+player.hostEvent("theme", { dark: true });
+```
+
+A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts; what it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. The player `createHost` receives sends events from then on:
+
+```json
+{
+  "capabilities": {
+    "host": ["user.*"]
+  },
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
+}
+```
+
+```js
+// host.js
+const post = (url) => (args) =>
+  fetch(url, { method: "POST", body: JSON.stringify(args) }).then((r) => r.json());
+
+// The functions the app may call, by their exact names.
+const functions = new Map([
+  ["user.info", post("https://api.example.com/user/info")],
+  ["user.settings", post("https://api.example.com/user/settings")],
+]);
+
+export async function createHost(player) {
+  addEventListener("online", () => player.hostEvent("online", {}));
+  return {
+    call(name, args) {
+      const f = functions.get(name);
+      if (!f) throw new Error(`no host function ${name}`);
+      return f(args);
+    },
+  };
+}
+```
+
+The host looks each name up as it is in a table of its functions, as above, and keeps its URLs and paths its own: `capabilities.host` grants names by their beginning (`user.*`), so a name the host turned into a path could reach what the grant leaves out. The runtime passes on names of 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:` and `-`, without `..`, and rejects the call of any other name. A prefix grant ends with a separator (`bridge.*`): `bridge*` matches `bridgeAdmin` too.
+
+Events sent before the app runs, such as from `createHost` itself, are delivered in order as soon as it starts, so the app's top-level `host.on` listeners receive them. An event sent before a listener registers is not replayed to it: an app reads the state it starts with through a call (`host.call("user.info")`) and follows its changes through events.
+
+The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
+
+The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh run --target web` runs it on the development page, and `nsh test` runs the same module for every app its tests open, headless or in a browser (`--target web`), so the app and its host are tested together ([Testing](./testing-and-trace.md#the-pages-host)).
 
 ## The browser as a platform
 

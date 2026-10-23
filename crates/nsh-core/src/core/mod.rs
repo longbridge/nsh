@@ -1,5 +1,6 @@
 mod classes;
 mod components;
+mod layout_tree;
 mod list;
 mod measure;
 mod overlay;
@@ -15,10 +16,13 @@ mod views;
 use std::{rc::Rc, sync::Arc};
 
 use slab::Slab;
-use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
+use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
-use self::list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget};
 pub use self::measure::Measurement;
+use self::{
+    layout_tree::LayoutTree,
+    list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget},
+};
 use crate::{
     animation::AnimationProp,
     geometry::{Bounds, Percentage, Point, Points, Size, rect, size_pt},
@@ -726,7 +730,7 @@ pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
     slots: Vec<u32>,
-    layout: TaffyTree<LeafContext<M::Prepared>>,
+    layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
     measure_cache: MeasureCache,
     /// Text blocks whose final layout must be (re)made after layout.
@@ -767,6 +771,11 @@ pub struct Core<M: TextEngine> {
     /// headers under the status bar).
     safe_area: EdgeInsets,
     list_binds: Vec<ListBind>,
+    /// The runtime's lists with overscan cells waiting to bind
+    /// ([`Core::take_paced_list_binds`]), in the order they asked.
+    paced_lists: Vec<NodeId>,
+    /// [`Core::take_paced_list_binds`]'s buffer, reused.
+    paced_scratch: Vec<(u32, u32)>,
     /// The events for JS, in order (the platform's and the core's events,
     /// Rust components' events, calls' results).
     events: Vec<crate::ui::JsEvent>,
@@ -832,6 +841,9 @@ pub struct Core<M: TextEngine> {
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
+    /// Answers the app's picks in place of the platform's picker
+    /// ([`Core::set_picker`]).
+    picker: Option<Arc<dyn crate::picker::PickerBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -858,17 +870,15 @@ impl<M: TextEngine + 'static> Core<M> {
 
 impl<M: TextEngine> Core<M> {
     fn with_engine(text_engine: M, viewport: Size<Points>) -> Self {
-        let mut layout = TaffyTree::with_capacity(256);
-        // The core rounds layouts itself (`rounded`): Taffy's pass walks the
-        // absolutely positioned nodes through lists it can leave stale.
-        layout.disable_rounding();
-        let root_layout = layout.new_leaf(root_style(viewport)).expect("taffy root");
+        let mut layout = LayoutTree::with_capacity(256);
+        let root_layout = layout.new_leaf(root_style(viewport));
         let mut nodes = Slab::with_capacity(256);
         let mut root = Node::new(ROOT_ID, Kind::View);
         root.layout = Some(root_layout);
         // The platform owns the root view.
         root.created = true;
         let root = nodes.insert(root) as Key;
+        layout.set_tag(root_layout, root);
         let mut slots = vec![0; 256];
         slots[ROOT_ID as usize] = root + 1;
         Self {
@@ -883,6 +893,7 @@ impl<M: TextEngine> Core<M> {
             access: Arc::default(),
             denied: Default::default(),
             clipboard: None,
+            picker: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -899,6 +910,8 @@ impl<M: TextEngine> Core<M> {
             header_heights: (Points(44.0), Points(96.0)),
             safe_area: EdgeInsets::default(),
             list_binds: Vec::new(),
+            paced_lists: Vec::new(),
+            paced_scratch: Vec::new(),
             events: Vec::new(),
             cells_scratch: Vec::new(),
             root,
@@ -1057,6 +1070,13 @@ impl<M: TextEngine> Core<M> {
         self.clipboard = backend;
     }
 
+    /// Answers the app's picks (`Picker.pickImages`) with `backend`, an
+    /// embedding app's own picker or a test's files, instead of showing the
+    /// platform's picker (`None`: the platform's, the default).
+    pub fn set_picker(&mut self, backend: Option<Arc<dyn crate::picker::PickerBackend>>) {
+        self.picker = backend;
+    }
+
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
     /// memory, for the core's life.
     pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
@@ -1083,9 +1103,7 @@ impl<M: TextEngine> Core<M> {
         if viewport != self.viewport {
             self.viewport = viewport;
             let root = self.nodes[self.root as usize].layout.expect("root layout");
-            self.layout
-                .set_style(root, root_style(viewport))
-                .expect("taffy root");
+            self.layout.set_style(root, root_style(viewport));
             self.needs_layout = true;
             self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
             self.components_viewport(viewport);
@@ -1135,7 +1153,7 @@ impl<M: TextEngine> Core<M> {
             && *own != Some(size)
         {
             *own = Some(size);
-            self.layout.mark_dirty(layout).expect("taffy dirty");
+            self.layout.mark_dirty(layout);
             self.needs_layout = true;
         }
     }
@@ -1155,9 +1173,56 @@ impl<M: TextEngine> Core<M> {
         Some((scroll.event_throttle_ms, content * z, frame, z))
     }
 
-    /// Moves list render requests produced by the last commit into `out`.
+    /// Moves list render requests produced by the last commit into `out`:
+    /// what must bind before the frame shows (cells whose item moved, cells
+    /// in the viewport and just ahead of it). The rest of the overscan
+    /// waits ([`Core::take_paced_list_binds`]).
     pub fn take_list_binds(&mut self, out: &mut Vec<ListBind>) {
         out.append(&mut self.list_binds);
+    }
+
+    /// Whether lists have overscan cells waiting to bind.
+    pub fn has_paced_list_binds(&self) -> bool {
+        !self.paced_lists.is_empty()
+    }
+
+    /// Hands out up to `cells` of the overscan cells waiting to bind, one
+    /// per list in turn (a nested list is not starved by its parent), each
+    /// list's nearest its leading edge first. What a list assigns now is
+    /// what waits: cells it left or whose items went are never handed out.
+    pub fn take_paced_list_binds(&mut self, cells: usize, out: &mut Vec<ListBind>) {
+        let mut left = cells;
+        let mut lists = std::mem::take(&mut self.paced_lists);
+        let mut one = std::mem::take(&mut self.paced_scratch);
+        let start = out.len();
+        while left > 0 && !lists.is_empty() {
+            lists.retain(|&id| {
+                if left == 0 {
+                    return true;
+                }
+                let Some(list) = self
+                    .key(id)
+                    .ok()
+                    .and_then(|key| self.nodes[key as usize].list.as_mut())
+                else {
+                    return false;
+                };
+                one.clear();
+                left -= list.take_paced(1, &mut one);
+                if let Some((slot, index)) = one.pop() {
+                    match out[start..].iter_mut().find(|b| b.list == id) {
+                        Some(bind) => bind.binds.push((slot, index)),
+                        None => out.push(ListBind {
+                            list: id,
+                            binds: vec![(slot, index)],
+                        }),
+                    }
+                }
+                list.has_paced()
+            });
+        }
+        self.paced_lists = lists;
+        self.paced_scratch = one;
     }
 
     /// Moves what the core hands JS (events it raised, such as
@@ -1197,7 +1262,7 @@ impl<M: TextEngine> Core<M> {
             cx.min_content = None;
             cx.cache = None;
             cx.laid_out = None;
-            self.layout.mark_dirty(layout).expect("taffy dirty");
+            self.layout.mark_dirty(layout);
             self.needs_layout = true;
             if self.nodes[key as usize].kind == Kind::Text {
                 self.queue_text(key);
@@ -1474,6 +1539,9 @@ impl<M: TextEngine> Core<M> {
         let relayout = self.needs_layout;
         if relayout {
             self.needs_layout = false;
+            // Boundaries first: what they give back may dirty what is
+            // around them, laid out next.
+            let relaid = self.relayout_boundaries();
             // Only walk the main tree when it was laid out again (a change
             // inside a list cell leaves it untouched).
             if self.layout_main() {
@@ -1489,6 +1557,9 @@ impl<M: TextEngine> Core<M> {
             // Screens and modals, then list cells (lists may live in them).
             self.layout_roots();
             self.layout_cells();
+            for key in relaid {
+                self.emit_frames(key);
+            }
         }
         self.update_lists(relayout);
         if !self.overlays.is_empty() {
@@ -1588,6 +1659,27 @@ impl<M: TextEngine> Core<M> {
                         }
                         _ => {}
                     }
+                    continue;
+                }
+                // Checked before the grants: a host may put the name in a
+                // path or a URL, where `user.x/../admin` leaves `user.*`.
+                Command::HostCall { id: call, name, .. }
+                    if !crate::access::valid_host_name(name) =>
+                {
+                    let message = format!(
+                        "nsh/host: invalid function name {name:?} ({})",
+                        crate::access::HOST_NAME_CHARS
+                    );
+                    self.answer_host(*call, Err(message.clone()));
+                    self.deny(message);
+                    continue;
+                }
+                Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
+                    let message = format!(
+                        "nsh/host: `{name}` is not granted: add it to capabilities.host in nsh.json"
+                    );
+                    self.answer_host(*call, Err(message.clone()));
+                    self.deny(message);
                     continue;
                 }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
@@ -1707,8 +1799,8 @@ impl<M: TextEngine> Core<M> {
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
-        }
-        .expect("taffy leaf");
+        };
+        self.layout.set_tag(layout, key);
         self.nodes[key as usize].layout = Some(layout);
         self.became(key, style);
         Ok(())
@@ -1789,8 +1881,8 @@ impl<M: TextEngine> Core<M> {
         node.control = fresh.control;
         node.component = fresh.component;
         let layout = node.layout.expect("a view has a layout");
-        let _ = self.layout.set_node_context(layout, leaf_context(kind));
-        let style = self.layout.style(layout).cloned().unwrap_or_default();
+        self.layout.set_node_context(layout, leaf_context(kind));
+        let style = self.layout.style(layout).clone();
         self.became(key, style);
         if let Some((parent, before)) = at {
             let _ = self.insert(parent, id, before);
@@ -1829,7 +1921,7 @@ impl<M: TextEngine> Core<M> {
         if !same {
             *self.text_cx(layout) = TextContext::new(Arc::new(text));
         }
-        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.layout.mark_dirty(layout);
         self.needs_layout = true;
     }
 
@@ -1917,7 +2009,7 @@ impl<M: TextEngine> Core<M> {
         if node.fixed_view {
             style.position = Position::Fixed;
         }
-        self.layout.set_style(layout, style).expect("taffy style");
+        self.layout.set_style(layout, style);
         self.needs_layout = true;
     }
 
@@ -2086,7 +2178,7 @@ impl<M: TextEngine> Core<M> {
             node.base_layout = Some(Box::new(layout));
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            self.layout.set_style(l, layout).expect("taffy style");
+            self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         let mut flags = 0;
@@ -2185,11 +2277,11 @@ impl<M: TextEngine> Core<M> {
             node.view_style = view;
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            let mut layout = self.layout.style(l).expect("taffy style").clone();
+            let mut layout = self.layout.style(l).clone();
             crate::style::swap_sides(&mut layout, &mut view);
             layout.direction = direction;
             self.nodes[key as usize].view_style = view;
-            self.layout.set_style(l, layout).expect("taffy style");
+            self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         self.mark(key, dirty::VIEW);
@@ -2379,7 +2471,7 @@ impl<M: TextEngine> Core<M> {
                         && *natural != size
                     {
                         *natural = size;
-                        self.layout.mark_dirty(layout).expect("taffy dirty");
+                        self.layout.mark_dirty(layout);
                         self.needs_layout = true;
                     }
                 }
@@ -2517,7 +2609,9 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Splice(at, removed, inserted) => {
+                let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
                 if let Some(list) = node.list.as_mut() {
+                    list.loads_at_start = loads_at_start;
                     list.splice(at, removed, inserted);
                 }
             }
@@ -2574,6 +2668,11 @@ impl<M: TextEngine> Core<M> {
             Prop::LoadMoreThreshold(threshold) => {
                 if let Some(list) = node.list.as_mut() {
                     list.end_threshold = threshold.max(0.0);
+                }
+            }
+            Prop::LoadMoreAtStartThreshold(threshold) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.start_threshold = threshold.max(0.0);
                 }
             }
             Prop::CellIndex(index) => {
@@ -3247,8 +3346,7 @@ impl<M: TextEngine> Core<M> {
                     .layout
                     .expect("block parent has layout");
                 self.layout
-                    .insert_child_at_index(parent_layout, index as usize, child_layout)
-                    .expect("taffy insert");
+                    .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
             // An overlay's native view goes to its root view
@@ -3330,9 +3428,7 @@ impl<M: TextEngine> Core<M> {
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
-                self.layout
-                    .remove_child(parent_layout, layout)
-                    .expect("taffy remove");
+                self.layout.remove_child(parent_layout, layout);
             }
             self.needs_layout = true;
             if emit_remove
@@ -3449,7 +3545,7 @@ impl<M: TextEngine> Core<M> {
             self.sticky_scrollers.retain(|&k| k != key);
         }
         if let Some((spacer, _)) = node.list.as_ref().and_then(|l| l.spacer) {
-            self.layout.remove(spacer).expect("taffy remove");
+            self.layout.remove(spacer);
         }
         if node.kind == Kind::Text {
             self.attachment_blocks.retain(|&k| k != key);
@@ -3476,7 +3572,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if let Some(layout) = node.layout {
-            self.layout.remove(layout).expect("taffy remove");
+            self.layout.remove(layout);
         }
         if node.created {
             self.mount.push(MountItem::Delete { id });
@@ -3582,7 +3678,7 @@ impl<M: TextEngine> Core<M> {
         if inline {
             // Block -> span: spans have no layout node or native view.
             if let Some(l) = node.layout.take() {
-                self.layout.remove(l).expect("taffy remove");
+                self.layout.remove(l);
             }
             if node.created {
                 node.created = false;
@@ -3591,11 +3687,9 @@ impl<M: TextEngine> Core<M> {
         } else {
             let style = node.base_layout.as_deref().cloned().unwrap_or_default();
             let cx = LeafContext::Text(TextContext::new(Arc::default()));
-            node.layout = Some(
-                self.layout
-                    .new_leaf_with_context(style, cx)
-                    .expect("taffy leaf"),
-            );
+            let layout = self.layout.new_leaf_with_context(style, cx);
+            self.layout.set_tag(layout, key);
+            node.layout = Some(layout);
             self.mark(key, dirty::TEXT_BUILD);
         }
     }
@@ -4212,8 +4306,23 @@ impl<M: TextEngine> Core<M> {
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
-            self.layout.mark_dirty(layout).expect("taffy dirty");
-            self.needs_layout = true;
+            // A text that measures as before leaves every layout standing:
+            // only the text is mounted again. Attachments are placed by its
+            // final layout, laid out again with the rest.
+            let attachments =
+                !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
+            let engine = &self.text_engine;
+            let cache = &mut self.measure_cache;
+            if attachments
+                || !self
+                    .layout
+                    .measures_as_before(layout, |input, _, cx, style| {
+                        measure_leaf(engine, cache, input, cx, style)
+                    })
+            {
+                self.layout.mark_dirty(layout);
+                self.needs_layout = true;
+            }
         }
         true
     }
@@ -4326,7 +4435,7 @@ impl<M: TextEngine> Core<M> {
                 inserted = true;
             }
             let layout = self.nodes[a as usize].layout.expect("attachment layout");
-            let dirty = self.layout.dirty(layout).unwrap_or(true);
+            let dirty = self.layout.dirty(layout);
             if dirty {
                 self.layout_root(
                     layout,
@@ -4378,7 +4487,7 @@ impl<M: TextEngine> Core<M> {
                 self.key(id).is_ok_and(|k| {
                     self.nodes[k as usize]
                         .layout
-                        .is_some_and(|l| self.layout.dirty(l).unwrap_or(true))
+                        .is_some_and(|l| self.layout.dirty(l))
                 })
             });
             if dirty {
@@ -4394,9 +4503,9 @@ impl<M: TextEngine> Core<M> {
     /// one way or the other on it).
     fn positioning_parent(&self, layout: LayoutId) -> Option<LayoutId> {
         let mut parent = self.layout.parent(layout)?;
-        match self.layout.style(layout).ok()?.position {
+        match self.layout.style(layout).position {
             Position::Absolute => {
-                while !self.layout.style(parent).ok()?.position.is_positioned() {
+                while !self.layout.style(parent).position.is_positioned() {
                     let Some(above) = self.layout.parent(parent) else {
                         break;
                     };
@@ -4449,7 +4558,7 @@ impl<M: TextEngine> Core<M> {
             height: AvailableSpace::Definite(self.viewport.height.0),
         };
         // A clean root has nothing new to lay out, nor frames to emit.
-        let main = self.layout.dirty(root).unwrap_or(true);
+        let main = self.layout.dirty(root);
         if main {
             self.layout_root(root, available);
         }
@@ -4674,13 +4783,13 @@ impl<M: TextEngine> Core<M> {
             ),
         };
         let changed = root.laid_out != Some((size, header));
-        if !changed && !self.layout.dirty(layout).unwrap_or(true) {
+        if !changed && !self.layout.dirty(layout) {
             return;
         }
         if kind == Kind::InputAccessory || (kind == Kind::HeaderItem && size.width > Points::ZERO) {
-            let mut style = self.layout.style(layout).expect("taffy style").clone();
+            let mut style = self.layout.style(layout).clone();
             style.size.width = taffy::Dimension::length(size.width.0);
-            self.layout.set_style(layout, style).expect("taffy style");
+            self.layout.set_style(layout, style);
         } else if kind != Kind::HeaderItem {
             let config_padding = match kind {
                 // Large titles and transparent headers lay the content out
@@ -4710,7 +4819,7 @@ impl<M: TextEngine> Core<M> {
                 };
                 style.padding.top = taffy::LengthPercentage::length(base + config_padding);
             }
-            self.layout.set_style(layout, style).expect("taffy style");
+            self.layout.set_style(layout, style);
         }
         let header_changed = root.laid_out.is_none_or(|(_, h)| h != header);
         self.nodes[key as usize]
@@ -4814,7 +4923,7 @@ impl<M: TextEngine> Core<M> {
                     Some(CellSlot::Item(_)) | None => item_cross,
                     Some(_) => extra_cross,
                 };
-                if resized || self.layout.dirty(cell_layout).unwrap_or(true) {
+                if resized || self.layout.dirty(cell_layout) {
                     self.layout_root(cell_layout, available(c));
                     self.nodes[cell as usize].relaid = true;
                 }
@@ -4829,43 +4938,19 @@ impl<M: TextEngine> Core<M> {
         let cache = &mut self.measure_cache;
         self.layout
             .compute_layout_with_measure(root, available, |input, _, cx, style| {
-                // Taffy resolves style sizes, padding, border, min/max and
-                // aspect ratio; only content is measured here.
-                taffy::compute_leaf_layout(
-                    input,
-                    style,
-                    |_, _| 0.0,
-                    |known, available| match cx {
-                        Some(LeafContext::Text(cx)) => {
-                            let max_width = if cx.text.no_wrap {
-                                None
-                            } else {
-                                known.width.or(match available.width {
-                                    AvailableSpace::Definite(w) => Some(w),
-                                    AvailableSpace::MinContent => {
-                                        Some(min_content_width(engine, cache, cx).0)
-                                    }
-                                    AvailableSpace::MaxContent => None,
-                                })
-                            };
-                            let measured = measure_text(engine, cache, cx, max_width);
-                            taffy::Size {
-                                width: known.width.unwrap_or(measured.width.0),
-                                height: known.height.unwrap_or(measured.height.0),
-                            }
-                        }
-                        Some(LeafContext::Image(Some(natural))) => {
-                            image_size(*natural, known.width, known.height)
-                        }
-                        Some(LeafContext::Native(Some(own))) => taffy::Size {
-                            width: known.width.unwrap_or(own.width.0),
-                            height: known.height.unwrap_or(own.height.0),
-                        },
-                        _ => taffy::Size::ZERO,
-                    },
-                )
-            })
-            .expect("taffy layout");
+                measure_leaf(engine, cache, input, cx, style)
+            });
+    }
+
+    /// Lays out the relayout boundaries a change inside made dirty
+    /// (`LayoutTree::relayout_boundaries`), returning those laid out on
+    /// their own: their subtrees' frames are new.
+    fn relayout_boundaries(&mut self) -> Vec<Key> {
+        let engine = &self.text_engine;
+        let cache = &mut self.measure_cache;
+        self.layout.relayout_boundaries(|input, _, cx, style| {
+            measure_leaf(engine, cache, input, cx, style)
+        })
     }
 
     /// Whether `key` is out of the layout: `display: none` on it or on a
@@ -4875,10 +4960,7 @@ impl<M: TextEngine> Core<M> {
         while k != NO_KEY {
             let n = &self.nodes[k as usize];
             if let Some(layout) = n.layout
-                && self
-                    .layout
-                    .style(layout)
-                    .is_ok_and(|s| s.display == taffy::Display::None)
+                && self.layout.style(layout).display == taffy::Display::None
             {
                 return true;
             }
@@ -5092,11 +5174,7 @@ impl<M: TextEngine> Core<M> {
         if !node.created {
             return;
         }
-        let hidden = hidden
-            || self
-                .layout
-                .style(layout)
-                .is_ok_and(|s| s.display == taffy::Display::None);
+        let hidden = hidden || self.layout.style(layout).display == taffy::Display::None;
         if hidden {
             self.set_frame(key, Bounds::default());
             if self.nodes[key as usize].kind.is_container() {
@@ -5112,11 +5190,7 @@ impl<M: TextEngine> Core<M> {
         }
         let node = &self.nodes[key as usize];
         let unrounded = self.layout.unrounded_layout(layout);
-        let containing = if self
-            .layout
-            .style(layout)
-            .is_ok_and(|s| s.position.is_out_of_flow())
-        {
+        let containing = if self.layout.style(layout).position.is_out_of_flow() {
             self.layout_origin(layout)
         } else {
             origin
@@ -5368,6 +5442,13 @@ impl<M: TextEngine> Core<M> {
                 .filter_map(|s| s.ready().map(|i| (i, s.cell))),
         );
         let extras = list.extras;
+        // An inverted list that loads at its start keeps its rows in
+        // place when scrolled away from it (`keeps_visible_rows`).
+        self.nodes[key as usize]
+            .list
+            .as_mut()
+            .expect("list")
+            .loads_at_start = events.contains(EventKind::LoadMoreAtStart);
         let mut anchor = 0.0;
         for &(index, cell) in &ready {
             if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
@@ -5497,17 +5578,32 @@ impl<M: TextEngine> Core<M> {
             self.commands.push((id, command));
         }
 
+        // The components' own lists bind in the core, at once; the
+        // runtime's pace their overscan.
+        let paced = !self.components.is_virtual_list(id);
         let list = self.nodes[key as usize].list.as_mut().expect("list");
+        list.paced = paced;
         let mut binds = Vec::new();
-        if list.update_window(&mut binds) {
+        let edges = list.update_window(&mut binds);
+        if edges.end {
             self.events.push(crate::ui::JsEvent::Event(
                 id,
                 EventKind::LoadMore,
                 EventPayload::None,
             ));
         }
+        if edges.start && events.contains(EventKind::LoadMoreAtStart) {
+            self.events.push(crate::ui::JsEvent::Event(
+                id,
+                EventKind::LoadMoreAtStart,
+                EventPayload::None,
+            ));
+        }
         if !binds.is_empty() {
             self.list_binds.push(ListBind { list: id, binds });
+        }
+        if list.paced && list.has_paced() && !self.paced_lists.contains(&id) {
+            self.paced_lists.push(id);
         }
         if events.contains(EventKind::ViewableItemsChange) {
             let viewable = list.viewable_items();
@@ -5538,10 +5634,11 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .filter_map(|s| s.ready().map(|i| (i, s.cell))),
         );
-        // Cells left without an item still show their last one. Those
-        // in the render window (the data shrank, the list jumped) would
-        // show through: move them out of sight. Cells the window left
-        // behind while scrolling are out of sight already.
+        // Cells left without an item, or not showing theirs yet (a paced
+        // bind, or one the frame's rounds did not reach), still show their
+        // last one. Those in the render window (the data changed, the list
+        // jumped) would show through: move them out of sight. Cells the
+        // window left behind while scrolling are out of sight already.
         let (window_start, window_end) = list.render_window();
         // In its parent's viewport, the cells start inside the list's
         // border and padding.
@@ -5549,7 +5646,7 @@ impl<M: TextEngine> Core<M> {
         let hidden: Vec<Key> = list
             .slots
             .iter()
-            .filter(|s| s.index.is_none() && s.cell != u32::MAX)
+            .filter(|s| s.ready().is_none() && s.cell != u32::MAX)
             .map(|s| s.cell)
             .collect();
         for cell in hidden {
@@ -5944,6 +6041,50 @@ fn min_content_width<M: TextEngine>(
     width
 }
 
+/// A leaf's layout (`taffy::compute_leaf_layout`): Taffy resolves its
+/// style's sizes, padding, border, minimums, maximums and aspect ratio;
+/// only its content (a text, an image's natural size, a native
+/// component's own size) is measured here.
+fn measure_leaf<M: TextEngine>(
+    engine: &M,
+    cache: &mut MeasureCache,
+    input: taffy::LayoutInput,
+    cx: Option<&mut LeafContext<M::Prepared>>,
+    style: &taffy::Style,
+) -> taffy::LayoutOutput {
+    taffy::compute_leaf_layout(
+        input,
+        style,
+        |_, _| 0.0,
+        |known, available| match cx {
+            Some(LeafContext::Text(cx)) => {
+                let max_width = if cx.text.no_wrap {
+                    None
+                } else {
+                    known.width.or(match available.width {
+                        AvailableSpace::Definite(w) => Some(w),
+                        AvailableSpace::MinContent => Some(min_content_width(engine, cache, cx).0),
+                        AvailableSpace::MaxContent => None,
+                    })
+                };
+                let measured = measure_text(engine, cache, cx, max_width);
+                taffy::Size {
+                    width: known.width.unwrap_or(measured.width.0),
+                    height: known.height.unwrap_or(measured.height.0),
+                }
+            }
+            Some(LeafContext::Image(Some(natural))) => {
+                image_size(*natural, known.width, known.height)
+            }
+            Some(LeafContext::Native(Some(own))) => taffy::Size {
+                width: known.width.unwrap_or(own.width.0),
+                height: known.height.unwrap_or(own.height.0),
+            },
+            _ => taffy::Size::ZERO,
+        },
+    )
+}
+
 fn measure_text<M: TextEngine>(
     engine: &M,
     cache: &mut MeasureCache,
@@ -6046,6 +6187,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::Video(p), P::VideoResizeMode(v)) => p.resize_mode = v,
         (NativeProps::Video(p), P::Controls(v)) => p.controls = v,
         (NativeProps::Video(p), P::ProgressInterval(v)) => p.progress_interval_ms = v.max(16.0),
+        (NativeProps::Video(p), P::AudioSession(v)) => p.audio_session = v,
         _ => {}
     }
 }

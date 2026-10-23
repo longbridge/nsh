@@ -9,13 +9,13 @@ use nsh_core::{
     platform::{Appearance, clipboard},
 };
 use nsh_engine::EngineControl;
-use objc2::{MainThreadOnly, rc::Retained};
+use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained, runtime::Bool};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSData, NSString};
+use objc2_foundation::{NSData, NSDictionary, NSString, NSURL};
 use objc2_ui_kit::{
-    UIAlertAction, UIAlertActionStyle, UIAlertController, UIAlertControllerStyle, UIDevice,
-    UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle, UIUserInterfaceIdiom,
-    UIUserInterfaceStyle, UIView, UIViewController,
+    UIAlertAction, UIAlertActionStyle, UIAlertController, UIAlertControllerStyle, UIApplication,
+    UIDevice, UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle,
+    UIUserInterfaceIdiom, UIUserInterfaceStyle, UIView, UIViewController,
 };
 
 thread_local! {
@@ -107,7 +107,7 @@ pub(crate) fn set_status_bar(config: StatusBarConfig, view: &UIView) {
 }
 
 /// The controller to present over: the top one of `view`'s window.
-fn top_controller(view: &UIView) -> Option<Retained<UIViewController>> {
+pub(crate) fn top_controller(view: &UIView) -> Option<Retained<UIViewController>> {
     let mut top = view.window()?.rootViewController()?;
     while let Some(next) = top.presentedViewController() {
         if next.isBeingDismissed() {
@@ -258,6 +258,40 @@ fn find_label(view: &UIView, text: &str) -> Option<Retained<objc2_ui_kit::UILabe
         return Some(objc2::Message::retain(label));
     }
     view.subviews().iter().find_map(|v| find_label(&v, text))
+}
+
+/// `openUrl`: opens `url` with `UIApplication.open` (the app's own
+/// application, the embedding app's when NSH is embedded) and reports
+/// whether the system opened it ([`EventKind::OpenUrl`] `id`). A scheme no
+/// app handles reports `false`.
+pub(crate) fn open_url(id: u32, url: &str, control: &EngineControl) {
+    let control = control.clone();
+    let answer = move |opened: bool| {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::OpenUrl,
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(id as f64)),
+                ("opened", PayloadValue::Bool(opened)),
+            ]),
+        );
+    };
+    let (Some(mtm), Some(url)) = (
+        MainThreadMarker::new(),
+        NSURL::URLWithString(&NSString::from_str(url)),
+    ) else {
+        return answer(false);
+    };
+    let completion = RcBlock::new(move |opened: Bool| answer(opened.as_bool()));
+    // SAFETY: an empty dictionary is valid options; UIKit calls the
+    // completion on the main thread.
+    unsafe {
+        UIApplication::sharedApplication(mtm).openURL_options_completionHandler(
+            &url,
+            &NSDictionary::new(),
+            Some(&completion),
+        )
+    };
 }
 
 /// `Clipboard.writeText`: puts `text` on the general pasteboard.

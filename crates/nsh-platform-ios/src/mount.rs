@@ -475,6 +475,11 @@ impl Mounter {
         }
     }
 
+    /// The surface's event target.
+    pub(crate) fn target(&self) -> &Retained<EventTarget> {
+        &self.target
+    }
+
     /// Node `id`'s view (`nsh test --target ios`).
     #[cfg(feature = "dev")]
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
@@ -1084,7 +1089,7 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
         }
         false
     }
@@ -1155,6 +1160,15 @@ impl Mounter {
             (Command::Dialog(dialog), native) if id == nsh_core::ROOT_ID => {
                 crate::system::show_dialog(&dialog, native.view(), &self.control);
             }
+            (
+                Command::PickImages {
+                    id: request,
+                    request: asked,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => {
+                crate::picker::pick_images(request, asked, native.view(), &self.control);
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
@@ -1165,6 +1179,7 @@ impl Mounter {
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
@@ -2353,6 +2368,11 @@ impl Mounter {
                     Some(sel!(handleContextMenu:)),
                 );
                 let _: () = objc2::msg_send![&r, setButtonMaskRequired: 1isize << 1];
+                // A finger has no buttons, so the mask does not hold it:
+                // a tap would open the menu and cancel the presses inside.
+                // Only a mouse or a trackpad (UITouchTypeIndirectPointer).
+                let pointer = objc2_foundation::NSNumber::new_isize(3);
+                r.setAllowedTouchTypes(&objc2_foundation::NSArray::from_retained_slice(&[pointer]));
                 r
             }
         });

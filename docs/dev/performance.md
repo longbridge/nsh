@@ -19,6 +19,10 @@ coalescing interval, with the latest coordinates kept independently per view and
   bundling included); applying a hot update takes 0.2–0.5ms on the engine thread.
 - gallery Photos list (`examples/gallery/Bench.tsx`, debug, headless): first frame 653 ops / 224 nodes, ~2.7ms (list bind
   rounds included).
+- Paced list binds (`Bench.tsx` scrolled 3000 pt, release, headless, three runs): the first commit binds the viewport,
+  786 ops / 641 mount items in ~1.1ms (1226 / 1029 in ~1.5ms when the whole overscan bound with it); the overscan
+  follows in commits of ~165 ops / 138 items. 43 commits and 1923 items in all (40 and 1943 before), commit median
+  ~0.26–0.31ms either way.
 - Photos scrolling (release): a frame that rebinds one row is 4 ops / 4 mount items; frames that reveal no new row call no JS and produce
   no batch. `list_bench` runs at ~9µs per frame back to back (JS ~4µs; ~30µs / JS ~20µs before reactivity went native) and
   ~50µs with caches flushed between frames, but ~60–150µs after the thread sleeps 10ms. The difference is the CPU clocking down while the thread sleeps (Apple CLPC), not the code path; neither QoS (the engine
@@ -78,6 +82,21 @@ coalescing interval, with the latest coordinates kept independently per view and
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
+- High-frequency updates (`cargo test --release -p nsh-core bench_high_frequency -- --ignored --nocapture`: `Board`, a quote board of
+  80 rows of a mark and five cells, 961 views, the first cells of 40 rows changing together on each press):
+  ~4.4µs per event, then per commit ~140µs when the cells have a size of their own and ~180µs when they take their text's, 40 mount
+  items either way. Nearly all of the commit is Taffy laying the dirty paths out again (~116µs of it, measured once by timing the
+  commit's phases): a changed text dirties every view up to the root, and the flex algorithm of the root and of each changed row runs
+  again over all their children, fixed cells included (nothing stops the dirtying at a view whose size its content cannot change); the
+  frame walk is ~10µs, the texts (the tests' engine) under 2µs. This is the baseline relayout boundaries are measured against.
+  With relayout boundaries (`LayoutTree::is_boundary`): ~36µs per commit for the fixed cells, each changed cell laid out on its own
+  and nothing above it; content-sized cells are not boundaries (their size is their text's) and stay at ~180µs.
+  With texts that measure as before (`LayoutTree::measures_as_before`: a changed text measured again for every input the layout asked
+  of it; the same answers, and nothing is laid out again): ~20µs for the fixed cells and ~15µs for content-sized cells whose values
+  keep their widths (the tests' text engine gives every character one width, as tabular figures do), against ~185µs before; when
+  every value changes width (a sign coming and going) nothing measures as before and the commit is ~192µs, against ~184µs (the
+  answers recorded and measured again). The component benchmark's update of 200 titles: core 0.19ms (Rust Button) and 0.09ms
+  (TSX), against 0.43ms and 0.35ms.
 - Rust components' handles (`handle_bench`: `cargo test --release -p nsh-engine --test engine bench_handles --
   --ignored --nocapture --test-threads=1`, 1000 calls in one press, the minimum of 200 presses, per call; steady
   state of five runs). In brackets, when `AnimatedValue` was an `Rc` of its node and `ElementRef` an `Rc` of its
@@ -204,6 +223,25 @@ draw a panel.
   noise (four runs each, ABBA, presented frames by screen capture): Stocks idle window updates 75–96 /s both, `main`
   p50 ~1.9 → ~1.7 ms, CPU ~38–40% both; a test canvas (524×340: a 400-point area and line, 400 bars, a pulsing ring,
   a moving square) presented 86–117 fps before and 92–119 after, `main` p50 ~1.2 → ~1.0 ms, CPU ~17% both.
+
+  List binds while scrolling (release host, 120 Hz MacBook Pro; the list scrolled by chained native
+  `scrollToOffset({ animated: true })` every 300 ms, no input; each display link refresh logged with its link
+  timestamp and main-thread time; three runs each, refreshes missed = link gaps of two periods or more). Before =
+  four cells per turn on `Wake`; after = the viewport bound at once, the overscan paced per frame, one item per view
+  part per merged frame, batches applied at frame start (4 ms), the cursor set only when it changes:
+
+  | Scenario | Before: fps, missed, main mean / p99 / max | After: fps, missed, main mean / p99 / max |
+  |---|---|---|
+  | 1100 rows of 76 pt, 390×844, 6000 pt/s | 119.2–119.9, 1–12, 0.31–0.32 / 1.2 / 1.9–2.0 ms | 118.5–119.2, 12–22, 0.25–0.26 / 1.0 / 1.9–4.0 ms |
+  | The same at 16700 pt/s | 119.0–120.0, 0–6, 0.51–0.52 / 1.9–2.0 / 3.2–6.3 ms | 119.7–120.0, 0–2, 0.39–0.40 / 1.7 / 3.1–4.7 ms |
+  | Photos grid, 1200×800, 6000 pt/s | 118.1–120.0, 0–53, 0.30–0.34 / 0.9–1.0 / 8.5–11.3 ms | 119.8–120.0, 0–6, 0.44–0.48 / 2.2–2.5 / 4.2–5.4 ms |
+
+  The rows' "after" runs were taken before the cursor change. Where the mouse was is not controlled: hover and cursor
+  work happen only with it over the window, which may be why the grid's mean rose. The missed refreshes do not follow the main thread's time (a run missing 18% had a 0.7 ms mean): the machine was loaded
+  (load average 8–29 from other processes), and one excluded run had ~100 ms stalls every 5 s with the main thread
+  idle. Frames over a refresh were the Photos grid's: setting the cursor as content moved under the mouse, which
+  renders its image again when the pointer is customized in Accessibility settings (45% of the main thread's
+  samples). Without that, a single batch of the first tiles a scroll shows costs 4–5 ms.
 
 - GPUI backend (`nsh-platform-gpui`; release with thin LTO, rootful Xwayland at scale 2, a focused 285×315 pt window at
   60 Hz, against the GTK backend (`GSK_RENDERER=ngl`) on the same display and bundle). `draw` is the surface element's

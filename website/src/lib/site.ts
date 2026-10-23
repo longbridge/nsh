@@ -4,7 +4,7 @@ export const SITE_URL = 'https://nsh.dev';
 export const SITE_TITLE = 'Native Shell';
 
 export const SITE_DESCRIPTION =
-  'Native Shell: AI-generated UI, native in your app, on every platform. Write apps in Rust or TSX for iOS, Android, macOS, Windows, Linux, GPUI and the web, drawn with each platform’s own UI, and deliver signed TSX modules to them at run time.';
+  'Native Shell is a Rust-first native UI framework: build one app for iOS, Android, macOS, Windows, Linux and the web, with each platform’s own UI and interaction.';
 
 export const REPO_URL = 'https://github.com/longbridge/nsh';
 

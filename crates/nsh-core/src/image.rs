@@ -52,6 +52,13 @@ impl ImageData {
     }
 }
 
+impl Default for ImageData {
+    /// No bytes.
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
 impl Deref for ImageData {
     type Target = [u8];
 

@@ -60,6 +60,8 @@ fn config(app: App) -> EngineConfig {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     }
 }
 

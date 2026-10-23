@@ -350,6 +350,21 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 
 `scroll_to_anchor` and `open_web` (`scrollToAnchor` and `nav` in TSX) stand for the app's own functions.
 
+With `links="open"`, a press on a link to another site or app (a URL with a scheme: `https:`, `mailto:`, ...) also
+opens it outside the app with [`openUrl`](../modules/nsh-device.md#openurl), under the app's `openUrl` capability,
+after `onLinkPress` reported it; anchors in the document (`#…`) are only reported. The default, `"report"`, opens
+nothing.
+
+```rust tabs
+use nsh_base::{TextViewLinks, text_view};
+
+text_view().markdown(doc).links(TextViewLinks::Open)
+```
+
+```tsx tabs
+<TextView markdown={doc} links="open" />
+```
+
 ## Render functions
 
 Render functions put the app's own content into the document. Each one takes the value of a part and returns its content (JSX in TSX, an element in Rust); a
@@ -773,6 +788,7 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 | `classes` | `.classes(..)` | `TextViewClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `TextViewStyles` | `{}` | Inline styles by part (each a `StyleProp<TextStyle>`), over the classes. |
 | `selectable` | `.selectable(..)` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([SelectionArea](./selection-area.md)). |
+| `links` | `.links(..)` | `"report" \| "open"` | `"report"` | What a press on a link does: reports it (`onLinkPress`), and with `"open"` also opens a link to another site or app outside the app ([Links](#links)). |
 | `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
 | `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
 | `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |

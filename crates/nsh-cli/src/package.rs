@@ -105,6 +105,25 @@ pub(crate) struct AppConfig {
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde::de::IgnoredAny>,
+    /// What the web's packages add to the page (`web.rs`).
+    #[serde(default)]
+    pub(crate) web: WebConfig,
+}
+
+/// `nsh.json` `"web"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WebConfig {
+    /// The page's host: a JS module, relative to `nsh.json`, whose
+    /// `createHost(player)` returns what `nsh/host` calls reach
+    /// (`createPlayer`'s `host`).
+    pub(crate) host: Option<PathBuf>,
+    /// The hosts the page's host module reaches (patterns, as
+    /// `capabilities.network.hosts`): the page's `connect-src` allows them
+    /// too, while the app's own requests stay checked against its
+    /// `capabilities`.
+    #[serde(default)]
+    pub(crate) connect: Vec<String>,
 }
 
 /// Options of `nsh package`.
@@ -135,7 +154,26 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let mut config: AppConfig =
         serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
     config.icon = config.icon.map(|icon| dir.join(icon));
+    config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
+}
+
+/// `nsh.json` `web.host` (`read_config` made it absolute), canonical: the
+/// file must be inside the app's directory, symbolic links resolved, as the
+/// page ships it as it is.
+pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+    let dir = dunce::canonicalize(entry.parent().unwrap_or(Path::new(".")))
+        .with_context(|| format!("the app's directory of {}", entry.display()))?;
+    let module = dunce::canonicalize(host)
+        .with_context(|| format!("nsh.json web.host {}", host.display()))?;
+    if !module.starts_with(&dir) {
+        bail!(
+            "nsh.json web.host {} must be inside the app's directory {}",
+            host.display(),
+            dir.display()
+        );
+    }
+    Ok(module)
 }
 
 /// The app's display name and id: from the config, else the entry's
@@ -985,6 +1023,44 @@ mod tests {
             release_name_and_id(entry, &config(Some("com.acme.orders"))).unwrap(),
             ("Orders".to_owned(), "com.acme.orders".to_owned())
         );
+    }
+
+    #[test]
+    fn the_web_host_module_stays_in_the_app_directory() {
+        let root = std::env::temp_dir().join(format!("nsh-web-host-{}", std::process::id()));
+        let app = root.join("app");
+        fs::create_dir_all(app.join("web")).unwrap();
+        fs::write(app.join("web/host.js"), "").unwrap();
+        fs::write(root.join("outside.js"), "").unwrap();
+        let entry = app.join("App.tsx");
+        let config = |host: &str| {
+            fs::write(
+                app.join("nsh.json"),
+                serde_json::json!({ "web": { "host": host } }).to_string(),
+            )
+            .unwrap();
+            read_config(&entry).unwrap().web.host.unwrap()
+        };
+        let inside = web_host_module(&entry, &config("web/host.js")).unwrap();
+        assert_eq!(
+            inside,
+            dunce::canonicalize(app.join("web/host.js")).unwrap()
+        );
+        assert!(web_host_module(&entry, &config("./web/../web/host.js")).is_ok());
+        let outside = root.join("outside.js");
+        let refused = [config("../outside.js"), config(outside.to_str().unwrap())];
+        #[cfg(unix)]
+        let refused = {
+            std::os::unix::fs::symlink(&outside, app.join("link.js")).unwrap();
+            let mut refused = refused.to_vec();
+            refused.push(config("link.js"));
+            refused
+        };
+        for host in refused {
+            let error = web_host_module(&entry, &host).unwrap_err().to_string();
+            assert!(error.contains("inside the app's directory"), "{error}");
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     /// App icons are drawn at 1024 pixels, which `sips` alone cannot

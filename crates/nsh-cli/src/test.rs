@@ -39,6 +39,10 @@ const IDLE_MS: u32 = 1200;
 /// Runs the tests `path` names, of the app whose entry is `entry`: a test
 /// file, the test files in a directory (an app's), or an app's entry with
 /// the steps standard input gives.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the flags of `nsh test`, one each"
+)]
 pub(crate) fn test(
     path: &Path,
     entry: &Path,
@@ -47,6 +51,7 @@ pub(crate) fn test(
     junit: Option<&Path>,
     target: Option<crate::run::Target>,
     browser: Option<&Path>,
+    web_host: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -79,6 +84,25 @@ pub(crate) fn test(
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
+    if web_host.is_some() && target.is_some() {
+        bail!(
+            "--web-host goes with headless runs: --target web takes nsh.json's web.host, the other targets have no page host"
+        );
+    }
+    // The page's host of headless runs: `--web-host`, else nsh.json's.
+    // Absolute: an app's headless runner opens it too.
+    let page_host = match web_host {
+        Some(module) => Some(
+            dunce::canonicalize(&module)
+                .with_context(|| format!("the web host module {}", ui::path(&module)))?,
+        ),
+        None if target.is_none() => crate::package::read_config(entry)?
+            .web
+            .host
+            .map(|host| crate::package::web_host_module(entry, &host))
+            .transpose()?,
+        None => None,
+    };
     let host = target
         .map(|target| crate::test_host::starter(target, browser, &work_dir))
         .transpose()?;
@@ -94,6 +118,7 @@ pub(crate) fn test(
                 filter,
                 trace,
                 verbose: ui::verbose(),
+                page_host,
             };
             in_runner(&app, &request, &shown, &mut tally)?;
         }
@@ -105,6 +130,7 @@ pub(crate) fn test(
                 filter,
                 trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
                 host,
+                page_host,
             };
             for file in &files {
                 let shown = shown(file);

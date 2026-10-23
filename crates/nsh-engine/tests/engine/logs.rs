@@ -53,6 +53,17 @@ pub(crate) fn containing(word: &str) -> Vec<String> {
         .collect()
 }
 
+/// The lines of every level logged so far that contain `word`.
+pub(crate) fn lines_containing(word: &str) -> Vec<String> {
+    LINES
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, l)| l.contains(word))
+        .map(|(_, l)| l.clone())
+        .collect()
+}
+
 /// The errors that contain `word`, once there is one (or after 5 s).
 pub(crate) fn wait_for(word: &str) -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(5);

@@ -5077,6 +5077,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "httpdate",
+ "imagesize 0.15.0",
  "libc",
  "log",
  "nsh-macros",

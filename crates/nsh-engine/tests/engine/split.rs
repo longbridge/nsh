@@ -108,6 +108,8 @@ fn config(bundle: Bundle) -> EngineConfig {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     }
 }
 

@@ -112,6 +112,11 @@ frame id:inner2 8 8 374 20
 expect Plum
 absent No plums
 expect Nothing here
+# A viewport of overscan below the visible rows (100 pt): bound after the
+# first frame, never further.
+expect Long 0
+expect Long 4
+absent Long 6
 tap id:add
 expect 4. Item 4
 expect 3. Cherry
