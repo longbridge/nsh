@@ -452,6 +452,44 @@ function Swatch() {
 
 请在组件函数体中（或在组件创建期间运行的代码中）读取 context，而不是在事件处理函数或定时器中读取：那里没有可供查找的组件。Rust 组件也是这样取得应用主题的：`nsh_base` 的 `theme()`（[主题](./rust.md#主题)）。
 
+## 错误边界
+
+错误边界把视图中某一部分的失败限制在这一部分之内。它下面的代码在渲染或运行时抛出异常（Rust 中为 panic），例如组件函数体、绑定、effect 或事件处理函数，失败的部分会被移除，错误边界在原处显示它的 fallback；视图的其余部分保持不变。Rust 中使用 `catch_error(view, fallback)`；TSX 中使用 `nsh` 的 `<ErrorBoundary fallback>`。fallback 得到错误（TSX 中就是抛出的值本身，通常是一个 `Error`）和一个重新渲染视图的 reset：
+
+```rust tabs
+fn profile_card(user: Signal<Option<User>>) -> impl IntoElement {
+    catch_error(
+        move || profile(user),
+        |error, reset| {
+            view()
+                .child(text(format!("Something went wrong: {error}")))
+                .child(text("Try again").on_press(move || reset.reset()))
+        },
+    )
+}
+```
+
+```tsx tabs
+import { ErrorBoundary, Text, View } from "nsh";
+
+function ProfileCard(props: { user: User | undefined }) {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <View>
+          <Text>Something went wrong: {error instanceof Error ? error.message : String(error)}</Text>
+          <Text onPress={reset}>Try again</Text>
+        </View>
+      )}
+    >
+      <Profile user={props.user} />
+    </ErrorBoundary>
+  );
+}
+```
+
+失败交给发生处上方最近的错误边界，fallback 中的失败交给再上一层的错误边界。没有错误边界时，失败作为未捕获的错误报告（开发时的错误浮层、日志）。TSX 中不带参数的 `fallback` 按原样显示：`fallback={<Text>Unavailable</Text>}`。
+
 ## 什么会运行，何时运行
 
 | 你写的 | 何时运行 | 何时再次运行 |

@@ -8,11 +8,12 @@ name: Release
 #   platform and, once all of them have built, creates a draft release with
 #   their archives; publish it from the releases page.
 # - Running it by hand without a tag builds the archives only (workflow
-#   artifacts): a dry run before tagging. With a tag it releases that tag.
-# - Pull requests that change this workflow or how xtask builds the
-#   distribution build the archives only, so a broken distribution shows
-#   before a release (xtask's other tasks are checked by the Linux and
-#   Windows workflows).
+#   artifacts): a dry run before tagging, and the check of a change to this
+#   workflow or to how xtask builds the distribution. With a tag it releases
+#   that tag.
+#
+# Pull requests and the merge queue never run it: its three builds are CI's
+# longest and held the runners every queued pull request waited for.
 #
 # Asset names carry no version (`nsh-macos-arm64.tar.gz`, each with a
 # `.sha256`), so `releases/latest/download/<asset>` always resolves: the
@@ -24,14 +25,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
-      - ".github/packages/nsh.json"
-      - "crates/xtask/Cargo.toml"
-      - "crates/xtask/src/dist.rs"
-      - "crates/xtask/src/android.rs"
-      - "crates/xtask/src/ios.rs"
   workflow_dispatch:
     inputs:
       tag:
@@ -44,7 +37,7 @@ permissions:
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -52,11 +45,6 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
-  # A pull request only checks that the distribution builds: without
-  # whole-program optimization it builds several times faster. Releases
-  # and runs by hand build it as shipped.
-  CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'pull_request' && 'false' || 'fat' }}
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'pull_request' && '16' || '1' }}
   TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:

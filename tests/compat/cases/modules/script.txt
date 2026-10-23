@@ -54,6 +54,17 @@ expect Calls: 5 promises
 wait 300
 expect Failed: none
 covers [nsh/clipboard] Clipboard
+# mod-picker
+tap id:case-mod-picker
+# options out of range throw a RangeError in the call; a pick is a promise,
+# which no picker answers there.
+expect Picked: not picked
+tap id:pick
+expect Thrown: RangeError
+expect Picked: pending
+wait 300
+expect Picked: pending
+covers [nsh/picker] Picker
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup
@@ -91,12 +102,27 @@ expect Scheme: dark
 absent Scheme: light
 tap id:system
 expect Scheme: light
+# openUrl: a promise for a web page, a TypeError for a `javascript:` URL.
+expect Open: not opened
+tap id:open
+expect Open: function, refused TypeError
+covers [nsh/device] openUrl
 covers [nsh/device] platform
 covers [nsh/device] pixelRatio
 covers [nsh/device] colorScheme
 covers [nsh/device] setColorScheme
 covers [nsh/device] fontScale
 covers [nsh/device] windowSize
+# mod-host-channel
+tap id:case-mod-host-channel
+# no embedding app: no parameters, posts go nowhere and calls fail at once.
+expect Params: 0 object
+expect Calls: not called
+expect Call failed: none
+tap id:call
+expect Calls: function, post done
+expect Call failed: nsh/host: this platform has no host
+covers [nsh/host] host
 # mod-ios
 tap id:case-mod-ios
 # the accessory view's content exists, and takes no room in its parent.
@@ -131,3 +157,14 @@ expect Storage removed: a=1 missing=null
 tap id:clear
 expect Storage cleared: none missing=null
 covers [nsh/storage] Storage
+# mod-host
+tap id:case-mod-host
+# no host on this platform: the call rejects at once; the root's events
+# reach the listener.
+expect Host available: false
+expect Host call: not called
+tap id:call
+expect Host call: rejected nsh/host: this platform has no host
+event id:heard onHost type=event event=tick payload=1
+expect Host heard: [1]
+covers [nsh/host] host

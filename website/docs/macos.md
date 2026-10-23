@@ -156,9 +156,18 @@ closes the retained window, stops the engine and returns from `run_app`.
 `nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
 
 
+`AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
+[images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
+cache directory and 256 MiB of images by default).
+
 `AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
 text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
 follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
+`AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
+in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
+(`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust). `set_ui_sets(sets)` sets the UI sets every

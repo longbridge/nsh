@@ -205,6 +205,16 @@ const NSH: &[Item] = &[
         ),
     ),
     (
+        "ErrorBoundary",
+        Export::Function(dom::error_boundary, 1),
+        Ts::function(
+            "Its children, or `fallback` once something under them threw (a component's body, a\nbinding, an effect, a listener): what failed goes, and `fallback(error, reset)` shows the\nthrown value; `reset()` renders the children again. A fallback that takes no arguments\nis shown as is. What throws in the fallback goes to the boundary above.",
+            &[
+                "(props: { fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element); children?: JSX.Element }): JSX.Element",
+            ],
+        ),
+    ),
+    (
         "View",
         Export::Value(|cx| dom::host_component(cx, "view", true)),
         Ts::function(
@@ -436,6 +446,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: "",
     },
     NativeModule {
+        name: "nsh/host",
+        exports: platform_modules::HOST_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(crate::host_channel::TYPES),
+    },
+    NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
         also: &[],
@@ -532,7 +549,13 @@ impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
         let host = registries.len();
-        registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
+        registries.extend(
+            ui_sets
+                .iter()
+                .flat_map(Registry::sets)
+                .filter(|r| r.specifier().is_some())
+                .cloned(),
+        );
         ModuleTable {
             registries,
             host,

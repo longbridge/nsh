@@ -1,7 +1,9 @@
 // The Controls demo: `nsh/base`'s switches in a settings list (one that
 // needs another on), checkboxes under a "select all" that shows a partial
 // selection, a plan picker of radios with a disabled plan, tabs that switch
-// a section. Every row is the control, its label included. Also the
+// a section, collapsible sections whose content is kept while collapsed,
+// progress bars of a transfer the app drives and of one of unknown size.
+// Every row is the control, its label included. Also the
 // gallery's own `Toggle` (a `Switch`) and `Segmented` (`Tabs`).
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
@@ -84,6 +86,51 @@ test("tabs show the section the app selects, and a disabled tab takes no press",
   await app.waitFor("Tab: Overview");
   await app.press("Overview");
   expect(app.texts()).toContain("Visitors");
+});
+
+test("a collapsible shows its content while the app has it open, and keeps it while collapsed", async () => {
+  // Both start collapsed.
+  expect(app.texts()).not.toContain("Apps");
+  expect(app.texts()).not.toContain("Keep originals");
+  await app.press("role:button[/^Storage/]");
+  await app.waitFor("Storage: expanded");
+  expect(app.texts()).toContain("Apps");
+  expect(app.texts()).toContain("54 GB");
+  await app.press("role:button[/^Storage/]");
+  await app.waitFor("Storage: collapsed");
+  expect(app.texts()).not.toContain("Apps");
+  // What is inside keeps its state from one opening to the next.
+  await app.press("role:button[/^Advanced/]");
+  await app.waitFor("Advanced: expanded");
+  await app.press("Keep originals");
+  await app.waitFor("Keep originals: on");
+  await app.press("role:button[/^Advanced/]");
+  await app.waitFor("Advanced: collapsed");
+  expect(app.texts()).not.toContain("Keep originals");
+  await app.press("role:button[/^Advanced/]");
+  await app.waitFor("Advanced: expanded");
+  expect(app.texts()).toContain("Edits are saved as copies");
+});
+
+test("a progress bar shows the transfer's value the app drives, and one of unknown size has none", async () => {
+  expect(app.count("role:progressbar")).toBe(2);
+  expect(app.texts()).toContain("0%");
+  expect(app.texts()).toContain("—");
+  expect(app.enabled("Reset")).toBe(false);
+  await app.press("Send");
+  await app.waitFor("Upload: started");
+  await app.wait(900);
+  expect(app.texts()).toContain("30%");
+  await app.press("Pause");
+  await app.waitFor("Upload: paused");
+  await app.press("Send");
+  await app.wait(3000);
+  await app.waitFor("Upload: done");
+  expect(app.texts()).toContain("100%");
+  expect(app.texts()).toContain("24 photos sent");
+  await app.press("Reset");
+  await app.waitFor("Upload: reset");
+  expect(app.texts()).toContain("0%");
 });
 
 test("the gallery's segmented control is a tab list", async () => {

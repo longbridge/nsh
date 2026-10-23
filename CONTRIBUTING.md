@@ -99,6 +99,12 @@ docs: Describe the capability checks of fetch redirects
 
 ## Development and Testing
 
+### Merge queue
+
+Pull requests targeting `main` use GitHub's merge queue. Once the required checks pass, select **Merge when
+ready** to join the queue. The queue checks the combined commit against the current `main` and preceding
+entries, then squash merges it. A failing check removes the entry; fix the failure and enqueue it again.
+
 ### System dependencies
 
 - Rust through rustup: `rust-toolchain.toml` selects stable and installs the iOS and Android targets. A nightly

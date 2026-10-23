@@ -2,6 +2,7 @@ package com.longbridge.nsh;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -28,6 +29,7 @@ final class ScrollBox extends FrameLayout implements Node {
     final Mounter mounter;
     final int id;
     final Decor decor = new Decor();
+    /** The events it listens to, kinds below 64 ({@link Mounter#wants} has all). */
     long events;
     boolean horizontal;
     int dismissMode; // 0 none, 1 on drag, 2 interactive
@@ -63,6 +65,14 @@ final class ScrollBox extends FrameLayout implements Node {
     /** This touch only dismisses the keyboard (`keyboardShouldPersistTaps`); -1: it does not. */
     private int tapMode = -1;
     private boolean swallowing;
+    /**
+     * Frames the platform scroll view drew. It draws again each frame while
+     * its overscroll effect (Android 12's stretch) relaxes, which moves no
+     * view: the test agent counts the frames as movement
+     * ({@link TestAgent#animating}), since a touch caught then only stops
+     * the stretch, and presses nothing.
+     */
+    int frames;
 
     /** The scrolled content, sized by the core (`ScrollContent`). */
     static final class Content extends Box {
@@ -341,6 +351,12 @@ final class ScrollBox extends FrameLayout implements Node {
         public void fling(int velocity) {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
         }
+
+        @Override
+        public void draw(Canvas canvas) {
+            super.draw(canvas);
+            frames++;
+        }
     }
 
     private final class HScroll extends HorizontalScrollView {
@@ -366,6 +382,12 @@ final class ScrollBox extends FrameLayout implements Node {
         @Override
         public void fling(int velocity) {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            super.draw(canvas);
+            frames++;
         }
     }
 

@@ -25,10 +25,10 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 
 ```
 crates/
-  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
+  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
-                       resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
+                       resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
                        overlays (`overlay.rs`: anchors and their placement; `core/overlay.rs`: shown in the root view, outside presses,
                        Escape / back; docs/dev/elements.md "Overlays"); the native animation graph (`animation/`: value / interpolate /
                        math nodes, timing / spring / decay drivers; the platforms evaluate it every frame; `Animator`: its
@@ -45,8 +45,9 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, safe areas, the keyboard, the status
-                       bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md),
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Collapsible`, `Progress`, safe areas, the keyboard, the status
+                       bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), `ResizablePanelGroup` / `ResizablePanel` (`resizable/`), `DockArea` (a dockable workspace: splits, tab groups and edge docks whose layout is
+                       data, `dock/`, docs/dev/dock.md),
                        the popups on the core's overlays (`Popover`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
                        `Tooltip`, `Sheet`; presented per device: docs/dev/components.md "Popups"), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
                        the theme (`theme.rs`: shadcn/ui's tokens and their defaults, `neutral`, read from shadcn's `cssVars` theme
@@ -56,6 +57,7 @@ crates/
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
   nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
+                       app's side of the channel with the embedding app (`host_channel.rs`: `nsh/host`), the
                        renderer of compiled JSX (`dom.rs`, `nsh:rt`), JS's reactive graph (`reactive.rs`: `nsh-core`'s
                        graph with JS values: signals, memos, effects, owners, context), `resource` (`resource.rs`), Rust components' and modules' JS face (`components.rs`), navigation,
                        lists, canvas, animation (`navigation.rs`, `list.rs`, `canvas.rs`, `animated.rs`), touches and the
@@ -80,7 +82,8 @@ crates/
   nsh-testing/         Headless tests: the driver (`headless/`: an engine without a window, display frames, a model of the views,
                        the steps, stand-in network and storage, fetch on ureq; no QuickJS, for Rust apps' `cargo test`); feature
                        `js`: `nsh test`'s side, the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
-                       engine of its own and each app it opens on a headless one (`run.rs`) or a real host (`driver.rs`, `--target`),
+                       engine of its own and each app it opens on a headless one (`run.rs`; the web page's host module,
+                       nsh.json `web.host`, answers `nsh/host` there: `page_host.rs`) or a real host (`driver.rs`, `--target`),
                        apps' headless runners (`runner.rs`); feature `bundle`: building entries in process (TSX entries of
                        `cargo test`, the CLI's compiler); feature `agent`: a real host's test agent (`agent.rs`, the dev hosts'),
                        which takes the steps with the platform's input
@@ -149,7 +152,8 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
-                      with a test), embedding samples
+                      with a test; host-echo: an app calling its web page's host (`nsh/host`, nsh.json `web.host`), the host
+                      module and their tests), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
                       `cargo run -p example-embed-gpui`) and the app they run (embedded: uses a native component the samples
                       register); bench: component benchmarks
@@ -188,6 +192,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::ui::de
 | anything platform-specific | `docs/dev/pitfalls.md` (verified constraints, by area) |
 | Rust components (`nsh-base`'s, apps' UI sets) | `docs/dev/components.md` |
 | `TextView`: Markdown / HTML documents, their parsers, parts and extensions | `docs/dev/text-view.md` |
+| `DockArea` and `ResizablePanelGroup`: the layout data, render keys, drag and drop, compact presentation | `docs/dev/dock.md` |
 | Rust classes TS uses (`#[class]`), module functions' kinds, callbacks, how calls and Rust components' props cross (typed) | `docs/dev/rust-classes.md`, `docs/dev/components.md` |
 
 Keep them current: a change that alters documented behavior updates its page (or the module doc) in the same commit,
@@ -310,8 +315,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
-  (`cargo xtask compat`; `docs/dev/compatibility.md`).
+  change until 0.3.0, the first release recorded. A new API lands with its test, a case in
+  `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens, shadcn/ui's, are the app's to draw with; the one
   exception is `TextView`'s default reading typography, its colors the theme's shadcn tokens (alerts GitHub's alert
@@ -447,10 +452,38 @@ It runs on every pull request: its `check` job is the status check main requires
 reports `check` for (one touching only `crates/gpui`) can still merge. The Compat workflow's `compat` job is required
 too, so it also runs on every pull request, and its `dorny/paths-filter` step (held to the graph by `paths.py` the same
 way) decides whether it builds and checks or passes at once.
+Every pull-request workflow also handles `merge_group: checks_requested`, so GitHub's merge queue tests the
+combined commit. Queue runs execute the full workflow without PR path filters; Compat always builds on a queue
+run. Website deployment runs only on pushes and manual dispatches. `.github/ci/paths.py` checks the queue
+trigger alongside the dependency paths.
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
 `files` in `paths.py`.
+
+## Parallel agents
+
+Subagents and teammates never run `cargo build`, `cargo test`, `cargo clippy`, `cargo xtask` or `nsh test` (several
+at once overload the machine); at most an occasional `cargo check -p <crate>` for compile errors. They write the
+code and its tests and report which tests to run; the main session runs builds and tests itself, one at a time.
+
+## Review and parallel workspaces
+
+For PR reviews and work involving multiple agents, **consider LayerFS before creating a Git worktree**. When
+isolated workspaces are needed and the workload fits the available Linux environment, prefer separate LayerFS
+branches and mounted Workspaces from the same committed input. Give each agent its own Workspace; reuse a warm
+snapshot only when its OS, architecture, toolchain and dependencies match the task.
+
+Reuse an existing prepared LayerFS deployment first. Start with `./scripts/layerfs status` and follow
+`docs/dev/layerfs.md`; use `./scripts/layerfs prepare` when setup is needed. The script's `prepare`, `smoke` and
+`status` commands prepare and validate the deployment. Create agent
+branches and mount Workspaces through the pinned LayerFS SDK described in that guide; a smoke run is a validation
+trial, not an agent's development Workspace. Keep source changes in Git and submit them through pull requests.
+
+Use a Git worktree when a concrete constraint makes LayerFS unsuitable, such as an unavailable Docker/FUSE
+environment or a task requiring native macOS, iOS or Windows tooling. State the reason briefly and proceed without
+an extra approval checkpoint. Read-only reviews that need no isolated workspace can inspect the checkout or Git
+objects directly. Preserve the existing parallel-agent build and test limits whichever workspace mechanism is used.
 
 ## Verification after changes
 

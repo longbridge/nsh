@@ -32,7 +32,8 @@ bundle (`plugin.rs`, an unknown `nsh/…` is an error), `nsh-js` serves them (`m
 loader). Where each one is implemented and declared: `js-modules.md`.
 
 - `nsh`: `signal` (`count()`, `count.set(v)`, `count.update(f)`), `computed`, `effect`, `batch`, `untracked`, `cleanup`,
-  `context` (`Theme()`, `<Theme.Provider value>`), `split(props, keys)` (`[picked, rest]`, keeping getters), `mount`;
+  `context` (`Theme()`, `<Theme.Provider value>`), `split(props, keys)` (`[picked, rest]`, keeping getters), `mount`,
+  `ErrorBoundary` (Rust's `catch_error`);
   the primitives `View`, `Text`, `Scroll`, `Input`, `Overlay`.
 - `nsh:rt` (only compiled code imports it): `element`, `text`, `append`, `insert`, `prop`, `bindProp`, `spread`,
   `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`, `metaUrl`. The bundle shares one `import.meta`, so
@@ -140,6 +141,17 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   branch per change of truthiness. An `<If>` whose child is a function written in place compiles to
   `((w) => cond(w, () => (fn)(w), …))(() => when)`: the function gets an accessor of `when`'s value (Solid's `<Show>`),
   read through the same thunk the condition is.
+- Errors: a computation that throws keeps the exception as the round's error, thrown out of the native that ended the
+  round (the first wins), unless an `ErrorBoundary` is above the owner it ran under. A boundary (`error_boundary`) is
+  a memo showing its children or its fallback by a signal (`[error]` while failed); the children render in a memo of
+  their own under it, whose context names that signal under a key of the graph's (`reactive::boundary_key`), so a
+  failure under it (`Js::call`: the computation is still the current owner) finds the boundary as `useContext` would.
+  Caught exceptions wait in `JsData.caught` (the first per boundary wins) until no computation runs (`finish` with
+  `running` at 0): setting the signal then runs the boundary again, which disposes the children's memo (what failed)
+  and calls `fallback(error, reset)` under the outer memo, so what fails in the fallback goes to the boundary above.
+  Listeners match Rust's: each node keeps the owner it was made under (`NodeData.owner`), and a handler's exception
+  (`Host::dispatch_event`, `touch.rs`) goes to that owner's boundary (`dom::catch_listener_failure`). Without a
+  boundary nothing changes: no lookup runs but the context walk of a failing computation.
 - Platform-only props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`): only the current platform's object is sent, each
   key as a prop of its own (`platform_props`).
 - The reactive graph and the renderer share one per-context state (`state.rs`); natives reach each part by shared or

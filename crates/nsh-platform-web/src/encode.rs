@@ -14,8 +14,8 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind, TransitionProps,
-    ViewKind, ViewProps, ViewStyle, WebSource,
+    ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
     ui::PropEnum,
 };
@@ -492,6 +492,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             let f = filters(&effects.backdrop_filters);
             let _ = write!(css, "backdrop-filter:{f};-webkit-backdrop-filter:{f};");
         }
+        if !effects.mask_images.is_empty() {
+            let images: Vec<String> = effects.mask_images.iter().map(gradient).collect();
+            let m = images.join(",");
+            // `-webkit-mask-image` for WebKit, which still needs the prefix.
+            let _ = write!(css, "mask-image:{m};-webkit-mask-image:{m};");
+        }
     }
     if !shadows.is_empty() {
         let _ = write!(css, "box-shadow:{};", shadows.join(","));
@@ -642,13 +648,24 @@ fn image_uri(s: &Option<ImageSource>) -> Option<&str> {
     s.as_ref().map(|s| &*s.uri)
 }
 
+/// An image's `objectPosition` as CSS, empty for the center (the default).
+fn object_position(p: ObjectPosition) -> String {
+    if p == ObjectPosition::CENTER {
+        String::new()
+    } else {
+        p.to_string()
+    }
+}
+
 fn resize_mode(m: ResizeMode) -> &'static str {
     match m {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        // Centered, scaled down to fit when larger.
-        ResizeMode::Center => "scale-down",
+        // Centered at its natural size.
+        ResizeMode::Center => "none",
+        // The same, scaled down to fit when larger.
+        ResizeMode::ScaleDown => "scale-down",
     }
 }
 
@@ -1083,6 +1100,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .opt_str(image_uri(&options.placeholder))
                 .num(options.blur_radius.0)
                 .num(options.fade_ms.unwrap_or(0.0))
+                // CSS's `object-position`; empty for the center.
+                .str(&object_position(options.position))
                 .end();
         }
         MountItem::ScrollConfig {
@@ -1339,6 +1358,13 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
+        Command::OpenUrl { id: request, url } => out
+            .item("cmd")
+            .num(id)
+            .str("openUrl")
+            .num(*request)
+            .str(url)
+            .end(),
         Command::ReadClipboard {
             id: request,
             has_only,
@@ -1372,6 +1398,38 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(id)
                 .str("readClipboardFiles")
                 .num(*request)
+                .end();
+        }
+        // `nsh.js` `pickImages`: the request, the limit, the longest side
+        // (0: any), the quality (-1: none), whether the stored format is
+        // asked for.
+        Command::PickImages {
+            id: request,
+            request: asked,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("pickImages")
+                .num(*request)
+                .num(asked.limit)
+                .num(asked.max_dimension.map_or(0, |d| d.0.max(1)))
+                .num(asked.quality.map_or(-1.0, |q| q.0))
+                .bool(asked.format == nsh_core::picker::PickFormat::Current)
+                .end();
+        }
+        // The id is written whole (`num` rounds); the page answers with
+        // `onHost` `{ type: "reply" }` (`nsh.js` `hostCall`).
+        Command::HostCall {
+            id: request,
+            name,
+            args,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostCall")
+                .raw(&request.to_string())
+                .str(name)
+                .raw(&args.to_string())
                 .end();
         }
         Command::ImageInfo { id: request, uri } => {

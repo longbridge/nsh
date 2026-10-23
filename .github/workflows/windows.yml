@@ -52,6 +52,8 @@ on:
       - ".cargo/**"
       - "rust-toolchain.toml"
       - ".github/workflows/windows.yml"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -112,7 +114,7 @@ jobs:
           cargo build -p nsh-cli
           run() { ./target/debug/nsh test "$@" --target windows; }
           run examples/counter
-          for file in context-menu device form gestures hover links navigation network photos shortcuts storage timers; do
+          for file in context-menu device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
             run "examples/gallery/tests/$file.test.tsx"
           done
           run examples/gallery/tests/environment.test.tsx --filter appearance

@@ -1146,33 +1146,24 @@ opt-level = 3
     fn write_rust_runner(&self, ws: &Path, dir: &str, root: &RootConfig) -> anyhow::Result<()> {
         let app = self.dependencies();
         let sets = self.sets();
-        let (os, lib, platform, features, exit) = match dir {
+        let (os, lib, platform, exit) = match dir {
             "rust-linux" => (
                 "target_os = \"linux\"",
                 "nsh-linux-app",
                 "nsh-platform-linux",
-                ", features = [\"webview\"]",
                 true,
             ),
             "rust-macos" => (
                 "target_os = \"macos\"",
                 "nsh-macos-app",
                 "nsh-platform-macos",
-                "",
                 true,
             ),
-            "rust-windows" => (
-                "windows",
-                "nsh-windows-app",
-                "nsh-platform-windows",
-                "",
-                true,
-            ),
+            "rust-windows" => ("windows", "nsh-windows-app", "nsh-platform-windows", true),
             _ => (
                 "target_os = \"ios\"",
                 "nsh-ios-app",
                 "nsh-platform-ios",
-                "",
                 false,
             ),
         };
@@ -1186,8 +1177,7 @@ opt-level = 3
                  [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
                 self.bin(dir),
                 self.bin(dir),
-                self.nsh
-                    .dep(lib, &format!(", default-features = false{features}")),
+                self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
                 self.nsh.dep(platform, ", default-features = false"),
@@ -1838,10 +1828,13 @@ struct Build<'a> {
     what: &'a str,
 }
 
-/// The `build.rs` of the web runtimes: the 8 MiB stack nsh's own has.
-const WEB_BUILD_RS: &str = "//! The web runtime's stack: 8 MiB, as nsh's own (`.cargo/config.toml`).\n\n\
+/// The `build.rs` of the web runtimes: the 8 MiB stack nsh's own has, and
+/// QuickJS' local time from the page (`nsh-platform-web`'s `build.rs`).
+const WEB_BUILD_RS: &str = "//! The web runtime's stack: 8 MiB, as nsh's own (`.cargo/config.toml`);\n\
+    //! QuickJS' local time from the page, as nsh's own (`nsh-platform-web`'s `build.rs`).\n\n\
     fn main() {\n    if std::env::var(\"CARGO_CFG_TARGET_ARCH\").as_deref() == Ok(\"wasm32\") {\n        \
-    println!(\"cargo:rustc-link-arg=-zstack-size=8388608\");\n    }\n}\n";
+    println!(\"cargo:rustc-link-arg=-zstack-size=8388608\");\n        \
+    println!(\"cargo:rustc-link-arg=--wrap=localtime_r\");\n    }\n}\n";
 
 impl RustApp {
     /// The `[dependencies]` lines of its crates, for a generated crate.
@@ -2492,7 +2485,8 @@ mod tests {
                 "{main}"
             );
         }
-        assert!(read("rust-linux/Cargo.toml").contains("features = [\"webview\"]"));
+        // Optional platform features come from the app, not its runner.
+        assert!(!read("rust-linux/Cargo.toml").contains("webview"));
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
@@ -2806,7 +2800,10 @@ mod tests {
             web.contains("bytecode-only = [\"nsh-platform-web/bytecode-only\"]"),
             "{web}"
         );
-        assert!(read("web/build.rs").contains("-zstack-size=8388608"));
+        let build = read("web/build.rs");
+        assert!(build.contains("-zstack-size=8388608"), "{build}");
+        // QuickJS' local time comes from the page (`__wrap_localtime_r`).
+        assert!(build.contains("--wrap=localtime_r"), "{build}");
         assert!(read("web/lib.rs").contains("nsh_platform_web::ui_sets!("));
         assert!(!app.workspace.join("gpui").exists());
         assert_eq!(app.gpui_workspace().unwrap(), app.workspace.join("gpui"));

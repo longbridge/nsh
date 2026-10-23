@@ -14,6 +14,7 @@ use nsh_core::{
     geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_testing::agent::{Key, Native};
+use objc2::msg_send;
 use objc2_core_foundation::CGRect;
 use objc2_ui_kit::{UIView, UIWindow};
 use rustc_hash::FxHashMap;
@@ -199,20 +200,63 @@ impl Native for IosNative {
         });
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::Keystroke;
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::Ios).map_err(|e| e.to_string())?;
+        let usage = stroke
+            .key
+            .hid_usage()
+            .ok_or_else(|| format!("a hardware keyboard has no key {keys:?}"))?;
+        let m = stroke.modifiers;
+        let modifiers: Vec<u16> = [
+            (m.ctrl, synth::CONTROL),
+            (m.alt, synth::OPTION),
+            (m.shift, synth::SHIFT),
+            (m.cmd, synth::COMMAND),
+        ]
+        .into_iter()
+        .filter_map(|(on, usage)| on.then_some(usage))
+        .collect();
+        // As a hand presses a shortcut: the modifiers down first, the key
+        // pressed and released, then the modifiers released.
+        let held = modifiers.clone();
+        self.on_main(move |_, window| {
+            for usage in held {
+                synth::key(window, usage, true);
+            }
+            synth::key(window, usage, true)
+        })
+        .filter(|sent| *sent)
+        .ok_or_else(|| "the simulator takes no keyboard events".to_owned())?;
+        std::thread::sleep(TAP);
+        self.on_main(move |_, window| {
+            synth::key(window, usage, false);
+            for usage in modifiers.into_iter().rev() {
+                synth::key(window, usage, false);
+            }
+        });
+        Ok(())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.on_main(move |view, _| view.with_mounter(|m| m.input_text(id)).flatten())
             .flatten()
     }
 
     fn back(&self) -> Result<(), String> {
-        // What a user does: a sheet is swiped down, a pushed screen goes
+        // What a user does: a sheet is swiped down; while the app listens
+        // to going back (a menu's or popover's `onCancel`, over the whole
+        // screen), VoiceOver's escape gesture reaches the surface, as the
+        // headless driver's back reaches the core; a pushed screen goes
         // with the header's back button.
         enum Gesture {
             Tap(f64, f64),
             Swipe((f64, f64), (f64, f64)),
+            Escaped,
         }
         let gesture = self
-            .on_main(|_, window| {
+            .on_main(|view, window| {
                 let size = window.bounds().size;
                 if let Some(sheet) = crate::navigation::presented_sheet(window) {
                     let top = sheet
@@ -224,6 +268,14 @@ impl Native for IosNative {
                         (x, top + 20.0),
                         (x, top + size.height * 0.6),
                     ));
+                }
+                // Taken out first: the escape reads the mounter too.
+                let root = view
+                    .with_mounter(|m| m.ui_view(nsh_core::ROOT_ID))
+                    .flatten();
+                // SAFETY: a UIAccessibilityAction method every view has.
+                if root.is_some_and(|r| unsafe { msg_send![&r, accessibilityPerformEscape] }) {
+                    return Ok(Gesture::Escaped);
                 }
                 let button = crate::navigation::back_button(window)
                     .ok_or("the screen shows no back button to go back with")?;
@@ -237,6 +289,7 @@ impl Native for IosNative {
         match gesture {
             Gesture::Tap(x, y) => self.tap(x, y, TAP),
             Gesture::Swipe(from, to) => self.swipe(from, to, Duration::ZERO),
+            Gesture::Escaped => {}
         }
         Ok(())
     }

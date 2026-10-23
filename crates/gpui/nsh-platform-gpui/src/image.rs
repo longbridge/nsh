@@ -1,4 +1,5 @@
-//! Image views: loading (`asset:/`, files, HTTP, `data:`), decoding into
+//! Image views: loading (`asset:/`, files, HTTP; `data:` URIs and `blob:`
+//! URLs, whose bytes the source carries), decoding into
 //! GPUI images, drawing with the resize mode, corner radii, tint, blur,
 //! filters, opacity and placeholder.
 //!
@@ -67,10 +68,11 @@ use std::{
 
 use gpui::{Corners, RenderImage};
 use nsh_core::{
-    Color, Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue,
-    ResizeMode,
+    Color, Command, EventKind, EventPayload, ImageData, ImageOptions, ImageSource, NodeId,
+    ObjectPosition, PayloadValue, ResizeMode,
     access::Access,
     geometry::{DevicePixels, Points, Size},
+    image::{CacheHeaders, DiskCache, Fetched},
 };
 use rustc_hash::FxHashMap;
 
@@ -118,6 +120,30 @@ pub enum AssetBase {
     Http(String),
     /// A directory on disk.
     Directory(PathBuf),
+    /// Directories on disk, looked in in order: a file is the first
+    /// directory's that has it (the app's own files, then an embedding
+    /// app's, say).
+    Directories(Vec<PathBuf>),
+}
+
+impl AssetBase {
+    /// The file of `path` (relative, `/`-separated) on disk: in the first
+    /// of [`AssetBase::Directories`] that has it, else in the first (where
+    /// reading it fails, naming that path). `None` over HTTP.
+    pub(crate) fn file(&self, path: &str) -> Option<PathBuf> {
+        match self {
+            AssetBase::Http(_) => None,
+            AssetBase::Directory(dir) => Some(dir.join(path)),
+            AssetBase::Directories(dirs) => {
+                let mut files = dirs.iter().map(|dir| dir.join(path));
+                let first = files.next()?;
+                if first.exists() {
+                    return Some(first);
+                }
+                Some(files.find(|file| file.exists()).unwrap_or(first))
+            }
+        }
+    }
 }
 
 /// Reads `asset:/…` files for the engine (fonts), on the engine thread.
@@ -129,10 +155,30 @@ impl nsh_engine::Assets for AssetReader {
             return Err(format!("not an asset URI: {uri}"));
         }
         match resolve(uri, self.0.as_ref()) {
-            Some(location) => read(&location, &Access::default(), &mut |_, _| {}),
+            Some(Location::File(path)) => {
+                std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+            }
+            Some(location) => {
+                read(&location, &Access::default(), None, &mut |_, _| {}).map(|b| b.to_vec())
+            }
             None => Err(format!("{uri}: no asset location configured")),
         }
     }
+}
+
+/// The disk cache of what this surface's images download (`None`: none).
+pub(crate) fn set_disk_cache(surface: &Surface, cache: Option<DiskCache>) {
+    *surface.image_cache.borrow_mut() = cache;
+}
+
+/// The disk cache a load of `uri` goes through: the surface's, for remote
+/// images (`asset:/` URIs, served by the dev server during development,
+/// change as the app does: never kept).
+fn disk_cache(surface: &Surface, uri: &str) -> Option<DiskCache> {
+    let remote = uri.starts_with("http://") || uri.starts_with("https://");
+    remote
+        .then(|| surface.image_cache.borrow().clone())
+        .flatten()
 }
 
 /// Where this surface's images resolve `asset:/` URIs.
@@ -147,8 +193,12 @@ enum Location {
     Url(String),
     /// A file on disk.
     File(PathBuf),
-    /// A `data:` URI (decoded on the worker).
+    /// A `data:` URI (decoded on the worker): `Image.getSize`'s; a view's
+    /// source arrives decoded ([`Location::Memory`]).
     Data(String),
+    /// Bytes in memory (a decoded `data:` URI, a blob), by the source's
+    /// URI.
+    Memory(String, ImageData),
 }
 
 impl Location {
@@ -158,7 +208,7 @@ impl Location {
         match self {
             Location::Url(url) => url.clone(),
             Location::File(path) => format!("file://{}", path.display()),
-            Location::Data(uri) => uri.clone(),
+            Location::Data(uri) | Location::Memory(uri, _) => uri.clone(),
         }
     }
 }
@@ -173,7 +223,7 @@ fn resolve(uri: &str, base: Option<&AssetBase>) -> Option<Location> {
                 let sep = if base.ends_with('/') { "" } else { "/" };
                 Some(Location::Url(format!("{base}{sep}{path}")))
             }
-            AssetBase::Directory(dir) => Some(Location::File(dir.join(path))),
+            dirs => dirs.file(path).map(Location::File),
         };
     }
     if uri.starts_with("http://") || uri.starts_with("https://") {
@@ -257,20 +307,7 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
 
 /// The bytes of a `data:` URI (base64 or percent-encoded).
 fn data_uri(uri: &str) -> Result<Vec<u8>, String> {
-    use base64::Engine;
-    let rest = uri.strip_prefix("data:").ok_or("not a data URI")?;
-    let (meta, data) = rest.split_once(',').ok_or("malformed data URI")?;
-    if meta.ends_with(";base64") {
-        // As lenient as browsers: whitespace and missing padding pass.
-        const LENIENT: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
-            &base64::alphabet::STANDARD,
-            base64::engine::GeneralPurposeConfig::new()
-                .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
-        );
-        let clean: String = data.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-        return LENIENT.decode(clean).map_err(|e| format!("data URI: {e}"));
-    }
-    Ok(percent_decode(data.as_bytes()))
+    nsh_core::image::decode_data_uri(uri).map(|(_, bytes)| bytes)
 }
 
 /// The HTTP agent all downloads share. It never follows redirects: each hop
@@ -288,20 +325,22 @@ fn agent() -> &'static ureq::Agent {
     })
 }
 
-/// GETs `url`, following redirects one hop at a time: a hop the app is not
-/// granted is never requested.
-fn get(url: &str, access: &Access) -> Result<ureq::http::Response<ureq::Body>, String> {
+/// GETs `url` with `headers`, following redirects one hop at a time: a hop
+/// the app is not granted is never requested.
+fn get(
+    url: &str,
+    access: &Access,
+    headers: &[(&'static str, String)],
+) -> Result<ureq::http::Response<ureq::Body>, String> {
     let mut url = url.to_owned();
     for _ in 0..=MAX_REDIRECTS {
-        let response = agent()
-            .get(&url)
-            .call()
-            .map_err(|e| format!("{url}: {e}"))?;
+        let mut request = agent().get(&url);
+        for (name, value) in headers {
+            request = request.header(*name, value);
+        }
+        let response = request.call().map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
         if !matches!(status, 301 | 302 | 303 | 307 | 308) {
-            if status >= 400 {
-                return Err(format!("{url}: HTTP {status}"));
-            }
             return Ok(response);
         }
         let location = response
@@ -311,35 +350,75 @@ fn get(url: &str, access: &Access) -> Result<ureq::http::Response<ureq::Body>, S
             .ok_or_else(|| format!("{url}: redirect without a Location"))?;
         url = access.media_redirect(&url, location)?;
     }
-    Err(format!("{url}: too many redirects"))
+    Err("too many redirects".to_owned())
+}
+
+/// GETs `url` with `headers` (a revalidation's conditions), following
+/// redirects one hop at a time (a hop the app is not granted is never
+/// requested), and reads the body as it arrives (`progress(loaded,
+/// total)`, total 0: unknown). Every status is a response: the cache
+/// decides what a `304` or a `5xx` means.
+fn download(
+    url: &str,
+    access: &Access,
+    headers: &[(&'static str, String)],
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<Fetched, String> {
+    let mut response = get(url, access, headers)?;
+    let status = response.status().as_u16();
+    let cache = CacheHeaders::from_lookup(|name| {
+        let values: Vec<&str> = response
+            .headers()
+            .get_all(name)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        (!values.is_empty()).then(|| values.join(", "))
+    });
+    if status >= 300 {
+        return Ok(Fetched::new(status, cache, Vec::new()));
+    }
+    let total = response.body().content_length().unwrap_or(0);
+    let mut reader = response.body_mut().with_config().limit(MAX_BYTES).reader();
+    let mut bytes = Vec::with_capacity(total.min(MAX_BYTES) as usize);
+    let mut chunk = [0u8; 16 << 10];
+    loop {
+        let n = reader.read(&mut chunk).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+        progress(bytes.len() as u64, total);
+    }
+    Ok(Fetched::new(status, cache, bytes))
 }
 
 /// Reads the bytes at `location` (blocking), calling `progress(loaded,
-/// total)` (total 0: unknown) as a download goes.
+/// total)` (total 0: unknown) as a download goes; a download through
+/// `cache` (the surface's disk cache, for `http(s)://` sources) when
+/// there is one.
 fn read(
     location: &Location,
     access: &Access,
+    cache: Option<&DiskCache>,
     progress: &mut dyn FnMut(u64, u64),
-) -> Result<Vec<u8>, String> {
+) -> Result<ImageData, String> {
     match location {
-        Location::File(path) => std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())),
-        Location::Data(uri) => data_uri(uri),
-        Location::Url(url) => {
-            let mut response = get(url, access)?;
-            let total = response.body().content_length().unwrap_or(0);
-            let mut reader = response.body_mut().with_config().limit(MAX_BYTES).reader();
-            let mut bytes = Vec::with_capacity(total.min(MAX_BYTES) as usize);
-            let mut chunk = [0u8; 16 << 10];
-            loop {
-                let n = reader.read(&mut chunk).map_err(|e| format!("{url}: {e}"))?;
-                if n == 0 {
-                    break;
-                }
-                bytes.extend_from_slice(&chunk[..n]);
-                progress(bytes.len() as u64, total);
+        Location::File(path) => std::fs::read(path)
+            .map(ImageData::from)
+            .map_err(|e| format!("{}: {e}", path.display())),
+        Location::Data(uri) => data_uri(uri).map(ImageData::from),
+        Location::Memory(_, data) => Ok(data.clone()),
+        Location::Url(url) => match cache {
+            Some(cache) => cache.load(url, |headers| download(url, access, headers, progress)),
+            None => {
+                download(url, access, &[], progress).and_then(|response| match response.status {
+                    200..=299 => Ok(response.body.into()),
+                    status => Err(format!("HTTP {status}")),
+                })
             }
-            Ok(bytes)
         }
+        .map_err(|e| format!("{url}: {e}")),
     }
 }
 
@@ -547,18 +626,19 @@ fn decode_svg(bytes: &[u8]) -> Result<Decoded, String> {
 }
 
 /// Decodes an encoded image (a worker): every frame of animations.
-fn decode(bytes: Vec<u8>) -> Result<Decoded, String> {
-    if nsh_core::svg::sniff(&bytes) {
-        return decode_svg(&bytes);
+fn decode(bytes: impl AsRef<[u8]>) -> Result<Decoded, String> {
+    let bytes = bytes.as_ref();
+    if nsh_core::svg::sniff(bytes) {
+        return decode_svg(bytes);
     }
-    if let Some(format) = animated_format(&bytes) {
-        match animation(&bytes, format) {
+    if let Some(format) = animated_format(bytes) {
+        match animation(bytes, format) {
             Ok(Some(decoded)) => return Ok(decoded),
             Ok(None) => {}
             Err(e) => log::debug!("image: not decoded as an animation: {e}"),
         }
     }
-    decode_still(&bytes)
+    decode_still(bytes)
 }
 
 /// Queues `job` on the worker pool (started on first use).
@@ -586,7 +666,13 @@ fn spawn(job: impl FnOnce() + Send + 'static) {
 }
 
 /// Loads `location` on a worker and hands the result to the main thread.
-fn work(key: String, location: Location, access: Arc<Access>, progress: bool) {
+fn work(
+    key: String,
+    location: Location,
+    access: Arc<Access>,
+    cache: Option<DiskCache>,
+    progress: bool,
+) {
     let mut last: Option<Instant> = None;
     let mut report = |loaded: u64, total: u64| {
         let now = Instant::now();
@@ -600,7 +686,7 @@ fn work(key: String, location: Location, access: Arc<Access>, progress: bool) {
             LOADER.with(|l| l.progress(&key, loaded, total));
         });
     };
-    let result = read(&location, &access, &mut report).and_then(decode);
+    let result = read(&location, &access, cache.as_ref(), &mut report).and_then(decode);
     rt::invoke(move || finish(key, result.map(Image::shared)));
 }
 
@@ -1228,7 +1314,36 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// Loads `uri` for `surface`; `done` runs on the main thread. Returns
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
-    let Some(location) = resolve(uri, surface.asset_base.borrow().as_ref()) else {
+    let location = resolve(uri, surface.asset_base.borrow().as_ref());
+    fetch_at(surface, location, uri, progress, done)
+}
+
+/// Loads `source` for `surface` as [`fetch`] does: from its bytes, when it
+/// carries them (a `data:` URI, a blob).
+fn fetch_source(
+    surface: &Surface,
+    source: &ImageSource,
+    progress: Option<Progress>,
+    done: Done,
+) -> bool {
+    match &source.data {
+        Some(data) => {
+            let location = Location::Memory(source.uri.to_string(), data.clone());
+            fetch_at(surface, Some(location), &source.uri, progress, done)
+        }
+        None => fetch(surface, &source.uri, progress, done),
+    }
+}
+
+/// Loads `location` (`uri`'s) for `surface`, as [`fetch`] does.
+fn fetch_at(
+    surface: &Surface,
+    location: Option<Location>,
+    uri: &str,
+    progress: Option<Progress>,
+    done: Done,
+) -> bool {
+    let Some(location) = location else {
         done(Err(format!("unsupported image source `{uri}`")));
         return true;
     };
@@ -1246,7 +1361,8 @@ fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -
     });
     if start {
         let access = surface.access.borrow().clone();
-        spawn(move || work(key, location, access, listens));
+        let cache = disk_cache(surface, uri);
+        spawn(move || work(key, location, access, cache, listens));
     }
     false
 }
@@ -1594,7 +1710,7 @@ pub(crate) fn set(
                 }
             }
         };
-        let immediate = fetch(surface, &source.uri, progress, Box::new(done));
+        let immediate = fetch_source(surface, source, progress, Box::new(done));
         waited.set(true);
         if !immediate && events.contains(EventKind::LoadStart) {
             surface.event(id, EventKind::LoadStart, EventPayload::None);
@@ -1622,7 +1738,7 @@ pub(crate) fn set(
                 Err(message) => log::warn!("image placeholder failed: {message}"),
             }
         };
-        fetch(surface, &placeholder.uri, None, Box::new(done));
+        fetch_source(surface, placeholder, None, Box::new(done));
     }
 }
 
@@ -1750,24 +1866,21 @@ fn natural(
 }
 
 /// Where an image of natural size `natural` goes in a box of `bounds`
-/// (x, y, width, height), as React Native fits it; it may extend past the
+/// (x, y, width, height), as React Native fits it and `objectPosition` places it; it may extend past the
 /// box (`cover`), which the view clips.
-fn fit(mode: ResizeMode, natural: (f32, f32), bounds: (f32, f32)) -> (f32, f32, f32, f32) {
-    let (nw, nh) = natural;
-    let (bw, bh) = bounds;
-    if nw <= 0.0 || nh <= 0.0 || matches!(mode, ResizeMode::Stretch) {
-        return (0.0, 0.0, bw, bh);
-    }
-    let contain = (bw / nw).min(bh / nh);
-    let scale = match mode {
-        ResizeMode::Cover => (bw / nw).max(bh / nh),
-        ResizeMode::Contain => contain,
-        // Natural size, shrunk to fit when larger.
-        ResizeMode::Center => contain.min(1.0),
-        ResizeMode::Stretch => 1.0,
-    };
-    let (w, h) = (nw * scale, nh * scale);
-    ((bw - w) / 2.0, (bh - h) / 2.0, w, h)
+fn fit(
+    mode: ResizeMode,
+    position: ObjectPosition,
+    natural: (f32, f32),
+    bounds: (f32, f32),
+) -> (f32, f32, f32, f32) {
+    use nsh_core::geometry::{px, size};
+    let r = mode.fit(
+        size(px(natural.0), px(natural.1)),
+        size(px(bounds.0), px(bounds.1)),
+        position,
+    );
+    (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0)
 }
 
 /// The mipmap level and the blur of a variant of an image of `pixels`
@@ -1810,6 +1923,7 @@ fn draw_one(
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(
         image.mode,
+        image.options.position,
         natural(picture.size, picture.points, source),
         (w, h),
     );
@@ -2020,6 +2134,7 @@ mod tests {
             uri: "asset:/logo@2x.png".into(),
             size: None,
             scales: Default::default(),
+            data: None,
         };
         assert_eq!(natural((200, 100), None, Some(&source)), (100.0, 50.0));
     }
@@ -2096,17 +2211,47 @@ mod tests {
     fn fits_images() {
         let n = (200.0, 100.0);
         let b = (100.0, 100.0);
-        assert_eq!(fit(ResizeMode::Cover, n, b), (-50.0, 0.0, 200.0, 100.0));
-        assert_eq!(fit(ResizeMode::Contain, n, b), (0.0, 25.0, 100.0, 50.0));
-        assert_eq!(fit(ResizeMode::Stretch, n, b), (0.0, 0.0, 100.0, 100.0));
-        assert_eq!(fit(ResizeMode::Center, n, b), (0.0, 25.0, 100.0, 50.0));
         assert_eq!(
-            fit(ResizeMode::Center, n, (400.0, 400.0)),
-            (100.0, 150.0, 200.0, 100.0)
+            fit(ResizeMode::Cover, ObjectPosition::CENTER, n, b),
+            (-50.0, 0.0, 200.0, 100.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::Contain, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::Stretch, ObjectPosition::CENTER, n, b),
+            (0.0, 0.0, 100.0, 100.0)
+        );
+        // CSS's `object-fit: none` and `scale-down`.
+        assert_eq!(
+            fit(ResizeMode::Center, ObjectPosition::CENTER, n, b),
+            (-50.0, 0.0, 200.0, 100.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::ScaleDown, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
+        );
+        for mode in [ResizeMode::Center, ResizeMode::ScaleDown] {
+            assert_eq!(
+                fit(mode, ObjectPosition::CENTER, n, (400.0, 400.0)),
+                (100.0, 150.0, 200.0, 100.0)
+            );
+        }
+        // `objectPosition`: a tall image covering its box shows its top.
+        let top = ObjectPosition::parse("top").unwrap();
+        assert_eq!(
+            fit(ResizeMode::Cover, top, (100.0, 300.0), b),
+            (0.0, 0.0, 100.0, 300.0)
+        );
+        let right = ObjectPosition::parse("right").unwrap();
+        assert_eq!(
+            fit(ResizeMode::Contain, right, (50.0, 100.0), b),
+            (50.0, 0.0, 50.0, 100.0)
         );
         // No natural size yet: fills the box.
         assert_eq!(
-            fit(ResizeMode::Contain, (0.0, 0.0), b),
+            fit(ResizeMode::Contain, ObjectPosition::CENTER, (0.0, 0.0), b),
             (0.0, 0.0, 100.0, 100.0)
         );
     }
@@ -2142,7 +2287,7 @@ mod tests {
 
     #[test]
     fn svg_decodes_oversampled() {
-        let logo = decode(SVG_LOGO.to_vec()).unwrap();
+        let logo = decode(SVG_LOGO).unwrap();
         assert_eq!(logo.points, Some(Size::new(Points(48.0), Points(24.0))));
         assert_eq!(logo.size, (48, 24), "intrinsic size in points");
         let pixels = logo.image.size(0);
@@ -2158,11 +2303,11 @@ mod tests {
         assert!((127..=128).contains(&a), "alpha {a}");
         // Capped: a large SVG draws at most 2048 pixels a side.
         let big = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="250"/>"#;
-        let big = decode(big.to_vec()).unwrap();
+        let big = decode(big).unwrap();
         let pixels = big.image.size(0);
         assert_eq!((pixels.width.0, pixels.height.0), (2048, 512));
         assert_eq!(big.size, (1000, 250));
-        assert!(decode(b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect".to_vec()).is_err());
+        assert!(decode(b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect").is_err());
     }
 
     #[test]
@@ -2171,8 +2316,9 @@ mod tests {
             uri: "asset:/logo@2x.svg".into(),
             size: None,
             scales: nsh_core::ImageScales::NONE,
+            data: None,
         };
-        let logo = decode(SVG_LOGO.to_vec()).unwrap();
+        let logo = decode(SVG_LOGO).unwrap();
         assert_eq!(natural(logo.size, logo.points, Some(&source)), (48.0, 24.0));
         // The picture keeps it for `onLoad` and `Image.getSize`.
         let picture = Image::shared(logo);
@@ -2181,7 +2327,7 @@ mod tests {
         assert_eq!(picture.pixels, (192, 96));
         // Fractions lay out as they are; reports round them.
         let odd = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10.5" height="10"/>"#;
-        let odd = decode(odd.to_vec()).unwrap();
+        let odd = decode(odd).unwrap();
         assert_eq!(odd.size, (11, 10));
         assert_eq!(natural(odd.size, odd.points, None), (10.5, 10.0));
     }
@@ -2192,7 +2338,7 @@ mod tests {
         // still draws neither (no fonts loaded, the resolver resolves
         // nothing).
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><text x="0" y="9" font-size="10" fill="#f00">NSH</text><image width="20" height="10" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="/></svg>"##;
-        let decoded = decode(svg.to_vec()).unwrap();
+        let decoded = decode(svg).unwrap();
         assert_eq!(decoded.size, (20, 10));
         let bytes = decoded.image.as_bytes(0).unwrap();
         assert!(bytes.iter().all(|&b| b == 0), "nothing drawn");
@@ -2201,7 +2347,7 @@ mod tests {
     #[test]
     fn svg_tints_through_alpha() {
         // A variant tinted red: the SVG's shape in red, the rest transparent.
-        let icon = decode(SVG_ICON.to_vec()).unwrap();
+        let icon = decode(SVG_ICON).unwrap();
         let size = icon.image.size(0);
         let size = (size.width.0 as u32, size.height.0 as u32);
         let ops = Ops {

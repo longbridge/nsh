@@ -23,12 +23,12 @@ use objc2::{
     rc::Retained,
     runtime::{AnyClass, AnyObject, ProtocolObject},
 };
-use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
     NSForegroundColorAttributeName, UIAdaptivePresentationControllerDelegate, UIBarButtonItem,
-    UIBehavioralStyle, UIColor, UIGestureRecognizer, UIGestureRecognizerDelegate,
+    UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer, UIGestureRecognizerDelegate,
     UIInterfaceOrientationMask, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
     UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
     UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
@@ -95,6 +95,16 @@ define_class!(
         fn view_did_layout_subviews(&self) {
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
+            self.report_insets();
+        }
+
+        /// The stack correcting what UIKit granted a screen beside a side
+        /// bar changes its safe area without moving anything in it: the
+        /// module hears the corrected insets from here, not a layout pass.
+        #[unsafe(method(viewSafeAreaInsetsDidChange))]
+        fn view_safe_area_insets_did_change(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), viewSafeAreaInsetsDidChange] };
             self.report_insets();
         }
     }
@@ -378,6 +388,90 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// Gives every screen whose view UIKit left empty its parent's bounds.
+///
+/// UIKit sizes a pushed controller's view from the navigation view, which
+/// is still empty when the stack mounts: autoresizing cannot grow a zero
+/// size, so the view keeps an empty frame even once the navigation view
+/// has one. The screen's content is not clipped, so it draws correctly,
+/// but an empty view answers `pointInside:` with false, which ends
+/// `hitTest:` there, and the accessibility snapshot UI tests read drops
+/// the whole subtree under it: the screen is visible and nothing in it
+/// can be touched or found.
+fn size_screens(nav: &UINavigationController) {
+    for controller in nav.viewControllers().iter() {
+        if !controller.isViewLoaded() {
+            continue;
+        }
+        let Some(view) = controller.view() else {
+            continue;
+        };
+        let Some(parent) = view.superview() else {
+            continue;
+        };
+        let size = view.bounds().size;
+        let bounds = parent.bounds();
+        if (size.width <= 0.0 || size.height <= 0.0)
+            && bounds.size.width > 0.0
+            && bounds.size.height > 0.0
+        {
+            view.setFrame(bounds);
+        }
+    }
+}
+
+/// Holds a screen's horizontal safe area to the part of it its stack covers.
+///
+/// A bar the device keeps along one side of the screen (the iPhone Duo's
+/// vertical bar) is an inset of the window, and `UINavigationController`
+/// hands that inset to the screens it shows without asking whether it still
+/// reaches the bar: a stack laid out in a column that stops well short of it
+/// passes the bar's whole width down as trailing safe area anyway. Content
+/// stays where it belongs (the core lays it out from the insets the screen
+/// reports, and a scroll view here adjusts nothing), but UIKit parks scroll
+/// indicators that far in from the edge, and `safeAreaInsets()` reads that
+/// wide inside the module.
+///
+/// What a screen is owed on a side is how much of the window's unsafe strip
+/// there the stack's view really covers; a negative `additionalSafeAreaInsets`
+/// takes the rest back. Both numbers come from the window and the stack's
+/// frame, never from what a screen's safe area currently is. Recovering the
+/// inset UIKit granted by subtracting the compensation already applied is the
+/// tempting shortcut, and it cannot heal. UIKit floors a safe area at zero, so
+/// once a compensation overshoots (the bar changes side and yesterday's value
+/// stays behind) that subtraction hands the overshoot straight back, and every
+/// later pass arrives at the same wrong number again. Taken from geometry and
+/// written to both sides every time, it is idempotent, and leaves nothing
+/// behind on the side the bar left.
+fn clip_side_safe_area(nav: &UINavigationController) {
+    let Some(view) = nav.viewIfLoaded() else {
+        return;
+    };
+    // Out of the window there is no bar to measure against; the layout pass
+    // that follows the stack going back in works this out again.
+    let Some(window) = view.window() else {
+        return;
+    };
+    let safe = window.safeAreaInsets();
+    let bounds = window.bounds();
+    let frame = view.convertRect_toView(view.bounds(), Some(&window));
+    let (stack_min, stack_max) = (frame.min().x, frame.max().x);
+    let covered = |min: CGFloat, max: CGFloat| (stack_max.min(max) - stack_min.max(min)).max(0.0);
+    let left = covered(bounds.min().x, bounds.min().x + safe.left) - safe.left;
+    let right = covered(bounds.max().x - safe.right, bounds.max().x) - safe.right;
+    for controller in nav.viewControllers().iter() {
+        let current = controller.additionalSafeAreaInsets();
+        if current.left == left && current.right == right {
+            continue;
+        }
+        controller.setAdditionalSafeAreaInsets(UIEdgeInsets {
+            left,
+            right,
+            ..current
+        });
+    }
+}
+
 define_class!(
     /// A stack's navigation controller: the back button asks it before
     /// popping (`navigationBar:shouldPopItem:`), answered from `preventBack`.
@@ -416,32 +510,23 @@ define_class!(
             }
         }
 
-        /// UIKit sizes a pushed controller's view from the navigation view,
-        /// which is still empty when the stack mounts: autoresizing cannot
-        /// grow a zero size, so the view keeps an empty frame even once the
-        /// navigation view has one. The screen's content is not clipped, so
-        /// it draws correctly, but an empty ancestor drops the whole subtree
-        /// from the accessibility snapshot UI tests read: no element inside
-        /// any screen can be found. Give such a view its parent's bounds.
+        /// Whatever a layout pass left empty (a stack that grew after it
+        /// mounted, a window that changed size) is sized here.
         #[unsafe(method(viewDidLayoutSubviews))]
         fn view_did_layout_subviews(&self) {
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
-            for controller in self.viewControllers().iter() {
-                if !controller.isViewLoaded() {
-                    continue;
-                }
-                let Some(view) = controller.view() else { continue };
-                let Some(parent) = view.superview() else { continue };
-                let size = view.bounds().size;
-                let bounds = parent.bounds();
-                if (size.width <= 0.0 || size.height <= 0.0)
-                    && bounds.size.width > 0.0
-                    && bounds.size.height > 0.0
-                {
-                    view.setFrame(bounds);
-                }
-            }
+            size_screens(self);
+            clip_side_safe_area(self);
+        }
+
+        /// A side bar arriving, leaving or changing side moves no view of
+        /// the stack, so the screens' compensation is worked out here too.
+        #[unsafe(method(viewSafeAreaInsetsDidChange))]
+        fn view_safe_area_insets_did_change(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), viewSafeAreaInsetsDidChange] };
+            clip_side_safe_area(self);
         }
     }
 );
@@ -489,10 +574,15 @@ define_class!(
         #[unsafe(method(navigationController:didShowViewController:animated:))]
         fn did_show(
             &self,
-            _nav: &UINavigationController,
+            nav: &UINavigationController,
             _controller: &UIViewController,
             _animated: bool,
         ) {
+            // An animated change of screens is deferred to a layout pass of
+            // the navigation view, which puts the screen that arrives in the
+            // hierarchy after `reconcile` has sized what was there: the one
+            // it brought in is only reachable here.
+            size_screens(nav);
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
         }
@@ -636,6 +726,11 @@ impl StackHost {
         self.nav.ivars().applying.set(true);
         self.nav.setViewControllers_animated(&array, animated);
         self.nav.ivars().applying.set(false);
+        // A stack whose size is settled is never laid out again for the
+        // screens it is given, so nothing would size a screen UIKit left
+        // empty until something unrelated (a rotation, a change of
+        // appearance) forces a layout pass.
+        size_screens(&self.nav);
     }
 }
 

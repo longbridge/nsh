@@ -47,6 +47,7 @@ impl HostValue for ImageSource {
                 uri: url.into(),
                 size: None,
                 scales: ImageScales::NONE,
+                data: None,
             });
         }
         let url = input.field("url")?.as_string()?;
@@ -62,6 +63,7 @@ impl HostValue for ImageSource {
             uri: url.into(),
             size,
             scales: scales(input),
+            data: None,
         })
     }
 

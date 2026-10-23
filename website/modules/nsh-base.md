@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, resizable panels, dockable workspaces, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,8 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), documents of Markdown or HTML (`TextView`), selections across texts
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), workspaces the user arranges (`ResizablePanel`s in a
+`ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), selections across texts
 (`SelectionArea`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
@@ -25,21 +26,21 @@ from the `nsh-base` crate (`nsh_base::{button, safe_area_view, …}`).
 
 ```rust tabs
 use nsh_base::{
-    AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog,
-    keyboard_avoiding_view, nav_page, nav_stack, radio, radio_group, safe_area_view, selection_area, switch, tab, tabs,
-    text_view, theme,
+    AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog, dock_area,
+    h_resizable, keyboard_avoiding_view, nav_page, nav_stack, radio, radio_group, resizable_panel, safe_area_view,
+    selection_area, switch, tab, tabs, text_view, theme, v_resizable,
 };
 ```
 
 ```tsx tabs
 import {
-  AlertDialog, Button, Checkbox, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
-  MenuItem, MenuSeparator, NavPage, NavStack, Popover, Radio, RadioGroup, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
+  AlertDialog, Button, Checkbox, Collapsible, ContextMenu, createNavStack, Dialog, DockArea, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu, Progress,
+  MenuItem, MenuSeparator, NavPage, NavStack, Popover, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
   Submenu, Switch, Tab, Tabs, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, DialogChangeReason, DialogProps, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, StatusBar,
+  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DockAreaLayout, DockNode, DockRegion, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TabProps, TabsProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
@@ -54,6 +55,10 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Radio`](../elements/radio.md), [`RadioGroup`](../elements/radio.md) | `radio()`, `radio_group()` | One option of a set the user picks one of, and the set; the app owns which one is checked. |
 | [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
+| [`Collapsible`](../elements/collapsible.md) | `collapsible()` | A region whose content expands and collapses; the app owns `open` and its trigger. |
+| [`Progress`](../elements/progress.md) | `progress()` | A progress bar; the app owns `value` (0 to 100) and `indeterminate`. |
+| [`ResizablePanelGroup`, `ResizablePanel`](../elements/resizable.md) | `h_resizable()`, `v_resizable()`, `resizable_panel()` | Panels side by side or stacked, with handles the user drags to resize them. |
+| [`DockArea`](../elements/dock.md) | `dock_area()` | A workspace of splits, tab groups and edge docks the user arranges; its layout is the app's data. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | Content presented over everything else: sheets, full-screen flows, dialogs. |
 | [`SafeAreaView`](../elements/safe-area-view.md) | `safe_area_view()` | A view padded clear of system UI and headers. |
@@ -110,6 +115,37 @@ activation, the disabled state and the tab role and selected state for screen re
 screen readers announce and holds no value: the app tells each tab whether it is selected (`selected`), hears
 presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
 `group-selected:` classes follow it. See [Tabs](../elements/tabs.md).
+
+### Collapsible
+
+A region whose content expands and collapses, with no look: its children show always (a summary, the trigger), its
+`content` after them while `open`. The app owns `open` and the trigger that flips it, and says the expanded state to
+screen readers there. The content is made once and kept while collapsed, so what is inside keeps its state. See
+[Collapsible](../elements/collapsible.md).
+
+### Progress
+
+A linear progress bar, with no look: a track with an indicator inside it, the indicator `value` percent of the track's
+width. The app owns `value` (0 to 100) and `indeterminate`; screen readers get the progress bar role, the range and the
+value, and no value while indeterminate, when the indicator's width and motion are the app's. See
+[Progress](../elements/progress.md).
+
+## Workspaces
+
+### ResizablePanelGroup and ResizablePanel
+
+Panels side by side or stacked, with a handle between each two that the user drags to share the room. The group owns
+the drag, which runs natively, each panel's limits (`minSize`, `maxSize`) and the resize cursor; the sizes are the
+app's (`size`, reported with `onResize`), and so are the handles' look and the panels' content. See
+[Resizable](../elements/resizable.md).
+
+### DockArea
+
+A dockable workspace: panels in tab groups, groups split side by side or stacked, and docks on the left, right and
+bottom edges. The layout is data the app owns (`layout`, reported with `onLayoutChange`); the area owns tab drags and
+drops, resizing, docks, zoom and the lock, keeps each panel's content as it moves, and presents the same layout with
+drawers and a bottom sheet when it is narrow. The tabs, handles, drop indicator and the panels' content are the
+app's. See [Dock](../elements/dock.md).
 
 ## Documents
 
@@ -280,7 +316,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md),
   [SelectionArea](../elements/selection-area.md), [Text](../elements/text.md) and

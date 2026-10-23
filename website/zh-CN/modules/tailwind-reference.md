@@ -52,7 +52,7 @@ view()
 ## 类如何组合
 
 - **后写的生效。** 同一变体层级的工具类中，字符串里靠后的那个生效：`"p-4 p-2"` 等于 `p-2`。组件可以接收 `class` 属性并直接拼接到自己的类后面，不需要 `tailwind-merge`。
-- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：位置（`first:` 等）、`group-*:`、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
+- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：`group-*:`（先按状态，再按组名）、`selection:`、`placeholder:`、位置（`first:` 等）、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`focus-visible:`、`active:`、`enabled:`、`disabled:`、动效偏好、从宽到窄的 `max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。与 Tailwind 的排序一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的排在后面（`dark:hover:` 在 `dark:` 之后）。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
 - **`style` 优先于类。** 内联 `style` 叠加在解析后的类之上。重要标记的工具类（`!p-4` 或 `p-4!`）连内联样式也能覆盖。
 - **文字样式会继承。** 写在视图上的文字类（`text-white`、`font-bold`、`text-center` 等）会像 CSS 一样传给其中的 `<Text>` 和 `<Input>`。
 - **display 遵循 CSS。** `flex` 和 `inline-flex` 是横向排列，除非有方向类另行指定，且与其在字符串中的位置无关（`flex-col flex` 是纵向）。没有 `flex` 的视图保持 NSH 默认的纵向排列。
@@ -70,16 +70,16 @@ view()
 | 步长（可用四分之一步） | `p-4`、`gap-1.5`、`m-0.25` | 步长 × 4 点 |
 | `px` | `p-px`、`-mt-px` | 1 点 |
 | `0` | `m-0` | 0 |
-| 分数 | `w-1/2`、`left-1/3` | 父元素的百分比 |
-| `full` | `w-full`、`inset-full` | 100% |
+| 分数（inset、宽高、`basis`、`translate`） | `w-1/2`、`left-1/3` | 父元素的百分比 |
+| `full`（同上） | `w-full`、`inset-full` | 100% |
 | `auto`（外边距、inset、宽高、basis） | `mx-auto`、`w-auto` | `"auto"` |
 | 任意值 | `p-[13px]`、`w-[42%]`、`mt-[1.5rem]` | 给定长度 |
 
-外边距、inset、`translate`、`rotate`、`skew`、`scale`、`z`、`hue-rotate`、`tracking`、`underline-offset`、`outline-offset`、网格线和渐变角度可以加前缀 `-` 表示负值：`-mt-2`、`-translate-x-1/2`、`-rotate-6`。
+外边距、inset、`translate`、`rotate`、`skew`、`scale`、`z`、`hue-rotate`、`tracking`、`underline-offset`、`outline-offset`、网格线和渐变角度可以加前缀 `-` 表示负值：`-mt-2`、`-translate-x-1/2`、`-rotate-6`。其他工具类（`-p-4`、`-gap-2`、`-w-4`）在 Tailwind 中没有负值形式，NSH 也没有。
 
 ### 颜色
 
-内置完整的 Tailwind 4 调色板：`red`、`orange`、`amber`、`yellow`、`lime`、`green`、`emerald`、`teal`、`cyan`、`sky`、`blue`、`indigo`、`violet`、`purple`、`fuchsia`、`pink`、`rose`、`slate`、`gray`、`zinc`、`neutral`、`stone`，每种有 `50`、`100`–`900`、`950` 色阶；另有 `black`、`white` 和 `transparent`。自定义颜色在 `nsh.json` 中添加（见 [主题定制](#主题定制)）。
+内置完整的 Tailwind 4 调色板：`red`、`orange`、`amber`、`yellow`、`lime`、`green`、`emerald`、`teal`、`cyan`、`sky`、`blue`、`indigo`、`violet`、`purple`、`fuchsia`、`pink`、`rose`、`slate`、`gray`、`zinc`、`neutral`、`stone`、`mauve`、`olive`、`mist`、`taupe`，每种有 `50`、`100`–`900`、`950` 色阶；另有 `black`、`white` 和 `transparent`。自定义颜色在 `nsh.json` 中添加（见 [主题定制](#主题定制)）。
 
 所有颜色工具类都接受：
 
@@ -91,14 +91,14 @@ view()
 | 任意颜色 | `bg-[#0ea5e9]`、`border-[rgb(0_0_0_/_0.1)]`、`text-[oklch(70%_0.2_50)]` |
 | 任意颜色加修饰 | `bg-[rgb(0_0_255)]/25` |
 
-`currentColor` 和 `inherit` 不是可用的颜色值；未指定环颜色时，环默认使用元素的文字颜色。
+`currentColor` 和 `inherit` 不是可用的颜色值。与浏览器一样，没有颜色类的边框、轮廓或环使用元素的文字颜色，可以是它自己的，也可以是继承的（`<View class="text-white"><View class="border ring-2" /></View>` 两者都是白色）；在 `style` 属性中设置的边框默认是黑色。
 
 ## 任意值
 
 方括号用于传入主题中没有的值：`w-[37px]`、`grid-cols-[200px_1fr]`、`bg-[linear-gradient(45deg,red,blue)]`。
 
 - `_` 表示空格（`grid-cols-[1fr_2fr]`）；字面下划线写作 `\_`。
-- 长度：裸数字或 `px`（点）、`pt`、`rem`（16 点），在合理的地方可用 `%`。
+- 长度：裸数字或 `px`（点）、`pt`（与 CSS 相同，为 4/3 点）、`rem`（16 点），在合理的地方可用 `%`。
 - 角度（`rotate-[...]`、`hue-rotate-[...]`、`bg-linear-[...]`）：`deg`、`rad`、`grad`、`turn`。
 - 时间（`duration-[...]`、`delay-[...]`）：`ms` 或 `s`；裸数字表示毫秒。
 - 类型提示用于消除歧义：`text-[length:22px]` 是字号，`text-[color:#333]` 是颜色；`border-[length:3px]` 同理。
@@ -111,11 +111,15 @@ view()
 |---|---|
 | `flex`、`inline-flex` | `display: "flex"`，没有方向类时为横向 |
 | `grid`、`inline-grid` | `display: "grid"` |
-| `block`、`flow-root` | `display: "block"`（块级布局） |
-| `inline`、`inline-block` | `display: "flex"`（没有行内格式化上下文，按视图布局） |
+| `block`、`flow-root` | 对应的块级布局或独立块级格式化上下文 |
+| `box-border`、`box-content` | 尺寸包含边框和内边距，或仅包含内容 |
+| `w/h/size-min`、`w/h/size-max`、`w/h/size-fit` | Taffy 的固有尺寸：`min-content`、`max-content`、`fit-content` |
+| `inline`、`inline-block` | `display: "block"`：浏览器在 flex 或 grid 父元素中为它们计算的值 |
 | `hidden` | `display: "none"` |
-| `relative`、`static`、`sticky` | `position: "relative"`（`sticky` 不会吸顶） |
-| `absolute`、`fixed` | `position: "absolute"`（`fixed` 相对父元素而不是屏幕） |
+| `relative`、`absolute` | `position` |
+| `static` | `position: "static"`：留在文档流中，忽略其偏移；绝对定位后代以最近的非 static 祖先为包含块 |
+| `sticky` | `position: "sticky"`：留在文档流中，父视图可见时按 `top`（水平滚动视图中为 `left`）吸附在外层滚动视图中 |
+| `fixed` | `position: "fixed"`：元素在其根视图（窗口或所在模态框）的范围内布局，位于该根视图的子元素之上，周围内容滚动时保持不动 |
 | `inset-<n>`、`inset-x-<n>`、`inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`、`right-<n>`、`bottom-<n>`、`left-<n>` | 对应的偏移 |
 | `start-<n>`、`end-<n>` | `start` / `end`（随书写方向） |
@@ -153,7 +157,8 @@ view()
 | `place-items-center`、`-start`、`-end`、`-stretch` | `alignItems` 和 `justifyItems` |
 | `place-self-auto`、`-center`、`-start`、`-end`、`-stretch` | `alignSelf` 和 `justifySelf` |
 | `gap-<n>`、`gap-x-<n>`、`gap-y-<n>` | `gap`、`columnGap`、`rowGap` |
-| `space-x-<n>`、`space-y-<n>` | `columnGap`、`rowGap`（是 gap，而不是给子元素加外边距） |
+| `space-x-<n>`、`space-y-<n>`（及负值） | 给除最后一个之外的每个子元素加外边距：`space-x` 为结束侧外边距，`space-y` 为底部外边距；与 Tailwind CSS 一样，子元素自身的外边距优先，并与 `gap` 叠加 |
+| `space-x-reverse`、`space-y-reverse` | 改为起始侧 / 顶部的外边距（子元素逆序排列时） |
 | `grid-cols-<n>` | `gridTemplateColumns: "repeat(n, minmax(0, 1fr))"` |
 | `grid-cols-[<tracks>]`、`grid-cols-none` | `gridTemplateColumns`（`grid-cols-[200px_1fr]`） |
 | `grid-rows-<n>`、`grid-rows-[<tracks>]`、`grid-rows-none` | `gridTemplateRows` |
@@ -164,8 +169,6 @@ view()
 | `grid-flow-row`、`grid-flow-col`、`grid-flow-dense`、`grid-flow-row-dense`、`grid-flow-col-dense` | `gridAutoFlow` |
 | `auto-cols-auto`、`-min`、`-max`、`-fr`、`auto-cols-[<track>]` | `gridAutoColumns` |
 | `auto-rows-auto`、`-min`、`-max`、`-fr`、`auto-rows-[<track>]` | `gridAutoRows` |
-
-`order-*` 可以写，但不起作用：子元素保持原有顺序。
 
 ## 间距
 
@@ -187,12 +190,11 @@ view()
 | `min-w-<n>`、`max-w-<n>`、`min-h-<n>`、`max-h-<n>` | 对应的限制 |
 | `w-screen`、`w-dvw`、`w-svw`、`w-lvw` | 窗口宽度（`min-w-` / `max-w-` 也可用） |
 | `h-screen`、`h-dvh`、`h-svh`、`h-lvh` | 窗口高度（`min-h-` / `max-h-` 也可用） |
-| `w-min`、`w-max`、`w-fit`（及 `h-`） | `auto`（由内容决定） |
-| `min-w-min`、`min-w-max`、`min-w-fit`（及 `min-h-`） | 0 |
-| `max-w-none`、`max-h-none`、`max-w-min`、`max-w-max`、`max-w-fit` | 不限制 |
+| `w-auto`、`h-auto` | `auto`（由内容决定） |
+| `max-w-none`、`max-h-none` | 不限制 |
 | `w-<container>`、`min-w-<container>`、`max-w-<container>` | 容器宽度（见下） |
 
-容器宽度（点）：`3xs` 256、`2xs` 288、`xs` 320、`sm` 384、`md` 448、`lg` 512、`xl` 576、`2xl` 672、`3xl` 768、`4xl` 896、`5xl` 1024、`6xl` 1152、`7xl` 1280、`prose` 520。
+容器宽度（点）：`3xs` 256、`2xs` 288、`xs` 320、`sm` 384、`md` 448、`lg` 512、`xl` 576、`2xl` 672、`3xl` 768、`4xl` 896、`5xl` 1024、`6xl` 1152、`7xl` 1280；与 Tailwind CSS 一样，`prose` 是元素字体中 `0` 宽度的 65 倍（CSS 的 `65ch`）。
 
 ## 排版
 
@@ -205,11 +207,11 @@ view()
 | `font-thin`（100）、`font-extralight`（200）、`font-light`（300）、`font-normal`（400）、`font-medium`（500）、`font-semibold`（600）、`font-bold`（700）、`font-extrabold`（800）、`font-black`（900） | `fontWeight` |
 | `font-[<weight>]`、`font-[<family>]` | 数字为字重，否则为字体族：`font-[650]`、`font-[Inter]` |
 | `italic`、`not-italic` | `fontStyle` |
-| `normal-nums`、`small-caps`、`oldstyle-nums`、`lining-nums`、`tabular-nums`、`proportional-nums` | `fontVariant`（可组合） |
+| `normal-nums`、`small-caps`、`oldstyle-nums`、`lining-nums`、`tabular-nums`、`proportional-nums` | `fontVariant`（可组合；`normal-nums` 重置数字形式） |
 
 ### 字号、颜色与行高
 
-`text-<size>` 同时设置字号和 Tailwind 对应的行高：
+`text-<size>` 同时设置字号和 Tailwind 对应的行高；`leading-*` 类会替换这个行高，与它在字符串中的位置和变体无关（`leading-tight md:text-lg` 保持 tight 行高）：
 
 | Class | 字号 | 行高 |
 |---|---|---|
@@ -234,6 +236,7 @@ view()
 | `text-<color>` | `color` |
 | `leading-none`（1）、`leading-tight`（1.25）、`leading-snug`（1.375）、`leading-normal`（1.5）、`leading-relaxed`（1.625）、`leading-loose`（2） | `lineHeight`，字号的倍数 |
 | `leading-<n>`、`leading-[<length>]` | `lineHeight`，单位为点（`leading-6` = 24） |
+| `leading-[<number>]` | `lineHeight`，字号的倍数（`leading-[1.5]`），子元素继承该倍数；`em` 和 `%` 先按当前字号计算为长度，再继承该长度 |
 | `tracking-tighter`（-0.05em）、`tracking-tight`（-0.025em）、`tracking-normal`（0）、`tracking-wide`（0.025em）、`tracking-wider`（0.05em）、`tracking-widest`（0.1em） | 相对字号的 `letterSpacing` |
 | `tracking-[<value>]` | `letterSpacing`：`tracking-[0.2em]`、`tracking-[1px]` |
 
@@ -246,12 +249,13 @@ view()
 | `align-baseline`、`align-text-top`、`align-text-bottom`、`align-middle` | `verticalAlign`（文本中的视图和图片） |
 | `text-end` | `textAlign: "right"` |
 | `uppercase`、`lowercase`、`capitalize`、`normal-case` | `textTransform` |
-| `truncate` | 单行、尾部省略、不换行、`overflow: hidden` |
+| `truncate` | 单行、尾部省略、不换行、`overflow: hidden`（用在视图上时：其中的文本不换行） |
 | `line-clamp-<n>`、`line-clamp-none` | `numberOfLines`（`none` 取消限制） |
 | `text-ellipsis`、`text-clip` | `ellipsizeMode` 为 `"tail"` / `"clip"` |
-| `whitespace-nowrap`、`text-nowrap` | 不换行 |
+| `whitespace-nowrap`、`text-nowrap` | 不换行；用在视图上时，作用于其中文本的行（与 CSS 的 `white-space` 一样会继承） |
 | `whitespace-normal`、`text-wrap`、`text-balance`、`text-pretty` | 正常换行（不做行平衡） |
-| `select-text`、`select-all`、`select-none` | `selectable` |
+| `select-text`、`select-none` | `selectable`；用在视图上时，作用于其中未自行设置的文本 |
+| `select-auto` | 取外层视图的 `selectable`，与 CSS 的 `user-select: auto` 一样（`select-none md:select-auto`） |
 
 ### 装饰线与阴影
 
@@ -263,8 +267,8 @@ view()
 | `decoration-auto`、`decoration-from-font` | `textDecorationThickness: "auto"` |
 | `decoration-<color>` | `textDecorationColor` |
 | `underline-offset-<n>`、`underline-offset-[<length>]`、`underline-offset-auto` | `textUnderlineOffset` |
-| `text-shadow-2xs`、`-xs`、`-sm`、`-md`、`-lg` | 主题中的文字阴影 |
-| `text-shadow-<color>` | 阴影颜色（颜色本身不带透明度时保留各层透明度） |
+| `text-shadow-2xs`、`-xs`、`-sm`、`-md`、`-lg` | 主题中的文字阴影（一层：主题中最宽的那层） |
+| `text-shadow-<color>`、`text-shadow-current` | 阴影颜色，透明度取尺寸的 alpha（`text-shadow-md/20`） |
 | `text-shadow-none` | 去掉阴影 |
 
 Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层。
@@ -274,7 +278,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | Class | 设置 |
 |---|---|
 | `placeholder:text-<color>` | `placeholderColor` |
-| `selection:text-<color>` | `selectionColor`（输入框的光标和选区、可选文本的选区高亮） |
+| `selection:bg-<color>` | `selectionColor`（输入框或可选文本的选区高亮，也作用于元素内的输入框和文本） |
 | `caret-<color>` | 光标颜色 |
 
 ## 背景
@@ -290,6 +294,8 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `from-<color>`、`via-<color>`、`to-<color>` | 渐变色标（两端默认透明） |
 | `from-<p>%`、`via-<p>%`、`to-<p>%` | 色标位置：`via-40%`、`from-[15%]` |
 | `bg-none` | 去掉渐变 |
+
+与 Tailwind CSS 的写法（`in oklab`）一致，渐变工具类在 Oklab 中混合颜色；位置为任意值时（`bg-linear-[25deg]`、`bg-conic-[0.25turn]`）遵循 CSS 的默认规则：使用调色板颜色时在 Oklab 中混合，所有色标都是十六进制、`rgb()`、`hsl()` 或具名颜色时在 sRGB 中混合。
 
 ```rust tabs
 view()
@@ -313,14 +319,14 @@ view()
 | `border`、`border-<n>`、`border-[<length>]` | `borderWidth`（不带值为 1） |
 | `border-x`、`border-y`、`border-t`、`border-r`、`border-b`、`border-l`、`border-s`、`border-e`（带 `-<n>` 或不带值） | 对应边的宽度 |
 | `border-<color>`、`border-t-<color>` 等 | `borderColor` 及各边颜色 |
-| `border-solid`、`border-dashed`、`border-dotted` | `borderStyle`（`border-double` 画实线） |
-| `border-none`、`border-hidden` | 宽度为 0 |
+| `border-solid`、`border-dashed`、`border-dotted` | `borderStyle` |
+| `border-none`、`border-hidden` | `borderStyle: "none"` / `"hidden"`：无论宽度类如何、顺序如何都没有边框（`md:border-solid` 会重新显示） |
 | `rounded`、`rounded-<size>`、`rounded-none`、`rounded-full`、`rounded-[<length>]` | `borderRadius`（不带值为 `sm`） |
 | `rounded-t-`、`-r-`、`-b-`、`-l-`、`-tl-`、`-tr-`、`-br-`、`-bl-` | 对应的角 |
 | `rounded-s-`、`-e-`、`-ss-`、`-se-`、`-es-`、`-ee-` | 起始 / 结束侧的角（随书写方向） |
-| `outline`、`outline-<n>`、`outline-[<length>]` | `outlineWidth` 及实线 `outlineStyle`（不带值为 1） |
+| `outline`、`outline-<n>`、`outline-[<length>]` | `outlineWidth`（不带值为 1），字符串中任何位置有样式类时用该样式，否则为实线（`outline-dashed outline-2` 是虚线，`outline-none outline-2` 不绘制） |
 | `outline-<color>` | `outlineColor` |
-| `outline-solid`、`outline-dashed`、`outline-dotted`、`outline-none`、`outline-hidden` | `outlineStyle` |
+| `outline-solid`、`outline-dashed`、`outline-dotted`、`outline-none`、`outline-hidden` | `outlineStyle`；只有样式类时宽度为 CSS 的 medium，即 3 点 |
 | `outline-offset-<n>`、`outline-offset-[<length>]` | `outlineOffset` |
 
 圆角尺寸（点）：`xs` 2、`sm` 4、`md` 6、`lg` 8、`xl` 12、`2xl` 16、`3xl` 24、`4xl` 32、`full` 9999。
@@ -343,13 +349,13 @@ view()
 |---|---|
 | `shadow-2xs`、`shadow-xs`、`shadow-sm`、`shadow`、`shadow-md`、`shadow-lg`、`shadow-xl`、`shadow-2xl` | 主题中的 `boxShadow` |
 | `shadow-[<box-shadow>]` | 任意阴影：`shadow-[0_8px_24px_rgb(0_0_0_/_0.12)]` |
-| `shadow-<color>` | 给阴影层重新着色：`shadow-indigo-500/40` |
+| `shadow-<color>`、`shadow-current` | 给阴影层重新着色，透明度取尺寸的 alpha：`shadow-indigo-500/40`；尺寸可带 `/<alpha>`：`shadow-xl/20` |
 | `shadow-none` | 无阴影 |
 | `inset-shadow-2xs`、`-xs`、`-sm`、`inset-shadow`、`inset-shadow-[...]`、`inset-shadow-<color>`、`inset-shadow-none` | 内阴影 |
 | `opacity-<n>`、`opacity-[<value>]` | `opacity`：`opacity-50` = 0.5 |
 | `mix-blend-<mode>` | `mixBlendMode`：`normal`、`multiply`、`screen`、`overlay`、`darken`、`lighten`、`color-dodge`、`color-burn`、`hard-light`、`soft-light`、`difference`、`exclusion`、`hue`、`saturation`、`color`、`luminosity`、`plus-darker`、`plus-lighter` |
 
-阴影、环和内阴影与 CSS 一样合并为一个 `boxShadow` 列表。阴影颜色本身不带透明度时，保留各层原有的透明度。
+阴影、环和内阴影与 CSS 一样合并为一个 `boxShadow` 列表。与 Tailwind 的 `--tw-shadow-color` 一样，阴影颜色替换各层的颜色，透明度也一并替换：`shadow-md shadow-red-500` 是不透明的红色阴影，`shadow-md/20 shadow-red-500` 则为 20%。
 
 ## 滤镜
 
@@ -359,7 +365,8 @@ view()
 | `brightness-<n>`、`contrast-<n>`、`saturate-<n>` | 百分比倍数：`brightness-125` = 1.25 |
 | `grayscale`、`grayscale-<n>`、`invert`、`invert-<n>`、`sepia`、`sepia-<n>` | 不带值为 100% |
 | `hue-rotate-<deg>`、`-hue-rotate-<deg>` | `hue-rotate()` |
-| `drop-shadow`、`drop-shadow-xs`、`-sm`、`-md`、`-lg`、`-xl`、`-2xl`、`drop-shadow-[...]` | `drop-shadow()`（原生只画一层：最宽的那层） |
+| `drop-shadow`、`drop-shadow-xs`、`-sm`、`-md`、`-lg`、`-xl`、`-2xl`、`drop-shadow-[...]`、`drop-shadow-none`；`drop-shadow-<color>`、`drop-shadow-current`；两者都可带 `/<alpha>` | 每层一个 `drop-shadow()`，位于其他滤镜之后；颜色替换各层的颜色，透明度取尺寸的 alpha；Web、Linux、Windows 和 GPUI 绘制每一层，iOS、macOS 和 Android 绘制最宽的一层 |
+| `drop-shadow-none` | 去掉投影 |
 | `filter-none` | 去掉所有滤镜 |
 | `backdrop-blur`、`backdrop-blur-<size>`、`backdrop-blur-[<length>]` | 模糊视图背后的内容 |
 | `backdrop-brightness-<n>`、`backdrop-contrast-<n>`、`backdrop-grayscale`、`backdrop-hue-rotate-<deg>`、`backdrop-invert`、`backdrop-opacity-<n>`、`backdrop-saturate-<n>`、`backdrop-sepia` | 背景滤镜 |
@@ -373,16 +380,17 @@ view()
 | Class | 设置 |
 |---|---|
 | `translate-x-<n>`、`translate-y-<n>`、`translate-<n>` | 平移（间距、`full`、元素自身尺寸的分数：`-translate-x-1/2`、任意值） |
-| `rotate-<deg>`、`rotate-z-<deg>`、`rotate-[<angle>]` | 旋转 |
-| `rotate-x-<deg>`、`rotate-y-<deg>` | 3D 旋转 |
+| `rotate-<deg>`、`rotate-[<angle>]` | 旋转（CSS 的 `rotate`） |
+| `rotate-x-<deg>`、`rotate-y-<deg>`、`rotate-z-<deg>` | 3D 旋转（属于 `transform`，在平移、旋转和缩放之后） |
 | `scale-<pct>`、`scale-x-<pct>`、`scale-y-<pct>`、`scale-[<factor>]` | 缩放：`scale-95` = 0.95，`-scale-x-100` 为水平镜像 |
 | `skew-<deg>`、`skew-x-<deg>`、`skew-y-<deg>` | 斜切（Android 不支持） |
-| `perspective-dramatic`（100）、`-near`（300）、`-normal`（500）、`-midrange`（800）、`-distant`（1200）、`perspective-[<length>]` | 3D 旋转的透视距离 |
+| `perspective-dramatic`（100）、`-near`（300）、`-normal`（500）、`-midrange`（800）、`-distant`（1200）、`perspective-[<length>]`、`perspective-none` | 元素子元素 3D 旋转的透视距离，从元素中心观察（CSS 的 `perspective`：`<View class="perspective-near"><View class="rotate-y-45" /></View>`） |
 | `origin-center`、`-top`、`-top-right`、`-right`、`-bottom-right`、`-bottom`、`-bottom-left`、`-left`、`-top-left`、`origin-[<value>]` | `transformOrigin` |
 | `backface-hidden`、`backface-visible` | `backfaceVisibility` |
-| `transform-none` | 清除变换 |
+| `transform-none` | 清除 3D 旋转和斜切（CSS 的 `transform: none`） |
+| `translate-none`、`rotate-none`、`scale-none` | 分别清除平移、旋转、缩放 |
 
-变换类与 CSS 一样组合：`translate-*`、`rotate-*` 和 `scale-*` 无论顺序都会叠加。`transform`、`transform-gpu`、`transform-cpu`、`transform-3d` 和 `transform-flat` 可以写，但不起作用。按尺寸分数的平移会根据元素的实际尺寸计算，尺寸变化时自动更新。
+变换类与 CSS 一样组合：`translate-*`、`rotate-*` 和 `scale-*` 无论顺序都会叠加。`transform`、`transform-gpu`、`transform-cpu` 和 `transform-flat` 可以写，但不起作用：NSH 以同一种方式合成所有变换，且都是平面的。按尺寸分数的平移会根据元素的实际尺寸计算，尺寸变化时自动更新。
 
 ## 过渡与动画
 
@@ -403,24 +411,25 @@ view()
 
 | Class | 设置 |
 |---|---|
-| `pointer-events-none`、`pointer-events-auto` | `pointerEvents` |
+| `pointer-events-none`、`pointer-events-auto` | 视图是否接收触摸和指针事件，与 CSS 一样会继承：在 `pointer-events-none` 视图内，`pointer-events-auto` 的视图仍会接收事件（`pointerEvents` 属性保持自身的含义：`"none"` 使整个子树都不接收事件） |
 | `cursor-<name>`、`cursor-[<name>]` | `cursor`：`cursor-pointer`、`cursor-grab`、`cursor-not-allowed` 等（所有 CSS 光标关键字） |
-| `select-none`、`select-text`、`select-all`、`select-auto` | 文字选择（见排版） |
+| `select-none`、`select-text`、`select-auto` | 文字选择（见排版） |
 
 ## 图片
 
 | Class | 设置 |
 |---|---|
-| `object-cover`、`object-contain`、`object-fill`、`object-none`、`object-scale-down` | `resizeMode`（`fill` 拉伸，`none` 和 `scale-down` 居中） |
+| `object-cover`、`object-contain`、`object-fill`、`object-none`、`object-scale-down` | `resizeMode`（`fill` 拉伸；`none` 即 `"center"`：原始尺寸，按 `objectPosition` 放置；`scale-down` 即 `"scale-down"`：同样放置，较大时缩小以适应） |
+| `object-top`、`object-bottom`、`object-left`、`object-right`、`object-center`、`object-top-left`、`object-top-right`、`object-bottom-left`、`object-bottom-right`、`object-[<position>]` | `objectPosition`（`object-left-top` 等与 `object-top-left` 等相同） |
 | `tint-<color>` | `tintColor`（为模板图片着色） |
 
 ## 可写但不起作用
 
-以下网页工具类可以通过解析、不会产生警告，但在原生侧不起作用：`antialiased`、`subpixel-antialiased`、`isolate`、`isolation-auto`、`box-border`、`box-content`、`order-*`、`select-auto`、`transform`、`transform-gpu`、`transform-cpu`、`transform-3d`、`transform-flat`，以及所有 `will-change-*`、`touch-*`、`appearance-*`、`scroll-*`、`snap-*` 和 `overscroll-*` 类。滚动、吸附和越界滚动是 [scroll](../elements/scroll.md) 的属性。
+以下工具类是渲染提示，或描述的正是每个原生视图本来的样子；它们可以通过解析、不会产生警告，也不改变任何东西：`antialiased`、`subpixel-antialiased`、`isolation-auto`、`box-border`、`appearance-none`、`appearance-auto`、`will-change-auto`、`will-change-scroll`、`will-change-contents`、`will-change-transform`、`will-change-[<value>]`、`transform`、`transform-gpu`、`transform-cpu`、`transform-flat`。滚动、吸附和越界滚动是 [scroll](../elements/scroll.md) 的属性。
 
 ## 不支持
 
-`peer-*` 变体、伪元素（`before:`、`after:`）、任意属性（`[prop:value]`）、`overflow-auto` / `overflow-scroll`、`divide-*`、`columns-*`、`float-*`、`container` 以及容器查询。`nsh build` 和 `nsh dev` 会对源码中发现的未知类给出警告（`file:line:col: unknown class '...'`），运行时也会对每个未知类记录一次日志。
+`peer-*` 变体、伪元素（`before:`、`after:`）、任意属性（`[prop:value]`）、`overflow-auto` / `overflow-scroll`、`divide-*`、`columns-*`、`float-*`、`container`、容器查询、`order-*`、`transform-3d`、`select-all`、`border-double` / `outline-double`、固有最小/最大尺寸约束（如 `max-w-max`）、`snap-*`、`scroll-*`、`overscroll-*`、`touch-*` 和 `isolate` 都是未知类。`nsh build` 和 `nsh dev` 会对源码中发现的未知类给出警告（`file:line:col: unknown class '...'`），运行时也会对每个未知类记录一次日志。
 
 ## 变体
 
@@ -573,7 +582,7 @@ each(items, |item: &Item| item.id, move |item, index| {
 
 ### 占位符与选区
 
-`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 的选区（包括光标）或可选 `<Text>` 的选区，同样只接受文字颜色：`selection:text-violet-500`（样式键 `selectionColor`）。
+`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 或可选 `<Text>` 的选区，写在任意元素上时也作用于其中的输入框和文本（Tailwind 的 `& *::selection`；以最近的元素为准），接受选区的背景色，即高亮颜色：`selection:bg-violet-200`（样式键 `selectionColor`；在平台用同一种颜色绘制光标和选区时，也决定输入框光标的颜色）。
 
 ### 重要标记
 

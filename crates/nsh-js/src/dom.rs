@@ -118,6 +118,9 @@ struct NodeData {
     places: bool,
     /// The node's object (not owned: the data goes with it).
     object: JsValue,
+    /// The owner it was made under (`reactive::owner_handle`): its
+    /// listeners' failures go to that owner's error boundary.
+    owner: (u32, u32),
 }
 
 /// The renderer of `cx`.
@@ -558,6 +561,7 @@ fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsV
         content: DETACHED,
         places: false,
         object: UNDEFINED,
+        owner: reactive::owner_handle(cx),
     }));
     // SAFETY: a registered class; the opaque is the boxed data, freed by
     // the finalizer.
@@ -1282,8 +1286,12 @@ fn set_prop(
     let mut warnings = crate::protocol::Warnings::deferred();
     // SAFETY: live node data.
     let tag = unsafe { (*p).tag };
-    let decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
+    let mut decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
+    if let Ok(Some(Op::SetProp { prop, .. })) = &mut decoded {
+        // A `blob:` URL's bytes are in this VM: they go with the source.
+        crate::web::blob::resolve_image_source(cx, prop);
+    }
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),
         Ok(None) => Ok(()),
@@ -3198,6 +3206,158 @@ unsafe extern "C" fn each_component(
     }
 }
 
+/// Hands the pending exception of a listener of node `id` to the error
+/// boundary the node was made under: whether one caught it (else it stays
+/// pending, as before).
+pub(crate) fn catch_listener_failure(cx: *mut JsContext, id: NodeId) -> bool {
+    let p = dom(cx).by_id(id);
+    if p.is_null() {
+        return false;
+    }
+    // SAFETY: live node data.
+    let owner = unsafe { (*p).owner };
+    reactive::catch_pending(cx, owner)
+}
+
+// --- Error boundaries -------------------------------------------------------------
+
+/// `ErrorBoundary({ fallback, children })`: its children, or its fallback
+/// once something under them failed (a component's body, a binding, an
+/// effect, a listener). `fallback(error, reset)` gets the thrown value and
+/// what renders the children again; a fallback that is not a function of
+/// arguments is shown as is. What fails in the fallback goes to the
+/// boundary above.
+///
+/// A memo shows one or the other, reading the boundary's signal (`[error]`
+/// while failed): the children render in a memo of their own under it,
+/// whose context names the signal (`reactive::boundary_key`), so failures
+/// under it reach the boundary; the outer memo running again disposes it.
+pub(crate) unsafe extern "C" fn error_boundary(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let failed = reactive::new_signal(cx, UNDEFINED);
+    let mut data = [failed, arg(argc, argv, 0)];
+    // SAFETY: the function keeps dups of `data`; ours is freed.
+    let func =
+        unsafe { qjs::JS_NewCFunctionData(cx, Some(boundary_run), 0, 0, 2, data.as_mut_ptr()) };
+    unsafe { qjs::JS_FreeValue(cx, failed) };
+    if unsafe { qjs::JS_IsException(func) } {
+        return func;
+    }
+    let view = reactive::memo(cx, func, false);
+    reactive::finish_value(cx, view)
+}
+
+/// A run of an `ErrorBoundary`'s memo: the fallback while its signal holds
+/// an error, else a memo rendering the children.
+unsafe extern "C" fn boundary_run(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (`error_boundary`); values got are freed.
+    let (failed, props) = unsafe { (*data, *data.add(1)) };
+    let state = unsafe { qjs::JS_Call(cx, failed, UNDEFINED, 0, ptr::null_mut()) };
+    if unsafe { qjs::JS_IsException(state) } {
+        return state;
+    }
+    // SAFETY: inline checks; values got are owned.
+    unsafe {
+        if !qjs::JS_IsArray(state) {
+            qjs::JS_FreeValue(cx, state);
+            let mut fdata = [failed, props];
+            let func =
+                qjs::JS_NewCFunctionData(cx, Some(boundary_view), 0, 0, 2, fdata.as_mut_ptr());
+            if qjs::JS_IsException(func) {
+                return func;
+            }
+            return reactive::memo(cx, func, false);
+        }
+        let error = qjs::JS_GetPropertyUint32(cx, state, 0);
+        qjs::JS_FreeValue(cx, state);
+        reactive::untracked_with(cx, || {
+            let fallback = qjs::JS_GetPropertyStr(cx, props, c"fallback".as_ptr());
+            if !qjs::JS_IsFunction(cx, fallback) || !node_ptr(cx, fallback).is_null() {
+                qjs::JS_FreeValue(cx, error);
+                return fallback;
+            }
+            let mut length = 0i32;
+            let l = qjs::JS_GetPropertyStr(cx, fallback, c"length".as_ptr());
+            qjs::JS_ToInt32(cx, &mut length, l);
+            qjs::JS_FreeValue(cx, l);
+            if length == 0 {
+                // An element to show, as children are.
+                qjs::JS_FreeValue(cx, error);
+                return fallback;
+            }
+            let mut rdata = [failed];
+            let reset =
+                qjs::JS_NewCFunctionData(cx, Some(boundary_reset), 0, 0, 1, rdata.as_mut_ptr());
+            let mut args = [error, reset];
+            let r = qjs::JS_Call(cx, fallback, UNDEFINED, 2, args.as_mut_ptr());
+            for v in [fallback, error, reset] {
+                qjs::JS_FreeValue(cx, v);
+            }
+            r
+        })
+    }
+}
+
+/// The memo of an `ErrorBoundary`'s children: names the boundary in its
+/// context, then renders them (untracked). A function among them gets a
+/// memo of its own here, so that it runs under the boundary too.
+unsafe extern "C" fn boundary_view(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (`boundary_run`); values got are owned.
+    let (failed, props) = unsafe { (*data, *data.add(1)) };
+    reactive::provide(cx, reactive::boundary_key(cx), failed);
+    reactive::untracked_with(cx, || unsafe {
+        let children = qjs::JS_GetPropertyStr(cx, props, c"children".as_ptr());
+        if qjs::JS_IsException(children) {
+            // Caught here, not as the memo's failure: a failed memo runs
+            // again when it is read, and the children would render twice.
+            reactive::catch_pending_at(cx, failed);
+            return UNDEFINED;
+        }
+        if qjs::JS_IsFunction(cx, children) && node_ptr(cx, children).is_null() {
+            return item_memo(cx, children);
+        }
+        match memoize_run(cx, children) {
+            Some(memos) => {
+                qjs::JS_FreeValue(cx, children);
+                memos
+            }
+            None => children,
+        }
+    })
+}
+
+/// An `ErrorBoundary`'s `reset`: renders its children again.
+unsafe extern "C" fn boundary_reset(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`boundary_run`).
+    reactive::set_signal(cx, unsafe { *data }, UNDEFINED);
+    reactive::finish_value(cx, UNDEFINED)
+}
+
 /// The globals of the renderer: `If` and `Each`, the control flow tags no
 /// app imports.
 pub(crate) fn install_globals(cx: *mut JsContext) {
@@ -3485,6 +3645,123 @@ mod tests {
                 "set text 6 \"2\""
             ]
         );
+    }
+
+    /// The texts made since the last call.
+    fn texts(host: &Host) -> Vec<String> {
+        texts_and_element(host).0
+    }
+
+    /// The texts made since the last call, and the last text element made.
+    fn texts_and_element(host: &Host) -> (Vec<String>, Option<nsh_core::NodeId>) {
+        let mut out = Vec::new();
+        host.take_ops(&mut out);
+        let element = out.iter().rev().find_map(|op| match op {
+            Op::Create {
+                id,
+                tag: nsh_core::Tag::Text,
+            } => Some(*id),
+            _ => None,
+        });
+        let texts = out
+            .into_iter()
+            .filter_map(|op| match op {
+                Op::CreateText { text, .. } => Some(text),
+                Op::SetText { text, .. } => Some(format!("set {text}")),
+                _ => None,
+            })
+            .collect();
+        (texts, element)
+    }
+
+    const BOUNDARY: &str = r#"
+        import { mount, signal, ErrorBoundary } from "nsh";
+        import { element, insert, text, prop, component } from "nsh:rt";
+        const n = signal(0);
+        globalThis.n = n;
+        globalThis.failBody = false;
+        const Risky = () => {
+            if (globalThis.failBody) throw new Error("body");
+            const t = element("text");
+            prop(t, "onPress", () => { throw new Error("press"); });
+            insert(t, () => {
+                if (n() == 1) throw new Error("binding");
+                return `n${n()}`;
+            });
+            return t;
+        };
+        const boundary = (children, label) => component(ErrorBoundary, {
+            fallback: (error, reset) => {
+                globalThis.reset = () => { n.set(0); reset(); };
+                if (label == "inner") throw new Error(`fallback of ${error.message}`);
+                return text(`${label} caught ${error.message}`);
+            },
+            get children() { return children(); },
+        });
+    "#;
+
+    /// A failure under an `ErrorBoundary` (a binding, a component's body,
+    /// a listener) shows its fallback in place of what failed; `reset()`
+    /// renders the children again.
+    #[test]
+    fn error_boundaries_catch_and_reset() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => {{
+                const v = element("view");
+                insert(v, text("before"));
+                insert(v, boundary(() => component(Risky, {{}}), "outer"));
+                return v;
+            }});
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["before", "n0"]);
+        // A binding fails: the boundary shows its fallback, nothing throws.
+        assert!(host.eval_script("fail.js", "n.set(1)").is_ok());
+        assert_eq!(texts(&host), ["outer caught binding"]);
+        host.eval_script("reset.js", "reset()").unwrap();
+        let (shown, element) = texts_and_element(&host);
+        assert_eq!(shown, ["n0"]);
+        // A listener fails.
+        host.dispatch_event(element.unwrap(), EventKind::Press, &EventPayload::None);
+        assert_eq!(texts(&host), ["outer caught press"]);
+        // The body fails when rendered again.
+        host.eval_script("body.js", "failBody = true; reset()")
+            .unwrap();
+        assert_eq!(texts(&host), ["outer caught body"]);
+    }
+
+    /// A failure in a fallback goes to the boundary above; with no
+    /// boundary, the failure throws as before.
+    #[test]
+    fn error_boundaries_nest() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => {{
+                const v = element("view");
+                insert(v, boundary(() => boundary(() => component(Risky, {{}}), "inner"), "outer"));
+                return v;
+            }});
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["n0"]);
+        // The inner boundary's fallback throws: the outer one shows that.
+        host.eval_script("fail.js", "n.set(1)").unwrap();
+        assert_eq!(texts(&host), ["outer caught fallback of binding"]);
+
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => component(Risky, {{}}));
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["n0"]);
+        assert!(host.eval_script("fail.js", "n.set(1)").is_err());
     }
 
     #[test]

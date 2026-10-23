@@ -955,6 +955,60 @@ covers [props] Tab.selectedStyle
 covers [props] accessibilityLabel
 covers [events] onPress
 
+# A collapsible: the summary always, the details only while the app's
+# `open` holds. Collapsed, the region is the trigger's 20 points.
+tap id:case-base-collapsible
+expect Summary
+absent Details 0
+frame id:region 0 20 390 20
+prop id:trigger accessibilityState expanded=false
+# Open: the details after the summary, 4 apart (`class`).
+tap id:trigger
+expect Details 0
+prop id:trigger accessibilityState expanded=true
+frame id:region 0 20 390 54
+frame id:details 0 0 390 30
+# Collapsed again: out of the layout.
+tap id:trigger
+absent Details 0
+frame id:region 0 20 390 20
+# Kept while collapsed: it follows the app and shows the latest.
+tap id:bump
+tap id:trigger
+expect Details 1
+frame id:region 0 20 390 54
+covers [nsh/base] Collapsible
+covers [props] Collapsible.open
+covers [props] Collapsible.content
+
+# base-progress
+tap id:case-base-progress
+# The progress bar role, its label, range and value for screen readers;
+# the indicator (30 high, 4 above it) in the track (3 around it, 6
+# below it) makes the bar 46 high.
+expect 40%
+prop id:upload role progressbar
+prop id:upload accessibilityLabel Uploading
+prop id:upload accessibilityValue min=0 max=100 now=40
+frame id:upload 0 20 390 46
+# The app's value, held to the range.
+tap id:more
+expect 120%
+prop id:upload accessibilityValue min=0 max=100 now=100
+# Indeterminate: the range with no value.
+tap id:wait
+prop id:upload accessibilityValue min=0 max=100
+frame id:upload 0 20 390 46
+tap id:wait
+prop id:upload accessibilityValue min=0 max=100 now=100
+covers [nsh/base] Progress
+covers [props] value
+covers [props] Progress.indeterminate
+covers [props] Progress.trackClass
+covers [props] Progress.trackStyle
+covers [props] Progress.indicatorClass
+covers [props] Progress.indicatorStyle
+
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
 expect token up #138a5aff
@@ -963,3 +1017,142 @@ expect token radius-card 14
 style id:up backgroundColor #138a5aff
 style id:primary backgroundColor #17171780
 covers [nsh] token
+
+# base-resizable
+tap id:case-base-resizable
+# The sidebar starts at its `size`, the main panel takes the rest; the
+# hidden aside takes no space. One handle, on the boundary: a band 9
+# thick, the line in its middle, `adjustable` and named by the app; its
+# indicator is the app's (half opaque, red) and holds what `renderHandle`
+# draws, told the handle's index, axis and state.
+expect Grip 0 horizontal idle
+expect Reported: none
+frame id:sidebar 0 0 150 100
+frame id:main 150 0 250 100
+frame id:aside 0 0 0 0
+prop label:Resize role adjustable
+frame label:Resize 146 0 9 100
+style parent:parent:parent:text:"Grip 0 horizontal idle" backgroundColor #ff0000ff
+style parent:parent:parent:text:"Grip 0 horizontal idle" opacity 0.5
+# A drag moves the boundary with the finger; nothing is reported until
+# it ends, then the group's sizes and the sidebar's, which the app
+# passes back.
+touch start label:Resize 4 50
+expect Grip 0 horizontal pressed
+touch move 34 50
+expect Grip 0 horizontal dragging
+frame id:sidebar 0 0 180 100
+frame id:main 180 0 220 100
+expect Reported: none
+touch end
+expect Grip 0 horizontal idle
+expect Reported: 180, 220
+expect Sidebar: 180
+frame label:Resize 176 0 9 100
+# Past its `maxSize` the sidebar stops at 200, below its `minSize` at
+# 120.
+touch start label:Resize 4 50
+touch move 64 50
+touch end
+expect Reported: 200, 200
+expect Sidebar: 200
+frame id:main 200 0 200 100
+touch start label:Resize 4 50
+touch move -146 50
+touch end
+expect Reported: 120, 280
+expect Sidebar: 120
+frame id:sidebar 0 0 120 100
+# The aside shown (`visible`) takes its 100 from the main panel, which
+# has no size of its own. A second handle comes.
+tap id:aside-toggle
+frame id:aside 300 0 100 100
+frame id:main 120 0 180 100
+expect Grip 1 horizontal idle
+# The group 100 wider: the panels with a size keep it, the main panel
+# takes the rest.
+tap id:widen
+frame id:sidebar 0 0 120 100
+frame id:main 120 0 280 100
+frame id:aside 400 0 100 100
+# Too narrow for them all (300): the sidebar (120) and the main panel
+# (100) are at their minimums, and the aside, `fixed`, does not shrink
+# either (it would to 80). The minimums together (280) fit, so none
+# yields.
+tap id:narrow
+frame id:sidebar 0 0 120 100
+frame id:main 120 0 100 100
+frame id:aside 220 0 100 100
+# Hidden again, it gives its space back to the main panel.
+tap id:aside-toggle
+frame id:sidebar 0 0 120 100
+frame id:main 120 0 180 100
+absent Grip 1 horizontal idle
+# None of that was a drag: nothing was reported.
+expect Reported: 120, 280
+# `disabled`: a drag does nothing.
+tap id:lock
+touch start label:Resize 4 50
+touch move 54 50
+touch end
+frame id:sidebar 0 0 120 100
+expect Reported: 120, 280
+# A screen reader's increment does nothing while it is disabled either;
+# once enabled, it moves the handle by 10, reported as a drag's end.
+event label:Resize onAccessibilityAction actionName=increment
+frame id:sidebar 0 0 120 100
+tap id:lock
+event label:Resize onAccessibilityAction actionName=increment
+expect Reported: 130, 170
+expect Sidebar: 130
+frame id:sidebar 0 0 130 100
+frame id:main 130 0 170 100
+# A vertical group stacks its panels, sharing the height.
+frame id:top 0 0 100 100
+frame id:bottom 0 100 100 100
+covers [nsh/base] ResizablePanelGroup
+covers [nsh/base] ResizablePanel
+covers [props] ResizablePanelGroup.axis
+covers [props] disabled
+covers [props] ResizablePanelGroup.handleClass
+covers [props] ResizablePanelGroup.handleStyle
+covers [props] ResizablePanelGroup.handleAccessibilityLabel
+covers [props] ResizablePanelGroup.renderHandle
+covers [events] ResizablePanelGroup.onResize
+covers [props] ResizablePanel.size
+covers [props] ResizablePanel.minSize
+covers [props] ResizablePanel.maxSize
+covers [props] ResizablePanel.fixed
+covers [props] ResizablePanel.visible
+covers [events] ResizablePanel.onResize
+# base-dock
+tap id:case-base-dock
+# 390 wide: compact. One group at a time, its tab bar listing every
+# center panel; the other group's panels are placed, hidden.
+expect Tab a*
+expect Tab b
+expect Tab c
+expect Panel a
+# A tab of the other group shows that group.
+tap text:Tab c
+expect Tab c*
+expect Panel c
+expect Reported none
+# The left dock is open in the layout, but nothing is presented at
+# first (reported against the layout's `open`); the ref presents its
+# drawer, and the layout stays as it is.
+expect Docks: left false
+tap id:open-files
+expect Docks: left false, left true
+expect Panel files
+expect Reported none
+style parent:parent:parent:parent:parent:parent:parent:parent:id:panel-files backgroundColor #ffffffff
+style below:parent:parent:parent:parent:parent:parent:parent:parent:id:panel-files backgroundColor #00000066
+# A press on its backdrop dismisses it.
+tap below:parent:parent:parent:parent:parent:parent:parent:parent:id:panel-files
+expect Docks: left false, left true, left false
+expect Reported none
+covers [props] DockArea.defaultLayout
+covers [props] DockArea.drawerClass
+covers [props] DockArea.backdropClass
+covers [events] DockArea.onDockOpenChange

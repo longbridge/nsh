@@ -18,8 +18,8 @@ use super::{
     events, when,
 };
 use crate::{
-    CellSlot, EventKind, EventPayload, ListContentStyle, PayloadValue, Prop, Tag, Viewability,
-    geometry::Points,
+    CellSlot, EventKind, EventPayload, ListContentStyle, ListViewport, PayloadValue, Prop, Tag,
+    Viewability, geometry::Points,
 };
 
 /// How a list lays out its rows: [`super::ListElement`] (the app's rows)
@@ -59,6 +59,17 @@ pub trait ListLayout: Sized {
     /// Scrolls horizontally.
     fn horizontal(mut self) -> Self {
         self.config().horizontal = Some(true);
+        self
+    }
+
+    /// What the list scrolls in (TS: `viewport`): [`ListViewport::Parent`]
+    /// lays it out at its full length and renders the rows near the
+    /// viewport of the scroll view around it, which scrolls it with what
+    /// else it holds (headers above the list, other lists); the default,
+    /// [`ListViewport::Own`], is a scroll view of its own. Fixed when the
+    /// list is made.
+    fn viewport(mut self, viewport: ListViewport) -> Self {
+        self.config().viewport = Some(viewport);
         self
     }
 
@@ -345,6 +356,25 @@ impl VirtualList {
     /// (default 1; TS: `loadMoreThreshold`).
     pub fn load_more_threshold(mut self, viewports: f32) -> Self {
         super::host::set(&mut self.0, Prop::LoadMoreThreshold(viewports));
+        self
+    }
+
+    /// Scrolled close to the start, once the user or a scroll command
+    /// moved the list (load what comes before the first row: the newer
+    /// messages of a chat opened at an old one; TS: `onLoadMoreAtStart`).
+    /// Fires once per approach, and again while the list stays near the
+    /// start when the rows change.
+    pub fn on_load_more_at_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.on(
+            EventKind::LoadMoreAtStart,
+            events::typed(listener.into_listener(), events::unit),
+        )
+    }
+
+    /// How close to the start [`Self::on_load_more_at_start`] fires, in
+    /// viewports (default 1; TS: `loadMoreAtStartThreshold`).
+    pub fn load_more_at_start_threshold(mut self, viewports: f32) -> Self {
+        super::host::set(&mut self.0, Prop::LoadMoreAtStartThreshold(viewports));
         self
     }
 

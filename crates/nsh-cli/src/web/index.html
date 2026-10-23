@@ -34,7 +34,9 @@
   // code (bytecode, with the hardening it runs first) and its fonts in
   // parallel, then runs the app as a release; a chunk's own fonts come
   // with it. A Rust app (`app.rust`) has no code: its runtime mounts its
-  // root.
+  // root. The page's host (`app.host`, nsh.json `web.host`) answers the
+  // app's `nsh/host` calls: its `createHost(player)` runs once the player
+  // exists, before the app starts, so no call comes earlier.
   import { createPlayer } from "./{{runtime}}";
 
   const app = {{app}};
@@ -77,10 +79,12 @@
   };
 
   try {
-    const [loaded, code, harden] = await Promise.all([
+    let host;
+    const [loaded, code, harden, hostModule] = await Promise.all([
       createPlayer(document.getElementById("app"), {
         wasm: take(app.wasm),
         glue: app.glue,
+        host: app.host ? { call: (name, args) => host.call(name, args) } : undefined,
         assets: app.assets,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
         prepareChunk: (id) => Promise.all((app.chunkFonts[id] ?? []).map(loadFont)),
@@ -92,9 +96,14 @@
       }),
       app.rust ? null : get(app.code).then((r) => r.arrayBuffer()),
       app.rust ? null : get(app.harden).then((r) => r.arrayBuffer()),
+      app.host ? import(`./${app.host}`) : null,
       ...app.fonts.map(loadFont),
     ]);
     player = loaded;
+    if (hostModule) {
+      host = await hostModule.createHost(player);
+      if (typeof host?.call !== "function") throw new Error("nsh.json web.host: createHost(player) returned no call(name, args)");
+    }
     status.hidden = true;
     if (app.rust) player.runRust();
     else player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks });

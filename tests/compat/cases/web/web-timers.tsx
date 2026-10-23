@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the order
-// timers, intervals and microtasks run in, cancelling them, delays as
-// `performance.now()` measures them, and `console`. Each check is a line
+// timers, intervals and microtasks run in, cancelling them, animation
+// frames, delays as `performance.now()` measures them, and `console`. Each check is a line
 // `<name>=<result>` its script expects after waiting.
 import { Text, View, signal } from "nsh";
 
@@ -140,6 +140,26 @@ async function run() {
   await check("clearIntervalUnknown", () => {
     clearInterval(987654);
     return "ok";
+  });
+
+  // Animation frames: a callback runs once, at a display frame, with the
+  // frame's time; one cancelled never runs.
+  await check("requestAnimationFrame", async () => {
+    const start = performance.now();
+    const times: number[] = [];
+    const a = requestAnimationFrame((time) => times.push(time));
+    const b = requestAnimationFrame((time) => times.push(time));
+    await sleep(200);
+    return [typeof a, a !== b, times.length, times.every((t) => typeof t === "number" && t >= start)];
+  });
+  await check("cancelAnimationFrame", async () => {
+    const log: string[] = [];
+    const id = requestAnimationFrame(() => log.push("cancelled"));
+    requestAnimationFrame(() => log.push("kept"));
+    cancelAnimationFrame(id);
+    cancelAnimationFrame(123456);
+    await sleep(200);
+    return log;
   });
 
   // performance.
