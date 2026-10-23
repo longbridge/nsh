@@ -1,31 +1,95 @@
 ---
 title: nsh/host
-description: "你的应用与嵌入它的应用之间的通道：启动参数、宿主发来的事件，以及发给宿主的调用和投递。"
-order: 9.1
+description: Host：调用嵌入 NSH 的应用或页面提供的函数，并监听它发来的事件。
+order: 8.6
 ---
 
 # nsh/host
 
-`nsh/host` 是你的应用与嵌入它的应用之间的通道。在视图中运行你的应用的 iOS、Android 或桌面应用，可以给它启动参数（通知要打开的会话、当前登录的用户），向它发送事件，并回答它发出的调用，中间不需要任何视图，宿主也不需要写 Rust。数据以 JSON 值传递，两侧都在原生代码中转换。
+`nsh/host` 连接嵌入 NSH 的应用：`NshAppView` / `NshView` 所在的原生应用，或在 Web 上运行播放器的页面。应用按名字调用宿主的函数（参数是 JSON），并监听宿主发来的事件。
 
-```tsx
+```ts
 import { host } from "nsh/host";
 ```
 
-嵌入方的那一侧属于它的 NSH 视图：`NshAppView`（Swift）和 `NshView`（Java、Kotlin）上的 `params`、`send`、`handle`，以及 Rust 中各平台 `AppView::host()` 返回的 `HostChannel`。
+```ts
+const host: {
+  readonly params: { readonly [key: string]: unknown };
+  post(name: string, data?: unknown): void;
+  available(): boolean;
+  call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
+  on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+};
+```
+
+## host.available
 
 ```ts
-const host: Host;
+available(): boolean;
+```
 
-interface Host {
-  readonly params: HostParams;
-  on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
-  call<T = HostValue>(name: string, data?: unknown): Promise<T>;
-  post(name: string, data?: unknown): void;
-}
+平台是否有应答调用的宿主。在 Web 上，页面给播放器传入宿主时为 `true`（[Web 上的宿主](#web-上的宿主)）。
 
-type HostValue = null | boolean | number | string | HostValue[] | { [key: string]: HostValue };
-type HostParams = { readonly [key: string]: HostValue };
+```tsx
+import { Text } from "nsh";
+import { host } from "nsh/host";
+
+<Text>{host.available() ? "Embedded" : "Standalone"}</Text>;
+```
+
+## host.call
+
+```ts
+call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
+```
+
+以 `args`（任意 JSON 值；不传时为 `null`）调用宿主的函数 `name`，resolve 为它的返回值。函数失败时以宿主给出的错误消息拒绝；`host.available()` 为 `false` 时以 `nsh/host: this platform has no host` 拒绝；`name` 不在应用的 [`host` 能力](#能力)中，或不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）时也会拒绝。
+
+调用最多等待宿主应答 30 秒，之后以 `nsh/host: <name> timed out after 30000 ms` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `nsh/host: invalid timeout <value>` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
+
+```ts
+const user = (await host.call("getUserInfo")) as { name: string };
+const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 5000 });
+```
+
+## host.on
+
+```ts
+on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+```
+
+宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `remove()`。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
+
+```ts
+const sub = host.on("loginChanged", (payload) => console.log(payload));
+// 之后
+sub.remove();
+```
+
+## 能力
+
+应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会被拒绝并记录日志；构建导入了 `nsh/host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
+
+```json
+{ "capabilities": { "host": ["getUserInfo", "bridge.*"] } }
+```
+
+## Web 上的宿主
+
+在 Web 上，页面就是宿主。`createPlayer` 的 `host` 选项应答调用，`player.hostEvent(event, payload)` 发送事件：
+
+```js
+const player = await createPlayer(container, {
+  wasm: "./nsh.wasm",
+  host: { call: (name, args) => (name === "getUserInfo" ? { name: "Ada" } : Promise.reject(new Error(name))) },
+});
+player.hostEvent("loginChanged", { signedIn: true });
+```
+
+发布的应用在 `nsh.json` 中指定宿主：`web.host` 是应用目录内的一个 JS 模块（路径相对于 `nsh.json`），导出 `createHost(player)`，返回带 `call` 的对象。`nsh package --target web` 把它随站点一起发布，`nsh run --target web` 在开发页面上运行它，`nsh test` 会为测试打开的应用运行它。`web.connect` 列出宿主自己的请求访问的主机，页面的 Content-Security-Policy 在应用的 `capabilities.network` 之外允许它们。参见 [Web](../docs/web.md#宿主的函数)。
+
+```json
+{ "web": { "host": "./host.js", "connect": ["api.example.com"] } }
 ```
 
 ## host.params
@@ -37,56 +101,14 @@ const conversation = host.params.conversation as string | undefined;
 mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
 ```
 
-## host.on
 
-```ts
-on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
-```
+## 原生 SDK 通道
 
-监听嵌入方的事件 `name`。`listener` 收到事件的数据（没有数据时是 `null`）；同一名称的监听器按添加顺序运行。返回一个停止监听的函数，在组件渲染时添加的监听器随组件一起停止。
-
-事件会等待你的应用：应用尚未监听的名称的事件会被保留，在添加该名称的第一个监听器、添加它的代码运行完之后立即送达（最多保留 256 个事件，超出时丢弃最早的）。如果最后一个监听器在接收过程中停止，剩余事件会按原顺序继续等待。嵌入方在你的应用启动之前或重新加载期间发送的事件，会交给它接下来运行的应用。因此嵌入方可以在用户点开通知的任何时候发送“打开会话 42”，无论应用正在运行、正在启动还是即将启动，都能收到。
-
-```tsx
-host.on<{ id: string }>("conversation.open", ({ id }) => stack.push(<Conversation id={id} />));
-```
-
-## host.call
-
-```ts
-call<T = HostValue>(name: string, data?: unknown): Promise<T>;
-```
-
-用 `data` 调用嵌入方对 `name` 的处理函数。promise 以它的回答 resolve，或以一个携带处理函数所给消息的 `Error` reject。嵌入方没有处理 `name` 时立即 reject，因此你的应用可以分辨自己运行在哪个宿主中。同时最多有 1024 个调用等待回答；再多一个会以 `RangeError` reject。
-
-```tsx
-try {
-  const profile = await host.call<{ name: string }>("user.profile", { id: 7 });
-  name.set(profile.name);
-} catch (e) {
-  error.set((e as Error).message);
-}
-```
-
-## host.post
-
-```ts
-post(name: string, data?: unknown): void;
-```
-
-把 `data` 交给嵌入方对 `name` 的处理函数，不需要回答：统计、"关闭我"、"用户已退出登录"。没有处理函数时被丢弃。
-
-```tsx
-host.post("analytics", { screen: "conversation", id });
-```
-
-## 数据
-
-传入的值按 `JSON.stringify` 的方式转换：函数和值为 `undefined` 的字段被省略，嵌套超过 64 层或条目超过一百万的值会抛出 `RangeError`。名称是 1 到 256 字节的字符串；其他名称会抛出 `TypeError`（`host.call` 以它 reject）。
+原生 SDK 的 `send` 会保留尚未监听的事件，最多 256 条。最后一个监听器在接收过程中取消订阅时，其余事件仍按原顺序等待；重载停机期间发送的事件交给下一次加载的应用。`host.on` 返回的订阅既可作为清理函数调用，也提供 `remove()`。`host.post(name, data)` 向原生 SDK 的处理函数投递数据，处理函数可用 `isPost` 区分投递与调用。
 
 ## 嵌入方的一侧
 
-每个视图为它加载的所有应用保留一条通道。在加载之前设置参数，随时在任意线程发送事件，按名称注册处理函数。处理函数回答一次，可以立即回答，也可以稍后回答；始终没有到来的回答会让调用失败。
+每个视图为它加载的所有应用保留一条通道。在加载之前设置参数，随时在任意线程发送事件，按名称注册处理函数。调用和投递需要在 `capabilities.host` 中授权。处理函数回答一次，可以立即回答，也可以稍后回答；始终没有到来的回答会让调用失败。
 
 ```rust tabs
 // 任一平台的 AppView（GPUI、macOS、Windows、Linux、iOS）：它的 HostChannel。

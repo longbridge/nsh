@@ -19,6 +19,7 @@ use std::{
     cell::{Cell, RefCell},
     ffi::c_int,
     rc::Rc,
+    time::Duration,
 };
 
 use nsh_core::{
@@ -28,11 +29,8 @@ use nsh_core::{
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 
-use crate::{
-    modules::{Export, Item, Ts},
-    web::js::{
-        self, Args, Ctx, Deferred, R, Raw, Throw, UNDEFINED, V, closure, native, type_error,
-    },
+use crate::web::js::{
+    self, Args, Ctx, Deferred, R, Raw, Throw, UNDEFINED, V, closure, native, type_error,
 };
 
 /// A listener of the embedding app's events.
@@ -40,6 +38,14 @@ struct Listener {
     id: u32,
     name: String,
     f: V,
+}
+
+/// A native call and its deadline on the app's clock.
+struct PendingCall {
+    deferred: Deferred,
+    name: String,
+    timeout: f64,
+    deadline: Option<nsh_core::time::Instant>,
 }
 
 /// A context's side of the channel.
@@ -51,7 +57,7 @@ pub(crate) struct HostChannel {
     /// The events no listener heard yet.
     inbox: RefCell<HostInbox>,
     /// The calls waiting for the embedding app's answers, by id.
-    calls: RefCell<FxHashMap<u64, Deferred>>,
+    calls: RefCell<FxHashMap<u64, PendingCall>>,
     next_call: Cell<u64>,
 }
 
@@ -112,23 +118,55 @@ fn error(cx: Ctx, message: &str) -> R<V> {
     js::construct(cx, class.raw(), &[message.raw()])
 }
 
-/// The `host` object.
-fn make(cx: Ctx) -> Raw {
+/// Whether a native SDK channel is configured alongside the platform.
+pub(crate) fn available(cx: Ctx) -> bool {
+    bridge(cx).is_some_and(|b| b.available())
+}
+
+/// Adds the SDK channel to the existing capability-gated platform module.
+/// Platform calls (notably the web player) keep the registry's transport.
+pub(crate) fn extend(cx: Ctx, host: Raw) -> Raw {
+    let obj = V::own(cx, host);
     let made = (|| -> R<V> {
-        let obj = js::new_object(cx)?;
+        let platform_call = js::get(cx, obj.raw(), "call")?;
+        let call = closure(cx, vec![platform_call], |cx, captures, args| {
+            if available(cx) {
+                return match start_call(cx, args) {
+                    Ok(promise) => Ok(promise),
+                    Err(Throw) => js::rejected_with_exception(cx),
+                };
+            }
+            let arguments: Vec<_> = (0..args.len()).map(|i| args.get(i)).collect();
+            js::call(cx, captures[0].raw(), UNDEFINED, &arguments)
+        })?;
+        js::define(cx, obj.raw(), "call", call, true)?;
+        let platform_on = js::get(cx, obj.raw(), "on")?;
+        let on = closure(cx, vec![platform_on], |cx, captures, args| {
+            let native_on = js::function(cx, c"on", on, 2)?;
+            let arguments = [args.get(0), args.get(1)];
+            let native_off = js::call(cx, native_on.raw(), UNDEFINED, &arguments)?;
+            let platform_sub = js::call(cx, captures[0].raw(), UNDEFINED, &arguments)?;
+            let platform_off = js::get(cx, platform_sub.raw(), "remove")?;
+            let off = closure(
+                cx,
+                vec![native_off, platform_sub, platform_off],
+                |cx, values, _| {
+                    js::call(cx, values[0].raw(), UNDEFINED, &[])?;
+                    js::call(cx, values[2].raw(), values[1].raw(), &[])?;
+                    Ok(V::undefined())
+                },
+            )?;
+            // Keep main's subscription form and the SDK's cleanup function.
+            js::define(cx, off.raw(), "remove", off.clone_ref(), true)?;
+            crate::keymap::undo_with_owner(cx, &off);
+            Ok(off)
+        })?;
+        js::define(cx, obj.raw(), "on", on, true)?;
         let params = bridge(cx)
             .map(|b| b.params())
             .filter(JsonValue::is_object)
             .unwrap_or_else(|| JsonValue::Object(Default::default()));
         js::define(cx, obj.raw(), "params", from_json(cx, &params), true)?;
-        js::define(cx, obj.raw(), "on", js::function(cx, c"on", on, 2)?, true)?;
-        js::define(
-            cx,
-            obj.raw(),
-            "call",
-            js::function(cx, c"call", call, 2)?,
-            true,
-        )?;
         js::define(
             cx,
             obj.raw(),
@@ -185,18 +223,31 @@ native! {
     }
 }
 
-native! {
-    /// `call(name, data)`: a promise of the embedding app's answer.
-    fn call(cx, _this, args) {
-        match start_call(cx, args) {
-            Ok(promise) => Ok(promise),
-            Err(Throw) => js::rejected_with_exception(cx),
-        }
-    }
-}
-
 fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
     let name = name_arg(cx, args.get(0), "host.call")?;
+    check_call(cx, &name)?;
+    let options = args.get(2);
+    let timeout = if js::is_nullish(options) {
+        30_000.0
+    } else {
+        let value = js::get(cx, options, "timeout")?;
+        if js::is_undefined(value.raw()) {
+            30_000.0
+        } else {
+            js::to_number(cx, value.raw())?
+        }
+    };
+    if !timeout.is_finite() || timeout < 0.0 {
+        let e = error(cx, &format!("nsh/host: invalid timeout {timeout}"))?;
+        return Err(js::throw(cx, e));
+    }
+    let deadline = (timeout != 0.0)
+        .then(|| {
+            Duration::try_from_secs_f64(timeout / 1000.0)
+                .ok()
+                .and_then(|duration| nsh_core::time::now().checked_add(duration))
+        })
+        .flatten();
     let data = to_json(cx, args.get(1))?;
     let state = channel(cx);
     if state.calls.borrow().len() >= MAX_PENDING_CALLS {
@@ -213,11 +264,19 @@ fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
     state.next_call.set(id);
     let started = match bridge(cx) {
         Some(bridge) => bridge.call(id, &name, data),
-        None => Err(no_handler(&name)),
+        None => Err("nsh/host: this platform has no host".to_owned()),
     };
     match started {
         Ok(()) => {
-            state.calls.borrow_mut().insert(id, deferred);
+            state.calls.borrow_mut().insert(
+                id,
+                PendingCall {
+                    deferred,
+                    name,
+                    timeout,
+                    deadline,
+                },
+            );
         }
         Err(message) => {
             let e = error(cx, &message)?;
@@ -227,9 +286,63 @@ fn start_call(cx: Ctx, args: Args<'_>) -> R<V> {
     Ok(promise)
 }
 
-/// Why a call to `name` fails at once when nothing handles it.
-pub(crate) fn no_handler(name: &str) -> String {
-    format!("host.call(\"{name}\"): the embedding app handles no \"{name}\"")
+/// Native SDK calls and posts obey the same names and grants as the
+/// platform's `Command::HostCall`, before crossing into host code.
+fn check_call(cx: Ctx, name: &str) -> R<()> {
+    let message = if !nsh_core::access::valid_host_name(name) {
+        Some(format!(
+            "nsh/host: invalid function name {name:?} ({})",
+            nsh_core::access::HOST_NAME_CHARS
+        ))
+    } else if !crate::dom::shared(cx)
+        .system_access
+        .borrow()
+        .allows_host(name)
+    {
+        Some(format!(
+            "nsh/host: `{name}` is not granted: add it to capabilities.host in nsh.json"
+        ))
+    } else {
+        None
+    };
+    if let Some(message) = message {
+        log::warn!(target: "js", "{message}");
+        let e = error(cx, &message)?;
+        return Err(js::throw(cx, e));
+    }
+    Ok(())
+}
+
+/// Earliest native SDK reply deadline, using the app's clock.
+pub(crate) fn next_deadline(cx: Ctx) -> Option<nsh_core::time::Instant> {
+    channel(cx)
+        .calls
+        .borrow()
+        .values()
+        .filter_map(|c| c.deadline)
+        .min()
+}
+
+/// Rejects expired calls and releases their slots; late replies are ignored.
+pub(crate) fn expire(cx: Ctx, now: nsh_core::time::Instant) {
+    let expired: Vec<_> = channel(cx)
+        .calls
+        .borrow()
+        .iter()
+        .filter(|(_, call)| call.deadline.is_some_and(|at| at <= now))
+        .map(|(&id, call)| {
+            (
+                id,
+                format!(
+                    "nsh/host: {} timed out after {} ms",
+                    call.name, call.timeout
+                ),
+            )
+        })
+        .collect();
+    for (id, message) in expired {
+        settle(cx, id, Err(message));
+    }
 }
 
 native! {
@@ -238,7 +351,8 @@ native! {
     fn post(cx, _this, args) {
         let name = name_arg(cx, args.get(0), "host.post")?;
         let data = to_json(cx, args.get(1))?;
-        if let Some(bridge) = bridge(cx) {
+        if let Some(bridge) = bridge(cx).filter(|b| b.available()) {
+            check_call(cx, &name)?;
             bridge.post(&name, data);
         }
         Ok(V::undefined())
@@ -308,9 +422,10 @@ pub(crate) fn deliver(cx: Ctx, name: &str, data: JsonValue) {
 
 /// Settles call `id` with the embedding app's answer (or why it failed).
 pub(crate) fn settle(cx: Ctx, id: u64, result: Result<JsonValue, String>) {
-    let Some(deferred) = channel(cx).calls.borrow_mut().remove(&id) else {
+    let Some(call) = channel(cx).calls.borrow_mut().remove(&id) else {
         return;
     };
+    let deferred = call.deferred;
     match result {
         Ok(value) => {
             let value = from_json(cx, &value);
@@ -326,16 +441,6 @@ pub(crate) fn settle(cx: Ctx, id: u64, result: Result<JsonValue, String>) {
     }
 }
 
-/// `nsh/host`'s exports.
-pub(crate) const EXPORTS: &[Item] = &[(
-    "host",
-    Export::Value(make),
-    Ts::value(
-        "The channel to the app this one is embedded in: its launch parameters\n(`host.params`), its events (`host.on`), and calls (`host.call`) and posts\n(`host.post`) to it.",
-        "Host",
-    ),
-)];
-
 /// `nsh/host`'s types.
 pub(crate) const TYPES: &str = r#"/** Data that crosses between the app and the embedding app: a JSON value. */
 export type HostValue = null | boolean | number | string | HostValue[] | { [key: string]: HostValue };
@@ -347,7 +452,22 @@ export type HostParams = { readonly [key: string]: HostValue };
  * desktop SDKs' `NshAppView`, `NshView` and `AppView`). Data crosses as JSON
  * values: what `JSON.stringify` keeps of it (functions and `undefined`
  * fields are left out). */
+export interface HostEvents {
+  /** Whether the platform or native SDK has a configured host. */
+  available(): boolean;
+  /** Listens until the subscription is removed. */
+  on(event: string, listener: (payload: unknown) => void): { remove(): void };
+}
+
+/** A cleanup function with the platform subscription's remove method. */
+export interface HostSubscription {
+  (): void;
+  remove(): void;
+}
+
 export interface Host {
+  /** Whether the platform or native SDK has a configured host. */
+  available(): boolean;
   /** The parameters the embedding app set before it started this app (what
    * to open, who the user is), `{}` when it set none. They are fixed while
    * the app runs; later requests come as events. */
@@ -359,13 +479,13 @@ export interface Host {
    * after the first listener is added, once the code adding it ran. Returns
    * a function that stops listening; a listener added while a component
    * renders stops with the component. */
-  on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
+  on<T = HostValue>(name: string, listener: (data: T) => void): HostSubscription;
   /** Calls the embedding app's handler of `name` with `data`: the promise
    * resolves with its answer, or rejects with an `Error` with the message the
    * handler gave, or at once when the embedding app handles no `name`. At
    * most 1024 calls wait for answers at once; one more rejects with a
    * `RangeError`. */
-  call<T = HostValue>(name: string, data?: unknown): Promise<T>;
+  call<T = HostValue>(name: string, data?: unknown, options?: { timeout?: number }): Promise<T>;
   /** Hands `data` to the embedding app's handler of `name`, without an
    * answer; it is dropped when the embedding app handles no `name`. */
   post(name: string, data?: unknown): void;
@@ -406,6 +526,17 @@ mod tests {
         }
     }
 
+    fn allow_host(host: &Host) {
+        host.set_system_access(
+            nsh_core::access::Access {
+                declared: nsh_core::access::Capabilities::from_json(&json!({ "host": true }))
+                    .unwrap(),
+                ..Default::default()
+            },
+            None,
+        );
+    }
+
     const REPORT: &str = r#"import { text } from "nsh:rt";
 import { host } from "nsh/host";
 const report = (v) => text(String(v));
@@ -428,30 +559,24 @@ const report = (v) => text(String(v));
     }
 
     #[test]
-    fn without_an_embedding_app_calls_fail_and_params_are_empty() {
+    fn without_an_embedding_app_params_are_empty_and_posts_are_ignored() {
         let host = Host::new().unwrap();
         host.eval_source(&format!(
             r#"{REPORT}
 report(JSON.stringify(host.params));
 host.post("seen", {{ a: 1 }});
-host.call("profile").catch((e) => report(e.message));
 "#
         ))
         .unwrap();
         host.run_jobs();
-        assert_eq!(
-            reported(&host),
-            [
-                "{}",
-                "host.call(\"profile\"): the embedding app handles no \"profile\""
-            ]
-        );
+        assert_eq!(reported(&host), ["{}"]);
     }
 
     #[test]
     fn calls_settle_with_the_answers_by_id() {
         let host = Host::new().unwrap();
         let bridge = Rc::new(Bridge::default());
+        allow_host(&host);
         host.set_host_bridge(bridge.clone());
         host.eval_source(&format!(
             r#"{REPORT}
@@ -484,6 +609,7 @@ host.post("seen", "home");
     #[test]
     fn events_wait_for_a_listener_of_their_name() {
         let host = Host::new().unwrap();
+        allow_host(&host);
         host.set_host_bridge(Rc::new(Bridge::default()));
         host.eval_source(&format!(
             r#"{REPORT}
@@ -537,8 +663,54 @@ globalThis.listenAgain = () => host.on("open", (data) => report("next " + data))
     }
 
     #[test]
+    fn native_calls_and_posts_require_the_hosts_capability() {
+        let host = Host::new().unwrap();
+        let bridge = Rc::new(Bridge::default());
+        host.set_host_bridge(bridge.clone());
+        host.eval_source(&format!(
+            r#"{REPORT}
+report(host.available());
+host.call("profile").catch(e => report(e.message));
+try {{ host.post("profile"); }} catch (e) {{ report(e.message); }}
+"#
+        ))
+        .unwrap();
+        host.run_jobs();
+        let seen = reported(&host);
+        assert_eq!(seen[0], "true");
+        assert!(seen[1..].iter().all(|s| s.contains("capabilities.host")));
+        assert!(bridge.calls.borrow().is_empty());
+        assert!(bridge.posts.borrow().is_empty());
+    }
+
+    #[test]
+    fn native_timeouts_release_calls_and_ignore_late_replies() {
+        let host = Host::new().unwrap();
+        allow_host(&host);
+        let bridge = Rc::new(Bridge::default());
+        host.set_host_bridge(bridge.clone());
+        host.eval_source(&format!(
+            r#"{REPORT}
+host.call("slow", null, {{ timeout: 20 }}).then(report, e => report(e.message));
+host.call("wait", null, {{ timeout: 0 }}).then(report);
+"#
+        ))
+        .unwrap();
+        assert!(host.next_timer().is_some());
+        host.run_timers(nsh_core::time::now() + std::time::Duration::from_millis(50));
+        assert_eq!(reported(&host), ["nsh/host: slow timed out after 20 ms"]);
+        assert_eq!(pending_calls(&host), 1);
+        let calls = bridge.calls.borrow();
+        host.host_reply(calls[0].0, Ok(json!("too late")));
+        host.host_reply(calls[1].0, Ok(json!("answered")));
+        assert_eq!(reported(&host), ["answered"]);
+        assert!(host.next_timer().is_none());
+    }
+
+    #[test]
     fn names_data_and_waiting_calls_are_limited() {
         let host = Host::new().unwrap();
+        allow_host(&host);
         host.set_host_bridge(Rc::new(Bridge::default()));
         host.eval_source(&format!(
             r#"{REPORT}

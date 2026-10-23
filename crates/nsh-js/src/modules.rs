@@ -28,7 +28,7 @@ use nsh_core::{
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
 use crate::{
-    animated, canvas, components, desktop, dom, env, host_channel, keymap, list, platform_modules,
+    animated, canvas, components, desktop, dom, env, keymap, list, platform_modules,
     reactive::{self, Native},
     touch,
 };
@@ -201,6 +201,16 @@ const NSH: &[Item] = &[
             "`[picked, rest]`: the props named in `keys` and the others, both still\nfollowing what they read (a component passing the rest on: `<Input {...rest} />`).",
             &[
                 "<T extends object, K extends readonly (keyof T)[]>(props: T, keys: K): [Pick<T, K[number]>, Omit<T, K[number]>]",
+            ],
+        ),
+    ),
+    (
+        "ErrorBoundary",
+        Export::Function(dom::error_boundary, 1),
+        Ts::function(
+            "Its children, or `fallback` once something under them threw (a component's body, a\nbinding, an effect, a listener): what failed goes, and `fallback(error, reset)` shows the\nthrown value; `reset()` renders the children again. A fallback that takes no arguments\nis shown as is. What throws in the fallback goes to the boundary above.",
+            &[
+                "(props: { fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element); children?: JSX.Element }): JSX.Element",
             ],
         ),
     ),
@@ -436,18 +446,18 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: "",
     },
     NativeModule {
+        name: "nsh/host",
+        exports: platform_modules::HOST_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(crate::host_channel::TYPES),
+    },
+    NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
         also: &[],
         moved_to: None,
         types: decl!(keymap::TYPES),
-    },
-    NativeModule {
-        name: "nsh/host",
-        exports: host_channel::EXPORTS,
-        also: &[],
-        moved_to: None,
-        types: decl!(host_channel::TYPES),
     },
 ];
 
@@ -539,7 +549,13 @@ impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
         let host = registries.len();
-        registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
+        registries.extend(
+            ui_sets
+                .iter()
+                .flat_map(Registry::sets)
+                .filter(|r| r.specifier().is_some())
+                .cloned(),
+        );
         ModuleTable {
             registries,
             host,

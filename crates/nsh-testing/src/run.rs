@@ -36,6 +36,7 @@ use crate::{
         DirectoryAssets, Headless, RecordingNetwork, StubNetwork, UreqNetwork, WAIT, print_batch,
     },
     module::{Case, Hook, Item, Launch, Mode, NetworkSetup, Platform, SafeArea, Suite},
+    page_host::PageHost,
 };
 
 /// Builds an entry ([`Entry`]; an app's may be its directory).
@@ -84,6 +85,11 @@ pub struct TestRun {
     /// Opens the apps on a real platform's host instead of a headless
     /// engine (`nsh test --target`).
     pub host: Option<StartHost>,
+    /// The web page's host module (`nsh.json` `web.host`, exporting
+    /// `createHost(player)`): each app opened headless gets one of its own,
+    /// which answers its `nsh/host` calls and sends its events, and
+    /// `host.available()` is true. `None`: the apps have no host.
+    pub page_host: Option<PathBuf>,
 }
 
 /// Starts the app whose entry is the path on a real platform's host, as
@@ -453,6 +459,15 @@ impl Session {
         let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let safe_area = launch.safe_area;
+        // Loaded before the app starts, as the page's host is: what it
+        // sends meanwhile waits for the app.
+        let page_host = match &self.run.page_host {
+            Some(module) => Some(
+                PageHost::start(module, clock.clone())
+                    .map_err(|e| format!("open({entry:?}): {e}"))?,
+            ),
+            None => None,
+        };
         let default = EngineConfig::new(app);
         let config = EngineConfig {
             viewport: nsh_core::Size::new(
@@ -485,6 +500,7 @@ impl Session {
                     Platform::Ios | Platform::Android => Idiom::default(),
                     _ => Idiom::Desktop,
                 },
+                host: page_host.is_some(),
                 ..Default::default()
             },
             ui_sets: self.run.ui_sets.clone(),
@@ -493,6 +509,10 @@ impl Session {
         };
         let mut app = Headless::start(config)
             .map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
+        if let Some(host) = page_host {
+            host.attach(app.engine().control());
+            app.on_host_call(move |id, name, args| host.call(id, name, args));
+        }
         if let Some(out) = &self.run.trace {
             let out = out.clone();
             app.observe(move |step, batch| {

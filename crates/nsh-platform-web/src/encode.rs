@@ -662,8 +662,10 @@ fn resize_mode(m: ResizeMode) -> &'static str {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        // Centered, scaled down to fit when larger.
-        ResizeMode::Center => "scale-down",
+        // Centered at its natural size.
+        ResizeMode::Center => "none",
+        // The same, scaled down to fit when larger.
+        ResizeMode::ScaleDown => "scale-down",
     }
 }
 
@@ -1403,6 +1405,21 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .num(id)
                 .str("readClipboardFiles")
                 .num(*request)
+                .end();
+        }
+        // The id is written whole (`num` rounds); the page answers with
+        // `onHost` `{ type: "reply" }` (`nsh.js` `hostCall`).
+        Command::HostCall {
+            id: request,
+            name,
+            args,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("hostCall")
+                .raw(&request.to_string())
+                .str(name)
+                .raw(&args.to_string())
                 .end();
         }
         Command::ImageInfo { id: request, uri } => {

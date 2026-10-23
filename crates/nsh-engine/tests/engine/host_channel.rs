@@ -31,7 +31,12 @@ fn bundle(app: &str) -> Bundle {
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &[]).unwrap();
     // SAFETY: compiled just now by this runtime.
-    unsafe { Bundle::bytecode(bytecode) }
+    unsafe { Bundle::bytecode(bytecode) }.with_policy(nsh_engine::Policy {
+        declared: Some(
+            nsh_core::access::Capabilities::from_json(&json!({ "host": true })).unwrap(),
+        ),
+        ..Default::default()
+    })
 }
 
 fn start(bundle: Bundle, host: &HostChannel) -> (Engine, Receiver<MountBatch>) {

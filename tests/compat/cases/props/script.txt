@@ -144,6 +144,9 @@ prop id:photo src https://example.com/b.png
 # One with a URL alone: the defaults.
 prop id:plain src https://example.com/plain.png
 prop id:plain resizeMode cover
+prop id:scale-down resizeMode scale-down
+prop id:object-none resizeMode center
+prop id:object-scale-down resizeMode scale-down
 prop id:plain blurRadius 0
 noprop id:plain placeholder
 noprop id:plain fadeDuration

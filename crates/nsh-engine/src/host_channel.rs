@@ -59,6 +59,7 @@ pub struct HostChannel {
 #[derive(Default)]
 struct Inner {
     params: serde_json::Map<String, JsonValue>,
+    configured: bool,
     handlers: HashMap<String, Handler>,
     /// The engine running the view's app: its attachment's id and queue.
     engine: Option<(u64, Sender<Message>)>,
@@ -96,7 +97,9 @@ impl HostChannel {
     /// keeps the ones it started with). Later requests are events
     /// ([`HostChannel::send`]).
     pub fn set_params(&self, params: serde_json::Map<String, JsonValue>) {
-        self.lock().params = params;
+        let mut inner = self.lock();
+        inner.params = params;
+        inner.configured = true;
     }
 
     /// The launch parameters ([`HostChannel::set_params`]).
@@ -115,6 +118,7 @@ impl HostChannel {
         let name = name.into();
         check_name(&name)?;
         let mut inner = self.lock();
+        inner.configured = true;
         if let Some((_, tx)) = &inner.engine
             && tx
                 .send(Message::HostEvent(name.clone(), data.clone()))
@@ -142,7 +146,9 @@ impl HostChannel {
         name: impl Into<String>,
         handler: impl Fn(HostCall) + Send + Sync + 'static,
     ) {
-        self.lock().handlers.insert(name.into(), Arc::new(handler));
+        let mut inner = self.lock();
+        inner.configured = true;
+        inner.handlers.insert(name.into(), Arc::new(handler));
     }
 
     /// Removes the handler of `name`: the app's calls of it fail at once
@@ -252,6 +258,10 @@ impl EngineBridge {
 }
 
 impl HostBridge for EngineBridge {
+    fn available(&self) -> bool {
+        self.channel.lock().configured
+    }
+
     fn params(&self) -> JsonValue {
         self.params.clone()
     }
@@ -437,6 +447,10 @@ mod tests {
         let mut config = EngineConfig::new(Bundle::source(
             "import { host } from 'nsh/host'; host.post('hold');".to_owned(),
         ));
+        if let crate::App::Js(bundle) = &mut config.app {
+            bundle.policy.declared =
+                Some(nsh_core::access::Capabilities::from_json(&json!({ "host": true })).unwrap());
+        }
         config.host = channel.clone();
         let engine = Engine::start(config, || ApproxTextEngine, Sink).unwrap();
         entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -466,6 +480,10 @@ mod tests {
             "import { host } from 'nsh/host'; host.on('open', data => host.post('seen', data));"
                 .to_owned(),
         ));
+        if let crate::App::Js(bundle) = &mut config.app {
+            bundle.policy.declared =
+                Some(nsh_core::access::Capabilities::from_json(&json!({ "host": true })).unwrap());
+        }
         config.host = channel;
         let engine = Engine::start(config, || ApproxTextEngine, Sink).unwrap();
         for id in 1..=3 {

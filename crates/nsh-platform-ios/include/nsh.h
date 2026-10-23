@@ -68,6 +68,14 @@ char *_Nullable nsh_app_set_locale(NshApp *app, const char *_Nullable tag);
 /// for Dynamic Type's; 0 follows the system's again.
 void nsh_app_set_font_scale(NshApp *app, float scale);
 
+/// The embedding app's theme overrides: a theme file of shadcn/ui's
+/// (`{ "cssVars": { "theme": {...}, "light": {...}, "dark": {...} } }`, as
+/// `nsh.json`'s `"theme"`), whose tokens win over the app's of the same
+/// names, light and dark; NULL gives the app its own theme back. Applies at
+/// once and to every app loaded later. Returns why the file does not parse,
+/// or NULL.
+char *_Nullable nsh_app_set_theme_overrides(NshApp *app, const char *_Nullable json);
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change. Returns an error without development support,
 /// or NULL.

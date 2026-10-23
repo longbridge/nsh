@@ -26,7 +26,7 @@ fn start_in(app: &str, environment: Environment) -> (Engine, Receiver<MountBatch
 
 /// [`start_in`] with the capabilities the app declares (JSON, `nsh.json`'s
 /// `capabilities` form) and an `nsh.json`.
-fn start_with(
+pub(crate) fn start_with(
     app: &str,
     environment: Environment,
     capabilities: Option<&str>,
@@ -210,7 +210,10 @@ fn a_stateful_component_steps_while_held_on((engine, rx): (Engine, Receiver<Moun
 }
 
 /// The batches until `done` holds for one (or nothing came for 500ms).
-fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -> Vec<MountBatch> {
+pub(crate) fn until(
+    rx: &Receiver<MountBatch>,
+    mut done: impl FnMut(&MountBatch) -> bool,
+) -> Vec<MountBatch> {
     let mut batches = Vec::new();
     while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
         let stop = done(&batch);
@@ -222,7 +225,7 @@ fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -
     batches
 }
 
-fn shows(batch: &MountBatch, wanted: &str) -> bool {
+pub(crate) fn shows(batch: &MountBatch, wanted: &str) -> bool {
     text_ids(batch, wanted).is_some()
 }
 
@@ -1080,7 +1083,7 @@ mount(() => (
       multiline
       style={{ placeholderColor: "#00ff00", selectionColor: "#0000ff" }}
     />
-    <Input class="placeholder:text-white selection:text-black" />
+    <Input class="placeholder:text-white selection:bg-black" />
     <Text selectable style={{ selectionColor: "#ff0000" }}>Pick me</Text>
   </>
 ));
@@ -1422,6 +1425,7 @@ fn menus_reach_the_platform_and_call_back() {
         enabled: true,
         checked: None,
         role: None,
+        when: nsh_core::keymap::When::Always,
     };
     let quit = MenuAction {
         id: 0,
@@ -1430,6 +1434,7 @@ fn menus_reach_the_platform_and_call_back() {
         enabled: true,
         checked: None,
         role: Some(MenuRole::Quit),
+        when: nsh_core::keymap::When::Always,
     };
     assert_eq!(
         &*menu,

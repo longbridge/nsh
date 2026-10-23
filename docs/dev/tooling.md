@@ -274,7 +274,7 @@ and more than one fails the step; a press whose match, or a view between it and 
   submenu's as `"Share > Mail"`) until it is chosen from (the root hears `Menu` with the action's id, then
   `Menu { closed }`) or closed;
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh/keymap` parses it for the
-  environment's OS; on a desktop environment (`open`'s `platform`: `Environment::desktop`) the root's keymap
+  environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
   (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
   root hears `KeyCommand`; else the focused input takes a character, Backspace or the return key, else Escape goes
   back when there is something to go back from;
@@ -313,6 +313,18 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
+- with `TestRun::page_host` (`nsh test`'s `--web-host`, else `nsh.json` `web.host`; `TestRequest::page_host` for an
+  app's runner) the web page's host answers `nsh/host` (`page_host.rs`, feature `js`): each app `open` starts
+  headless gets a host of its own, started before the engine (`createHost(player)` in a QuickJS context of its own on
+  its own thread: timers on the app's clock, woken by its alarms (`Clock::at`), `console` to the `js` log, no imports), `Environment::host` set, and the
+  driver hands the root's `Command::HostCall`s to it as their batches are applied (`Headless::on_host_call`); it
+  answers each with a `Host` `{ type: "reply" }` event as `nsh.js` `hostCall` does (`ok: false` with the message on a throw, a rejection or
+  a value that is not JSON), and `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
+  `page_host::Target` until `attach`, so the app's top-level `host.on` hears it, and the host goes with the app
+  (its thread ends when the driver drops its calls). A module that does not load, exports no `createHost` or whose
+  `createHost` returns no `call` fails the `open`. A call's timeout (`runtime/host.rs`) is the core's timer, on the
+  engine's clock: virtual on a manual clock, real otherwise, as the host module's own timers are. `--target web`'s
+  page runs `nsh.json`'s `web.host` (`web::with_page_host`); the other real hosts (`--target`) have none;
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;
@@ -421,7 +433,8 @@ menus of its own; the web, whose `Menu.popup` is the app's own UI, has none), th
 `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
 moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
 `keymap::Key::virtual_key`, the web's CDP key events, Linux's bindings fired as its shortcut controller would, as GTK
-takes no made-up keys; the phones, without app shortcuts, refuse them),
+takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
+real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
@@ -473,9 +486,11 @@ inside the scroll view that rests (still reporting where it is) before it lifts,
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
 tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
 a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
-Back taps the header's back button (the bar button carrying the back chevron's mask) or swipes a presented sheet
-down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
-`drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
+Back swipes a presented sheet down; else, while the app listens to going back (an overlay's `onCancel`: a menu's
+sheet, whose backdrop covers the header, a popover), it is VoiceOver's escape gesture (`accessibilityPerformEscape`
+on the surface's root view, which hands the core the back press, as the headless driver's back does); else it taps
+the header's back button (the bar button carrying the back chevron's mask); dialogs are answered with a tap on the
+`UIAlertController`'s button; screenshots are `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per

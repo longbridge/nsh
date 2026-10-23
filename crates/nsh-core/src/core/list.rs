@@ -16,7 +16,18 @@
 //! `batch` and then sets its `cellIndex` to confirm, and only confirmed cells
 //! are measured and positioned. New cells are created with their first
 //! index. The engine runs at most 8 "bind → JS → layout" rounds per frame,
-//! merged into one batch. Row-local state travels with recycled cells, so
+//! merged into one batch.
+//!
+//! A slot remembers the item JS was last asked to show (`requested`), so
+//! what is still to bind is always derived from the current assignment:
+//! nothing stale is queued. Cells whose item moved (a splice) learn their
+//! new index in the same commit, and so does every cell in the viewport and
+//! just ahead of it in the scroll direction. A list with `paced` set (the
+//! runtime's) leaves the rest of the overscan pending: the engine binds it
+//! with `take_paced`, nearest the leading edge first, as its per-turn
+//! budget allows, and asks for a display frame while some is left.
+//!
+//! Row-local state travels with recycled cells, so
 //! apps keep it outside, keyed by id. Unbound cells keep their last content:
 //! the core moves them out of sight (never with a NaN frame; cells never
 //! placed are skipped). The header, footer and empty placeholder are cells
@@ -71,6 +82,9 @@ pub(super) struct Slot {
     pub(super) index: Option<u32>,
     /// Item the cell's content currently shows (confirmed by the runtime).
     pub(super) rendered: Option<u32>,
+    /// Item the runtime was last asked to show in this slot (its cell's
+    /// index); `None` before the first request or when that item is gone.
+    pub(super) requested: Option<u32>,
 }
 
 impl Slot {
@@ -291,6 +305,13 @@ pub(super) struct ListState {
     /// Cells whose item moved to another index (a splice): the runtime
     /// learns their new index with the next bindings.
     moved: Vec<(u32, u32)>,
+    /// Binds of overscan cells wait for the engine's budget
+    /// ([`Self::take_paced`]); the rest bind with the window.
+    pub(super) paced: bool,
+    /// The last scroll step the platform reported, in natural coordinates
+    /// (its sign is the scroll direction). The core's own moves (anchoring
+    /// a splice, measured rows, following a pin) are not steps.
+    lead: f32,
     /// Scroll that keeps the visible content in place after a splice.
     splice_anchor: f32,
     /// The target of the last scroll command, until it is reached with
@@ -349,6 +370,8 @@ impl ListState {
             issued: 0,
             pending: Vec::new(),
             moved: Vec::new(),
+            paced: false,
+            lead: 0.0,
             splice_anchor: 0.0,
             pin: None,
             parent: false,
@@ -485,24 +508,35 @@ impl ListState {
         };
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
-            let Some(old) = s.index else { continue };
-            match shift(old) {
-                Some(new) => {
-                    s.index = Some(new);
-                    if s.rendered == Some(old) {
-                        s.rendered = Some(new);
-                    }
-                    if new != old {
-                        self.moved.push((slot as u32, new));
-                    }
-                    self.by_index.insert(new, slot as u32);
-                }
-                None => {
-                    s.index = None;
-                    s.rendered = None;
+            let index = s.index.and_then(shift);
+            let Some(new) = index else {
+                if s.index.take().is_some() {
                     self.free.push(slot as u32);
                 }
+                // The cell's content follows the new data at its old index:
+                // it is bound again before it shows.
+                s.rendered = None;
+                s.requested = None;
+                continue;
+            };
+            s.index = Some(new);
+            s.rendered = s.rendered.and_then(shift);
+            // The runtime's index for the cell follows its item at once, or
+            // its content shows the item now at the old index.
+            match s.requested.map(|r| (r, shift(r))) {
+                Some((r, Some(n))) => {
+                    s.requested = Some(n);
+                    if n != r {
+                        self.moved.push((slot as u32, n));
+                    }
+                }
+                Some((_, None)) => {
+                    s.requested = None;
+                    s.rendered = None;
+                }
+                None => {}
             }
+            self.by_index.insert(new, slot as u32);
         }
         self.free.sort_unstable();
         self.free.dedup();
@@ -556,6 +590,8 @@ impl ListState {
     /// user.
     fn moved_to(&mut self, at: f32, settled: bool) {
         if at != self.offset {
+            let step = at - self.offset;
+            self.lead = if self.inverted { -step } else { step };
             self.offset = at;
             self.dirty = true;
         }
@@ -1094,6 +1130,7 @@ impl ListState {
                     cell: u32::MAX,
                     index: None,
                     rendered: None,
+                    requested: None,
                 },
             );
         }
@@ -1111,6 +1148,7 @@ impl ListState {
             if slot.cell == cell {
                 slot.cell = u32::MAX;
                 slot.rendered = None;
+                slot.requested = None;
                 self.dirty = true;
             }
         }
@@ -1211,18 +1249,21 @@ impl ListState {
         StickyRange { cell, start, end }
     }
 
-    /// Recomputes the render window. New `(slot, index)` bindings are
-    /// pushed to `binds`. Returns true if `onLoadMore` should fire.
+    /// Recomputes the render window. `(slot, index)` bindings due now are
+    /// pushed to `binds`: cells whose item moved, and new ones in the
+    /// viewport or just ahead of it (all of them unless `paced`). Returns
+    /// true if `onLoadMore` should fire.
     pub(super) fn update_window(&mut self, binds: &mut Vec<(u32, u32)>) -> bool {
         self.dirty = false;
+        // Cells whose item moved: the runtime learns their new index (cheap:
+        // the cell shows the same item) before anything else binds.
+        binds.append(&mut self.moved);
         if self.count == 0 || self.viewport <= 0.0 {
             for slot in 0..self.slots.len() {
                 self.unbind(slot as u32);
             }
             return false;
         }
-        // Cells whose item moved: the runtime learns their new index.
-        binds.append(&mut self.moved);
         let at = self.natural_offset();
         let overscan = self.viewport * OVERSCAN;
         let range = self.items_in(at - overscan, at + self.viewport + overscan);
@@ -1243,7 +1284,7 @@ impl ListState {
                 self.unbind(slot);
             }
         }
-        let mut bind = |this: &mut Self, i: u32| {
+        let bind = |this: &mut Self, i: u32| {
             if this.by_index.contains_key(&i) {
                 return;
             }
@@ -1254,13 +1295,13 @@ impl ListState {
                         cell: u32::MAX,
                         index: None,
                         rendered: None,
+                        requested: None,
                     });
                     this.slots.len() as u32 - 1
                 }
             };
             this.slots[slot as usize].index = Some(i);
             this.by_index.insert(i, slot);
-            binds.push((slot, i));
         };
         if let Some((first, last)) = range {
             for i in first..=last {
@@ -1270,6 +1311,24 @@ impl ListState {
         for s in [before, sticky].into_iter().flatten() {
             bind(self, s);
         }
+        let (start, end) = self.urgent_span(at);
+        let new = binds.len();
+        for slot in 0..self.slots.len() {
+            let s = self.slots[slot];
+            let Some(i) = s.index else { continue };
+            if s.requested == Some(i) {
+                continue;
+            }
+            if !self.paced
+                || sticky == Some(i)
+                || before == Some(i)
+                || self.item_overlaps(i, start, end)
+            {
+                self.slots[slot].requested = Some(i);
+                binds.push((slot as u32, i));
+            }
+        }
+        binds[new..].sort_unstable_by_key(|b| b.1);
 
         let total = self.blocks().total;
         let near_end = at + self.viewport >= total - self.viewport * self.end_threshold;
@@ -1278,6 +1337,82 @@ impl ListState {
             return true;
         }
         false
+    }
+
+    /// The span (natural coordinates) whose cells bind with the window:
+    /// the viewport, and ahead of it in the scroll direction twice the last
+    /// step (what the next frames of a fling show). A step longer than the
+    /// viewport is a jump: only the viewport.
+    fn urgent_span(&self, at: f32) -> (f32, f32) {
+        let step = self.lead.abs();
+        let ahead = if step <= self.viewport {
+            (2.0 * step).min(self.viewport * OVERSCAN)
+        } else {
+            0.0
+        };
+        if self.lead > 0.0 {
+            (at, at + self.viewport + ahead)
+        } else {
+            (at - ahead, at + self.viewport)
+        }
+    }
+
+    /// Whether item `i`'s row overlaps `start..end` (natural coordinates).
+    fn item_overlaps(&self, i: u32, start: f32, end: f32) -> bool {
+        let top = self.item_at(i);
+        top < end && top + self.row_size(self.row_of(i)) > start
+    }
+
+    /// Whether cells wait for [`Self::take_paced`].
+    pub(super) fn has_paced(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|s| s.index.is_some() && s.index != s.requested)
+    }
+
+    /// Up to `max` of the cells waiting to bind, nearest the viewport first
+    /// on the side the list scrolls towards, then the other side; pushed to
+    /// `binds`. Returns how many. The engine takes one at a time (it checks
+    /// its budget after each), so this picks the nearest by a scan of the
+    /// slots instead of sorting them.
+    pub(super) fn take_paced(&mut self, max: usize, binds: &mut Vec<(u32, u32)>) -> usize {
+        let mut taken = 0;
+        while taken < max {
+            let Some((slot, i)) = self.nearest_waiting() else {
+                break;
+            };
+            self.slots[slot as usize].requested = Some(i);
+            binds.push((slot, i));
+            taken += 1;
+        }
+        taken
+    }
+
+    /// The waiting cell [`Self::take_paced`] binds next: `(slot, index)`.
+    fn nearest_waiting(&self) -> Option<(u32, u32)> {
+        let at = self.natural_offset();
+        let (top, bottom) = (at, at + self.viewport);
+        let forward = self.lead >= 0.0;
+        let mut best: Option<((bool, f32), u32, u32)> = None;
+        for (slot, s) in self.slots.iter().enumerate() {
+            let Some(i) = s.index else { continue };
+            if s.requested == Some(i) {
+                continue;
+            }
+            let start = self.item_at(i);
+            let (distance, below) = if start >= bottom {
+                (start - bottom, true)
+            } else {
+                let end = start + self.row_size(self.row_of(i));
+                ((top - end).max(0.0), false)
+            };
+            // The side behind waits for the side ahead.
+            let key = (below != forward, distance);
+            if best.is_none_or(|(b, ..)| key.0.cmp(&b.0).then(key.1.total_cmp(&b.1)).is_lt()) {
+                best = Some((key, slot as u32, i));
+            }
+        }
+        best.map(|(_, slot, i)| (slot, i))
     }
 
     fn unbind(&mut self, slot: u32) {
@@ -1649,6 +1784,80 @@ mod tests {
         l.splice(90, 2, 0);
         assert_eq!(l.offset, offset);
         assert_eq!(l.count, 101);
+    }
+
+    #[test]
+    fn paced_lists_bind_the_viewport_now_and_the_overscan_ahead_first() {
+        let mut l = list(1000, 50.0, 400.0);
+        l.paced = true;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        assert_eq!(now, (0..8).collect::<Vec<_>>(), "the viewport");
+        assert!(l.has_paced());
+        binds.clear();
+        assert_eq!(l.take_paced(3, &mut binds), 3);
+        assert_eq!(binds.iter().map(|b| b.1).collect::<Vec<_>>(), [8, 9, 10]);
+        while l.take_paced(100, &mut binds) > 0 {}
+        assert!(!l.has_paced());
+
+        // The platform reports the scroll: scrolling up by 100, the
+        // viewport and two steps above it bind now; the rest above comes
+        // before what is below.
+        l.reported(2000.0, 0);
+        l.update_window(&mut binds);
+        while l.take_paced(100, &mut binds) > 0 {}
+        l.reported(1900.0, 0);
+        binds.clear();
+        l.update_window(&mut binds);
+        // 1700..2300 was bound already; 1500..1600 is new and waits.
+        assert_eq!(binds, []);
+        // A jump binds its viewport only.
+        l.reported(5000.0, 0);
+        l.update_window(&mut binds);
+        let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        assert_eq!(now, (100..108).collect::<Vec<_>>());
+        // A step up before the overscan bound: the viewport (4900..5300)
+        // and two steps ahead (4700..4900) bind now ...
+        l.reported(4900.0, 0);
+        binds.clear();
+        l.update_window(&mut binds);
+        let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        assert_eq!(now, (94..100).collect::<Vec<_>>());
+        // ... the rest above before what is below.
+        binds.clear();
+        l.take_paced(3, &mut binds);
+        assert_eq!(binds.iter().map(|b| b.1).collect::<Vec<_>>(), [93, 92, 91]);
+    }
+
+    #[test]
+    fn splices_tell_bound_cells_their_index_and_forget_gone_items() {
+        let mut l = list(100, 50.0, 400.0);
+        l.paced = true;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        for &(slot, index) in &binds {
+            l.add_slot_cell(CellSlot::Item(slot), 100 + slot);
+            l.rendered(100 + slot, index);
+        }
+        // Overscan cells wait; one row arrives at the top.
+        l.splice(0, 0, 1);
+        binds.clear();
+        l.update_window(&mut binds);
+        // Every bound cell learns its new index, at once (the anchoring
+        // scroll keeps them in place). The anchoring scroll is the core's,
+        // not a step of the user's: the cells waiting below it, and the new
+        // row above, still wait.
+        let now: Vec<u32> = binds.iter().map(|b| b.1).collect();
+        assert_eq!(now, (1..=8).collect::<Vec<_>>(), "{binds:?}");
+        assert!(l.has_paced());
+        // The data shrinks under the cells still waiting: none is asked
+        // for an item that is gone.
+        l.splice(3, 98, 0);
+        binds.clear();
+        l.update_window(&mut binds);
+        while l.take_paced(100, &mut binds) > 0 {}
+        assert!(binds.iter().all(|&(_, i)| i < 3), "{binds:?}");
     }
 
     #[test]

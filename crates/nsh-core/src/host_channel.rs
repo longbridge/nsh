@@ -44,6 +44,12 @@ pub fn check_name(name: &str) -> Result<(), String> {
 /// engine implements it over the embedding app's channel; the answer to a
 /// call comes back to the VM later, by its id.
 pub trait HostBridge {
+    /// Whether the native embedding app configured this channel. A false
+    /// value leaves calls to the platform transport (including the web).
+    fn available(&self) -> bool {
+        true
+    }
+
     /// The launch parameters the embedding app set before the app started
     /// (a JSON object; `{}` without any).
     fn params(&self) -> JsonValue;

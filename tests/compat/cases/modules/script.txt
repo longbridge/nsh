@@ -97,15 +97,15 @@ covers [nsh/device] colorScheme
 covers [nsh/device] setColorScheme
 covers [nsh/device] fontScale
 covers [nsh/device] windowSize
-# mod-host
-tap id:case-mod-host
+# mod-host-channel
+tap id:case-mod-host-channel
 # no embedding app: no parameters, posts go nowhere and calls fail at once.
 expect Params: 0 object
 expect Calls: not called
 expect Call failed: none
 tap id:call
 expect Calls: function, post done
-expect Call failed: host.call("profile"): the embedding app handles no "profile"
+expect Call failed: nsh/host: this platform has no host
 covers [nsh/host] host
 # mod-ios
 tap id:case-mod-ios
@@ -141,3 +141,14 @@ expect Storage removed: a=1 missing=null
 tap id:clear
 expect Storage cleared: none missing=null
 covers [nsh/storage] Storage
+# mod-host
+tap id:case-mod-host
+# no host on this platform: the call rejects at once; the root's events
+# reach the listener.
+expect Host available: false
+expect Host call: not called
+tap id:call
+expect Host call: rejected nsh/host: this platform has no host
+event id:heard onHost type=event event=tick payload=1
+expect Host heard: [1]
+covers [nsh/host] host

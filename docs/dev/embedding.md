@@ -97,8 +97,9 @@
     rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
     elsewhere): `Message::HostReply(id, result)` settles the promise in the engine's next turn. A `HostReply` dropped
     unanswered rejects ("did not answer"), so a handler that panics (caught) or forgets fails the call rather than
-    leaving it pending; an answer for an engine that stopped goes nowhere. There is no time limit: the embedding app
-    decides. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
+    leaving it pending; an answer for an engine that stopped goes nowhere. Calls use the platform API's timeout:
+    30 seconds by default, `{ timeout: 0 }` to wait without a deadline, on the app's clock. Calls and posts require
+    `capabilities.host` and the same function-name validation as the platform transport. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
     handler they are dropped.
   - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
     engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in
@@ -108,7 +109,7 @@
     (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
   - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
-    directly ("Native modules", below). The channel's data is the embedding app's own: capabilities do not apply.
+    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
 - **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
   `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
   change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
@@ -135,6 +136,22 @@
   toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
   in classes included, stay as they are. The layout direction stays the system's language's.
+- **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
+  tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
+  Win32; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
+  `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
+  calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and
+  does not set is the default theme's), and a file that does not parse is an error (Swift throws `NshError`, Java an
+  `IllegalArgumentException`, C returns it) that changes nothing. The tokens go to the engine as host tokens
+  (`EngineControl::set_tokens`, `Core::set_host_tokens`): they win over the app's tokens of the same names in both
+  appearances, the app's others stay (`Tokens::over`), and classes naming the changed tokens (`bg-primary`,
+  `rounded-(--radius)`) are resolved again at once, as are Rust components reading `theme()`. Each platform keeps
+  them on its surface and starts every engine with them (`Engine::start_with`), so they are in the first frame of
+  every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
+  token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
+  in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
+  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

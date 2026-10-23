@@ -25,10 +25,19 @@ import java.util.Map;
  * (`embed.badge`) and talks to the app through the view's channel
  * (`nsh/host`): launch parameters, the "time" call it answers, the
  * "tapped" posts it hears and the "message" events "Send a message" sends.
+ * (`embed.badge`). "Brand" puts the host's brand over the app's theme
+ * (`setThemeOverrides`).
  */
 public final class MainActivity extends Activity {
     private NshView nsh;
     private int loads;
+    private boolean branded;
+
+    /** The host's brand: the tokens it sets win over the app's, light and dark. */
+    private static final String BRAND = "{ \"cssVars\": {"
+            + " \"theme\": { \"radius\": \"1rem\" },"
+            + " \"light\": { \"primary\": \"#e11d48\", \"primary-foreground\": \"#ffffff\" },"
+            + " \"dark\": { \"primary\": \"#fb7185\", \"primary-foreground\": \"#1c1917\" } } }";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -60,6 +69,11 @@ public final class MainActivity extends Activity {
                 Collections.singletonMap("text", "Hello from Android at " + DateFormat.getTimeInstance().format(new Date()))));
         column.addView(reload);
         column.addView(message);
+        Button brand = new Button(this);
+        brand.setText("Brand");
+        // null gives the app its own theme back.
+        brand.setOnClickListener(v -> nsh.setThemeOverrides((branded = !branded) ? BRAND : null));
+        column.addView(brand);
         column.addView(count);
 
         // The embedded nsh app, in a bordered frame.

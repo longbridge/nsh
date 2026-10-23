@@ -8,9 +8,8 @@ group: platforms
 # Android
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
-and `x86_64`. An existing app embeds modules in an `NshView` and loads signed packages it downloads, under limits and
-capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms, for
-apps written in Rust and in TSX. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
+and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
 ## Requirements
@@ -167,6 +166,7 @@ again replaces the running app. The complete sample is
 | `setGrantedCapabilities(String json)` | The most the apps loaded next may do, as JSON in the form of `nsh.json`'s `capabilities`; `null` grants what each app declares. Returns `false` (and is ignored) for an invalid grant. |
 | `setLocale(Locale locale)` | The app's language and region in place of the user's: `Intl`, `locale()` and the components follow it at once, and the apps loaded later start in it. `null` follows the system's. |
 | `setFontScale(float scale)` | The text size in place of the system's font size (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `0` follows the system's. |
+| `setThemeOverrides(String json)` | The host's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file in the format of `nsh.json`'s `"theme"`. Its tokens win over the app's of the same names, in light and dark mode, and the app's others stay. Applies at once and to the apps loaded later; `null` gives the app its own theme back. Throws `IllegalArgumentException` for a file that does not parse. |
 | `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the app's own id. |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
@@ -235,6 +235,23 @@ Handlers run on the UI thread; a call waits for its answer in the app without bl
 never given fails the call once it is collected, and a call of a name with no handler fails at once. Events of names
 the app does not listen to yet are kept until it does, and events sent while no app runs (before `loadAssetBundle`,
 during a reload) go to the next one.
+## Theme overrides
+
+One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,
+as a theme file in the format of `nsh.json`'s `"theme"` (shadcn/ui's `cssVars`, values as CSS writes them). They win
+over the app's tokens of the same names; the app's other tokens stay. Give a token its dark-mode value under `dark`
+(one set only under `light` or `theme` is that color in both modes):
+
+```java
+nsh.setThemeOverrides("{ \"cssVars\": {"
+        + " \"theme\": { \"radius\": \"0.75rem\" },"
+        + " \"light\": { \"primary\": \"#e11d48\", \"primary-foreground\": \"#ffffff\" },"
+        + " \"dark\": { \"primary\": \"#fb7185\", \"primary-foreground\": \"#1c1917\" } } }");
+nsh.loadAssetBundle("orders");
+```
+
+Call it before or after loading: classes such as `bg-primary` and `rounded-(--radius)` restyle at once, and every app
+loaded later starts with the overrides in its first frame. `setThemeOverrides(null)` gives the app its own theme back.
 
 ## Limits
 

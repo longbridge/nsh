@@ -80,6 +80,9 @@ pub(crate) struct Encoded {
     pub(crate) objects: Vec<Obj>,
     /// Items for the UI-thread animator, in order.
     pub(crate) animation: Vec<MountItem>,
+    /// The app's keyboard shortcuts, when the batch changed them: matched
+    /// natively (`crate::keymap`), never sent to Java.
+    pub(crate) keymap: Option<std::sync::Arc<nsh_core::keymap::Keymap>>,
 }
 
 impl Encoded {
@@ -242,6 +245,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ResizeMode::Contain => 1,
                     ResizeMode::Stretch => 2,
                     ResizeMode::Center => 3,
+                    ResizeMode::ScaleDown => 4,
                 });
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
                 e.float(options.blur_radius.0);
@@ -305,8 +309,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(LAYOUT_DIRECTION);
                 e.bool(rtl);
             }
-            // Keyboard shortcuts are not matched on Android yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => e.keymap = Some(keymap),
             MountItem::Appearance { appearance } => {
                 e.int(APPEARANCE);
                 e.int(appearance as i32);
@@ -603,7 +606,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
-                    | Command::Desktop(_) => e.int(-1),
+                    | Command::Desktop(_)
+                    // No host answers `nsh/host` here (`Environment::host`):
+                    // the core rejects the calls first.
+                    | Command::HostCall { .. } => e.int(-1),
                 }
             }
         }
@@ -760,22 +766,26 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
     }
     let filter_list = |e: &mut Encoded, list: &[Filter]| {
         // Color filters as one composed matrix, then blur, then the drop
-        // shadow (what Android's render effects take).
+        // shadow (what Android's render effects take): the widest of the
+        // chain's (the last of equals).
         let matrix = nsh_core::compose_color_matrices(list);
         e.bool(matrix.is_some());
         for v in matrix.unwrap_or([0.0; 20]) {
             e.float(v);
         }
         e.float(nsh_core::blur_radius(list).0);
-        let shadow = list.iter().find_map(|f| match *f {
-            Filter::DropShadow {
-                offset_x,
-                offset_y,
-                blur,
-                color,
-            } => Some((offset_x.0, offset_y.0, blur.0, color)),
-            _ => None,
-        });
+        let shadow = list
+            .iter()
+            .filter_map(|f| match *f {
+                Filter::DropShadow {
+                    offset_x,
+                    offset_y,
+                    blur,
+                    color,
+                } => Some((offset_x.0, offset_y.0, blur.0, color)),
+                _ => None,
+            })
+            .max_by(|a, b| a.2.total_cmp(&b.2));
         e.bool(shadow.is_some());
         let (x, y, b, c) = shadow.unwrap_or((0.0, 0.0, 0.0, Color::TRANSPARENT));
         e.float(x);

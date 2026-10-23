@@ -93,7 +93,7 @@ upload(photo).then((url) => {
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `src` | `image(src)` | `string \| ImageAsset` | | 图片。 |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | `"cover"` | 图片如何适配其盒子。 |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | `"cover"` | 图片如何适配其盒子：`"center"` 以原始尺寸居中显示（CSS 的 `object-fit: none`）；`"scale-down"` 同样居中，较大时缩小以适应。 |
 | `placeholder` | `.placeholder(src)` | `string \| ImageAsset` | | `src` 加载完成前显示的图片；最好是本地资源。 |
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | 以该半径（点）模糊图片（在解码时于主线程外处理一次）。 |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |

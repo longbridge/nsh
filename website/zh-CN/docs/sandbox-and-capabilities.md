@@ -105,13 +105,14 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true
+    "clipboard": true,
+    "host": ["getUserInfo", "bridge.*"]
   }
 }
 ```
 
 **没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
-`network.sockets`。**有 `"capabilities"` 的应用
+`network.sockets`；宿主的函数也一样，即 `host`。**有 `"capabilities"` 的应用
 只能做其中列出的事**：其他一律拒绝。未知的键会导致构建错误，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
 [签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
@@ -166,6 +167,29 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 
 每个应用都可以用 [`nsh/storage`](../modules/nsh-storage.md) 在设备上保存自己的数据，无需任何能力：存储里只有该应用自己的数据，保存位置由宿主应用决定。
 
+### `host`
+
+`host` 列出 `nsh/host` 的 `host.call(name, args)` 可以调用的、嵌入 NSH 的宿主应用的函数：确切的函数名
+（`"getUserInfo"`），或以 `*` 结尾的前缀（`"bridge.*"` 匹配 `bridge.call` 和 `bridge.share`）。`"host": true`
+允许所有函数。没有列出的函数会被拒绝，没有 `"capabilities"` 的应用也一样：宿主的函数从不默认授予；构建导入了
+`nsh/host` 却没有声明 `host` 的应用时会警告每次调用都会被拒绝。函数名由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-`
+组成，长度 1 到 128，不含 `..`；其他名字的调用在检查授权之前就被拒绝。前缀以分隔符结尾（`"bridge.*"`）：`"bridge*"`
+也会匹配 `bridgeAdmin`。宿主发来的事件（`host.on(event, listener)`）在宿主发送时
+送到应用的监听函数。
+
+```ts
+import { host } from "nsh/host";
+
+if (host.available()) {
+  const user = await host.call("getUserInfo");
+  const sub = host.on("loginChanged", (payload) => console.log(payload));
+  sub.remove();
+}
+```
+
+在嵌入了宿主的平台上 `host.available()` 为 true；在其他平台上 `host.call` 会以
+`nsh/host: this platform has no host` reject。
+
 ### 被拒绝时的表现
 
 | 请求 | 结果 |
@@ -174,6 +198,7 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | 远程图片 | 图片加载失败，触发 `onError`。 |
 | 视频源、web view 源、状态栏修改 | 不显示也不修改任何东西。 |
 | 剪贴板 | `writeText` 和 `writeImage` 不做任何事；`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`。 |
+| 宿主调用 | Promise 被 reject，错误信息提示把该函数加入 `capabilities.host`；调用不会到达宿主。 |
 
 每种拒绝只记录一次日志，并说明需要添加哪个键：
 
