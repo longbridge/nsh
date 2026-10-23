@@ -550,6 +550,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         ui_sets: ui_sets(),
         runtime: None,
         data_dir: Some("/app-data".into()),
+        // The browser keeps what it downloads in its HTTP cache.
+        cache: nsh_engine::CacheOptions::off(),
         filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {
             namespace,
         })),
@@ -558,6 +560,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
         picker: None,
     };
     // A test session's app: the test's storage, network and trace.

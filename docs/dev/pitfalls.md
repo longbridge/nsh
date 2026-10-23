@@ -170,6 +170,14 @@ Things that were found the hard way. Read the section of the area you change bef
   the window's size as `preferredContentSize`. Standalone apps have a white root view (UIKit windows are black).
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
+- **iOS, a side bar's safe area reaches past the bar**: a strip the device keeps along one side of the screen (a
+  foldable's vertical bar) is an inset of the window, and `UINavigationController` passes that inset to the screens it
+  shows without asking whether the stack still reaches the bar, so a stack laid out in a column well clear of it gives
+  its screens the bar's whole width of trailing safe area anyway: UIKit parks scroll indicators that far in from the
+  edge, and `safeAreaInsets()` reads that wide inside the module. `clip_side_safe_area` takes the surplus back with a
+  negative `additionalSafeAreaInsets` worked out from the window and the stack's frame alone. Deriving what UIKit
+  granted by subtracting the compensation already applied looks equivalent and cannot heal: UIKit floors a safe area at
+  zero, so after an overshoot that subtraction returns the value already applied, for good.
 
 - **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
   itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
@@ -219,6 +227,15 @@ Things that were found the hard way. Read the section of the area you change bef
   edit, connection call and batch end, since keyboards start and end it in many ways (`setComposingRegion` included); a
   value JS sets meanwhile waits for its end (`setText` restarts the keyboard, which commits the pre-edit text), and is
   never applied from inside the text watcher.
+- **Android, input selection after attachment**: a navigation screen can be measured while detached. `TextView` then
+  caches disabled cursor controllers because its root has no window parameters; attachment alone does not refresh
+  them, and another `requestLayout` may reuse the text layout. `InputBox` reapplies the current break strategy on
+  attachment when a text layout already exists, discarding it so the next measure refreshes the controllers with a
+  valid window. Keep this on every attachment, including reattachment. Do not replace the text or enable
+  `textIsSelectable` to force a refresh: those affect selection, input-method state or focus/keyboard behavior.
+  Regression checks must cold-start the Android host and long-press a four-line input inside `NavStack`, with explicit
+  `lineHeight` and height updated by `onContentSizeChange` ([reproduction](https://github.com/longbridge/nsh/issues/409));
+  hot reload can hide the failure. Also check removal/reattachment, editing and the native selection menu.
 - **Android, keyboard avoidance**: the keyboard's height becomes bottom padding of the scroll around the focused input, and
   `ScrollBox.reveal` scrolls it into view; `requestRectangleOnScreen` cannot, as ScrollView ignores its padding when it decides
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft

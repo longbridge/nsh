@@ -384,7 +384,16 @@ dropped.
 Text (`src/text.rs`) is broken into lines here, with widths and font metrics from the `measure_text`,
 `font_ascent` and `font_descent` imports (canvas `measureText`, cached per font and string); runs are drawn at the
 positions computed here with a line height equal to the font's ascent + descent, so the baseline lands where layout
-put it.
+put it. Canvas text has no numeric variants (its `font` takes only `small-caps`; there is no `fontVariantNumeric`),
+so text with one (`tabular-nums`, ...) is measured by `measure_numeric_text` instead: a hidden span with the run's
+`font` and `font-variant-numeric`, as the run is drawn. Measuring there lays the page out, so a figure (digits and the
+signs numbers are written with: `css::measured_by_char`) is the sum of its characters' widths, each measured once and
+cached, and a live value that changes every frame lays nothing out; text with letters is measured whole, kerning
+included (`web/text-browser.test.mjs` checks both against what Chrome draws). The CSS of runs (`src/text/css.rs`: the `font` shorthand,
+generic families such as `monospace` left unquoted,
+names the app quoted kept only when their quotes close them) and line breaking (`src/text/wrap.rs`: break opportunities, the
+line start and end rules of CJK punctuation, the filling of lines) depend on nothing of the browser and are tested on
+the host (`tests/text`).
 
 ## Styles as classes
 

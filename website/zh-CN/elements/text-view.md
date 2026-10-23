@@ -316,6 +316,18 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 
 `scroll_to_anchor` 和 `open_web`（TSX 中是 `scrollToAnchor` 和 `nav`）代表应用自己的函数。
 
+设置 `links="open"` 后，按下指向其他网站或应用的链接（带 scheme 的 URL：`https:`、`mailto:` 等）时，在 `onLinkPress` 报告之后，还会用 [`openUrl`](../modules/nsh-device.md#openurl) 在应用之外打开它，受应用的 `openUrl` 能力约束；文档内的锚点（`#…`）只报告。默认值 `"report"` 什么都不打开。
+
+```rust tabs
+use nsh_base::{TextViewLinks, text_view};
+
+text_view().markdown(doc).links(TextViewLinks::Open)
+```
+
+```tsx tabs
+<TextView markdown={doc} links="open" />
+```
+
 <a id="render-functions"></a>
 
 ## 渲染函数
@@ -721,6 +733,7 @@ fn chat() -> impl IntoElement {
 | `classes` | `.classes(..)` | `TextViewClasses` | `{}` | 按部件设定的 Tailwind 类。 |
 | `styles` | `.styles(..)` | `TextViewStyles` | `{}` | 按部件设定的内联样式（每个都是 `StyleProp<TextStyle>`），优先于类。 |
 | `selectable` | `.selectable(..)` | `boolean` | `false` | 整个文档作为一体可选择：选区可以跨越它的段落、标题、单元格和代码块（[SelectionArea](./selection-area.md)）。 |
+| `links` | `.links(..)` | `"report" \| "open"` | `"report"` | 按下链接时的行为：报告它（`onLinkPress`），设为 `"open"` 时还会在应用之外打开指向其他网站或应用的链接（[链接](#链接)）。 |
 | `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | 代码块显示其水平滚动指示器。 |
 | `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | 表格显示其水平滚动指示器。 |
 | `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |

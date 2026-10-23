@@ -63,7 +63,9 @@ colored with the theme's tokens; the app restyles each part over it.
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
 - **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
-  footnote reference `#footnote-<label>`. Nothing opens a URL: the app decides.
+  footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
+  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::ui::open_url`,
+  under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
 
 ## Parts and their default styles
 

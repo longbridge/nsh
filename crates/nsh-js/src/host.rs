@@ -47,6 +47,8 @@ pub(crate) struct Shared {
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
     pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
+    /// The embedding app's side of `nsh/host` (the engine's bridge).
+    pub(crate) host_bridge: RefCell<Option<Rc<dyn nsh_core::host_channel::HostBridge>>>,
     pub(crate) system_websocket:
         RefCell<Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>>,
     /// Permissions and host-selected app directory for native system operations.
@@ -739,6 +741,41 @@ impl Host {
         *self.shared.system_websocket.borrow_mut() = transport;
     }
 
+    /// Connects `nsh/host` to the embedding app: its launch parameters, and
+    /// where the app's calls and posts go. Call before evaluating the bundle
+    /// (`host.params` is read when the module is first imported).
+    pub fn set_host_bridge(&self, bridge: Rc<dyn nsh_core::host_channel::HostBridge>) {
+        *self.shared.host_bridge.borrow_mut() = Some(bridge);
+    }
+
+    /// Delivers the embedding app's event `name` (`host.on`): to the
+    /// listeners of its name, or kept until one is added.
+    pub fn host_event(&self, name: &str, data: nsh_core::JsonValue) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::deliver(cx.as_raw().as_ptr(), name, data);
+            });
+            self.run_jobs();
+        });
+    }
+
+    /// Settles call `id` (`host.call`) with the embedding app's answer, or
+    /// rejects it with the message.
+    pub fn host_reply(&self, id: u64, result: Result<nsh_core::JsonValue, String>) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::settle(cx.as_raw().as_ptr(), id, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Installs the meaning of `process.exit(code)` for this VM. The callback
     /// runs on the owning engine thread after the app's exit capability check.
     /// NSH never terminates the embedding process itself.
@@ -779,11 +816,27 @@ impl Host {
 
     /// Earliest timer deadline, if any timer is pending.
     pub fn next_timer(&self) -> Option<Instant> {
-        self.shared.timers.borrow_mut().next_deadline()
+        let timer = self.shared.timers.borrow_mut().next_deadline();
+        let host = self
+            .cx
+            .is_live()
+            .then(|| {
+                self.cx
+                    .with(|cx| crate::host_channel::next_deadline(cx.as_raw().as_ptr()))
+            })
+            .flatten();
+        timer.into_iter().chain(host).min()
     }
 
     /// Runs all timers due at `now`.
     pub fn run_timers(&self, now: Instant) {
+        if self.cx.is_live() {
+            self.guarded(Phase::Call, || {
+                self.cx
+                    .with(|cx| crate::host_channel::expire(cx.as_raw().as_ptr(), now));
+                self.run_jobs();
+            });
+        }
         loop {
             // Release the borrow before calling into JS: callbacks may add timers.
             let Some(callback) = self.shared.timers.borrow_mut().pop_due(now) else {
@@ -1125,9 +1178,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Press(nsh_core::PressEvent {
             position,
             page_position,
+            modifiers,
+            clicks,
         }) => {
             obj.set("position", point_object(cx, *position)?)?;
             obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
+            obj.set("clickCount", *clicks)?;
         }
         EventPayload::Hover(nsh_core::HoverEvent {
             position,
@@ -1959,6 +2016,11 @@ const report = (v) => text(String(v));
         let event = nsh_core::PressEvent {
             position: point(px(3.0), px(4.5)),
             page_position: point(px(30.0), px(40.5)),
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            clicks: 2,
         };
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::Press(event)).unwrap();
@@ -1976,6 +2038,10 @@ const report = (v) => text(String(v));
                 ),
                 (3.0, 4.5, 30.0, 40.5)
             );
+            let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
+            assert!(modifiers.get::<_, bool>("control").unwrap());
+            assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
     }
 

@@ -974,6 +974,7 @@ opt-level = 3
                 self.nsh.dep("nsh-base", HIGHLIGHT),
             ),
         )?;
+        write(&ws.join("android/build.rs"), ANDROID_BUILD_RS)?;
         let android = "#[cfg(target_os = \"android\")]\n";
         // A Rust app's root, which the development library runs when a
         // test session says so (`nsh test --target android`).
@@ -1106,6 +1107,7 @@ opt-level = 3
                 self.root_fn(android, root),
             ),
         )?;
+        write(&ws.join("rust-android/build.rs"), ANDROID_BUILD_RS)?;
         let wasm = "#[cfg(target_arch = \"wasm32\")]\n";
         write(
             &ws.join("rust-web/Cargo.toml"),
@@ -1827,6 +1829,19 @@ struct Build<'a> {
     /// What the step says it builds.
     what: &'a str,
 }
+
+/// Link arguments belong to the final cdylib, so apps' Android runtimes
+/// need the same 16 KB alignment as `nsh-platform-android`'s `build.rs`.
+const ANDROID_BUILD_RS: &str = r#"//! Android's shared runtime supports both 4 KB and 16 KB page sizes.
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
+        println!("cargo:rustc-link-arg-cdylib=-Wl,-z,max-page-size=16384");
+        println!("cargo:rustc-link-arg-cdylib=-Wl,-z,common-page-size=16384");
+    }
+}
+"#;
 
 /// The `build.rs` of the web runtimes: the 8 MiB stack nsh's own has, and
 /// QuickJS' local time from the page (`nsh-platform-web`'s `build.rs`).

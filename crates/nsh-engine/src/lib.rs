@@ -10,7 +10,9 @@
 
 mod access;
 mod app_directory;
+mod cache;
 mod error;
+mod host_channel;
 mod local_storage;
 #[cfg(feature = "net")]
 pub mod net;
@@ -43,6 +45,7 @@ use nsh_core::{
     PayloadValue, TextEngine, time::Instant, ui::JsEvent,
 };
 pub use nsh_core::{
+    JsonValue,
     access::{Access, Capabilities},
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
@@ -63,8 +66,12 @@ use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{FileStorage, data_dir};
 
-pub use crate::error::{AppError, AppErrorKind, PackageInfo};
 use crate::script::{NetworkQueue, RequestId, Script};
+pub use crate::{
+    cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
+    error::{AppError, AppErrorKind, PackageInfo},
+    host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Stack size of the engine thread. QuickJS recursion (and deep Solid
@@ -661,6 +668,10 @@ pub struct EngineConfig {
     /// system's data directory ([`data_dir`]) for apps of their own,
     /// `…/nsh` in an embedding app's. `None`: nothing is kept.
     pub data_dir: Option<std::path::PathBuf>,
+    /// Where the app's caches are kept and how much each keeps: the engine
+    /// opens them in `<root>/<app id>/<kind>` ([`Engine::image_cache`]).
+    /// [`EngineConfig::new`]: none.
+    pub cache: CacheOptions,
     /// The app's storage, overriding the one [`EngineConfig::data_dir`]
     /// names (the browser's `localStorage`, an embedder's own); `None`
     /// with no data directory either: in memory, for the engine's life.
@@ -681,6 +692,11 @@ pub struct EngineConfig {
     /// clipboard (a test's own: `nsh test --target`); `None`: the
     /// platform's.
     pub clipboard: Option<Arc<dyn nsh_core::clipboard::ClipboardBackend>>,
+    /// The embedding app's channel with the app (`nsh/host`): its launch
+    /// parameters, its events and its handlers of the app's calls and
+    /// posts. A view keeps one for every app it runs; the default is a
+    /// channel of the engine's own, with none of them.
+    pub host: HostChannel,
     /// Answers the app's picks (`Picker.pickImages`) in place of the
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
@@ -769,11 +785,13 @@ impl EngineConfig {
             ui_sets: Vec::new(),
             runtime: None,
             data_dir: None,
+            cache: CacheOptions::off(),
             storage: None,
             clock: Clock::system(),
             context: EngineContext::default(),
             pinned: EnvironmentPins::default(),
             clipboard: None,
+            host: HostChannel::default(),
             picker: None,
         }
     }
@@ -828,6 +846,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("context", &self.context)
             .field("pinned", &self.pinned)
             .field("clipboard", &self.clipboard.is_some())
+            .field("host", &self.host)
             .field("picker", &self.picker.is_some())
             .finish()
     }
@@ -863,6 +882,18 @@ enum Message {
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// The embedding app's design tokens.
     Tokens(Option<Box<Tokens>>),
+    /// The embedding app's event (`nsh/host`'s `host.on`): its name and
+    /// data.
+    HostEvent(String, nsh_core::JsonValue),
+    /// The embedding app's answer to call `.0` (`host.call`).
+    HostReply(u64, Result<nsh_core::JsonValue, String>),
+    /// The embedding app's URL handler answered URL request `id`: it took
+    /// the URL, or the platform opens it.
+    UrlHandled {
+        id: u32,
+        url: String,
+        handled: bool,
+    },
     /// Moves a manual clock forward by this much, then calls back.
     Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
@@ -1028,8 +1059,12 @@ impl EngineControl {
 pub struct Engine {
     control: EngineControl,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Serializes shutdown with the embedding app's sends.
+    host: HostChannel,
     /// Interrupts running JS when the engine stops.
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// The app's disk cache of downloaded images.
+    image_cache: Option<nsh_core::image::DiskCache>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1058,11 +1093,13 @@ impl Engine {
         F: FnOnce() -> M + Send + 'static,
         S: MountSink,
     {
+        let image_cache = config.cache.open_images(config.app.app_id());
         let (tx, rx) = crossbeam_channel::unbounded();
         setup(&EngineControl { tx: tx.clone() });
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_stop = stop.clone();
+        let host = config.host.clone();
         let thread = std::thread::Builder::new()
             .name("nsh-engine".into())
             .stack_size(ENGINE_STACK_SIZE)
@@ -1070,8 +1107,17 @@ impl Engine {
         Ok(Engine {
             control: EngineControl { tx },
             thread: Some(thread),
+            host,
             stop,
+            image_cache,
         })
+    }
+
+    /// The disk cache of the images the app downloads
+    /// ([`EngineConfig::cache`]; `None`: none). The platform's image loader
+    /// routes the app's `http(s)` images through it.
+    pub fn image_cache(&self) -> Option<nsh_core::image::DiskCache> {
+        self.image_cache.clone()
     }
 
     /// A handle for sending input from other threads.
@@ -1085,8 +1131,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         // Dropped on the platform's main thread: a script still running is
         // aborted rather than waited for.
-        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = self.control.tx.send(Message::Shutdown);
+        self.host.shutdown(&self.control.tx, &self.stop);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -1286,6 +1331,9 @@ struct Driver<M: TextEngine + 'static> {
     /// When the last display frame ran, on a clock that moves with the
     /// display's frames: the next one comes a frame after it.
     last_frame: Option<Instant>,
+    /// The engine's attachment to the embedding app's channel: its events
+    /// come here while the engine runs.
+    _host: host_channel::HostAttachment,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -1301,6 +1349,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         config.pinned.apply(&mut config.environment);
         #[cfg(feature = "js")]
         let system_tx = tx.clone();
+        #[cfg(feature = "js")]
+        let host_bridge = config.host.bridge(tx.clone());
+        let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(match &config.app {
             App::Js(bundle) => bundle.policy.access(),
@@ -1402,6 +1453,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             sets_seen: FxHashMap::default(),
             resized: None,
             pinned: config.pinned,
+            host: config.host.clone(),
+            url_opens: Vec::new(),
             net: Net {
                 network: config.network.clone(),
                 tx,
@@ -1428,6 +1481,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             clock: config.clock.clone(),
             context: config.context.clone(),
             last_frame: None,
+            _host: config.host.attach(host_tx, rx.clone()),
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -1445,6 +1499,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);
                         }),
+                        host: Rc::new(host_bridge),
                     }
                 };
                 #[cfg(not(feature = "js"))]
@@ -1750,6 +1805,11 @@ struct State<M: TextEngine> {
     /// `items`; `js` is the rest of the wake-up).
     perf_commit: perf::CommitTiming,
     committed_since_gc: bool,
+    /// The embedding app's channel: its URL handler sees the app's URLs
+    /// first.
+    host: HostChannel,
+    /// URLs the app asked to open, taken from the core (a reused buffer).
+    url_opens: Vec<(u32, String)>,
     net: Net,
     /// Development updates to apply.
     hot: Vec<HotUpdate>,
@@ -2090,6 +2150,21 @@ impl<M: TextEngine> State<M> {
 
     /// Produces one frame: applies JS ops, lays out, and lets lists pull
     /// the items they need, merging everything into a single batch.
+    /// Hands the URLs the app asked to open to the embedding app's URL
+    /// handler, or, without one, to the platform ([`nsh_core::open_url`]);
+    /// true when the platform has one to open (the core's commit sends it).
+    fn open_urls(&mut self) -> bool {
+        self.core.take_url_opens(&mut self.url_opens);
+        let mut platform = false;
+        for (id, url) in self.url_opens.drain(..) {
+            if self.host.open_url(id, url.clone(), &self.net.tx).is_none() {
+                self.core.open_url_on_platform(id, url);
+                platform = true;
+            }
+        }
+        platform
+    }
+
     fn commit(&mut self, script: Option<&Script>) -> Option<MountBatch> {
         let start = Instant::now();
         let mut merged: Option<MountBatch> = None;
@@ -2177,6 +2252,7 @@ impl<M: TextEngine> State<M> {
                     Err(err) => log::error!("invalid op: {err:?}"),
                 }
             }
+            drop(ops);
             if let Some(batch) = self.core.commit() {
                 commits += 1;
                 match &mut merged {
@@ -2186,6 +2262,8 @@ impl<M: TextEngine> State<M> {
             }
             self.core.take_list_binds(&mut self.binds);
             self.core.take_events(&mut self.events);
+            // URLs the platform opens go out in another round.
+            let urls = self.open_urls();
             // Posts the ops queued (in program order) run in another round.
             let posted = script.is_some_and(Script::has_posted);
             // New tokens (the app's theme, the embedding app's) reach what
@@ -2199,7 +2277,12 @@ impl<M: TextEngine> State<M> {
                 _ => false,
             };
             let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
-            if self.binds.is_empty() && self.events.is_empty() && !posted && !retheme && !more_paced
+            if self.binds.is_empty()
+                && self.events.is_empty()
+                && !posted
+                && !retheme
+                && !more_paced
+                && !urls
             {
                 break;
             }
@@ -2412,6 +2495,24 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.perf_commit = perf::CommitTiming::default();
         }
         Message::Tokens(tokens) => state.core.set_host_tokens(tokens.map(|t| *t)),
+        // A Rust app has no `nsh/host`: what the host sends it goes.
+        Message::HostEvent(name, data) => {
+            if let Some(script) = script {
+                script.host_event(&name, data);
+            }
+        }
+        Message::HostReply(id, result) => {
+            if let Some(script) = script {
+                script.host_reply(id, result);
+            }
+        }
+        Message::UrlHandled { id, url, handled } => {
+            if handled {
+                state.core.answer_open_url(id, true);
+            } else {
+                state.core.open_url_on_platform(id, url);
+            }
+        }
         // The driver handles it ([`Driver::handle`]), and keeps the ones
         // sent before it started for after the first frame.
         Message::Advance(..) => unreachable!("the driver moves the clock"),
