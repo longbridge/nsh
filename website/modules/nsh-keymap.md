@@ -1,6 +1,6 @@
 ---
 title: nsh/keymap
-description: "Keyboard shortcuts: bind keystrokes such as mod+k to handlers, on macOS, Windows, Linux and the web."
+description: "Keyboard shortcuts: bind keystrokes such as mod+k to handlers, on macOS, Windows, Linux, the web, and iOS and Android with a hardware keyboard."
 order: 8.7
 ---
 
@@ -38,7 +38,7 @@ interface KeyBindingOptions {
 
 A Rust binding lives as long as the component (the owner) that made it; the handler gets the keystroke as written.
 
-Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys, such as Ctrl+T or Cmd+W, never reach the page). On iOS and Android, `bind` keeps the bindings but no key fires them yet, so the same code runs everywhere.
+Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys, such as Ctrl+T or Cmd+W, never reach the page), and on iOS and Android with a hardware keyboard: an iPad's, a Mac's running an iPad app, a tablet's or a Chromebook's, the simulator's and the emulator's. The same code runs everywhere; without a keyboard, no key fires the bindings.
 
 ## keymap.bind
 
@@ -136,7 +136,7 @@ A keystroke is modifiers and a key joined by `+`: `"mod+k"`, `"ctrl+shift+p"`, `
 | `alt` (also `option`, `opt`) | Option (⌥) | Alt | Alt |
 | `shift` | Shift (⇧) | Shift | Shift |
 
-In a browser, keys follow the platform the browser runs on: `mod` is Command on a Mac, iPhone or iPad and Ctrl elsewhere.
+iOS follows macOS (`mod` is Command) and Android follows Windows and Linux (`mod` is Ctrl, `cmd` the Meta key). In a browser, keys follow the platform the browser runs on: `mod` is Command on a Mac, iPhone or iPad and Ctrl elsewhere.
 
 Use `mod` for an app's own shortcuts: it is the key each platform's apps use for them (⌘K on macOS, Ctrl+K on Windows and Linux), so one spelling fits everywhere. The Windows key and Super mostly belong to the system, so `cmd` is rarely right outside macOS.
 
@@ -180,7 +180,7 @@ keymap.bind("mod+enter", send, { when: "always" });
 keymap.bind("mod+e", archive, { when: "notEditing" });
 ```
 
-On the GPUI backend, a native component with the keyboard focus counts as a text input, since it may be a text editor. It sees each key first: a key it handles itself never reaches the bindings, and the bindings that fire while text is edited get the keys it lets through.
+On iOS and Android, a key an input method is composing with (choosing a candidate, committing) stays the input method's. On the GPUI backend, a native component with the keyboard focus counts as a text input, since it may be a text editor. It sees each key first: a key it handles itself never reaches the bindings, and the bindings that fire while text is edited get the keys it lets through.
 
 ## Which binding runs
 

@@ -439,6 +439,9 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     assets.sort();
     assets.dedup();
     let natives = std::mem::take(&mut *natives.lock().expect("natives lock"));
+    if let Some(warning) = ungranted_host(&natives, capabilities.as_ref()) {
+        log::warn!(target: "nsh::build", "{warning}");
+    }
     Ok(Bundle {
         code,
         source_map,
@@ -447,6 +450,22 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         natives: natives.into_iter().collect(),
         capabilities,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+/// The warning for an app that imports `nsh/host` and grants itself none
+/// of the host's functions (`capabilities.host`): each of its calls is
+/// refused, as the host's functions are never granted by default.
+fn ungranted_host<'a>(
+    natives: impl IntoIterator<Item = &'a String>,
+    capabilities: Option<&nsh_core::access::Capabilities>,
+) -> Option<String> {
+    let imports = natives.into_iter().any(|n| n == "nsh/host");
+    let granted = capabilities.is_some_and(|c| !c.host.is_empty());
+    (imports && !granted).then(|| {
+        "the app imports nsh/host and nsh.json declares no `capabilities.host`: every `host.call` is refused \
+         (list the host's functions it calls, prefixes ending in `*`, or `true`)"
+            .to_owned()
     })
 }
 
@@ -709,6 +728,9 @@ pub async fn bundle_hot_async(
     assets.sort();
     assets.dedup();
     let natives = std::mem::take(&mut *natives.lock().expect("natives lock"));
+    if let Some(warning) = ungranted_host(&natives, capabilities.as_ref()) {
+        log::warn!(target: "nsh::build", "{warning}");
+    }
     Ok(HotBundle {
         modules,
         natives: natives.into_iter().collect(),
@@ -724,6 +746,24 @@ pub async fn bundle_hot_async(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn apps_calling_the_host_without_a_grant_are_warned() {
+        use nsh_core::access::Capabilities;
+        let natives = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let caps = |json| Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap();
+        let host = natives(&["nsh", "nsh/host"]);
+        assert!(
+            super::ungranted_host(&host, None)
+                .unwrap()
+                .contains("capabilities.host")
+        );
+        assert!(super::ungranted_host(&host, Some(&caps("{}"))).is_some());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": false}"#))).is_some());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": ["a"]}"#))).is_none());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": true}"#))).is_none());
+        assert!(super::ungranted_host(&natives(&["nsh"]), None).is_none());
+    }
+
     use super::*;
 
     /// An app whose screens are imported on demand: the first imports what

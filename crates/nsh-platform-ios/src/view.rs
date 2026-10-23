@@ -37,6 +37,8 @@ struct State {
     options: SurfaceOptions,
     /// The embedding app's locale and text size.
     host: nsh_engine::HostEnvironment,
+    /// The embedding app's theme overrides.
+    host_tokens: Option<nsh_engine::Tokens>,
     on_error: Option<ErrorHandler>,
     #[cfg(feature = "dev")]
     dev: Option<crate::dev::DevSession>,
@@ -59,6 +61,7 @@ impl AppView {
                     surface: None,
                     options,
                     host: nsh_engine::HostEnvironment::default(),
+                    host_tokens: None,
                     on_error: None,
                     #[cfg(feature = "dev")]
                     dev: None,
@@ -156,6 +159,24 @@ impl AppView {
         self.set_host(|host| host.font_scale = scale);
     }
 
+    /// The embedding app's theme overrides: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, as `nsh.json`'s `"theme"`), whose
+    /// tokens win over the app's of the same names, light and dark, while
+    /// the app's others stay (a brand's `primary` and `radius`). Classes
+    /// naming them (`bg-primary`) are resolved again at once, and every
+    /// app loaded later starts with them. `None` gives the app its own
+    /// theme back. Fails, changing nothing, on a file that does not parse.
+    pub fn set_theme_overrides(&self, json: Option<&str>) -> Result<(), nsh_base::ThemeError> {
+        let tokens = json.map(nsh_base::theme_overrides).transpose()?;
+        let mut state = self.inner.state.borrow_mut();
+        state.host_tokens = tokens;
+        if let Some(surface) = &state.surface {
+            surface.set_host_tokens(state.host_tokens.clone());
+        }
+        Ok(())
+    }
+
     fn set_host(&self, change: impl FnOnce(&mut nsh_engine::HostEnvironment)) {
         let mut state = self.inner.state.borrow_mut();
         change(&mut state.host);
@@ -224,6 +245,7 @@ impl Inner {
             UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
         );
         surface.set_host_environment(state.host);
+        surface.set_host_tokens(state.host_tokens.clone());
         #[cfg(feature = "dev")]
         surface.set_test_model(state.test_model.clone());
         let weak: Weak<Inner> = Rc::downgrade(this);

@@ -7,6 +7,7 @@ import Context from "./context";
 import CoreAnimated from "./core-animated";
 import CoreCanvas from "./core-canvas";
 import CoreElements from "./core-elements";
+import CoreErrorBoundary from "./core-error-boundary";
 import CoreList from "./core-list";
 import CoreOverlay from "./core-overlay";
 import CorePrimitives from "./core-primitives";
@@ -21,6 +22,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-animated": CoreAnimated,
   "core-canvas": CoreCanvas,
   "core-elements": CoreElements,
+  "core-error-boundary": CoreErrorBoundary,
   "core-list": CoreList,
   "core-overlay": CoreOverlay,
   "core-primitives": CorePrimitives,

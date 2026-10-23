@@ -1003,6 +1003,22 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
      `boolean` into `boole an`. */
   td code { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
   td:last-child { min-width: 16rem; }
+  /* A comparison matrix (a table with status dots): status cells and row
+     labels on one line, the last column as wide as its content, NSH's
+     column tinted. */
+  table:has(.status) td:has(.status) { white-space: nowrap; }
+  table:has(.status) td:first-child { white-space: nowrap; }
+  table:has(.status) td:last-child { min-width: 0; }
+  table:has(.status) { font-size: 0.8rem; }
+  table:has(.status) :is(th, td) { padding-inline: 0.42rem; }
+  table:has(.status) :is(th, td):nth-child(2) { background: color-mix(in srgb, var(--citrus) 8%, transparent); }
+  table:has(.status) th:nth-child(2) { color: var(--foreground); }
+  /* Status dots: green available, yellow partial, red not provided. */
+  .status { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; vertical-align: 0.05em; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
+  .status + * , td .status { margin-right: 0.15rem; }
+  .status--yes { --tone: var(--success); }
+  .status--partial { --tone: var(--warning); }
+  .status--no { --tone: var(--destructive); }
 
   blockquote { padding: 0.1rem 0 0.1rem 1.1rem; border-left: 2px solid var(--citrus); color: var(--muted-foreground); }
   blockquote > p { margin-block: 0.5rem; }

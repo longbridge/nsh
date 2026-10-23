@@ -389,6 +389,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             read_clipboard_image(surface, *id, *has_only)
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
+        Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing calls the window delegate synchronously, which stops

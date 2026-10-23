@@ -68,6 +68,7 @@ struct Hid {
         u8,
         u32,
     ) -> Event,
+    keyboard: unsafe extern "C" fn(Allocator, u64, u32, u32, u8, u32) -> Event,
     append: unsafe extern "C" fn(Event, Event, u32),
     set_integer: unsafe extern "C" fn(Event, u32, i64),
     set_float: unsafe extern "C" fn(Event, u32, f64),
@@ -113,6 +114,7 @@ fn load() -> Option<Hid> {
         Some(Hid {
             digitizer: symbol(iokit, "IOHIDEventCreateDigitizerEvent")?,
             finger: symbol(iokit, "IOHIDEventCreateDigitizerFingerEvent")?,
+            keyboard: symbol(iokit, "IOHIDEventCreateKeyboardEvent")?,
             append: symbol(iokit, "IOHIDEventAppendEvent")?,
             set_integer: symbol(iokit, "IOHIDEventSetIntegerValue")?,
             set_float: symbol(iokit, "IOHIDEventSetFloatValue")?,
@@ -233,6 +235,39 @@ pub(crate) fn touch(window: &UIWindow, x: f64, y: f64, phase: Phase) -> bool {
         }
         enqueue(hid, hand, window, mtm);
     }
+    true
+}
+
+/// `kHIDPage_KeyboardOrKeypad`.
+const KEYBOARD_PAGE: u32 = 7;
+
+/// The USB HID usages of the left Control, Shift, Option and Command keys.
+pub(crate) const CONTROL: u16 = 0xE0;
+pub(crate) const SHIFT: u16 = 0xE1;
+pub(crate) const OPTION: u16 = 0xE2;
+pub(crate) const COMMAND: u16 = 0xE3;
+
+/// A hardware keyboard's key `usage` (a USB HID keyboard usage) going down
+/// or up, to `window`, as UIKit takes a real keyboard's: it becomes the
+/// presses, key commands and typing of the key.
+pub(crate) fn key(window: &UIWindow, usage: u16, down: bool) -> bool {
+    let Some(hid) = hid() else { return false };
+    // SAFETY: IOKit's constructor with its documented arguments; the event
+    // is handed over (and released) by `enqueue`.
+    let event = unsafe {
+        (hid.keyboard)(
+            std::ptr::null(),
+            now(),
+            KEYBOARD_PAGE,
+            u32::from(usage),
+            u8::from(down),
+            0,
+        )
+    };
+    if event.is_null() {
+        return false;
+    }
+    enqueue(hid, event, window, window.mtm());
     true
 }
 

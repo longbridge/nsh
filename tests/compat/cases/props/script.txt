@@ -144,6 +144,9 @@ prop id:photo src https://example.com/b.png
 # One with a URL alone: the defaults.
 prop id:plain src https://example.com/plain.png
 prop id:plain resizeMode cover
+prop id:scale-down resizeMode scale-down
+prop id:object-none resizeMode center
+prop id:object-scale-down resizeMode scale-down
 prop id:plain blurRadius 0
 noprop id:plain placeholder
 noprop id:plain fadeDuration
@@ -426,6 +429,27 @@ prop id:preview src https://example.com/photo.png
 covers [props] src
 covers [globals] URL
 covers [globals] Blob
+# props-list-start
+tap id:case-props-list-start
+# Opens at its start: not an approach.
+expect Item 0
+expect Starts: 0
+# 20 items of 40 points in 200. Away from the start, then back: 100
+# points from it is not within the threshold's quarter of a viewport (50
+# points, not the default whole one); 40 points is.
+scroll scroll:text:"Item 0" 0 300
+absent Starts: 1
+scroll scroll:text:"Item 9" 0 100
+absent Starts: 1
+scroll scroll:text:"Item 9" 0 40
+expect Starts: 1
+# Five items arrive above: the rows on screen keep their place, 200
+# points further down, out of the threshold, so nothing more loads.
+expect Item -4
+prop scroll:text:"Item 0" contentOffset y=240
+absent Starts: 2
+covers [props] List.loadMoreAtStartThreshold
+covers [events] onLoadMoreAtStart
 # props-list-sticky-offset
 tap id:case-props-list-sticky-offset
 # Items 0 and 3 stick 24 points below the top: each moves with the scroll
