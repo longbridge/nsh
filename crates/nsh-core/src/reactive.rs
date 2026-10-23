@@ -335,7 +335,9 @@ impl<H: Host> Graph<H> {
         id
     }
 
-    fn context_of(&self, owner: u32) -> Option<Rc<Frame<H>>> {
+    /// The context frames owner `owner` sees, innermost first (none for
+    /// [`NONE`], [`UNOWNED`] and [`DISPOSED`]).
+    pub fn context_of(&self, owner: u32) -> Option<Rc<Frame<H>>> {
         if !is_node(owner) {
             return None;
         }

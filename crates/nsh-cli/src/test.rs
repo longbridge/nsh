@@ -383,7 +383,12 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
 /// `nsh/test`, and compiled.
 fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     let mut sets = crate::ui_sets().to_vec();
-    sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
+    sets.extend(
+        nsh_testing::test_sets()
+            .iter()
+            .flat_map(nsh_core::ui::Registry::sets)
+            .map(SetDescription::from),
+    );
     bytecode_of(entry, &sets, false)
 }
 

@@ -421,8 +421,8 @@ own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
-  back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
-  swiped down on iOS, the back button on Android);
+  back button on Windows and in GPUI, the browser's back button on the web, a sheet swiped down, VoiceOver's escape
+  gesture while a menu, popover or `Sheet` is open, else the header's back button on iOS, the back button on Android);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;

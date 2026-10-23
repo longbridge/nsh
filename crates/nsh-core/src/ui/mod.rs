@@ -59,6 +59,7 @@ pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
+mod rows;
 mod scrollable;
 pub(crate) mod services;
 pub(crate) mod status_bar;
@@ -161,6 +162,7 @@ pub use self::{
     renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
+    rows::Rows,
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     style::{

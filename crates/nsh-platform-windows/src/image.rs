@@ -853,7 +853,7 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
     let location = resolve(uri, surface.asset_base.borrow().as_ref());
-    fetch_at(surface, location, uri, progress, done)
+    fetch_at(location, uri, progress, done)
 }
 
 /// Loads `source` for `surface` as [`fetch`] does: from its bytes, when it
@@ -867,15 +867,14 @@ fn fetch_source(
     match &source.data {
         Some(data) => {
             let location = Location::Memory(source.uri.to_string(), data.clone());
-            fetch_at(surface, Some(location), &source.uri, progress, done)
+            fetch_at(Some(location), &source.uri, progress, done)
         }
         None => fetch(surface, &source.uri, progress, done),
     }
 }
 
-/// Loads `location` (`uri`'s) for `surface`, as [`fetch`] does.
+/// Loads `location` (`uri`'s), as [`fetch`] does.
 fn fetch_at(
-    surface: &Surface,
     location: Option<Location>,
     uri: &str,
     progress: Option<Progress>,

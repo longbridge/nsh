@@ -161,6 +161,29 @@ define_class!(
             }
         }
 
+        /// VoiceOver's escape gesture (a two-finger scrub) from inside the
+        /// surface, where no screen or modal took it: the app's going back
+        /// (the top overlay's `onCancel` first), as Escape and the back
+        /// button are elsewhere. A menu sheet's backdrop takes no focus,
+        /// so this is how a VoiceOver user leaves it.
+        #[unsafe(method(accessibilityPerformEscape))]
+        fn accessibility_perform_escape(&self) -> bool {
+            let shared = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone());
+            let taken = shared.is_some_and(|shared| {
+                shared
+                    .get(self.mtm())
+                    .try_borrow()
+                    .is_ok_and(|m| m.as_ref().is_some_and(Mounter::escape))
+            });
+            // SAFETY: calling the superclass implementation.
+            taken || unsafe { msg_send![super(self), accessibilityPerformEscape] }
+        }
+
         #[unsafe(method(safeAreaInsetsDidChange))]
         fn safe_area_insets_did_change(&self) {
             // SAFETY: calling the superclass implementation.

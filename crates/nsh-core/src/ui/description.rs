@@ -291,7 +291,11 @@ impl Description {
     pub fn of(sets: &[Registry]) -> Description {
         Description {
             nsh: VERSION.to_owned(),
-            sets: sets.iter().map(SetDescription::from).collect(),
+            sets: sets
+                .iter()
+                .flat_map(Registry::sets)
+                .map(SetDescription::from)
+                .collect(),
         }
     }
 

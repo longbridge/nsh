@@ -281,6 +281,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
   scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
   it only stops it.
+- **A menu's backdrop covers the header**: on a touch screen a menu is a sheet over a backdrop on the whole window,
+  so a tap at the header's back button lands on the backdrop and closes the menu (`backdropPress`) instead of going
+  back from a submenu. iOS has no back key, so while the app listens to going back the agent's `back` is VoiceOver's
+  escape gesture on the surface (`RootView`'s `accessibilityPerformEscape`), which the core takes as the back button.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 
