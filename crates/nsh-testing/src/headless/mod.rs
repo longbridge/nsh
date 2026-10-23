@@ -158,6 +158,11 @@ type Observer = Box<dyn FnMut(&str, &MountBatch) + Send>;
 /// Answers a dialog ([`Headless::on_dialog`]).
 type DialogHandler = Box<dyn FnMut(&Dialog) -> DialogAnswer + Send>;
 
+/// Takes the app's `nsh/host` calls ([`Headless::on_host_call`]): their
+/// id, the host's function and its argument.
+#[cfg(feature = "js")]
+type HostCalls = Box<dyn FnMut(u64, &str, &nsh_core::JsonValue) + Send>;
+
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogAnswer {
@@ -165,6 +170,21 @@ pub enum DialogAnswer {
     Press(String),
     /// Close it without a button (tapping outside, the back button).
     Dismiss,
+}
+
+/// Answers a pick: the files the user picks for the request (none: the
+/// picker cancelled).
+type PickHandler =
+    Box<dyn FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile> + Send>;
+
+/// Who answers the picks a step asks for.
+enum Picks {
+    /// Cancelled: no files.
+    Default,
+    /// A test's handler.
+    Handler(PickHandler),
+    /// The caller, after the step ([`Headless::answer_pick`]).
+    Caller,
 }
 
 /// Who answers the dialogs a step shows.
@@ -213,7 +233,8 @@ enum Pumped {
 /// It plays the platform's part the NSH protocol defines and nothing
 /// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
-/// test, else [`default_answer`]), the clipboard holds text. Images are
+/// test, else [`default_answer`]), the clipboard holds text, and `nsh
+/// test`'s web page host answers `nsh/host` calls. Images are
 /// not loaded: no `onLoad` comes, and `Image.getSize` / `Image.prefetch`
 /// fail.
 pub struct Headless {
@@ -225,6 +246,8 @@ pub struct Headless {
     screen: Screen,
     animator: Animator,
     dialogs: Dialogs,
+    /// Who answers the picks.
+    picks: Picks,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -238,6 +261,12 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// The embedding app's channel with the app (`EngineConfig::host`),
+    /// which the test plays.
+    host: nsh_engine::HostChannel,
+    /// Where the app's `nsh/host` calls go (the web page's host).
+    #[cfg(feature = "js")]
+    host_calls: Option<HostCalls>,
 }
 
 impl Headless {
@@ -246,6 +275,7 @@ impl Headless {
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
+        let host = config.host.clone();
         let Launched {
             engine,
             batches,
@@ -262,6 +292,7 @@ impl Headless {
             screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
+            picks: Picks::Default,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -270,6 +301,9 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            host,
+            #[cfg(feature = "js")]
+            host_calls: None,
         })
     }
 
@@ -375,6 +409,21 @@ impl Headless {
         }
     }
 
+    /// The embedding app's channel with the app (`nsh/host`): its launch
+    /// parameters and handlers, as the engine was given them.
+    pub fn host(&self) -> &nsh_engine::HostChannel {
+        &self.host
+    }
+
+    /// The step `host.send`: the embedding app sends event `name` with
+    /// `data` (the app's `host.on(name, ...)` hears it), and the app
+    /// settles.
+    pub fn send_host_event(&mut self, name: &str, data: nsh_core::JsonValue) -> Result<(), String> {
+        self.step(format!("host.send({name})"));
+        self.host.send(name, data)?;
+        self.done()
+    }
+
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
     /// rotation, a resized window), as a platform reports it.
     pub fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String> {
@@ -448,6 +497,65 @@ impl Headless {
         self.done()
     }
 
+    /// Answers the picks steps ask for (`Picker.pickImages`) with
+    /// `handler`, the files the user picks, instead of cancelling them.
+    pub fn on_pick(
+        &mut self,
+        handler: impl FnMut(&nsh_core::picker::PickRequest) -> Vec<nsh_core::picker::PickedFile>
+        + Send
+        + 'static,
+    ) {
+        self.picks = Picks::Handler(Box::new(handler));
+    }
+
+    /// Leaves the picks steps ask for to the caller: a step returns with
+    /// one asked ([`Headless::pending_pick`]) until [`Headless::answer_pick`]
+    /// answers it.
+    pub fn answer_picks_myself(&mut self) {
+        self.picks = Picks::Caller;
+    }
+
+    /// The oldest pick asked and not answered yet.
+    pub fn pending_pick(&self) -> Option<nsh_core::picker::PickRequest> {
+        self.screen.pending_pick().map(|(_, request)| request)
+    }
+
+    /// The picks the app asked for so far, in order.
+    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+        self.screen.picks()
+    }
+
+    /// Answers the oldest pick not answered yet with `files` (none: the
+    /// user cancelled), then waits until the app is quiet.
+    pub fn answer_pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        self.pick(files)?;
+        self.done()
+    }
+
+    /// Answers the oldest pick not answered yet.
+    fn pick(&mut self, files: Vec<nsh_core::picker::PickedFile>) -> Result<(), String> {
+        let (id, _) = self.screen.pending_pick().ok_or("no pick to answer")?;
+        self.screen.picked();
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Pick,
+            EventPayload::Picked { id, files },
+        );
+        Ok(())
+    }
+
+    /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
+    /// `calls` as their batches are applied; the environment must say the
+    /// platform has a host (`Environment::host`), else the core rejects
+    /// them before they reach a batch.
+    #[cfg(feature = "js")]
+    pub(crate) fn on_host_call(
+        &mut self,
+        calls: impl FnMut(u64, &str, &nsh_core::JsonValue) + Send + 'static,
+    ) {
+        self.host_calls = Some(Box::new(calls));
+    }
+
     /// Puts `text` on the clipboard (`None`: nothing), as the user copying.
     pub fn set_clipboard(&mut self, text: Option<String>) {
         self.screen.set_clipboard(text);
@@ -479,6 +587,18 @@ impl Headless {
         for item in &batch.items {
             self.animator.apply(item);
         }
+        #[cfg(feature = "js")]
+        if let Some(calls) = &mut self.host_calls {
+            for item in &batch.items {
+                if let MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::HostCall { id, name, args },
+                } = item
+                {
+                    calls(*id, name, args);
+                }
+            }
+        }
         self.applied += 1;
         if let Some(observer) = &mut self.observer {
             observer(&self.step, batch);
@@ -487,8 +607,9 @@ impl Headless {
     }
 
     /// Does what a platform does after a batch: reports where commands
-    /// moved scroll views, tells modals they show, answers clipboard reads,
-    /// goes back when the app asked, reports finished animations.
+    /// moved scroll views, tells modals they show, answers clipboard reads
+    /// and the URLs opened, goes back when the app asked, reports finished
+    /// animations.
     fn react(&mut self) {
         let control = self.engine.control();
         for id in self.screen.take_scrolled() {
@@ -521,6 +642,15 @@ impl Headless {
                 ),
             ];
             control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
+        }
+        // URLs are recorded (`Screen::opened_urls`) and reported opened, as
+        // a device with an app for every scheme would.
+        for id in self.screen.take_url_opens() {
+            let fields = vec![
+                ("id", PayloadValue::Number(f64::from(id))),
+                ("opened", PayloadValue::Bool(true)),
+            ];
+            control.dispatch_event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields));
         }
         if self.screen.take_back_asked() {
             self.go_back(false);
@@ -678,12 +808,25 @@ impl Headless {
         self.settle();
         self.check()?;
         loop {
-            let answer = match (&mut self.dialogs, self.screen.pending_dialog()) {
-                (_, None) | (Dialogs::Caller, _) => return Ok(()),
-                (Dialogs::Default, Some(dialog)) => default_answer(dialog)?,
-                (Dialogs::Handler(handler), Some(dialog)) => handler(dialog),
+            match (&mut self.dialogs, self.screen.pending_dialog()) {
+                (_, None) | (Dialogs::Caller, _) => {}
+                (dialogs, Some(dialog)) => {
+                    let answer = match dialogs {
+                        Dialogs::Handler(handler) => handler(dialog),
+                        _ => default_answer(dialog)?,
+                    };
+                    self.answer(answer)?;
+                    self.settle();
+                    self.check()?;
+                    continue;
+                }
+            }
+            let files = match (&mut self.picks, self.screen.pending_pick()) {
+                (_, None) | (Picks::Caller, _) => return Ok(()),
+                (Picks::Default, Some(_)) => Vec::new(),
+                (Picks::Handler(handler), Some((_, request))) => handler(&request),
             };
-            self.answer(answer)?;
+            self.pick(files)?;
             self.settle();
             self.check()?;
         }
@@ -1738,10 +1881,14 @@ mod tests {
                 .unwrap_err()
                 .contains("nothing")
         );
-        // Phones fire no app shortcuts.
+        // Phones and tablets fire them from a hardware keyboard too; on
+        // Android `mod` is Control.
         let mut phone = open_shortcuts(nsh_core::platform::Os::Ios);
-        phone.press_key("mod+k").unwrap();
-        assert!(phone.shows("Palette 0"));
+        phone.press_key("cmd+k").unwrap();
+        phone.wait_for("Palette 1").unwrap();
+        let mut android = open_shortcuts(nsh_core::platform::Os::Android);
+        android.press_key("ctrl+k").unwrap();
+        android.wait_for("Palette 1").unwrap();
     }
 
     #[cfg(feature = "js")]

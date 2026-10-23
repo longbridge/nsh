@@ -200,6 +200,45 @@ impl Native for IosNative {
         });
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::Keystroke;
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::Ios).map_err(|e| e.to_string())?;
+        let usage = stroke
+            .key
+            .hid_usage()
+            .ok_or_else(|| format!("a hardware keyboard has no key {keys:?}"))?;
+        let m = stroke.modifiers;
+        let modifiers: Vec<u16> = [
+            (m.ctrl, synth::CONTROL),
+            (m.alt, synth::OPTION),
+            (m.shift, synth::SHIFT),
+            (m.cmd, synth::COMMAND),
+        ]
+        .into_iter()
+        .filter_map(|(on, usage)| on.then_some(usage))
+        .collect();
+        // As a hand presses a shortcut: the modifiers down first, the key
+        // pressed and released, then the modifiers released.
+        let held = modifiers.clone();
+        self.on_main(move |_, window| {
+            for usage in held {
+                synth::key(window, usage, true);
+            }
+            synth::key(window, usage, true)
+        })
+        .filter(|sent| *sent)
+        .ok_or_else(|| "the simulator takes no keyboard events".to_owned())?;
+        std::thread::sleep(TAP);
+        self.on_main(move |_, window| {
+            synth::key(window, usage, false);
+            for usage in modifiers.into_iter().rev() {
+                synth::key(window, usage, false);
+            }
+        });
+        Ok(())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.on_main(move |view, _| view.with_mounter(|m| m.input_text(id)).flatten())
             .flatten()

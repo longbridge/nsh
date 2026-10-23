@@ -26,7 +26,7 @@ fn start_in(app: &str, environment: Environment) -> (Engine, Receiver<MountBatch
 
 /// [`start_in`] with the capabilities the app declares (JSON, `nsh.json`'s
 /// `capabilities` form) and an `nsh.json`.
-fn start_with(
+pub(crate) fn start_with(
     app: &str,
     environment: Environment,
     capabilities: Option<&str>,
@@ -83,6 +83,8 @@ fn start_with(
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -209,7 +211,10 @@ fn a_stateful_component_steps_while_held_on((engine, rx): (Engine, Receiver<Moun
 }
 
 /// The batches until `done` holds for one (or nothing came for 500ms).
-fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -> Vec<MountBatch> {
+pub(crate) fn until(
+    rx: &Receiver<MountBatch>,
+    mut done: impl FnMut(&MountBatch) -> bool,
+) -> Vec<MountBatch> {
     let mut batches = Vec::new();
     while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
         let stop = done(&batch);
@@ -221,7 +226,7 @@ fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -
     batches
 }
 
-fn shows(batch: &MountBatch, wanted: &str) -> bool {
+pub(crate) fn shows(batch: &MountBatch, wanted: &str) -> bool {
     text_ids(batch, wanted).is_some()
 }
 
@@ -1064,6 +1069,71 @@ fn clipboard_images_and_files_reach_js() {
             },
             Command::ReadClipboardFiles { id: 3 },
         ]
+    );
+}
+
+const PICKER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh/picker";
+
+const shown = signal("");
+setTimeout(async () => {
+  const images = await Picker.pickImages({ multiple: true, limit: 3, maxDimension: 1024 });
+  const [{ file, size }] = images;
+  const bytes = await file.bytes();
+  const url = URL.createObjectURL(file);
+  shown.set(
+    `${images.length} ${file instanceof File} ${file.name} ${file.type} ${file.size} ${size.width}x${size.height} ${bytes.slice(1, 4).join(",")} ${url.startsWith("blob:")} ${file.lastModified}`,
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn picked_images_reach_js_as_files() {
+    let (engine, rx) = start(PICKER);
+    let control = engine.control();
+    let mut asked = None;
+    until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickImages { id, request },
+            } = item
+            {
+                asked = Some(*request);
+                let mut file = nsh_core::picker::PickedFile::new(
+                    "IMG_0042.HEIC",
+                    "image/jpeg",
+                    nsh_core::ImageData::new(vec![0xff, 0xd8, 0xff, 0xe0, 0, 0]),
+                );
+                file.size = Size::new(
+                    nsh_core::geometry::DevicePixels(1024),
+                    nsh_core::geometry::DevicePixels(768),
+                );
+                file.last_modified = Some(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_700_000_000_000),
+                );
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: vec![file],
+                    },
+                );
+            }
+        }
+        shows(
+            batch,
+            "1 true IMG_0042.jpg image/jpeg 6 1024x768 216,255,224 true 1700000000000",
+        )
+    });
+    let asked = asked.expect("a pick");
+    assert_eq!(asked.limit, 3);
+    assert_eq!(
+        asked.max_dimension,
+        Some(nsh_core::geometry::DevicePixels(1024))
     );
 }
 

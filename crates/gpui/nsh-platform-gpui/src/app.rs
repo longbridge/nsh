@@ -150,6 +150,11 @@ pub struct AppOptions {
     /// functions read it with `nsh_core::ui::engine_context`, so each view
     /// reaches its own part of the embedding app.
     pub context: nsh_engine::EngineContext,
+    /// The embedding app's channel with the apps the view runs
+    /// (`nsh/host`): their launch parameters, events to them and handlers of
+    /// their calls and posts ([`AppView::host`]). One for every app the view
+    /// loads; a new one by default.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for AppOptions {
@@ -167,6 +172,7 @@ impl Default for AppOptions {
             data_dir: None,
             storage: None,
             context: Default::default(),
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }
@@ -244,6 +250,9 @@ pub struct AppView {
     _keystrokes: gpui::Subscription,
     /// The view itself handled the Tab being dispatched ([`AppView::tab`]).
     tabbed: std::cell::Cell<bool>,
+    /// Answers the apps' picks in place of GPUI's open dialog
+    /// ([`AppView::set_picker`]).
+    picker: RefCell<Option<Arc<dyn nsh_core::picker::PickerBackend>>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -287,6 +296,7 @@ impl AppView {
             focus: cx.focus_handle().tab_stop(true),
             options: RefCell::new(options),
             tabbed: std::cell::Cell::new(false),
+            picker: RefCell::new(None),
             _keystrokes: cx.observe_keystrokes(Self::tab_entered),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
@@ -322,6 +332,8 @@ impl AppView {
             context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
+            host: options.host.clone(),
+            picker: self.picker.borrow().clone(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -354,12 +366,29 @@ impl AppView {
         self.options.borrow_mut().asset_base = base;
     }
 
+    /// The channel with the apps this view runs (`nsh/host`;
+    /// [`AppOptions::host`]): set their launch parameters
+    /// ([`nsh_engine::HostChannel::set_params`], read when an app starts),
+    /// send them events ([`nsh_engine::HostChannel::send`]) and handle their
+    /// calls and posts ([`nsh_engine::HostChannel::handle`]; handlers run on
+    /// the engine thread). Any thread may use it.
+    pub fn host(&self) -> nsh_engine::HostChannel {
+        self.options.borrow().host.clone()
+    }
+
     /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now
     /// on: the JS heap, the stack, the time budgets of loading and of every
     /// other call into JS, and the quotas (nodes, ops). The running app
     /// keeps the limits it was loaded with.
     pub fn set_limits(&self, limits: Limits) {
         self.options.borrow_mut().limits = limits;
+    }
+
+    /// Answers the picks of the apps loaded from now on
+    /// (`Picker.pickImages`) with `picker`, the embedding app's own picker,
+    /// instead of showing GPUI's open dialog; `None`: the dialog again.
+    pub fn set_picker(&self, picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>) {
+        *self.picker.borrow_mut() = picker;
     }
 
     /// Development: loads the app from a `nsh dev` server (`ws://host:port/ws`)

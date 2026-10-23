@@ -18,10 +18,10 @@
 
 use jni::objects::GlobalRef;
 use nsh_core::{
-    AccessibilityRole, AutoCapitalize, AutoFill, BorderStyle, Checked, Color, Command,
-    DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve,
-    LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch,
-    MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle, Checked, Color,
+    Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType,
+    LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation,
+    MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
     ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
     ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE},
@@ -80,6 +80,9 @@ pub(crate) struct Encoded {
     pub(crate) objects: Vec<Obj>,
     /// Items for the UI-thread animator, in order.
     pub(crate) animation: Vec<MountItem>,
+    /// The app's keyboard shortcuts, when the batch changed them: matched
+    /// natively (`crate::keymap`), never sent to Java.
+    pub(crate) keymap: Option<std::sync::Arc<nsh_core::keymap::Keymap>>,
 }
 
 impl Encoded {
@@ -306,8 +309,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(LAYOUT_DIRECTION);
                 e.bool(rtl);
             }
-            // Keyboard shortcuts are not matched on Android yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => e.keymap = Some(keymap),
             MountItem::Appearance { appearance } => {
                 e.int(APPEARANCE);
                 e.int(appearance as i32);
@@ -592,11 +594,26 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(id as i32);
                         e.bool(has_only);
                     }
+                    Command::OpenUrl { id, url } => {
+                        e.int(26);
+                        e.int(id as i32);
+                        e.string(url);
+                    }
                     // Answered by the sink (`host::answer_clipboard_reads`);
                     // images are not written to Android's clipboard.
                     Command::ReadClipboardImage { .. }
                     | Command::ReadClipboardFiles { .. }
                     | Command::SetClipboardImage(_) => e.int(-1),
+                    // `Picker.java`: the request, the limit, the longest
+                    // side (0: any), the quality (-1: none), the format.
+                    Command::PickImages { id, request } => {
+                        e.int(25);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.int(request.max_dimension.map_or(0, |d| d.0.max(1)));
+                        e.float(request.quality.map_or(-1.0, |q| q.0));
+                        e.bool(request.format == nsh_core::picker::PickFormat::Current);
+                    }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
@@ -604,7 +621,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
-                    | Command::Desktop(_) => e.int(-1),
+                    | Command::Desktop(_)
+                    // No host answers `nsh/host` here (`Environment::host`):
+                    // the core rejects the calls first.
+                    | Command::HostCall { .. } => e.int(-1),
                 }
             }
         }
@@ -932,6 +952,11 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             });
             e.bool(v.controls);
             e.float(v.progress_interval_ms);
+            e.int(match v.audio_session {
+                AudioSession::Default => 0,
+                AudioSession::Playback => 1,
+                AudioSession::MixWithOthers => 2,
+            });
         }
     }
 }

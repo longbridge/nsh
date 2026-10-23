@@ -20,7 +20,13 @@
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
 // `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `overlay` (false: no error box),
-// `onError`, `onLog`.
+// `onError`, `onLog`, `host` (the functions `nsh/host`'s
+// `host.call(name, args)` reaches: an object whose `call(name, args)`
+// returns the result or a promise of it; a throw or a rejection rejects
+// the app's call; without it `host.available()` is false). The page sends
+// `host.on` listeners events with `player.hostEvent(event, payload)`
+// (JSON; it throws when the payload is not); events sent before the app
+// runs are delivered, in order, once it starts.
 //
 // A split bundle (`nsh build --split`) loads its chunks on demand: from
 // `chunks[id]` when given (`app.<digest>.js` on a CDN), else `id` relative
@@ -535,6 +541,8 @@ class Player {
     // default only when the app is the page (in an iframe each push would
     // be an entry of the embedding page's history too).
     this.history = options.history ?? window.top === window;
+    // Host events sent before the app runs (`begin`).
+    this.hostEvents = [];
     if (window.top === window) document.documentElement.classList.add("nsh-page");
   }
 
@@ -1000,13 +1008,25 @@ class Player {
     this.idiom = this.options.idiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
+    // Host events wait for this app's top-level `host.on` listeners, not
+    // the replaced app's; those queued after a failed start are dropped.
+    this.started = false;
+    this.hostEvents ??= [];
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
     try {
       this.call(() => start(environment));
+    } catch (err) {
+      // Only a trap (a panic) throws: no app runs to take events.
+      this.hostEvents = null;
+      throw err;
     } finally {
       this.starting = false;
     }
+    this.started = true;
+    const events = this.hostEvents;
+    this.hostEvents = [];
+    for (const json of events) this.eventJson(ROOT_ID, "onHost", json);
   }
 
   /** Fetches chunk `id` of the running bundle and hands it to the engine. */
@@ -1068,6 +1088,9 @@ class Player {
   }
 
   stop() {
+    // Host events wait for the next app (`begin`).
+    this.started = false;
+    this.hostEvents ??= [];
     this.fileOperations.clear();
     for (const id of [...this.requests.keys()]) this.fetchCancel(id);
     for (const id of [...this.websockets.keys()]) this.websocketCancel(id);
@@ -1219,6 +1242,7 @@ class Player {
       safeArea: this.safeArea(),
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
+      host: Boolean(this.options.host),
     };
   }
 
@@ -1239,7 +1263,12 @@ class Player {
   }
 
   event(id, name, payload = null) {
-    this.call(() => this.withStrings([name, JSON.stringify(payload)], (np, nl, pp, pl) =>
+    this.eventJson(id, name, JSON.stringify(payload));
+  }
+
+  /** {@link event} with its payload already serialized. */
+  eventJson(id, name, json) {
+    this.call(() => this.withStrings([name, json], (np, nl, pp, pl) =>
       this.wasm.nsh_event(id, np, nl, pp, pl)));
   }
 
@@ -3473,12 +3502,15 @@ class Player {
         }
         break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
+      case "openUrl": this.event(ROOT_ID, "onOpenUrl", { id: args[0], opened: this.openUrl(args[1]) }); break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "setClipboardImage": this.writeClipboardImage(args[0]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
+      case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
+      case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "exitApp": {
@@ -3534,6 +3566,23 @@ class Player {
    * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
+  // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
+  // new tab, another scheme (mailto:, tel:, ...) through the browser's
+  // handler. Whether the browser let it open (a blocked pop-up is false).
+  openUrl(url) {
+    let opened = null;
+    try {
+      opened = window.open(url, "_blank");
+    } catch (err) {
+      console.warn(`[nsh] openUrl: ${err}`);
+    }
+    // The page opened knows nothing of this one.
+    if (opened) {
+      try { opened.opener = null; } catch {}
+    }
+    return !!opened;
+  }
+
   async readClipboard(request, hasOnly) {
     let text = "";
     try {
@@ -3554,6 +3603,77 @@ class Player {
     } catch {
       // Denied, an insecure context, or a type the browser does not write.
     }
+  }
+
+  /**
+   * `Picker.pickImages`: a file input of images. Files are read as they are,
+   * unless one is larger than `maxDimension` (or a JPEG with a `quality`):
+   * then it is drawn upright at the size that fits and encoded again (a PNG
+   * stays a PNG), as `nsh_core::picker` says. A cancelled input sends none.
+   */
+  pickImages(request, limit, maxDimension, quality, current) {
+    const app = this.app;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = current ? "image/*" : "image/jpeg,image/png,image/gif,image/webp";
+    input.multiple = limit > 1;
+    input.style.display = "none";
+    let answered = false;
+    const answer = async (files) => {
+      if (answered) return;
+      answered = true;
+      input.remove();
+      const picked = [];
+      for (const file of files.slice(0, limit)) {
+        try {
+          picked.push(await this.preparePicked(file, maxDimension, quality));
+        } catch {
+          // Unreadable: left out.
+        }
+      }
+      if (app !== this.app) return;
+      this.call((w) => {
+        for (const p of picked) {
+          this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
+            w.nsh_picked_file(np, nl, tp, tl, bp, bl, p.width, p.height, p.lastModified));
+        }
+        return w.nsh_picked(request);
+      });
+    };
+    input.addEventListener("change", () => answer([...(input.files ?? [])]));
+    input.addEventListener("cancel", () => answer([]));
+    this.root.append(input);
+    input.click();
+  }
+
+  async preparePicked(file, maxDimension, quality) {
+    const type = file.type.toLowerCase();
+    let bitmap = null;
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      // A format the browser does not decode: kept as it is.
+    }
+    const width = bitmap?.width ?? 0;
+    const height = bitmap?.height ?? 0;
+    const longer = Math.max(width, height);
+    const scale = maxDimension > 0 && longer > maxDimension;
+    const requality = quality >= 0 && type === "image/jpeg";
+    const keep = { name: file.name, type, lastModified: file.lastModified, width, height };
+    if (!bitmap || !(scale || requality)) {
+      bitmap?.close();
+      return { ...keep, bytes: new Uint8Array(await file.arrayBuffer()) };
+    }
+    const factor = scale ? maxDimension / longer : 1;
+    const w = Math.max(1, Math.round(width * factor));
+    const h = Math.max(1, Math.round(height * factor));
+    const canvas = new OffscreenCanvas(w, h);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const png = type === "image/png" && scale;
+    const out = await canvas.convertToBlob(png ? { type: "image/png" } : { type: "image/jpeg", quality: quality >= 0 ? quality : 0.9 });
+    const name = file.name.replace(/\.[^.]*$/, "") + (png ? ".png" : ".jpg");
+    return { ...keep, name, type: out.type, width: w, height: h, bytes: new Uint8Array(await out.arrayBuffer()) };
   }
 
   /** `Clipboard.readImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
@@ -3584,6 +3704,39 @@ class Player {
     img.onload = () => answer({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ has: true });
     img.src = uri;
+  }
+
+  /**
+   * `nsh/host`'s `host.call`: `options.host.call(name, args)`, answered
+   * with `onHost` `{ type: "reply" }` whatever happens (the app's call waits for the
+   * reply): a missing host, a throw, a rejection or a result that is not
+   * JSON answer `ok: false` with the error's message.
+   */
+  async hostCall(request, name, args) {
+    // Answers for an app that was replaced meanwhile are dropped.
+    const app = this.app;
+    let reply;
+    try {
+      const host = this.options.host;
+      if (typeof host?.call !== "function") throw new Error("this page has no host (createPlayer's `host`)");
+      const value = (await host.call(name, args)) ?? null;
+      reply = JSON.stringify({ type: "reply", id: request, ok: true, value });
+    } catch (err) {
+      reply = JSON.stringify({ type: "reply", id: request, ok: false, error: String(err?.message ?? err) });
+    }
+    if (app === this.app) this.eventJson(ROOT_ID, "onHost", reply);
+  }
+
+  /**
+   * Sends `event` with `payload` to the app's `host.on(event)` listeners.
+   * The payload is serialized here, so one that is not JSON throws to the
+   * caller rather than inside a deferred engine call. Events sent before
+   * the app runs wait for it (`begin`).
+   */
+  hostEvent(event, payload = null) {
+    const json = JSON.stringify({ type: "event", event: String(event), payload: payload ?? null });
+    if (this.started) this.eventJson(ROOT_ID, "onHost", json);
+    else this.hostEvents?.push(json);
   }
 
   /** `Image.getSize` / `prefetch`: loads the image (the browser keeps it cached for the views that show it). */

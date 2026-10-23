@@ -66,7 +66,7 @@ use objc2_foundation::{
     NSCurrentLocaleDidChangeNotification, NSData, NSDictionary, NSKeyValueObservingOptions,
     NSLocale, NSLocaleLanguageDirection, NSNotification, NSNotificationCenter, NSObject,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSPoint,
-    NSProcessInfo, NSString, ns_string,
+    NSProcessInfo, NSString, NSURL, ns_string,
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -389,6 +389,18 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             read_clipboard_image(surface, *id, *has_only)
         }
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
+        Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
+        Command::OpenUrl { id, url } => {
+            let opened = open_url(url);
+            surface.event(
+                ROOT_ID,
+                EventKind::OpenUrl,
+                EventPayload::Map(vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("opened", PayloadValue::Bool(opened)),
+                ]),
+            );
+        }
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing calls the window delegate synchronously, which stops
@@ -910,6 +922,15 @@ fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
 
 /// `Clipboard.readText` / `hasText`: answers read `id` with whether the
 /// clipboard holds text and, unless `has_only`, the text.
+/// Opens `url` in the app that handles its scheme (`NSWorkspace`): whether
+/// one took it.
+pub(crate) fn open_url(url: &str) -> bool {
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) else {
+        return false;
+    };
+    NSWorkspace::sharedWorkspace().openURL(&url)
+}
+
 fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let pasteboard = NSPasteboard::generalPasteboard();
     // SAFETY: an immutable AppKit constant.

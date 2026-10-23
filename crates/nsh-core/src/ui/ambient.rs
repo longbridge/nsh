@@ -377,6 +377,20 @@ pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R 
     f(&storage)
 }
 
+/// Opens `url` outside the app (TS: `openUrl` of `nsh/device`): a web page
+/// in the browser, a `mailto:` or `tel:` link in its app, any scheme
+/// another app registered. The embedding app may take it first (its host
+/// channel's URL handler, which routes it through the host's router).
+/// Resolves to whether it opened: `false` for a URL
+/// [`crate::open_url::check_url`] refuses, when the app's `openUrl`
+/// capability is not granted, or when no app handles it. Await it in a
+/// task, or drop it when the answer does not matter.
+pub fn open_url(url: impl Into<String>) -> Answer<bool> {
+    let (answer, action) = super::services::open_url(url.into());
+    act(action);
+    answer
+}
+
 /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
 pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
@@ -425,6 +439,31 @@ pub fn clipboard_files() -> Answer<Vec<String>> {
     let (answer, action) = super::services::clipboard_files();
     act(action);
     answer
+}
+
+/// Shows the system's picker for images and gives the ones the user picked,
+/// prepared as `request` says, none when cancelled (TS:
+/// `Picker.pickImages`), to await in a task.
+pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::picker::PickedFile>> {
+    let (answer, action) = super::services::pick_images(request);
+    act(action);
+    answer
+}
+
+/// The value function `name` of the embedding app returns for `args`
+/// (TS: `host.call`), to await in a task.
+pub(crate) fn host_call(
+    name: String,
+    args: crate::JsonValue,
+) -> Answer<Result<crate::JsonValue, String>> {
+    let (answer, action) = super::services::host_call(name, args);
+    act(action);
+    answer
+}
+
+/// Forgets the host calls whose answers were dropped (they timed out).
+pub(crate) fn forget_host_calls() {
+    act(Action::ForgetHostCalls);
 }
 
 /// Shows `message` at the bottom of the screen (Android's toasts, TS:

@@ -163,6 +163,11 @@ enum Command {
         /// apps in (default: the one installed on this machine).
         #[arg(long, value_name = "PATH")]
         browser: Option<PathBuf>,
+        /// The web page's host module (default: `nsh.json` `web.host`), which
+        /// exports `createHost(player)`: in headless runs it answers the
+        /// `nsh/host` calls of each app the tests open and sends its events.
+        #[arg(long, value_name = "JS")]
+        web_host: Option<PathBuf>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -588,6 +593,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             junit,
             target,
             browser,
+            web_host,
         } => test::test(
             &path,
             &entry,
@@ -596,6 +602,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             junit.as_deref(),
             target,
             browser.as_deref(),
+            web_host,
         ),
         Command::Dev {
             entry,

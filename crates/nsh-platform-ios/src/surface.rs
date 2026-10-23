@@ -14,7 +14,7 @@ use nsh_engine::{
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
-    runtime::ProtocolObject,
+    runtime::{AnyObject, ProtocolObject},
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
@@ -125,6 +125,8 @@ pub(crate) struct RootViewIvars {
     /// The embedding app's locale and text size over the system's
     /// ([`Surface::set_host_environment`]).
     host: Cell<nsh_engine::HostEnvironment>,
+    /// The embedding app's theme overrides ([`Surface::set_host_tokens`]).
+    host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
     #[cfg(feature = "dev")]
@@ -213,6 +215,42 @@ define_class!(
                 }
             });
         }
+
+        /// Hardware keys no responder inside handled: the app's shortcuts
+        /// (`nsh/keymap`) take those they bind.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::root_began(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () =
+                    unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
+        }
     }
 );
 
@@ -233,12 +271,25 @@ impl RootView {
             keyboard: Cell::new((0.0, 0.25)),
             environment: Cell::new(None),
             host: Cell::default(),
+            host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
         // SAFETY: UIView's designated initializer.
         unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+
+    /// The running app's event target.
+    fn target(&self) -> Option<Retained<crate::target::EventTarget>> {
+        let running = self.ivars().running.borrow();
+        let mounter = running
+            .as_ref()?
+            .mounter
+            .get(self.mtm())
+            .try_borrow()
+            .ok()?;
+        mounter.as_ref().map(|m| m.target().clone())
     }
 
     /// What JS sees through `windowSize()`, `safeArea()`, `keyboard()`...
@@ -289,6 +340,9 @@ impl RootView {
             locale: current_locale(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
+            // No host answers `nsh/host` here: an embedding app talks to its
+            // apps through its own UI sets (`nsh/native`).
+            host: false,
         };
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);
@@ -471,6 +525,8 @@ impl RootView {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: self.ivars().options.host.clone(),
+            picker: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
@@ -489,7 +545,13 @@ impl RootView {
             #[cfg(feature = "dev")]
             test_model: self.ivars().test_model.clone(),
         };
-        let engine = match Engine::start(config, CoreTextEngine::default, sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.ivars().host_tokens.borrow().clone();
+        let engine = match Engine::start_with(config, CoreTextEngine::default, sink, |control| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        }) {
             Ok(engine) => engine,
             Err(err) => return log::error!("failed to start the engine: {err}"),
         };
@@ -567,6 +629,10 @@ pub struct SurfaceOptions {
     pub storage: Option<std::path::PathBuf>,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+    /// The embedding app's channel with the apps (`nsh/host`): launch
+    /// parameters, events and handlers of their calls and posts, one for
+    /// every app the surface runs.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for SurfaceOptions {
@@ -579,6 +645,7 @@ impl Default for SurfaceOptions {
             data_dir: data_dir(),
             storage: None,
             components: crate::component::Components::default(),
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }
@@ -684,6 +751,17 @@ impl Surface {
     pub fn set_host_environment(&self, host: nsh_engine::HostEnvironment) {
         self.view.ivars().host.set(host);
         self.view.publish_environment();
+    }
+
+    /// The embedding app's theme overrides (`nsh_base::theme_overrides`),
+    /// which win over the app's tokens of the same names (`None`: the
+    /// app's own again): sent to the running app at once, and to every app
+    /// started later before its first frame.
+    pub fn set_host_tokens(&self, tokens: Option<nsh_engine::Tokens>) {
+        *self.view.ivars().host_tokens.borrow_mut() = tokens.clone();
+        if let Some(running) = &*self.view.ivars().running.borrow() {
+            running.engine.control().set_tokens(tokens);
+        }
     }
 
     /// Replaces the running app with `app` (state is reset).
