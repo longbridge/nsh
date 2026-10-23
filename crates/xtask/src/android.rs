@@ -145,7 +145,6 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
     Ok(out)
 }
 
-/// A cargo command set up to cross-compile for `triple` with the NDK.
 /// The NDK's name of `triple` in its compilers' names: ARMv7's is
 /// `armv7a-linux-androideabi`, the others are Rust's.
 fn clang_target(triple: &str) -> &str {
@@ -155,6 +154,7 @@ fn clang_target(triple: &str) -> &str {
     }
 }
 
+/// A cargo command set up to cross-compile for `triple` with the NDK.
 fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
     let toolchain = sdk.toolchain();
     let bin = toolchain.join("bin");
