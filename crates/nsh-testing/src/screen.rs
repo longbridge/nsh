@@ -604,17 +604,19 @@ impl Screen {
                     inner.within(bounds)
                 } else if inner.shows(&bounds) {
                     // Any of its content scrolls into view, nothing before
-                    // its start: lists park the cells they do not use there.
-                    let size =
-                        scroll
-                            .content
-                            .map_or(Size::new(Points(f32::MAX), Points(f32::MAX)), |c| {
-                                Size::new(
-                                    c.width.max(bounds.size.width),
-                                    c.height.max(bounds.size.height),
-                                )
-                            });
-                    Clip::Within(Bounds::new(content, size))
+                    // its start along its axis: lists park the cells they do
+                    // not use there. Across it nothing is clipped (the
+                    // headless text engine puts inline views on one line).
+                    let far = Points(f32::MAX / 4.0);
+                    let start = if scroll.horizontal {
+                        Point::new(content.x, -far)
+                    } else {
+                        Point::new(-far, content.y)
+                    };
+                    Clip::Within(Bounds::new(
+                        start,
+                        Size::new(Points(f32::MAX), Points(f32::MAX)),
+                    ))
                 } else {
                     Clip::Within(Bounds::default())
                 };
