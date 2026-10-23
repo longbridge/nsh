@@ -194,6 +194,7 @@ final class EmbedController: UIViewController {
 | `fontScale: CGFloat?` | 代替动态字体的文字大小（1 为默认）：文字和输入框按它重新排版，`fontScale()` 读到它，立即生效，此后加载的应用也一样；长度保持原样。`nil` 跟随系统。 |
 | `setThemeOverrides(_ json: String?) throws` | 把宿主的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件。其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变。立即生效，并作用于之后加载的应用；`nil` 恢复应用自己的主题。文件无法解析时抛出 `NshError`。 |
 | `storageDirectory: URL?` | 此后加载的应用保存其[存储](../modules/nsh-storage.md)的目录；`nil`：`Library/Application Support/nsh/<app id>`，按应用自己的 id。 |
+| `cacheOptions: NshCacheOptions` | 此后加载的应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小：`location` 为 `.system`（`Library/Caches/nsh`，每个应用在 `<app id>`）、`.directory(URL)` 或 `.off`；`images` 为 `.default`（256 MB）、`.maxSize(megabytes:)` 或 `.off`。 |
 | `loadBundle(at url: URL) throws` | 运行 `nsh build` 写出的 bundle。资源取自同目录下的 `assets/`；同目录下的 `bundle.js.map` 和 `capabilities.json` 也会被读取。 |
 | `run(_ package: NshPackage)` | 运行一个已验证的签名包（见下文）。一个包只能运行一次。 |
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | 在主线程之外验证指定 URL 的包，然后运行它。被拒绝时抛出原因；正在运行的应用保持不变。 |
@@ -209,7 +210,7 @@ final class EmbedController: UIViewController {
 > `bundle.nshc`（字节码）只能从应用包内部加载。QuickJS 不校验字节码，其他来源的字节码可能破坏内存：对于应用包之外的文件，请加载
 > `bundle.js`（JS 源码），更好的做法是使用[签名包](./signed-packages.md)。
 
-`limits`、`grantCapabilities` 和 `storageDirectory` 从下一次加载开始生效：请在 `loadBundle` / `run` 之前设置。
+`limits`、`grantCapabilities`、`storageDirectory` 和 `cacheOptions` 从下一次加载开始生效：请在 `loadBundle` / `run` 之前设置。
 
 每个应用无需任何设置就按自己的 id 保存存储：签名包使用其发布密钥证书担保的 id，bundle 使用其 `nsh.json` 中的 `id`（`nsh build` 写在它旁边的 `app.json`）。如果宿主想把应用的数据放到自己选择的位置，设置 `storageDirectory`：
 

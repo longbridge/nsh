@@ -58,6 +58,47 @@ void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint
 /// or NULL.
 char *_Nullable nsh_app_set_storage_directory(NshApp *app, const char *_Nullable path);
 
+/// Where an app's caches are kept (`NshCacheOptions.location`).
+enum {
+    /// The system's cache directory: `nsh` in the app's Caches.
+    NSH_CACHE_LOCATION_SYSTEM = 0,
+    /// `NshCacheOptions.directory`.
+    NSH_CACHE_LOCATION_DIRECTORY = 1,
+    /// Nothing on disk.
+    NSH_CACHE_LOCATION_OFF = 2,
+};
+
+/// How much one cache keeps (`NshCacheOptions.images`).
+enum {
+    /// Its default size (images: 256 MiB).
+    NSH_CACHE_POLICY_DEFAULT = 0,
+    /// At most its `_max_mb` megabytes (MiB).
+    NSH_CACHE_POLICY_MAX_SIZE = 1,
+    /// Not kept on disk.
+    NSH_CACHE_POLICY_OFF = 2,
+};
+
+/// Where the apps keep their caches and how much each keeps. Zeroed, it is
+/// the default (the system's directory, default sizes). Set `size` to
+/// `sizeof(NshCacheOptions)`: fields added later read as zero for callers
+/// built against this header.
+typedef struct {
+    uint32_t size;
+    /// `NSH_CACHE_LOCATION_*`.
+    uint32_t location;
+    /// For `NSH_CACHE_LOCATION_DIRECTORY`: each app's caches in
+    /// `<directory>/<app id>`.
+    const char *_Nullable directory;
+    /// `NSH_CACHE_POLICY_*` of the images the apps download.
+    uint32_t images;
+    /// For `NSH_CACHE_POLICY_MAX_SIZE`.
+    uint32_t images_max_mb;
+} NshCacheOptions;
+
+/// Where the apps `app` loads keep their caches and how much each keeps.
+/// Applies from the next load. Returns why `options` are invalid, or NULL.
+char *_Nullable nsh_app_set_cache(NshApp *app, const NshCacheOptions *options);
+
 /// The embedding app's locale, standing in for the user's: a BCP 47 tag or a
 /// platform identifier (`zh-Hans-CN`, `en_US`); NULL follows the system's
 /// again. Applies at once and to every app loaded later. Returns why `tag` is

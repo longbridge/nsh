@@ -4,7 +4,7 @@
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
-  Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB aligned, `apksigner`;
+  Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title and the GTK application id,
   which the runner reads next to itself), `<id>.desktop` (`StartupWMClass` is the id, which GTK makes the window's
@@ -22,6 +22,10 @@
   are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
+  the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
+  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
+  for the APK runtimes and AARs. APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform
@@ -267,6 +271,17 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
+  `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
+  `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),
+  sizes in `ByteSize::mib` / `gib`) and hands to the platform (`Engine::image_cache`). `EngineConfig::new` keeps none.
+  `System` is the engine's own (`~/Library/Caches`, `%LOCALAPPDATA%`, `$XDG_CACHE_HOME`) on the desktops; iOS and
+  Android, which alone know theirs, resolve it before the engine sees it (`Library/Caches/nsh`; `nsh` in the
+  Context's cache directory). One shape on every face: `AppOptions::cache` / `SurfaceOptions::cache` and
+  `AppView::set_cache` in Rust, `NshAppView.cacheOptions` (`NshCacheOptions`: `.system` / `.directory(URL)` /
+  `.off`, `.default` / `.maxSize(megabytes:)` / `.off`) in Swift over `nsh_app_set_cache` (a C struct with a leading
+  `size`, read up to it, so it can grow), `NshView.setCacheOptions(NshCacheOptions)` (immutable, built) in Java; all
+  from the next load. A new kind of cache is one more `CachePolicy` field, never another option per platform.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

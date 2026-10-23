@@ -205,6 +205,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `fontScale: CGFloat?` | The text size in place of Dynamic Type's (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `nil` follows the system's. |
 | `setThemeOverrides(_ json: String?) throws` | The host's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file in the format of `nsh.json`'s `"theme"`. Its tokens win over the app's of the same names, in light and dark mode, and the app's others stay. Applies at once and to the apps loaded later; `nil` gives the app its own theme back. Throws `NshError` for a file that does not parse. |
 | `storageDirectory: URL?` | Where the apps loaded from now on keep their [storage](../modules/nsh-storage.md); `nil`: `Library/Application Support/nsh/<app id>`, by the app's own id. |
+| `cacheOptions: NshCacheOptions` | Where the apps loaded from now on keep their caches, the [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps: `location` `.system` (`Library/Caches/nsh`, each app in `<app id>`), `.directory(URL)` or `.off`; `images` `.default` (256 MB), `.maxSize(megabytes:)` or `.off`. |
 | `loadBundle(at url: URL) throws` | Runs a bundle written by `nsh build`. Assets come from `assets/` next to it; `bundle.js.map` and `capabilities.json` next to it are read too. |
 | `run(_ package: NshPackage)` | Runs a verified signed package (see below). A package runs once. |
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
@@ -221,7 +222,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 > anywhere else could corrupt memory: for a file outside the app bundle, load `bundle.js` (JS source), or better, a
 > [signed package](./signed-packages.md).
 
-`limits`, `grantCapabilities` and `storageDirectory` apply from the next load: set them before `loadBundle` / `run`.
+`limits`, `grantCapabilities`, `storageDirectory` and `cacheOptions` apply from the next load: set them before `loadBundle` / `run`.
 
 Each app keeps its storage under its own id with no setting: a signed package under the id its release key's certificate vouches for, a bundle under the `id` of its `nsh.json` (`app.json` next to it, written by `nsh build`). Set `storageDirectory` to keep an app's data somewhere of the host's choosing:
 

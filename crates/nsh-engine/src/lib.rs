@@ -10,6 +10,7 @@
 
 mod access;
 mod app_directory;
+mod cache;
 mod error;
 mod host_channel;
 mod local_storage;
@@ -67,6 +68,7 @@ pub use storage::{FileStorage, data_dir};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 pub use crate::{
+    cache::{ByteSize, CacheLocation, CacheOptions, CachePolicy},
     error::{AppError, AppErrorKind, PackageInfo},
     host_channel::{HostCall, HostChannel, HostReply, OpenUrlRequest},
 };
@@ -666,6 +668,10 @@ pub struct EngineConfig {
     /// system's data directory ([`data_dir`]) for apps of their own,
     /// `…/nsh` in an embedding app's. `None`: nothing is kept.
     pub data_dir: Option<std::path::PathBuf>,
+    /// Where the app's caches are kept and how much each keeps: the engine
+    /// opens them in `<root>/<app id>/<kind>` ([`Engine::image_cache`]).
+    /// [`EngineConfig::new`]: none.
+    pub cache: CacheOptions,
     /// The app's storage, overriding the one [`EngineConfig::data_dir`]
     /// names (the browser's `localStorage`, an embedder's own); `None`
     /// with no data directory either: in memory, for the engine's life.
@@ -779,6 +785,7 @@ impl EngineConfig {
             ui_sets: Vec::new(),
             runtime: None,
             data_dir: None,
+            cache: CacheOptions::off(),
             storage: None,
             clock: Clock::system(),
             context: EngineContext::default(),
@@ -1056,6 +1063,8 @@ pub struct Engine {
     host: HostChannel,
     /// Interrupts running JS when the engine stops.
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// The app's disk cache of downloaded images.
+    image_cache: Option<nsh_core::image::DiskCache>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1084,6 +1093,7 @@ impl Engine {
         F: FnOnce() -> M + Send + 'static,
         S: MountSink,
     {
+        let image_cache = config.cache.open_images(config.app.app_id());
         let (tx, rx) = crossbeam_channel::unbounded();
         setup(&EngineControl { tx: tx.clone() });
         let engine_tx = tx.clone();
@@ -1099,7 +1109,15 @@ impl Engine {
             thread: Some(thread),
             host,
             stop,
+            image_cache,
         })
+    }
+
+    /// The disk cache of the images the app downloads
+    /// ([`EngineConfig::cache`]; `None`: none). The platform's image loader
+    /// routes the app's `http(s)` images through it.
+    pub fn image_cache(&self) -> Option<nsh_core::image::DiskCache> {
+        self.image_cache.clone()
     }
 
     /// A handle for sending input from other threads.

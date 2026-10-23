@@ -518,6 +518,7 @@ impl RootView {
             ui_sets: crate::ui_sets(),
             runtime: None,
             data_dir: self.ivars().options.data_dir.clone(),
+            cache: system_cache(self.ivars().options.cache.clone()),
             storage: self.ivars().options.storage.as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
@@ -569,7 +570,7 @@ impl RootView {
         // mounter is installed here.
         let root = Retained::into_super(self.retain());
         let asset_base = self.ivars().options.asset_base.clone();
-        *mounter.get(mtm).borrow_mut() = Some(Mounter::new(
+        let mut installed = Mounter::new(
             mtm,
             root,
             engine.control(),
@@ -577,7 +578,10 @@ impl RootView {
             asset_base,
             access,
             self.ivars().options.components.clone(),
-        ));
+        );
+        // The app's downloaded images go through its disk cache.
+        installed.set_image_cache(engine.image_cache());
+        *mounter.get(mtm).borrow_mut() = Some(installed);
         *self.ivars().running.borrow_mut() = Some(Running { engine, mounter });
         self.ivars().environment.set(Some(self.environment()));
     }
@@ -627,6 +631,11 @@ pub struct SurfaceOptions {
     /// (`storage.json` in it), overriding their own in
     /// [`SurfaceOptions::data_dir`]; `None`: theirs.
     pub storage: Option<std::path::PathBuf>,
+    /// Where the apps keep their caches (the images they downloaded) and
+    /// how much each keeps: by default `nsh` in the app's Caches
+    /// ([`nsh_engine::CacheLocation::System`]), each app in
+    /// `<dir>/<app id>`.
+    pub cache: nsh_engine::CacheOptions,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
     /// The embedding app's channel with the apps (`nsh/host`): launch
@@ -644,6 +653,7 @@ impl Default for SurfaceOptions {
             granted: None,
             data_dir: data_dir(),
             storage: None,
+            cache: nsh_engine::CacheOptions::default(),
             components: crate::component::Components::default(),
             host: nsh_engine::HostChannel::default(),
         }
@@ -655,6 +665,21 @@ impl Default for SurfaceOptions {
 /// its id.
 fn data_dir() -> Option<std::path::PathBuf> {
     nsh_engine::data_dir().map(|dir| dir.join("nsh"))
+}
+
+/// `cache` with [`nsh_engine::CacheLocation::System`] made iOS's: `nsh` in
+/// the (embedding or standalone) app's Caches, as its data is in its
+/// Application Support.
+fn system_cache(mut cache: nsh_engine::CacheOptions) -> nsh_engine::CacheOptions {
+    if cache.location == nsh_engine::CacheLocation::System {
+        cache.location = match std::env::var_os("HOME").filter(|home| !home.is_empty()) {
+            Some(home) => nsh_engine::CacheLocation::Dir(
+                std::path::PathBuf::from(home).join("Library/Caches/nsh"),
+            ),
+            None => nsh_engine::CacheLocation::Off,
+        };
+    }
+    cache
 }
 
 /// One running nsh app hosted in a `UIView`.

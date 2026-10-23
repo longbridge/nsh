@@ -7,8 +7,8 @@ group: platforms
 
 # Android
 
-NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
-and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
+NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`,
+`armeabi-v7a` and `x86_64`. Whole apps written in Rust and in TSX run and package as on the other platforms, and an existing app
 can embed modules in an `NshView` and load signed packages it downloads, under limits and capabilities it sets. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
@@ -45,6 +45,8 @@ A Rust app's APK holds its own `libnsh.so`, built with your crate, whose activit
 The APK is built with the SDK's build tools, without Gradle, and signed with the debug key unless you pass a release
 keystore. Signing for release and icons: [Packaging](./packaging.md#android).
 
+NSH builds `libnsh.so` with 16 KB ELF alignment and packages the uncompressed native libraries on 16 KB ZIP boundaries.
+
 ## Embedding in an Android app
 
 An existing Android app can show NSH apps inside its own UI. The runtime ships as an Android library, `nsh.aar`: you
@@ -69,7 +71,7 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
-The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a` and `x86_64` (64-bit only). It declares the `INTERNET`
+The AAR holds the Java runtime and `libnsh.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`. It declares the `INTERNET`
 permission and needs **API 28** (Android 9) or newer.
 
 Add it to the app module, for example from a `libs` folder:
@@ -168,6 +170,7 @@ again replaces the running app. The complete sample is
 | `setFontScale(float scale)` | The text size in place of the system's font size (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `0` follows the system's. |
 | `setThemeOverrides(String json)` | The host's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file in the format of `nsh.json`'s `"theme"`. Its tokens win over the app's of the same names, in light and dark mode, and the app's others stay. Applies at once and to the apps loaded later; `null` gives the app its own theme back. Throws `IllegalArgumentException` for a file that does not parse. |
 | `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the app's own id. |
+| `setCacheOptions(NshCacheOptions options)` | Where the apps loaded next keep their caches, the [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps. Build one with `NshCacheOptions.builder()`: `location(File)`, `systemLocation()` (the default: `nsh` in the cache directory, each app in `<app id>`) or `noDiskCache()`; `imagesMaxMegabytes(int)` (256 by default) or `imagesOff()`. |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
@@ -184,7 +187,7 @@ again replaces the running app. The complete sample is
 > and QuickJS does not validate bytecode, so `loadBundleFile` takes JS source only. Code the app downloads should come
 > as a [signed package](./signed-packages.md).
 
-`setLimits`, `setGrantedCapabilities` and `setStorageDirectory` apply from the next load: call them before `loadAssetBundle` and friends.
+`setLimits`, `setGrantedCapabilities`, `setStorageDirectory` and `setCacheOptions` apply from the next load: call them before `loadAssetBundle` and friends.
 
 Each app keeps its storage under its own id with no setting: a signed package under the id its release key's certificate vouches for, a bundle under the `id` of its `nsh.json` (`nsh/app.json` among the APK's assets, written by `nsh package`). Call `setStorageDirectory` to keep an app's data somewhere of the host's choosing:
 

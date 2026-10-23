@@ -8,6 +8,8 @@
 //! Everything here is single-threaded and allocation-conscious: the core runs
 //! on the engine thread, between the JS host and the platform backend.
 
+mod byte_size;
+pub use byte_size::ByteSize;
 pub mod access;
 pub mod animation;
 pub mod canvas;

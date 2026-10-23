@@ -478,6 +478,40 @@ function measureContext() {
   return canvas.getContext("2d");
 }
 
+/** The span `measureNumericText` measures in (one for the page's players). */
+let numericSpan = null;
+
+/**
+ * The width of `text` in CSS `font` with `font-variant-numeric: numeric`
+ * (`tabular-nums`, ...). Canvas text cannot have numeric variants: its
+ * `font` takes only `small-caps`, and the context has `fontVariantCaps`
+ * but no `fontVariantNumeric`, so `measureText` measures proportional
+ * digits, narrower than the tabular ones the run is drawn with. A hidden
+ * span with the run's CSS measures what the DOM draws (font-variant-numeric:
+ * Chrome 52, Firefox 34, Safari 9.1). Its layout is forced, so the engine
+ * asks only for text with a numeric variant, and caches the answers.
+ */
+function measureNumericText(font, numeric, text) {
+  if (typeof document === "undefined" || !document.body) return null;
+  if (!numericSpan?.isConnected) {
+    const box = document.createElement("div");
+    box.setAttribute("aria-hidden", "true");
+    box.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;"
+      + "visibility:hidden;pointer-events:none;contain:strict";
+    numericSpan = document.createElement("span");
+    numericSpan.style.cssText = "position:absolute;left:0;top:0;white-space:pre;"
+      + "letter-spacing:normal;word-spacing:normal;text-transform:none;font-kerning:auto;"
+      + "font-feature-settings:normal";
+    box.append(numericSpan);
+    document.body.append(box);
+  }
+  // `font` resets the variant: set it first, as the run's CSS does.
+  numericSpan.style.font = font;
+  numericSpan.style.fontVariantNumeric = numeric;
+  numericSpan.textContent = text;
+  return numericSpan.getBoundingClientRect().width;
+}
+
 /** Whether `locale`'s script is written right to left. */
 function rightToLeft(locale) {
   try {
@@ -599,6 +633,13 @@ class Player {
           }
           this.measure.font = this.str(fp, fl);
           return this.measure.measureText(this.str(tp, tl)).width;
+        },
+        measure_numeric_text: (fp, fl, np, nl, tp, tl) => {
+          const font = this.str(fp, fl), text = this.str(tp, tl);
+          const width = measureNumericText(font, this.str(np, nl), text);
+          if (width != null) return width;
+          this.measure.font = font;
+          return this.measure.measureText(text).width;
         },
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],

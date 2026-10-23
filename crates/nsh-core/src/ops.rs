@@ -377,7 +377,8 @@ pub struct HoverEvent {
 
 /// Where the pointer was at a press ([`EventKind::Press`],
 /// [`EventKind::LongPress`], [`EventKind::PressDown`],
-/// [`EventKind::PressUp`]), on backends that know it, in points.
+/// [`EventKind::PressUp`]), with the modifier keys and the click count, on
+/// backends that know it, in points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PressEvent {
     /// Position in the pressed view, its transforms undone (for a pressed
@@ -386,6 +387,11 @@ pub struct PressEvent {
     /// Position in the root view the view is in (the surface, or its
     /// modal), as touches' `page`.
     pub page_position: Point<Points>,
+    /// The modifier keys held when the press began.
+    pub modifiers: crate::keymap::Modifiers,
+    /// Consecutive clicks at the same place: 1 for a click, 2 for a
+    /// double click, ...
+    pub clicks: u32,
 }
 
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
@@ -654,7 +660,8 @@ pub enum EventPayload {
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
-    /// `onPressDown`, `onPressUp`), on backends that know it.
+    /// `onPressDown`, `onPressUp`), with the modifier keys and the click
+    /// count, on backends that know it.
     Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),

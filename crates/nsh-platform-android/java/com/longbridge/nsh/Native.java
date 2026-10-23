@@ -87,8 +87,11 @@ final class Native {
      */
     static native byte[] svg(byte[] bytes, int maxPx, float density, int[] size, float[] intrinsic);
 
-    /** A host whose apps keep their data in {@code dataDir}, each in a directory named by its id. */
-    static native long create(NshView view, float density, boolean trace, String dataDir);
+    /**
+     * A host whose apps keep their data in {@code dataDir} and the images they download in {@code cacheDir} (null:
+     * not on disk), each in a directory named by its id.
+     */
+    static native long create(NshView view, float density, boolean trace, String dataDir, String cacheDir);
 
     static native void destroy(long handle);
 
@@ -103,6 +106,25 @@ final class Native {
 
     /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
     static native void setStorage(long handle, String dir);
+
+    /**
+     * Where the apps loaded next keep their caches ({@code location}: 0 the system's, 1 {@code dir}, 2 none) and how
+     * much each keeps ({@code images}: 0 its default, 1 {@code imagesMaxMb} megabytes, 2 none).
+     */
+    static native void setCache(long handle, int location, String dir, int images, int imagesMaxMb);
+
+    /**
+     * What the running app's disk cache holds for {@code url}: its bytes ({@code byte[]}) when fresh, the conditional
+     * request headers to revalidate a stale copy with ({@code String[]}, names and values), or null. Any thread.
+     */
+    static native Object imageCacheLookup(long handle, String url);
+
+    /**
+     * Ends a download of {@code url} through the disk cache: {@code status} 0 when the request failed, else the
+     * response's status, {@code headers} (names and values) and body. Returns the cached bytes when they are what to
+     * show (a 304; a stale copy when the request failed), or null. Any thread.
+     */
+    static native byte[] imageCacheComplete(long handle, String url, int status, String[] headers, byte[] body);
 
     /**
      * The embedding app's theme overrides (a shadcn/ui theme file, null: the

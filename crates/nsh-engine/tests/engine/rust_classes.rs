@@ -521,6 +521,7 @@ pub(crate) fn start_with(
         ui_sets,
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),

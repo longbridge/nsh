@@ -706,6 +706,13 @@ pub fn animated_value(value: f32) -> super::AnimatedValue {
     super::AnimatedValue::new(&executor(), value)
 }
 
+/// Animated values for a view's opacity and transform, and motions to
+/// play on them (TS: `createMotion`): bind it with
+/// [`super::Styled::bind_motion`]. A `Copy` handle the current owner keeps.
+pub fn motion() -> super::Motion {
+    super::Motion::new(&executor())
+}
+
 /// A handle for an element (TS: `ref`): put it on the element with
 /// [`super::Element::element_ref`], call its commands from handlers and
 /// tasks. A `Copy` handle the current owner keeps, as a signal is.

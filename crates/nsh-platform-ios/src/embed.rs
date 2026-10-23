@@ -254,6 +254,98 @@ pub unsafe extern "C" fn nsh_app_set_storage_directory(
     status(dir.map(|dir| app.view.set_storage_directory(dir)))
 }
 
+/// [`NshCacheOptions::location`]: the system's cache directory (`nsh` in
+/// the app's Caches).
+pub const NSH_CACHE_LOCATION_SYSTEM: u32 = 0;
+/// [`NshCacheOptions::location`]: [`NshCacheOptions::directory`].
+pub const NSH_CACHE_LOCATION_DIRECTORY: u32 = 1;
+/// [`NshCacheOptions::location`]: nothing on disk.
+pub const NSH_CACHE_LOCATION_OFF: u32 = 2;
+/// A cache's policy ([`NshCacheOptions::images`]): its default size.
+pub const NSH_CACHE_POLICY_DEFAULT: u32 = 0;
+/// A cache's policy: at most its `_max_mb` megabytes.
+pub const NSH_CACHE_POLICY_MAX_SIZE: u32 = 1;
+/// A cache's policy: not kept on disk.
+pub const NSH_CACHE_POLICY_OFF: u32 = 2;
+
+/// Where the apps an `NshApp` loads keep their caches and how much each
+/// keeps (`nsh.h`'s `NshCacheOptions`). `size` is the struct's size as the
+/// caller knows it: fields past it read as zero (their defaults), so the
+/// struct can grow.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct NshCacheOptions {
+    /// `sizeof(NshCacheOptions)`.
+    pub size: u32,
+    /// `NSH_CACHE_LOCATION_*`.
+    pub location: u32,
+    /// The directory, for `NSH_CACHE_LOCATION_DIRECTORY`: NUL-terminated
+    /// UTF-8.
+    pub directory: *const c_char,
+    /// `NSH_CACHE_POLICY_*` of the images the apps download.
+    pub images: u32,
+    /// Megabytes (MiB) of images kept, for `NSH_CACHE_POLICY_MAX_SIZE`.
+    pub images_max_mb: u32,
+}
+
+/// Where the apps `app` loads keep their caches and how much each keeps.
+/// Applies from the next load. Returns why `options` are invalid (nothing
+/// changes), or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `options` must point to at
+/// least `options->size` readable bytes (and at least its `size` field),
+/// its `directory` `NULL` or a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_cache(
+    app: *mut NshApp,
+    options: *const NshCacheOptions,
+) -> *mut c_char {
+    use nsh_engine::{ByteSize, CacheLocation, CacheOptions, CachePolicy};
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    if options.is_null() {
+        return status(Err("no cache options".to_owned()));
+    }
+    // Read what the caller's struct has; the rest stays zero (defaults).
+    // SAFETY: `options` points to at least its `size` field.
+    let given = unsafe { (*options).size } as usize;
+    let mut read = std::mem::MaybeUninit::<NshCacheOptions>::zeroed();
+    let len = given.min(std::mem::size_of::<NshCacheOptions>());
+    // SAFETY: the caller's struct has `len` readable bytes; `read` is as
+    // large; all-zero bytes are a valid `NshCacheOptions`.
+    let options = unsafe {
+        std::ptr::copy_nonoverlapping(options as *const u8, read.as_mut_ptr() as *mut u8, len);
+        read.assume_init()
+    };
+    let location = match options.location {
+        NSH_CACHE_LOCATION_SYSTEM => Ok(CacheLocation::System),
+        NSH_CACHE_LOCATION_DIRECTORY if options.directory.is_null() => {
+            Err("NSH_CACHE_LOCATION_DIRECTORY without a directory".to_owned())
+        }
+        // SAFETY: guaranteed by the caller.
+        NSH_CACHE_LOCATION_DIRECTORY => unsafe { utf8(options.directory, "the cache directory") }
+            .map(|dir| CacheLocation::Dir(PathBuf::from(dir))),
+        NSH_CACHE_LOCATION_OFF => Ok(CacheLocation::Off),
+        other => Err(format!("unknown cache location {other}")),
+    };
+    let images = match options.images {
+        NSH_CACHE_POLICY_DEFAULT => Ok(CachePolicy::Default),
+        NSH_CACHE_POLICY_MAX_SIZE => Ok(CachePolicy::MaxSize(ByteSize::mib(u64::from(
+            options.images_max_mb,
+        )))),
+        NSH_CACHE_POLICY_OFF => Ok(CachePolicy::Off),
+        other => Err(format!("unknown cache policy {other}")),
+    };
+    status(location.and_then(|location| {
+        images.map(|images| {
+            app.view
+                .set_cache(CacheOptions::at(location).with_images(images))
+        })
+    }))
+}
+
 /// The embedding app's locale, which stands in for the user's: a BCP 47
 /// tag or a platform identifier (`zh-Hans-CN`, `en_US`); `NULL` follows the
 /// system's again. Applies at once and to every app loaded later. Returns

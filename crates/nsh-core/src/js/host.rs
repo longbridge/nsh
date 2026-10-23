@@ -442,12 +442,15 @@ export interface PanEvent {
   valueY?: number;
 }
 
-/** Where the pointer was at a press: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
+/** Where the pointer was at a press, the modifier keys held when it began and its click count: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
 export interface PressEvent {
   /** Position in the pressed view (its transforms undone; a pressed span's text view). */
   position: Point;
   /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
   pagePosition: Point;
+  modifiers: Modifiers;
+  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click. */
+  clickCount: number;
 }
 
 /** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
@@ -527,25 +530,25 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Press,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A tap. `e` is where the pointer was, on backends that know it.",
+        "A tap. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::LongPress,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A press held for about half a second. `e` is where the pointer was, on backends that know it.",
+        "A press held for about half a second. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::PressDown,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A press went down. `e` is where the pointer was, on backends that know it.",
+        "A press went down. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::PressUp,
         on::ALL,
         "(e?: PressEvent) => void",
-        "The press ended. `e` is where the pointer was, on backends that know it.",
+        "The press ended. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::HoverIn,

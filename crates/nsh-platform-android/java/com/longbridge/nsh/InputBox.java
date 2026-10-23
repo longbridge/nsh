@@ -57,6 +57,17 @@ final class InputBox extends FrameLayout implements Node {
         setBackground(decor);
         edit = new EditText(context) {
             @Override
+            protected void onAttachedToWindow() {
+                super.onAttachedToWindow();
+                // A detached navigation screen may already have a text layout,
+                // with Editor's selection controllers disabled for lack of a window.
+                // Reapplying the current break strategy discards that layout so the
+                // next measure refreshes the controllers under the attached window,
+                // without replacing editable text or changing textIsSelectable.
+                if (getLayout() != null) setBreakStrategy(getBreakStrategy());
+            }
+
+            @Override
             public boolean onKeyUp(int code, android.view.KeyEvent event) {
                 // The up of an Enter whose down submitted another field (focus
                 // moved meanwhile) must not advance focus again.

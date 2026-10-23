@@ -505,6 +505,7 @@ impl Session {
             },
             ui_sets: self.run.ui_sets.clone(),
             clock,
+            host: launch.host,
             ..default
         };
         let mut app = Headless::start(config)
@@ -556,8 +557,18 @@ impl Session {
         {
             return Err(format!("open({entry:?}): {tag:?} is not a locale"));
         }
+        // The host's dev host plays no handlers of the test's: they run
+        // headless only. The launch parameters reach its engine.
+        if launch.host_handlers {
+            return Err(format!(
+                "open({entry:?}): {}",
+                crate::driver::headless_only("`host.handlers`")
+            ));
+        }
         let safe_area = launch.safe_area;
         let mut environment = nsh_dev::protocol::TestEnvironment::default();
+        let params = launch.host.params();
+        environment.host_params = (!params.is_empty()).then_some(params);
         environment.clipboard = launch.clipboard.clone();
         environment.locale = launch.locale.clone();
         environment.reduced_motion = launch.reduced_motion.then_some(true);

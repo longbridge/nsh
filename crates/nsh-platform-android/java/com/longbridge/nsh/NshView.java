@@ -168,11 +168,14 @@ public class NshView extends FrameLayout {
      * @param trace log per-commit timings
      */
     public NshView(Context context, boolean trace) {
-        this(context, trace, new File(context.getFilesDir(), "nsh"));
+        this(context, trace, new File(context.getFilesDir(), "nsh"), new File(context.getCacheDir(), "nsh"));
     }
 
-    /** As {@link #NshView(Context, boolean)}, the apps keeping their data in {@code dataDir}. */
-    NshView(Context context, boolean trace, File dataDir) {
+    /**
+     * As {@link #NshView(Context, boolean)}, the apps keeping their data in {@code dataDir} and the images they
+     * download in {@code cacheDir}.
+     */
+    NshView(Context context, boolean trace, File dataDir, File cacheDir) {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
@@ -197,7 +200,9 @@ public class NshView extends FrameLayout {
         addOnUnhandledKeyEventListener((v, e) -> onBackKey(e));
         // Apps keep their data in <dataDir>/<app id>: nsh in the files
         // directory unless the development host's test session says.
-        handle = Native.create(this, density, trace, dataDir.getPath());
+        // ... and the images they download in <cacheDir>/<app id>/images: nsh
+        // in the cache directory.
+        handle = Native.create(this, density, trace, dataDir.getPath(), cacheDir.getPath());
     }
 
     /**
@@ -253,6 +258,20 @@ public class NshView extends FrameLayout {
      */
     public void setStorageDirectory(File dir) {
         Native.setStorage(handle, dir == null ? null : dir.getPath());
+    }
+
+    /**
+     * Where the apps this view loads from now on keep their caches (the
+     * images they download, so they show again without a download and
+     * offline) and how much each keeps. The default
+     * ({@code NshCacheOptions.DEFAULT}): {@code nsh} in the Context's cache
+     * directory, each app in {@code <dir>/<app id>}, 256 MiB of images.
+     *
+     * @param options the options
+     */
+    public void setCacheOptions(NshCacheOptions options) {
+        Native.setCache(handle, options.location, options.directory == null ? null : options.directory.getPath(),
+                options.images, options.imagesMaxMegabytes);
     }
 
     /**
