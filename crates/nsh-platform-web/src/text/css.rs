@@ -44,6 +44,46 @@ pub(crate) fn font_variant_numeric(variant: FontVariant) -> Option<String> {
     (!css.is_empty()).then_some(css)
 }
 
+/// Whether text with a numeric variant is measured character by
+/// character (each character's width measured once, then summed) rather
+/// than whole: text of digits and the signs numbers are written with
+/// (prices, times, percentages, counters), whose digits the variant draws
+/// at fixed widths and which nothing kerns. It is what changes on every
+/// update of a live figure; measuring it whole would lay the page out for
+/// every new value (`ffi::measure_numeric_text`). Other text (with letters)
+/// is measured whole, kerning included.
+pub(crate) fn measured_by_char(text: &str) -> bool {
+    !text.is_empty()
+        && text.chars().all(|c| {
+            c.is_ascii_digit()
+                || matches!(
+                    c,
+                    '.' | ','
+                        | ':'
+                        | '/'
+                        | '+'
+                        | '-'
+                        | '−'
+                        | '%'
+                        | '‰'
+                        | '$'
+                        | '€'
+                        | '£'
+                        | '¥'
+                        | '¢'
+                        | '₩'
+                        | '₹'
+                        | '#'
+                        | '('
+                        | ')'
+                        | ' '
+                        | '\u{a0}'
+                        | '\u{202f}'
+                        | '\u{2009}'
+                )
+        })
+}
+
 /// A `fontFamily` value as a CSS family list: one family or a
 /// comma-separated stack. Generic families and the system font keywords
 /// stay bare (quoted, `"monospace"` names a font called monospace, which
@@ -55,11 +95,15 @@ pub(crate) fn family_list(value: &str) -> String {
         if !out.is_empty() {
             out.push_str(", ");
         }
-        if family.starts_with(['"', '\'']) || is_keyword(family) {
+        if well_quoted(family) || is_keyword(family) {
             out.push_str(family);
         } else {
+            // A name, or a quoted one whose quotes do not close it: quoted
+            // here, escaped, without control characters (a CSS string
+            // cannot hold a line break).
+            let name = family.trim_matches(['"', '\'']);
             out.push('"');
-            for c in family.chars() {
+            for c in name.chars().filter(|c| !c.is_control()) {
                 if c == '"' || c == '\\' {
                     out.push('\\');
                 }
@@ -69,6 +113,20 @@ pub(crate) fn family_list(value: &str) -> String {
         }
     }
     out
+}
+
+/// A name the app quoted that its quotes close: the same quote at both
+/// ends, and none of it, a backslash or a control character inside, so it
+/// is one CSS string as written.
+fn well_quoted(family: &str) -> bool {
+    let Some(quote) = family.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+        return false;
+    };
+    family.len() >= 2
+        && family.ends_with(quote)
+        && !family[1..family.len() - 1]
+            .chars()
+            .any(|c| c == quote || c == '\\' || c.is_control())
 }
 
 /// The families of a list, trimmed, without empty ones; commas inside
@@ -106,7 +164,7 @@ fn split_families(value: &str) -> impl Iterator<Item = &str> {
 /// A CSS generic family (CSS Fonts 4) or a system font keyword: written
 /// without quotes. CSS matches them ASCII case-insensitively.
 fn is_keyword(family: &str) -> bool {
-    const KEYWORDS: [&str; 14] = [
+    const KEYWORDS: [&str; 15] = [
         "serif",
         "sans-serif",
         "monospace",
@@ -121,6 +179,8 @@ fn is_keyword(family: &str) -> bool {
         "emoji",
         "fangsong",
         "-apple-system",
+        // Chrome's name for the system font on macOS: a family only unquoted.
+        "BlinkMacSystemFont",
     ];
     KEYWORDS.iter().any(|k| k.eq_ignore_ascii_case(family))
 }

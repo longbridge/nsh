@@ -28,6 +28,8 @@ fn generic_families_stay_unquoted() {
     // CSS matches them ASCII case-insensitively.
     assert_eq!(family_list("Monospace"), "Monospace");
     assert_eq!(family_list("-apple-system"), "-apple-system");
+    // Chrome's system font keyword is only one unquoted.
+    assert_eq!(family_list("BlinkMacSystemFont"), "BlinkMacSystemFont");
 }
 
 #[test]
@@ -107,4 +109,39 @@ fn numeric_variants_name_their_css() {
             .as_deref(),
         Some("lining-nums proportional-nums")
     );
+}
+
+#[test]
+fn quotes_that_do_not_close_a_name_are_quoted_again() {
+    // As written when the quotes close it.
+    assert_eq!(family_list("'DejaVu Sans Mono'"), "'DejaVu Sans Mono'");
+    assert_eq!(family_list("\"Fira Code\""), "\"Fira Code\"");
+    // Otherwise the name is quoted here, escaped, so the class's rule
+    // stays one CSS declaration.
+    assert_eq!(family_list("\"Fira Code"), "\"Fira Code\"");
+    assert_eq!(family_list("'a'b'"), "\"a'b\"");
+    assert_eq!(family_list("\"a\\\""), "\"a\\\\\"");
+    assert_eq!(family_list("Line\nBreak"), "\"LineBreak\"");
+}
+
+#[test]
+fn figures_are_measured_character_by_character() {
+    use crate::css::measured_by_char;
+
+    for figure in [
+        "530.92",
+        "1,234.56",
+        "-0.5%",
+        "+12.3%",
+        "$1,111.11",
+        "12:30",
+        "(42)",
+        "1 234",
+    ] {
+        assert!(measured_by_char(figure), "{figure}");
+    }
+    // Text with letters is measured whole, its kerning with it.
+    for text in ["Price 12", "12 shares", "AAPL", ""] {
+        assert!(!measured_by_char(text), "{text}");
+    }
 }

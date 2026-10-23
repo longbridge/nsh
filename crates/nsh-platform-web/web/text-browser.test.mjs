@@ -6,8 +6,23 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
+// The first Chromium-based browser found (`CHROME` names one).
+const candidates = [
+  process.env.CHROME,
+  'chromium',
+  'chromium-browser',
+  'google-chrome',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+].filter(Boolean);
 let chromium;
-try { execFileSync('chromium', ['--version'], { stdio: 'ignore' }); chromium = 'chromium'; } catch {}
+for (const candidate of candidates) {
+  try {
+    execFileSync(candidate, ['--version'], { stdio: 'ignore' });
+    chromium = candidate;
+    break;
+  } catch {}
+}
 
 test('tabular digits are measured as wide as the DOM draws them', { skip: !chromium }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nsh-text-browser-'));
@@ -32,6 +47,12 @@ test('tabular digits are measured as wide as the DOM draws them', { skip: !chrom
         for (const text of ['530.92', '111.11', '1,234.56', 'Price']) {
           const measured = measureNumericText(font, 'tabular-nums', text);
           if (Math.abs(measured - drawn(text)) > 0.01) throw Error(text + ': measured ' + measured + ', drawn ' + drawn(text));
+        }
+        // Figures are measured character by character (the engine's
+        // \`measured_by_char\`): the sum is what the run draws.
+        for (const text of ['530.92', '1,234.56', '-0.5%', '$1,111.11', '12:30']) {
+          const sum = [...text].reduce((w, c) => w + measureNumericText(font, 'tabular-nums', c), 0);
+          if (Math.abs(sum - drawn(text)) > 0.05) throw Error(text + ': summed ' + sum + ', drawn ' + drawn(text));
         }
         document.body.dataset.result = 'passed';
       } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
