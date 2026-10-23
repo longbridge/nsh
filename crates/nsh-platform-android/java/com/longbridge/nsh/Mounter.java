@@ -116,7 +116,8 @@ final class Mounter {
     }
 
     final NshView host;
-    final float density;
+    /** Pixels per dp; {@link NshView} updates it when the display density changes. */
+    float density;
     final Context context;
     final Images images;
     final SparseArray<View> views = new SparseArray<>();

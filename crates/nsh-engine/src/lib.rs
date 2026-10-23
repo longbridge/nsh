@@ -872,6 +872,7 @@ enum Message {
     Frame,
     States(NodeId, u8),
     FontsChanged,
+    Remount,
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
     Fetch(Requester, u64, FetchEvent),
@@ -1037,6 +1038,13 @@ impl EngineControl {
     /// is measured again.
     pub fn fonts_changed(&self) {
         let _ = self.tx.send(Message::FontsChanged);
+    }
+
+    /// The platform's views get everything again and text is measured
+    /// again: the unit the platform converts values with changed (Android's
+    /// density). Send the new environment and size too.
+    pub fn remount(&self) {
+        let _ = self.tx.send(Message::Remount);
     }
 
     /// Records the engine's commits into `monitor` from now on (`None`:
@@ -2476,6 +2484,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         Message::States(id, states) => state.core.set_states(id, states),
         Message::FontsChanged => state.core.fonts_changed(),
+        Message::Remount => state.core.remount(),
         Message::Fetch(who, hop, event) => {
             if let Some(event) = state.net.event(who, hop, event) {
                 match who {

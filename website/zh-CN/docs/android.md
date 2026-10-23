@@ -348,7 +348,7 @@ adb reverse tcp:8790 tcp:8790
       android:windowSoftInputMode="adjustResize" />
   ```
 
-  `NshView` 会自行适应新的尺寸、配色方案、字体缩放和布局方向。
+  `NshView` 会自行适应新的尺寸、配色方案、字体缩放、显示密度和布局方向，应用的状态保持不变。
 - **生命周期。** 宿主 Activity 或 Fragment 销毁时调用 `destroy()`。
 
 ## 另请参阅

@@ -92,7 +92,7 @@ public class NshView extends FrameLayout {
     long handle;
     /** Serializes background sends with releasing the native handle. */
     private final Object hostLock = new Object();
-    private final float density;
+    private float density;
     private final Box root;
     private final Mounter mounter;
     private final TouchTracker touches;
@@ -593,7 +593,19 @@ public class NshView extends FrameLayout {
     @Override
     protected void onConfigurationChanged(Configuration config) {
         super.onConfigurationChanged(config);
+        // `wm density` or a display change: the view keeps its pixel size, so
+        // only its size in dp changes. The environment's new density makes the
+        // engine send every view again; it goes first so that the new window
+        // size reaches JS with it.
+        float d = getResources().getDisplayMetrics().density;
+        boolean rescaled = d > 0 && d != density;
+        if (rescaled) {
+            density = d;
+            mounter.density = d;
+        }
         publishEnvironment(getRootWindowInsets());
+        int w = getWidth(), h = getHeight();
+        if (rescaled && handle != 0 && w > 0 && h > 0) Native.resize(handle, w / density, h / density);
     }
 
     private static Window windowOf(Context context) {

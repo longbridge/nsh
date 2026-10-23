@@ -3,7 +3,10 @@
 //! `measure` lays it out at any width, `layout` makes the final
 //! `StaticLayout` that the UI thread only draws.
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, Ordering},
+};
 
 use jni::{
     objects::{GlobalRef, JObject, JValue},
@@ -43,9 +46,32 @@ pub(crate) struct Prepared(Option<GlobalRef>);
 /// A finished `StaticLayout`, drawn by `NshText.java`.
 pub(crate) struct AndroidLayout(pub(crate) GlobalRef);
 
+/// The display density (pixels per dp), shared by the host and its text
+/// engine: `wm density` and display changes change it while the app runs.
+#[derive(Clone)]
+pub(crate) struct Density(Arc<AtomicU32>);
+
+impl Density {
+    pub(crate) fn new(density: f32) -> Self {
+        Self(Arc::new(AtomicU32::new(density.to_bits())))
+    }
+
+    pub(crate) fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    /// Whether `density` is new (a positive, finite value that differs).
+    pub(crate) fn set(&self, density: f32) -> bool {
+        if !(density.is_finite() && density > 0.0) {
+            return false;
+        }
+        self.0.swap(density.to_bits(), Ordering::Relaxed) != density.to_bits()
+    }
+}
+
 /// [`TextEngine`] backed by Android's `StaticLayout`.
 pub(crate) struct AndroidTextEngine {
-    pub(crate) density: f32,
+    pub(crate) density: Density,
 }
 
 impl TextEngine for AndroidTextEngine {
@@ -139,7 +165,7 @@ impl TextEngine for AndroidTextEngine {
             EllipsizeMode::Middle => 2,
             EllipsizeMode::Clip => 3,
         };
-        let density = self.density;
+        let density = self.density.get();
         let shadow = text.shadow;
         // Offset, width, height and `verticalAlign` (0 baseline, 1 text
         // top, 2 text bottom, 3 middle): `TextLayouts.Attachment` places it
@@ -266,7 +292,7 @@ impl TextEngine for AndroidTextEngine {
             let j = java();
             let args: [jvalue; 2] = [
                 JValue::Object(obj.as_obj()).as_jni(),
-                JValue::Float(self.density).as_jni(),
+                JValue::Float(self.density.get()).as_jni(),
             ];
             // SAFETY: matches the signature checked in `java::init`.
             let array = unsafe {
@@ -312,7 +338,7 @@ impl TextEngine for AndroidTextEngine {
             let j = java();
             let args: [jvalue; 2] = [
                 JValue::Object(obj.as_obj()).as_jni(),
-                JValue::Float(self.density).as_jni(),
+                JValue::Float(self.density.get()).as_jni(),
             ];
             // SAFETY: matches the signature checked in `java::init`.
             let array = unsafe {
