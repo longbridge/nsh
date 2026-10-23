@@ -4213,8 +4213,23 @@ impl<M: TextEngine> Core<M> {
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
-            self.layout.mark_dirty(layout);
-            self.needs_layout = true;
+            // A text that measures as before leaves every layout standing:
+            // only the text is mounted again. Attachments are placed by its
+            // final layout, laid out again with the rest.
+            let attachments =
+                !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
+            let engine = &self.text_engine;
+            let cache = &mut self.measure_cache;
+            if attachments
+                || !self
+                    .layout
+                    .measures_as_before(layout, |input, _, cx, style| {
+                        measure_leaf(engine, cache, input, cx, style)
+                    })
+            {
+                self.layout.mark_dirty(layout);
+                self.needs_layout = true;
+            }
         }
         true
     }

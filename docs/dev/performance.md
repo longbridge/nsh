@@ -79,7 +79,7 @@ coalescing interval, with the latest coordinates kept independently per view and
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
 - High-frequency updates (`cargo test --release -p nsh-core bench_high_frequency -- --ignored --nocapture`: `Board`, a quote board of
-  80 rows of a mark and five cells, 961 views, the first cells of 40 rows changing together on each press, their texts' lengths too):
+  80 rows of a mark and five cells, 961 views, the first cells of 40 rows changing together on each press):
   ~4.4µs per event, then per commit ~140µs when the cells have a size of their own and ~180µs when they take their text's, 40 mount
   items either way. Nearly all of the commit is Taffy laying the dirty paths out again (~116µs of it, measured once by timing the
   commit's phases): a changed text dirties every view up to the root, and the flex algorithm of the root and of each changed row runs
@@ -87,6 +87,12 @@ coalescing interval, with the latest coordinates kept independently per view and
   frame walk is ~10µs, the texts (the tests' engine) under 2µs. This is the baseline relayout boundaries are measured against.
   With relayout boundaries (`LayoutTree::is_boundary`): ~36µs per commit for the fixed cells, each changed cell laid out on its own
   and nothing above it; content-sized cells are not boundaries (their size is their text's) and stay at ~180µs.
+  With texts that measure as before (`LayoutTree::measures_as_before`: a changed text measured again for every input the layout asked
+  of it; the same answers, and nothing is laid out again): ~20µs for the fixed cells and ~15µs for content-sized cells whose values
+  keep their widths (the tests' text engine gives every character one width, as tabular figures do), against ~185µs before; when
+  every value changes width (a sign coming and going) nothing measures as before and the commit is ~192µs, against ~184µs (the
+  answers recorded and measured again). The component benchmark's update of 200 titles: core 0.19ms (Rust Button) and 0.09ms
+  (TSX), against 0.43ms and 0.35ms.
 - Rust components' handles (`handle_bench`: `cargo test --release -p nsh-engine --test engine bench_handles --
   --ignored --nocapture --test-threads=1`, 1000 calls in one press, the minimum of 200 presses, per call; steady
   state of five runs). In brackets, when `AnimatedValue` was an `Rc` of its node and `ElementRef` an `Rc` of its

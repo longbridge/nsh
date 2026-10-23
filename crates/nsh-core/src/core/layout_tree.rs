@@ -22,6 +22,12 @@
 //!   when what it gives back differs (its overflow, say) is its parent laid
 //!   out again. A large page with values changing often costs what changes,
 //!   not what the page is.
+//! - **leaves that measure as before.** A leaf whose content changed (its
+//!   text) dirties nothing when it measures the same for every input the
+//!   layout asked of it since its cache was last cleared
+//!   ([`LayoutTree::measures_as_before`]): every layout above was computed
+//!   from those answers alone, so all of them stand. A price that keeps its
+//!   width, a wrapped paragraph that keeps its lines, cost their text.
 
 use slab::Slab;
 use taffy::{
@@ -50,7 +56,17 @@ struct LayoutNode<C> {
     last: Option<(LayoutInput, LayoutOutput)>,
     /// It is a boundary waiting in [`LayoutTree::dirty_boundaries`].
     queued: bool,
+    /// A leaf's answers to the inputs the layout asked of it since its
+    /// cache was last cleared, each once: what the layouts above it were
+    /// computed from. `None` once there were more than [`MEASURED`] to keep.
+    measured: Option<Vec<(LayoutInput, LayoutOutput)>>,
 }
+
+/// How many answers of a leaf [`LayoutNode::measured`] keeps: a layout asks
+/// a few (its sizes under a measuring pass and the final one); more come of
+/// many layouts at other sizes (a window resized), and are not worth
+/// measuring again.
+const MEASURED: usize = 8;
 
 impl<C> LayoutNode<C> {
     fn new(style: Style, context: Option<C>) -> Self {
@@ -65,7 +81,14 @@ impl<C> LayoutNode<C> {
             tag: None,
             last: None,
             queued: false,
+            measured: Some(Vec::new()),
         }
+    }
+
+    /// Clears its cached layouts, and so what they were computed from.
+    fn clear_cache(&mut self) {
+        self.cache.clear();
+        self.measured = Some(Vec::new());
     }
 }
 
@@ -139,7 +162,7 @@ impl<C> LayoutTree<C> {
     pub(crate) fn set_style(&mut self, node: NodeId, style: Style) {
         let n = &mut self.nodes[key(node)];
         n.style = style;
-        n.cache.clear();
+        n.clear_cache();
         if let Some(parent) = n.parent {
             self.mark_dirty(parent);
         }
@@ -192,7 +215,7 @@ impl<C> LayoutTree<C> {
     pub(crate) fn mark_dirty(&mut self, node: NodeId) {
         let mut at = Some(node);
         while let Some(node) = at {
-            self.nodes[key(node)].cache.clear();
+            self.nodes[key(node)].clear_cache();
             if self.is_boundary(node) {
                 let n = &mut self.nodes[key(node)];
                 if !n.queued {
@@ -235,6 +258,26 @@ impl<C> LayoutTree<C> {
             && style.flex_basis == taffy::Dimension::auto()
             && !baseline(parent.align_items)
             && !style.align_self.is_some_and(baseline)
+    }
+
+    /// What measures the leaf `node` changed (its text, say): whether it
+    /// measures with `measure` as it did for every input the layout asked of
+    /// it since its cache was last cleared, so that every layout above it
+    /// stands and nothing needs laying out again. When it does not, or it
+    /// was asked too much to tell, the caller marks it dirty
+    /// ([`LayoutTree::mark_dirty`]). A leaf never asked (new, or dirty
+    /// already) measures as before: nothing was computed from it.
+    pub(crate) fn measures_as_before<M>(&mut self, node: NodeId, mut measure: M) -> bool
+    where
+        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    {
+        let n = &mut self.nodes[key(node)];
+        let Some(measured) = &n.measured else {
+            return false;
+        };
+        measured
+            .iter()
+            .all(|(input, output)| measure(*input, node, n.context.as_mut(), &n.style) == *output)
     }
 
     /// Whether `node` has no cached layout: it changed, or something in it
@@ -346,7 +389,17 @@ where
                 (Display::Grid, true) => compute_grid_layout(view, node, inputs),
                 (_, false) => {
                     let n = &mut view.tree.nodes[key(node)];
-                    (view.measure)(inputs, node, n.context.as_mut(), &n.style)
+                    let output = (view.measure)(inputs, node, n.context.as_mut(), &n.style);
+                    if let Some(measured) = &mut n.measured
+                        && !measured.iter().any(|(asked, _)| *asked == inputs)
+                    {
+                        if measured.len() < MEASURED {
+                            measured.push((inputs, output.clone()));
+                        } else {
+                            n.measured = None;
+                        }
+                    }
+                    output
                 }
             };
             // The out-of-flow nodes this one is the containing block of, in
@@ -455,7 +508,7 @@ where
     }
 
     fn cache_clear(&mut self, node: NodeId) {
-        self.tree.nodes[key(node)].cache.clear();
+        self.tree.nodes[key(node)].clear_cache();
     }
 }
 

@@ -65,6 +65,12 @@ Things that were found the hard way. Read the section of the area you change bef
   content), and shrinking is floored at the content's automatic minimum, so either let the content change the size (the layout
   consistency harness found the first). Growing is fine: it takes the free space the parent and siblings leave. A restyled node always
   dirties its parent (`set_style`), a boundary included. Boundaries' frames are emitted after the passes (`commit_round`).
+- **A changed text dirties nothing when it measures as before** (`LayoutTree::measures_as_before`, from `rebuild_text`): every
+  layout above a leaf was computed from the leaf's answers to the inputs it was asked (Taffy calls it under measuring passes and for
+  its final size), so the leaf keeps those answers since its cache was last cleared (`LayoutNode::measured`, at most eight: more come
+  of layouts at many sizes) and measures them again; all the same, and only the text is mounted again. The record is cleared with the
+  cache, never alone: an answer dropped while a layout above still holds what it was computed from would let a change through
+  unseen. Texts with attachments always relayout (their views are placed by the text's final layout).
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped.

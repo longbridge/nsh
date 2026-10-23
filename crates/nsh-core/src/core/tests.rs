@@ -11547,14 +11547,19 @@ mod views {
         /// Its cells have a size of their own: what their text says moves
         /// nothing around them.
         fixed: bool,
+        /// Each tick changes how wide the changing values are (a sign comes
+        /// and goes); otherwise they keep their width, but for the rare
+        /// digit a price gains (the tests' text engine gives every
+        /// character one width, as tabular figures have).
+        widening: bool,
     }
 
     /// A page of high-frequency updates, a quote board: 80 rows of a
     /// mark and five cells (about a thousand nodes), the first cells of 40
-    /// rows changing together on each press, their texts' lengths too.
+    /// rows changing together on each press.
     #[component]
     fn Board(props: BoardProps) -> impl IntoElement {
-        let fixed = props.fixed;
+        let (fixed, widening) = (props.fixed, props.widening);
         let ticks: Vec<Signal<u32>> = (0..BOARD_TICKING).map(|_| signal(0)).collect();
         let pressed = ticks.clone();
         let cell = move |content: Text| {
@@ -11575,10 +11580,11 @@ mod views {
             })
             .children((0..BOARD_ROWS).map(|row| {
                 let first = match ticks.get(row) {
-                    // A price: its length changes as it grows.
-                    Some(&tick) => {
-                        text(move || format!("{}.{:02}", 9 + tick.get() / 3, tick.get() % 100))
-                    }
+                    Some(&tick) => text(move || {
+                        let t = tick.get();
+                        let sign = if widening && t % 2 == 1 { "+" } else { "" };
+                        format!("{sign}{}.{:02}", 9 + t / 3, t % 100)
+                    }),
                     None => text(format!("{row}.00")),
                 };
                 view()
@@ -11595,14 +11601,18 @@ mod views {
     /// `cargo test --release -p nsh-core bench_high_frequency -- --ignored --nocapture`
     ///
     /// The cost of a commit when many values of a large page change at
-    /// once and often: [`Board`] with fixed cells and with cells that
-    /// take their text's size.
+    /// once and often: [`Board`] with fixed cells, and with cells that
+    /// take their text's size, the values keeping their widths or not.
     #[test]
     #[ignore]
     fn bench_high_frequency() {
-        for fixed in [true, false] {
+        for (fixed, widening, label) in [
+            (true, false, "fixed cells"),
+            (false, false, "content-sized cells, same widths"),
+            (false, true, "content-sized cells, new widths"),
+        ] {
             let mut c = core();
-            c.mount_root(&Root::new::<Board>(move || BoardProps { fixed }));
+            c.mount_root(&Root::new::<Board>(move || BoardProps { fixed, widening }));
             let first = c.commit().unwrap();
             let nodes = first
                 .items
@@ -11622,9 +11632,8 @@ mod views {
                 commit += mid.elapsed();
             }
             eprintln!(
-                "high frequency ({} cells, {nodes} views, {BOARD_TICKING} values a tick): \
+                "high frequency ({label}, {nodes} views, {BOARD_TICKING} values a tick): \
                  {:?} per event, {:?} per commit, {} mount items",
-                if fixed { "fixed" } else { "content-sized" },
                 event / n,
                 commit / n,
                 items / n as usize
@@ -16382,4 +16391,85 @@ fn a_relayout_boundary_that_overflows_more_lays_its_parent_out_again() {
         _ => None,
     });
     assert_eq!(content, Some(500.0));
+}
+
+#[test]
+fn a_text_that_measures_as_before_lays_nothing_out_again() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("flexDirection", StyleValue::Str("row"))]),
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "9.07".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            style_op(
+                6,
+                &[
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let first = c.commit().unwrap();
+    let after = frame_of(&first, 6).unwrap().origin.x;
+    let root = c.nodes[c.root as usize].layout.unwrap();
+    // As wide as before (the tests' engine gives each character one width):
+    // nothing to lay out again, the text mounted again.
+    c.apply(Op::SetText {
+        id: 5,
+        text: "9.14".into(),
+    })
+    .unwrap();
+    c.flush_dirty();
+    assert!(!c.needs_layout && !c.layout.dirty(root));
+    let batch = c.commit().unwrap();
+    assert!(
+        matches!(&batch.items[..], [MountItem::Text { id: 4, text, .. }] if text.text == "9.14")
+    );
+    // Wider: laid out again, and its sibling moves.
+    c.apply(Op::SetText {
+        id: 5,
+        text: "+9.21".into(),
+    })
+    .unwrap();
+    c.flush_dirty();
+    assert!(c.needs_layout && c.layout.dirty(root));
+    let batch = c.commit().unwrap();
+    assert!(frame_of(&batch, 4).is_some());
+    assert!(frame_of(&batch, 6).unwrap().origin.x > after);
 }
