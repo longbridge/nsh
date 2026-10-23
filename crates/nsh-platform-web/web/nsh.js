@@ -2121,6 +2121,9 @@ class Player {
         tracks.set(cellId, cell);
       }
       cell._range = range;
+      // The animated offsets come after the batch's ops (`sticky-offset`):
+      // one that became a number is no longer added.
+      cell._stickyOffset = undefined;
       this.placeTrack(cell);
     }
   }

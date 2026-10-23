@@ -1411,6 +1411,11 @@ final class Mounter {
         return offset == null ? 0 : offset;
     }
 
+    /** Sticky cell `id` sticks no animated value further in (until an output says so). */
+    void forgetStickyOffset(int id) {
+        stickyOffsets.remove(id);
+    }
+
     void outputs(float[] out) {
         if (out == null || out.length == 0) return;
         for (int i = 1; i + 2 < out.length; i += 3) {

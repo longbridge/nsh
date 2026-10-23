@@ -316,7 +316,8 @@ fn nearest(points: &[f32], to: f32) -> Option<f32> {
 /// sticky offset from it): at scroll offset `offset` (along the main axis)
 /// it shows `clamp(offset - start, 0, end - start)` past where it is laid
 /// out.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
 pub struct StickyCell {
     /// The cell.
     pub cell: NodeId,

@@ -760,8 +760,8 @@ pub struct Core<M: TextEngine> {
     sticky_changed: bool,
     /// The warning about `bottom` / `right` sticky insets was logged.
     sticky_warned: bool,
-    /// The warning about animated insets of views that are not sticky was
-    /// logged.
+    /// The warning about animated insets of views that are not sticky, or
+    /// on the axis their scroll view does not scroll, was logged.
     inset_warned: bool,
     /// Live screens, modals and header items.
     roots: Vec<Key>,

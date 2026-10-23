@@ -16583,6 +16583,58 @@ fn sticky_views_stick_at_an_animated_top() {
 }
 
 #[test]
+fn an_animated_inset_across_the_scroll_axis_is_ignored() {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 40.0,
+        }),
+        Op::Create {
+            id: 2,
+            tag: Tag::Scroll,
+        },
+        style_op(2, &[("height", StyleValue::Number(400.0))]),
+    ];
+    ops.extend(child_view(3, 2, 100.0, &[]));
+    let mut style = Box::<Style>::default();
+    let mut patch = StylePatch::default();
+    patch
+        .set(&mut style, "position", StyleValue::Str("sticky"))
+        .unwrap();
+    patch
+        .set(&mut style, "height", StyleValue::Number(30.0))
+        .unwrap();
+    // `left` in a vertical scroll view: it sticks nowhere.
+    style.animated.push((AnimationProp::StickyLeft, 2));
+    ops.extend([
+        Op::Create {
+            id: 4,
+            tag: Tag::View,
+        },
+        Op::SetStyle {
+            id: 4,
+            style,
+            patch,
+        },
+        Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        },
+    ]);
+    ops.extend(child_view(5, 2, 1000.0, &[]));
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    assert!(sticky_of(&batch, 2).is_none_or(|cells| cells.is_empty()));
+}
+
+#[test]
 fn a_relayout_boundary_that_overflows_more_lays_its_parent_out_again() {
     let mut c = core();
     apply(

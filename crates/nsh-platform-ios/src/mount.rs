@@ -3182,13 +3182,8 @@ impl Mounter {
             }
         }
         // Sticky cells that stick an animated value further in follow it.
-        let animated_sticky = |cells: &Vec<StickyCell>| cells.iter().any(|c| c.offset.is_some());
-        if self.sticky.values().any(animated_sticky) {
-            let lists: Vec<NodeId> = (self.sticky.iter())
-                .filter(|(_, cells)| animated_sticky(cells))
-                .map(|(&id, _)| id)
-                .collect();
-            for id in lists {
+        for (&id, cells) in &self.sticky {
+            if cells.iter().any(|c| c.offset.is_some()) {
                 self.pin_sticky(id);
             }
         }

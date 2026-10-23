@@ -194,10 +194,16 @@ final class ScrollBox extends FrameLayout implements Node {
                 if (horizontal) v.setTranslationX(0); else v.setTranslationY(0);
             }
             if (!kept && mounter.stickyHosts.get(old) == this) mounter.stickyHosts.remove(old);
+            mounter.forgetStickyOffset(old);
         }
         // A cell may be in a list in this scroll view's viewport: its
-        // animated offset finds this scroll view.
-        for (int c : cells) mounter.stickyHosts.put(c, this);
+        // animated offset finds this scroll view. Its offset is forgotten:
+        // the outputs after the batch bring back the ones still animated,
+        // so a cell whose offset became a number no longer adds the old one.
+        for (int c : cells) {
+            mounter.stickyHosts.put(c, this);
+            mounter.forgetStickyOffset(c);
+        }
         stickyCells = cells;
         stickyStart = start;
         stickyEnd = end;
