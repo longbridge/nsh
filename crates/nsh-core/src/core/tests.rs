@@ -10768,6 +10768,69 @@ mod views {
         assert_eq!(dark.background_color, Some(crate::Color(0x000000ff)));
     }
 
+    /// A screen whose trailing header button is UIKit's own.
+    #[derive(Default)]
+    struct SystemItemPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct SystemItemPageProps {}
+
+    impl Component for SystemItemPage {
+        type Props = SystemItemPageProps;
+        type Event = NoEvent;
+
+        // The core's own stack and screen: `nsh_base`'s wrap them.
+        #[allow(deprecated)]
+        fn view(_: SystemItemPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            stack().flex_1().child(
+                screen()
+                    .header_right_system_item(crate::HeaderSystemItem::Add)
+                    .header_right(view().on_press(|_: &()| {}))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// The platform draws the trailing header button itself, by the name the
+    /// screen passes (`add` here); the `headerRight` view stays the press
+    /// target either way.
+    #[test]
+    fn a_system_header_button_reaches_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<SystemItemPage>(|| SystemItemPageProps {}));
+        let config = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        assert_eq!(config.right_system_item, Some(crate::HeaderSystemItem::Add));
+        assert!(config.right.is_some(), "the trailing slot is set");
+    }
+
+    /// Without the prop the header is built as before: no system button, so
+    /// the platform wraps the app's `headerRight` view instead.
+    #[test]
+    fn a_screen_without_the_prop_has_no_system_header_button() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Page>(|| PageProps {}));
+        let config = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        assert_eq!(config.right_system_item, None);
+    }
+
     /// A holder of its children as its view's root.
     #[derive(Default)]
     struct Tray;

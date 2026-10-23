@@ -376,6 +376,9 @@ pub struct ScreenConfig {
     pub left: Option<NodeId>,
     /// Trailing header item view.
     pub right: Option<NodeId>,
+    /// UIKit's own bar button in the trailing slot instead of `right`'s
+    /// view (iOS); a press on it presses `right`'s first pressable view.
+    pub right_system_item: Option<crate::HeaderSystemItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -406,6 +409,7 @@ impl Default for ScreenConfig {
             animation: ScreenAnimation::Default,
             left: None,
             right: None,
+            right_system_item: None,
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,

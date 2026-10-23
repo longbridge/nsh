@@ -2579,10 +2579,14 @@ impl Mounter {
             else {
                 continue;
             };
-            screen.apply_header(|item| match self.slot(item).map(|s| &s.native) {
-                Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
-                _ => None,
-            });
+            let press = Some(self.shared.clone());
+            screen.apply_header(
+                |item| match self.slot(item).map(|s| &s.native) {
+                    Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
+                    _ => None,
+                },
+                press,
+            );
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
                 if let Some(scroll) = first_scroll_view(&screen.view) {
@@ -2854,6 +2858,45 @@ impl Mounter {
         };
         if s.events.contains(event) {
             self.control.dispatch_event(id, event, EventPayload::None);
+        }
+    }
+
+    /// Presses the element the app put in the trailing header slot, as a tap
+    /// on a system bar button does: the first view inside the slot that
+    /// takes a press (the one made first), resolved now (the slot's content
+    /// arrives after the button is made). A slot with none takes no press.
+    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+        let Some(Slot {
+            native: Native::Screen(host),
+            ..
+        }) = self.slot(screen)
+        else {
+            return;
+        };
+        let Some(slot_node) = host.config.right else {
+            return;
+        };
+        let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let mut found = None;
+        for (index, slot) in self.views.iter().enumerate() {
+            let Some(slot) = slot else { continue };
+            if !slot.events.contains(EventKind::Press) {
+                continue;
+            }
+            let id = index as NodeId;
+            if let Some(view) = self.slot(id).map(|s| s.native.view().retain())
+                && view != container
+                && view.isDescendantOfView(&container)
+            {
+                found = Some(id);
+                break;
+            }
+        }
+        if let Some(node) = found {
+            self.control
+                .dispatch_event(node, EventKind::Press, EventPayload::None);
         }
     }
 
