@@ -8,8 +8,11 @@
 
 use crate::geometry::{Points, Radians, Size};
 
-/// Most entries a `transform` list can have.
-pub const MAX_TRANSFORMS: usize = 8;
+/// Most entries a `transform` list can have: room for every step
+/// Tailwind's utilities compose (`translate`, `rotate`, `scale`, then
+/// `rotateX() rotateY() rotateZ() skewX() skewY()`) and the perspective of
+/// `perspective-*`.
+pub const MAX_TRANSFORMS: usize = 16;
 
 /// One kind of transform entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

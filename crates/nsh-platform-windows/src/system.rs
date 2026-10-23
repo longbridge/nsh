@@ -481,6 +481,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             EventKind::Clipboard,
             clipboard::files_answer(*id, &clipboard_files()),
         ),
+        Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:

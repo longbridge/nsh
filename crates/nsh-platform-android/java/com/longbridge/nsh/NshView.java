@@ -62,6 +62,45 @@ public class NshView extends FrameLayout {
         // no view takes it.
         return super.dispatchTouchEvent(e) || tracking;
     }
+
+    /**
+     * A hardware keyboard's keys go to the app's shortcuts ({@code nsh/keymap}) before the focused view
+     * gets them: a key a binding takes is consumed, with its release (the input never sees it).
+     */
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (handle != 0) {
+            int action = e.getAction();
+            if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+                return true;
+            } else if (action == android.view.KeyEvent.ACTION_UP && Native.keyUp(handle, e.getKeyCode())) {
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * Keys with Control come as shortcuts first (the window's input stage offers them before the key
+     * event, and a text field selects all, copies or pastes there): the app's shortcuts take them first.
+     */
+    @Override
+    public boolean dispatchKeyShortcutEvent(android.view.KeyEvent e) {
+        if (handle != 0 && e.getAction() == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+            return true;
+        }
+        return super.dispatchKeyShortcutEvent(e);
+    }
+
+    /** Whether the app's shortcuts take key press {@code e}. */
+    private boolean keymapKey(android.view.KeyEvent e) {
+        // An input or hosted view (a web view, a native component) has the focus: in text.
+        View focus = findFocus();
+        boolean editing = focus != null && focus != this;
+        return Native.keyDown(handle, e.getKeyCode(), e.getUnicodeChar(0), e.getMetaState(),
+                e.getRepeatCount() > 0, editing);
+    }
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private ErrorListener errorListener;
     /** Where `asset:/…` files come from: an http base, a directory, or APK assets. */
@@ -172,6 +211,28 @@ public class NshView extends FrameLayout {
      */
     public void setStorageDirectory(File dir) {
         Native.setStorage(handle, dir == null ? null : dir.getPath());
+    }
+
+    /**
+     * Overrides the app's theme with the host's: a theme file of shadcn/ui's
+     * ({@code { "cssVars": { "theme": {…}, "light": {…}, "dark": {…} } }},
+     * values as CSS writes them, the format of {@code nsh.json}'s
+     * {@code "theme"}). Its tokens win over the app's of the same names, in
+     * light and dark mode; the app's others stay, so a branded host sets only
+     * what its brand changes ({@code primary}, {@code radius}, ...). Call it
+     * before or after loading: it applies at once (classes such as
+     * {@code bg-primary} are resolved again) and to every app loaded later,
+     * from its first frame. Main thread.
+     *
+     * @param json the theme file, or null to give the app its own theme back
+     * @throws IllegalArgumentException when the file does not parse; the
+     *     overrides then stay as they were
+     */
+    public void setThemeOverrides(String json) {
+        String error = Native.setThemeOverrides(handle, json);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
     }
 
     /** The contents of {@code file}, or null when it does not exist. */

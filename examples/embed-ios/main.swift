@@ -5,7 +5,8 @@
 // a native component the bundle uses (`embed.badge`). "Load update" runs a
 // signed package (`nsh publish`) verified against a root key; a real app
 // downloads the package, here it ships as `nsh/update.nshpkg` with
-// `nsh/root.pub`.
+// `nsh/root.pub`. "Brand" puts the host's brand over the app's theme
+// (`setThemeOverrides`).
 
 import NativeShell
 import UIKit
@@ -14,6 +15,7 @@ final class EmbedController: UIViewController {
     private let app = NshAppView()
     private let status = UILabel()
     private var count = 0
+    private var branded = false
     private lazy var trust: NshTrust? = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return try? NshTrust(stateDirectory: support.appendingPathComponent("nsh"))
@@ -36,7 +38,10 @@ final class EmbedController: UIViewController {
         status.font = .systemFont(ofSize: 13)
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
-        let buttons = UIStackView(arrangedSubviews: [reload, update])
+        let brand = UIButton(type: .system)
+        brand.setTitle("Brand", for: .normal)
+        brand.addTarget(self, action: #selector(toggleBrand), for: .touchUpInside)
+        let buttons = UIStackView(arrangedSubviews: [reload, update, brand])
         buttons.spacing = 16
         let header = UIStackView(arrangedSubviews: [title, buttons, status])
         header.axis = .vertical
@@ -67,13 +72,31 @@ final class EmbedController: UIViewController {
     }
 
     @objc private func load() {
-        guard let url = Bundle.main.url(forResource: "bundle", withExtension: "qbc", subdirectory: "nsh") else {
+        guard let url = Bundle.main.url(forResource: "bundle", withExtension: "nshc", subdirectory: "nsh") else {
             return
         }
         do {
             try app.loadBundle(at: url)
             count += 1
             status.text = "loaded \(count)×"
+        } catch {
+            status.text = "\(error)"
+        }
+    }
+
+    /// The host's brand over the app's theme: the tokens it sets win, light and
+    /// dark, the app's others stay; `nil` gives the app its own theme back.
+    @objc private func toggleBrand() {
+        branded.toggle()
+        let brand = """
+            { "cssVars": {
+                "theme": { "radius": "1rem" },
+                "light": { "primary": "#e11d48", "primary-foreground": "#ffffff" },
+                "dark": { "primary": "#fb7185", "primary-foreground": "#1c1917" }
+            } }
+            """
+        do {
+            try app.setThemeOverrides(branded ? brand : nil)
         } catch {
             status.text = "\(error)"
         }

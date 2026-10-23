@@ -4,7 +4,7 @@
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, TitleBarStyle, WindowFrame, WindowLevel},
+    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
     geometry::Points,
     ui::{ModuleCx, module, task::Action},
 };
@@ -41,6 +41,17 @@ impl Window {
     pub(crate) fn set_title_bar(style: TitleBarStyle, height: Option<f32>, cx: &mut ModuleCx) {
         let height = crate::desktop::title_bar_height(height.map(Points));
         desktop(cx, DesktopCommand::SetTitleBar { style, height });
+    }
+
+    /// When the menu bar shows on Windows and Linux, where the window draws
+    /// the application menu as a bar above the app: `"shown"` (the
+    /// default) always; `"autoHide"` only after Alt is pressed and released
+    /// alone, until Alt alone hides it again, as in Windows and GNOME apps.
+    /// F10 and Alt with a menu's initial still open a menu, and the bar
+    /// shows while it is open. macOS's menu bar is the system's and always
+    /// shows.
+    pub(crate) fn set_menu_bar(mode: MenuBarMode, cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::SetMenuBar(mode));
     }
 
     /// Minimizes the window.

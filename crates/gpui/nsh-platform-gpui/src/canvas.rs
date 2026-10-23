@@ -111,7 +111,7 @@ const MAX_SIGMA: f64 = 256.0;
 #[derive(Default)]
 pub(crate) struct CanvasState {
     /// The drawing.
-    drawing: Option<Arc<Drawing>>,
+    pub(crate) drawing: Option<Arc<Drawing>>,
     /// Animated value slots (`AnimationProp::CanvasArg`).
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI (premultiplied pixels): `None`
@@ -3066,7 +3066,7 @@ mod tests {
         let (region, _) = region(&key, (0.0, 0.0), [0.0, 0.0, w * scale, h * scale]).unwrap();
         let drawing = Drawing {
             ops,
-            slots: Vec::new(),
+            ..Drawing::default()
         };
         record(
             &drawing,
@@ -3126,7 +3126,7 @@ mod tests {
         ];
         let drawing = Drawing {
             ops,
-            slots: Vec::new(),
+            ..Drawing::default()
         };
         let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
         let text = WindowTextSystem::new(system.clone());
@@ -3197,7 +3197,7 @@ mod tests {
         ];
         let drawing = Drawing {
             ops,
-            slots: Vec::new(),
+            ..Drawing::default()
         };
         let system = Arc::new(gpui::TextSystem::new(Arc::new(gpui::NoopTextSystem::new())));
         let text = WindowTextSystem::new(system.clone());

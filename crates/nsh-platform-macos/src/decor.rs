@@ -225,6 +225,11 @@ impl Decor {
         unsafe { target.setContents(image.as_deref()) };
     }
 
+    /// How an image view fits its image.
+    pub(crate) fn resize_mode(&self) -> ResizeMode {
+        self.mode
+    }
+
     /// How an image view fits its image (`resizeMode`) and where it places
     /// it (`objectPosition`).
     pub(crate) fn set_fit(&mut self, mode: ResizeMode, position: ObjectPosition) {
@@ -238,9 +243,9 @@ impl Decor {
 
     /// Frames the picture layer (and the tint in it) where the resize mode
     /// and the position put the image in the image layer, which crops what
-    /// reaches outside: a centered image shows at its natural size unless
-    /// it is larger than the view (then it is shrunk to fit, as React
-    /// Native does).
+    /// reaches outside: `center` shows the image at its natural size,
+    /// `scale-down` too unless it is larger than the view (then it is
+    /// shrunk to fit), as CSS's `object-fit`.
     fn fit_contents(&self) {
         let (Some(layer), Some(picture)) = (&self.image, &self.picture) else {
             return;

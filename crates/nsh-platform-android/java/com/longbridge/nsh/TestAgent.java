@@ -187,6 +187,25 @@ final class TestAgent {
         });
     }
 
+    /**
+     * Presses the key `code` (`KeyEvent.KEYCODE_*`) with `meta` (`KeyEvent.META_*`) on a hardware
+     * keyboard: the window's view hierarchy gets it from its root, as the window's input stage
+     * (ViewRootImpl) hands it over after the input method: with Control as a shortcut first.
+     */
+    static void pressKeys(NshView host, int code, int meta) {
+        onMain(() -> {
+            View window = target(host);
+            long now = SystemClock.uptimeMillis();
+            KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, meta,
+                    KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD);
+            if ((meta & KeyEvent.META_CTRL_ON) == 0 || !window.dispatchKeyShortcutEvent(down)) {
+                window.dispatchKeyEvent(down);
+            }
+            window.dispatchKeyEvent(KeyEvent.changeAction(down, KeyEvent.ACTION_UP));
+            return null;
+        });
+    }
+
     /** The text input `id` holds; null when it is no input. */
     static String inputText(NshView host, int id) {
         return onMain(() -> {

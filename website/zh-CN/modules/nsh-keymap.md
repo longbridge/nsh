@@ -1,6 +1,6 @@
 ---
 title: nsh/keymap
-description: 键盘快捷键：把 mod+k 这样的按键组合绑定到处理函数，支持 macOS、Windows 和 Linux。
+description: 键盘快捷键：把 mod+k 这样的按键组合绑定到处理函数，支持 macOS、Windows、Linux、Web，以及接了硬件键盘的 iOS 和 Android。
 order: 8.7
 ---
 
@@ -38,7 +38,7 @@ interface KeyBindingOptions {
 
 Rust 绑定与创建它的组件（所有者）同生命周期；处理函数收到的是你写下的按键组合。
 
-快捷键在 macOS、Windows、Linux 和浏览器中可用（浏览器自己的按键，比如 Ctrl+T 或 Cmd+W，不会传给页面）。在 iOS 和 Android 上，`bind` 会保留绑定，但目前没有按键会触发它们，因此同一份代码可以在所有平台上运行。
+快捷键在 macOS、Windows、Linux 和浏览器中可用（浏览器自己的按键，比如 Ctrl+T 或 Cmd+W，不会传给页面），在接了硬件键盘的 iOS 和 Android 上也可用：iPad 的键盘、在 Mac 上运行的 iPad 应用、平板或 Chromebook 的键盘，以及模拟器的键盘。同一份代码在所有平台上运行；没有键盘时，不会有按键触发这些绑定。
 
 ## keymap.bind
 
@@ -136,7 +136,7 @@ text(format!("搜索 {}", key_label("mod+k")))
 | `alt`（也可写 `option`、`opt`） | Option（⌥） | Alt | Alt |
 | `shift` | Shift（⇧） | Shift | Shift |
 
-在浏览器里，按键遵循浏览器所在的平台：在 Mac、iPhone 或 iPad 上 `mod` 是 Command，其他地方是 Ctrl。
+iOS 与 macOS 一致（`mod` 是 Command），Android 与 Windows、Linux 一致（`mod` 是 Ctrl，`cmd` 是 Meta 键）。在浏览器里，按键遵循浏览器所在的平台：在 Mac、iPhone 或 iPad 上 `mod` 是 Command，其他地方是 Ctrl。
 
 应用自己的快捷键请用 `mod`：它就是各平台应用习惯使用的那个键（macOS 上是 ⌘K，Windows 和 Linux 上是 Ctrl+K），一种写法到处适用。Windows 键和 Super 基本归系统使用，所以在 macOS 以外很少该用 `cmd`。
 
@@ -180,7 +180,7 @@ keymap.bind("mod+enter", send, { when: "always" });
 keymap.bind("mod+e", archive, { when: "notEditing" });
 ```
 
-在 GPUI 后端上，拥有键盘焦点的原生组件按文本输入框对待，因为它可能是文本编辑器。它先看到每个按键：它自己处理的按键不会到达绑定，它放过的按键交给在编辑文本时也会触发的绑定。
+在 iOS 和 Android 上，输入法正在组字时用到的按键（选候选词、上屏）仍归输入法。在 GPUI 后端上，拥有键盘焦点的原生组件按文本输入框对待，因为它可能是文本编辑器。它先看到每个按键：它自己处理的按键不会到达绑定，它放过的按键交给在编辑文本时也会触发的绑定。
 
 ## 运行哪个绑定
 
