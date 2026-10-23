@@ -118,6 +118,12 @@ pub(crate) struct WebConfig {
     /// `createHost(player)` returns what `nsh/host` calls reach
     /// (`createPlayer`'s `host`).
     pub(crate) host: Option<PathBuf>,
+    /// The hosts the page's host module reaches (patterns, as
+    /// `capabilities.network.hosts`): the page's `connect-src` allows them
+    /// too, while the app's own requests stay checked against its
+    /// `capabilities`.
+    #[serde(default)]
+    pub(crate) connect: Vec<String>,
 }
 
 /// Options of `nsh package`.

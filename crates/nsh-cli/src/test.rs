@@ -85,7 +85,9 @@ pub(crate) fn test(
         bail!("--browser goes with --target web");
     }
     if web_host.is_some() && target.is_some() {
-        bail!("--web-host goes with headless runs: the hosts of --target have no page host");
+        bail!(
+            "--web-host goes with headless runs: --target web takes nsh.json's web.host, the other targets have no page host"
+        );
     }
     // The page's host of headless runs: `--web-host`, else nsh.json's.
     // Absolute: an app's headless runner opens it too.

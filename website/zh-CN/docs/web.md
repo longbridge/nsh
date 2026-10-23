@@ -258,10 +258,9 @@ player.hostEvent("theme", { dark: true });
 ```json
 {
   "capabilities": {
-    "host": ["user.*"],
-    "network": { "hosts": ["api.example.com"] }
+    "host": ["user.*"]
   },
-  "web": { "host": "./host.js" }
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
 }
 ```
 
@@ -292,9 +291,9 @@ export async function createHost(player) {
 
 应用运行之前发送的事件（比如 `createHost` 里发送的）会在应用启动后立即按顺序送达，应用顶层注册的 `host.on` 监听器能收到它们。监听器注册之前发送的事件不会补发给它：应用通过调用（`host.call("user.info")`）读取启动时的状态，再通过事件跟进变化。
 
-宿主模块运行在应用的页面里，与应用共用页面的 Content-Security-Policy：应用的能力限制了 `network` 时，宿主自己的请求（`fetch`、`XMLHttpRequest`、`WebSocket`）只能到达页面自身的源和 `capabilities.network` 列出的主机，所以要把宿主访问的每个源都列在那里（或用 `"*"`），如上面的 `api.example.com`。
+宿主模块运行在应用的页面里，与应用共用页面的 Content-Security-Policy：应用的能力限制了 `network` 时，页面的 `connect-src` 包含页面自身的源、`capabilities.network` 列出的主机和 `web.connect` 列出的主机。`web.connect` 列出宿主模块自己的请求（`fetch`、`XMLHttpRequest`、`WebSocket`）访问的主机，写法与 `capabilities.network.hosts` 的模式相同（`api.example.com`、`*.example.com`、`"*"`），如上面的 `api.example.com`；应用自己的请求仍按它的 `capabilities` 检查。
 
-模块按原样复制，所以它通过绝对 URL 导入其他代码。应用调用的每个函数仍需在 `host` [能力](./sandbox-and-capabilities.md)中声明。`nsh test` 会为测试打开的每个应用在无界面环境中运行同一个模块，不用浏览器就能一起测试应用和它的宿主（[测试](./testing-and-trace.md#页面的宿主)）。
+模块按原样复制，所以它通过绝对 URL 导入其他代码。应用调用的每个函数仍需在 `host` [能力](./sandbox-and-capabilities.md)中声明。`nsh run --target web` 在开发页面上运行它，`nsh test` 会为测试打开的每个应用运行同一个模块，无界面运行或在浏览器中（`--target web`）都一样，从而一起测试应用和它的宿主（[测试](./testing-and-trace.md#页面的宿主)）。
 
 ## 浏览器作为平台
 

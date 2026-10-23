@@ -344,7 +344,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 [`host.call`](../modules/nsh-host.md)，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
 `call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致；应用启动前发送的事件
 会在应用启动后送到它顶层注册的监听器。`--web-host <module>` 指定另一个模块。应用调用的函数必须列在它的 `capabilities.host` 中，
-与页面上一致。调用的超时按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它；宿主自己的定时器按真实时间运行。在真实平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
+与页面上一致。调用的超时和宿主自己的定时器都按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它们。在浏览器中（`--target web`），开发页面像发布的页面一样为每个应用运行 `nsh.json` 的 `web.host`；在其他平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
 
 ```tsx
 // nsh.json：{ "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }

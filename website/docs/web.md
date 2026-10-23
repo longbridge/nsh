@@ -280,10 +280,9 @@ A published app gets its host from `nsh.json`: `web.host` names a JS module in t
 ```json
 {
   "capabilities": {
-    "host": ["user.*"],
-    "network": { "hosts": ["api.example.com"] }
+    "host": ["user.*"]
   },
-  "web": { "host": "./host.js" }
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
 }
 ```
 
@@ -314,9 +313,9 @@ The host looks each name up as it is in a table of its functions, as above, and 
 
 Events sent before the app runs, such as from `createHost` itself, are delivered in order as soon as it starts, so the app's top-level `host.on` listeners receive them. An event sent before a listener registers is not replayed to it: an app reads the state it starts with through a call (`host.call("user.info")`) and follows its changes through events.
 
-The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the host's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach the page's origin and the hosts `capabilities.network` lists, so list every origin the host talks to there (or `"*"`), as `api.example.com` above.
+The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
 
-The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh test` runs the same module headless for every app its tests open, so the app and its host are tested together without a browser ([Testing](./testing-and-trace.md#the-pages-host)).
+The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh run --target web` runs it on the development page, and `nsh test` runs the same module for every app its tests open, headless or in a browser (`--target web`), so the app and its host are tested together ([Testing](./testing-and-trace.md#the-pages-host)).
 
 ## The browser as a platform
 

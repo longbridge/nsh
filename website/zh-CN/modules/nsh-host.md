@@ -84,8 +84,8 @@ const player = await createPlayer(container, {
 player.hostEvent("loginChanged", { signedIn: true });
 ```
 
-发布的应用在 `nsh.json` 中指定宿主：`web.host` 是应用目录内的一个 JS 模块（路径相对于 `nsh.json`），导出 `createHost(player)`，返回带 `call` 的对象。`nsh package --target web` 把它随站点一起发布，无界面的 `nsh test` 会为测试打开的应用运行它。宿主与应用共用页面的 Content-Security-Policy：应用的能力限制了 `network` 时，宿主自己的请求访问的每个源都要列在 `capabilities.network` 中。参见 [Web](../docs/web.md#宿主的函数)。
+发布的应用在 `nsh.json` 中指定宿主：`web.host` 是应用目录内的一个 JS 模块（路径相对于 `nsh.json`），导出 `createHost(player)`，返回带 `call` 的对象。`nsh package --target web` 把它随站点一起发布，`nsh run --target web` 在开发页面上运行它，`nsh test` 会为测试打开的应用运行它。`web.connect` 列出宿主自己的请求访问的主机，页面的 Content-Security-Policy 在应用的 `capabilities.network` 之外允许它们。参见 [Web](../docs/web.md#宿主的函数)。
 
 ```json
-{ "web": { "host": "./host.js" } }
+{ "web": { "host": "./host.js", "connect": ["api.example.com"] } }
 ```

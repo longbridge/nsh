@@ -364,8 +364,9 @@ imports): its `call` answers the app's [`host.call`](../modules/nsh-host.md), it
 `host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
 app's call with its message, as on the page, and events sent before the app starts reach its top-level listeners
 once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
-the page. A call's timeout runs on the app's time, so a manual clock moves it (`app.clock.runFor`); the host's own
-timers run on real time. On a real platform (`--target`) the apps have no host: `host.available()` is `false`.
+the page. A call's timeout and the host's own timers run on the app's time, so a manual clock moves them
+(`app.clock.runFor`). In a browser (`--target web`) the development page runs `nsh.json`'s `web.host` for each app as a
+published page does; on the other platforms (`--target`) the apps have no host: `host.available()` is `false`.
 
 ```tsx
 // nsh.json: { "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }

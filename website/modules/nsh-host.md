@@ -84,8 +84,8 @@ const player = await createPlayer(container, {
 player.hostEvent("loginChanged", { signedIn: true });
 ```
 
-A published app names its host in `nsh.json`: `web.host` is a JS module in the app's directory, relative to `nsh.json`, exporting `createHost(player)`, which returns the object with `call`. `nsh package --target web` ships it with the site, and headless `nsh test` runs it for the apps its tests open. The host shares the page's Content-Security-Policy with the app: when the app's capabilities restrict `network`, list every origin the host's own requests reach in `capabilities.network`. See [Web](../docs/web.md#the-hosts-functions).
+A published app names its host in `nsh.json`: `web.host` is a JS module in the app's directory, relative to `nsh.json`, exporting `createHost(player)`, which returns the object with `call`. `nsh package --target web` ships it with the site, `nsh run --target web` runs it on the development page, and `nsh test` runs it for the apps its tests open. `web.connect` lists the hosts the host's own requests reach, which the page's Content-Security-Policy allows alongside the app's `capabilities.network`. See [Web](../docs/web.md#the-hosts-functions).
 
 ```json
-{ "web": { "host": "./host.js" } }
+{ "web": { "host": "./host.js", "connect": ["api.example.com"] } }
 ```

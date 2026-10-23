@@ -82,9 +82,10 @@ build to the same file) and takes `nsh.js` from the crate.
   `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it runs
   each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
-  reads fonts with a synchronous `XMLHttpRequest` from `/assets/`; it has no host (`web.host` is the published page's),
-  so `nsh/host` calls reject there, in `nsh test --target web` too (headless `nsh test` runs the host module instead:
-  `docs/dev/tooling.md` "Headless runs").
+  reads fonts with a synchronous `XMLHttpRequest` from `/assets/`. With `nsh.json` `web.host` it imports the module
+  (`web::with_page_host` serves it as `nsh-host.js`, read when the session starts, checked as `nsh package` checks it)
+  and runs its `createHost(player)` before the first bundle, as a published page does; `nsh test --target web` serves
+  each app's the same way (headless `nsh test` runs the module itself: `docs/dev/tooling.md` "Headless runs").
 - **Tests** (`nsh test --target web`, `docs/dev/tooling.md` "On a real platform"): the CLI opens the development host
   in a headless Chromium browser it drives over the DevTools protocol (`nsh-cli/src/cdp.rs`, `test_web.rs`). When the
   server's hello says `test`, the page calls `player.testStart()` (`nsh_test_start`): from the next bundle on, every
@@ -629,8 +630,11 @@ pointer, touch or key takes it over.
   directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the
   runtime and runs its `createHost(player)` once the player exists, before `run`, and its `host` option forwards to
   what that returns (no callable `call`: the page's "could not be loaded" error). The host module shares the page's
-  CSP: its own requests are bound by the `connect-src` an app restricting `network` gets, with no exemption, so the
-  origins it reaches belong in `capabilities.network`. The module is copied as it is: its own imports are absolute URLs.
+  CSP: an app restricting `network` gets a `connect-src` of `'self'`, its `capabilities.network` and `web.connect`
+  (`package::WebConfig::connect`, host patterns checked as `HostPattern`s, which keeps any CSP syntax out:
+  `web::page_connect`). `web.connect` is the page's alone: the core checks the app's requests against its
+  capabilities before `fetch` sees them, so only the redirect hops CSP guards widen with it. The module is copied as it
+  is: its own imports are absolute URLs.
   Headless `nsh test` runs the same module for each app a test opens (`nsh_testing` `page_host.rs`,
   `docs/dev/tooling.md` "Headless runs").
 
