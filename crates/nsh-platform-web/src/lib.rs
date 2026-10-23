@@ -1427,6 +1427,21 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// Vertical scroll view `id` is pulled `distance` past its top: its pull
+/// value (`pullValue`) follows.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_pull(id: u32, distance: f32) -> f64 {
+    send(|app| {
+        if app.animation.pulled(id, distance) {
+            let mut out = Out::new();
+            app.animation.outputs(&mut out);
+            if !out.is_empty() {
+                ffi::submit(&out.finish());
+            }
+        }
+    })
+}
+
 /// The user zoomed zoomable scroll view `id` to `scale` (reported before
 /// the offset it scrolled to).
 #[unsafe(no_mangle)]

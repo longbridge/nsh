@@ -229,6 +229,12 @@ final class Native {
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
 
+    /**
+     * How far (points) a vertical scroll view is pulled past its top.
+     * Returns bound values when a pull value changed, else null.
+     */
+    static native float[] pull(long handle, int id, float distance);
+
     /** A zoomable scroll view's zoom scale, reported before its offset. */
     static native void zoom(long handle, int id, float scale);
 

@@ -446,6 +446,11 @@ pub(crate) fn scroll_value<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Pr
     Some(Prop::ScrollValue(input.animated_node()))
 }
 
+/// `pullValue`: an animated value.
+pub(crate) fn pull_value<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    Some(Prop::PullValue(input.animated_node()))
+}
+
 /// `hitSlop`: one number for every edge, or the edges.
 pub(crate) fn hit_slop<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Prop> {
     Some(Prop::HitSlop(match input.as_number() {
@@ -515,6 +520,13 @@ pub(crate) fn deceleration<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Sc
 pub(crate) fn visible_content<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::FollowEnd(
         points(input, "autoscrollToBottomThreshold").map(|t| t.max(Points::ZERO)),
+    ))
+}
+
+/// `refreshIndicator`: `{ height }`.
+pub(crate) fn refresh_indicator<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ScrollProp> {
+    Some(ScrollProp::RefreshIndicator(
+        points(input, "height").map(|h| h.max(Points::ZERO)),
     ))
 }
 

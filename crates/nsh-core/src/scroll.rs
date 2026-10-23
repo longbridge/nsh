@@ -49,10 +49,6 @@ const WHEEL_IDLE: f64 = 150.0;
 const INDICATOR_HOLD: f64 = 700.0;
 /// ...then fades out in this long.
 const INDICATOR_FADE: f64 = 300.0;
-/// How far past the top a release must be to trigger a refresh.
-const REFRESH_PULL: f32 = 64.0;
-/// Space kept above the content while refreshing (the spinner's).
-const REFRESH_SPACE: f32 = 56.0;
 /// Duration of animated scrolls and bounces back (ms).
 const ANIMATION: f64 = 300.0;
 /// The release speed (points per ms) a settled mouse wheel snaps with:
@@ -174,6 +170,9 @@ pub trait ScrollHost {
     /// The offset changed (`offset` is the one reported): the children
     /// move, the sticky cells pin to it, native scroll values follow.
     fn moved(&self, offset: Point<Points>);
+    /// A vertical view is pulled `distance` past its top (0 once it is
+    /// back): its native pull value follows.
+    fn pulled(&self, distance: Points);
     /// The children's placement changed (mirroring, insets).
     fn relayout(&self);
     /// The view draws again (the indicator, the spinner, the content).
@@ -220,13 +219,6 @@ fn drag_position(raw: f32, min: f32, max: f32, dim: f32, bounces: bool) -> f32 {
     } else {
         raw
     }
-}
-
-/// Whether a vertical scroll view dragged to `offset` (negative: pulled
-/// past its top) refreshes when the finger lifts, if it listens to
-/// `onRefresh` and is not refreshing yet.
-pub fn refreshes(offset: Points) -> bool {
-    offset.0 <= -REFRESH_PULL
 }
 
 /// The deceleration rate: velocity kept per ms.
@@ -435,7 +427,7 @@ impl ScrollState {
     fn limits(&self, size: Size<Points>) -> (f32, f32) {
         let max = self.max_f(size);
         let min = if !self.horizontal && self.live.refreshing {
-            -REFRESH_SPACE
+            -self.behavior.refresh_inset().0
         } else {
             0.0
         };
@@ -549,19 +541,25 @@ impl ScrollState {
     }
 
     /// The refresh spinner's center in a view `width` wide and how far it
-    /// is pulled out (all of it while refreshing), when it shows; `refresh`
-    /// is whether JS listens to `onRefresh`.
+    /// is pulled out (all of it while refreshing), when it shows (not when
+    /// the app draws its own); `refresh` is whether JS listens to
+    /// `onRefresh`.
     pub fn spinner(&self, width: Points, refresh: bool) -> Option<(Point<Points>, Percentage)> {
         let y = self.y.0;
-        if self.horizontal || y >= 0.0 || !(self.live.refreshing || refresh) {
+        let b = &self.behavior;
+        if self.horizontal
+            || y >= 0.0
+            || b.refresh_indicator.is_some()
+            || !(self.live.refreshing || refresh)
+        {
             return None;
         }
         let progress = if self.live.refreshing {
             1.0
         } else {
-            (-y / REFRESH_PULL).min(1.0)
+            (-y / b.refresh_threshold().0).min(1.0)
         };
-        let cy = self.behavior.content_inset.top.0 - y - REFRESH_SPACE / 2.0;
+        let cy = b.content_inset.top.0 - y - b.refresh_inset().0 / 2.0;
         Some((point(width / 2.0, Points(cy)), Percentage(progress)))
     }
 
@@ -625,11 +623,14 @@ fn interrupt(host: &impl ScrollHost) {
 /// Moves the main axis offset to `pos` (not clamped: drags rubber band)
 /// and updates everything that follows it.
 fn moved_to(host: &impl ScrollHost, pos: f32) {
-    let offset = host.scroll_mut(|s, size| {
+    let moved = host.scroll_mut(|s, size| {
         let target = if s.horizontal { &mut s.x } else { &mut s.y };
         if target.0 == pos {
             return None;
         }
+        // How far it is pulled past its top, when that changes.
+        let pulled =
+            (!s.horizontal && (target.0 < 0.0 || pos < 0.0)).then(|| Points((-pos).max(0.0)));
         *target = Points(pos);
         if s.indicator {
             s.live.shown = host.now();
@@ -637,12 +638,15 @@ fn moved_to(host: &impl ScrollHost, pos: f32) {
             s.live.dark = host.dark();
         }
         s.live.report = true;
-        Some(s.reported(size))
+        Some((s.reported(size), pulled))
     });
-    let Some(Some(offset)) = offset else {
+    let Some(Some((offset, pulled))) = moved else {
         return;
     };
     host.moved(offset);
+    if let Some(distance) = pulled {
+        host.pulled(distance);
+    }
     if host.attached() {
         ensure_ticking(host);
     } else {
@@ -863,7 +867,11 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             }
             busy |= alpha > 0.0;
         }
-        if !s.horizontal && s.offset() < 0.0 && s.live.refreshing {
+        if !s.horizontal
+            && s.offset() < 0.0
+            && s.live.refreshing
+            && s.behavior.refresh_indicator.is_none()
+        {
             s.live.spin = Radians(((now / 1000.0) as f32 * 2.0 * PI) % (2.0 * PI));
             redraw = true;
             busy = true;
@@ -958,12 +966,16 @@ pub fn behavior(host: &impl ScrollHost, behavior: &ScrollBehavior) {
 /// `Refreshing`: shows the spinner above the content (scrolling to it
 /// when at the top) or hides it.
 pub fn refreshing(host: &impl ScrollHost, refreshing: bool) {
-    let Some(Some((pos, dragging))) = host.scroll_mut(|s, _| {
+    let Some(Some((pos, dragging, inset))) = host.scroll_mut(|s, _| {
         if s.horizontal || s.live.refreshing == refreshing {
             return None;
         }
         s.live.refreshing = refreshing;
-        Some((s.offset(), matches!(s.live.phase, Phase::Drag { .. })))
+        Some((
+            s.offset(),
+            matches!(s.live.phase, Phase::Drag { .. }),
+            s.behavior.refresh_inset().0,
+        ))
     }) else {
         return;
     };
@@ -972,7 +984,7 @@ pub fn refreshing(host: &impl ScrollHost, refreshing: bool) {
         return;
     }
     if refreshing && pos <= 0.5 {
-        animate_to(host, -REFRESH_SPACE, ANIMATION, false, false);
+        animate_to(host, -inset, ANIMATION, false, false);
     } else if !refreshing && pos < 0.0 {
         animate_to(host, 0.0, ANIMATION, false, false);
     }
@@ -1086,7 +1098,10 @@ pub fn drag_end(host: &impl ScrollHost, vx: f32, vy: f32) {
         } else {
             -vx
         } / 1000.0;
-        let refresh = !s.horizontal && !s.live.refreshing && listens && s.offset() <= -REFRESH_PULL;
+        let refresh = !s.horizontal
+            && !s.live.refreshing
+            && listens
+            && s.behavior.refreshes(Points(s.offset()));
         (v, refresh)
     }) else {
         return;
@@ -1591,7 +1606,9 @@ mod tests {
         assert_eq!(s.origin(), pt(0.0, 850.0));
         // Refreshing lowers the top limit.
         s.live.refreshing = true;
-        assert_eq!(s.limits(size).0, -REFRESH_SPACE);
+        assert_eq!(s.limits(size).0, -56.0);
+        s.behavior.refresh_indicator = Some(Points(80.0));
+        assert_eq!(s.limits(size).0, -80.0);
     }
 
     #[test]
@@ -1743,5 +1760,25 @@ mod tests {
         // The leading spoke is the brightest.
         assert_eq!(all[0].1, 1.0);
         assert_eq!(all[1].0, Radians(PI / 4.0));
+    }
+
+    #[test]
+    fn refresh_follows_its_props() {
+        let mut s = scroll_state((300.0, 1000.0), false);
+        assert!(!s.behavior.refreshes(Points(-63.0)));
+        assert!(s.behavior.refreshes(Points(-64.0)));
+        // Pulled 32 of 64: half the spokes, centered in the 56 kept.
+        s.y = Points(-32.0);
+        assert_eq!(
+            s.spinner(Points(300.0), true),
+            Some((pt(150.0, 4.0), Percentage(0.5)))
+        );
+        // The app's own indicator, 100 tall: no spinner, a pull refreshes
+        // at its height, which refreshing keeps.
+        s.behavior.refresh_indicator = Some(Points(100.0));
+        assert!(!s.behavior.refreshes(Points(-64.0)));
+        assert!(s.behavior.refreshes(Points(-100.0)));
+        assert_eq!(s.behavior.refresh_inset(), Points(100.0));
+        assert_eq!(s.spinner(Points(300.0), true), None);
     }
 }

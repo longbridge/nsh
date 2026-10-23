@@ -54,6 +54,8 @@ pub struct Animator {
     gestures: FxHashMap<u32, Gestures>,
     /// Scroll view id -> (value node, horizontal).
     scrolls: FxHashMap<u32, (NodeId, bool)>,
+    /// Vertical scroll view id -> pull value node.
+    pulls: FxHashMap<u32, NodeId>,
     /// A view's canvas slot values while they are written (reused: written
     /// on every frame).
     canvas_args: Vec<(u16, AnimationValue)>,
@@ -83,19 +85,31 @@ impl Animator {
                 id,
                 horizontal,
                 scroll_value,
+                pull_value,
                 ..
-            } => match scroll_value {
-                Some(node) => {
-                    self.scrolls.insert(*id, (*node, *horizontal));
+            } => {
+                match scroll_value {
+                    Some(node) => {
+                        self.scrolls.insert(*id, (*node, *horizontal));
+                    }
+                    None => {
+                        self.scrolls.remove(id);
+                    }
                 }
-                None => {
-                    self.scrolls.remove(id);
+                match pull_value.filter(|_| !*horizontal) {
+                    Some(node) => {
+                        self.pulls.insert(*id, node);
+                    }
+                    None => {
+                        self.pulls.remove(id);
+                    }
                 }
-            },
+            }
             MountItem::Delete { id } => {
                 self.bindings.remove(id);
                 self.gestures.remove(id);
                 self.scrolls.remove(id);
+                self.pulls.remove(id);
             }
             _ => {}
         }
@@ -120,6 +134,17 @@ impl Animator {
         };
         let value = if horizontal { offset.x } else { offset.y };
         self.graph.set(node, value.0, &mut self.finished);
+        true
+    }
+
+    /// A vertical scroll view is pulled `distance` past its top (0 when
+    /// not): feeds its pull value. False if no value is bound to it.
+    pub fn pulled(&mut self, id: u32, distance: Points) -> bool {
+        let Some(&node) = self.pulls.get(&id) else {
+            return false;
+        };
+        self.graph
+            .set(node, distance.0.max(0.0), &mut self.finished);
         true
     }
 

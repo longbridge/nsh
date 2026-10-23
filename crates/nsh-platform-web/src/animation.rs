@@ -30,6 +30,8 @@ pub(crate) struct UiAnimation {
     gestures: FxHashMap<u32, Gestures>,
     /// Scroll view id -> (value node, horizontal).
     scrolls: FxHashMap<u32, (NodeId, bool)>,
+    /// Vertical scroll view id -> pull value node.
+    pulls: FxHashMap<u32, NodeId>,
 }
 
 fn value_css(v: AnimationValue) -> String {
@@ -66,20 +68,32 @@ impl UiAnimation {
                 id,
                 horizontal,
                 scroll_value,
+                pull_value,
                 ..
-            } => match scroll_value {
-                Some(node) => {
-                    self.scrolls.insert(*id, (*node, *horizontal));
+            } => {
+                match scroll_value {
+                    Some(node) => {
+                        self.scrolls.insert(*id, (*node, *horizontal));
+                    }
+                    None => {
+                        self.scrolls.remove(id);
+                    }
                 }
-                None => {
-                    self.scrolls.remove(id);
+                match pull_value.filter(|_| !*horizontal) {
+                    Some(node) => {
+                        self.pulls.insert(*id, node);
+                    }
+                    None => {
+                        self.pulls.remove(id);
+                    }
                 }
-            },
+            }
             MountItem::Delete { id } => {
                 self.bindings.remove(id);
                 self.statics.remove(id);
                 self.gestures.remove(id);
                 self.scrolls.remove(id);
+                self.pulls.remove(id);
             }
             _ => {}
         }
@@ -100,6 +114,16 @@ impl UiAnimation {
         };
         self.graph
             .set(node, if horizontal { x } else { y }, &mut self.finished);
+        true
+    }
+
+    /// A vertical scroll view is pulled `distance` past its top: feeds its
+    /// pull value.
+    pub(crate) fn pulled(&mut self, id: u32, distance: f32) -> bool {
+        let Some(&node) = self.pulls.get(&id) else {
+            return false;
+        };
+        self.graph.set(node, distance.max(0.0), &mut self.finished);
         true
     }
 

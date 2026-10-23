@@ -267,6 +267,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 horizontal,
                 scrollbar_visible,
                 scroll_value,
+                pull_value,
                 keyboard_dismiss,
                 mirrored,
             } => {
@@ -285,6 +286,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     horizontal,
                     scrollbar_visible,
                     scroll_value,
+                    pull_value,
                     keyboard_dismiss,
                     mirrored,
                 });
@@ -369,6 +371,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.bool(b.bounces_zoom);
                 e.bool(b.pinch);
                 e.bool(b.center_content);
+                e.bool(b.refresh_indicator.is_some());
+                e.float(b.refresh_indicator.map_or(0.0, |h| h.0));
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 e.int(SCROLL_BY);
