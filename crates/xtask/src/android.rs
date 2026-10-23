@@ -11,8 +11,9 @@ use anyhow::{Context as _, bail};
 
 use crate::term;
 
-/// ABIs built by default.
-pub(crate) const ABIS: [&str; 2] = ["arm64-v8a", "x86_64"];
+/// ABIs built by default: phones' 64-bit and 32-bit processes, and the
+/// emulators of x86-64 hosts.
+pub(crate) const ABIS: [&str; 3] = ["arm64-v8a", "armeabi-v7a", "x86_64"];
 /// Minimum Android API level (Android 9): hardware-accelerated shadow
 /// layers and the `Typeface` weight API.
 pub(crate) const MIN_SDK: u32 = 28;
@@ -96,8 +97,9 @@ fn newest(dir: &Path) -> Option<PathBuf> {
 fn triple(abi: &str) -> anyhow::Result<&'static str> {
     Ok(match abi {
         "arm64-v8a" => "aarch64-linux-android",
+        "armeabi-v7a" => "armv7-linux-androideabi",
         "x86_64" => "x86_64-linux-android",
-        other => bail!("unsupported ABI {other} (64-bit only: arm64-v8a, x86_64)"),
+        other => bail!("unsupported ABI {other} (arm64-v8a, armeabi-v7a, x86_64)"),
     })
 }
 
@@ -144,12 +146,21 @@ pub(crate) fn build(release: bool, dev: bool, abis: &[String]) -> anyhow::Result
 }
 
 /// A cargo command set up to cross-compile for `triple` with the NDK.
+/// The NDK's name of `triple` in its compilers' names: ARMv7's is
+/// `armv7a-linux-androideabi`, the others are Rust's.
+fn clang_target(triple: &str) -> &str {
+    match triple {
+        "armv7-linux-androideabi" => "armv7a-linux-androideabi",
+        other => other,
+    }
+}
+
 fn ndk_cargo(sdk: &Sdk, triple: &str) -> Command {
     let toolchain = sdk.toolchain();
     let bin = toolchain.join("bin");
     // On Windows the NDK's per-target compilers are batch files.
     let script = if cfg!(windows) { ".cmd" } else { "" };
-    let clang = bin.join(format!("{triple}{MIN_SDK}-clang{script}"));
+    let clang = bin.join(format!("{}{MIN_SDK}-clang{script}", clang_target(triple)));
     let env_triple = triple.replace('-', "_");
     let mut cmd = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cmd.current_dir(root())

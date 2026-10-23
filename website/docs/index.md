@@ -142,7 +142,7 @@ A Rust app takes the same path from step 2 on, with its components running nativ
 | Platform | Status | Backend | Notes |
 |---|---|---|---|
 | iOS | Supported (iOS 15.0+) | UIKit | Devices and the simulator; embedded with `NativeShell.xcframework` ([iOS](./ios.md)) |
-| Android | Supported (API 28, Android 9+) | Android views | `arm64-v8a` and `x86_64`; embedded with `nsh.aar` ([Android](./android.md)) |
+| Android | Supported (API 28, Android 9+) | Android views | `arm64-v8a`, `armeabi-v7a` and `x86_64`; embedded with `nsh.aar` ([Android](./android.md)) |
 | macOS | Supported (macOS 14+) | AppKit | Standalone apps; embedded with `AppView` ([macOS](./macos.md)) |
 | Windows | Supported (Windows 10 1809+) | Win32, Direct2D | Standalone apps; embedded with `AppView` ([Windows](./windows.md)) |
 | Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |

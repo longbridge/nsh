@@ -7,8 +7,8 @@ group: platforms
 
 # Android
 
-NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`
-和 `x86_64`。现有应用在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们，这是主要用途。也可以运行和打包完整应用，方式与其他平台相同，Rust 和 TSX 编写的应用都可以。在
+NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`、
+`armeabi-v7a` 和 `x86_64`。现有应用在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们，这是主要用途。也可以运行和打包完整应用，方式与其他平台相同，Rust 和 TSX 编写的应用都可以。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求
@@ -64,7 +64,7 @@ dist/nsh/embed/android/nsh.aar       release: bundles and signed packages
 dist/nsh/embed/android/nsh-dev.aar   also connects to a `nsh dev` server
 ```
 
-AAR 包含 Java 运行时以及适用于 `arm64-v8a` 和 `x86_64` 的 `libnsh.so`（仅 64 位）。它声明了 `INTERNET`
+AAR 包含 Java 运行时以及适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的 `libnsh.so`。它声明了 `INTERNET`
 权限，要求 **API 28**（Android 9）或更高版本。
 
 把它加入应用模块，例如从 `libs` 文件夹引入：

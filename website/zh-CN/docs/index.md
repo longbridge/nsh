@@ -142,7 +142,7 @@ Rust 应用从第 2 步起走同样的路径，只是由它的组件以原生方
 | 平台 | 状态 | 后端 | 说明 |
 |---|---|---|---|
 | iOS | 已支持（iOS 15.0+） | UIKit | 真机和模拟器；通过 `NativeShell.xcframework` 嵌入（[iOS](./ios.md)） |
-| Android | 已支持（API 28，Android 9+） | Android 视图 | `arm64-v8a` 和 `x86_64`；通过 `nsh.aar` 嵌入（[Android](./android.md)） |
+| Android | 已支持（API 28，Android 9+） | Android 视图 | `arm64-v8a`、`armeabi-v7a` 和 `x86_64`；通过 `nsh.aar` 嵌入（[Android](./android.md)） |
 | macOS | 已支持（macOS 14+） | AppKit | 独立应用；通过 `AppView` 嵌入（[macOS](./macos.md)） |
 | Windows | 已支持（Windows 10 1809+） | Win32、Direct2D | 独立应用；通过 `AppView` 嵌入（[Windows](./windows.md)） |
 | Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |
