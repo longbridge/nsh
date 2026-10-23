@@ -100,7 +100,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `src` | `image(src)` | `string \| ImageAsset` | | The image. |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | `"cover"` | How the image fits its box. |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | `"cover"` | How the image fits its box: `"center"` shows it at its natural size, centered (CSS's `object-fit: none`); `"scale-down"` the same, shrunk to fit where it is larger. |
 | `placeholder` | `.placeholder(src)` | `string \| ImageAsset` | | Shown until `src` has loaded; best a local asset. |
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | Blurs the image by this radius in points (applied once while decoding, off the main thread). |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`, Android `300` | How long a loaded image fades in, in milliseconds. |

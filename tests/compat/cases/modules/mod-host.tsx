@@ -1,32 +1,32 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/host`
-// on the headless runtime, which runs the app without an embedding app: the
-// launch parameters are empty, a listener is added and removed, a post goes
-// nowhere and a call fails at once with the reason. Its script checks each.
+// on a platform without a host (the headless runtime's): `available()` is
+// false, a call rejects at once, and the root's host events reach
+// `host.on`'s listeners until they are removed. Its script checks each.
 import { Text, View, signal } from "nsh";
 import { host } from "nsh/host";
 
 function App() {
-  const calls = signal("not called");
-  const failed = signal("none");
+  const called = signal("not called");
+  const heard = signal<unknown[]>([]);
+  const sub = host.on("tick", (payload) => heard.update((h) => [...h, payload]));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
-      <Text>{`Params: ${Object.keys(host.params).length} ${typeof host.params}`}</Text>
-      <Text>{`Calls: ${calls()}`}</Text>
-      <Text>{`Call failed: ${failed()}`}</Text>
+      <Text>{`Host available: ${host.available()}`}</Text>
+      <Text>{`Host call: ${called()}`}</Text>
+      <Text testID="heard">{`Host heard: ${JSON.stringify(heard())}`}</Text>
       <View
         testID="call"
-        onPress={() => {
-          const off = host.on<{ id: string }>("conversation.open", ({ id }) => failed.set(`opened ${id}`));
-          off();
-          host.post("analytics", { screen: "home" });
-          host.call<{ name: string }>("profile", { id: 7 }).then(
-            (profile) => failed.set(`answered ${profile.name}`),
-            (e: Error) => failed.set(e.message),
-          );
-          calls.set(`${typeof off}, post done`);
-        }}
+        onPress={() =>
+          host.call("echo", { n: 1 }, { timeout: 1000 }).then(
+            (value) => called.set(`ok ${JSON.stringify(value)}`),
+            (e: Error) => called.set(`rejected ${e.message}`),
+          )
+        }
       >
         <Text>Call</Text>
+      </View>
+      <View testID="remove" onPress={() => sub.remove()}>
+        <Text>Remove</Text>
       </View>
     </View>
   );

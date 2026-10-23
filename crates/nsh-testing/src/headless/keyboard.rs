@@ -1,9 +1,10 @@
 //! The step `keyboard.press(<keys>)`: a key with its modifiers, as a
-//! hardware keyboard gives it. On a desktop platform (`open`'s
-//! `platform`) the app's shortcuts (`nsh/keymap`) take it first, as the
-//! platforms' keymaps do: the newest binding of the
-//! keystroke that fires where the focus is reports `onKeyCommand`. Else
-//! the focused input takes the keys that edit it, and Escape goes back.
+//! hardware keyboard gives it, on every platform (`open`'s `platform`: the
+//! phones and tablets have one too, a tablet's keyboard, a Chromebook's).
+//! The app's shortcuts (`nsh/keymap`) take it first, as the platforms'
+//! keymaps do: the newest binding of the keystroke that fires where the
+//! focus is reports `onKeyCommand`. Else the focused input takes the keys
+//! that edit it, and Escape goes back.
 
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
@@ -24,10 +25,11 @@ impl Headless {
         self.step(format!("keyboard.press({keys})"));
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
-        // Desktop platforms fire the app's shortcuts (`on_key`, `keymap.bind`).
+        // A hardware keyboard fires the app's shortcuts (`on_key`,
+        // `keymap.bind`), on every platform.
         let found = match self.screen.keymap() {
-            Some(keymap) if self.environment.desktop() => keymap.find(stroke, editing, false),
-            _ => KeyMatch::None,
+            Some(keymap) => keymap.find(stroke, editing, false),
+            None => KeyMatch::None,
         };
         if let KeyMatch::Fire(id) = found {
             self.engine.control().dispatch_event(

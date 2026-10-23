@@ -134,6 +134,11 @@ QuickJS bytecode is trusted input, so only load it from your own app's files. A 
 text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
 follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
+`AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
+in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
+(`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
+
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
 (`my_app::registry()`, which `#[native_module]` makes), so the TSX a view loads imports your Rust components and

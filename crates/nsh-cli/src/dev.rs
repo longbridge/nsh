@@ -66,7 +66,8 @@ impl DevSession {
         // --target web` builds it in a checkout).
         let rust_root = crate::rust_app::is_root(&entry);
         if let Ok(Some(runtime)) = crate::runtime::web(crate::runtime::WebKind::Dev, false) {
-            let (page, files) = crate::web::dev_host(&runtime, rust_root)?;
+            let (page, files) =
+                crate::web::with_page_host(crate::web::dev_host(&runtime, rust_root)?, &entry)?;
             server.serve_web(page, files);
         }
         let session = DevSession {

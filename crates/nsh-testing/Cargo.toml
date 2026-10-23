@@ -22,8 +22,9 @@ live = ["dep:ureq"]
 # hosts link it.
 agent = ["dep:nsh-dev", "dep:serde", "dep:serde_json", "dep:base64"]
 # `nsh test`'s side: the `nsh/test` module, test files on an engine of their
-# own (`run_file`) and apps' headless runners (`runner`): QuickJS.
-js = ["live", "nsh-engine/js", "dep:nsh-dev", "dep:base64", "dep:dunce", "dep:serde", "dep:serde_json", "dep:tokio"]
+# own (`run_file`) and apps' headless runners (`runner`): QuickJS, which also
+# runs the web page's host module (`page_host`).
+js = ["live", "nsh-engine/js", "dep:nsh-dev", "dep:base64", "dep:dunce", "dep:rquickjs", "dep:serde", "dep:serde_json", "dep:tokio"]
 # Building entries in this process (`compile_tsx`, `tsx`, `compiler`): nsh's
 # bundler. Off in apps' headless runners, which `nsh` builds the entries for.
 bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
@@ -39,6 +40,8 @@ crossbeam-channel.workspace = true
 dunce = { workspace = true, optional = true }
 log.workspace = true
 regex.workspace = true
+# The web page's host module of headless runs (`page_host`).
+rquickjs = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 # The requests routes' JS functions answer, waiting for the test file's VM.

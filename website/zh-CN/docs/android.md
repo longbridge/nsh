@@ -8,7 +8,7 @@ group: platforms
 # Android
 
 NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`
-和 `x86_64`。现有应用在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们，这是主要用途。也可以运行和打包完整应用，方式与其他平台相同，Rust 和 TSX 编写的应用都可以。在
+和 `x86_64`。用 Rust 和 TSX 编写的完整应用，运行和打包方式与其他平台相同；现有应用也可以在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。在
 Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求
@@ -160,13 +160,14 @@ setContentView(column);
 | `setGrantedCapabilities(String json)` | 接下来加载的应用最多能做什么，JSON 格式与 `nsh.json` 的 `capabilities` 相同；`null` 表示授予每个应用所声明的能力。授权无效时返回 `false`（并被忽略）。 |
 | `setLocale(Locale locale)` | 代替用户设置的语言和地区：`Intl`、`locale()` 和组件立即跟随，此后加载的应用也从它开始。`null` 跟随系统。 |
 | `setFontScale(float scale)` | 代替系统字体大小的文字大小（1 为默认）：文字和输入框按它重新排版，`fontScale()` 读到它，立即生效，此后加载的应用也一样；长度保持原样。`0` 跟随系统。 |
+| `setThemeOverrides(String json)` | 把宿主的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件。其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变。立即生效，并作用于之后加载的应用；`null` 恢复应用自己的主题。文件无法解析时抛出 `IllegalArgumentException`。 |
 | `setStorageDirectory(File dir)` | 接下来加载的应用保存其[存储](../modules/nsh-storage.md)的目录；`null`：应用私有目录内的 `files/nsh/<app id>`，按应用自己的 id。 |
 | `loadAssetBundle(String dir)` | 运行 APK assets 中的 `dir/bundle.nshc`；应用资源取自 `dir/assets/`。无法读取时返回 `false`（也会报告给错误监听器）。 |
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
 | `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`nsh/host`](../modules/nsh-host.md)）。不是 JSON 对象时返回 `false`。 |
-| `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用。 |
+| `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用；`destroy()` 后返回 `false`。 |
 | `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
 | `connectDevServer(String url)` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用 release 版 AAR 时返回 `false`。 |
 | `handleBack()` | 让应用处理返回键（关闭对话框、弹出页面、执行 `BackHandler` 监听器）；返回它是否处理了。 |
@@ -222,6 +223,19 @@ nsh.handle("user.profile") { data, reply ->
 ```
 
 处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
+## 主题覆盖
+
+嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：
+
+```java
+nsh.setThemeOverrides("{ \"cssVars\": {"
+        + " \"theme\": { \"radius\": \"0.75rem\" },"
+        + " \"light\": { \"primary\": \"#e11d48\", \"primary-foreground\": \"#ffffff\" },"
+        + " \"dark\": { \"primary\": \"#fb7185\", \"primary-foreground\": \"#1c1917\" } } }");
+nsh.loadAssetBundle("orders");
+```
+
+在加载之前或之后调用都可以：`bg-primary`、`rounded-(--radius)` 等类名立即更新样式，之后加载的每个应用在第一帧就带有这些覆盖。`setThemeOverrides(null)` 恢复应用自己的主题。
 
 ## 应用打开的链接
 

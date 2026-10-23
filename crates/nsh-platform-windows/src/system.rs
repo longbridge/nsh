@@ -500,6 +500,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             EventKind::Clipboard,
             clipboard::files_answer(*id, &clipboard_files()),
         ),
+        Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
         Command::OpenUrl { id, url } => {
             let opened = open_url(url);
             surface.event(

@@ -527,6 +527,7 @@ pub(crate) fn start_with(
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

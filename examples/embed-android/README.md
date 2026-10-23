@@ -31,6 +31,14 @@ nsh.send("message", Map.of("text", "Hello"));                      // `host.on("
 
 Handlers run on the UI thread and answer once, now or later from any thread (`reply.resolve`, `reply.reject`).
 
+Theme overrides: "Brand" puts the host's brand over the app's theme. The tokens of a theme file
+(`nsh.json`'s `"theme"` format) win over the app's of the same names, light and dark, and
+classes such as `bg-primary` restyle at once; `null` gives the app its own theme back:
+
+```java
+nsh.setThemeOverrides("{ \"cssVars\": { \"light\": { \"primary\": \"#e11d48\" } } }");
+```
+
 Signed packages (`nsh publish`; see `docs/dev/signed-packages.md`), e.g. updates the app
 downloads: verify off the UI thread, then run on it.
 

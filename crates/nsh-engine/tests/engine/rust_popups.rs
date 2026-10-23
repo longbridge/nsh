@@ -54,6 +54,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

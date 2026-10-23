@@ -32,6 +32,7 @@ pub mod navigation;
 pub mod open_url;
 mod ops;
 pub mod overlay;
+pub mod picker;
 pub mod platform;
 mod props;
 pub mod reactive;

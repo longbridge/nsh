@@ -59,6 +59,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         pinned: Default::default(),
         clipboard: None,
         host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx

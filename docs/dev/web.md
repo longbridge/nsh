@@ -61,7 +61,8 @@ build to the same file) and takes `nsh.js` from the crate.
   bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
   sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
   with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
-  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
+  (`web::font_loads`). With `nsh.json` `web.host` the page also imports `host.<digest>.js` and passes `createPlayer` a
+  `host` (Platform services). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
   (`appId`: the `nsh.json` id, the page's `app.id`; a Rust app's root carries its own), without `limits`: a published
   app runs on its own, with none (`sandbox.md`); an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
@@ -81,7 +82,10 @@ build to the same file) and takes `nsh.js` from the crate.
   `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it runs
   each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
-  reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
+  reads fonts with a synchronous `XMLHttpRequest` from `/assets/`. With `nsh.json` `web.host` it imports the module
+  (`web::with_page_host` serves it as `nsh-host.js`, read when the session starts, checked as `nsh package` checks it)
+  and runs its `createHost(player)` before the first bundle, as a published page does; `nsh test --target web` serves
+  each app's the same way (headless `nsh test` runs the module itself: `docs/dev/tooling.md` "Headless runs").
 - **Tests** (`nsh test --target web`, `docs/dev/tooling.md` "On a real platform"): the CLI opens the development host
   in a headless Chromium browser it drives over the DevTools protocol (`nsh-cli/src/cdp.rs`, `test_web.rs`). When the
   server's hello says `test`, the page calls `player.testStart()` (`nsh_test_start`): from the next bundle on, every
@@ -609,9 +613,33 @@ pointer, touch or key takes it over.
   deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
   gesture (a warning says so).
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
+- **The host** (`nsh/host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
+  `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
+  the id written whole, not rounded as `num` would), and `nsh.js` `hostCall` answers every one with `onHost`
+  `{ type: "reply", id, ok, value?, error? }` (`EventPayload::Json`, `nsh_event`): `ok: false` with the error's message when the page has no host, `call` throws or
+  its promise rejects, or the result is not JSON, since the app's call waits until it is answered. The page sends
+  events with `player.hostEvent(event, payload)` (`onHost` `{ type: "event", event, payload }`; one `EventKind` for
+  both keeps the kinds within `EventMask`'s 64 bits): the payload is serialized at once (a payload that is
+  not JSON throws to the page, not inside a deferred engine call where it would drop the calls queued after it), and
+  events sent before the app runs are queued and delivered in order right after `begin` starts it, so its top-level
+  `host.on` listeners get them (no replay to listeners registered later); every `begin` queues again until the new app
+  has started, and a start that throws (a trap) drops the queue and the events sent after it. `web/nsh.test.mjs`
+  tests `hostCall` and this queue on a fake engine (`node --test crates/nsh-platform-web/web/nsh.test.mjs`).
+  `Environment::host` is set when the player has a `host` (`nsh_environment`'s `host`, read at start only).
+  `nsh package --target web` copies `nsh.json` `web.host` (a JS module relative to `nsh.json`, `package::WebConfig`; `package::web_host_module` requires it inside the app's
+  directory once symbolic links are resolved, as `nsh test` does) as `host.<digest>.js`; the page imports it alongside the
+  runtime and runs its `createHost(player)` once the player exists, before `run`, and its `host` option forwards to
+  what that returns (no callable `call`: the page's "could not be loaded" error). The host module shares the page's
+  CSP: an app restricting `network` gets a `connect-src` of `'self'`, its `capabilities.network` and `web.connect`
+  (`package::WebConfig::connect`, host patterns checked as `HostPattern`s, which keeps any CSP syntax out:
+  `web::page_connect`). `web.connect` is the page's alone: the core checks the app's requests against its
+  capabilities before `fetch` sees them, so only the redirect hops CSP guards widen with it. The module is copied as it
+  is: its own imports are absolute URLs.
+  Headless `nsh test` runs the same module for each app a test opens (`nsh_testing` `page_host.rs`,
+  `docs/dev/tooling.md` "Headless runs").
 
 ## Not implemented
 
-Platform services other than the theme color, toasts, dialogs and the clipboard; image download progress; a web
+Platform services other than the theme color, toasts, dialogs, the clipboard and the host; image download progress; a web
 view's events and commands for pages of other sites (beyond `postMessage` and loads), user agents. A published app
 ships no source map.

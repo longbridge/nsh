@@ -90,6 +90,8 @@ public class NshView extends FrameLayout {
     private final java.util.Map<String, HostHandler> hostHandlers = new java.util.concurrent.ConcurrentHashMap<>();
 
     long handle;
+    /** Serializes background sends with releasing the native handle. */
+    private final Object hostLock = new Object();
     private final float density;
     private final Box root;
     private final Mounter mounter;
@@ -102,6 +104,45 @@ public class NshView extends FrameLayout {
         // no view takes it.
         return super.dispatchTouchEvent(e) || tracking;
     }
+
+    /**
+     * A hardware keyboard's keys go to the app's shortcuts ({@code nsh/keymap}) before the focused view
+     * gets them: a key a binding takes is consumed, with its release (the input never sees it).
+     */
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        if (handle != 0) {
+            int action = e.getAction();
+            if (action == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+                return true;
+            } else if (action == android.view.KeyEvent.ACTION_UP && Native.keyUp(handle, e.getKeyCode())) {
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /**
+     * Keys with Control come as shortcuts first (the window's input stage offers them before the key
+     * event, and a text field selects all, copies or pastes there): the app's shortcuts take them first.
+     */
+    @Override
+    public boolean dispatchKeyShortcutEvent(android.view.KeyEvent e) {
+        if (handle != 0 && e.getAction() == android.view.KeyEvent.ACTION_DOWN && keymapKey(e)) {
+            return true;
+        }
+        return super.dispatchKeyShortcutEvent(e);
+    }
+
+    /** Whether the app's shortcuts take key press {@code e}. */
+    private boolean keymapKey(android.view.KeyEvent e) {
+        // An input or hosted view (a web view, a native component) has the focus: in text.
+        View focus = findFocus();
+        boolean editing = focus != null && focus != this;
+        return Native.keyDown(handle, e.getKeyCode(), e.getUnicodeChar(0), e.getMetaState(),
+                e.getRepeatCount() > 0, editing);
+    }
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private ErrorListener errorListener;
     /** Where `asset:/…` files come from: an http base, a directory, or APK assets. */
@@ -212,6 +253,28 @@ public class NshView extends FrameLayout {
      */
     public void setStorageDirectory(File dir) {
         Native.setStorage(handle, dir == null ? null : dir.getPath());
+    }
+
+    /**
+     * Overrides the app's theme with the host's: a theme file of shadcn/ui's
+     * ({@code { "cssVars": { "theme": {…}, "light": {…}, "dark": {…} } }},
+     * values as CSS writes them, the format of {@code nsh.json}'s
+     * {@code "theme"}). Its tokens win over the app's of the same names, in
+     * light and dark mode; the app's others stay, so a branded host sets only
+     * what its brand changes ({@code primary}, {@code radius}, ...). Call it
+     * before or after loading: it applies at once (classes such as
+     * {@code bg-primary} are resolved again) and to every app loaded later,
+     * from its first frame. Main thread.
+     *
+     * @param json the theme file, or null to give the app its own theme back
+     * @throws IllegalArgumentException when the file does not parse; the
+     *     overrides then stay as they were
+     */
+    public void setThemeOverrides(String json) {
+        String error = Native.setThemeOverrides(handle, json);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
     }
 
     /** The contents of {@code file}, or null when it does not exist. */
@@ -376,11 +439,16 @@ public class NshView extends FrameLayout {
      *
      * @param name the event
      * @param data JSON as Java objects (see {@link HostHandler#handle}), or null
-     * @return false when the name or the data is invalid
+     * @return false when the view was destroyed, or the name or data is invalid
      */
     public boolean send(String name, Object data) {
-        if (handle == 0 || name == null) return false;
-        return Native.sendHostEvent(handle, name, data == null ? null : Json.stringify(data));
+        if (name == null) return false;
+        // Serialization may call the host's own code. Finish it before
+        // taking the lock and reading the view's current handle.
+        String json = data == null ? null : Json.stringify(data);
+        synchronized (hostLock) {
+            return handle != 0 && Native.sendHostEvent(handle, name, json);
+        }
     }
 
     /**
@@ -462,10 +530,14 @@ public class NshView extends FrameLayout {
      * native components. The view can no longer be used.
      */
     public void destroy() {
-        if (handle != 0) {
-            Native.destroy(handle);
+        long taken;
+        synchronized (hostLock) {
+            taken = handle;
             handle = 0;
         }
+        // A send already in JNI finished before the handle was taken.
+        // Joining the engine needs no Java lock.
+        if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
     }
 

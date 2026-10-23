@@ -8,10 +8,13 @@ the look of the UI nsh draws.
 ## Principles
 
 1. **Say what it is, immediately.** The headline states the purpose in plain
-   words: AI-generated UI, native in your app. nsh is a layer inside native
-   apps (AI-generated and dynamically delivered UI first, plugins second,
-   standalone apps third), never presented as a way to write whole apps, and
-   never compared with other frameworks outside the comparison page. Architecture comes further down.
+   words: a native UI framework for every platform — one app, native on
+   each. The home page follows the positioning in that order: what native
+   means (the platform's foundations and its interaction), cross-platform
+   from phone to desktop to the web, Rust first with TSX beside it, the
+   foundations, then the ways to ship (standalone apps first, dynamically
+   delivered and AI-generated UI on the same engine). Other frameworks are
+   named only on the comparison page. Architecture comes further down.
 2. **Show the real thing.** The hero runs the gallery's AI chat
    (`demos/home-chat.tsx`, its files in `demos/hero-chat/`, copied from
    `examples/gallery`) live on the web player: it plays one scenario on
