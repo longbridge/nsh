@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The gallery's frame rate, CPU and memory, page by page, on this desktop.
 
-Opens the gallery in the platform's window (`nsh test --target <linux|macos>
---fps`), visits every demo, lets it run idle and scrolls it, and reads the
+Opens the gallery in the platform's window (`nsh test --target
+<linux|macos|windows|ios> --fps`), visits every demo, lets it run idle and scrolls it, and reads the
 performance monitor's line of every second (`nsh::perf`). Prints a table per
 scenario and writes the readings as JSON:
 
@@ -14,8 +14,9 @@ the frames drawn per second (0 for a page with nothing moving), `moving` the
 rate while something moves (one frame per median gap between drawn frames), `frame p95`
 the main thread's time per drawn frame and `over` the share of frames longer
 than a 120 Hz refresh (8.3 ms); `cpu` is the process' (percent of one core),
-`gpu` its share of the GPU (macOS) and `mem` its memory (Linux: resident,
-macOS: physical footprint); then the platform's frame phases (mean ms).
+`gpu` its share of the GPU (macOS) and `mem` its memory (Linux and Windows:
+resident, macOS: physical footprint); then the platform's frame phases (mean
+ms).
 """
 
 import argparse
@@ -39,7 +40,7 @@ DEMOS = [
 # One second's `nsh::perf` line: the fields both desktops log, and between
 # `over` and `commits` the platform's frame phases as `name mean/p50/p95/max`
 # (Linux: update, layout, paint, snapshot, canvas, drain; macOS: tick,
-# drain, canvas).
+# drain, canvas; Windows: tick, drain, paint, present, canvas).
 LINE = re.compile(
     r"fps (?P<fps>\d+)/(?P<hz>\d+) frame (?P<frame>[\d./]+) gap (?P<gap>[\d./]+) over (?P<over>\d+)% "
     r"(?P<phases>.*?) ?commits (?P<commits>\d+) js (?P<js>[\d./]+) core (?P<core>[\d./]+) "
@@ -95,8 +96,10 @@ def summary(stat: str) -> list[float]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--nsh", default=str(GALLERY.parent.parent / "target/release/nsh"))
-    parser.add_argument("--target", default="linux" if sys.platform.startswith("linux") else "macos")
+    exe = ".exe" if sys.platform == "win32" else ""
+    parser.add_argument("--nsh", default=str(GALLERY.parent.parent / f"target/release/nsh{exe}"))
+    native = {"linux": "linux", "win32": "windows"}
+    parser.add_argument("--target", default=next((t for p, t in native.items() if sys.platform.startswith(p)), "macos"))
     parser.add_argument("--only", help="comma-separated demos (default: all)")
     parser.add_argument("--seconds", type=int, default=4)
     parser.add_argument("--size", default="1200x800", help="the window, WxH in points")

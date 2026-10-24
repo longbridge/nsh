@@ -283,6 +283,14 @@ pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
 
 /// Draws a canvas: records it first if needed.
 pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
+    let started = crate::fps::measuring().then(std::time::Instant::now);
+    draw_canvas(cx, state);
+    if let Some(started) = started {
+        crate::fps::drew_canvas(started.elapsed());
+    }
+}
+
+fn draw_canvas(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(canvas) = state.canvas.as_ref() else {
         return;
     };

@@ -145,6 +145,8 @@ pub(crate) struct Surface {
     pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
+    /// The performance monitor, while it measures ([`crate::fps`]).
+    fps: RefCell<Option<Rc<crate::fps::Fps>>>,
     /// Paces animation frames while something animates.
     ticker: RefCell<Option<crate::window::Ticker>>,
     /// Extra frame clients (transitions, glides, spinners): called on every
@@ -204,6 +206,7 @@ impl Surface {
             scale: Cell::new(1.0),
             pixels: Cell::new((0, 0)),
             swap: RefCell::new(None),
+            fps: RefCell::new(None),
             target_scale: Cell::new(0.0),
             invalid: Cell::new(false),
             environment: Cell::new(environment),
@@ -287,6 +290,24 @@ impl Surface {
         self.epoch.elapsed().as_secs_f64()
     }
 
+    /// Measures the surface's frames and commits from now on; one
+    /// `nsh::perf` line a second ([`crate::fps`]). The ticker then runs on
+    /// every refresh.
+    pub(crate) fn enable_fps(self: &Rc<Self>) {
+        if self.fps.borrow().is_some() {
+            return;
+        }
+        let fps = Rc::new(crate::fps::Fps::new());
+        self.control(|c| c.set_perf_monitor(Some(fps.monitor.clone())));
+        *self.fps.borrow_mut() = Some(fps);
+        self.ensure_ticking();
+    }
+
+    /// The performance monitor, while one measures.
+    pub(crate) fn fps(&self) -> Option<Rc<crate::fps::Fps>> {
+        self.fps.borrow().clone()
+    }
+
     /// Starts `config`'s app, replacing what ran.
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();
@@ -323,6 +344,9 @@ impl Surface {
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
+                }
+                if let Some(fps) = &*self.fps.borrow() {
+                    engine.control().set_perf_monitor(Some(fps.monitor.clone()));
                 }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
@@ -504,6 +528,11 @@ impl Surface {
 
     /// Applies what the engine sent (`WM_NSH_WAKE`).
     pub(crate) fn drain(self: &Rc<Self>) {
+        let started = self
+            .fps
+            .borrow()
+            .as_ref()
+            .map(|_| std::time::Instant::now());
         self.pending.borrow().store(false, Ordering::Release);
         let messages: Vec<Message> = match &*self.rx.borrow() {
             Some(rx) => rx.try_iter().collect(),
@@ -538,6 +567,9 @@ impl Surface {
             self.write_animations();
         }
         self.ensure_ticking();
+        if let (Some(started), Some(fps)) = (started, self.fps()) {
+            fps.drained(started.elapsed(), applied);
+        }
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {
@@ -596,7 +628,8 @@ impl Surface {
     }
 
     fn wants_frames(&self) -> bool {
-        self.js_frame.get()
+        self.fps.borrow().is_some()
+            || self.js_frame.get()
             || self.anim.borrow().animating()
             || !self.frame_clients.borrow().is_empty()
     }
@@ -615,6 +648,14 @@ impl Surface {
 
     /// One frame of the ticker (`WM_NSH_TICK`).
     pub(crate) fn tick(self: &Rc<Self>) {
+        let started = self
+            .fps
+            .borrow()
+            .as_ref()
+            .map(|_| std::time::Instant::now());
+        let moved = self.anim.borrow().animating()
+            || self.js_frame.get()
+            || !self.frame_clients.borrow().is_empty();
         let now = self.clock();
         self.now.set(now);
         if self.anim.borrow().animating() {
@@ -636,6 +677,9 @@ impl Surface {
             } else {
                 t.pause();
             }
+        }
+        if let (Some(started), Some(fps)) = (started, self.fps()) {
+            fps.ticked(started.elapsed(), moved);
         }
     }
 }

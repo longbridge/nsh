@@ -139,9 +139,14 @@ pub(crate) fn run(
     window: HostWindow<'_>,
 ) -> anyhow::Result<()> {
     let HostFlags { limits, trace, fps } = flags;
-    if fps && !matches!(target, Target::Macos | Target::Linux | Target::Ios) {
+    if fps
+        && !matches!(
+            target,
+            Target::Macos | Target::Linux | Target::Ios | Target::Windows
+        )
+    {
         bail!(
-            "--fps needs --target macos, linux or ios (the other hosts have no performance monitor yet)"
+            "--fps needs --target macos, linux, windows or ios (the other hosts have no performance monitor yet)"
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;

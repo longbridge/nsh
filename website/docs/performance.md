@@ -235,8 +235,9 @@ nsh run App.tsx --target macos --fps --release
 ```
 
 (`AppOptions { fps: true, .. }` in a Rust app's `run_app`) shows the frame rate and what frames and commits cost over the running app, with CPU, GPU and memory
-([macOS: performance monitor](./macos.md#performance-monitor)). On Linux, `--target linux --fps` logs the same readings once a
-second, with the time of each phase of a frame; `nsh test --target linux --fps -v` takes them while a test drives the app.
+([macOS: performance monitor](./macos.md#performance-monitor)). On Linux and Windows, `--target linux --fps` and
+`--target windows --fps` log the same readings once a second, with the time of each phase of a frame;
+`nsh test --target linux --fps -v` (or `windows`) takes them while a test drives the app.
 
 > [!TIP]
 > Single measurements are dominated by the CPU's clock state: a thread that just slept runs slower for a while.

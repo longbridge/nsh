@@ -221,8 +221,8 @@ nsh run App.tsx --target android --trace --release
 nsh run App.tsx --target macos --fps --release
 ```
 
-（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。在 Linux 上，`--target linux --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时；
-`nsh test --target linux --fps -v` 可以在测试驱动应用时采集这些读数。
+（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`）会在运行中的应用上方显示帧率、每帧和每次 commit 的开销，以及 CPU、GPU 和内存（[macOS：性能监视器](./macos.md#性能监视器)）。在 Linux 和 Windows 上，`--target linux --fps` 和 `--target windows --fps` 每秒输出一行同样的读数，并给出一帧中每个阶段的耗时；
+`nsh test --target linux --fps -v`（或 `windows`）可以在测试驱动应用时采集这些读数。
 
 > [!TIP]
 > 单次测量主要受 CPU 时钟状态影响：刚刚休眠过的线程会在一段时间内运行得更慢。请在同一台机器上比较多次运行的最小值，

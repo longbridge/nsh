@@ -153,7 +153,8 @@ enum Command {
         trace: bool,
         /// Log the performance monitor's readings of the apps the tests
         /// open, once a second: frame rate, frame and commit costs, CPU,
-        /// memory (`--target linux`, `macos` or `ios`; shown with `-v`).
+        /// memory (`--target linux`, `macos`, `windows` or `ios`; shown with
+        /// `-v`).
         #[arg(long)]
         fps: bool,
         /// Also write the results to this file as a JUnit XML report, the
@@ -254,7 +255,8 @@ enum Command {
         trace: bool,
         /// Show the performance monitor over the app: frame rate, frame and
         /// commit costs, CPU, GPU, memory (`--target macos`, which also logs
-        /// its readings once a second; `--target linux` and `ios` log them).
+        /// its readings once a second; `--target linux`, `windows` and `ios`
+        /// log them).
         #[arg(long)]
         fps: bool,
         /// Where to run.

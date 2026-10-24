@@ -194,8 +194,26 @@ echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await 
 ```
 
 The host takes `--bundle <path>` to run a build (`nsh build`) without a dev server; without it it connects to the dev
-server on this machine (`--dev-server ws://…/ws` names another); `--trace` logs per-commit timings; `--data-dir <dir>`
+server on this machine (`--dev-server ws://…/ws` names another); `--trace` logs per-commit timings; `--fps` the
+performance monitor's readings once a second ("Performance"); `--data-dir <dir>`
 keeps the apps' data there (`nsh test` gives each app a fresh one). Timers are Win32's (~15.6 ms granularity).
+
+## Performance: `--fps`
+
+`nsh-windows-host --fps` (`nsh run --target windows --fps`, `nsh test --target windows --fps`; `AppOptions::fps`)
+logs one `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`), in the Linux and macOS
+backends' shape: frames shown over the compositor's rate (`DwmGetCompositionTimingInfo`), the main thread's time per
+shown frame and its phases (`tick`: the ticker's animations and frame callbacks; `drain`: batches applied as they
+arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:
+`Present`, which waits for the vertical blank and is not counted as work), the engine's commits, its busy share, and
+the process' CPU (`GetProcessTimes`) and working set. While it measures, the ticker runs on every refresh: its ticks
+close the frames. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
+Windows).
+
+A window is drawn whole on every frame (the swap chain is `FLIP_DISCARD`): what a frame costs grows with what the
+window shows, ~2.7 ms of `paint` for the gallery's Stocks page (~690 views) at 1200 × 800 points on a 150% display, and
+~1–2 ms for most pages. Three things keep it down: canvases record their animated tail only (see the table above),
+views without content of their own push no clip, and the children of a clipping view out of sight are not drawn.
 
 ## Not implemented, or different
 

@@ -37,8 +37,13 @@ pub(crate) fn starter(
     if browser.is_some() && target != Target::Web {
         anyhow::bail!("--browser goes with --target web");
     }
-    if fps && !matches!(target, Target::Linux | Target::Macos | Target::Ios) {
-        anyhow::bail!("--fps goes with --target linux, macos or ios");
+    if fps
+        && !matches!(
+            target,
+            Target::Linux | Target::Macos | Target::Windows | Target::Ios
+        )
+    {
+        anyhow::bail!("--fps goes with --target linux, macos, windows or ios");
     }
     match target {
         Target::Web => return crate::test_web::starter(browser),

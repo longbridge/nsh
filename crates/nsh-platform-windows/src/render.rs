@@ -1060,7 +1060,10 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
     // Only a window with web views has a composition: without one the
     // frame is the one swap chain, drawn and presented as always.
     let composition = surface.composition();
+    let fps = surface.fps();
+    let started = fps.as_ref().map(|_| std::time::Instant::now());
     let drawn = draw_into(surface, &gfx, &target, scale, false, composition.as_deref());
+    let painted = started.map(|s| s.elapsed());
     match drawn {
         Ok(drawn) => {
             if let Some(c) = &composition
@@ -1071,11 +1074,15 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
                 device_lost(surface);
                 return;
             }
+            let shown = std::time::Instant::now();
             if let Err(err) = chain.present() {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
                 return;
+            }
+            if let (Some(fps), Some(painted)) = (&fps, painted) {
+                fps.painted(painted, shown.elapsed());
             }
             drop(swap);
             surface.items_placed(drawn.items);
@@ -1327,15 +1334,6 @@ mod tests {
     }
 
     #[test]
-    fn a_layer_covers_the_bounds_and_the_shadow() {
-        let v = dot(None, 2);
-        assert_eq!(area(&v), (-1.0, -1.0, 17.0, 17.0));
-        // React Native's shadow: offset (0, -3), radius 3.
-        v.state_mut().style.shadow.opacity = 1.0;
-        assert_eq!(area(&v), (-13.0, -13.0, 29.0, 29.0));
-    }
-
-    #[test]
     fn children_outside_the_visible_area_are_hidden() {
         let visible = rect_f(0.0, 0.0, 100.0, 100.0);
         let hidden = |v: &NshView, y: f32| hidden_by_clips(v, Mat4::new(), (0.0, y), &visible);
@@ -1362,6 +1360,15 @@ mod tests {
             .transform
             .push(TransformKind::TranslateY, -150.0);
         assert!(!hidden(&moved, 200.0));
+    }
+
+    #[test]
+    fn a_layer_covers_the_bounds_and_the_shadow() {
+        let v = dot(None, 2);
+        assert_eq!(area(&v), (-1.0, -1.0, 17.0, 17.0));
+        // React Native's shadow: offset (0, -3), radius 3.
+        v.state_mut().style.shadow.opacity = 1.0;
+        assert_eq!(area(&v), (-13.0, -13.0, 29.0, 29.0));
     }
 
     #[test]
