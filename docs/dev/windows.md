@@ -67,7 +67,10 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   (`ViewState::natives`: text editors, alerts, overlays, videos — the `Hosted` trait), the scroll
   indicator, then the border, all inside an opacity layer when translucent (bounded by the area the subtree draws in:
   an unbounded layer is a surface as large as the clip around it, often the window; a view that paints only its
-  background color fades the color instead, with no layer). Transforms are CSS-like 4x4 matrices
+  background color fades the color instead, with no layer). A view's content clip is pushed only when it has content
+  (text, an image, a canvas). The children of a clipping view (a scroll view's content) whose drawn area
+  (`drawn_area`: bounds, shadows, outlines, transformed children) lies outside what the window and the clips leave
+  visible are not drawn (`hidden_by_clips`, in the window's pass only). Transforms are CSS-like 4x4 matrices
   (`geom.rs`); affine ones are Direct2D's 3x2 world transform, projective ones (perspective) draw the subtree into an
   offscreen bitmap mapped with `DrawBitmap`'s perspective transform. Units are points: the device context's DPI is
   the window's (the process is per-monitor DPI aware, v2).

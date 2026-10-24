@@ -159,6 +159,11 @@ pub(crate) struct DrawCx<'a> {
     /// The clip of the passes around this one (DIPs of the window), for
     /// a pass drawn offscreen in window coordinates.
     clip_base: Option<D2D_RECT_F>,
+    /// The window's bounds (DIPs) in the window's pass: the children of a
+    /// clipping view that fall outside what is visible are not drawn
+    /// ([`hidden_by_clips`]). `None` in passes drawn offscreen, which
+    /// draw everything.
+    pub(crate) window: Option<D2D_RECT_F>,
 }
 
 /// A composed item reached by a pass.
@@ -221,6 +226,7 @@ impl<'a> DrawCx<'a> {
             composed: Vec::new(),
             split: None,
             clip_base: None,
+            window: None,
         })
     }
 
@@ -242,6 +248,19 @@ impl<'a> DrawCx<'a> {
         cx.alpha = self.alpha;
         cx.clip_base = Some(self.clip_bounds());
         Ok(cx)
+    }
+
+    /// What the window and the clips pushed so far leave visible (DIPs of
+    /// the window), in the window's pass.
+    fn visible(&self) -> Option<D2D_RECT_F> {
+        let window = self.window?;
+        let clip = self.clip_bounds();
+        Some(D2D_RECT_F {
+            left: window.left.max(clip.left),
+            top: window.top.max(clip.top),
+            right: window.right.min(clip.right),
+            bottom: window.bottom.min(clip.bottom),
+        })
     }
 
     /// What the clips pushed so far leave visible, in DIPs of the target
@@ -703,6 +722,33 @@ fn paints_one_shape(view: &NshView, state: &ViewState) -> bool {
         && view.with_children(<[NshView]>::is_empty)
 }
 
+/// True if `view`, placed at `origin` in its parent drawn at `world`,
+/// draws nothing inside `visible` (window DIPs): what its subtree covers
+/// ([`drawn_area`], with its shadows, outlines and transforms) lies
+/// outside. False when that area is not known.
+fn hidden_by_clips(view: &NshView, world: Mat4, origin: (f32, f32), visible: &D2D_RECT_F) -> bool {
+    let local = {
+        let s = view.state();
+        let mut local = Mat4::new().translate(origin.0, origin.1);
+        if let Some(t) = s.transform() {
+            local = Mat4::mul(&t, &local);
+        }
+        local
+    };
+    let world = Mat4::mul(&local, &world);
+    if !world.is_affine() {
+        return false;
+    }
+    let Some(area) = drawn_area(view) else {
+        return false;
+    };
+    let b = crate::compose::map_bounds(&world.to_3x2(), &area);
+    b.right <= visible.left
+        || b.left >= visible.right
+        || b.bottom <= visible.top
+        || b.top >= visible.bottom
+}
+
 /// The area `view` and its subtree draw in, in its coordinates: its
 /// bounds, out by its shadows and outline, with what its children draw
 /// unless it clips them. `None` when that is not known: an item it hosts
@@ -765,27 +811,39 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     crate::decor::draw_background(cx, &state);
     let clip = state.clips();
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
+    // Most views (boxes, rows) have no content of their own: no clip for it.
+    let content = state.text.is_some() || state.image.is_some() || state.canvas.is_some();
     if clip {
         cx.push_clip_rounded(crate::geom::rect(0.0, 0.0, w, h), state.radii());
-    } else {
+    } else if content {
         // The view's own content stays inside it, as a UIKit view's drawing
         // stays in its backing store.
         cx.push_clip_rect(0.0, 0.0, w, h);
     }
-    crate::text::draw(cx, &state);
-    crate::image::draw(cx, &state);
-    crate::canvas::draw(cx, &state);
-    if !clip {
+    if content {
+        crate::text::draw(cx, &state);
+        crate::image::draw(cx, &state);
+        crate::canvas::draw(cx, &state);
+    }
+    if !clip && content {
         cx.pop();
     }
     let natives = state.natives.clone();
     drop(state);
+    // Inside a clip (a scroll view's content), children out of sight are
+    // left out: drawing them would issue their commands for nothing.
+    let visible = if clip { cx.visible() } else { None };
     view.with_children(|children| {
         for child in children {
             let origin = {
                 let s = child.state();
                 view.state().child_origin(s.frame, s.shift)
             };
+            if let Some(visible) = &visible
+                && hidden_by_clips(child, world, origin, visible)
+            {
+                continue;
+            }
             draw_view(cx, child, world, origin);
         }
     });
@@ -1079,6 +1137,8 @@ fn draw_into(
         }
     };
     cx.offscreen = offscreen;
+    let (w, h) = surface.size();
+    cx.window = Some(rect_f(0.0, 0.0, w, h));
     cx.split = composition.map(|composition| Split {
         composition,
         size: surface.pixel_size(),
@@ -1273,6 +1333,35 @@ mod tests {
         // React Native's shadow: offset (0, -3), radius 3.
         v.state_mut().style.shadow.opacity = 1.0;
         assert_eq!(area(&v), (-13.0, -13.0, 29.0, 29.0));
+    }
+
+    #[test]
+    fn children_outside_the_visible_area_are_hidden() {
+        let visible = rect_f(0.0, 0.0, 100.0, 100.0);
+        let hidden = |v: &NshView, y: f32| hidden_by_clips(v, Mat4::new(), (0.0, y), &visible);
+        let row = view(None, 2, ViewKind::View, rect(0.0, 0.0, 100.0, 40.0));
+        assert!(!hidden(&row, 0.0));
+        assert!(!hidden(&row, 80.0));
+        // Below the visible area, and above it.
+        assert!(hidden(&row, 120.0));
+        assert!(hidden(&row, -60.0));
+        // Its shadow reaches in.
+        row.state_mut().style.shadow.opacity = 1.0;
+        row.state_mut().style.shadow.radius = Points(30.0);
+        assert!(!hidden(&row, 120.0));
+        row.state_mut().style.shadow.opacity = 0.0;
+        // A child sticking out of it reaches in.
+        view(Some(&row), 4, ViewKind::View, rect(0.0, -50.0, 10.0, 10.0));
+        assert!(!hidden(&row, 120.0));
+        assert!(hidden(&row, 200.0));
+        // A transform moves it in.
+        let moved = view(None, 6, ViewKind::View, rect(0.0, 0.0, 100.0, 40.0));
+        moved
+            .state_mut()
+            .style
+            .transform
+            .push(TransformKind::TranslateY, -150.0);
+        assert!(!hidden(&moved, 200.0));
     }
 
     #[test]
