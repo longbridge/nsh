@@ -933,6 +933,7 @@ impl RustApp {
         };
         let sets = self.sets();
         let ws = &self.workspace;
+        let web_dev = self.web_dev_profile();
         // A Rust app's runners too (`nsh.json` "root"), only then: they
         // name its root component.
         let rust = if self.root.is_some() {
@@ -961,7 +962,7 @@ strip = true
 panic = \"abort\"
 [profile.web.package.quickjs-jit-sys]
 opt-level = 3
-"),
+{web_dev}"),
             false,
         )?;
         // What earlier versions of nsh wrote: the app's own command line,
@@ -1310,6 +1311,43 @@ opt-level = 3
         )
     }
 
+    /// The profile of the development web runtime (`web-dev`, for
+    /// [`WebKind::Dev`](crate::runtime::WebKind::Dev)), which is built again
+    /// on every change to the app's Rust code: incremental and without LTO,
+    /// so an edit to an app crate rebuilds in well under a second where
+    /// `web`'s fat LTO over one codegen unit re-optimizes the whole module.
+    /// The app's crates are at `-O1` (what changes), the other crates for
+    /// size and QuickJS at `-O3` (it dominates the runtime's cost). It panics
+    /// as `web` does (`abort`) and has no debug assertions, so the page
+    /// behaves as the published one.
+    fn web_dev_profile(&self) -> String {
+        let mut profile = String::from(
+            "
+# The development web runtime (`nsh run --target web`): built again on
+# every change to the app's Rust code, so incremental and without LTO; the
+# app's crates at -O1, the others for size, QuickJS at -O3.
+[profile.web-dev]
+inherits = \"dev\"
+opt-level = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+panic = \"abort\"
+[profile.web-dev.package.\"*\"]
+opt-level = \"s\"
+[profile.web-dev.package.quickjs-jit-sys]
+opt-level = 3
+",
+        );
+        for c in &self.crates {
+            profile.push_str(&format!(
+                "[profile.web-dev.package.{:?}]\nopt-level = 1\n",
+                c.package
+            ));
+        }
+        profile
+    }
+
     /// The web runtime's library name (its module is `<name>.wasm`),
     /// after the app as its binaries are ([`Self::bin`]).
     fn web_lib(&self) -> String {
@@ -1317,9 +1355,10 @@ opt-level = 3
     }
 
     /// The app's web runtime of `kind` (its `nsh.wasm` / `nsh-dev.wasm`, and
-    /// nsh's `nsh.js`), built for `wasm32-unknown-unknown` with the `web`
-    /// profile as nsh builds its own (`runtime::web`). Without `build`, the
-    /// one built before, if any.
+    /// nsh's `nsh.js`), built for `wasm32-unknown-unknown`: a release one
+    /// with the `web` profile as nsh builds its own (`runtime::web`), a
+    /// development one with `web-dev` ([`Self::web_dev_profile`]). Without
+    /// `build`, the one built before, if any.
     pub(crate) fn web(
         &self,
         kind: crate::runtime::WebKind,
@@ -1400,7 +1439,7 @@ opt-level = 3
             package: &package,
             triple: Some(WASM),
             release: false,
-            profile: Some("web"),
+            profile: Some(web_profile(kind)),
             extra: features,
             artifact: &artifact,
             what: &format!("the web runtime of {}", self.packages()),
@@ -2104,6 +2143,15 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
     match name {
         "nsh-platform-gpui" | "nsh-gpui-host" => source.join("crates/gpui").join(name),
         _ => source.join("crates").join(name),
+    }
+}
+
+/// The profile the app's web runtime of `kind` builds with: `web` for
+/// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
+fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
+    match kind {
+        crate::runtime::WebKind::Release => "web",
+        crate::runtime::WebKind::Dev => "web-dev",
     }
 }
 
@@ -2815,6 +2863,100 @@ mod tests {
         let host = std::fs::read_to_string(app.workspace.join("ios-host/Cargo.toml")).unwrap();
         assert!(host.contains("nsh-ios-host = { path ="), "{host}");
         assert!(!host.contains("version = \"="), "{host}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn web_dev_profile_builds_the_development_runtime_incrementally() {
+        use crate::runtime::WebKind;
+        let dir = std::env::temp_dir().join(format!("nsh-rust-web-dev-{}", std::process::id()));
+        let app = app(
+            &dir,
+            &[
+                ("app-charts", dir.join("charts")),
+                ("app-storage", dir.join("storage")),
+            ],
+            None,
+        );
+        app.write_workspace().unwrap();
+        let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
+        assert_eq!(super::web_profile(WebKind::Dev), "web-dev");
+        let profile = |name: &str| -> Vec<String> {
+            let header = format!("[{name}]");
+            let mut lines = manifest.lines().skip_while(|l| *l != header).skip(1);
+            let mut keys = Vec::new();
+            for line in lines.by_ref() {
+                if line.starts_with('[') || line.is_empty() {
+                    break;
+                }
+                keys.push(line.to_owned());
+            }
+            keys
+        };
+        let web_dev = profile("profile.web-dev");
+        for key in [
+            "inherits = \"dev\"",
+            "opt-level = 1",
+            "panic = \"abort\"",
+            "debug-assertions = false",
+        ] {
+            assert!(web_dev.iter().any(|l| l == key), "{key}: {manifest}");
+        }
+        // Incremental: no LTO, and dev's codegen units.
+        assert!(
+            !web_dev
+                .iter()
+                .any(|l| l.starts_with("lto") || l.starts_with("codegen-units"))
+        );
+        assert_eq!(
+            profile("profile.web-dev.package.\"*\""),
+            ["opt-level = \"s\""]
+        );
+        assert_eq!(
+            profile("profile.web-dev.package.quickjs-jit-sys"),
+            ["opt-level = 3"]
+        );
+        for package in ["app-charts", "app-storage"] {
+            let name = format!("profile.web-dev.package.\"{package}\"");
+            assert_eq!(profile(&name), ["opt-level = 1"], "{manifest}");
+        }
+        // As nsh's own manifest, for the debug builds of the hosts: each
+        // table once, or Cargo rejects the manifest as a duplicate key.
+        assert_eq!(
+            profile("profile.dev.package.quickjs-jit-sys"),
+            ["opt-level = 3"]
+        );
+        assert_eq!(profile("profile.dev.package.taffy"), ["opt-level = 3"]);
+        for table in [
+            "[profile.dev.package.quickjs-jit-sys]",
+            "[profile.dev.package.taffy]",
+            "[profile.web-dev]",
+        ] {
+            assert_eq!(manifest.matches(table).count(), 1, "{table}: {manifest}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn web_dev_profile_leaves_the_release_runtime_s_profile_as_it_was() {
+        use crate::runtime::WebKind;
+        let dir = std::env::temp_dir().join(format!("nsh-rust-web-rel-{}", std::process::id()));
+        let app = app(&dir, &[("app-native", dir.join("native"))], None);
+        app.write_workspace().unwrap();
+        let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
+        assert_eq!(super::web_profile(WebKind::Release), "web");
+        let web = "[profile.web]
+inherits = \"release\"
+opt-level = \"z\"
+lto = \"fat\"
+codegen-units = 1
+strip = true
+panic = \"abort\"
+[profile.web.package.quickjs-jit-sys]
+opt-level = 3
+";
+        assert!(manifest.contains(web), "{manifest}");
+        assert_eq!(manifest.matches("[profile.web.").count(), 1, "{manifest}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -63,7 +63,8 @@ components and modules.
 
 Either way the crate's assets (`assets!()`) are published with the app's, and its fonts load before the first frame.
 During `nsh run --target web`, a change to the crate's Rust code builds the runtime again and the open page loads it by
-itself; TSX edits stay hot updates.
+itself; TSX edits stay hot updates. The development runtime builds incrementally, so a change to the crate is ready in
+about a second; `nsh package` builds the published one optimized for size.
 
 Rust code that runs on every platform, the web included, uses the engine's services: `fetch(url).await` makes
 HTTP requests through the same network stack as JS's `fetch` (the browser's here, with its CORS rules); `timer`,
