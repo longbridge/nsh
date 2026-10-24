@@ -247,7 +247,7 @@ release 构建，gallery 运行在 1200 × 800 的窗口里（1800 × 1200 像�
 Stocks 每秒 commit 16–17 次，每次在引擎线程上用时最多 2.1 ms 的 JS 和 1.7 ms 的 core（p95）。
 
 > [!NOTE]
-> 动画页面在这里的 CPU 占用比 Linux 和 macOS 高（Stocks 为 52–71%，而那两者为 26–36%；Animations 为 32–40%，而那两者为 5–13%），
+> 动画页面在这里的 CPU 占用比 Linux 和 macOS 高（Stocks 为 52–71%，而那两者为 25–36%；Animations 为 32–40%，而那两者为 5–13%），
 > 原因在于各个后端在哪里绘制。在 Windows 上，只要有东西在动，主线程每一帧都用 Direct2D 重绘整个窗口：Stocks 上一个脉动的圆点
 > 就会让整页约 690 个视图全部重绘（每帧约 2.7 ms，其中文字约 0.6 ms）。在 Linux 上，GSK 只重绘有变化的区域并保留窗口的其余部分；
 > 在 macOS 上，Core Animation 保留每个视图的 layer 并在 GPU 上合成，所以一帧的开销只取决于这一帧里变化的内容。此外，这里的数字是

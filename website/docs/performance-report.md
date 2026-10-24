@@ -269,7 +269,7 @@ it, *canvas* (recording and replaying drawings).
 Stocks commits 16–17 times a second, each in up to 2.1 ms of JS and 1.7 ms of the core on the engine thread (p95).
 
 > [!NOTE]
-> Animated pages take more CPU here than on Linux and macOS (Stocks 52–71% against 26–36%, Animations 32–40% against
+> Animated pages take more CPU here than on Linux and macOS (Stocks 52–71% against 25–36%, Animations 32–40% against
 > 5–13%) because of where each backend draws. On Windows the main thread draws the whole window with Direct2D on every
 > frame in which something moves: one pulsing dot on Stocks redraws all ~690 views of the page (~2.7 ms of each frame,
 > ~0.6 ms of it text). On Linux GSK redraws only the damaged areas and keeps the rest of the window, and on macOS Core
