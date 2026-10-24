@@ -111,6 +111,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 |---|---|---|---|---|
 | `items` | `.items(..)` | `TabBarItem[]` | `[]` | The tabs, in order. |
 | `selectedIndex` | `.selected_index(..)` | `number` | `0` | The selected tab, by index; an index past the tabs selects none. |
+| `hidden` | `.hidden(..)` | `boolean` | `false` | Out of sight, without a transition. For the app switching tabs: the pages it keeps are shown again as they were, and there is no transition to ride on. Moving the bar out of the way of a pushed page is [`NavPage`](./nav-stack.md#navpage-props)'s `hidesBottomBarWhenPushed` instead. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the bar is: its position and size. Its look is the system's. |
 | `testID` | `.test_id(..)` | `string` | none | Finds the bar in tests and `nsh test --trace`. |
 
