@@ -1181,6 +1181,28 @@ impl NshView {
         }
     }
 
+    /// Whether its content is drawn on Core Animation's threads: a
+    /// canvas's, unless the app drew it at once
+    /// (`desktop={{ drawsAsynchronously: false }}`). Every asynchronous
+    /// drawing holds GPU memory of its own while it is drawn (about 97 MB
+    /// on macOS 27 for a 340×40 canvas, however little it draws), which a
+    /// small canvas that changes now and then has no use for.
+    fn draws_asynchronously(&self) -> bool {
+        let state = self.state();
+        state.canvas.is_some() && state.props.draws_asynchronously != Some(false)
+    }
+
+    /// Its props changed: a content layer already made follows
+    /// `drawsAsynchronously` (a new one reads it when it is made).
+    pub(crate) fn props_changed(&self) {
+        if let Some((layer, _)) = &*self.ivars().content.borrow() {
+            let asynchronous = self.draws_asynchronously();
+            if layer.drawsAsynchronously() != asynchronous {
+                layer.setDrawsAsynchronously(asynchronous);
+            }
+        }
+    }
+
     /// The layer its content is drawn in (made on first use).
     fn content_layer(&self) -> Option<Retained<CALayer>> {
         if let Some((layer, _)) = &*self.ivars().content.borrow() {
@@ -1199,9 +1221,10 @@ impl NshView {
         layer.setNeedsDisplayOnBoundsChange(true);
         // Canvases are drawn on Core Animation's threads (paths and
         // gradients are costly; measured on the Stocks demo, main-thread
-        // time per frame went from 3.5 to 1.8 ms); text is cheap to draw
-        // and drawn at once, which was faster.
-        layer.setDrawsAsynchronously(self.state().canvas.is_some());
+        // time per frame went from 3.5 to 1.8 ms) unless the app draws one
+        // at once (`drawsAsynchronously`); text is cheap to draw and drawn
+        // at once, which was faster.
+        layer.setDrawsAsynchronously(self.draws_asynchronously());
         layer.setContentsScale(self.backing_scale());
         // Above the decoration behind it (fills, gradients, inset
         // shadows), below the children and the borders in front.

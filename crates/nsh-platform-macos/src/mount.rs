@@ -334,6 +334,7 @@ impl Mounter {
             MountItem::ViewProps { id, props } => {
                 let Some(view) = self.get(*id) else { return };
                 view.state_mut().props = props.clone();
+                view.props_changed();
                 crate::input::props_changed(surface, view);
                 crate::access::props_changed(view);
             }

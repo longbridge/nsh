@@ -115,13 +115,8 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
             Tag::WebView => on::WEBVIEW,
             Tag::Video => on::VIDEO,
             Tag::InputAccessory => on::INPUT_ACCESSORY,
-            Tag::View
-            | Tag::Cell
-            | Tag::Stack
-            | Tag::HeaderItem
-            | Tag::Canvas
-            | Tag::Native
-            | Tag::Overlay => 0,
+            Tag::Canvas => on::CANVAS,
+            Tag::View | Tag::Cell | Tag::Stack | Tag::HeaderItem | Tag::Native | Tag::Overlay => 0,
         }
 }
 
@@ -163,6 +158,8 @@ pub mod on {
     pub const INPUT_ACCESSORY: u32 = 1 << 11;
     /// `<overlay>`.
     pub const OVERLAY: u32 = 1 << 12;
+    /// `<canvas>`.
+    pub const CANVAS: u32 = 1 << 13;
     /// Set by the runtime itself, not part of the elements' types.
     pub const INTERNAL: u32 = 1 << 31;
 }
@@ -883,6 +880,7 @@ const GROUPS: &[(u32, &str, &str)] = &[
     (on::VIDEO, "Video", "videos"),
     (on::INPUT_ACCESSORY, "InputAccessory", "input accessories"),
     (on::OVERLAY, "Overlay", "`<Overlay>`"),
+    (on::CANVAS, "Canvas", "`<Canvas>`"),
 ];
 
 /// The declarations of the host elements' props: the named types they use

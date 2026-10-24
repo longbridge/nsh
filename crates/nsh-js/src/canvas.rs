@@ -1544,7 +1544,10 @@ export interface CanvasSize {
   height: number;
 }
 
-export interface CanvasProps extends ViewProps {
+export interface CanvasProps extends Omit<ViewProps, "desktop"> {
+  /** Desktop-only props: `drawsAsynchronously` (macOS) draws the canvas
+   * on Core Animation's threads (the default) or, `false`, at once. */
+  desktop?: DesktopProps & DesktopCanvasHostProps;
   /**
    * Draws the canvas. Runs again when signals it reads change and when the
    * canvas resizes (it first runs once the size is known); animated values

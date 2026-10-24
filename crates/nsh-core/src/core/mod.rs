@@ -3008,6 +3008,13 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::DrawsAsynchronously(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.draws_asynchronously != value {
+                    props.draws_asynchronously = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::Focusable(value) => {
                 let props = node.props.get_or_insert_default();
                 if props.focusable != value {

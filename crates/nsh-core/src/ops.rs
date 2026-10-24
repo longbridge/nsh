@@ -2112,6 +2112,15 @@ pub enum Prop {
     /// a draggable view stay clickable without it.
     #[prop(desktop = "windowDrag")]
     WindowDrag(Option<bool>),
+    /// `drawsAsynchronously` (macOS canvases): Core Animation draws the
+    /// canvas on its own threads (the default), or at once on the main
+    /// thread (`false`). Drawing asynchronously keeps the main thread free
+    /// for a canvas that changes every frame; each such drawing also holds
+    /// GPU memory of its own while it is drawn (about 97 MB on macOS 27,
+    /// however little it draws), which a small canvas that changes now and
+    /// then draws at once without. Ignored elsewhere.
+    #[prop(desktop = "drawsAsynchronously", on = CANVAS)]
+    DrawsAsynchronously(Option<bool>),
     /// `tooltip`: a hint about the view, shown above it on the desktops
     /// while the pointer rests on it (after half a second) until the
     /// pointer leaves or presses it, never on touch screens; it never takes

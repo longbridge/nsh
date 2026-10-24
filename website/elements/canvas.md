@@ -78,6 +78,7 @@ plus:
 | Prop | Rust | Type | Description |
 |---|---|---|---|
 | `draw` | `canvas(painter)` | `(cx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | Draws the canvas. Runs once the size is known, again when the canvas resizes, and again when signals it reads change. |
+| `desktop={{ drawsAsynchronously }}` | `.draws_asynchronously(enabled)` | `boolean` | macOS draws a canvas on Core Animation's threads (`true`, the default), which keeps the main thread free for a canvas that changes every frame. `false` draws it at once on the main thread, without GPU memory for each drawing: the lighter choice for a small canvas that changes now and then, such as a chart updated every few seconds. The other platforms draw every canvas their own way. |
 
 Give the canvas a size through its styles (width / height, `flex`, an aspect ratio): its size is the one its styles
 give it.
