@@ -319,6 +319,19 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   left edge with `destination-out`, inside the head). What is left is drawing the whole window on every refresh
   (~690 views; text ~0.6 ms of it, `EndDraw` ~0.05 ms). CPU readings vary by ±10 points between runs on this machine.
 
+  Partial frames (`docs/dev/windows.md` "Partial frames": a frame draws the changed views' areas over the kept back
+  buffer of a `FLIP_SEQUENTIAL` swap chain, once, in a clip of up to 24 rectangles, and presents them with `Present1`),
+  same setup. Before = the whole window drawn on every frame:
+
+  | Scenario | Before: frame p95, over one refresh, paint per frame, CPU | After |
+  |---|---|---|
+  | Stocks (~34 changed views a frame) | 6.6–6.9 ms, 3–5%, 2.7 ms, 52–71% | 3.7–4.3 ms, 0–1%, 1.4 ms, 36–43% |
+  | Animations demo | 2.6 ms, 0%, 2.3 ms, 32–40% | 1.0 ms, 0%, 0.9 ms, 20–28% |
+  | Canvas demo | 2.6–2.7 ms, 0%, 2.0–2.4 ms, 28–50% | 0.95 ms, 0%, 0.8 ms, 21–26% |
+
+  Drawing each area in a pass of its own (up to 6) was tried first: Stocks' paint only went 2.7 → 2.2 ms, the
+  passes each walking the tree and the merged areas covering ~30% of the window.
+
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes

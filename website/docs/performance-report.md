@@ -260,21 +260,20 @@ it, *canvas* (recording and replaying drawings).
 
 | Demo | FPS | Frame p95 | Paint / canvas per frame | CPU |
 |---|---|---|---|---|
-| Stocks: 22 live sparklines, an intraday chart, order book, tape | 144 | 6.6–6.9 ms | 2.7 / 0.3 ms | 52–71% |
-| Canvas: a gauge, a clock, a dot matrix | 144 | 2.6–2.7 ms | 2.0–2.4 / 0.08 ms | 28–50% |
-| Animations: three native loops, springs, sequences | 144 | 2.6–3.7 ms | 2.3 ms | 32–40% |
+| Stocks: 22 live sparklines, an intraday chart, order book, tape | 144 | 3.7–4.3 ms | 1.4 / 0.13 ms | 36–43% |
+| Canvas: a gauge, a clock, a dot matrix | 144 | 1.0–2.0 ms | 0.8–1.4 / 0.05 ms | 21–35% |
+| Animations: three native loops, springs, sequences | 144 | 1.0–3.6 ms | 0.9–1.9 ms | 20–41% |
 
 </div>
 
 Stocks commits 16–17 times a second, each in up to 2.1 ms of JS and 1.7 ms of the core on the engine thread (p95).
 
 > [!NOTE]
-> Animated pages take more CPU here than on Linux and macOS (Stocks 52–71% against 25–36%, Animations 32–40% against
-> 5–13%) because of where each backend draws. On Windows the main thread draws the whole window with Direct2D on every
-> frame in which something moves: one pulsing dot on Stocks redraws all ~690 views of the page (~2.7 ms of each frame,
-> ~0.6 ms of it text). On Linux GSK redraws only the damaged areas and keeps the rest of the window, and on macOS Core
-> Animation keeps every view's layer and composites them on the GPU, so a frame costs what changed in it. The numbers
-> also count 144 frames a second at 1800 × 1200 pixels, where the Linux and macOS readings above run at 120–144 Hz.
+> Pages whose animations move views across large areas take more CPU here than on Linux and macOS (Animations 20–41%
+> against 5–13%, Gestures 36% against 1–5%). A Windows frame draws again, with Direct2D on the main thread, every view
+> over the areas that changed: a ring that grows redraws the card under it on every frame. On macOS Core Animation
+> moves, scales and fades the layers it keeps on the GPU without drawing them again, and on Linux GSK keeps the
+> render nodes of what did not change. The numbers also count 144 frames a second at 1800 × 1200 pixels.
 
 ### Every page
 
@@ -289,31 +288,31 @@ where they have room to scroll.
 
 | Page | Frames come from | FPS | Frame p95 | Over one refresh | CPU |
 |---|---|---|---|---|---|
-| Stocks | Live data, native loops | 144 | 6.6 ms | 3% | 60% |
-| Stocks, scrolling | Live data, scroll | 144 | 6.7 ms | 3% | 66% |
-| Photos, scrolling | Scroll | 143 | 2.5 ms | 0% | 11% |
-| Lists, scrolling | Scroll | 144 | 2.2 ms | 0% | 15% |
-| Scrolling, scrolling | Scroll | 144 | 3.1 ms | 0% | 9% |
-| Navigation, scrolling | Scroll | 144 | 1.4 ms | 0% | 9% |
-| Form, scrolling | Scroll | 144 | 1.5 ms | 0% | 11% |
-| Resizable, scrolling | Scroll | 144 | 1.0 ms | 0% | 15% |
-| Dock, scrolling | Scroll | 144 | 1.4 ms | 1% | 6% |
-| Gestures | Springs, a pulsing ring | 144 | 1.9 ms | 0% | 39% |
-| Physics, scrolling | Scroll (a 900 × 500 window) | 143 | 1.2 ms | 1% | 10% |
-| Animations | Native loops | 144 | 2.6 ms | 0% | 40% |
-| Canvas, scrolling | Scroll, native loops | 144 | 2.7 ms | 0% | 34% |
-| Styles, scrolling | Scroll, a swaying transform | 144 | 2.1 ms | 0% | 31% |
-| Tailwind | `animate-*` utilities | 144 | 2.1 ms | 0% | 27% |
-| Text, scrolling | Scroll | 144 | 2.3 ms | 0% | 13% |
-| Text View, scrolling | Scroll | 144 | 1.9 ms | 0% | 18% |
-| Images, scrolling | Scroll, GIF and WebP frames | 144 | 5.9 ms | 2% | 42% |
-| Components, scrolling | Scroll | 144 | 1.6 ms | 0% | 17% |
-| Overlays, scrolling | Scroll (a 900 × 500 window) | 143 | 1.1 ms | 1% | 8% |
-| Menus, scrolling | Scroll (a 900 × 500 window) | 144 | 1.2 ms | 0% | 15% |
-| Controls | Transitions | 144 | 1.6 ms | 0% | 11% |
-| Web and video, scrolling | Scroll | 144 | 1.6 ms | 0% | 14% |
-| System | `requestAnimationFrame`, timers | 144 | 0.1 ms | 0% | 3% |
-| Storage, scrolling | Scroll (a 900 × 500 window) | 144 | 0.9 ms | 0% | 12% |
+| Stocks | Live data, native loops | 144 | 3.9 ms | 0% | 36% |
+| Stocks, scrolling | Live data, scroll | 144 | 4.3 ms | 0% | 43% |
+| Photos, scrolling | Scroll | 143 | 2.1 ms | 0% | 9% |
+| Lists, scrolling | Scroll | 144 | 2.0 ms | 1% | 19% |
+| Scrolling, scrolling | Scroll | 143 | 2.1 ms | 0% | 7% |
+| Navigation, scrolling | Scroll | 144 | 0.8 ms | 0% | 9% |
+| Form, scrolling | Scroll | 144 | 0.8 ms | 0% | 12% |
+| Resizable, scrolling | Scroll | 143 | 0.4 ms | 0% | 4% |
+| Dock, scrolling | Scroll | 144 | 0.5 ms | 1% | 5% |
+| Gestures | Springs, a pulsing ring | 144 | 1.8 ms | 0% | 36% |
+| Physics, scrolling | Scroll (a 900 × 500 window) | 144 | 0.8 ms | 0% | 4% |
+| Animations | Native loops | 144 | 1.0 ms | 0% | 28% |
+| Canvas, scrolling | Scroll, native loops | 144 | 2.0 ms | 0% | 35% |
+| Styles, scrolling | Scroll, a swaying transform | 144 | 2.1 ms | 0% | 39% |
+| Tailwind | `animate-*` utilities | 144 | 0.6 ms | 0% | 19% |
+| Text, scrolling | Scroll | 144 | 1.6 ms | 0% | 8% |
+| Text View, scrolling | Scroll | 144 | 1.1 ms | 0% | 10% |
+| Images, scrolling | Scroll, GIF and WebP frames | 143 | 4.8 ms | 2% | 23% |
+| Components, scrolling | Scroll | 144 | 1.0 ms | 1% | 11% |
+| Overlays, scrolling | Scroll (a 900 × 500 window) | 144 | 0.6 ms | 0% | 1% |
+| Menus, scrolling | Scroll (a 900 × 500 window) | 144 | 0.6 ms | 0% | 2% |
+| Controls | Transitions | 117–144 | 1.5 ms | 0% | 22% |
+| Web and video, scrolling | Scroll | 144 | 1.6 ms | 0% | 15% |
+| System | `requestAnimationFrame`, timers | 144 | < 0.1 ms | 0% | 1% |
+| Storage, scrolling | Scroll (a 900 × 500 window) | 144 | 0.5 ms | 0% | 1% |
 
 </div>
 
@@ -354,8 +353,10 @@ the zip is the `.zip` written beside its directory:
 
 What makes these numbers:
 
-- **Frames only for changes**: the compositor-paced ticker runs while a native animation, a transition or a frame
-  callback runs, and the window is drawn when something in it changed.
+- **Frames only for changes, drawn only where they changed**: the compositor-paced ticker runs while a native
+  animation, a transition or a frame callback runs. A frame draws the areas of the views that changed (where they
+  were and where they are), over the pixels the window keeps, and presents only those to the compositor (Stocks:
+  ~34 views a frame).
 - **Canvases record their animated part**: a drawing is recorded as Direct2D command lists, vector and sharp at any
   scale. When an animated value changes, only the operations from the first one that reads an animated value on are
   recorded again; what comes before is kept (Stocks: ~26 ms of recording a second for 22 pulsing sparklines and the
