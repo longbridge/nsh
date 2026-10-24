@@ -40,6 +40,14 @@ const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const HOVER_EVENTS = ["onHoverIn", "onHoverOut", "onHoverMove"];
+// What lays out a field's text, copied to the hidden copy that finds its
+// caret (`caretBounds`).
+const CARET_STYLE = [
+  "direction", "boxSizing", "width", "height", "borderTopWidth", "borderRightWidth", "borderBottomWidth",
+  "borderLeftWidth", "borderStyle", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "fontStyle",
+  "fontVariant", "fontWeight", "fontStretch", "fontSize", "lineHeight", "fontFamily", "textAlign",
+  "textTransform", "textIndent", "letterSpacing", "wordSpacing", "tabSize",
+];
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
@@ -470,6 +478,40 @@ function measureContext() {
   return canvas.getContext("2d");
 }
 
+/** The span `measureNumericText` measures in (one for the page's players). */
+let numericSpan = null;
+
+/**
+ * The width of `text` in CSS `font` with `font-variant-numeric: numeric`
+ * (`tabular-nums`, ...). Canvas text cannot have numeric variants: its
+ * `font` takes only `small-caps`, and the context has `fontVariantCaps`
+ * but no `fontVariantNumeric`, so `measureText` measures proportional
+ * digits, narrower than the tabular ones the run is drawn with. A hidden
+ * span with the run's CSS measures what the DOM draws (font-variant-numeric:
+ * Chrome 52, Firefox 34, Safari 9.1). Its layout is forced, so the engine
+ * asks only for text with a numeric variant, and caches the answers.
+ */
+function measureNumericText(font, numeric, text) {
+  if (typeof document === "undefined" || !document.body) return null;
+  if (!numericSpan?.isConnected) {
+    const box = document.createElement("div");
+    box.setAttribute("aria-hidden", "true");
+    box.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;"
+      + "visibility:hidden;pointer-events:none;contain:strict";
+    numericSpan = document.createElement("span");
+    numericSpan.style.cssText = "position:absolute;left:0;top:0;white-space:pre;"
+      + "letter-spacing:normal;word-spacing:normal;text-transform:none;font-kerning:auto;"
+      + "font-feature-settings:normal";
+    box.append(numericSpan);
+    document.body.append(box);
+  }
+  // `font` resets the variant: set it first, as the run's CSS does.
+  numericSpan.style.font = font;
+  numericSpan.style.fontVariantNumeric = numeric;
+  numericSpan.textContent = text;
+  return numericSpan.getBoundingClientRect().width;
+}
+
 /** Whether `locale`'s script is written right to left. */
 function rightToLeft(locale) {
   try {
@@ -591,6 +633,13 @@ class Player {
           }
           this.measure.font = this.str(fp, fl);
           return this.measure.measureText(this.str(tp, tl)).width;
+        },
+        measure_numeric_text: (fp, fl, np, nl, tp, tl) => {
+          const font = this.str(fp, fl), text = this.str(tp, tl);
+          const width = measureNumericText(font, this.str(np, nl), text);
+          if (width != null) return width;
+          this.measure.font = font;
+          return this.measure.measureText(text).width;
         },
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
@@ -1565,6 +1614,14 @@ class Player {
       this.drawSoon(el);
       return;
     }
+    if (prop === "sticky-offset") {
+      // A sticky cell sticks this much further in (an animated offset).
+      const offset = Number(value);
+      if (el._stickyOffset === offset) return;
+      el._stickyOffset = offset;
+      if (el._track) this.placeTrack(el);
+      return;
+    }
     el._animation[prop] = value;
     if (prop === "border-color") {
       // Borders are drawn by an overlay.
@@ -2007,6 +2064,14 @@ class Player {
       el.scrollTo({ left: el._smooth[0], top: el._smooth[1], behavior: "smooth" });
       return;
     }
+    // So does a glide of the wheel's or the keys' (`scrollSmoothly`):
+    // its next frame would put the offset back.
+    const a = el._glide;
+    if (a) {
+      a.x += dx;
+      a.y += dy;
+      if (a.at) a.at = [a.at[0] + dx, a.at[1] + dy];
+    }
     el.scrollLeft += dx;
     el.scrollTop += dy;
   }
@@ -2113,6 +2178,9 @@ class Player {
         tracks.set(cellId, cell);
       }
       cell._range = range;
+      // The animated offsets come after the batch's ops (`sticky-offset`):
+      // one that became a number is no longer added.
+      cell._stickyOffset = undefined;
       this.placeTrack(cell);
     }
   }
@@ -2164,7 +2232,7 @@ class Player {
     t.width = `${horizontal ? length : 0}px`;
     t.height = `${horizontal ? 0 : length}px`;
     const s = cell.style;
-    const inset = `${at + origin - range[0]}px`;
+    const inset = `${at + origin - range[0] + (cell._stickyOffset ?? 0)}px`;
     s.left = horizontal ? inset : "auto";
     s.top = horizontal ? "auto" : inset;
     s.width = `${f[2]}px`;
@@ -2284,6 +2352,7 @@ class Player {
   }
 
   scrolled(el) {
+    if (el._commandEnd) this.waitCommandEnd(el);
     if (this.desktopUI) this.showBar(el);
     // Still moving after the finger left (touch scrolling is the
     // browser's): a glide.
@@ -2298,6 +2367,8 @@ class Player {
   /** The browser's scrolling stopped: the end, unless the scroll is driven
    * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
+    clearTimeout(el._commandEnd);
+    el._commandEnd = 0;
     el._smooth = null;
     if (el._driven || el._touchDrag) return;
     // The browser's end of a scroll that ended here (`ownEnd`).
@@ -2828,6 +2899,9 @@ class Player {
     field.addEventListener("select", () => this.selectionChanged(el, field));
     field.addEventListener("keyup", () => this.selectionChanged(el, field));
     field.addEventListener("pointerup", () => this.selectionChanged(el, field));
+    // Scrolling the text moves the caret.
+    field.addEventListener("scroll", () => this.caretMoved(el, field));
+    field.addEventListener("paste", (e) => this.pasted(el, e));
   }
 
   textChanged(el, field) {
@@ -2846,11 +2920,92 @@ class Player {
   }
 
   selectionChanged(el, field) {
+    this.caretMoved(el, field);
     if (!el._events.has("onSelectionChange")) return;
     const sel = [field.selectionStart ?? 0, field.selectionEnd ?? 0];
     if (el._selection && el._selection[0] === sel[0] && el._selection[1] === sel[1]) return;
     el._selection = sel;
     this.event(el._id, "onSelectionChange", { start: sel[0], end: sel[1] });
+  }
+
+  /** A paste into a field: what the clipboard holds (`onPaste`, the files'
+   * bytes handed to WebAssembly as they are), and the field's own paste
+   * of the text unless `pasteBehavior` is `"report"`. The browser gives the
+   * clipboard only to this event, the user's paste. */
+  pasted(el, e) {
+    if (el._config?.pasteInserts === false) e.preventDefault();
+    if (!el._events.has("onPaste")) return;
+    const data = e.clipboardData;
+    const text = data?.getData("text/plain") ?? "";
+    const files = [...(data?.files ?? [])];
+    // A file manager's files are local paths the page cannot read: their
+    // `file:` URLs, when the browser lists them.
+    const uris = (data?.getData("text/uri-list") ?? "").split(/\r?\n/).filter((u) => u.startsWith("file:"));
+    Promise.all(files.map((f) => f.arrayBuffer())).then((buffers) => {
+      const size = buffers.reduce((n, b) => n + b.byteLength, 0);
+      const bytes = new Uint8Array(size);
+      let at = 0;
+      for (const b of buffers) {
+        bytes.set(new Uint8Array(b), at);
+        at += b.byteLength;
+      }
+      const json = JSON.stringify({
+        text,
+        files: files.map((f, i) => ({ name: f.name || "image.png", type: f.type, size: buffers[i].byteLength })),
+        uris,
+      });
+      this.call(() => this.withStrings([json, bytes], (jp, jl, bp, bl) => this.wasm.nsh_paste(el._id, jp, jl, bp, bl)));
+    });
+  }
+
+  /** `onCaretMove` while the field has the focus, if its caret moved. */
+  caretMoved(el, field) {
+    if (!el._events.has("onCaretMove") || document.activeElement !== field) return;
+    const caret = this.caretBounds(el, field);
+    const key = caret.join();
+    if (el._caret === key) return;
+    el._caret = key;
+    const [x, y, width, height] = caret;
+    this.event(el._id, "onCaretMove", { bounds: { origin: { x, y }, size: { width, height } } });
+  }
+
+  /** The caret at the selection's end in view `el` (`[x, y, width,
+   * height]`): a field tells no caret's place, so a hidden copy of it
+   * (its font, box and wrapping) holds the text up to the caret and a
+   * marker where the caret is, as libraries for textarea carets do. */
+  caretBounds(el, field) {
+    const style = getComputedStyle(field);
+    const area = field.tagName === "TEXTAREA";
+    const mirror = this._caretMirror ??= document.createElement("div");
+    const m = mirror.style;
+    for (const p of CARET_STYLE) m[p] = style[p];
+    m.position = "absolute";
+    m.visibility = "hidden";
+    m.top = "0";
+    m.left = "-9999px";
+    m.overflow = "hidden";
+    m.whiteSpace = area ? "pre-wrap" : "pre";
+    m.overflowWrap = area ? "break-word" : "normal";
+    document.body.appendChild(mirror);
+    const end = field.selectionEnd ?? field.value.length;
+    const before = field.value.slice(0, end);
+    mirror.textContent = field.type === "password" ? "•".repeat(before.length) : before;
+    const marker = document.createElement("span");
+    // Something to measure, even at the end of the text.
+    marker.textContent = field.value.slice(end) || ".";
+    mirror.appendChild(marker);
+    const fontSize = parseFloat(style.fontSize) || 16;
+    const height = parseFloat(style.lineHeight) || fontSize * 1.2;
+    const border = (side) => parseFloat(style[`border${side}Width`]) || 0;
+    let x = marker.offsetLeft + border("Left") - field.scrollLeft;
+    // A single line is centered in its box.
+    let y = area
+      ? marker.offsetTop + border("Top") - field.scrollTop
+      : (field.clientHeight - height) / 2 + border("Top");
+    mirror.remove();
+    x += field.offsetLeft;
+    y += field.offsetTop;
+    return [x, y, 1, height];
   }
 
   op_iv([, id, text, count]) {
@@ -2880,6 +3035,8 @@ class Player {
     field.style.top = `${y}px`;
     field.style.width = `${w}px`;
     field.style.height = `${h}px`;
+    // Its text may wrap elsewhere now.
+    this.caretMoved(el, field);
   }
 
   // Navigation
@@ -3471,14 +3628,18 @@ class Player {
       case "scrollTo":
         if (!el) break;
         el._applied++;
+        this.stopGlide(el, args[0], args[1]);
         el._smooth = args[2] ? [args[0], args[1]] : null;
         el.scrollTo({ left: args[0], top: args[1], behavior: args[2] ? "smooth" : "instant" });
         break;
-      case "scrollToEnd":
+      case "scrollToEnd": {
         if (!el) break;
         el._applied++;
-        el.scrollTo({ left: el._horizontal ? el.scrollWidth : 0, top: el._horizontal ? 0 : el.scrollHeight, behavior: args[0] ? "smooth" : "instant" });
+        const [x, y] = el._horizontal ? [el.scrollWidth, 0] : [0, el.scrollHeight];
+        this.stopGlide(el, x, y);
+        el.scrollTo({ left: x, top: y, behavior: args[0] ? "smooth" : "instant" });
         break;
+      }
       case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
       case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
       case "toast": this.toast(args[0], args[1]); break;
@@ -4645,6 +4806,41 @@ class Player {
     }, 200);
   }
 
+  /** Stops `el`'s glide where it is for a scroll command of the core's to
+   * (`x`, `y`), as the native backends interrupt theirs: left running, its
+   * next frame would put the offset back. The browser's `scrollend` after
+   * the command's scroll ends the scroll it stopped; a command that leaves
+   * the view where it is moves nothing, and no `scrollend` follows, so its
+   * `onScrollEnd` is sent here. */
+  stopGlide(el, x, y) {
+    const a = el._glide;
+    if (!a) return;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.timer);
+    el._glide = null;
+    this.drive(el, -1);
+    // Browsers clamp the offsets of scrolls.
+    const stays = (to, at, max) => Math.min(Math.max(to, 0), max) === at;
+    if (stays(x, el.scrollLeft, el.scrollWidth - el.clientWidth) && stays(y, el.scrollTop, el.scrollHeight - el.clientHeight)) {
+      this.ownEnd(el);
+    } else {
+      // A fractional destination may round back to the current offset,
+      // in which case the browser sends no scrollend. Moving commands
+      // keep this fallback waiting through their scroll events.
+      this.waitCommandEnd(el);
+    }
+  }
+
+  /** Ends a command rounded to the current offset when no browser event
+   * follows; scroll events keep a moving command's fallback waiting. */
+  waitCommandEnd(el) {
+    clearTimeout(el._commandEnd);
+    el._commandEnd = setTimeout(() => {
+      this.scrollEnded(el);
+      el._ownEnd = [el.scrollLeft, el.scrollTop];
+    }, 200);
+  }
+
   /** The snap point of a snapping view next to where it is towards `dir`
    * (0: the nearest). */
   snapPoint(el, dir) {
@@ -4706,6 +4902,8 @@ class Player {
   }
 
   scrollEvent(el, name) {
+    // Snapping animated values that follow it settle, listened to or not.
+    if (name === "onScrollEnd") this.call((w) => w.nsh_scroll_ended(el._id));
     if (el._events.has(name)) this.event(el._id, name, { x: el.scrollLeft, y: el.scrollTop });
   }
 

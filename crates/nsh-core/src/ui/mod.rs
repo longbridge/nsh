@@ -109,7 +109,8 @@ pub(crate) use self::{
 pub use self::{
     animated::{
         Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
-        Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
+        DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
+        sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     call::{
@@ -138,8 +139,8 @@ pub use self::{
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
-        PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent,
+        OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -187,12 +188,13 @@ pub use crate::geometry::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
-    EllipsizeMode, EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode,
-    KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
-    LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation, ModalPresentation,
-    PanActivation, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
-    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent,
-    TransformKind, TransformOrigin, Viewability,
+    EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, HoverEvent, KeyboardAppearance,
+    KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
+    LayoutCurve, LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation,
+    ModalPresentation, PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents,
+    PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig,
+    StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin,
+    Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,
@@ -237,6 +239,7 @@ pub mod prelude {
         CallCx,
         Callback,
         CanvasView,
+        CaretEvent,
         Child,
         Children,
         ClaimRequest,
@@ -253,6 +256,7 @@ pub mod prelude {
         DefiniteLength,
         DevicePixels,
         DialogAnswer,
+        DiffClamp,
         EaseMode,
         // Native animation values.
         Easing,
@@ -326,6 +330,9 @@ pub mod prelude {
         PanEvent,
         PanGesture,
         ParentElement,
+        PasteBehavior,
+        PasteEvent,
+        PastedFile,
         Percentage,
         Placement,
         PlaybackDirection,

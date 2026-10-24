@@ -914,6 +914,16 @@ pub trait Native: Send + Sync {
         let _ = at;
         Err("this platform has no mouse".into())
     }
+    /// Pastes `content` into the focused input, as the user's paste does
+    /// with it on the clipboard (the system's clipboard stays as it was).
+    fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        let _ = content;
+        Err(
+            "pasting in tests is not supported on this platform yet: run the test headless, \
+             or on macOS or iOS"
+                .into(),
+        )
+    }
     /// Chooses the action of the open context menu (`Menu.popup`) at the
     /// end of `path`: the labels of the submenus on the way, then its own.
     fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
@@ -1174,6 +1184,20 @@ impl Agent {
             TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
             TestStep::Hover { selector } => done(self.hover(&selector)),
             TestStep::RightClick { selector } => done(self.right_click(&selector)),
+            TestStep::Paste {
+                selector,
+                text,
+                files,
+                uris,
+            } => {
+                let mut content = nsh_core::PasteEvent::new(text);
+                content.files = files
+                    .into_iter()
+                    .map(|f| nsh_core::PastedFile::new(f.name, f.mime, f.data))
+                    .collect();
+                content.uris = uris;
+                done(self.paste(&selector, &content))
+            }
             TestStep::Menu => {
                 let menu = self.scene.menu()?;
                 serde_json::to_value(menu.map(|m| crate::menu::entries(&m)))
@@ -1589,6 +1613,12 @@ impl Agent {
             Point::new(Points(0.0), Points(distance))
         };
         self.native.scroll(at, delta);
+        self.settled()
+    }
+
+    fn paste(&self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        self.focus(selector)?;
+        self.native.paste(content)?;
         self.settled()
     }
 

@@ -334,7 +334,14 @@ pub(crate) fn can_bounce(view: &NshView, dx: f32, dy: f32) -> bool {
 }
 
 /// Sends `kind` with the offset if JS listens to it.
-fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
+fn emit(surface: &Rc<Surface>, view: &NshView, kind: EventKind) {
+    if kind == EventKind::ScrollEnd {
+        // Snapping animated values that follow it settle.
+        let id = view.state().id;
+        if surface.anim.borrow_mut().scroll_ended(id) {
+            surface.ensure_ticking();
+        }
+    }
     let (id, x, y) = {
         let state = view.state();
         if !state.events.contains(kind) {
@@ -1119,8 +1126,12 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
         };
         (s.sticky.clone(), main(s) - lead, s.horizontal)
     };
+    // An animated offset is the graph's (pinned again with its frames,
+    // `pin_animated_sticky`, when it is being written).
+    let anim = surface.anim.try_borrow().ok();
     for c in &cells {
-        let t = sticky_shift(Points(offset), c.start, c.end).0;
+        let extra = c.offset.zip(anim.as_ref()).map_or(0.0, |(n, a)| a.value(n));
+        let t = sticky_shift(Points(offset + extra), c.start, c.end).0;
         let shift = if horizontal { (t, 0.0) } else { (0.0, t) };
         with_cell(surface, view, c.cell, |cell| {
             let changed = {
@@ -1131,6 +1142,25 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
                 cell.place();
             }
         });
+    }
+}
+
+/// Pins again the sticky cells of the scroll views whose cells stick an
+/// animated value further in, after the graph's values were written.
+pub(crate) fn pin_animated_sticky(surface: &Surface) {
+    let views: Vec<u32> = surface.anim.borrow().sticky_views().to_vec();
+    if views.is_empty() {
+        return;
+    }
+    for id in views {
+        let view = surface
+            .mounter
+            .try_borrow()
+            .ok()
+            .and_then(|m| m.views.get(&id).cloned());
+        if let Some(view) = view {
+            pin_sticky(surface, &view);
+        }
     }
 }
 

@@ -23,6 +23,8 @@ function App() {
   const scale = new AnimatedValue(2);
   const sum = Animated.add(opacity, scale);
   const mapped = scale.interpolate({ inputRange: [0, 4], outputRange: [0, 100] });
+  // A floating bar that settles shown or hidden when its scroll view rests.
+  const bar = scale.diffClamp(0, 56, { snap: true });
   const fade = Animated.timing(opacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic) });
   const spring = Animated.sampleSpring({ toValue: 1, damping: 40 });
   const decay = Animated.sampleDecay({ velocity: 1000, from: 0 });
@@ -59,6 +61,11 @@ function App() {
       </View>
       <View testID="box" style={{ width: width(), height: 20 }} />
       <Text>Keyboard: {keyboard.update?.type}</Text>
+      <Text>
+        Snapping diffClamp: {String(bar instanceof AnimatedNode)}{" "}
+        {String(Animated.diffClamp(scale, 0, 56, { snap: true }) === bar)}{" "}
+        {String(scale.diffClamp(0, 56) !== bar)}
+      </Text>
     </View>
   );
 }

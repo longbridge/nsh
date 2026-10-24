@@ -610,6 +610,16 @@ const header = scroll.diffClamp(0, 56);
 <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: header.mul(-1) }] }}>…</View>
 ```
 
+加上 `{ snap: true }`（Rust 中为 `diff_clamp_with(min, max, DiffClamp::snapping())`）后，滚动停止时只显示了一部分的标题栏会把移动做完：它在 UI 线程上用 200 ms 停到完全显示或完全隐藏，取较近的一端。只有当页面滚动的距离至少达到标题栏的高度时它才会隐藏，因此滚动距离不足的页面会显示整个标题栏。移动过程中再次滚动，标题栏会从当前位置继续跟随滚动。
+
+```rust tabs
+let header = offset.diff_clamp_with(0.0, 56.0, DiffClamp::snapping());
+```
+
+```tsx tabs
+const header = scroll.diffClamp(0, 56, { snap: true });
+```
+
 ## 组合动画
 
 动画由步骤搭建（Rust 中的 `Animation`，TSX 中 `nsh/animated` 的 `Animated`），整棵动画树在原生端运行：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也不运行你的代码。

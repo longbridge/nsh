@@ -29,6 +29,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod mobile;
 mod mount;
 pub mod navigation;
 pub mod open_url;
@@ -80,13 +81,14 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent,
-        IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ListContentStyle, ListViewport, ModalAnimation,
-        ModalPresentation, ModalProp, NativeProp, NodeId, Op, OverlayProp, PayloadValue,
-        PressEvent, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp,
-        ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
+        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HeaderSystemItem,
+        HoverEvent, IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance,
+        KeyboardDismissMode, KeyboardTaps, KeyboardType, ListContentStyle, ListViewport,
+        ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op, OverlayProp,
+        PasteBehavior, PasteEvent, PastedFile, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
+        ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig,
+        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        Viewability, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,
@@ -102,8 +104,8 @@ pub use crate::{
     },
     text::{
         ATTACHMENT_CHAR, ApproxTextEngine, AttachmentAlignments, AttributedText, BackgroundBox,
-        FontExtent, LinePiece, ResolvedTextStyle, TextAttachment, TextBackground, TextEngine,
-        TextLayout, TextLine, TextLink, TextSpan,
+        FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment, TextBackground,
+        TextEngine, TextLayout, TextLine, TextLink, TextSpan,
     },
     transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
 };

@@ -483,6 +483,24 @@ export interface ScrollEvent {
   zoomScale: number;
 }
 
+/** Where an input's caret is: the payload of `onCaretMove`. */
+export interface CaretEvent {
+  /** The caret in the input (its border box), the input's own scrolling applied: as wide as the platform draws it, as tall as its line. Empty until the input is laid out. */
+  bounds: Bounds;
+  /** The caret in the root view the input is in (the surface or its dialog), as of the event: an `Overlay`'s `anchor`. */
+  pageBounds: Bounds;
+}
+
+/** What the user pasted into an input: the payload of `onPaste`. The platform read the clipboard as the user pasted; the app never reads it for this. */
+export interface PasteEvent {
+  /** The plain text, `""` when there was none. */
+  text: string;
+  /** Files with their bytes: images (a screenshot, an image copied from a page or an app), as `File`s an app can upload. */
+  files: File[];
+  /** `file:` URLs of local files copied in a file manager (as `onFileDrop`'s). */
+  uris: string[];
+}
+
 /** A line of a laid-out text (in the text's content box). */
 export interface TextLayoutLine {
   text: string;
@@ -746,6 +764,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         on::INPUT,
         "(e: { start: number; end: number }) => void",
         "",
+    ),
+    (
+        EventKind::Paste,
+        on::INPUT,
+        "(e: PasteEvent) => void",
+        "The user pasted (the keyboard's shortcut, a menu's Paste, a keyboard's image): the text, images as `File`s, local files' `file:` URLs. It comes before the `onChange` of the text it inserts; `pasteBehavior` decides whether the input inserts the text (images and files never are).",
+    ),
+    (
+        EventKind::CaretMove,
+        on::INPUT,
+        "(e: CaretEvent) => void",
+        "The caret moved: with the selection, or as the text scrolled or wrapped again. `bounds` is where it is in the input, `pageBounds` in the root view (an `Overlay`'s `anchor`): an `@` mention's suggestions open there.",
     ),
     (
         EventKind::KeyPress,

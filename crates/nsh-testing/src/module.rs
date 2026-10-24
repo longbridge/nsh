@@ -724,6 +724,56 @@ pub struct WaitOptions {
     pub state: Option<WaitState>,
 }
 
+/// What a test pastes ([`App::paste`]): what the clipboard holds as the
+/// user pastes.
+#[derive(Debug, Default, Clone, JsObject)]
+pub struct PasteContent {
+    /// The text.
+    pub text: Option<String>,
+    /// Paths of files whose bytes are pasted (a screenshot: an image file),
+    /// each a `File` of `onPaste`, its type from its extension.
+    pub files: Option<Vec<String>>,
+    /// `file:` URLs of local files, as a file manager copies them.
+    pub uris: Option<Vec<String>>,
+}
+
+impl PasteContent {
+    /// What `onPaste` reports of it, the files read.
+    fn read(self) -> Result<nsh_core::PasteEvent, String> {
+        let mut paste = nsh_core::PasteEvent::new(self.text.unwrap_or_default());
+        for path in self.files.unwrap_or_default() {
+            let data = std::fs::read(&path).map_err(|e| format!("paste: {path}: {e}"))?;
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+            paste.files.push(nsh_core::PastedFile::new(
+                name.clone(),
+                mime_of(&name),
+                data,
+            ));
+        }
+        paste.uris = self.uris.unwrap_or_default();
+        Ok(paste)
+    }
+}
+
+/// The MIME type of a file named `name`, by its extension.
+fn mime_of(name: &str) -> &'static str {
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") => "image/heic",
+        Some("svg") => "image/svg+xml",
+        Some("txt") => "text/plain",
+        Some("json") => "application/json",
+        Some("pdf") => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
 /// How far a drag moves the finger ([`App::drag`]), in points.
 #[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
 pub struct DragBy {
@@ -745,6 +795,49 @@ pub struct MenuEntry {
     /// Its check mark, when it is a checkable item.
     #[prop(skip_none)]
     pub checked: Option<bool>,
+}
+
+/// The style of a span as the app resolved it (`app.spanStyle`). Colors
+/// are `#rrggbbaa`.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct SpanStyle {
+    /// Its text color.
+    pub color: String,
+    /// The background a nested text's `backgroundColor` gives it.
+    #[prop(skip_none)]
+    pub background_color: Option<String>,
+    /// Its font size, in points.
+    pub font_size: f64,
+    /// Its font weight (400 regular, 700 bold).
+    pub font_weight: f64,
+    /// Whether it is italic.
+    pub italic: bool,
+    /// Whether it is underlined.
+    pub underline: bool,
+    /// Whether it is struck through.
+    pub line_through: bool,
+}
+
+impl Default for SpanStyle {
+    fn default() -> Self {
+        nsh_core::ResolvedTextStyle::default().into()
+    }
+}
+
+impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
+    fn from(style: nsh_core::ResolvedTextStyle) -> Self {
+        let css = |color: nsh_core::Color| format!("#{:08x}", color.0);
+        SpanStyle {
+            color: css(style.color),
+            background_color: style.background.map(|b| css(b.color)),
+            font_size: f64::from(style.font_size.0),
+            font_weight: f64::from(style.font_weight),
+            italic: style.italic,
+            underline: style.decoration.underline,
+            line_through: style.decoration.line_through,
+        }
+    }
 }
 
 /// What [`WaitOptions`] waits for.
@@ -1413,6 +1506,20 @@ impl App {
         step(&this, move |app| app.right_click(&selector)).await
     }
 
+    /// Pastes `content` into the input `selector` names (or the first input
+    /// in it), as the user's paste does with it on the clipboard: the input
+    /// takes the focus and hears `onPaste` (`files` are paths whose bytes
+    /// it gets as `File`s), then its text goes in as `pasteBehavior` says.
+    /// The machine's clipboard stays as it was.
+    pub async fn paste(
+        this: Instance<Self>,
+        selector: String,
+        content: PasteContent,
+    ) -> Result<(), String> {
+        let content = content.read()?;
+        step(&this, move |app| app.paste(&selector, &content)).await
+    }
+
     /// Chooses the open context menu's action labelled `label` (a
     /// submenu's: `"Share > Mail"`), as a click on it: the app hears
     /// `onMenu`, then the menu closes.
@@ -1534,6 +1641,15 @@ impl App {
     /// The text of the input `selector` names, `null` when none matches.
     pub fn value(&self, selector: String) -> Result<Option<String>, String> {
         self.with(|app| app.value(&selector))
+    }
+
+    /// The style of the characters `selector` names, from the first
+    /// character. `id:<testID>` names a nested text. `text:<text>` names
+    /// where the text reads it. The parts before the last name the views
+    /// to look in (`id:note >> text:here`). Headless tests read this style;
+    /// an empty span reports an error because it has no first character.
+    pub fn span_style(&self, selector: String) -> Result<SpanStyle, String> {
+        self.with(|app| app.span_style(&selector).map(SpanStyle::from))
     }
 
     /// What the app's storage holds now.

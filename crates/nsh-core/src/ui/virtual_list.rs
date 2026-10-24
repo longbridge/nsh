@@ -311,6 +311,17 @@ impl VirtualList {
         self
     }
 
+    /// The sticky rows stick this animated value from the start instead,
+    /// following it (below a header that moves, `header` the header's
+    /// visible height; TS: `stickyHeaderOffset` set to an animated value).
+    pub fn bind_sticky_header_offset(mut self, value: &impl super::Animated) -> Self {
+        if let Some(node) = value.animated_node().live() {
+            super::host::set(&mut self.0, Prop::StickyOffsetNode(Some(node.id())));
+            self.0.attrs.bound.push(node);
+        }
+        self
+    }
+
     /// Scrolls to row `index` before the first frame (TS:
     /// `initialScrollIndex`).
     pub fn initial_scroll_index(mut self, index: usize) -> Self {

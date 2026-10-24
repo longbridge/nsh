@@ -11,11 +11,11 @@
 //! mounted (`popOnSwipe`, `popOnBack`, `closeOnSwipe`, `closeOnEscape`),
 //! never from JS.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig, Size,
+    Color, EdgeInsets, EventKind, EventPayload, HeaderSystemItem, ModalAnimation, ModalConfig,
+    ModalPresentation, NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig, Size,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -28,11 +28,11 @@ use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
     NSForegroundColorAttributeName, UIAdaptivePresentationControllerDelegate, UIBarButtonItem,
-    UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer, UIGestureRecognizerDelegate,
-    UIInterfaceOrientationMask, UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar,
-    UINavigationBarAppearance, UINavigationController, UINavigationControllerDelegate,
-    UINavigationItem, UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder,
-    UIView, UIViewAutoresizing, UIViewController,
+    UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer,
+    UIGestureRecognizerDelegate, UIInterfaceOrientationMask, UIModalPresentationStyle,
+    UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
+    UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
+    UIPresentationController, UIResponder, UIView, UIViewAutoresizing, UIViewController,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -585,6 +585,12 @@ define_class!(
             size_screens(nav);
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
+            // UIKit installs its own pop delegate while loading the navigation
+            // view. Restore ours after showing a screen so hidden headers still
+            // use the mounted swipe-back policy.
+            if let Some(pop) = nav.interactivePopGestureRecognizer() {
+                pop.setDelegate(Some(ProtocolObject::from_ref(self)));
+            }
         }
     }
 
@@ -602,6 +608,65 @@ define_class!(
         }
     }
 );
+
+/// The target of the UIKit bar button `ios={{ headerRightSystemItem }}`
+/// draws: a press on it presses the screen's `headerRight`, whose element
+/// the app listens to.
+struct BarItemIvars {
+    mounter: SharedMounter,
+    /// The screen whose trailing slot the button presses.
+    screen: NodeId,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = BarItemIvars]
+    struct BarItemTarget;
+
+    impl BarItemTarget {
+        #[unsafe(method(nshPress:))]
+        fn press(&self, _sender: Option<&NSObject>) {
+            let ivars = self.ivars();
+            if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.press_trailing_header(ivars.screen);
+            }
+        }
+    }
+);
+
+impl BarItemTarget {
+    fn new(mtm: MainThreadMarker, screen: NodeId, mounter: SharedMounter) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(BarItemIvars { mounter, screen });
+        // SAFETY: NSObject's designated initializer.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// A system bar button: its item, the button and its target.
+type SystemBarItem = (
+    HeaderSystemItem,
+    Retained<UIBarButtonItem>,
+    Retained<BarItemTarget>,
+);
+
+/// UIKit's bar button of `item`.
+fn system_bar_item(item: HeaderSystemItem) -> UIBarButtonSystemItem {
+    match item {
+        HeaderSystemItem::Add => UIBarButtonSystemItem::Add,
+        HeaderSystemItem::Done => UIBarButtonSystemItem::Done,
+        HeaderSystemItem::Close => UIBarButtonSystemItem::Close,
+        HeaderSystemItem::Edit => UIBarButtonSystemItem::Edit,
+        HeaderSystemItem::Compose => UIBarButtonSystemItem::Compose,
+        HeaderSystemItem::Search => UIBarButtonSystemItem::Search,
+        HeaderSystemItem::Share => UIBarButtonSystemItem::Action,
+        HeaderSystemItem::Trash => UIBarButtonSystemItem::Trash,
+        HeaderSystemItem::Save => UIBarButtonSystemItem::Save,
+        HeaderSystemItem::Cancel => UIBarButtonSystemItem::Cancel,
+    }
+}
 
 impl StackDelegate {
     fn new(mtm: MainThreadMarker, stack: NodeId, mounter: SharedMounter) -> Retained<Self> {
@@ -737,6 +802,10 @@ impl StackHost {
 /// One screen.
 pub(crate) struct ScreenHost {
     pub(crate) controller: Retained<ScreenController>,
+    /// The bar button of `ios={{ headerRightSystemItem }}`, made once per
+    /// item and kept while it stays, with its target (UIKit keeps a bar
+    /// button's target weakly).
+    right_system: RefCell<Option<SystemBarItem>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
     pub(crate) config: ScreenConfig,
@@ -754,13 +823,18 @@ impl ScreenHost {
             controller,
             view,
             config: ScreenConfig::default(),
+            right_system: RefCell::new(None),
         }
     }
 
     /// Applies the header options; `item` returns the view of a header item.
     /// The bar is UIKit's: a `header` slot (`header_view`, the whole bar
     /// where NSH draws it) is never placed, so it stays out of sight.
-    pub(crate) fn apply_header(&self, item: impl Fn(NodeId) -> Option<Retained<UIView>>) {
+    pub(crate) fn apply_header(
+        &self,
+        item: impl Fn(NodeId) -> Option<Retained<UIView>>,
+        press: Option<SharedMounter>,
+    ) {
         let mtm = self.controller.mtm();
         let c = &self.config;
         let nav_item = self.controller.navigationItem();
@@ -773,7 +847,38 @@ impl ScreenHost {
         };
         nav_item.setLeftBarButtonItem(bar_item(c.left).as_deref());
         nav_item.setLeftItemsSupplementBackButton(true);
-        nav_item.setRightBarButtonItem(bar_item(c.right).as_deref());
+        // `ios={{ headerRightSystemItem }}`: UIKit's button, which presses
+        // the app's `headerRight` (none without it). The same item keeps its
+        // button: rebuilding it on every header change would flash it.
+        let system = match (c.right_system_item, c.right, press) {
+            (Some(kind), Some(_), Some(mounter)) => {
+                let mut kept = self.right_system.borrow_mut();
+                if kept.as_ref().is_none_or(|(k, ..)| *k != kind) {
+                    let target = BarItemTarget::new(mtm, self.controller.screen_id(), mounter);
+                    // SAFETY: UIKit's designated initializer of a system bar
+                    // button; the target lives in `right_system` as long as
+                    // the button, and `nshPress:` is its action's selector.
+                    let item = unsafe {
+                        UIBarButtonItem::initWithBarButtonSystemItem_target_action(
+                            UIBarButtonItem::alloc(mtm),
+                            system_bar_item(kind),
+                            Some(&target),
+                            Some(objc2::sel!(nshPress:)),
+                        )
+                    };
+                    *kept = Some((kind, item, target));
+                }
+                kept.as_ref().map(|(_, item, _)| item.clone())
+            }
+            _ => {
+                self.right_system.borrow_mut().take();
+                None
+            }
+        };
+        match system {
+            Some(item) => nav_item.setRightBarButtonItem(Some(&item)),
+            None => nav_item.setRightBarButtonItem(bar_item(c.right).as_deref()),
+        }
         nav_item.setHidesBackButton(!c.back_visible);
         nav_item.setBackButtonTitle(c.back_title.as_deref().map(NSString::from_str).as_deref());
         nav_item.setLargeTitleDisplayMode(if c.large_title {

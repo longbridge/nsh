@@ -21,7 +21,7 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
-use crate::text::{WebLayout, css_font};
+use crate::text::{WebLayout, css_font, font_variant_numeric};
 
 /// JSON output.
 pub(crate) struct Out {
@@ -696,24 +696,10 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
             let _ = write!(css, "text-underline-offset:{o}px;");
         }
     }
-    let v = style.font_variant.0;
-    let mut numeric = Vec::new();
-    if v & nsh_core::FontVariant::OLDSTYLE_NUMS != 0 {
-        numeric.push("oldstyle-nums");
+    if let Some(numeric) = font_variant_numeric(style.font_variant) {
+        let _ = write!(css, "font-variant-numeric:{numeric};");
     }
-    if v & nsh_core::FontVariant::LINING_NUMS != 0 {
-        numeric.push("lining-nums");
-    }
-    if v & nsh_core::FontVariant::TABULAR_NUMS != 0 {
-        numeric.push("tabular-nums");
-    }
-    if v & nsh_core::FontVariant::PROPORTIONAL_NUMS != 0 {
-        numeric.push("proportional-nums");
-    }
-    if !numeric.is_empty() {
-        let _ = write!(css, "font-variant-numeric:{};", numeric.join(" "));
-    }
-    if v & nsh_core::FontVariant::SMALL_CAPS != 0 {
+    if style.font_variant.0 & nsh_core::FontVariant::SMALL_CAPS != 0 {
         css.push_str("font-variant-caps:small-caps;");
     }
     if let Some(s) = shadow
@@ -838,6 +824,9 @@ fn input_json(c: &InputConfig) -> String {
     );
     if let Some(m) = c.max_length {
         let _ = write!(s, ",\"maxLength\":{m}");
+    }
+    if c.paste_behavior != nsh_core::PasteBehavior::Insert {
+        s.push_str(",\"pasteInserts\":false");
     }
     s.push('}');
     s

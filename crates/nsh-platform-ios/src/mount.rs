@@ -592,6 +592,32 @@ impl Mounter {
         for (_, area) in &self.areas {
             area.batch_applied();
         }
+        self.focused_caret_moved();
+    }
+
+    /// Reports the focused input's caret if the batch moved it (the input
+    /// was laid out again: its text wraps elsewhere).
+    fn focused_caret_moved(&self) {
+        let Some(id) = self.focused else { return };
+        let Some(Slot {
+            native: Native::Input(input),
+            events,
+            ..
+        }) = self.slot(id)
+        else {
+            return;
+        };
+        if !events.contains(EventKind::CaretMove) {
+            return;
+        }
+        let view = input.editor_view();
+        view.layoutIfNeeded();
+        let Some(caret) = crate::input::caret(view) else {
+            return;
+        };
+        if crate::input::caret_changed(view, caret) {
+            self.input_event(id, EventKind::CaretMove, EventPayload::caret(caret));
+        }
     }
 
     /// The surface's event target.
@@ -2402,6 +2428,9 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Input(input) = &mut slot.native {
+            input.set_paste_listens(events.contains(EventKind::Paste));
+        }
         let v = slot.values;
         let any = |kinds: &[EventKind]| kinds.iter().any(|&k| events.contains(k));
         let handles_press = any(&[
@@ -2673,10 +2702,14 @@ impl Mounter {
             else {
                 continue;
             };
-            screen.apply_header(|item| match self.slot(item).map(|s| &s.native) {
-                Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
-                _ => None,
-            });
+            let press = Some(self.shared.clone());
+            screen.apply_header(
+                |item| match self.slot(item).map(|s| &s.native) {
+                    Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
+                    _ => None,
+                },
+                press,
+            );
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
                 if let Some(scroll) = first_scroll_view(&screen.view) {
@@ -2948,6 +2981,45 @@ impl Mounter {
         };
         if s.events.contains(event) {
             self.control.dispatch_event(id, event, EventPayload::None);
+        }
+    }
+
+    /// Presses the element the app put in the trailing header slot, as a tap
+    /// on a system bar button does: the first view inside the slot that
+    /// takes a press (the one made first), resolved now (the slot's content
+    /// arrives after the button is made). A slot with none takes no press.
+    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+        let Some(Slot {
+            native: Native::Screen(host),
+            ..
+        }) = self.slot(screen)
+        else {
+            return;
+        };
+        let Some(slot_node) = host.config.right else {
+            return;
+        };
+        let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let mut found = None;
+        for (index, slot) in self.views.iter().enumerate() {
+            let Some(slot) = slot else { continue };
+            if !slot.events.contains(EventKind::Press) {
+                continue;
+            }
+            let id = index as NodeId;
+            if let Some(view) = self.slot(id).map(|s| s.native.view().retain())
+                && view != container
+                && view.isDescendantOfView(&container)
+            {
+                found = Some(id);
+                break;
+            }
+        }
+        if let Some(node) = found {
+            self.control
+                .dispatch_event(node, EventKind::Press, EventPayload::None);
         }
     }
 
@@ -3253,7 +3325,10 @@ impl Mounter {
         let offset = if l.horizontal { offset.x } else { offset.y } as f32;
         for c in cells {
             let Some(s) = self.slot(c.cell) else { continue };
-            let t = (offset - c.start.0).clamp(0.0, c.end.0 - c.start.0) as CGFloat;
+            // An animated offset is the graph's (pinned again with its frames).
+            let extra = c.offset.map_or(0.0, |n| self.animator.value(n));
+            let t =
+                (offset + extra - c.start.0).clamp(0.0, (c.end.0 - c.start.0).max(0.0)) as CGFloat;
             let (x, y) = if l.horizontal { (t, 0.0) } else { (0.0, t) };
             s.native
                 .view()
@@ -3292,6 +3367,13 @@ impl Mounter {
         }
     }
 
+    /// Scroll view `id` came to rest (`onScrollEnd`).
+    pub(crate) fn scroll_ended(&mut self, id: NodeId) {
+        if let Some(node) = self.slot(id).and_then(|s| s.scroll_value) {
+            self.animator.settle(node);
+        }
+    }
+
     /// Display link frame.
     pub(crate) fn tick(&mut self) {
         if self.animator.tick() {
@@ -3305,6 +3387,12 @@ impl Mounter {
         for &id in &self.animated {
             if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
                 apply_dynamic(s, animator);
+            }
+        }
+        // Sticky cells that stick an animated value further in follow it.
+        for (&id, cells) in &self.sticky {
+            if cells.iter().any(|c| c.offset.is_some()) {
+                self.pin_sticky(id);
             }
         }
     }

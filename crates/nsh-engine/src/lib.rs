@@ -1359,7 +1359,14 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        core.set_components(nsh_core::ui::Registry::merged(&config.ui_sets));
+        // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
+        // sets the host serves.
+        let sets: Vec<_> = nsh_core::runtime::registries()
+            .iter()
+            .chain(&config.ui_sets)
+            .cloned()
+            .collect();
+        core.set_components(nsh_core::ui::Registry::merged(&sets));
         // The JS calls Rust posts queue in one place, which the core
         // releases in order with the ops (a post during a synchronous call)
         // and the script runs.
@@ -2358,7 +2365,7 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
 /// Returns false on shutdown.
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
-        Message::Event(id, event, payload) => {
+        Message::Event(id, event, mut payload) => {
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
@@ -2383,6 +2390,14 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             // values (from JS and from Rust components alike).
             if let (EventKind::ChangeText, EventPayload::Text { text, count }) = (event, &payload) {
                 state.core.input_changed(id, text, *count);
+            }
+            // The platform knows the caret in the input, the core where
+            // the input is.
+            if event == EventKind::CaretMove {
+                state.core.locate_caret(id, &mut payload);
+            }
+            if event == EventKind::Paste {
+                payload = payload.into_paste();
             }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {

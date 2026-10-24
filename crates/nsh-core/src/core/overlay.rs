@@ -527,7 +527,7 @@ impl<M: TextEngine> Core<M> {
     fn hint_anchor(&self, key: Key) -> Option<Key> {
         match self.overlay(key)?.config.anchor {
             OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => self.key(id).ok(),
-            OverlayAnchor::Point(_) => None,
+            OverlayAnchor::Point(_) | OverlayAnchor::Bounds(_) => None,
             OverlayAnchor::None => {
                 let mut k = self.nodes[key as usize].parent;
                 while k != NO_KEY {
@@ -1020,6 +1020,7 @@ impl<M: TextEngine> Core<M> {
                 origin: p,
                 size: Size::default(),
             }),
+            OverlayAnchor::Bounds(bounds) => Some(bounds),
             OverlayAnchor::Node(id) => self.measure(id).map(|m| Bounds {
                 origin: m.page,
                 size: m.frame.size,

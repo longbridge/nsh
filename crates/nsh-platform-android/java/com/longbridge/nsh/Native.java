@@ -75,6 +75,8 @@ final class Native {
     static final int PICK = 64;
     static final int LOAD_MORE_AT_START = 65;
     static final int OPEN_URL = 66;
+    static final int CARET_MOVE = 67;
+    static final int PASTE = 68;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -239,6 +241,9 @@ final class Native {
      */
     static native void eventMap(long handle, int id, int kind, String[] keys, Object[] values);
 
+    /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
+    static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
+
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);
 
@@ -250,6 +255,12 @@ final class Native {
      * else null.
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
+
+    /**
+     * A scroll view came to rest: the snapping animated values that follow it settle. Returns
+     * bound values when one starts moving, else null.
+     */
+    static native float[] scrollEnded(long handle, int id);
 
     /** A zoomable scroll view's zoom scale, reported before its offset. */
     static native void zoom(long handle, int id, float scale);

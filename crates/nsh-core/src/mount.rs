@@ -7,8 +7,8 @@ use crate::{
     geometry::{Bounds, Points, Size},
     ops::{
         AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, ResizeMode,
-        ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
+        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, PasteBehavior,
+        ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
     },
     props::{EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
     style::{Color, TextAlign, ViewStyle},
@@ -316,7 +316,8 @@ fn nearest(points: &[f32], to: f32) -> Option<f32> {
 /// sticky offset from it): at scroll offset `offset` (along the main axis)
 /// it shows `clamp(offset - start, 0, end - start)` past where it is laid
 /// out.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
 pub struct StickyCell {
     /// The cell.
     pub cell: NodeId,
@@ -326,6 +327,12 @@ pub struct StickyCell {
     /// The scroll offset at which the next sticky cell pushes it out (may be
     /// infinite).
     pub end: Points,
+    /// An animated value added to the scroll offset: it sticks that much
+    /// further from the viewport's start (below a header that moves), at
+    /// `clamp(offset + value - start, 0, end - start)`. The platforms read
+    /// it from the animation graph whenever they pin, and pin again on the
+    /// graph's frames.
+    pub offset: Option<crate::animation::NodeId>,
 }
 
 /// The header heights a platform without a native header gives the core
@@ -376,6 +383,9 @@ pub struct ScreenConfig {
     pub left: Option<NodeId>,
     /// Trailing header item view.
     pub right: Option<NodeId>,
+    /// UIKit's own bar button in the trailing slot instead of `right`'s
+    /// view (iOS); a press on it presses `right`'s first pressable view.
+    pub right_system_item: Option<crate::HeaderSystemItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -406,6 +416,7 @@ impl Default for ScreenConfig {
             animation: ScreenAnimation::Default,
             left: None,
             right: None,
+            right_system_item: None,
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -502,6 +513,8 @@ pub struct InputConfig {
     pub blur_on_submit: bool,
     /// `submitBehavior` as set; [`InputConfig::submit`] resolves it.
     pub submit_behavior: Option<SubmitBehavior>,
+    /// What a paste does (`pasteBehavior`).
+    pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
     /// Caret and selection color.
@@ -552,6 +565,7 @@ impl Default for InputConfig {
             editable: true,
             blur_on_submit: true,
             submit_behavior: None,
+            paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
             selection_color: None,
             auto_fill: crate::ops::AutoFill::Default,

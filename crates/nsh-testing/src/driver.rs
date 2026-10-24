@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use nsh_core::{
-    Dialog,
+    Dialog, ResolvedTextStyle,
     geometry::{Point, Points, Size},
     platform::ColorScheme,
 };
@@ -29,6 +29,9 @@ pub(crate) trait Driver: Send {
     fn press_key(&mut self, keys: &str) -> Result<(), String>;
     fn hover(&mut self, selector: &str) -> Result<(), String>;
     fn right_click(&mut self, selector: &str) -> Result<(), String>;
+    /// Pastes `content` into the input `selector` names, as the user's
+    /// paste does with it on the clipboard.
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String>;
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String>;
     fn close_menu(&mut self) -> Result<(), String>;
     fn back(&mut self) -> Result<(), String>;
@@ -63,6 +66,7 @@ pub(crate) trait Driver: Send {
     fn enabled(&mut self, selector: &str) -> Result<bool, String>;
     fn shows(&mut self, selector: &str) -> Result<bool, String>;
     fn value(&mut self, selector: &str) -> Result<Option<String>, String>;
+    fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String>;
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String>;
     /// The open context menu's actions, `None` when none is open.
     fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
@@ -115,6 +119,9 @@ impl Driver for Headless {
     }
     fn right_click(&mut self, selector: &str) -> Result<(), String> {
         Headless::right_click(self, selector)
+    }
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        Headless::paste(self, selector, content)
     }
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {
         Headless::choose_menu_item(self, label)
@@ -198,6 +205,10 @@ impl Driver for Headless {
     fn value(&mut self, selector: &str) -> Result<Option<String>, String> {
         self.catch_up();
         Ok(self.screen().input_text(selector)?.map(str::to_owned))
+    }
+    fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
+        self.catch_up();
+        self.screen().span_style(selector)
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.catch_up();
@@ -318,6 +329,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::PressKey { keys } => format!("keyboard.press({keys})"),
         TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
+        TestStep::Paste { selector, .. } => format!("paste({selector})"),
         TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::HostSend { name, .. } => format!("host.send({name})"),
@@ -408,6 +420,18 @@ impl Driver for Remote {
     fn right_click(&mut self, selector: &str) -> Result<(), String> {
         self.action(TestStep::RightClick {
             selector: selector.into(),
+        })
+    }
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        self.action(TestStep::Paste {
+            selector: selector.into(),
+            text: content.text.clone(),
+            files: content
+                .files
+                .iter()
+                .map(|f| nsh_dev::protocol::TestFile::new(&f.name, &f.mime, f.data.clone()))
+                .collect(),
+            uris: content.uris.clone(),
         })
     }
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {
@@ -506,6 +530,9 @@ impl Driver for Remote {
         self.query(TestStep::Value {
             selector: selector.into(),
         })
+    }
+    fn span_style(&mut self, _: &str) -> Result<ResolvedTextStyle, String> {
+        Err(headless_only("Reading a span's style (`app.spanStyle`)"))
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.query(TestStep::Dialogs)

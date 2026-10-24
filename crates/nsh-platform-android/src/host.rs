@@ -1263,6 +1263,75 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
     }
 }
 
+/// `onPaste`: the text, the images' encoded bytes (each a `File` in JS, the
+/// bytes never through JS strings) and local files' `file:` URLs.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_paste(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    text: JString<'_>,
+    images: jni::objects::JObjectArray<'_>,
+    uris: jni::objects::JObjectArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let mut paste =
+        nsh_core::PasteEvent::new(env.get_string(&text).map(String::from).unwrap_or_default());
+    for i in 0..env.get_array_length(&images).unwrap_or(0) {
+        let Ok(image) = env.get_object_array_element(&images, i) else {
+            continue;
+        };
+        let image = jni::objects::JByteArray::from(image);
+        if let Ok(bytes) = env.convert_byte_array(&image) {
+            paste.files.push(nsh_core::PastedFile::image(bytes));
+        }
+    }
+    for i in 0..env.get_array_length(&uris).unwrap_or(0) {
+        let Ok(uri) = env.get_object_array_element(&uris, i) else {
+            continue;
+        };
+        if let Ok(uri) = env.get_string(&JString::from(uri)) {
+            paste.uris.push(uri.into());
+        }
+    }
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            id as NodeId,
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(paste)),
+        );
+    }
+}
+
+/// Folds the caret Java reports as numbers (`caretX`, `caretY`,
+/// `caretWidth`, `caretHeight`, in dp) into `onCaretMove`'s `bounds`.
+fn caret_bounds(fields: &mut Vec<(&'static str, PayloadValue)>) {
+    let mut caret = [0.0f32; 4];
+    fields.retain(|(key, value)| {
+        let slot = match *key {
+            "caretX" => 0,
+            "caretY" => 1,
+            "caretWidth" => 2,
+            "caretHeight" => 3,
+            _ => return true,
+        };
+        if let PayloadValue::Number(n) = value {
+            caret[slot] = *n as f32;
+        }
+        false
+    });
+    let [x, y, width, height] = caret;
+    fields.push((
+        "bounds",
+        PayloadValue::Bounds(nsh_core::Bounds {
+            origin: point(px(x), px(y)),
+            size: size(px(width), px(height)),
+        }),
+    ));
+}
+
 /// An event with an object payload: `keys` and `values` (`Double`,
 /// `Boolean` or `String`), or with a single `value` when `keys` is null.
 #[unsafe(no_mangle)]
@@ -1346,11 +1415,18 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "opened" => "opened",
                 "reason" => "reason",
                 "composing" => "composing",
+                "caretX" => "caretX",
+                "caretY" => "caretY",
+                "caretWidth" => "caretWidth",
+                "caretHeight" => "caretHeight",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {
                 fields.push((key, v));
             }
+        }
+        if kind == EventKind::CaretMove {
+            caret_bounds(&mut fields);
         }
         EventPayload::Map(fields)
     };
@@ -1420,6 +1496,25 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
     }
     let mut ui = host.ui.lock().expect("ui");
     if !ui.scrolled(id as u32, x, y) {
+        return std::ptr::null_mut();
+    }
+    finish(host, &mut ui);
+    floats(&env, &ui.outputs())
+}
+
+/// A scroll view came to rest: the snapping values that follow its scroll
+/// value settle. Returns bound values when one starts moving, else null.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_scrollEnded(
+    env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+) -> jfloatArray {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let mut ui = host.ui.lock().expect("ui");
+    if !ui.scroll_ended(id as u32) {
         return std::ptr::null_mut();
     }
     finish(host, &mut ui);

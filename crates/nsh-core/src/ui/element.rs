@@ -744,6 +744,19 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// A sticky view ([`super::Styled::sticky`]) sticks this animated value
+    /// from the top of the scroll view's viewport, following it (below a
+    /// header that moves: `header.add(8.0)`; TS: `top` set to an animated
+    /// value).
+    fn bind_sticky_top(self, value: &impl super::Animated) -> Self {
+        self.bind(crate::animation::AnimationProp::StickyTop, value)
+    }
+
+    /// The same as [`Self::bind_sticky_top`] in a horizontal scroll view.
+    fn bind_sticky_left(self, value: &impl super::Animated) -> Self {
+        self.bind(crate::animation::AnimationProp::StickyLeft, value)
+    }
+
     /// Appends a transform step driven by an animated value, after the styles'
     /// transforms.
     fn bind_transform(mut self, kind: crate::TransformKind, value: &impl super::Animated) -> Self {

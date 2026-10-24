@@ -1207,6 +1207,30 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
         }
+        // The bytes cross natively: each file is a `File` over them.
+        EventPayload::Paste(paste) => {
+            obj.set("text", paste.text.as_str())?;
+            let files = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in paste.files.iter().enumerate() {
+                let blob = crate::web::blob::Blob::new(file.data.clone(), file.mime.clone());
+                let made = crate::web::blob::new_file(
+                    cx.as_raw().as_ptr(),
+                    blob,
+                    file.name.clone(),
+                    crate::web::blob::now_ms(),
+                )
+                .map_err(|_| rquickjs::Error::Exception)?;
+                // SAFETY: an owned value of this context, handed over.
+                let value = unsafe { Value::from_raw(cx.clone(), made.take()) };
+                files.set(index, value)?;
+            }
+            obj.set("files", files)?;
+            let uris = rquickjs::Array::new(cx.clone())?;
+            for (index, uri) in paste.uris.iter().enumerate() {
+                uris.set(index, uri.as_str())?;
+            }
+            obj.set("uris", uris)?;
+        }
         // The core answers picks; JS never gets their files this way.
         EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
@@ -2126,6 +2150,27 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::FileDrop(uris.clone())).unwrap();
             let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
             assert_eq!(actual, uris);
+        });
+    }
+
+    #[test]
+    fn paste_payload_hands_files_over_as_file_objects() {
+        let host = Host::new().unwrap();
+        let mut paste = nsh_core::PasteEvent::new("hi");
+        paste.files.push(nsh_core::PastedFile::image(vec![
+            0x89, b'P', b'N', b'G', 1, 2,
+        ]));
+        paste.uris.push("file:///tmp/a.txt".into());
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Paste(Box::new(paste))).unwrap();
+            cx.globals().set("pasted", value).unwrap();
+            let summary: String = cx
+                .eval(
+                    "const f = pasted.files[0]; \
+                     `${pasted.text} ${f instanceof File} ${f.name} ${f.type} ${f.size} ${pasted.uris[0]}`",
+                )
+                .unwrap();
+            assert_eq!(summary, "hi true image.png image/png 6 file:///tmp/a.txt");
         });
     }
 

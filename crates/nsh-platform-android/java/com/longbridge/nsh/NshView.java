@@ -447,10 +447,17 @@ public class NshView extends FrameLayout {
      * Registers native component {@code name} ({@code nativeComponent(name, ...)}
      * in JS): {@code factory} makes one for every element created from now on.
      *
+     * Names under {@code nsh/} are NSH's own: registering one logs a warning
+     * and changes nothing.
+     *
      * @param name the name JS uses
      * @param factory makes the components (UI thread)
      */
     public void registerComponent(String name, NshComponent.Factory factory) {
+        if (name.startsWith("nsh/")) {
+            android.util.Log.w("nsh", "native component `" + name + "` is not registered: names under `nsh/` are NSH's");
+            return;
+        }
         mounter.components.put(name, factory);
     }
 

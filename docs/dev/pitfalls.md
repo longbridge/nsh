@@ -88,7 +88,9 @@ Things that were found the hard way. Read the section of the area you change bef
   has applied (`EngineControl::scroll(.., applied)`), and the core adds the ones still pending; otherwise a stale offset
   moves the window (and fires `onLoadMore`) backwards.
 - **Unbound list cells still show their last item**: the core moves them out of sight (never with a NaN frame: cells that
-  were never placed are skipped; UIKit throws on NaN geometry).
+  were never placed are skipped; UIKit throws on NaN geometry). Out of sight is not out of reach: the backends'
+  accessibility trees go by props, not frames, and a browser keeps such a cell in its accessibility tree, as a Tab
+  stop and for test-id lookups. The core hides them too (`Core::set_spare`) until it places them again.
 - **Tailwind variant order decides between variants**, not their order in the string: `odd:bg-a last:bg-b` gives an odd last row
   `bg-a` (Tailwind sorts `odd` after `last`), exactly as in CSS.
 
@@ -109,6 +111,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **IPAs are zipped with `ditto -c -k --norsrc --keepParent`**: `--sequesterRsrc` adds `__MACOSX/` resource forks.
 
 ## iOS, UIKit and Mac Catalyst
+
+- **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
+  the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
+  `system_tab_bar.rs`, fill the immediate host's bounds exactly during layout, and report intrinsic height with
+  `sizeThatFits` at the laid-out width. `sizeToFit` changes the frame and must not run on selection updates.
 
 - **Pressed-style observers must leave ancestor clicks working**: a view with only `activeStyle` / `active:`
   has a `PressRecognizer` to report its pressed state, but yields the click to the nearest ancestor with press
@@ -152,6 +159,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **UINavigationController breaks transitions started during another one**: stack changes that arrive while
   `transitionCoordinator()` is set wait for `didShow` and are applied on the next main-queue turn (the coordinator outlives
   the callback); only pages the controller actually had count as popped by the user.
+- **UIKit installs its own interactive-pop delegate while loading a navigation controller's view**: assigning NSH's
+  delegate when the stack is created can be overwritten. Bind the current recognizer in `didShow`, after UIKit has
+  configured the screen, so hidden headers use NSH's mounted `popOnSwipe` / `popOnBack` policy too. Verify the gesture
+  with real system edge input; the in-process test agent does not start UIKit's interactive pop.
 - **`UIAlertController` asserts when its presentation controller's delegate is set**; a popover action sheet (iPad, Mac) hides
   its cancel action and runs it on a tap outside, so sheets without one get a hidden, untitled cancel answering "dismissed" (`null`).
 - **Catalyst: a mouse drag does not scroll a UIScrollView** (Mac behavior); test scrolling with trackpad-style scroll wheel
@@ -227,6 +238,15 @@ Things that were found the hard way. Read the section of the area you change bef
   edit, connection call and batch end, since keyboards start and end it in many ways (`setComposingRegion` included); a
   value JS sets meanwhile waits for its end (`setText` restarts the keyboard, which commits the pre-edit text), and is
   never applied from inside the text watcher.
+- **Android, input selection after attachment**: a navigation screen can be measured while detached. `TextView` then
+  caches disabled cursor controllers because its root has no window parameters; attachment alone does not refresh
+  them, and another `requestLayout` may reuse the text layout. `InputBox` reapplies the current break strategy on
+  attachment when a text layout already exists, discarding it so the next measure refreshes the controllers with a
+  valid window. Keep this on every attachment, including reattachment. Do not replace the text or enable
+  `textIsSelectable` to force a refresh: those affect selection, input-method state or focus/keyboard behavior.
+  Regression checks must cold-start the Android host and long-press a four-line input inside `NavStack`, with explicit
+  `lineHeight` and height updated by `onContentSizeChange` ([reproduction](https://github.com/longbridge/nsh/issues/409));
+  hot reload can hide the failure. Also check removal/reattachment, editing and the native selection menu.
 - **Android, keyboard avoidance**: the keyboard's height becomes bottom padding of the scroll around the focused input, and
   `ScrollBox.reveal` scrolls it into view; `requestRectangleOnScreen` cannot, as ScrollView ignores its padding when it decides
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
@@ -277,6 +297,9 @@ Things that were found the hard way. Read the section of the area you change bef
   under the watched one as given: watch a canonical path (a `..` in it makes every path look like a dot entry).
 - **GDK frame times are microseconds** (`FrameClock::frame_time`); `nsh_anim::Graph::tick` takes seconds and the
   scroll and transition code milliseconds: convert at each call site.
+- **AT-SPI reads widgets, not what NSH draws**: a view `snapshot` skips (`visibility: hidden`) is still presented, with
+  its subtree, until its accessible state is `Hidden` (`access.rs`); GTK's AT-SPI bridge then leaves out the widget
+  and its subtree (`gtk_accessible_should_present`; checked with an AT-SPI client on GTK 4.14).
 - **A widget's accessible role is effectively fixed** once its AT context is realized: GTK refuses to change it (with a
   critical), and nothing tells whether it is. Roles are decided when the view is created, from the batch that creates
   it (`access::prepare`); a later change detaches the view and puts it back.
@@ -390,6 +413,11 @@ Things that were found the hard way. Read the section of the area you change bef
   clip spaces are the placed frames (`ns().frame()`).
 - In `define_class!` methods, an early `return` of a `bool` or `Option<Retained<_>>` does not compile (the macro wraps
   the return type): write the body as one expression.
+- VoiceOver reads views, not layers: `visibility: hidden` hides only the view's layer (an `NSView`'s own `hidden` is
+  the navigation's, for screens under the top one), so `access.rs` takes such a view and its subtree out as it does
+  for `accessibilityElementsHidden`. `setAccessibilityChildren:` cannot be undone: `nil` leaves the view without
+  children instead of AppKit's again, so a subtree shown again stayed out of reach; `NshView` answers
+  `accessibilityChildren` itself (none while hidden or grouped, else `NSView`'s).
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, the test agent's screenshot, shows them: WebKit
@@ -437,6 +465,17 @@ Things that were found the hard way. Read the section of the area you change bef
   Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
   Chromium hands it over). The published page starts its downloads with `fetch` in a head script instead
   (`web::page`, `fetches`).
+- **A scroll view's smooth wheel and key scrolling is nsh's glide, which no browser call cancels**: `wheel` and the
+  scroll keys are prevented and `scrollSmoothly` moves the view on animation frames, so an instant `scrollTo` lasted
+  one frame and the glide's next one put its offset back (Chromium 141: a 900 px wheel notch, `scrollTo(0)` 50 ms
+  later, then 778, 848, … 900). Commands stop the glide first (`stopGlide`) and `op_sb` moves it. A `scrollTo` to
+  where the view already is, instant or smooth, sends neither `scroll` nor `scrollend` (Chromium 152): `stopGlide`
+  sends the `onScrollEnd` of the scroll it stops then. Headless Chrome (141, 155) scrolls a wheel's delta at once by
+  itself: the scroll that animates there is the glide.
+- **Fractional scroll targets can move less than half a CSS pixel**: at DPR 2, Chromium rounds a target of 40.4
+  to 40.5. A half-pixel stationary tolerance therefore ends the scroll early and duplicates `onScrollEnd`.
+  `stopGlide` compares clamped offsets exactly; a quiet-period fallback covers targets rounded back to the
+  current offset, for which the browser emits no `scrollend`.
 
 ## Testing on simulators and emulators
 

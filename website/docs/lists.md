@@ -164,7 +164,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `inverted` | `.inverted()` | `boolean` | `false` | Item 0 at the bottom (chat); starts at the end and keeps its distance from the end. |
 | `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content grows (see below). |
 | `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | Items that stick to the top while scrolled past (one column, not inverted). |
-| `stickyHeaderOffset` | `.sticky_header_offset(px(..))` | `number` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. |
+| `stickyHeaderOffset` | `.sticky_header_offset(px(..))`, `.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. An animated value moves them every frame. |
 | `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, ..., `.row_gap(..)`, `.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
 | `contentClass` | | `string` | | The same as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
 | `header` | `.header(..)` | component or element | | Before the items. |
@@ -279,6 +279,32 @@ for (const [letter, names] of groups) {
 Because a cell may show a header now and a name later, the row decides what to render with [`when` / `<If>`](../elements/control-flow.md), which switches when the row changes. Sticky headers need one column and a list that is not inverted.
 
 `stickyHeaderOffset` (`.sticky_header_offset(..)` in Rust) makes the headers stick that many points below the top instead, as CSS `position: sticky`'s `top` does: under a translucent bar 56 points tall, `stickyHeaderOffset={56}` (`.sticky_header_offset(px(56.0))`) keeps each header below the bar while the rows scroll on under it, and the next header pushes it out from there. A negative offset leaves part of a header out of view.
+
+The offset can be an [animated value](./animation.md#animated-values) (`.bind_sticky_header_offset(&node)` in Rust): the headers follow it every frame on the UI thread, so they stay below a bar that moves. With a bar that hides as the content scrolls down and comes back as it scrolls up ([`diffClamp`](./animation.md#arithmetic-and-diffclamp)), the headers stick to its bottom edge wherever it is:
+
+```rust tabs
+let offset = animated_value(0.0);
+let hidden = offset.diff_clamp(0.0, 56.0);
+let shown = hidden.mul(-1.0).add(56.0);
+
+view().flex_1().overflow_hidden().child(
+    virtual_list(rows.len(), row)
+        .scroll_value(&offset)
+        .sticky_header_indices(headers)
+        .bind_sticky_header_offset(&shown),
+).child(view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&hidden.mul(-1.0)))
+```
+
+```tsx tabs
+const scroll = createAnimatedValue(0);
+const hidden = scroll.diffClamp(0, 56);
+const shown = hidden.mul(-1).add(56);
+
+<View style={{ flex: 1, overflow: "hidden" }}>
+  <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+</View>
+```
 
 ## Chat: inverted lists
 

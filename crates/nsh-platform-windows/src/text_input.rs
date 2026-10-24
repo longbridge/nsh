@@ -143,6 +143,8 @@ pub(crate) struct InputState {
     count: Cell<u32>,
     /// Selection as last reported (UTF-16).
     reported: Cell<(u32, u32)>,
+    /// The caret as last reported, in the view.
+    reported_caret: Cell<Bounds<Points>>,
     /// The composition as last reported (`onCompositionChange`): its text
     /// while one is in progress.
     composed: RefCell<Option<String>>,
@@ -184,6 +186,7 @@ impl InputState {
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
             reported: Cell::new((0, 0)),
+            reported_caret: Cell::new(Bounds::default()),
             composed: RefCell::new(None),
             pending: RefCell::new(None),
             anim_color: Cell::new(None),
@@ -1115,26 +1118,53 @@ fn key_press(surface: &Surface, view: &NshView, key: &str) {
     });
 }
 
-/// Reports the selection if it moved and JS listens.
+/// Reports the selection if it moved and JS listens, then the caret.
 fn report_selection(surface: &Surface, view: &NshView, input: &InputState) {
-    if !view.state().events.contains(EventKind::SelectionChange) {
+    if view.state().events.contains(EventKind::SelectionChange) {
+        let range = {
+            let model = input.model.borrow();
+            let (s, e) = model.selection();
+            let text = model.text();
+            (model::byte_to_utf16(text, s), model::byte_to_utf16(text, e))
+        };
+        if input.reported.replace(range) != range {
+            send(surface, view, EventKind::SelectionChange, || {
+                EventPayload::Map(vec![
+                    ("start", PayloadValue::Number(range.0 as f64)),
+                    ("end", PayloadValue::Number(range.1 as f64)),
+                ])
+            });
+        }
+    }
+    report_caret(surface, view, input);
+}
+
+/// `onCaretMove` if the caret moved (with the selection, or as the text
+/// scrolled or wrapped again) and JS listens.
+fn report_caret(surface: &Surface, view: &NshView, input: &InputState) {
+    // Only an input that edits shows a caret.
+    if !input.focused.get() || !view.state().events.contains(EventKind::CaretMove) {
         return;
     }
-    let range = {
-        let model = input.model.borrow();
-        let (s, e) = model.selection();
-        let text = model.text();
-        (model::byte_to_utf16(text, s), model::byte_to_utf16(text, e))
+    let caret: Bounds<Points> = caret_bounds(view, input);
+    if input.reported_caret.replace(caret) != caret {
+        send(surface, view, EventKind::CaretMove, || {
+            EventPayload::caret(caret)
+        });
+    }
+}
+
+/// The caret in the input view's coordinates (`onCaretMove`'s `bounds`):
+/// in the content box, scrolled with the text.
+fn caret_bounds(view: &NshView, input: &InputState) -> Bounds<Points> {
+    let Some((x, y, h)) = input.caret_rect() else {
+        return Bounds::default();
     };
-    if input.reported.replace(range) == range {
-        return;
+    let content = content_rect(view, input);
+    Bounds {
+        origin: Point::new(content.origin.x + Points(x), content.origin.y + Points(y)),
+        size: Size::new(Points(caret_width()), Points(h)),
     }
-    send(surface, view, EventKind::SelectionChange, || {
-        EventPayload::Map(vec![
-            ("start", PayloadValue::Number(range.0 as f64)),
-            ("end", PayloadValue::Number(range.1 as f64)),
-        ])
-    });
 }
 
 /// Reports the composition if it started, changed or ended since last
@@ -1384,6 +1414,9 @@ pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     place(view, &input);
     if input.focused.get() {
         input.reveal();
+        if let Some(surface) = surface_of(view) {
+            report_caret(&surface, view, &input);
+        }
     }
 }
 
@@ -1586,6 +1619,11 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let moved = input.scroll.get() != before;
     if moved {
         view.changed();
+        if input.focused.get()
+            && let Some(surface) = surface_of(view)
+        {
+            report_caret(&surface, view, &input);
+        }
     }
     moved
 }
@@ -1651,7 +1689,10 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             item(
                 Some(MenuRole::Paste),
                 "",
-                editable && crate::system::clipboard_has_text(),
+                editable
+                    && (crate::system::clipboard_has_text()
+                        || (view.state().events.contains(EventKind::Paste)
+                            && crate::system::clipboard_has_image())),
                 0x56,
                 true,
             ),
@@ -1831,8 +1872,28 @@ fn cut(surface: &Surface, view: &NshView, input: &InputState, secure: bool) -> b
     true
 }
 
+/// A paste (Ctrl+V, Shift+Insert, the menu): reports what the clipboard
+/// holds (`onPaste`) if the app listens, then inserts its text as
+/// `pasteBehavior` says. The clipboard is read only here, on the user's
+/// paste.
 fn paste(surface: &Surface, view: &NshView, input: &InputState) {
-    let Some(text) = crate::system::clipboard_text() else {
+    let text = crate::system::clipboard_text();
+    if view.state().events.contains(EventKind::Paste) {
+        let mut paste = nsh_core::PasteEvent::new(text.clone().unwrap_or_default());
+        if let Some(image) = crate::system::clipboard_image() {
+            paste.files.push(nsh_core::PastedFile::image(image));
+        }
+        paste.uris = crate::system::clipboard_files();
+        surface.event(
+            view.id(),
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(paste)),
+        );
+    }
+    if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
+        return;
+    }
+    let Some(text) = text else {
         return;
     };
     let text = pasted(&text, input.multiline());

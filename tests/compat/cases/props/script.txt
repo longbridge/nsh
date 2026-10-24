@@ -457,6 +457,9 @@ tap id:case-props-list-sticky-offset
 # reaches item 0's bottom there.
 expect Offset 0
 prop scroll:text:"Offset 0" stickyHeaderIndices start=-24 end=56, start=96 end=Infinity
+# An animated offset: the platform adds its value as it pins, every frame,
+# so the travel is the one at the top.
+prop scroll:text:"Animated 0" stickyHeaderIndices start=0 end=80, start=120 end=Infinity
 covers [props] stickyHeaderOffset
 # props-list-viewport
 tap id:case-props-list-viewport

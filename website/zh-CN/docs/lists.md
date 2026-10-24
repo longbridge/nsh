@@ -164,7 +164,7 @@ const toggle = (id: number) =>
 | `inverted` | `.inverted()` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
 | `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | 非倒置列表在距离末尾不超过该点数时，随内容增长停留在末尾（见下文）。 |
 | `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | 滚过时吸附在顶部的条目（单列且非倒置）。 |
-| `stickyHeaderOffset` | `.sticky_header_offset(px(..))` | `number` | `0` | 吸顶条目吸附在距顶部多远的位置，同 CSS `position: sticky` 的 `top`；内容继续在其上方的空间下滚动。 |
+| `stickyHeaderOffset` | `.sticky_header_offset(px(..))`、`.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | 吸顶条目吸附在距顶部多远的位置，同 CSS `position: sticky` 的 `top`；内容继续在其上方的空间下滚动。动画值让它们逐帧移动。 |
 | `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)` 等、`.row_gap(..)`、`.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
 | `contentClass` | | `string` | | 同上，写成类名（`p-*`、`gap-*`）；`contentStyle` 优先。 |
 | `header` | `.header(..)` | 组件或元素 | | 在条目之前。 |
@@ -279,6 +279,32 @@ for (const [letter, names] of groups) {
 同一个单元格可能这会儿显示标题、过一会儿显示名字，所以行用 [`when` / `<If>`](../elements/control-flow.md) 决定渲染什么，它会在行改变时切换。吸顶标题要求单列且列表不倒置。
 
 `stickyHeaderOffset`（Rust 中为 `.sticky_header_offset(..)`）让标题吸附在距顶部这么多点的位置，如同 CSS `position: sticky` 的 `top`：在 56 点高的半透明栏下，`stickyHeaderOffset={56}`（`.sticky_header_offset(px(56.0))`）让每个标题停在栏的下方，行则继续在栏下滚动，下一个标题从那里把它推出去。负值会让标题的一部分移出视口。
+
+偏移量可以是[动画值](./animation.md#动画值)（Rust 中为 `.bind_sticky_header_offset(&node)`）：标题在 UI 线程上逐帧跟随它，因此始终停在移动的栏下方。对于内容向下滚动时隐藏、向上滚动时重新出现的栏（[`diffClamp`](./animation.md#算术运算与-diffclamp)），标题无论栏在哪里都吸附在它的下边缘：
+
+```rust tabs
+let offset = animated_value(0.0);
+let hidden = offset.diff_clamp(0.0, 56.0);
+let shown = hidden.mul(-1.0).add(56.0);
+
+view().flex_1().overflow_hidden().child(
+    virtual_list(rows.len(), row)
+        .scroll_value(&offset)
+        .sticky_header_indices(headers)
+        .bind_sticky_header_offset(&shown),
+).child(view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&hidden.mul(-1.0)))
+```
+
+```tsx tabs
+const scroll = createAnimatedValue(0);
+const hidden = scroll.diffClamp(0, 56);
+const shown = hidden.mul(-1).add(56);
+
+<View style={{ flex: 1, overflow: "hidden" }}>
+  <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+</View>
+```
 
 ## 聊天：倒置列表
 

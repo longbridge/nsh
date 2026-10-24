@@ -1,6 +1,7 @@
 //! The small runtime modules: `nsh/android`
 //! (`isAvailable`, `BackHandler.onBackPress` over the registry's module),
-//! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/webview` and
+//! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/mobile`
+//! (`isAvailable`, with the registry's `TabBar`), `nsh/webview` and
 //! `nsh/video` (their host elements as components, which the compiler
 //! makes in place for their tags), `nsh/native` (`nativeComponent`: the
 //! JS face of components the embedding app registers natively;
@@ -461,6 +462,14 @@ pub(crate) const HOST_EXPORTS: &[Item] = &[(
         "The app embedding NSH: `host.call(name, args)` calls one of its functions\n(granted by `capabilities.host` in nsh.json), `host.on(event, f)` hears its\nevents, `host.available()` says whether the platform embeds one.",
         "Host & hostModule & HostEvents",
     ),
+)];
+
+/// The hand-written exports of `nsh/mobile` (with the registry's
+/// `TabBar`).
+pub(crate) const MOBILE_EXPORTS: &[Item] = &[(
+    "isAvailable",
+    Export::Value(|cx| boolean(matches!(os(cx), Os::Ios | Os::Android))),
+    Ts::value("True on iOS (and Mac Catalyst) and Android.", "boolean"),
 )];
 
 /// `nsh/ios`.
