@@ -89,6 +89,9 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 So keep per-item state in your data (keyed by id), not in signals created inside the row function: such a signal stays
 with the cell and shows up on another item.
 
+Cells waiting for their next item are hidden once their row is gone or shown by another cell, so screen readers,
+touches and UI tests meet each row once.
+
 ## Props
 
 | Prop | Rust | Type | Default | Description |
@@ -97,6 +100,7 @@ with the cell and shows up on another item.
 | `children` | `virtual_list(.., \|at\| row)` | `(item: () => T, index: () => number) => JSX.Element` | | Renders one row. |
 | `estimatedItemSize` | `.estimated_item_size(px(..))` | `number` | `50` | The size of items not measured yet, in points. Close estimates keep the scroll bar steady. |
 | `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
+| `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`: the list scrolls in a scroll view of its own. `"parent"`: it lies at its full length in its parent's layout and renders the rows near the viewport of the scroll view around it, which scrolls it with the rest of the page (see [lists in a page](../docs/lists.md#lists-in-a-page-viewportparent)). Chosen when the list is made. |
 | `numColumns` | `.columns(n)` | `number` | `1` | Items per row (vertical lists). |
 | `inverted` | `.inverted()` | `boolean` | `false` | Laid out from the end, item 0 last (chat style): starts scrolled to the end and keeps its distance from the end as content changes. |
 | `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | For lists that are not inverted: at the end of the content, or within that many points of it, the list stays at the end as the content grows or the viewport shrinks; scrolled further up, the visible content stays. |
@@ -111,6 +115,8 @@ with the cell and shows up on another item.
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. In Rust, the rows' identities, so rows keep their cells and sizes when rows come and go before them. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near: load more. |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onLoadMore` fires. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | The start is near, after the user or a scroll command moved the list: load what comes before the first item. |
+| `loadMoreAtStartThreshold` | `.load_more_at_start_threshold(viewports)` | `number` | `1` | How close to the start (in viewports) `onLoadMoreAtStart` fires. |
 | `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | Items became viewable or stopped being viewable. |
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable (below). |
 | `refreshing` | `.refreshing(..)` | `boolean` | | The pull-to-refresh spinner shows. |
@@ -151,6 +157,7 @@ viewable rows, `changed()` the rows that came or went.
 | `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide started / stopped. |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
 | `onLoadMore` | `.on_load_more` | none | Within `loadMoreThreshold` viewports of the end. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start` | none | Within `loadMoreAtStartThreshold` viewports of the start, once per approach after a scroll. |
 | `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }` (`ViewableItems`) | Viewability changed. |
 | `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 

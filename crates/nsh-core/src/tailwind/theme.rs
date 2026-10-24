@@ -27,7 +27,9 @@ pub struct Theme {
     /// Flat color names: `red-500`, `black`, `brand`.
     pub(crate) colors: FxHashMap<Box<str>, Color>,
     /// Breakpoints (`sm:`), ascending.
-    pub(crate) breakpoints: Vec<(Box<str>, f32)>,
+    /// Name, width, and whether Tailwind's is in `rem` (the default
+    /// theme's, which Tailwind orders after `px` ones).
+    pub(crate) breakpoints: Vec<(Box<str>, f32, bool)>,
     /// `max-w-sm` and friends.
     pub(crate) containers: FxHashMap<Box<str>, f32>,
     /// `text-lg`: size and line height (a multiple of the size).
@@ -64,12 +66,14 @@ pub struct Theme {
     tokens: Option<Arc<ClassTokens>>,
 }
 
-/// The design tokens (`crate::ui::Tokens`) by the names classes give them: a key's dots are dashes (`muted.foreground`
-/// is `muted-foreground`) and `.background` may be left out (`primary` is
-/// `primary.background`). Colors are names of the color utilities
-/// (`bg-primary`, `text-muted-foreground/70`) when the Tailwind theme has no
-/// color of that name, and variables like numbers (`bg-(--primary)`,
-/// `rounded-(--radius-lg)`, `text-(length:--font-size)`).
+/// The design tokens (`crate::ui::Tokens`) by the names classes give them,
+/// their names: as Tailwind's theme variables, colors are names of the
+/// color utilities (`bg-primary`, `text-muted-foreground/70`) when the
+/// Tailwind theme has no color of that name, and every token is a
+/// variable (`bg-(--primary)`, `rounded-(--radius-lg)`,
+/// `text-(length:--font-size)`, `font-(family-name:--font-mono)`). The
+/// fonts `font-sans` and `font-mono` are what `font-sans` and `font-mono`
+/// set, as `--font-sans` and `--font-mono` are in Tailwind.
 ///
 /// Classes naming them are parsed with each appearance's values (one rule
 /// per appearance when they differ), so applying them costs what a palette
@@ -79,6 +83,7 @@ pub struct Theme {
 pub(crate) struct ClassTokens {
     colors: FxHashMap<Box<str>, AdaptiveColor>,
     numbers: FxHashMap<Box<str>, f32>,
+    fonts: FxHashMap<Box<str>, Arc<str>>,
 }
 
 static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
@@ -87,28 +92,20 @@ static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
 impl ClassTokens {
     /// The names classes give `theme`'s tokens.
     pub(crate) fn new(theme: &crate::ui::Tokens) -> Self {
-        let mut tokens = ClassTokens::default();
-        // Exact names win over the short ones: set after them.
-        let mut exact = Vec::new();
-        for (key, c) in theme.colors() {
-            let name = key.replace('.', "-");
-            if let Some(short) = name.strip_suffix("-background") {
-                tokens.colors.insert(short.into(), c);
-            }
-            exact.push((name, c));
+        ClassTokens {
+            colors: theme.colors().map(|(k, c)| (k.into(), c)).collect(),
+            numbers: theme.numbers().map(|(k, n)| (k.into(), n)).collect(),
+            fonts: theme.fonts().map(|(k, f)| (k.into(), f.clone())).collect(),
         }
-        for (name, c) in exact {
-            tokens.colors.insert(name.into(), c);
-        }
-        for (key, n) in theme.numbers() {
-            tokens.numbers.insert(key.replace('.', "-").into(), n);
-        }
-        tokens
     }
 
-    /// The names of the colors and the numbers.
+    /// The names of the colors, the numbers and the fonts.
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
-        self.colors.keys().chain(self.numbers.keys()).map(|n| &**n)
+        self.colors
+            .keys()
+            .chain(self.numbers.keys())
+            .chain(self.fonts.keys())
+            .map(|n| &**n)
     }
 
     /// Whether `self` and `other` have the same names (only their values
@@ -116,8 +113,16 @@ impl ClassTokens {
     pub(crate) fn same_names(&self, other: &ClassTokens) -> bool {
         self.colors.len() == other.colors.len()
             && self.numbers.len() == other.numbers.len()
+            && self.fonts.len() == other.fonts.len()
             && self.colors.keys().all(|k| other.colors.contains_key(k))
             && self.numbers.keys().all(|k| other.numbers.contains_key(k))
+            && self.fonts.keys().all(|k| other.fonts.contains_key(k))
+    }
+
+    /// Whether `utility` is one of Tailwind's that a token replaces:
+    /// `font-sans` and `font-mono` when the theme has those fonts.
+    pub(crate) fn replaces(&self, utility: &str) -> bool {
+        self.fonts.contains_key(utility)
     }
 
     /// `utility` with its tokens replaced by their values in the light or
@@ -129,6 +134,9 @@ impl ClassTokens {
             let c = if dark { c.dark } else { c.light };
             let _ = write!(out, "#{:08x}", Color::from(c).0);
         };
+        if let Some(family) = self.fonts.get(utility) {
+            return Some(format!("font-[family-name:{}]", family.replace(' ', "_")));
+        }
         if utility.contains('(') {
             // `(--name)` and `(hint:--name)`, Tailwind 4's shorthand of
             // `[var(--name)]`.
@@ -152,8 +160,10 @@ impl ClassTokens {
                     .colors
                     .get(name)
                     .filter(|_| hint.is_none_or(|h| h == "color"));
+                let font = self.fonts.get(name).filter(|_| hint == Some("family-name"));
                 match (color, self.numbers.get(name)) {
                     (Some(c), _) => hex(&mut out, c),
+                    (None, _) if let Some(f) = font => out.push_str(&f.replace(' ', "_")),
                     (None, Some(n)) if hint == Some("number") => {
                         let _ = write!(out, "{n}");
                     }
@@ -227,11 +237,11 @@ impl Default for Theme {
             rem,
             colors,
             breakpoints: vec![
-                ("sm".into(), 40.0 * rem),
-                ("md".into(), 48.0 * rem),
-                ("lg".into(), 64.0 * rem),
-                ("xl".into(), 80.0 * rem),
-                ("2xl".into(), 96.0 * rem),
+                ("sm".into(), 40.0 * rem, true),
+                ("md".into(), 48.0 * rem, true),
+                ("lg".into(), 64.0 * rem, true),
+                ("xl".into(), 80.0 * rem, true),
+                ("2xl".into(), 96.0 * rem, true),
             ],
             containers: map(&[
                 ("3xs", 16.0 * rem),
@@ -247,8 +257,6 @@ impl Default for Theme {
                 ("5xl", 64.0 * rem),
                 ("6xl", 72.0 * rem),
                 ("7xl", 80.0 * rem),
-                // 65 characters of a 16pt font, roughly.
-                ("prose", 65.0 * 0.5 * rem),
             ]),
             text: map(&[
                 ("xs", (0.75 * rem, Some(1.0 / 0.75))),
@@ -337,7 +345,6 @@ impl Default for Theme {
                 ("2xs", shadows("inset 0 1px rgb(0 0 0 / 0.05)")),
                 ("xs", shadows("inset 0 1px 1px rgb(0 0 0 / 0.05)")),
                 ("sm", shadows("inset 0 2px 4px rgb(0 0 0 / 0.05)")),
-                ("", shadows("inset 0 2px 4px rgb(0 0 0 / 0.05)")),
             ]),
             drop_shadows: map(&[
                 ("xs", shadows("0 1px 1px rgb(0 0 0 / 0.05)")),
@@ -496,8 +503,8 @@ impl Theme {
                 "breakpoints" => {
                     for (name, w) in entries(v, "breakpoints")? {
                         let w = num(&w, &format!("breakpoint `{name}`"))?;
-                        self.breakpoints.retain(|(n, _)| **n != *name);
-                        self.breakpoints.push((name.into(), w));
+                        self.breakpoints.retain(|(n, ..)| **n != *name);
+                        self.breakpoints.push((name.into(), w, false));
                     }
                     self.breakpoints.sort_by(|a, b| a.1.total_cmp(&b.1));
                 }
@@ -619,7 +626,7 @@ impl Theme {
     /// breakpoint variants take by name. Tools enumerate the classes a
     /// theme offers with them (the engine's record of Tailwind classes).
     pub fn names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, _)| &**n).collect();
+        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, ..)| &**n).collect();
         let keys = [
             self.colors.keys().collect::<Vec<_>>(),
             self.containers.keys().collect(),

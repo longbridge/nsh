@@ -42,6 +42,7 @@ pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
+mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
@@ -58,13 +59,14 @@ pub mod reactive;
 pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
+mod rows;
 mod scrollable;
 pub(crate) mod services;
 pub(crate) mod status_bar;
 mod style;
 mod system;
 pub(crate) mod task;
-pub(crate) mod tokens;
+pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
 
@@ -107,7 +109,8 @@ pub(crate) use self::{
 pub use self::{
     animated::{
         Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
-        Interpolation, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
+        DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
+        sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     call::{
@@ -133,10 +136,11 @@ pub use self::{
         Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
+    engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
-        Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
-        PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
+        CaretEvent, Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent,
+        OverlayPosition, PanEvent, ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
@@ -159,6 +163,7 @@ pub use self::{
     renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
+    rows::Rows,
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     style::{
@@ -170,7 +175,7 @@ pub use self::{
         Quotas, System, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
-    tokens::{TokenSource, Tokens},
+    tokens::{FONT_MONO, FONT_SANS, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
@@ -181,14 +186,20 @@ pub use crate::geometry::{
     relative, rems, size,
 };
 pub use crate::{
-    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow,
-    ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode,
-    EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps,
-    KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents,
-    ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
-    animation::{Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing},
+    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
+    BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
+    EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, HoverEvent, KeyboardAppearance,
+    KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
+    LayoutCurve, LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation,
+    ModalPresentation, PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents,
+    PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig,
+    StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin,
+    Viewability,
+    animation::{
+        Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
+        MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,
+        StepPosition, sample_easing,
+    },
     color::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
         transparent_black, transparent_white, white, yellow,
@@ -220,6 +231,7 @@ pub mod prelude {
         Appearance,
         // Host elements and their settings.
         AutoCapitalize,
+        BackdropMaterial,
         BlendMode,
         BorderCurve,
         Bounds,
@@ -227,6 +239,7 @@ pub mod prelude {
         CallCx,
         Callback,
         CanvasView,
+        CaretEvent,
         Child,
         Children,
         ClaimRequest,
@@ -243,6 +256,7 @@ pub mod prelude {
         DefiniteLength,
         DevicePixels,
         DialogAnswer,
+        DiffClamp,
         EaseMode,
         // Native animation values.
         Easing,
@@ -284,12 +298,15 @@ pub mod prelude {
         KeyboardDismissMode,
         KeyboardTaps,
         KeyboardType,
+        Keyframe,
         KeyframeAnimation,
+        KeyframeTiming,
         Keyframes,
         Later,
         LayoutDirection,
         Length,
         ListLayout,
+        ListViewport,
         Listener,
         Measurement,
         Method,
@@ -298,6 +315,10 @@ pub mod prelude {
         ModalAnimation,
         ModalPresentation,
         ModuleCx,
+        Motion,
+        MotionChannel,
+        MotionPreset,
+        MotionSpec,
         NativeEvent,
         NativeView,
         NoEvent,
@@ -309,12 +330,17 @@ pub mod prelude {
         PanEvent,
         PanGesture,
         ParentElement,
+        PasteBehavior,
+        PasteEvent,
+        PastedFile,
         Percentage,
         Placement,
+        PlaybackDirection,
         Point,
         PointerEvents,
         Points,
         Position,
+        PressEvent,
         PropEnum,
         Props,
         Radians,
@@ -338,8 +364,10 @@ pub mod prelude {
         SnapAlignment,
         Spring,
         Stack,
+        StaggerFrom,
         StatusBarSetting,
         StatusBarStyle,
+        StepPosition,
         Styled,
         SubmitBehavior,
         System,
@@ -406,14 +434,15 @@ pub mod prelude {
             clipboard_files, clipboard_has_image, clipboard_has_string, clipboard_image,
             clipboard_string, color, component_ref, dark, dismiss_keyboard, element_ref, fetch,
             font_scale, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
-            keyboard_height, locale, measure_text, next_frame, on_back_press, on_key, on_key_with,
-            os, os_version, pixel_ratio, prefetch_image, reduce_motion, request_animation_frame,
-            round_to_nearest_pixel, safe_area, screen_reader, set_clipboard, set_clipboard_image,
-            set_color_scheme, set_interval, set_timeout, spawn, timer, timer_until, toast, tokens,
-            window,
+            keyboard_height, locale, measure_text, motion, next_frame, on_back_press, on_key,
+            on_key_with, open_url, os, os_version, pick_images, pixel_ratio, prefetch_image,
+            reduce_motion, request_animation_frame, round_to_nearest_pixel, safe_area,
+            screen_reader, set_clipboard, set_clipboard_image, set_color_scheme, set_interval,
+            set_timeout, spawn, text_metrics, timer, timer_until, toast, tokens, window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
+        batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
+        provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,
+        use_context, when,
     };
     // Kept for apps written before `nsh_base` presented dialogs,
     // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,

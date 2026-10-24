@@ -8,7 +8,9 @@ import PaintEffects from "./paint-effects";
 import PaintInlineAlign from "./paint-inline-align";
 import PaintMisc from "./paint-misc";
 import PaintMotion from "./paint-motion";
+import PaintObjectPosition from "./paint-object-position";
 import PaintShadows from "./paint-shadows";
+import PaintTailwind from "./paint-tailwind";
 import PaintText from "./paint-text";
 import StateStyles from "./state-styles";
 import StateChecked from "./state-checked";
@@ -19,8 +21,10 @@ const cases: Record<string, () => JSX.Element> = {
   "paint-effects": PaintEffects,
   "paint-misc": PaintMisc,
   "paint-motion": PaintMotion,
+  "paint-object-position": PaintObjectPosition,
   "paint-shadows": PaintShadows,
   "paint-text": PaintText,
+  "paint-tailwind": PaintTailwind,
   "state-styles": StateStyles,
   "state-checked": StateChecked,
   "state-indeterminate": StateIndeterminate,

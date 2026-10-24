@@ -11,15 +11,16 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo, VideoProgress,
-        WebNavigation,
+        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
+        VideoProgress, WebNavigation,
     },
 };
 use crate::{
-    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp, Points,
-    Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
-    StatusBarSetting, SubmitBehavior, Tag, WebSource,
+    AudioSession, AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue,
+    KeyboardAppearance, KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp,
+    OverlayProp, PasteBehavior, PasteEvent, Points, Prop, ResizeMode, ReturnKeyType, Rgba,
+    ScreenAnimation, ScreenProp, ScrollProp, Size, StatusBarSetting, SubmitBehavior, Tag,
+    WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -58,6 +59,7 @@ crate::static_reactive!(Hsla: Hsla, Rgba, Color);
 crate::static_reactive!(crate::AccessibilityRole: crate::AccessibilityRole);
 crate::static_reactive!(AutoCapitalize: AutoCapitalize);
 crate::static_reactive!(AutoFill: AutoFill);
+crate::static_reactive!(crate::HeaderSystemItem: crate::HeaderSystemItem);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
 crate::static_reactive!(KeyboardType: KeyboardType);
 crate::static_reactive!(ModalAnimation: ModalAnimation);
@@ -65,6 +67,7 @@ crate::static_reactive!(ModalPresentation: ModalPresentation);
 crate::static_reactive!(ResizeMode: ResizeMode);
 crate::static_reactive!(ReturnKeyType: ReturnKeyType);
 crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+crate::static_reactive!(PasteBehavior: PasteBehavior);
 crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
 crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
@@ -454,6 +457,19 @@ impl Input {
         })
     }
 
+    /// What a paste does (`pasteBehavior`; default: insert its text).
+    /// [`Self::on_paste`] hears what was pasted either way.
+    pub fn paste_behavior(self, behavior: impl IntoReactive<PasteBehavior>) -> Self {
+        self.bind_prop(behavior, Prop::PasteBehavior)
+    }
+
+    /// The user pasted: the text, the files with their bytes (a
+    /// screenshot) and local files' URLs, before the text it inserts is
+    /// reported.
+    pub fn on_paste<M>(self, listener: impl IntoListener<PasteEvent, M>) -> Self {
+        self.listen(EventKind::Paste, listener.into_listener(), events::paste)
+    }
+
     /// Focused when it appears.
     pub fn auto_focus(self, focus: impl IntoReactive<bool>) -> Self {
         self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
@@ -516,6 +532,17 @@ impl Input {
             EventKind::SelectionChange,
             listener.into_listener(),
             events::selection,
+        )
+    }
+
+    /// The caret moved: with the selection, or as the text scrolled or
+    /// wrapped again ([`CaretEvent`]: where it is, in the input and in the
+    /// root view).
+    pub fn on_caret_move<M>(self, listener: impl IntoListener<CaretEvent, M>) -> Self {
+        self.listen(
+            EventKind::CaretMove,
+            listener.into_listener(),
+            events::caret,
         )
     }
 
@@ -675,6 +702,18 @@ impl Screen {
         })
     }
 
+    /// The trailing header button is UIKit's own, drawn instead of the
+    /// `header_right` view (iOS; a press on it presses that view's first
+    /// pressable view).
+    pub fn header_right_system_item(
+        self,
+        item: impl IntoReactive<crate::HeaderSystemItem>,
+    ) -> Self {
+        self.bind_prop(item, |item| {
+            Prop::Screen(ScreenProp::HeaderRightSystemItem(Some(item)))
+        })
+    }
+
     /// Whether the back button shows (default true).
     pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
@@ -778,6 +817,15 @@ impl Overlay {
     pub fn anchor_point(self, point: impl IntoReactive<Point<Points>>) -> Self {
         self.bind_prop(point, |p| {
             Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Point(p)))
+        })
+    }
+
+    /// Places it against a box of the root view: an input's caret
+    /// ([`CaretEvent::page_bounds`]), where suggestions for what is being
+    /// typed open.
+    pub fn anchor_bounds(self, bounds: impl IntoReactive<Bounds<Points>>) -> Self {
+        self.bind_prop(bounds, |b| {
+            Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Bounds(b)))
         })
     }
 
@@ -1115,6 +1163,14 @@ impl Video {
         self.bind_prop(ms, |ms: f32| Prop::Native(NativeProp::ProgressInterval(ms)))
     }
 
+    /// What its sound does to the rest of the device's audio while it
+    /// plays (default: the app's audio settings).
+    pub fn audio_session(self, session: impl IntoReactive<AudioSession>) -> Self {
+        self.bind_prop(session, |session: AudioSession| {
+            Prop::Native(NativeProp::AudioSession(session))
+        })
+    }
+
     /// It started loading.
     pub fn on_load_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::LoadStart, listener.into_listener(), events::unit)
@@ -1318,6 +1374,13 @@ impl Painter {
         let slot = self.drawing.slot(node.id());
         self.nodes.push(node);
         slot
+    }
+
+    /// Adds `node`: a part of the drawing that assistive technologies and
+    /// UI tests see as an element of its own ([`crate::canvas::CanvasNode`]).
+    pub fn node(mut self, node: crate::canvas::CanvasNode) -> Self {
+        self.drawing.nodes.push(node);
+        self
     }
 
     /// Records `op` (one built by hand: its numbers and paints from

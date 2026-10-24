@@ -33,11 +33,11 @@ fn notify() -> impl IntoElement {
                 .justify_center()
                 .rounded_md()
                 .border_2()
-                .border_color(move || theme().border())
+                .border_color(move || theme().border)
                 .transition_colors()
-                .checked(|s| s.bg(move || theme().primary()).border_color(move || theme().primary()))
+                .checked(|s| s.bg(move || theme().primary).border_color(move || theme().primary))
         })
-        .indicator(text(move || if on.get() { "✓" } else { "" }).text_color(move || theme().primary_foreground()))
+        .indicator(text(move || if on.get() { "✓" } else { "" }).text_color(move || theme().primary_foreground))
         .child(text("Notify me"))
 }
 ```

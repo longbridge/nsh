@@ -104,7 +104,7 @@ impl Mounter {
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
-        crate::input::content_moved(surface);
+        crate::input::content_moved(surface, false);
         crate::selection_area::end_batch(surface);
     }
 
@@ -230,6 +230,7 @@ impl Mounter {
                 crate::transition::style_changed(surface, view, &old);
                 view.moved();
                 crate::decor::style_changed(view, &old);
+                crate::access::style_changed(view, &old);
             }
             MountItem::Text {
                 id,

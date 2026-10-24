@@ -30,7 +30,7 @@
 //! - `From<Rgba> for u32` and the packed [`Color`] round, as above.
 //! - Parsing (`"…".parse::<Hsla>()`, `Rgba::try_from(&str)`) accepts every
 //!   CSS color NSH reads (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`,
-//!   names), not only hex, with [`ColorParseError`] instead of `anyhow`.
+//!   names, `color-mix()`), not only hex, with [`ColorParseError`] instead of `anyhow`.
 //! - gpui-kit's `Colorize` methods are inherent methods of [`Hsla`], so no
 //!   trait import is needed; its `divide` (which sets the alpha) is left
 //!   out for [`Hsla::alpha`], and `lighten` / `darken` clamp the lightness
@@ -710,16 +710,33 @@ impl TryFrom<&'_ str> for Hsla {
     }
 }
 
+/// sRGB's transfer function undone: an sRGB channel as linear light.
+pub(crate) fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Linear light as an sRGB channel in `0..=1` (clamped before the
+/// transfer function).
+pub(crate) fn linear_to_srgb(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    if x <= 0.003_130_8 {
+        12.92 * x
+    } else {
+        1.055 * x.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 /// sRGB to OKLab (Björn Ottosson's matrices).
-fn rgb_to_oklab(c: Rgba) -> (f32, f32, f32) {
-    let to_linear = |c: f32| {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let (r, g, b) = (to_linear(c.r), to_linear(c.g), to_linear(c.b));
+pub(crate) fn rgb_to_oklab(c: Rgba) -> (f32, f32, f32) {
+    let (r, g, b) = (
+        srgb_to_linear(c.r),
+        srgb_to_linear(c.g),
+        srgb_to_linear(c.b),
+    );
     let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
     let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
     let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
@@ -740,15 +757,7 @@ pub(crate) fn oklab_to_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let r = 4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3;
     let g = -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3;
     let bl = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
-    let gamma = |x: f32| {
-        let x = x.clamp(0.0, 1.0);
-        if x <= 0.003_130_8 {
-            12.92 * x
-        } else {
-            1.055 * x.powf(1.0 / 2.4) - 0.055
-        }
-    };
-    (gamma(r), gamma(g), gamma(bl))
+    (linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(bl))
 }
 
 #[cfg(test)]

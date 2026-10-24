@@ -174,9 +174,20 @@ impl<C: Component> super::component::AnyInstance for OnceInstance<C> {
     }
 
     fn adopt(&mut self, parent: Owner) {
-        if self.owner.is_none() && !self.parent.is_live() {
-            self.parent = parent;
+        if self.owner.is_some() || !parent.is_live() {
+            return;
         }
+        // Preserve a caller's more specific scope (including error boundaries)
+        // when it is already under the placement owner. Otherwise the child
+        // belongs under the provider where its receiving component placed it.
+        let mut at = Some(self.parent);
+        while let Some(owner) = at {
+            if owner == parent {
+                return;
+            }
+            at = owner.parent();
+        }
+        self.parent = parent;
     }
 
     fn place(&mut self, host: NodeId, parent: Owner) {

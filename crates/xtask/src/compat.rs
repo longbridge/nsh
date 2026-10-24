@@ -37,11 +37,12 @@ pub(crate) fn compat(record: Option<&str>) -> anyhow::Result<()> {
         .context("copy Cargo.lock to nsh-compat")?;
     let mut cargo = Command::new("cargo");
     cargo.current_dir(&repo);
-    match record {
-        None => cargo.arg("test"),
-        Some(version) => cargo.args(["run", "--"]).args(["record", version]),
-    };
+    cargo.arg(if record.is_some() { "run" } else { "test" });
+    // Cargo's own option, so before `run`'s `--`.
     cargo.arg("--target-dir").arg(root.join("target"));
+    if let Some(version) = record {
+        cargo.args(["--", "record", version]);
+    }
     term::run(&mut cargo)?;
     match record {
         None => term::done("compatible with every recorded release"),

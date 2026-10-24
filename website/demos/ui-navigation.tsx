@@ -1,13 +1,19 @@
-// Navigation: a stack of pages with header options, pushed and popped.
+// Navigation: a stack of pages with header options, pushed and popped; in a
+// wide window the inbox and the open message side by side (master–detail).
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { createNavStack, NavPage, NavStack } from "nsh/base";
-import { ui } from "./palette";
+import { desktop, size, tint, ui, wide } from "./palette";
 
 function Button(props: { title: string; variant?: "primary" | "secondary"; onPress: () => void }) {
   const primary = () => props.variant !== "secondary";
   return (
-    <View role="button" onPress={props.onPress} style={primary() ? ui().primary : ui().raised} class="items-center rounded-xl py-3 active:opacity-75">
-      <Text style={{ fontWeight: "600", color: primary() ? ui().onPrimary : ui().text }}>{props.title}</Text>
+    <View
+      role="button"
+      onPress={props.onPress}
+      style={desktop ? { ...(primary() ? ui().primary : ui().raised), height: size.control, alignSelf: "flex-start" } : primary() ? ui().primary : ui().raised}
+      class={desktop ? "justify-center rounded-lg px-3 active:opacity-75" : "items-center rounded-xl py-3 active:opacity-75"}
+    >
+      <Text style={{ fontWeight: "600", fontSize: desktop ? 13 : undefined, color: primary() ? ui().onPrimary : ui().text }}>{props.title}</Text>
     </View>
   );
 }
@@ -82,11 +88,75 @@ function Detail(props: { id: number }) {
   );
 }
 
+const messages = [1, 2, 3, 4, 5, 6];
+
+/** A wide window: the inbox on the start side, the selected message beside it. */
+function Inbox() {
+  const selected = signal(1);
+  const starred = signal<number[]>([]);
+  const star = (id: number) => (
+    <Text
+      onPress={() => starred.set(starred().includes(id) ? starred().filter((s) => s !== id) : [...starred(), id])}
+      style={{ fontSize: 17, color: ui().accent }}
+    >
+      {starred().includes(id) ? "★" : "☆"}
+    </Text>
+  );
+  return (
+    <View style={{ flex: 1, flexDirection: "row", backgroundColor: ui().page }}>
+      <View style={{ width: 320, borderRightWidth: 1, borderRightColor: ui().line }}>
+        <Header title="Inbox" />
+        <View style={{ padding: 8, gap: 2 }}>
+          <Each of={messages}>
+            {(id) => (
+              <View
+                role="button"
+                onPress={() => selected.set(id())}
+                hoverStyle={selected() === id() ? {} : { backgroundColor: tint(ui().text, 0.04) }}
+                style={{
+                  height: size.row + 12,
+                  paddingHorizontal: 12,
+                  borderRadius: 8,
+                  justifyContent: "center",
+                  gap: 2,
+                  backgroundColor: selected() === id() ? tint(ui().accent, 0.14) : "transparent",
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ flex: 1, fontSize: size.label, fontWeight: "600", color: ui().text }}>{`Message ${id()}`}</Text>
+                  <Text style={{ fontSize: 12, color: ui().accent }}>{starred().includes(id()) ? "★" : ""}</Text>
+                </View>
+                <Text numberOfLines={1} style={{ fontSize: 12, color: ui().muted }}>{`The body of message ${id()}.`}</Text>
+              </View>
+            )}
+          </Each>
+        </View>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Header title={`Message ${selected()}`} right={star(selected())} />
+        <View style={{ padding: 24, gap: 12 }}>
+          <Text style={{ color: ui().text }}>{`The body of message ${selected()}.`}</Text>
+          <Text style={{ fontSize: 13, color: ui().muted }}>Click a message on the left; on a phone it opens as a page of a NavStack.</Text>
+          <Button title="Next message" onPress={() => selected.set(selected() === messages.length ? 1 : selected() + 1)} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function App() {
   return (
-    <NavStack state={nav} style={{ flex: 1 }}>
-      {(route) => (route.name === "home" ? <Home /> : <Detail id={route.id} />)}
-    </NavStack>
+    <>
+      {() =>
+        wide() ? (
+          <Inbox />
+        ) : (
+          <NavStack state={nav} style={{ flex: 1 }}>
+            {(route) => (route.name === "home" ? <Home /> : <Detail id={route.id} />)}
+          </NavStack>
+        )
+      }
+    </>
   );
 }
 

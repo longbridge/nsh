@@ -24,6 +24,8 @@ mod fetch;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;
 mod handle_bench;
+mod host;
+mod host_channel;
 mod host_modules;
 mod hot;
 mod hover;
@@ -35,6 +37,7 @@ mod list_bench;
 mod logs;
 mod native;
 mod net;
+mod open_url;
 mod package;
 mod parity;
 mod platform;

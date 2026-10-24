@@ -143,6 +143,10 @@ pub(crate) struct Surface {
     pub(crate) input_pressed: Cell<u8>,
     /// The mouse is over the surface.
     pub(crate) input_hovered: Cell<bool>,
+    /// A field took the surface's focus. The view takes the window's at the
+    /// next paint, or the keys for the field go to whatever element of the
+    /// embedding app had it ([`crate::events::install`]).
+    pub(crate) window_focus_requested: Cell<bool>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -169,6 +173,8 @@ pub(crate) struct Surface {
     generation: Cell<u64>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
+    pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// What the running app may reach (checked for image redirects).
     pub(crate) access: RefCell<Arc<nsh_core::access::Access>>,
     /// Videos, web views and registered native components.
@@ -222,6 +228,7 @@ impl Surface {
             invalid: Cell::new(false),
             input_pressed: Cell::new(0),
             input_hovered: Cell::new(false),
+            window_focus_requested: Cell::new(false),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             js_frame: Cell::new(false),
@@ -236,6 +243,7 @@ impl Surface {
             on_hot_update_failed: RefCell::new(None),
             generation: Cell::new(0),
             asset_base: RefCell::new(None),
+            image_cache: RefCell::new(None),
             access: RefCell::new(Arc::default()),
             native: Default::default(),
             keymap: Default::default(),
@@ -320,6 +328,8 @@ impl Surface {
             },
         ) {
             Ok(engine) => {
+                // The app's downloaded images go through its disk cache.
+                crate::image::set_disk_cache(self, engine.image_cache());
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
@@ -547,6 +557,7 @@ impl Surface {
             anim.write(&self.mounter.borrow());
             std::mem::take(&mut anim.finished)
         };
+        crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
         }

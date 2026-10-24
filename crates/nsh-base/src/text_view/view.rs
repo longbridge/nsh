@@ -48,6 +48,13 @@ pub struct TextViewProps {
     /// a pointer), each block on its own.
     #[prop(default)]
     pub selectable: Prop<bool>,
+    /// What a press on a link does: `"report"` (the default) reports it
+    /// (`onLinkPress`) and opens nothing; `"open"` also opens a link to
+    /// another app or site outside the app (`openUrl` of `nsh/device`,
+    /// under the app's `openUrl` capability; the embedding app may route
+    /// it), while anchors in the document (`#…`) are only reported.
+    #[prop(default)]
+    pub links: Prop<TextViewLinks>,
     /// Whether code blocks show the scroll indicator of their horizontal
     /// scroll view (default true).
     #[prop(default = true)]
@@ -102,12 +109,25 @@ pub struct TextViewMath {
     pub display: bool,
 }
 
+/// What a press on a link of a [`TextView`] does (`links`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub enum TextViewLinks {
+    /// It is reported (`onLinkPress`); the app decides what opens.
+    #[default]
+    Report,
+    /// It is reported, then a URL of another app or site (with a scheme:
+    /// `https:`, `mailto:`, ...) opens outside the app
+    /// ([`nsh_core::ui::open_url`]); an anchor in the document (`#…`) is
+    /// only reported.
+    Open,
+}
+
 /// The events of a [`TextView`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum TextViewEvent {
     /// A link was pressed: its URL (`#anchor` for a heading of the
-    /// document, `#footnote-<label>` for a footnote). Nothing opens it:
-    /// the app decides.
+    /// document, `#footnote-<label>` for a footnote). Nothing opens it
+    /// unless `links` is `"open"`: the app decides.
     #[args(event)]
     LinkPress(TextViewLinkPressEvent),
     /// An image that is not in a link was pressed: the image (its `src`,
@@ -214,7 +234,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .gap(px(BLOCK_GAP))
         .text_size(px(BODY_SIZE))
         .line_height(px(BODY_SIZE * BODY_LINE))
-        .text_color(move || theme().foreground())
+        .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
         // a `SelectionArea`, the outer area's).
         .selection_area(props.selectable)
@@ -260,7 +280,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 .gap(px(4.0))
                 .text_size(px(SMALL_SIZE))
                 .line_height(px(SMALL_SIZE * 1.6))
-                .text_color(move || theme().muted_foreground());
+                .text_color(move || theme().muted_foreground);
             Some(
                 cx.part(footnotes, Part::Footnotes)
                     .children(notes.iter().map(|note| {
@@ -370,6 +390,7 @@ struct Cx {
     /// image there is the link's.
     link: std::cell::RefCell<Option<SharedString>>,
     highlighter: Option<CodeHighlighter>,
+    links: TextViewLinks,
     scope: Scope<TextViewEvent>,
 }
 
@@ -400,7 +421,24 @@ impl Cx {
             list_depth: std::cell::Cell::new(0),
             line: std::cell::Cell::new(BODY_SIZE * BODY_LINE),
             link: std::cell::RefCell::new(None),
+            links: props.links.get(),
             scope,
+        }
+    }
+
+    /// What a press on a link to `url` does: reported, and opened outside
+    /// the app when `links` says so.
+    fn link_press(&self, url: SharedString) -> impl Fn() + Clone + 'static {
+        let (scope, links) = (self.scope, self.links);
+        move || {
+            scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                url: url.clone(),
+            }));
+            if links == TextViewLinks::Open && !url.starts_with('#') {
+                // Whether it opened is the platform's to show; a refused
+                // URL or capability is logged.
+                drop(open_url(url.to_string()));
+            }
         }
     }
 
@@ -535,7 +573,7 @@ impl Cx {
                     .border_l(px(2.0))
                     .border_color(strong_border)
                     .ps(px(BODY_SIZE * 0.9))
-                    .text_color(move || theme().foreground().opacity(0.8));
+                    .text_color(move || theme().foreground.opacity(0.8));
                 self.part(self.blocks(column, children, key, tail), Part::Blockquote)
                     .into_element()
             }
@@ -569,11 +607,11 @@ impl Cx {
                             .px(px(16.0))
                             .rounded(px(8.0))
                             .border_1()
-                            .border_color(move || theme().border())
-                            .bg(move || theme().muted())
+                            .border_color(move || theme().border)
+                            .bg(move || theme().muted)
                             .child(
                                 text(tex.clone())
-                                    .font_family("monospace")
+                                    .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
                                     .when(self.selectable, |t| t.selectable(true)),
@@ -646,17 +684,17 @@ impl Cx {
                         });
                     let marker = if checked {
                         marker
-                            .bg(move || theme().primary())
-                            .border_color(move || theme().primary())
+                            .bg(move || theme().primary)
+                            .border_color(move || theme().primary)
                             .child(
                                 text("✓")
                                     .text_size(px(11.0))
                                     .line_height(px(13.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(move || theme().primary_foreground()),
+                                    .text_color(move || theme().primary_foreground),
                             )
                     } else {
-                        marker.border_color(move || theme().muted_foreground())
+                        marker.border_color(move || theme().muted_foreground)
                     };
                     self.parts(marker, &parts).into_element()
                 }
@@ -682,7 +720,7 @@ impl Cx {
                         .w(px(MARKER_BOX))
                         .pe(px(6.0))
                         .text_right()
-                        .text_color(move || theme().muted_foreground());
+                        .text_color(move || theme().muted_foreground);
                     self.part(marker, Part::ListMarker).into_element()
                 }
             };
@@ -693,9 +731,9 @@ impl Cx {
                 .flex_1()
                 .gap(px(if loose { BLOCK_GAP } else { ITEM_GAP }))
                 .when(done, |v| {
-                    v.text_color(move || theme().muted_foreground())
+                    v.text_color(move || theme().muted_foreground)
                         .line_through()
-                        .text_decoration_color(move || theme().muted_foreground().opacity(0.6))
+                        .text_decoration_color(move || theme().muted_foreground.opacity(0.6))
                 });
             let row = view().flex_row().map(|v| {
                 if task {
@@ -814,7 +852,7 @@ impl Cx {
         // scrolls to the edges, and the scroll bar sits in the bottom
         // padding rather than over the last line.
         let body = self.caret_after(
-            body.font_family("monospace")
+            body.font_family(mono_font)
                 .px(px(16.0))
                 .py(px(14.0))
                 .when(self.selectable, |t| t.selectable(true)),
@@ -825,8 +863,8 @@ impl Cx {
             .when(hover, |b| b.group())
             .rounded(px(8.0))
             .border_1()
-            .border_color(move || theme().border())
-            .bg(move || theme().muted())
+            .border_color(move || theme().border)
+            .bg(move || theme().muted)
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
         // The actions last, so they are drawn over the code.
@@ -874,15 +912,15 @@ impl Cx {
         } else {
             text(label.clone())
                 .text_size(px(11.0))
-                .text_color(move || theme().muted_foreground())
+                .text_color(move || theme().muted_foreground)
                 .into_element()
         };
         let event = TextViewCodeActionEvent {
             id: action.id.clone(),
             code: code.clone(),
         };
-        let hovered = theme().foreground().opacity(0.08);
-        let pressed = theme().foreground().opacity(0.14);
+        let hovered = theme().foreground.opacity(0.08);
+        let pressed = theme().foreground.opacity(0.14);
         view()
             .min_w(px(24.0))
             .h(px(24.0))
@@ -965,7 +1003,7 @@ impl Cx {
             let row = view()
                 .row_start(line)
                 .col_span_full()
-                .when(head, |v| v.bg(move || theme().list_head()));
+                .when(head, |v| v.bg(move || theme().muted));
             grid.push(self.parts(row, row_parts).into_element());
             // Each cell where it starts, as wide as it spans; the columns no
             // cell covers (a short row) are empty cells.
@@ -1016,10 +1054,10 @@ impl Cx {
                     .px(px(12.0))
                     .border_r_1()
                     .border_b_1()
-                    .border_color(move || theme().border())
+                    .border_color(move || theme().border)
                     .when(head, |v| {
                         v.text_size(px(CODE_SIZE))
-                            .text_color(move || theme().muted_foreground())
+                            .text_color(move || theme().muted_foreground)
                     });
                 self.parts(cell, cell_parts).child(t).into_element()
             }));
@@ -1037,7 +1075,7 @@ impl Cx {
             .min_w(rems(floors.iter().sum()))
             .border_t_1()
             .border_l_1()
-            .border_color(move || theme().border())
+            .border_color(move || theme().border)
             .children(grid);
         let table = view()
             .flex_col()
@@ -1065,7 +1103,7 @@ impl Cx {
     ) -> AnyElement {
         let shown = signal(open);
         let marker = text(move || SharedString::from(if shown.get() { "▾ " } else { "▸ " }))
-            .text_color(move || theme().muted_foreground());
+            .text_color(move || theme().muted_foreground);
         let summary = self.part(
             view()
                 .flex_row()
@@ -1156,9 +1194,7 @@ impl Cx {
                 let color = color.as_deref().and_then(|c| c.parse::<Hsla>().ok());
                 let span = self
                     .span(content, key)
-                    .bg(move || {
-                        color.map_or_else(|| theme().warning().opacity(0.4), AdaptiveColor::from)
-                    })
+                    .bg(move || color.map_or_else(|| HIGHLIGHT.opacity(0.4), AdaptiveColor::from))
                     .rounded(px(3.0));
                 // A solid color of the document's is the same in both
                 // appearances: its text takes the ink that reads on it
@@ -1196,24 +1232,19 @@ impl Cx {
                 title,
                 content,
             } => {
-                let scope = self.scope;
                 let url = SharedString::from(url.clone());
                 let outer = self.link.replace(Some(url.clone()));
                 let span = self.span(content, key);
                 self.link.replace(outer);
                 let el = span
-                    .text_color(move || theme().link())
+                    .text_color(move || theme().primary)
                     .underline()
-                    .text_decoration_color(move || theme().link().opacity(0.4))
+                    .text_decoration_color(move || theme().primary.opacity(0.4))
                     .text_decoration_thickness(px(1.0))
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
-                    .on_press(move || {
-                        scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                            url: url.clone(),
-                        }))
-                    });
+                    .on_press(self.link_press(url));
                 self.part(el, Part::Link).into_element()
             }
             Inline::Image(image) => {
@@ -1241,7 +1272,7 @@ impl Cx {
                 self.part(
                     text(index.to_string())
                         .text_size(rems(0.75))
-                        .text_color(move || theme().link())
+                        .text_color(move || theme().primary)
                         .role(AccessibilityRole::Link)
                         .on_press(move || {
                             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
@@ -1304,11 +1335,10 @@ impl Cx {
         let scope = self.scope;
         let pressed = image.clone();
         let is_link = link.is_some();
+        let link = link.map(|url| self.link_press(url));
         // In a link it is the link's; else a press reports the image.
         let press = Some(move || match &link {
-            Some(url) => scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                url: url.clone(),
-            })),
+            Some(press) => press(),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
         });
         let role = if is_link {
@@ -1506,31 +1536,40 @@ impl TextView {
 /// Lines that stand out more than the theme's borders (quotes' and
 /// rules'): the text's color, faint.
 fn strong_border() -> AdaptiveColor {
-    theme().foreground().opacity(0.15)
+    theme().foreground.opacity(0.15)
 }
 
 /// Code in text: monospace, smaller, on a rounded background (the text's
 /// color, faint, so it shows on any surface).
 fn code_span(span: Text) -> Text {
-    span.font_family("monospace")
+    span.font_family(mono_font)
         .text_size(px(CODE_SIZE))
-        .bg(move || theme().foreground().opacity(0.06))
+        .bg(move || theme().foreground.opacity(0.06))
         .rounded(px(4.0))
 }
 
-/// The color of an alert of kind `alert`: the theme's status colors; an
-/// important one is violet (no token names it).
+/// The color of an alert of kind `alert`: GitHub's alert colors (shadcn's
+/// tokens have no status colors), a caution the theme's `destructive`.
 fn alert_color(alert: Alert) -> AdaptiveColor {
-    let t = theme();
     match alert {
-        Alert::Note => t.info(),
-        Alert::Tip => t.success(),
-        Alert::Important => t
-            .color("important.background")
-            .unwrap_or(AdaptiveColor::rgb(0x8b5cf6, 0xa78bfa)),
-        Alert::Warning => t.warning(),
-        Alert::Caution => t.danger(),
+        Alert::Note => AdaptiveColor::rgb(0x0969da, 0x4493f8),
+        Alert::Tip => AdaptiveColor::rgb(0x1a7f37, 0x3fb950),
+        Alert::Important => AdaptiveColor::rgb(0x8250df, 0xab7df8),
+        Alert::Warning => AdaptiveColor::rgb(0x9a6700, 0xd29922),
+        Alert::Caution => theme().destructive,
     }
+}
+
+/// Highlighted text's background, at 40% (`==text==`, `<mark>`): a
+/// marker's yellow.
+const HIGHLIGHT: AdaptiveColor = AdaptiveColor::rgb(0xfde047, 0xca8a04);
+
+/// The theme's monospaced font (`font-mono`), else the system's.
+fn mono_font() -> SharedString {
+    theme()
+        .font_mono
+        .clone()
+        .unwrap_or_else(|| SharedString::from("monospace"))
 }
 
 // The reading typography (sizes in points), after Allsum's documents.
@@ -1681,8 +1720,8 @@ fn text_width(line: &str) -> f32 {
 /// The built-in copy action's icon (the gallery's copy glyph), which fades
 /// and shrinks away as a check springs in once `done` goes to 1.
 fn copy_icon(done: &AnimatedValue) -> AnyElement {
-    let muted = theme().muted_foreground();
-    let ok = theme().success();
+    let muted = theme().muted_foreground;
+    let ok = theme().foreground;
     // The gallery's copy and check glyphs, drawn on a 20 unit grid scaled
     // to the icon's 14 pt.
     const K: f32 = 14.0 / 20.0;

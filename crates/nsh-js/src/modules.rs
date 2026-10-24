@@ -113,6 +113,7 @@ pub(crate) struct NativeModule {
 
 /// `nsh`: the API apps write against.
 const NSH: &[Item] = &[
+    crate::env::TOKEN_EXPORT,
     (
         "signal",
         Export::Function(reactive::signal, 2),
@@ -200,6 +201,16 @@ const NSH: &[Item] = &[
             "`[picked, rest]`: the props named in `keys` and the others, both still\nfollowing what they read (a component passing the rest on: `<Input {...rest} />`).",
             &[
                 "<T extends object, K extends readonly (keyof T)[]>(props: T, keys: K): [Pick<T, K[number]>, Omit<T, K[number]>]",
+            ],
+        ),
+    ),
+    (
+        "ErrorBoundary",
+        Export::Function(dom::error_boundary, 1),
+        Ts::function(
+            "Its children, or `fallback` once something under them threw (a component's body, a\nbinding, an effect, a listener): what failed goes, and `fallback(error, reset)` shows the\nthrown value; `reset()` renders the children again. A fallback that takes no arguments\nis shown as is. What throws in the fallback goes to the boundary above.",
+            &[
+                "(props: { fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element); children?: JSX.Element }): JSX.Element",
             ],
         ),
     ),
@@ -309,6 +320,13 @@ export interface Context<T> extends Accessor<T> {
 
 /** A component: a function of its props rendering elements. */
 export type Component<P = {}> = (props: P) => JSX.Element;
+
+/**
+ * The design tokens of the app's theme by name, and what `token()` gives
+ * for each: a color or a font family as a string, a number. nsh declares
+ * the app's (`.nsh/types/nsh/tokens.d.ts`, from `nsh.json` `"theme"`).
+ */
+export interface Tokens {}
 "#;
 
 /// The modules that exported primitives before `nsh` did: `nsh` serves
@@ -372,6 +390,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: decl!(desktop::TYPES),
     },
     NativeModule {
+        name: "nsh/mobile",
+        exports: platform_modules::MOBILE_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: "",
+    },
+    NativeModule {
         name: "nsh/webview",
         exports: platform_modules::WEBVIEW_EXPORTS,
         also: &[],
@@ -426,6 +451,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         also: &[],
         moved_to: Some("nsh"),
         types: "",
+    },
+    NativeModule {
+        name: "nsh/host",
+        exports: platform_modules::HOST_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(crate::host_channel::TYPES),
     },
     NativeModule {
         name: "nsh/keymap",
@@ -524,7 +556,13 @@ impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
         let host = registries.len();
-        registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
+        registries.extend(
+            ui_sets
+                .iter()
+                .flat_map(Registry::sets)
+                .filter(|r| r.specifier().is_some())
+                .cloned(),
+        );
         ModuleTable {
             registries,
             host,

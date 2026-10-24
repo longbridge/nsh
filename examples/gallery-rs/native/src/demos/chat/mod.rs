@@ -1201,9 +1201,8 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         chat.play(id);
     };
     let all = scenarios();
-    // TS: `bg-paper-border dark:bg-graphite-raised` when selected,
-    // `hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-card
-    // dark:active:bg-graphite-raised` otherwise.
+    // TS: `bg-accent` when selected, `hover:bg-card active:bg-accent`
+    // otherwise (the gallery theme's tokens).
     let fill = AdaptiveColor::new(colors::BORDER.light, colors::RAISED.dark);
     let rows = conversations.iter().map(|&(id, label)| {
         let selected = move || current.get() == Some(id);

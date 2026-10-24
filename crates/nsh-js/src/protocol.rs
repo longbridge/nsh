@@ -635,6 +635,7 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
             input: r.int()? as nsh_core::animation::NodeId,
             min: r.number()?,
             max: r.number()?,
+            snap: r.value()?.as_bool().unwrap_or(false),
         },
         ANIMATION_START_COMPOSITE => {
             // `node` carries the animation id here.
@@ -804,6 +805,18 @@ fn decode_driver(cx: &Ctx<'_>, config: &Value<'_>) -> rquickjs::Result<Driver> {
     })
 }
 
+/// Where the channels of motion `value` (a preset's name or a spec) start,
+/// by `MotionChannel::ALL` (`None` for those it does not move).
+pub(crate) fn motion_start(value: Value<'_>) -> [Option<f32>; 9] {
+    let mut starts = [None; 9];
+    if let Some(spec) = nsh_core::js::animation::motion_spec(&Js(value)) {
+        for (channel, start) in spec.start_values() {
+            starts[channel.index()] = Some(start);
+        }
+    }
+    starts
+}
+
 /// A composite animation: `{ type, ... }` with `node` on the runs.
 fn decode_composite(
     r: &Reader<'_, '_>,
@@ -840,6 +853,24 @@ fn decode_composite(
                 .map(|n| n as u32),
             reset: o.get::<_, Option<bool>>("reset")?.unwrap_or(true),
         },
+        // `Animated.keyframes`: the tree is made natively from the config.
+        "keyframes" => nsh_core::js::animation::keyframes_composite(
+            &Js(spec.clone()),
+            o.get::<_, f64>("node")? as nsh_core::animation::NodeId,
+        ),
+        // A motion's `play`: its channels' nodes (by `MotionChannel::ALL`) and
+        // the motion; `reduced` lands it at its end without moving.
+        "motion" => {
+            let nodes: Vec<f64> = o.get("nodes")?;
+            let nodes: [nsh_core::animation::NodeId; 9] =
+                std::array::from_fn(|i| nodes.get(i).copied().unwrap_or(0.0) as _);
+            let motion = nsh_core::js::animation::motion_spec(&Js(o.get("motion")?))
+                .ok_or_else(|| Exception::throw_type(r.cx, "motion: unknown motion"))?;
+            motion.composite(
+                &nodes,
+                o.get::<_, Option<bool>>("reduced")?.unwrap_or(false),
+            )
+        }
         _ => Composite::Run {
             node: o.get::<_, f64>("node")? as nsh_core::animation::NodeId,
             driver: decode_driver(r.cx, spec)?,

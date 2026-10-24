@@ -7,6 +7,7 @@ import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
+import { Toaster } from "./toast";
 import { type DemoEntry, nav } from "./nav";
 import { Appear, Badge, colors, desktop, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
 
@@ -25,8 +26,11 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     demos: [
       { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
       { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
+      { name: "Collapsing header", detail: "A header that shrinks to a bar as the page scrolls, headings sticking below it", icon: "scroll", screen: lazy(() => import("./demos/CollapsingHeader").then((m) => m.CollapsingHeader)) },
       { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
       { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
+      { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
+      { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "components", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
     ],
   },
   {
@@ -52,9 +56,9 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     title: "Platform",
     demos: [
       { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
-      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
+      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
       { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
-      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
+      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
@@ -92,7 +96,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 
 function Home() {
   return (
-    <NavPage title="Gallery" {...header} headerRight={<ThemeToggle />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
+    <NavPage title="Gallery" {...header} headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ padding: 16, paddingBottom: 40, gap: 20 }}>
           <Each of={groups}>
@@ -178,7 +182,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
       role="button"
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
-      class={active() ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"}
+      class={active() ? "bg-accent" : "hover:bg-hover active:bg-accent"}
       style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: radius.control, cursor: "pointer" }}
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
@@ -204,7 +208,7 @@ function SidebarToggle() {
       role="button"
       accessibilityLabel="Toggle sidebar"
       accessibilityState={{ selected: sidebarOpen() }}
-      class="hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"
+      class="hover:bg-hover active:bg-accent"
       style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control, cursor: "pointer" }}
     >
       <Icon name="sidebar" size={18} tint={colors.muted} />
@@ -387,6 +391,7 @@ function App() {
       <If when={desktop()} else={<Phone />}>
         <Desktop />
       </If>
+      <Toaster />
     </View>
   );
 }

@@ -66,7 +66,7 @@ view()
 How conflicts resolve:
 
 1. **Later classes win** over earlier ones in the same string: `"p-2 p-4"` is `p-4`. There is no need for `tailwind-merge`: a component can append the `class` its caller passes. Later methods win in Rust too.
-2. **Variant classes apply after plain ones**, ordered by Tailwind's variant order (`hover:` before `active:`, breakpoints ascending, `dark:` last), whatever their position in the string. As in CSS, `odd:bg-a last:bg-b` gives an odd last row `bg-a`, because Tailwind sorts `odd` after `last`.
+2. **Variant classes apply after plain ones**, ordered by Tailwind's variant order (`hover:` before `active:`, `max-*:` widest first, breakpoints ascending, `dark:` last), whatever their position in the string. As in Tailwind, a class's highest variant decides, then its next highest, and a class with one more variant comes later: `dark:hover:bg-a dark:bg-b` is `bg-a` while hovered in dark mode, and `max-md:p-2 max-lg:p-4` is `p-2` below `md`. As in CSS, `odd:bg-a last:bg-b` gives an odd last row `bg-a`, because Tailwind sorts `odd` after `last`.
 3. **`style` wins over classes.**
 4. `!` makes a class important: `!p-0`.
 
@@ -88,7 +88,7 @@ Rust components (`SafeAreaView`, `KeyboardAvoidingView` and those of an app's ow
 | `group-active/name:` ... | The same, for an ancestor marked `group/name` | `.group_named("name")`; `.group_active_named("name", ..)`, ... |
 | `first:`, `last:`, `odd:`, `even:`, `only:` | The element's own position among its siblings. To color a row's label by the row's position, put `last:text-*` on the row: the label inherits it | Plain Rust from the row's index (`at.is_first()`, `at.is_last()`, `at.index() % 2`) |
 | `placeholder:` | Styles an input's placeholder (`placeholder:text-zinc-400`) | `.placeholder_color(..)` |
-| `selection:` | Styles the selection of an input or a selectable text (`selection:text-violet-500`) | `.selection_color(..)` |
+| `selection:` | Colors the selection highlight of an input or a selectable text, and of those inside the element (`selection:bg-violet-200`) | `.selection_color(..)` |
 | `dark:` | The system appearance is dark | An `AdaptiveColor`, or `.dark(\|s\| ..)` |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | The window is at least 640, 768, 1024, 1280, 1536 points wide | `.style_when(\|\| window().width >= px(768.0), \|s\| ..)` |
 | `max-sm:`, `max-md:`, ... | The window is narrower than the breakpoint | The same, with `<` |
@@ -152,12 +152,15 @@ Breakpoints compare against the window (the surface NSH renders into), not the d
 ## What differs from Tailwind on the web
 
 - **Units are points.** `p-4` (`.p_4()`) is 16 points (1 spacing step = 4pt, 1rem = 16pt). Arbitrary values in `px` are points too: `p-[13px]` (`.p(px(13.0))`) is 13pt.
-- **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps NSH's default column. `block` and `flow-root` use block layout; `inline` and `inline-block` lay out as views (there is no inline formatting context). In Rust, `.flex_row()` and `.flex_col()` set the direction.
+- **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps NSH's default column. `block` and `flow-root` use block layout, and so do `inline` and `inline-block`, as a browser lays them out in a flex or grid parent. In Rust, `.flex_row()` and `.flex_col()` set the direction.
 - **Text classes on views are inherited.** `text-*`, `font-*`, `leading-*`, `tracking-*` and the other text utilities on a view (`.text_color(..)`, `.font_weight(..)`, ... in Rust) pass to the text and input elements inside it, as CSS inheritance does: `<View class="text-white">` makes its labels white.
-- **`space-x-*` / `space-y-*` are gaps** (`gap-x` / `gap-y`).
+- **Every view is a box of its own.** `overflow-x-hidden` and `overflow-y-hidden` clip both axes, as `overflow-hidden` does (scrolling is the [scroll](../elements/scroll.md) element's); `invisible` hides the view and everything in it; `mix-blend-*` blends a view with everything drawn behind it; `block` boxes keep their own margins and their children's apart; an `absolute` view is placed in its nearest positioned ancestor, as in CSS; `fixed` lays a view out in its root view (other elements are placed as `absolute`).
+- **Text keeps its whitespace.** Spaces and line breaks in a string are drawn as written, and `whitespace-*` sets the wrapping; the JSX compiler collapses the whitespace of literal JSX text, as JSX does.
+- **Transitions animate property groups**: `transition` animates colors, opacity, shadows and transforms, `transition-all` also corner radii and border widths; filters, backdrop filters, gradients and layout take their new values at once.
+- **`focus-visible:` is `focus:`**: it applies whenever the element has focus.
 - **State backgrounds show over gradients.** In CSS a gradient covers `background-color`, so `active:bg-*` on a `bg-linear-*` surface would never be seen; in NSH a background color from `active:`, `hover:`, `focus:` or `group-*:` replaces the gradient while that state holds (unless the state sets a gradient of its own, such as `active:from-*`). So do `activeStyle` and the other state styles, and animated background colors.
 - **Classes for settings that are props in NSH**: `line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*` (image resize mode), `select-text`, `caret-*` and `placeholder:text-*` work, and lose to the explicit props (`numberOfLines`, `pointerEvents`, `resizeMode`, ...) when both are set. In Rust these are the element's methods (`.number_of_lines(..)`, `.resize_mode(..)`, ...).
-- **The supported set**: utilities and variants of Tailwind 4 that have a native meaning. `peer-*` variants, pseudo-elements (`before:`, `after:`) and arbitrary properties (`[mask-type:luminance]`) are reported as unknown classes. Web-only utilities that need nothing natively (`antialiased`, `will-change-*`, `touch-*`, `scroll-*`, `snap-*`, `overscroll-*`, `box-border`, ...) are accepted and ignored.
+- **The supported set**: utilities and variants of Tailwind 4 that have a native meaning. `peer-*` variants, pseudo-elements (`before:`, `after:`) and arbitrary properties (`[mask-type:luminance]`) are reported as unknown classes, and so is every utility NSH has no native meaning for, so a class never means something else than in a browser. Rendering hints (`antialiased`, `will-change-transform`, `appearance-none`, `box-border`, ...) are accepted and change nothing.
 
 Everything else works as documented by Tailwind 4: the color palette, opacity modifiers (`bg-black/40`), arbitrary values (`bg-[#34c759]`, `w-[72px]`, `grid-cols-[1fr_2fr]`), fractions (`w-1/2`, `translate-x-1/2`), shadows and rings, gradients (`bg-linear-to-r`, `bg-radial`, `bg-conic` with `from-` / `via-` / `to-`), filters, `backdrop-blur-*`, `mix-blend-*`, transforms, `transition-*` and `duration-*`, `animate-spin` / `ping` / `pulse` / `bounce`, and grid, each with its typed method in Rust. The platform limits of [filters and blending](./styling.md#filters-and-blending) apply to classes too.
 
@@ -202,63 +205,83 @@ With this theme, `bg-brand-500`, `text-brand` (the `DEFAULT` shade), `border-ink
 
 Unknown keys and invalid values are build errors (`nsh.json: tailwind: unknown theme key 'colours'`). The theme is compiled into the bundle and applied before the first frame.
 
-The Tailwind theme shapes your classes. Typed methods keep Tailwind's default scales, so a Rust component looks the same in every app, and take the app's look from the component theme, `"theme"` in `nsh.json` ([Rust](./rust.md#theme)).
+The Tailwind theme shapes your classes. Typed methods keep Tailwind's default scales, so a Rust component looks the same in every app, and take the app's look from the design tokens of its theme, `"theme"` in `nsh.json` ([Rust](./rust.md#theme)).
 
 ## Theme tokens
 
-Rust components draw with the component theme's colors and numbers (`theme()` from `nsh_base`); classes can name them too, so a TSX screen follows the same theme its Rust components do:
+The app's theme (`"theme"` in `nsh.json`) holds its design tokens: shadcn/ui's colors (`background`, `foreground`, `primary`, `muted-foreground`, `border`, `ring`, `chart-1`, `sidebar`, ...), its `radius`, its fonts `font-sans` and `font-mono`, and any token the app adds. Classes name them as Tailwind names the variables of a CSS `@theme`, Rust components read them with `theme()` from `nsh_base`, and TSX reads them with `token()` from `nsh`, so a TSX screen and the Rust components follow the same theme:
 
 ```rust tabs
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius_lg())
+    .rounded(move || theme().radius)
     .border_1()
-    .border_color(move || theme().border())
-    .bg(move || theme().background())
+    .border_color(move || theme().border)
+    .bg(move || theme().card)
     .p_4()
-    .child(text("Balance").text_color(move || theme().foreground()))
-    .child(text("Updated just now").text_color(move || theme().muted_foreground()))
+    .child(text("Balance").text_color(move || theme().card_foreground))
+    .child(text("Updated just now").text_color(move || theme().muted_foreground))
     .child(
         view()
-            .rounded(move || theme().radius())
-            .bg(move || theme().primary())
+            .rounded(move || theme().radius)
+            .bg(move || theme().primary)
             .px_4()
             .py_2()
-            .active(|s| s.bg(move || theme().primary_active()))
-            .child(
-                text("Continue")
-                    .text_color(move || theme().primary_foreground())
-                    .text_size(move || theme().font_size()),
-            ),
+            .active(|s| s.bg(move || theme().primary.opacity(0.9)))
+            .child(text("Continue").text_color(move || theme().primary_foreground)),
     )
 ```
 
 ```tsx tabs
-<View class="rounded-(--radius-lg) border border-border bg-background p-4">
-  <Text class="text-foreground">Balance</Text>
+<View class="rounded-(--radius) border border-border bg-card p-4">
+  <Text class="text-card-foreground">Balance</Text>
   <Text class="text-muted-foreground">Updated just now</Text>
-  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
-    <Text class="text-primary-foreground text-(length:--font-size)">Continue</Text>
+  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary/90">
+    <Text class="text-primary-foreground">Continue</Text>
   </View>
 </View>
 ```
 
-A token is a key of the theme file with its dots written as dashes: `muted.foreground` is `muted-foreground`, `radius.lg` is `--radius-lg`. Keys ending in `.background` can leave it out: `bg-primary` is `primary.background`, and `bg-primary-background` works too. In Rust, the keys the components use are methods of `theme()` (`primary()`, `muted_foreground()`, `radius_lg()`), and every other key is `theme().color("chart.up")` or `theme().number("radius.card")`.
+A token's name is its CSS variable's without `--`, as the theme file writes it: `muted-foreground`, `radius`, `chart-1`. In Rust, shadcn's tokens are methods of `theme()` (`primary()`, `muted_foreground()`, `radius()`, `font_mono()`), and every token is `theme().color("up")`, `theme().number("radius-card")` or `theme().font("font-display")`.
 
 | Form | Takes | Example |
 |---|---|---|
-| A color name in any color utility | A theme color | `bg-primary`, `text-muted-foreground/70`, `border-t-border`, `ring-ring`, `from-accent`, `placeholder:text-muted-foreground` |
+| A color name in any color utility | A theme color, with an opacity too | `bg-primary`, `text-muted-foreground/70`, `bg-up/30`, `border-t-border`, `ring-ring`, `from-accent`, `placeholder:text-muted-foreground` |
 | `(--name)`, Tailwind 4's variable shorthand | A theme color or number | `bg-(--primary)`, `rounded-(--radius)`, `p-(--gap-card)` |
-| `(color:--name)`, `(length:--name)`, `(number:--name)` | The same, typed where a utility takes several kinds | `text-(color:--link)`, `text-(length:--font-size)` |
+| `(color:--name)`, `(length:--name)`, `(number:--name)`, `(family-name:--name)` | The same, typed where a utility takes several kinds | `text-(color:--up)`, `text-(length:--text-title)`, `font-(family-name:--font-mono)` |
+| `font-sans`, `font-mono` | The theme's fonts, when it sets them | `font-mono` |
 
-- **Every key is a token.** The keys the components use (`primary.background`, `border`, `radius`, `font.size`, ...; the list is in [Rust](./rust.md#theme)), and any other key a theme file has: `"sidebar.background"` makes `bg-sidebar`, `"chart.up": "#16a34a"` makes `text-chart-up`, a number `"radius.card": 10` makes `rounded-(--radius-card)`. Numbers are points; `(number:--name)` passes the plain number.
-- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary` and `theme().primary()` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one mode only is used in both.
-- **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token only when the Tailwind theme has no color `primary`.
-- **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens and the Rust bindings reading `theme()` are restyled natively, with no JavaScript running. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's).
+- **Your own tokens.** Every name in the theme file is a token, as every variable of a CSS `@theme` is: `"up": "#16a34a"` makes `bg-up`, `text-up` and `bg-up/30`; `"radius-card": "14px"` makes `rounded-(--radius-card)`; `"font-display": "Pacifico"` makes `font-(family-name:--font-display)`. Lengths are in points; `(number:--name)` passes the plain number.
+- **Fonts.** `font-sans` is the app's font: every text that sets no family of its own is drawn with it, as a page is with Tailwind's `--font-sans`. `font-mono` is the font of `font-mono` and of code in `TextView`. Unset, both are the system's fonts.
+- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary`, `theme().primary` and `token("primary")` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one appearance only is used in both.
+- **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token when the Tailwind theme has no color `primary`.
+- **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens, the Rust bindings reading `theme()` and the TSX code reading `token()` are updated, the classes and bindings natively. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's). A host that only adds its brand gives theme overrides, the tokens its brand changes in the same file format ([iOS](./ios.md#theme-overrides), [Android](./android.md#theme-overrides), `AppView::set_theme_overrides` on the desktops).
 - **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
 
 Classes naming tokens are resolved once per theme, like any other class: drawing them costs what a palette color does.
+
+### `token()` in TSX
+
+`token(name)` from `nsh` is a token's value in the appearance shown: a color as `#rrggbbaa`, a length as a number of points, a font as its family name. It is reactive, so code that reads it in a component, a memo or an effect runs again when the theme or the appearance changes, which suits values that go where no class does, such as a canvas or a chart:
+
+```tsx
+import { Canvas, token } from "nsh";
+
+<Canvas
+  style={{ height: 160 }}
+  draw={(cx, { width, height }) => {
+    cx.beginPath();
+    cx.moveTo(0, height);
+    cx.lineTo(width, 0);
+    cx.strokeStyle = token("chart-1");
+    cx.lineWidth = 2;
+    cx.stroke();
+  }}
+/>
+```
+
+The names are typed: NSH writes the app's tokens into `.nsh/types/nsh/tokens.d.ts` from its theme, so `token("up")` is a `string` once `"up"` is in the theme, and a name the theme lacks is a type error.
 
 ## The class check
 

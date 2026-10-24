@@ -4,7 +4,7 @@
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
-  Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB aligned, `apksigner`;
+  Android: an APK assembled without Gradle (`aapt2 link`, native libraries stored uncompressed and 16 KB ZIP aligned, `apksigner`;
   the debug key unless `--keystore`). Linux: a directory `<name>/` with the release runner (`crates/nsh-linux-app`) as
   the executable, `nsh/bundle.nshc`, `nsh/assets/` and `nsh/app.json` (the window title and the GTK application id,
   which the runner reads next to itself), `<id>.desktop` (`StartupWMClass` is the id, which GTK makes the window's
@@ -22,6 +22,10 @@
   are needed; `--run` launches the executable.
   GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
   package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
+- Android's `libnsh.so` uses 16 KB ELF LOAD alignment and a 16 KB-aligned RELRO end, set by `nsh-platform-android/build.rs` and
+  the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
+  with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
+  for the APK runtimes and AARs. APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform
@@ -36,21 +40,28 @@
 - **Native components** (`nsh/native`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`
-  (`NativeComponent`) — one registry per view, no globals. JS declares one with `nativeComponent<P, E>(name, { props,
+  (`NativeComponent`) — one registry per view, no globals. Names under `nsh/` are NSH's own
+  (`nsh_core::platform::is_reserved_component`): each backend registers them itself (`nsh/tab-bar`, `nsh/mobile`'s
+  `TabBar`, on iOS and Android) and refuses an embedding app's registration of one with a warning. JS declares one with `nativeComponent<P, E>(name, { props,
   events })`; the element is a `<native>` leaf: `component` names it, each own prop goes as `$name` (any JSON value,
   `nsh_core::JsonValue`, sent when it changes; `undefined` removes it), view props (style, classes, accessibility, `ref`)
   stay the box's. The core sends `Create` (`ViewKind::Native`, a box decorated and placed like any view), then
   `MountItem::Component { name }` and `ComponentProps` (all props, then the changed ones). The component fills the box,
   emits events (`ComponentContext::emit` → `onNativeEvent` `{ name, data }` → the `on<Name>` handler) and may report
   its own size (`set_size`; the leaf measures to it where the style leaves a dimension open, like an image's natural
-  size). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
+  size). A component is destroyed once, when its element is deleted or its app stops: on Android a stopped engine
+  sends no `Delete`, so `NshView.destroy()` and a load replacing the app (`Host::load` → `NshView.appStopped`) call
+  `NshComponent.destroy()` on every component still alive (`Mounter.destroyComponents`). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
   cross the C ABI / JNI as JSON text (Swift `JSONSerialization`, Java `org.json` as maps and lists). Registered
   components are the embedding app's own code: capabilities do not apply to them.
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the
   surface element's prepaint lays it out at the box's window bounds and prepaints it (`prepaint_as_root`, clipped to the
   clipping ancestors), the tree paints it where it draws the box (NSH content drawn later covers it), and a `BlockMouse`
-  hitbox under it keeps NSH's input away; keys go to it while focus is inside it, and one that returns its widget's
+  hitbox under it keeps NSH's input away; keys go to it first while focus is inside it (GPUI dispatches its key
+  bindings, then its key listeners, then the surface's), and the keys it lets through reach the window's shortcuts,
+  then the app's `nsh/keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
+  typing keys to the component) and the menu's shortcuts, and nothing else of NSH's (`input::component_key`); one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
   scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
   value, window, cx)`, `command(name, args, window, cx)`), so it can update its entities. `render` is also called while
@@ -66,6 +77,59 @@
   set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
   answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
   throws a `ReferenceError` naming it.
+- **The host channel** (`nsh/host`; `nsh_engine::HostChannel`, `nsh_core::host_channel`, `nsh-js`
+  `host_channel.rs`): the embedding app and the app talk without a view in between and without Rust of the
+  embedding app's. Every view keeps one channel for every app it loads (Rust `AppView::host()` on iOS, macOS,
+  Linux, Windows and GPUI, `AppOptions::host` / `SurfaceOptions::host` to bring one's own; Swift `NshAppView.params`,
+  `send(_:_:)`, `handle(_:_:)`, `removeHandler(_:)`, C `nsh_app_set_host_params`, `nsh_app_send_host_event`,
+  `nsh_app_set_host_handler`, `nsh_host_call_resolve` / `_reject` / `_free`; Java `NshView.setParams`, `send`,
+  `handle`, `NshView.HostHandler`, `NshHostReply`) and hands it to each engine (`EngineConfig::host`), one channel per
+  surface, no globals.
+  - *Launch parameters*: `set_params(map)` before a load; the engine snapshots them when it starts (`HostChannel::bridge`)
+    and `host.params` reads them synchronously (a JSON object, `{}` without any), fixed for the app's life. Later
+    requests ("open conversation X" from a notification) are events.
+  - *Events* (`send(name, data)`, any thread, never waiting): `Message::HostEvent` on the attached engine
+    (`HostChannel::attach`: an engine attaches when it starts and detaches when it goes, by id, so a reload's new engine
+    is not detached by the old one). While no engine runs, the channel keeps them for the next (`HostInbox`, 256, the
+    oldest dropped and logged). Stopping the engine serializes its interrupt and shutdown message with `send`;
+    its attachment recovers events left in the engine queue for the next app under the same lock. In the VM, an
+    event of a name nobody listens to is kept likewise until the first
+    listener of that name is added; a job then delivers what was kept, in order, at the end of the turn that added it
+    (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
+    uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
+    listener unsubscribes during a callback, the rest keep their original order and age in the inbox.
+  - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
+    engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
+    rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
+    elsewhere): `Message::HostReply(id, result)` settles the promise in the engine's next turn. A `HostReply` dropped
+    unanswered rejects ("did not answer"), so a handler that panics (caught) or forgets fails the call rather than
+    leaving it pending; an answer for an engine that stopped goes nowhere. Calls use the platform API's timeout:
+    30 seconds by default, `{ timeout: 0 }` to wait without a deadline, on the app's clock. Calls and posts require
+    `capabilities.host` and the same function-name validation as the platform transport. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
+    handler they are dropped.
+  - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
+    engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in
+    `embed.rs`; Android: `NshView.hostMessage`, called over JNI on the engine thread, posts to the UI thread), where
+    Swift's and Java's handlers run. Android serializes the native part of `send` with taking the handle in
+    `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
+    (Swift `JSONSerialization`, Java
+    `org.json` as maps and lists), the VM as JSON values converted natively.
+  - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
+    directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
+  - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
+    `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
+    opens (`openUrl` of `nsh/device`, `nsh_core::ui::open_url`, a `TextView` with `links="open"`;
+    `nsh_core::open_url`) reach it before the platform, so a host routes its own links through its router. It is a
+    typed hook of the channel, not a named message: the channel is already the view's one object for the host's side,
+    threaded to every engine and through both SDKs' main-thread glue, and a hook of its own takes only what passed
+    the URL check and the `openUrl` capability, where no `host.call` name of the app can reach it or be mistaken for
+    it. The core keeps each request (`Action::OpenUrl` → `Core::take_url_opens`); the engine (`State::open_urls`,
+    after each commit round) runs the handler on the engine thread with an `OpenUrlRequest`, answered once from any
+    thread: `handled()` resolves the app's promise `true` (`Core::answer_open_url`), `decline()` or dropping it
+    hands the URL to the platform (`Message::UrlHandled` → `Core::open_url_on_platform`: `Command::OpenUrl` on the
+    root, answered by `EventKind::OpenUrl` `{ id, opened }`). Without a handler the platform opens it at once. The
+    SDKs' handlers are synchronous on the main thread (Swift `(URL) -> Bool`, Java `boolean openUrl(String)`), reached
+    as the call handlers are.
 - **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
   `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
   change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
@@ -74,6 +138,22 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **Each engine's own part of the host** (`nsh_core::ui::EngineContext`): a host serving several engines (windows,
+  panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
+  `EngineContext::default().with(MyLink { .. })`, at most one value per type, `Send + Sync`. The set's Rust code
+  reads the context of the engine running it with `engine_context::<MyLink>()` (`Option<Arc<MyLink>>`): plain
+  functions in the call, `cx` functions as ops, `async` ones in their task, after awaits too, and components. The
+  engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
+  threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
+  backend's window tests run two engines reading their own.
+- **The host's own picker** (`nsh_core::picker::PickerBackend`): an embedding app that has a picker of its own answers
+  the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
+  every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any
+  thread), and the core resolves the pick with them (cut to the limit, sizes, types and extensions filled in from the
+  bytes), sending no `Command::PickImages`. The capability check comes first, so a pick the app is not granted never
+  reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
+  needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
+  the view's activity).
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
@@ -84,6 +164,22 @@
   toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
   in classes included, stay as they are. The layout direction stays the system's language's.
+- **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme
+  tokens (brand colors, `radius`, ...) at run time: Rust `AppView::set_theme_overrides(Option<&str>)` (AppKit, GTK,
+  Win32; the iOS `AppView`'s too), Swift `NshAppView.setThemeOverrides(_:)` (C `nsh_app_set_theme_overrides`), Java
+  `NshView.setThemeOverrides`. The value is a theme file in the format of `nsh.json`'s `"theme"` (shadcn's `cssVars`:
+  `theme`, `light` and `dark` sections, values as CSS writes them; `components.md` "The theme"); it is parsed on the
+  calling thread by `nsh_base::theme_overrides`, which keeps only the tokens the file sets (a `var()` it names and
+  does not set is the default theme's), and a file that does not parse is an error (Swift throws `NshError`, Java an
+  `IllegalArgumentException`, C returns it) that changes nothing. The tokens go to the engine as host tokens
+  (`EngineControl::set_tokens`, `Core::set_host_tokens`): they win over the app's tokens of the same names in both
+  appearances, the app's others stay (`Tokens::over`), and classes naming the changed tokens (`bg-primary`,
+  `rounded-(--radius)`) are resolved again at once, as are Rust components reading `theme()`. Each platform keeps
+  them on its surface and starts every engine with them (`Engine::start_with`), so they are in the first frame of
+  every app loaded later, a development reload included; `None` / `nil` / `null` gives the app its own theme back. A
+  token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
+  in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
+  `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -138,24 +234,24 @@ NSH draws (`src/layers.rs`).
   sheets, popovers and notifications (drawn by `Root` above the content) cover it and take the input, while its app
   keeps running.
 - **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_base::Theme`
-  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the app
+  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one from a theme file (shadcn's
+  `cssVars`, as `nsh.json`'s `"theme"`: `components.md` "The theme"): the app
   renders with its tokens instead of its own theme's (`Core::set_host_tokens`, which win until cleared with
   `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
-  `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
-  keys it lacks keep the app's values. It applies at once and to every app loaded later, in their
+  `bg-sidebar`, `rounded-(--radius)`; every token of the theme, the host's own names too) restyle with it;
+  tokens it lacks keep the app's values. It applies at once and to every app loaded later, in their
   first frame (the surface starts engines with `Engine::start_with`, sending the theme before the start).
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's
-  `src/theme.rs` converts GPUI Kit's active `Theme`: both modes from its `light_theme` / `dark_theme` configs (gpui-kit
-  theme JSON, unset colors null, which NSH skips), then the current mode's colors as GPUI Kit resolved them, so NSH's
-  components match GPUI Kit's widgets; it runs on every change (`cx.observe_global::<Theme>`).
-- **NSH's theme in the host.** An NSH theme file is a gpui-kit theme file (same keys, same `themes` / `mode` /
-  `colors` structure): `ThemeRegistry::global_mut(cx).load_themes_from_str(json)` registers its entries by `name`
-  (give each one), and setting `Theme::global_mut(cx).light_theme` / `dark_theme` to them and calling
-  `Theme::change(mode, …)` applies them to GPUI Kit (the example's violet theme, `themes/violet.json`). Share hex
-  colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
-  reads gradients and `blue-500/50` that NSH rejects.
-- **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
+  `src/theme.rs` maps GPUI Kit's active `Theme` onto shadcn's tokens: the current mode's colors as GPUI Kit resolved
+  them, each set on the token of the same role (`Theme::set_color`: `background`, `primary`, `muted-foreground`,
+  `border`, `ring`, ...) for both appearances, its radius on `radius` and its font families on `font-sans` /
+  `font-mono` (`set_number`, `set_font`), so NSH's components match GPUI Kit's widgets. It runs again on every
+  change, a mode switch included (`cx.observe_global::<Theme>`), so one appearance's values are always the shown
+  mode's. The example's `themes/violet.json` is the host's own GPUI Kit theme, loaded into GPUI Kit's
+  `ThemeRegistry`; the embedded app takes it on through this mapping.
+- **From NSH to the host.** The app talks to the embedding app through its channel (`AppView::host()`, "The host
+  channel" above: launch parameters, events, calls and posts); through the native components the latter registers
   (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
   of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
   subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
@@ -177,6 +273,17 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
+  `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
+  `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),
+  sizes in `ByteSize::mib` / `gib`) and hands to the platform (`Engine::image_cache`). `EngineConfig::new` keeps none.
+  `System` is the engine's own (`~/Library/Caches`, `%LOCALAPPDATA%`, `$XDG_CACHE_HOME`) on the desktops; iOS and
+  Android, which alone know theirs, resolve it before the engine sees it (`Library/Caches/nsh`; `nsh` in the
+  Context's cache directory). One shape on every face: `AppOptions::cache` / `SurfaceOptions::cache` and
+  `AppView::set_cache` in Rust, `NshAppView.cacheOptions` (`NshCacheOptions`: `.system` / `.directory(URL)` /
+  `.off`, `.default` / `.maxSize(megabytes:)` / `.off`) in Swift over `nsh_app_set_cache` (a C struct with a leading
+  `size`, read up to it, so it can grow), `NshView.setCacheOptions(NshCacheOptions)` (immutable, built) in Java; all
+  from the next load. A new kind of cache is one more `CachePolicy` field, never another option per platform.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

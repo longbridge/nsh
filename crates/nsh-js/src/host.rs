@@ -47,6 +47,8 @@ pub(crate) struct Shared {
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
     pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
+    /// The embedding app's side of `nsh/host` (the engine's bridge).
+    pub(crate) host_bridge: RefCell<Option<Rc<dyn nsh_core::host_channel::HostBridge>>>,
     pub(crate) system_websocket:
         RefCell<Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>>,
     /// Permissions and host-selected app directory for native system operations.
@@ -640,6 +642,15 @@ impl Host {
                         None => Ok(()),
                     }
                 });
+                // A listener made under an error boundary fails into it.
+                let result = match result {
+                    Err(rquickjs::Error::Exception)
+                        if crate::dom::catch_listener_failure(raw, id) =>
+                    {
+                        Ok(())
+                    }
+                    other => other,
+                };
                 self.report(&cx, result);
             });
             self.run_jobs();
@@ -730,6 +741,41 @@ impl Host {
         *self.shared.system_websocket.borrow_mut() = transport;
     }
 
+    /// Connects `nsh/host` to the embedding app: its launch parameters, and
+    /// where the app's calls and posts go. Call before evaluating the bundle
+    /// (`host.params` is read when the module is first imported).
+    pub fn set_host_bridge(&self, bridge: Rc<dyn nsh_core::host_channel::HostBridge>) {
+        *self.shared.host_bridge.borrow_mut() = Some(bridge);
+    }
+
+    /// Delivers the embedding app's event `name` (`host.on`): to the
+    /// listeners of its name, or kept until one is added.
+    pub fn host_event(&self, name: &str, data: nsh_core::JsonValue) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::deliver(cx.as_raw().as_ptr(), name, data);
+            });
+            self.run_jobs();
+        });
+    }
+
+    /// Settles call `id` (`host.call`) with the embedding app's answer, or
+    /// rejects it with the message.
+    pub fn host_reply(&self, id: u64, result: Result<nsh_core::JsonValue, String>) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::settle(cx.as_raw().as_ptr(), id, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Installs the meaning of `process.exit(code)` for this VM. The callback
     /// runs on the owning engine thread after the app's exit capability check.
     /// NSH never terminates the embedding process itself.
@@ -770,11 +816,27 @@ impl Host {
 
     /// Earliest timer deadline, if any timer is pending.
     pub fn next_timer(&self) -> Option<Instant> {
-        self.shared.timers.borrow_mut().next_deadline()
+        let timer = self.shared.timers.borrow_mut().next_deadline();
+        let host = self
+            .cx
+            .is_live()
+            .then(|| {
+                self.cx
+                    .with(|cx| crate::host_channel::next_deadline(cx.as_raw().as_ptr()))
+            })
+            .flatten();
+        timer.into_iter().chain(host).min()
     }
 
     /// Runs all timers due at `now`.
     pub fn run_timers(&self, now: Instant) {
+        if self.cx.is_live() {
+            self.guarded(Phase::Call, || {
+                self.cx
+                    .with(|cx| crate::host_channel::expire(cx.as_raw().as_ptr(), now));
+                self.run_jobs();
+            });
+        }
         loop {
             // Release the borrow before calling into JS: callbacks may add timers.
             let Some(callback) = self.shared.timers.borrow_mut().pop_due(now) else {
@@ -979,6 +1041,17 @@ impl Host {
         });
     }
 
+    /// Publishes the design tokens the app is drawn with to JS (`token()`
+    /// of `nsh`). Call before evaluating the bundle, then on every change.
+    pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::ui::Tokens>) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::env::set_tokens(cx.as_raw().as_ptr(), tokens);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// True if JS asked for a display frame (`requestAnimationFrame`).
     pub fn wants_frame(&self) -> bool {
         !self.shared.frames.borrow().is_empty()
@@ -1102,6 +1175,17 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 obj.set(*key, payload_value(cx, value)?)?;
             }
         }
+        EventPayload::Press(nsh_core::PressEvent {
+            position,
+            page_position,
+            modifiers,
+            clicks,
+        }) => {
+            obj.set("position", point_object(cx, *position)?)?;
+            obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
+            obj.set("clickCount", *clicks)?;
+        }
         EventPayload::Hover(nsh_core::HoverEvent {
             position,
             page_position,
@@ -1123,10 +1207,37 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("uris", list)?;
         }
+        // The bytes cross natively: each file is a `File` over them.
+        EventPayload::Paste(paste) => {
+            obj.set("text", paste.text.as_str())?;
+            let files = rquickjs::Array::new(cx.clone())?;
+            for (index, file) in paste.files.iter().enumerate() {
+                let blob = crate::web::blob::Blob::new(file.data.clone(), file.mime.clone());
+                let made = crate::web::blob::new_file(
+                    cx.as_raw().as_ptr(),
+                    blob,
+                    file.name.clone(),
+                    crate::web::blob::now_ms(),
+                )
+                .map_err(|_| rquickjs::Error::Exception)?;
+                // SAFETY: an owned value of this context, handed over.
+                let value = unsafe { Value::from_raw(cx.clone(), made.take()) };
+                files.set(index, value)?;
+            }
+            obj.set("files", files)?;
+            let uris = rquickjs::Array::new(cx.clone())?;
+            for (index, uri) in paste.uris.iter().enumerate() {
+                uris.set(index, uri.as_str())?;
+            }
+            obj.set("uris", uris)?;
+        }
+        // The core answers picks; JS never gets their files this way.
+        EventPayload::Picked { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
         }
+        EventPayload::Json(value) => return json_value(cx, value),
         EventPayload::TextLayout(lines) => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (i, l) in lines.iter().enumerate() {
@@ -1924,6 +2035,41 @@ const report = (v) => text(String(v));
     }
 
     #[test]
+    fn press_payload_has_both_positions() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::PressEvent {
+            position: point(px(3.0), px(4.5)),
+            page_position: point(px(30.0), px(40.5)),
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            clicks: 2,
+        };
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Press(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (3.0, 4.5, 30.0, 40.5)
+            );
+            let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
+            assert!(modifiers.get::<_, bool>("control").unwrap());
+            assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
+        });
+    }
+
+    #[test]
     fn hover_payload_has_both_positions_and_the_modifiers() {
         let host = Host::new().unwrap();
         let event = nsh_core::HoverEvent {
@@ -2004,6 +2150,27 @@ const report = (v) => text(String(v));
             let value = payload_object(&cx, &EventPayload::FileDrop(uris.clone())).unwrap();
             let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
             assert_eq!(actual, uris);
+        });
+    }
+
+    #[test]
+    fn paste_payload_hands_files_over_as_file_objects() {
+        let host = Host::new().unwrap();
+        let mut paste = nsh_core::PasteEvent::new("hi");
+        paste.files.push(nsh_core::PastedFile::image(vec![
+            0x89, b'P', b'N', b'G', 1, 2,
+        ]));
+        paste.uris.push("file:///tmp/a.txt".into());
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Paste(Box::new(paste))).unwrap();
+            cx.globals().set("pasted", value).unwrap();
+            let summary: String = cx
+                .eval(
+                    "const f = pasted.files[0]; \
+                     `${pasted.text} ${f instanceof File} ${f.name} ${f.type} ${f.size} ${pasted.uris[0]}`",
+                )
+                .unwrap();
+            assert_eq!(summary, "hi true image.png image/png 6 file:///tmp/a.txt");
         });
     }
 

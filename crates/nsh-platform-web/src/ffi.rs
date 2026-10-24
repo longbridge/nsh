@@ -6,6 +6,15 @@
 unsafe extern "C" {
     #[link_name = "measure_text"]
     fn js_measure_text(font: *const u8, font_len: usize, text: *const u8, text_len: usize) -> f64;
+    #[link_name = "measure_numeric_text"]
+    fn js_measure_numeric_text(
+        font: *const u8,
+        font_len: usize,
+        numeric: *const u8,
+        numeric_len: usize,
+        text: *const u8,
+        text_len: usize,
+    ) -> f64;
     #[link_name = "font_ascent"]
     fn js_font_ascent(font: *const u8, font_len: usize) -> f64;
     #[link_name = "font_descent"]
@@ -23,6 +32,10 @@ unsafe extern "C" {
     );
     #[link_name = "submit"]
     fn js_submit(json: *const u8, len: usize);
+    #[link_name = "image_bytes"]
+    fn js_image_bytes(uri: *const u8, uri_len: usize, data: *const u8, data_len: usize);
+    #[link_name = "release_image"]
+    fn js_release_image(uri: *const u8, uri_len: usize);
     #[link_name = "request_frame"]
     fn js_request_frame();
     #[link_name = "request_pump"]
@@ -105,6 +118,23 @@ pub(crate) fn measure_text(font: &str, text: &str) -> f32 {
     unsafe { js_measure_text(font.as_ptr(), font.len(), text.as_ptr(), text.len()) as f32 }
 }
 
+/// The width of `text` in CSS `font` with `font-variant-numeric:
+/// numeric`, in points: canvas has no numeric variants, so the page
+/// measures it in the DOM, as the run is drawn.
+pub(crate) fn measure_numeric_text(font: &str, numeric: &str, text: &str) -> f32 {
+    // SAFETY: the slices are valid for the call; JS only reads them.
+    unsafe {
+        js_measure_numeric_text(
+            font.as_ptr(),
+            font.len(),
+            numeric.as_ptr(),
+            numeric.len(),
+            text.as_ptr(),
+            text.len(),
+        ) as f32
+    }
+}
+
 /// Ascent and descent of CSS `font` (0 when the browser cannot tell).
 pub(crate) fn font_metrics(font: &str) -> (f32, f32) {
     // SAFETY: the slice is valid for the calls; JS only reads it.
@@ -141,6 +171,20 @@ pub(crate) fn register_font(family: &str, data: &[u8], weight: u16, italic: bool
 pub(crate) fn submit(json: &str) {
     // SAFETY: the slice is valid for the call; JS copies it.
     unsafe { js_submit(json.as_ptr(), json.len()) }
+}
+
+/// Gives the page the bytes of the in-memory image `uri` (a `data:` URI's,
+/// a blob's): it makes a browser blob URL of them that `<img>` elements
+/// showing `uri` load.
+pub(crate) fn image_bytes(uri: &str, data: &[u8]) {
+    // SAFETY: the slices are valid for the call; JS copies them.
+    unsafe { js_image_bytes(uri.as_ptr(), uri.len(), data.as_ptr(), data.len()) }
+}
+
+/// The page may forget (revoke) the blob URL of the in-memory image `uri`.
+pub(crate) fn release_image(uri: &str) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_release_image(uri.as_ptr(), uri.len()) }
 }
 
 /// Asks for a `requestAnimationFrame` callback (`nsh_frame`).

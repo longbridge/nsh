@@ -175,8 +175,14 @@ impl std::fmt::Debug for Components {
 }
 
 impl Components {
-    /// Registers `factory` under `name` (replacing an earlier one).
+    /// Registers `factory` under `name` (replacing an earlier one). Names
+    /// under `nsh/` are NSH's own: registering one logs a warning and
+    /// changes nothing.
     pub fn register(&self, name: &str, factory: ComponentFactory) {
+        if nsh_core::platform::is_reserved_component(name) {
+            log::warn!("native component `{name}` is not registered: names under `nsh/` are NSH's");
+            return;
+        }
         self.factories.borrow_mut().insert(name.into(), factory);
         self.missing.borrow_mut().remove(name);
     }
@@ -503,6 +509,8 @@ pub(crate) fn lend(surface: &Rc<Surface>, top: &NshView, image: &NSView) -> Vec<
     };
     let mut lent = Vec::new();
     for (holder, shown) in found {
+        // `place_in` converts with AppKit's geometry, which the bounds place.
+        crate::scroll::commit_ancestors(&holder);
         let Some(place) = place_in(&shown, top.ns()) else {
             continue;
         };

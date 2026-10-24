@@ -1,12 +1,14 @@
-import { computed, signal, Text, View } from "nsh";
-import { Checkbox, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { cleanup, computed, signal, Text, View } from "nsh";
+import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { reduceMotion } from "nsh/accessibility";
 import { platform } from "nsh/device";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, switchLook } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, switchLook, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
-// gallery's own here.
+// gallery's own here, with its hover and keyboard focus ring (`hovered`,
+// `focusRing`) on every control, and no motion with reduced motion.
 
 /**
  * The sizes of the page. Touch screens take the standard tier (44 pt and
@@ -29,6 +31,34 @@ const row = (first: boolean) => ({
   borderTopWidth: first ? 0 : 1,
   borderTopColor: colors.line,
 });
+/** How far a row's hover fill reaches past its content on each side, and its corners. */
+const BLEED = 8;
+
+/**
+ * A row that takes the pointer's hover: `row`'s, its fill reaching `BLEED`
+ * past the content on both sides with rounded corners, and the content where
+ * it was (`start`: more room before it). The hairline above it is a
+ * `Divider`, the length `row`'s top border had; the point it took stays in
+ * the padding, so nothing moves.
+ */
+const hoverRow = (first: boolean, start = 0) => ({
+  ...row(true),
+  marginHorizontal: -BLEED,
+  paddingStart: BLEED + start,
+  paddingEnd: BLEED,
+  paddingTop: size.padding + (first ? 0 : 1),
+  borderRadius: BLEED,
+});
+
+/** The hairline above a `hoverRow` that is not the first. */
+function Divider(props: { show: boolean }) {
+  return (
+    <If when={props.show}>
+      <View style={{ position: "absolute", top: 0, left: BLEED, right: BLEED, height: 1, backgroundColor: colors.line }} />
+    </If>
+  );
+}
+
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
 
@@ -132,12 +162,18 @@ const SECTIONS: { name: string; rows: [string, string][]; disabled?: boolean }[]
   { name: "Billing", rows: [], disabled: true },
 ];
 
+const USAGE: [string, string][] = [
+  ["Photos", "120 GB"],
+  ["Apps", "54 GB"],
+  ["System", "38 GB"],
+];
+
 const count = (n: number) => n.toLocaleString("en-US");
 
 /**
  * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup`,
- * `Tab` and `Tabs` in the settings, filters, pickers and section switchers
- * apps use them for.
+ * `Tab` and `Tabs`, `Collapsible` in the settings, filters, pickers, section
+ * switchers and disclosures apps use them for.
  */
 export function Controls() {
   const last = signal("—");
@@ -158,12 +194,15 @@ export function Controls() {
             last.set(`${props.label}: ${on ? "on" : "off"}`);
           }}
           // The track at the trailing edge, after the label.
-          style={{ ...row(!!props.first), flexDirection: "row-reverse" }}
+          style={{ ...hoverRow(!!props.first), flexDirection: "row-reverse" }}
           activeStyle={pressed}
+          hoverStyle={props.disabled ? undefined : hovered()}
+          focusStyle={focusRing()}
           disabledStyle={dimmed}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
         >
+          <Divider show={!props.first} />
           <Label label={props.label} detail={props.detail} />
         </Switch>
       );
@@ -208,8 +247,10 @@ export function Controls() {
               shown.set(on ? KINDS.map((k) => k.name) : []);
               last.set(`Select all: ${on}`);
             }}
-            style={row(true)}
+            style={hoverRow(true)}
             activeStyle={pressed}
+            hoverStyle={hovered()}
+            focusStyle={focusRing()}
             indicatorStyle={box(mark())}
             indicator={<BoxMark mark={mark()} />}
           >
@@ -224,11 +265,14 @@ export function Controls() {
                   last.set(`${kind().name}: ${on}`);
                 }}
                 // One level under "Select all": the boxes line up with its label.
-                style={{ ...row(false), paddingStart: size.control + size.gap }}
+                style={hoverRow(false, size.control + size.gap)}
                 activeStyle={pressed}
+                hoverStyle={hovered()}
+                focusStyle={focusRing()}
                 indicatorStyle={box(has(kind().name) ? "check" : null)}
                 indicator={<BoxMark mark={has(kind().name) ? "check" : null} />}
               >
+                <Divider show />
                 <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{kind().name}</Text>
                 <Text style={{ fontSize: size.detail, color: colors.faint, fontVariant: ["tabular-nums"] }}>{count(kind().count)}</Text>
               </Checkbox>
@@ -255,10 +299,13 @@ export function Controls() {
                   plan.set(p().name);
                   last.set(`Plan: ${p().name}`);
                 }}
-                style={row(i() === 0)}
+                style={hoverRow(i() === 0)}
                 activeStyle={pressed}
+                hoverStyle={p().disabled ? undefined : hovered()}
+                focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
+                <Divider show={i() !== 0} />
                 <Ring on={plan() === p().name} />
                 <Label label={p().name} detail={p().detail} />
                 <Text style={{ fontSize: size.label, color: plan() === p().name ? colors.text : colors.muted, fontVariant: ["tabular-nums"] }}>{p().price}</Text>
@@ -309,6 +356,8 @@ export function Controls() {
                 }}
                 style={{ flex: 1, borderRadius: inner / 2, borderWidth: 1, borderColor: "transparent", alignItems: "center", justifyContent: "center" }}
                 selectedStyle={finish.pill}
+                hoverStyle={s().disabled || section() === s().name ? undefined : hovered()}
+                focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
                 <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
@@ -332,6 +381,184 @@ export function Controls() {
     );
   }
 
+  function Disclosure() {
+    const storage = signal(false);
+    const advanced = signal(false);
+    const originals = signal(false);
+    const look = switchLook(() => originals(), size.switch);
+    /** The always-visible row that flips a section: the app's trigger, which tells screen readers whether it is expanded. */
+    function Summary(props: { label: string; detail: string; open: boolean; set: (open: boolean) => void; first?: boolean }) {
+      return (
+        <View
+          role="button"
+          accessibilityState={{ expanded: props.open }}
+          onPress={() => {
+            const next = !props.open;
+            props.set(next);
+            last.set(`${props.label}: ${next ? "expanded" : "collapsed"}`);
+          }}
+          style={hoverRow(!!props.first)}
+          activeStyle={pressed}
+          hoverStyle={hovered()}
+          focusStyle={focusRing()}
+        >
+          <Divider show={!props.first} />
+          <Label label={props.label} detail={props.detail} />
+          {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
+          <View
+            class="transition-transform duration-150 motion-reduce:transition-none"
+            style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
+          >
+            <Icon name="chevron" size={size.check} tint={colors.muted} />
+          </View>
+        </View>
+      );
+    }
+    return (
+      <Card icon="controls" title="Collapsible" subtitle="Details under a summary, kept while collapsed">
+        <View>
+          <Collapsible
+            open={storage()}
+            content={
+              <View style={{ paddingStart: size.gap, paddingBottom: size.padding }}>
+                <Each of={USAGE}>
+                  {(u) => (
+                    <View style={{ flexDirection: "row", alignItems: "center", minHeight: size.line }}>
+                      <Text style={{ flex: 1, fontSize: size.label, color: colors.muted }}>{u()[0]}</Text>
+                      <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"] }}>{u()[1]}</Text>
+                    </View>
+                  )}
+                </Each>
+              </View>
+            }
+          >
+            <Summary first label="Storage" detail="212 GB of 256 GB used" open={storage()} set={(open) => storage.set(open)} />
+          </Collapsible>
+          <Collapsible
+            open={advanced()}
+            content={
+              <Switch
+                checked={originals()}
+                onChange={(on) => {
+                  originals.set(on);
+                  last.set(`Keep originals: ${on ? "on" : "off"}`);
+                }}
+                style={{ ...hoverRow(false, size.gap), flexDirection: "row-reverse" }}
+                activeStyle={pressed}
+                hoverStyle={hovered()}
+                focusStyle={focusRing()}
+                trackStyle={look.trackStyle}
+                thumbStyle={look.thumbStyle}
+              >
+                <Divider show />
+                <Label label="Keep originals" detail={originals() ? "Edits are saved as copies" : "Edits replace the photo"} />
+              </Switch>
+            }
+          >
+            <Summary label="Advanced" detail="Options most people leave alone" open={advanced()} set={(open) => advanced.set(open)} />
+          </Collapsible>
+        </View>
+      </Card>
+    );
+  }
+
+  function Transfers() {
+    const sent = signal(0);
+    const running = signal(false);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      running.set(false);
+    };
+    cleanup(stop);
+    // The indeterminate bar's sweep: the app flips its translation, a
+    // transition moves it; it rests in the middle with reduced motion.
+    const end = signal(false);
+    const sweep = setInterval(() => {
+      if (!reduceMotion()) end.set(!end());
+    }, 800);
+    cleanup(() => clearInterval(sweep));
+    const start = () => {
+      if (sent() >= 100) sent.set(0);
+      running.set(true);
+      last.set("Upload: started");
+      timer = setInterval(() => {
+        sent.set(Math.min(100, sent() + 10));
+        if (sent() >= 100) {
+          stop();
+          last.set("Upload: done");
+        }
+      }, 300);
+    };
+    /** A transfer: its label and value over a bar, the value tabular at the trailing edge. */
+    function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; first?: boolean }) {
+      return (
+        <Progress
+          value={props.value}
+          indeterminate={props.indeterminate}
+          // The label row first: the children follow the track.
+          style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
+          trackStyle={{ height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.raised }}
+          indicatorClass={
+            !props.indeterminate
+              ? undefined
+              : reduceMotion()
+                ? "w-1/3 translate-x-full"
+                : `w-1/3 transition-transform duration-700 ease-in-out ${end() ? "translate-x-[200%]" : "translate-x-0"}`
+          }
+          indicatorStyle={{ height: 6, borderRadius: 3, backgroundColor: toneColor("accent") }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
+            <Label label={props.label} detail={props.detail} />
+            <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>
+              {props.indeterminate ? "—" : `${props.value}%`}
+            </Text>
+          </View>
+        </Progress>
+      );
+    }
+    return (
+      <Card icon="controls" title="Progress" subtitle="Transfers: the app owns the value">
+        <View>
+          <Transfer
+            first
+            label="Upload"
+            detail={sent() >= 100 ? "24 photos sent" : running() ? "Sending 24 photos" : "24 photos to send"}
+            value={sent()}
+          />
+          <Transfer label="Backup" detail="Preparing: its size is not known yet" value={0} indeterminate />
+        </View>
+        {/* As wide as their labels with a pointer; sharing the row on a touch screen. */}
+        <View style={{ flexDirection: "row", gap: size.gap, marginTop: size.padding, alignSelf: pointer ? "flex-start" : "stretch" }}>
+          <Button
+            label={running() ? "Pause" : sent() >= 100 ? "Send again" : "Send"}
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            onPress={() => {
+              if (running()) {
+                stop();
+                last.set("Upload: paused");
+              } else start();
+            }}
+          />
+          <Button
+            label="Reset"
+            variant="secondary"
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            disabled={sent() === 0}
+            onPress={() => {
+              stop();
+              sent.set(0);
+              last.set("Upload: reset");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -340,5 +567,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Last]} />;
 }

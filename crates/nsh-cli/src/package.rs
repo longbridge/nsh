@@ -105,6 +105,25 @@ pub(crate) struct AppConfig {
     /// A Rust app's root component in its crate (`rust_app::RootConfig`).
     #[serde(default, rename = "root")]
     _root: Option<serde::de::IgnoredAny>,
+    /// What the web's packages add to the page (`web.rs`).
+    #[serde(default)]
+    pub(crate) web: WebConfig,
+}
+
+/// `nsh.json` `"web"`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WebConfig {
+    /// The page's host: a JS module, relative to `nsh.json`, whose
+    /// `createHost(player)` returns what `nsh/host` calls reach
+    /// (`createPlayer`'s `host`).
+    pub(crate) host: Option<PathBuf>,
+    /// The hosts the page's host module reaches (patterns, as
+    /// `capabilities.network.hosts`): the page's `connect-src` allows them
+    /// too, while the app's own requests stay checked against its
+    /// `capabilities`.
+    #[serde(default)]
+    pub(crate) connect: Vec<String>,
 }
 
 /// Options of `nsh package`.
@@ -135,7 +154,26 @@ pub(crate) fn read_config(entry: &Path) -> anyhow::Result<AppConfig> {
     let mut config: AppConfig =
         serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))?;
     config.icon = config.icon.map(|icon| dir.join(icon));
+    config.web.host = config.web.host.map(|host| dir.join(host));
     Ok(config)
+}
+
+/// `nsh.json` `web.host` (`read_config` made it absolute), canonical: the
+/// file must be inside the app's directory, symbolic links resolved, as the
+/// page ships it as it is.
+pub(crate) fn web_host_module(entry: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+    let dir = dunce::canonicalize(entry.parent().unwrap_or(Path::new(".")))
+        .with_context(|| format!("the app's directory of {}", entry.display()))?;
+    let module = dunce::canonicalize(host)
+        .with_context(|| format!("nsh.json web.host {}", host.display()))?;
+    if !module.starts_with(&dir) {
+        bail!(
+            "nsh.json web.host {} must be inside the app's directory {}",
+            host.display(),
+            dir.display()
+        );
+    }
+    Ok(module)
 }
 
 /// The app's display name and id: from the config, else the entry's
@@ -895,7 +933,7 @@ fn entitlements(profile: &Path, id: &str) -> anyhow::Result<plist::Value> {
         bail!("cannot read provisioning profile {}", profile.display());
     }
     let profile = plist::Value::from_reader_xml(output.stdout.as_slice())?;
-    let entitlements = profile
+    let mut entitlements = profile
         .as_dictionary()
         .and_then(|d| d.get("Entitlements"))
         .cloned()
@@ -904,11 +942,30 @@ fn entitlements(profile: &Path, id: &str) -> anyhow::Result<plist::Value> {
         .as_dictionary()
         .and_then(|d| d.get("application-identifier"))
         .and_then(|v| v.as_string())
-        .unwrap_or_default();
-    if !profile_allows(app_id, id) {
+        .unwrap_or_default()
+        .to_owned();
+    if !profile_allows(&app_id, id) {
         bail!("the provisioning profile is for {app_id}, not {id}");
     }
+    // A wildcard profile (`TEAMID.*`) signs the app as `TEAMID.<id>`, as
+    // Xcode does: devices refuse an app signed with the wildcard itself.
+    if let Some(dictionary) = entitlements.as_dictionary_mut() {
+        dictionary.insert(
+            "application-identifier".to_owned(),
+            plist::Value::String(signed_app_id(&app_id, id)),
+        );
+    }
     Ok(entitlements)
+}
+
+/// The `application-identifier` an app with bundle id `id` is signed with
+/// under a profile's (`TEAMID.com.example.app` or a wildcard such as
+/// `TEAMID.*`), which covers it.
+fn signed_app_id(app_id: &str, id: &str) -> String {
+    match app_id.split_once('.') {
+        Some((team, pattern)) if pattern.ends_with('*') => format!("{team}.{id}"),
+        _ => app_id.to_owned(),
+    }
 }
 
 /// Whether a profile's `application-identifier` (`TEAMID.com.example.app`,
@@ -987,6 +1044,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_web_host_module_stays_in_the_app_directory() {
+        let root = std::env::temp_dir().join(format!("nsh-web-host-{}", std::process::id()));
+        let app = root.join("app");
+        fs::create_dir_all(app.join("web")).unwrap();
+        fs::write(app.join("web/host.js"), "").unwrap();
+        fs::write(root.join("outside.js"), "").unwrap();
+        let entry = app.join("App.tsx");
+        let config = |host: &str| {
+            fs::write(
+                app.join("nsh.json"),
+                serde_json::json!({ "web": { "host": host } }).to_string(),
+            )
+            .unwrap();
+            read_config(&entry).unwrap().web.host.unwrap()
+        };
+        let inside = web_host_module(&entry, &config("web/host.js")).unwrap();
+        assert_eq!(
+            inside,
+            dunce::canonicalize(app.join("web/host.js")).unwrap()
+        );
+        assert!(web_host_module(&entry, &config("./web/../web/host.js")).is_ok());
+        let outside = root.join("outside.js");
+        let refused = [config("../outside.js"), config(outside.to_str().unwrap())];
+        #[cfg(unix)]
+        let refused = {
+            std::os::unix::fs::symlink(&outside, app.join("link.js")).unwrap();
+            let mut refused = refused.to_vec();
+            refused.push(config("link.js"));
+            refused
+        };
+        for host in refused {
+            let error = web_host_module(&entry, &host).unwrap_err().to_string();
+            assert!(error.contains("inside the app's directory"), "{error}");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// App icons are drawn at 1024 pixels, which `sips` alone cannot
     /// convert.
     #[cfg(target_os = "macos")]
@@ -1019,6 +1114,22 @@ mod tests {
         ));
         assert!(!profile_allows("ABCDE12345.com.other.*", "com.example.app"));
         assert!(!profile_allows("", "com.example.app"));
+    }
+
+    #[test]
+    fn wildcard_profiles_sign_the_bundle_id() {
+        assert_eq!(
+            signed_app_id("ABCDE12345.*", "com.example.app"),
+            "ABCDE12345.com.example.app"
+        );
+        assert_eq!(
+            signed_app_id("ABCDE12345.com.example.*", "com.example.app"),
+            "ABCDE12345.com.example.app"
+        );
+        assert_eq!(
+            signed_app_id("ABCDE12345.com.example.app", "com.example.app"),
+            "ABCDE12345.com.example.app"
+        );
     }
 
     #[test]

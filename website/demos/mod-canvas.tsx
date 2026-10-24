@@ -1,6 +1,6 @@
 import { Canvas, mount, Path2D, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { tint, ui } from "./palette";
+import { desktop, Panel, Split, tint, ui, wide } from "./palette";
 
 const TAU = Math.PI * 2;
 const heart = new Path2D("M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z");
@@ -10,15 +10,19 @@ function Chip(props: { label: string; onPress: () => void }) {
     <Text
       onPress={props.onPress}
       activeStyle={{ opacity: 0.6 }}
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 10,
-        overflow: "hidden",
-        ...ui().raised,
-        color: ui().text,
-        fontWeight: "600",
-      }}
+      style={
+        desktop
+          ? { alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, overflow: "hidden", ...ui().raised, color: ui().text, fontSize: 13, fontWeight: "600" }
+          : {
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 10,
+              overflow: "hidden",
+              ...ui().raised,
+              color: ui().text,
+              fontWeight: "600",
+            }
+      }
     >
       {props.label}
     </Text>
@@ -38,6 +42,33 @@ function App() {
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 16 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>Canvas</Text>
+      <Split
+        gap={16}
+        width={560}
+        inspector={
+          wide() ? (
+            <>
+              <Panel title="draw reads a signal">
+                <View style={{ gap: 10 }}>
+                  <Text style={{ fontSize: 13, color: ui().text, fontVariant: ["tabular-nums"] }}>[{data().join(", ")}]</Text>
+                  <Chip label="New point" onPress={() => data.update((v) => [...v.slice(1), Math.round(Math.random() * 90) + 5])} />
+                </View>
+              </Panel>
+              <Panel title="An animated value in draw">
+                <View style={{ gap: 10 }}>
+                  <Text style={{ fontSize: 13, color: ui().text, fontVariant: ["tabular-nums"] }}>{Math.round(target() * 100)}%</Text>
+                  <Chip label="Animate ring" onPress={go} />
+                </View>
+              </Panel>
+            </>
+          ) : (
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Chip label="New point" onPress={() => data.update((v) => [...v.slice(1), Math.round(Math.random() * 90) + 5])} />
+              <Chip label="Animate ring" onPress={go} />
+            </View>
+          )
+        }
+      >
       <Canvas
         style={{ height: 170, borderRadius: 12, ...ui().inset }}
         draw={(cx, { width, height }) => {
@@ -100,10 +131,7 @@ function App() {
           }}
         />
       </View>
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Chip label="New point" onPress={() => data.update((v) => [...v.slice(1), Math.round(Math.random() * 90) + 5])} />
-        <Chip label="Animate ring" onPress={go} />
-      </View>
+      </Split>
     </View>
   );
 }

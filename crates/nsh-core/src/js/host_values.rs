@@ -7,7 +7,7 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
     StatusBarSetting, StatusBarStyle, Viewability,
-    geometry::{Points, point, size},
+    geometry::{Bounds, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
@@ -47,6 +47,7 @@ impl HostValue for ImageSource {
                 uri: url.into(),
                 size: None,
                 scales: ImageScales::NONE,
+                data: None,
             });
         }
         let url = input.field("url")?.as_string()?;
@@ -62,6 +63,7 @@ impl HostValue for ImageSource {
             uri: url.into(),
             size,
             scales: scales(input),
+            data: None,
         })
     }
 
@@ -412,12 +414,24 @@ pub(crate) fn pinch<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     ))
 }
 
-/// `anchor`: a host element (a ref), `{ x, y }`, or nothing.
+/// `anchor`: a host element (a ref), `{ x, y }`, `{ origin, size }`, or
+/// nothing.
 pub(crate) fn overlay_anchor<I: HostInput>(input: &I, _: &mut HostCx) -> Option<OverlayProp> {
+    let bounds = || {
+        let origin = input.field("origin")?;
+        let extent = input.field("size")?;
+        Some(Bounds {
+            origin: point(points(&origin, "x")?, points(&origin, "y")?),
+            size: size(
+                points(&extent, "width")?.max(Points::ZERO),
+                points(&extent, "height")?.max(Points::ZERO),
+            ),
+        })
+    };
     let anchor = match (input.node(), points(input, "x"), points(input, "y")) {
         (Some(id), ..) => OverlayAnchor::Node(id),
         (None, Some(x), Some(y)) => OverlayAnchor::Point(point(x, y)),
-        _ => OverlayAnchor::None,
+        _ => bounds().map_or(OverlayAnchor::None, OverlayAnchor::Bounds),
     };
     Some(OverlayProp::Anchor(anchor))
 }
@@ -442,6 +456,16 @@ pub(crate) fn rotation<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> 
 /// `scrollValue`: an animated value.
 pub(crate) fn scroll_value<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::ScrollValue(input.animated_node()))
+}
+
+/// `stickyHeaderOffset`: a number, or an animated value.
+pub(crate) fn sticky_offset<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    match input.as_number() {
+        Some(n) => Some(Prop::StickyOffset(Points(n as f32))),
+        None => input
+            .animated_node()
+            .map(|node| Prop::StickyOffsetNode(Some(node))),
+    }
 }
 
 /// `hitSlop`: one number for every edge, or the edges.

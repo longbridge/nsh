@@ -23,7 +23,7 @@ use objc2_ui_kit::{
     UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
+    UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
 };
 
 use crate::{
@@ -333,6 +333,8 @@ pub(crate) struct Mounter {
     animated: Vec<NodeId>,
     /// Image views waiting for their frame before loading.
     pending_images: Vec<NodeId>,
+    /// The display scale images were last requested at.
+    image_scale: CGFloat,
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
@@ -408,6 +410,7 @@ impl Mounter {
             views,
             animated: Vec::new(),
             pending_images: Vec::new(),
+            image_scale: 0.0,
             animator: Animator::new(&target),
             target,
             images: ImageLoader::new(
@@ -470,6 +473,37 @@ impl Mounter {
         for (_, area) in &self.areas {
             area.batch_applied();
         }
+        self.focused_caret_moved();
+    }
+
+    /// Reports the focused input's caret if the batch moved it (the input
+    /// was laid out again: its text wraps elsewhere).
+    fn focused_caret_moved(&self) {
+        let Some(id) = self.focused else { return };
+        let Some(Slot {
+            native: Native::Input(input),
+            events,
+            ..
+        }) = self.slot(id)
+        else {
+            return;
+        };
+        if !events.contains(EventKind::CaretMove) {
+            return;
+        }
+        let view = input.editor_view();
+        view.layoutIfNeeded();
+        let Some(caret) = crate::input::caret(view) else {
+            return;
+        };
+        if crate::input::caret_changed(view, caret) {
+            self.input_event(id, EventKind::CaretMove, EventPayload::caret(caret));
+        }
+    }
+
+    /// The surface's event target.
+    pub(crate) fn target(&self) -> &Retained<EventTarget> {
+        &self.target
     }
 
     /// Node `id`'s view (`nsh test --target ios`).
@@ -494,6 +528,22 @@ impl Mounter {
             Native::Input(input) => Some(input.text()),
             _ => None,
         }
+    }
+
+    /// VoiceOver's escape gesture (or the test agent's `back`) reached the
+    /// surface: while the app listens to going back (an overlay's
+    /// `onCancel`, a back listener), the core hears it as the back button
+    /// (the top overlay listening first). Whether it was taken.
+    pub(crate) fn escape(&self) -> bool {
+        if !self
+            .slot(nsh_core::ROOT_ID)
+            .is_some_and(|s| s.events.contains(EventKind::BackPress))
+        {
+            return false;
+        }
+        self.control
+            .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+        true
     }
 
     /// Whether a native animation runs.
@@ -1065,7 +1115,7 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
         }
         false
     }
@@ -1136,6 +1186,15 @@ impl Mounter {
             (Command::Dialog(dialog), native) if id == nsh_core::ROOT_ID => {
                 crate::system::show_dialog(&dialog, native.view(), &self.control);
             }
+            (
+                Command::PickImages {
+                    id: request,
+                    request: asked,
+                },
+                native,
+            ) if id == nsh_core::ROOT_ID => {
+                crate::picker::pick_images(request, asked, native.view(), &self.control);
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
@@ -1146,6 +1205,7 @@ impl Mounter {
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
+            (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
             (Command::ReadClipboard { id, has_only }, _) => {
                 let (has, text) = crate::system::read_clipboard(has_only);
                 let mut fields = vec![
@@ -1914,9 +1974,13 @@ impl Mounter {
         if !matches!(s.native, Native::Image(_)) {
             return;
         }
-        s.decor.set_resize_mode(resize_mode);
-        let same_source =
-            s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
+        // `center` shows the image at its own size: decoded so, where the
+        // other modes decode it at the view's.
+        let natural = |m: ResizeMode| m == ResizeMode::Center;
+        let same_decode = natural(s.decor.resize_mode()) == natural(resize_mode);
+        s.decor.set_fit(resize_mode, options.position);
+        let same_source = same_decode
+            && s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
         let same_look = s.image_options.placeholder == options.placeholder
             && s.image_options.blur_radius == options.blur_radius;
         s.image_options = options;
@@ -1936,19 +2000,64 @@ impl Mounter {
         }
     }
 
+    /// The screen's pixels per point. Not `contentScaleFactor`: it stays 1
+    /// on views that draw nothing themselves.
+    fn display_scale(&self) -> CGFloat {
+        let Some(root) = self.slot(nsh_core::ROOT_ID).map(|s| s.native.view()) else {
+            return 2.0;
+        };
+        // SAFETY: a plain getter.
+        let scale = unsafe { root.traitCollection().displayScale() };
+        if scale > 0.0 {
+            return scale;
+        }
+        root.window().map_or(2.0, |w| w.screen().scale())
+    }
+
+    /// The surface's traits changed: on a screen of another scale (an
+    /// external display, Catalyst), images decode again for it.
+    pub(crate) fn traits_changed(&mut self) {
+        if self.display_scale() == self.image_scale {
+            return;
+        }
+        for (id, slot) in self.views.iter_mut().enumerate() {
+            let Some(s) = slot else { continue };
+            if !matches!(s.native, Native::Image(_))
+                || (s.image.is_none() && s.image_options.placeholder.is_none())
+            {
+                continue;
+            }
+            let id = id as NodeId;
+            for key in [s.image_key.take(), s.placeholder_key.take()]
+                .into_iter()
+                .flatten()
+            {
+                self.images.cancel(id, &key);
+            }
+            if !self.pending_images.contains(&id) {
+                self.pending_images.push(id);
+            }
+        }
+        self.start_image_loads();
+    }
+
     /// Starts loads queued during the batch, now that frames are known so
     /// images can be decoded at their display size.
     fn start_image_loads(&mut self) {
-        let scale = self
-            .slot(nsh_core::ROOT_ID)
-            .map_or(2.0, |s| s.native.view().contentScaleFactor());
+        let scale = self.display_scale();
+        self.image_scale = scale;
         for id in std::mem::take(&mut self.pending_images) {
             let Some(s) = self.slot(id) else { continue };
             let Native::Image(view) = &s.native else {
                 continue;
             };
             let size = view.bounds().size;
-            let max_pixels = (size.width.max(size.height) * scale).ceil() as u32;
+            // 0: the image's own size, which `center` shows.
+            let max_pixels = if s.decor.resize_mode() == ResizeMode::Center {
+                0
+            } else {
+                (size.width.max(size.height) * scale).ceil() as u32
+            };
             let filters = s
                 .style
                 .effects
@@ -1960,11 +2069,17 @@ impl Mounter {
                 matrix: nsh_core::compose_color_matrices(filters),
             };
             let (source, placeholder) = (
-                s.image.as_ref().map(|s| s.uri.clone()),
-                s.image_options.placeholder.as_ref().map(|s| s.uri.clone()),
+                s.image.as_ref().map(|s| (s.uri.clone(), s.data.clone())),
+                s.image_options
+                    .placeholder
+                    .as_ref()
+                    .map(|s| (s.uri.clone(), s.data.clone())),
             );
-            if let Some(uri) = source {
-                match self.images.request(id, &uri, max_pixels, scale, look) {
+            if let Some((uri, data)) = source {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, look)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -1988,9 +2103,12 @@ impl Mounter {
             }
             // The placeholder, until the image shows.
             let shown = self.slot(id).is_some_and(|s| s.image_shown);
-            if let Some(uri) = placeholder.filter(|_| !shown) {
+            if let Some((uri, data)) = placeholder.filter(|_| !shown) {
                 let plain = crate::image::Look::default();
-                match self.images.request(id, &uri, max_pixels, scale, plain) {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, plain)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -2017,16 +2135,21 @@ impl Mounter {
         };
         let view = view.clone();
         view.set_drawing(drawing.clone());
-        let scale = view.contentScaleFactor();
+        // Not the view's `contentScaleFactor`: zooming raises it.
+        let scale = self.display_scale();
         for image in drawing.images() {
             if view.has_image(&image.uri) {
                 continue;
             }
             // At their natural size: the drawing may scale them anyway.
-            match self
-                .images
-                .request(id, &image.uri, 0, scale, crate::image::Look::default())
-            {
+            match self.images.request(
+                id,
+                &image.uri,
+                None,
+                0,
+                scale,
+                crate::image::Look::default(),
+            ) {
                 Request::Ready(decoded) if decoded.vector => {
                     log::warn!("canvas image failed: {}", not_a_bitmap(&image.uri));
                 }
@@ -2037,11 +2160,17 @@ impl Mounter {
     }
 
     /// What the image loader reports.
+    /// The disk cache the images it loads go through.
+    pub(crate) fn set_image_cache(&mut self, cache: Option<nsh_core::image::DiskCache>) {
+        self.images.set_disk_cache(cache);
+    }
+
     pub(crate) fn load_event(&mut self, event: crate::image::LoadEvent) {
         use crate::image::LoadEvent;
         match event {
             LoadEvent::Decoded { key, result } => self.image_loaded(&key, result),
             LoadEvent::Bytes { uri, result } => self.images.bytes_ready(&uri, result),
+            LoadEvent::Download { uri, headers } => self.images.download(&uri, &headers),
             LoadEvent::Progress { uri, loaded, total } => {
                 for id in self.images.waiting(&uri) {
                     let Some(s) = self.slot(id) else { continue };
@@ -2176,14 +2305,18 @@ impl Mounter {
             return;
         };
         slot.events = events;
+        if let Native::Input(input) = &mut slot.native {
+            input.set_paste_listens(events.contains(EventKind::Paste));
+        }
         let v = slot.values;
         let any = |kinds: &[EventKind]| kinds.iter().any(|&k| events.contains(k));
-        let own_press = any(&[
+        let handles_press = any(&[
             EventKind::Press,
             EventKind::LongPress,
             EventKind::PressDown,
             EventKind::PressUp,
-        ]) || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
+        ]);
+        let own_press = handles_press || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
         let (links, links_long_press) = match &slot.native {
             Native::Text(t) => (t.has_links(), t.links_long_press()),
             _ => (false, false),
@@ -2234,7 +2367,7 @@ impl Mounter {
         }
         if let Some(press) = &g.press {
             press.set_long_press(events.contains(EventKind::LongPress) || links_long_press);
-            press.set_own(own_press);
+            press.set_own(own_press, handles_press);
             press.set_long_press_delay(slot.long_press_delay);
         }
         let wants_hover = slot.tracked & nsh_core::tailwind::state::HOVERED != 0
@@ -2264,6 +2397,11 @@ impl Mounter {
                     Some(sel!(handleContextMenu:)),
                 );
                 let _: () = objc2::msg_send![&r, setButtonMaskRequired: 1isize << 1];
+                // A finger has no buttons, so the mask does not hold it:
+                // a tap would open the menu and cancel the presses inside.
+                // Only a mouse or a trackpad (UITouchTypeIndirectPointer).
+                let pointer = objc2_foundation::NSNumber::new_isize(3);
+                r.setAllowedTouchTypes(&objc2_foundation::NSArray::from_retained_slice(&[pointer]));
                 r
             }
         });
@@ -2441,10 +2579,14 @@ impl Mounter {
             else {
                 continue;
             };
-            screen.apply_header(|item| match self.slot(item).map(|s| &s.native) {
-                Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
-                _ => None,
-            });
+            let press = Some(self.shared.clone());
+            screen.apply_header(
+                |item| match self.slot(item).map(|s| &s.native) {
+                    Some(Native::HeaderItem(v)) => Some(Retained::into_super(v.clone())),
+                    _ => None,
+                },
+                press,
+            );
             if screen.config.large_title {
                 // Large titles collapse as the content scrolls under them.
                 if let Some(scroll) = first_scroll_view(&screen.view) {
@@ -2716,6 +2858,45 @@ impl Mounter {
         };
         if s.events.contains(event) {
             self.control.dispatch_event(id, event, EventPayload::None);
+        }
+    }
+
+    /// Presses the element the app put in the trailing header slot, as a tap
+    /// on a system bar button does: the first view inside the slot that
+    /// takes a press (the one made first), resolved now (the slot's content
+    /// arrives after the button is made). A slot with none takes no press.
+    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+        let Some(Slot {
+            native: Native::Screen(host),
+            ..
+        }) = self.slot(screen)
+        else {
+            return;
+        };
+        let Some(slot_node) = host.config.right else {
+            return;
+        };
+        let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let mut found = None;
+        for (index, slot) in self.views.iter().enumerate() {
+            let Some(slot) = slot else { continue };
+            if !slot.events.contains(EventKind::Press) {
+                continue;
+            }
+            let id = index as NodeId;
+            if let Some(view) = self.slot(id).map(|s| s.native.view().retain())
+                && view != container
+                && view.isDescendantOfView(&container)
+            {
+                found = Some(id);
+                break;
+            }
+        }
+        if let Some(node) = found {
+            self.control
+                .dispatch_event(node, EventKind::Press, EventPayload::None);
         }
     }
 
@@ -2991,14 +3172,18 @@ impl Mounter {
         }
     }
 
-    /// Brings a list's sticky cells above its other cells.
+    /// Brings a list's sticky cells above its other cells (the cells of a
+    /// list in the scroll view's viewport are in that list, where the core
+    /// keeps them on top).
     fn front_sticky(&self, list: NodeId) {
         let (Some(cells), Some(l)) = (self.sticky.get(&list), self.slot(list)) else {
             return;
         };
         let container = l.native.view();
         for c in cells {
-            if let Some(s) = self.slot(c.cell) {
+            if let Some(s) = self.slot(c.cell)
+                && s.native.view().superview().as_deref() == Some(container)
+            {
                 container.bringSubviewToFront(s.native.view());
             }
         }
@@ -3017,7 +3202,10 @@ impl Mounter {
         let offset = if l.horizontal { offset.x } else { offset.y } as f32;
         for c in cells {
             let Some(s) = self.slot(c.cell) else { continue };
-            let t = (offset - c.start.0).clamp(0.0, c.end.0 - c.start.0) as CGFloat;
+            // An animated offset is the graph's (pinned again with its frames).
+            let extra = c.offset.map_or(0.0, |n| self.animator.value(n));
+            let t =
+                (offset + extra - c.start.0).clamp(0.0, (c.end.0 - c.start.0).max(0.0)) as CGFloat;
             let (x, y) = if l.horizontal { (t, 0.0) } else { (0.0, t) };
             s.native
                 .view()
@@ -3056,6 +3244,13 @@ impl Mounter {
         }
     }
 
+    /// Scroll view `id` came to rest (`onScrollEnd`).
+    pub(crate) fn scroll_ended(&mut self, id: NodeId) {
+        if let Some(node) = self.slot(id).and_then(|s| s.scroll_value) {
+            self.animator.settle(node);
+        }
+    }
+
     /// Display link frame.
     pub(crate) fn tick(&mut self) {
         if self.animator.tick() {
@@ -3069,6 +3264,12 @@ impl Mounter {
         for &id in &self.animated {
             if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
                 apply_dynamic(s, animator);
+            }
+        }
+        // Sticky cells that stick an animated value further in follow it.
+        for (&id, cells) in &self.sticky {
+            if cells.iter().any(|c| c.offset.is_some()) {
+                self.pin_sticky(id);
             }
         }
     }

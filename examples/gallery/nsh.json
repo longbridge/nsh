@@ -5,40 +5,6 @@
   "build": 1,
   "icon": "icon.png",
   "appearance": "system",
-  "tailwind": {
-    "colors": {
-      "brand": {
-        "50": "#f5f3ff",
-        "500": "#7c3aed",
-        "600": "#6d28d9",
-        "700": "#5b21b6"
-      },
-      "graphite": {
-        "page": "#101113",
-        "card": "#18191c",
-        "inset": "#0c0d0f",
-        "raised": "#24262a",
-        "border": "#2c2e33",
-        "line": "#1f2124"
-      },
-      "citrus": {
-        "DEFAULT": "#c8f26d",
-        "ink": "#13160c",
-        "deep": "#4f6e0c"
-      },
-      "paper": {
-        "page": "#f4f4f2",
-        "card": "#ffffff",
-        "inset": "#f0f0ec",
-        "raised": "#fbfbf9",
-        "border": "#e2e2dd",
-        "line": "#ecece8"
-      }
-    },
-    "radius": {
-      "card": 14
-    }
-  },
   "theme": "theme.json",
   "capabilities": {
     "network": {
@@ -74,6 +40,7 @@
       ]
     },
     "statusBar": true,
-    "clipboard": true
+    "clipboard": true,
+    "picker": true
   }
 }

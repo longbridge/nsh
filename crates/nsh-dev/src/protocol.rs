@@ -140,6 +140,10 @@ pub struct TestEnvironment {
     /// the platform shows, as a headless app's does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<f64>,
+    /// The launch parameters the app reads as `host.params` (`nsh/host`):
+    /// the embedding app's, which the test plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_params: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// How a test moves its app's manual clock ([`TestEnvironment::clock`];
@@ -276,6 +280,29 @@ pub enum ServerMessage {
     },
 }
 
+/// A file a test pastes ([`TestStep::Paste`]).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct TestFile {
+    /// Its name.
+    pub name: String,
+    /// Its MIME type.
+    pub mime: String,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl TestFile {
+    /// A file named `name` of type `mime` holding `data`.
+    pub fn new(name: impl Into<String>, mime: impl Into<String>, data: Vec<u8>) -> TestFile {
+        TestFile {
+            name: name.into(),
+            mime: mime.into(),
+            data,
+        }
+    }
+}
+
 /// A step of a test on a host's app, named as `nsh/test` names them: views
 /// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
 /// actions are native input at the view the selector names.
@@ -342,11 +369,35 @@ pub enum TestStep {
         /// The view.
         selector: String,
     },
+    /// Pastes into the input (`app.paste`), as the user's paste does with
+    /// this on the clipboard.
+    Paste {
+        /// The input.
+        selector: String,
+        /// The text (empty: none).
+        text: String,
+        /// Files with their bytes (images).
+        files: Vec<TestFile>,
+        /// Local files' `file:` URLs.
+        uris: Vec<String>,
+    },
     /// The open context menu's actions (`app.menu`): `null` when none is.
     Menu,
     /// The text on the test's clipboard (`app.clipboard`): `null` when it
     /// holds none.
     Clipboard,
+    /// The embedding app sends event `name` with `data` to the app
+    /// (`app.host.send`; `nsh/host`'s `host.on`), then the app settles.
+    HostSend {
+        /// The event.
+        name: String,
+        /// Its data.
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// The URLs the app opened (`app.openedUrls`; `openUrl` of
+    /// `nsh/device`), in order: recorded, never opened.
+    OpenedUrls,
     /// Chooses the open context menu's action (`app.chooseMenuItem`).
     ChooseMenuItem {
         /// Its label (a submenu's: `"Share > Mail"`).
@@ -490,6 +541,17 @@ pub enum SceneQuery {
     Menu,
     /// The text on the test's clipboard, or `null`.
     Clipboard,
+    /// The embedding app sends event `name` with `data` to the app
+    /// ([`TestStep::HostSend`]).
+    HostSend {
+        /// The event.
+        name: String,
+        /// Its data.
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// The URLs the app opened, in order ([`TestStep::OpenedUrls`]).
+    OpenedUrls,
     /// The open context menu was chosen from or closed.
     MenuClosed,
     /// The app's storage: its entries.
@@ -520,6 +582,12 @@ pub enum SceneQuery {
     Span {
         /// The span.
         id: u32,
+    },
+    /// The canvas containing the node `selector` names, and its center
+    /// in the canvas's coordinates: `[view, {x, y}]`, or `null` for a view.
+    CanvasNode {
+        /// The canvas node's selector.
+        selector: String,
     },
 
     /// The text input `id` holds.

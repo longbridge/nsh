@@ -38,6 +38,7 @@ nsh init my-app --template rust
 | `src/main.rs` | Mounts the same root on macOS, Windows or Linux for `cargo run` |
 | `Cargo.toml` | The crate, depending on `nsh-core` and `nsh-base` at the CLI's version |
 | `nsh.json` | The app's name, id, version and build number, its crate (`"rust": "."`) and root component (`"root": "App"`) ([Project structure](./project-structure.md#nshjson)) |
+| `App.test.tsx` | The root's test, in TypeScript (`nsh test`), with `tsconfig.json` and `.nsh/types` for your editor |
 | `README.md` | How to run, test and package the app, and how to add a TSX entry later |
 | `.gitignore` | Ignores `.nsh/` and `target/` |
 
@@ -90,8 +91,8 @@ pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
     view()
         .flex_1()
-        .bg(move || theme().background())
-        .text_color(move || theme().foreground())
+        .bg(move || theme().background)
+        .text_color(move || theme().foreground)
         .child(
             safe_area_view()
                 .flex_1()
@@ -107,13 +108,13 @@ pub fn App() -> impl IntoElement {
                                 .px_5()
                                 .py_3()
                                 .rounded(px(10.0))
-                                .bg(move || theme().primary())
+                                .bg(move || theme().primary)
                                 .active(|s| s.opacity(0.6))
                                 .on_press(move || count.update(|value| *value += 1))
                                 .child(
                                     text("Tap")
                                         .text_size(px(17.0))
-                                        .text_color(move || theme().primary_foreground()),
+                                        .text_color(move || theme().primary_foreground),
                                 ),
                         ),
                 ),
@@ -129,15 +130,14 @@ import { SafeAreaView } from "nsh/base";
 function App() {
   const count = signal(0);
   return (
-    <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
-      <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
+    <SafeAreaView class="flex-1 items-center justify-center gap-4 bg-background">
+      <Text class="text-3xl font-semibold text-foreground">{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeStyle={{ opacity: 0.6 }}
         role="button"
-        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
+        class="rounded-(--radius) bg-primary px-5 py-3 active:bg-primary/90"
       >
-        <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
+        <Text class="text-lg text-primary-foreground">Tap</Text>
       </View>
     </SafeAreaView>
   );
@@ -156,7 +156,7 @@ In Rust:
   `nsh.json`'s `"root": "App"` names it, and `nsh run` mounts it. `signal(0_u32)` makes a value that changes over time.
 - **`text(move || format!(…, count.get()))`** binds the text to the signal: when `count` changes, NSH runs this
   closure again and updates this one text, nothing else. Styles take closures the same way:
-  `.bg(move || theme().primary())` follows the theme into dark mode.
+  `.bg(move || theme().primary)` follows the theme into dark mode.
 - **`.on_press(..)`** makes the view answer presses; `.active(|s| s.opacity(0.6))` is its style while pressed, applied
   natively. The button is the app's own: NSH provides the primitives and the capabilities, and the app draws its UI
   from them.
@@ -172,11 +172,13 @@ In TSX:
   base components, as `nsh_base` does in Rust.
 - **`function App()`** is a component that runs **once**. **`{count()}`** reads the signal inside JSX: the compiler
   sees a call and makes this text follow the signal.
-- **`<View onPress>`** is a native view that reacts to presses; `activeStyle` is its style while pressed. `View`,
+- **`<View onPress>`** is a native view that reacts to presses; `active:` classes are its style while pressed. `View`,
   `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from `nsh`; only
   `If` and `Each` need no import.
-- **`style={{ … }}`** takes an object of camelCase style properties, with numbers in points; `class` takes
-  [Tailwind](./tailwind.md) classes.
+- **`class`** takes [Tailwind](./tailwind.md) classes; `style={{ … }}` takes an object of camelCase style
+  properties, with numbers in points. `bg-background`, `bg-primary`, `text-primary-foreground` and
+  `rounded-(--radius)` name the tokens of the app's theme ([Theme tokens](./tailwind.md#theme-tokens)): they follow
+  dark mode by themselves, and `"theme"` in `nsh.json` restyles them.
 - **`mount(App)`** renders the component into the app's surface.
 
 > [!IMPORTANT]
@@ -281,7 +283,7 @@ Leave `nsh run` running and change the button's label:
 ```rust tabs
 text("Add one")
     .text_size(px(17.0))
-    .text_color(move || theme().primary_foreground())
+    .text_color(move || theme().primary_foreground)
 ```
 
 ```tsx tabs
@@ -300,10 +302,10 @@ fn tap_button(on_press: impl Fn() + 'static) -> impl IntoElement {
     view()
         .p_3()
         .rounded(px(10.0))
-        .bg(move || theme().primary())
+        .bg(move || theme().primary)
         .active(|s| s.opacity(0.6))
         .on_press(on_press)
-        .child(text("Tap").text_size(px(17.0)).text_color(move || theme().primary_foreground()))
+        .child(text("Tap").text_size(px(17.0)).text_color(move || theme().primary_foreground))
 }
 
 // In App: .child(tap_button(move || count.update(|value| *value += 1)))
@@ -453,8 +455,8 @@ nsh test my-app/nsh.json --trace     # a Rust app's root
 nsh test my-app/App.tsx --trace      # a TSX app's entry
 ```
 
-Given a directory, it runs the app's tests: the TSX template's `App.test.tsx` opens the app, presses its button and
-checks what it shows (`nsh test my-app`). A Rust app tests its root the same way, or in `cargo test` with
+Given a directory, it runs the app's tests: each template's `App.test.tsx` opens the app, presses its button and
+checks what it shows (`nsh test my-app`). A Rust app's opens its root (`open(".")`); it can also be tested in `cargo test` with
 `nsh_testing::Headless` ([Building with Rust](./rust.md#testing)).
 
 ## Next steps

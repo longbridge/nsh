@@ -120,7 +120,7 @@ New views carry no style at all until you give them one, so unstyled wrappers co
 
 ## Colors
 
-In Rust, colors are typed values: `rgb(0x0099ff)`, `rgba(0x0099ffcc)`, `hsla(..)`, `white()`, `black()`, and Tailwind's palette as `nsh_core::ui::palette` (`BLUE.shade(500)`). Color methods take an `AdaptiveColor`, a light and a dark value: `AdaptiveColor::rgb(0xffffff, 0x0d1117)` switches with the system appearance natively, with no render. Colors from the app's theme (`theme().primary()` from `nsh_base`) are adaptive too ([Rust](./rust.md#theme)).
+In Rust, colors are typed values: `rgb(0x0099ff)`, `rgba(0x0099ffcc)`, `hsla(..)`, `white()`, `black()`, and Tailwind's palette as `nsh_core::ui::palette` (`BLUE.shade(500)`). Color methods take an `AdaptiveColor`, a light and a dark value: `AdaptiveColor::rgb(0xffffff, 0x0d1117)` switches with the system appearance natively, with no render. Colors from the app's theme (`theme().primary` from `nsh_base`) are adaptive too ([Rust](./rust.md#theme)).
 
 In TSX, color properties accept CSS color strings:
 
@@ -256,6 +256,8 @@ view()
 
 Color stops are placed by percentages or lengths (`px`, `pt`, `rem`; plain numbers are points) along a linear or radial gradient, and by percentages or angles (`deg`, `turn`, `rad`, `grad`) around a conic one. A stop with two positions (`#8250df 0 12px`) is a band of one color, as are two stops at the same position. Lengths are measured along the gradient line at the view's current size, so a 12px band stays 12px wide as the view resizes.
 
+Colors mix between stops as in CSS: in the space a gradient names (`linear-gradient(in oklab, …)`; also `srgb`, `srgb-linear`, `xyz`, `oklch` with a hue method such as `longer hue`, and `hsl`), and otherwise in sRGB when every color is a hex, `rgb()`, `hsl()` or named color, and in Oklab when one is `oklch()`, `oklab()`, `lab()`, `lch()` or `color()`.
+
 Text elements do not draw gradients on iOS.
 
 ## Filters and blending
@@ -264,6 +266,7 @@ Text elements do not draw gradients on iOS.
 |---|---|---|
 | `filter` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`; several separated by spaces | `.brightness(n)`, `.contrast(n)`, `.grayscale(n)`, `.hue_rotate(angle)`, `.invert(n)`, `.saturate(n)`, `.sepia(n)`, `.blur(px(..))` |
 | `backdropFilter` | Filters of what is behind the view: `"blur(10px)"` (frosted glass) | `.backdrop_blur(px(10.0))`, `.backdrop_saturate(n)`, ... |
+| `glassEffect` | `"regular"` or `"clear"` for Apple's Liquid Glass on iOS 26 and later; `"none"` (the default) uses `backdropFilter` | `ViewStyle::glass_effect` (`GlassEffect`) |
 | `mixBlendMode` | How the view blends with what is behind it: `"multiply"`, `"screen"`, `"overlay"`, ... | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -292,11 +295,37 @@ Platform support differs:
 | `backdropFilter` | A system blur material, approximating the radius | From Android 12 (API 31) |
 | `mixBlendMode` | Yes | From Android 10 (API 29) |
 
+The web, Windows and Linux apply every filter to views, macOS as iOS does; GPUI draws the color filters and `drop-shadow()`. The backdrop filter is a blur on iOS, macOS and Android, every filter on the web and Windows; Linux and GPUI draw none, and GPUI draws views in the normal blend mode. Of a `filter` with several `drop-shadow()`s, iOS, macOS and Android draw the last. `mixBlendMode` blends the view with everything drawn behind it.
+
+On iOS, `ios={{ backdropMaterial: "regular" }}` selects the system material used by a
+`backdropFilter` blur. Values are `"ultraThin"` (the default), `"thin"`, `"regular"`, `"thick"`,
+and `"chrome"`. Pair the prop with a positive blur radius to show the material. Rust uses
+`.backdrop_material(BackdropMaterial::Regular)` alongside `.backdrop_blur(px(30.0))`.
+The radius approximates material strength: NSH applies a fraction of the chosen material,
+reaching full strength at 30 points. The light or dark variant follows the view's background color.
+These choices map to Apple's [system blur materials](https://developer.apple.com/documentation/uikit/uiblureffect/style/systemmaterial).
+
+```rust tabs
+view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
+```
+
+```tsx tabs
+<View ios={{ backdropMaterial: "regular" }} style={{ height: 64, backdropFilter: "blur(30px)" }} />
+```
+
+`glassEffect` draws Liquid Glass behind a view's content on iOS 26 and later. `"regular"` uses the standard material;
+`"clear"` takes less color from the background. Pair it with `backdropFilter` for the blur shown on earlier iOS
+versions and other platforms. The glass follows the view's size and rounded corners.
+
+```tsx
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
+```
+
 ## Outlines, opacity and visibility
 
 - `outlineWidth`, `outlineColor`, `outlineStyle`, `outlineOffset` (`.outline(..)`, `.outline_color(..)`, `.outline_dashed()`, `.outline_offset(..)`): a line outside the border that takes no space (negative offsets draw inside). `outlineStyle: "none"` (or `"hidden"`, `.outline_none()`) hides the outline whatever its width, as in CSS.
 - `opacity` (`.opacity(n)`): 0 to 1, applied to the view and its children.
-- `visibility: "hidden"`: the view is not drawn but keeps its space. `display: "none"` (`.hidden()`) removes it from layout.
+- `visibility: "hidden"`: the view is not drawn but keeps its space, and screen readers skip it and its subtree, as in a browser. `display: "none"` (`.hidden()`) removes it from layout.
 - `zIndex` (`.z_index(n)`): the order among siblings, also the native stacking order (stable for equal values).
 - `cursor` (`.cursor(..)`, `.cursor_pointer()`): the pointer shape over the view, for pointers and desktops.
 
@@ -306,7 +335,7 @@ In Rust, transforms are methods (`.translate_x(..)`, `.rotate(..)`, `.scale(..)`
 
 ```rust tabs
 view().translate_x(px(20.0)).rotate(deg(-8.0)).scale(0.9)
-view().perspective(px(600.0)).rotate_y(deg(35.0)).backface_hidden()
+view().perspective(px(600.0)).child(view().rotate_y(deg(35.0)).backface_hidden())
 view().origin_top_left().rotate(deg(30.0))
 ```
 
@@ -316,7 +345,7 @@ view().origin_top_left().rotate(deg(30.0))
 <View style={{ transformOrigin: "top left", transform: [{ rotate: "30deg" }] }} />
 ```
 
-Steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY`, `perspective`. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust); the default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
+Steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY`, `perspective`. Rust's `.perspective(..)` is CSS's `perspective` property, as Tailwind's `perspective-*`: it gives the view's children their depth. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust); the default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
 
 Android has no skew transforms.
 

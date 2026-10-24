@@ -18,9 +18,17 @@ final class ComponentBox extends Box {
         addView(component.view());
     }
 
+    /** The element is gone, or its app stopped: tells the component once. */
     void destroy() {
-        if (component != null) component.destroy();
+        NshComponent c = component;
+        if (c == null) return;
+        // Cleared first, so it is told once even if destroy() throws.
         component = null;
+        try {
+            c.destroy();
+        } finally {
+            removeAllViews();
+        }
     }
 
     @Override

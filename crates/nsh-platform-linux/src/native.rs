@@ -153,8 +153,14 @@ impl std::fmt::Debug for Components {
 }
 
 impl Components {
-    /// Registers `factory` under `name` (replacing an earlier one).
+    /// Registers `factory` under `name` (replacing an earlier one). Names
+    /// under `nsh/` are NSH's own: registering one logs a warning and
+    /// changes nothing.
     pub fn register(&self, name: &str, factory: ComponentFactory) {
+        if nsh_core::platform::is_reserved_component(name) {
+            log::warn!("native component `{name}` is not registered: names under `nsh/` are NSH's");
+            return;
+        }
         self.factories.borrow_mut().insert(name.into(), factory);
         self.missing.borrow_mut().remove(name);
     }
@@ -621,7 +627,9 @@ impl VideoHost {
                 picture.set_content_fit(match p.resize_mode {
                     ResizeMode::Cover => gtk::ContentFit::Cover,
                     ResizeMode::Stretch => gtk::ContentFit::Fill,
-                    ResizeMode::Center => gtk::ContentFit::ScaleDown,
+                    // GTK draws no picture at its natural size in a box of
+                    // another: `center` shrinks it to fit, as `scale-down`.
+                    ResizeMode::Center | ResizeMode::ScaleDown => gtk::ContentFit::ScaleDown,
                     ResizeMode::Contain => gtk::ContentFit::Contain,
                 });
             } else if let Some(video) = widget.downcast_ref::<gtk::Video>() {

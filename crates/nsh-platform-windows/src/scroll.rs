@@ -115,6 +115,13 @@ impl ScrollHost for Host<'_> {
             shared::frame(&host, now * 1000.0)
         });
     }
+
+    fn settled(&self) {
+        let id = self.view.id();
+        if self.surface.anim.borrow_mut().scroll_ended(id) {
+            self.surface.ensure_ticking();
+        }
+    }
 }
 
 /// Whether `view` is a scroll view the user can scroll by `(dx, dy)`
@@ -130,7 +137,8 @@ pub(crate) fn can_scroll(view: &NshView, dx: f32, dy: f32) -> bool {
 
 // Sticky cells.
 
-/// Calls `f` with `view`'s child of node `id`.
+/// Calls `f` with the view of node `id` in `view` (a child, or for a list
+/// in the scroll view's viewport, the list's).
 fn with_cell(surface: &Surface, view: &NshView, id: nsh_core::NodeId, f: impl FnOnce(&NshView)) {
     if let Ok(mounter) = surface.mounter.try_borrow() {
         if let Some(cell) = &mounter.views.get(id) {
@@ -138,10 +146,19 @@ fn with_cell(surface: &Surface, view: &NshView, id: nsh_core::NodeId, f: impl Fn
         }
         return;
     }
-    // While a batch is applied: look among the children.
-    let cell = view.with_children(|c| c.iter().find(|c| c.id() == id).cloned());
-    if let Some(cell) = cell {
-        f(&cell);
+    // While a batch is applied: look among the children, then deeper (the
+    // cells of a list in the scroll view's viewport are in the list).
+    let mut views = view.with_children(|c| c.to_vec());
+    if let Some(cell) = views.iter().find(|c| c.id() == id) {
+        f(cell);
+        return;
+    }
+    while let Some(v) = views.pop() {
+        if v.id() == id {
+            f(&v);
+            return;
+        }
+        views.extend(v.with_children(|c| c.to_vec()));
     }
 }
 
@@ -152,7 +169,11 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
     if s.sticky.is_empty() {
         return;
     }
-    for (cell, shift) in s.sticky_shifts() {
+    // An animated offset is the graph's (pinned again with its frames,
+    // `pin_animated_sticky`, when it is being written).
+    let anim = surface.anim.try_borrow().ok();
+    let value = |n| anim.as_ref().map_or(0.0, |a| a.value(n));
+    for (cell, shift) in s.sticky_shifts_with(value) {
         let shift = (shift.x.0, shift.y.0);
         with_cell(surface, view, cell, |cell| {
             let mut cs = cell.state_mut();
@@ -162,6 +183,22 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
                 cell.moved();
             }
         });
+    }
+}
+
+/// Pins again the sticky cells of the scroll views whose cells stick an
+/// animated value further in, after the graph's values were written.
+pub(crate) fn pin_animated_sticky(surface: &Surface) {
+    let views: Vec<u32> = surface.anim.borrow().sticky_views().to_vec();
+    for id in views {
+        let view = surface
+            .mounter
+            .try_borrow()
+            .ok()
+            .and_then(|m| m.views.get(id));
+        if let Some(view) = view {
+            pin_sticky(surface, &view);
+        }
     }
 }
 

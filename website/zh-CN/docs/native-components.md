@@ -356,7 +356,7 @@ nsh.registerComponent("embed.badge") { context -> Badge(this, context) }
 | API | 说明 |
 |---|---|
 | `NshView.registerComponent(String name, NshComponent.Factory factory)` | 以某个名称注册一个工厂；此后每创建一个元素，它就生成一个组件（UI 线程）。 |
-| `interface NshComponent` | `View view()`、`void setProp(String, Object)`、`default void command(String, Object)`、`default void destroy()`（元素已移除）。在 UI 线程上调用。 |
+| `interface NshComponent` | `View view()`、`void setProp(String, Object)`、`default void command(String, Object)`、`default void destroy()`（元素已移除：被移除，或它的应用被 `NshView.destroy()` 停止、被再次加载替换；每个组件调用一次）。在 UI 线程上调用。 |
 | `setProp` 的值 | `String`、`Number`、`Boolean`、`java.util.List`、`java.util.Map`；被移除时（或 JSON `null`）为 `null`。 |
 | `NshComponentContext.emit(String event, Object data)` | 发出一个事件；`data` 使用同样的 Java 类型，或 `null`。可在任意线程调用。 |
 | `NshComponentContext.setSize(float width, float height)` | 以 dp 为单位上报组件自身的尺寸。可在任意线程调用。 |
@@ -573,6 +573,7 @@ fn register(app: &AppView) {
 - **能力声明不适用。** 注册的组件是宿主应用自己的代码；应用声明的[能力](./sandbox-and-capabilities.md)限制不了它做什么。如果你嵌入的是不受信任的应用，就只注册那些可以放心让它们使用的组件。
 - **接口只传数据。** Props、事件负载和命令参数都以 JSON 文本跨越边界；每次变更时传递标识符和小数据，而不是大块数据。
 - **一个 bundle，两个平台。** 在 iOS 和 Android 上用相同的 props 和事件注册相同的名称，同一个 bundle 就能在两个平台上运行。
+- **`nsh/` 下的名称属于 NSH。** NSH 自己的组件（`nsh/mobile` 的 `TabBar` 所用的系统标签栏）注册在 `nsh/` 下；请用你的应用或公司来命名自己的组件（`embed.badge`），在 `nsh/` 下注册会记录一条警告，并保留 NSH 的组件。
 
 ## 另请参阅
 

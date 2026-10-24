@@ -715,6 +715,20 @@ impl Display for Failure {
 
 impl std::error::Error for Failure {}
 
+/// `error` as one message: its chain, then the details of the
+/// [`Failure`] in it (a compiler's diagnostics), for reports that carry a
+/// message instead of printing it (a test's failure).
+pub(crate) fn with_details(error: &anyhow::Error) -> String {
+    let mut message = format!("{error:#}");
+    if let Some(failure) = error.chain().find_map(|e| e.downcast_ref::<Failure>())
+        && !failure.details.trim().is_empty()
+    {
+        message.push('\n');
+        message.push_str(failure.details.trim_end());
+    }
+    message
+}
+
 /// Prints `error`: `error <message>`, and the details of the
 /// [`Failure`] in it.
 pub(crate) fn report(error: &anyhow::Error) {
@@ -731,11 +745,20 @@ pub(crate) fn report(error: &anyhow::Error) {
 /// Verbose runs let the output through instead (and return none).
 pub(crate) fn capture(
     cmd: &mut Command,
-    mut on_line: impl FnMut(&str),
+    on_line: impl FnMut(&str),
 ) -> std::io::Result<(ExitStatus, String)> {
     if verbose() {
         return Ok((cmd.status()?, String::new()));
     }
+    capture_all(cmd, on_line)
+}
+
+/// [`capture`] for output the caller reads (`cargo test`'s results):
+/// verbose runs get it too, and show each line as it comes.
+pub(crate) fn capture_all(
+    cmd: &mut Command,
+    mut on_line: impl FnMut(&str),
+) -> std::io::Result<(ExitStatus, String)> {
     let (reader, writer) = std::io::pipe()?;
     cmd.stdin(Stdio::null())
         .stdout(writer.try_clone()?)
@@ -750,7 +773,11 @@ pub(crate) fn capture(
     let mut line = Vec::new();
     while reader.read_until(b'\n', &mut line)? > 0 {
         let text = String::from_utf8_lossy(&line);
-        on_line(text.trim_end_matches(['\n', '\r']));
+        let text_line = text.trim_end_matches(['\n', '\r']);
+        if verbose() {
+            plain(text_line);
+        }
+        on_line(text_line);
         output.push_str(&text);
         line.clear();
     }
@@ -761,7 +788,14 @@ pub(crate) fn capture(
 /// shows the crate it compiles, the output is shown only if it fails, and
 /// warnings are counted (`-v` shows them).
 pub(crate) fn cargo(cmd: &mut Command, what: &str) -> anyhow::Result<()> {
-    let step = Step::start(format!("building {what}"));
+    cargo_as(cmd, ["building", "built"], what)
+}
+
+/// [`cargo`] for another cargo command (`cargo check`): `doing` names the
+/// step while it runs and once it ends (`["checking", "checked"]`).
+pub(crate) fn cargo_as(cmd: &mut Command, doing: [&str; 2], what: &str) -> anyhow::Result<()> {
+    let [doing, done] = doing;
+    let step = Step::start(format!("{doing} {what}"));
     if !verbose() {
         cmd.env("CARGO_TERM_COLOR", if color() { "always" } else { "never" });
     }
@@ -776,14 +810,14 @@ pub(crate) fn cargo(cmd: &mut Command, what: &str) -> anyhow::Result<()> {
     })
     .context("run cargo")?;
     if !status.success() {
-        return Err(failure(format!("building {what} failed"), output));
+        return Err(failure(format!("{doing} {what} failed"), output));
     }
     let note = match warnings {
         0 => None,
         1 => Some("1 warning: -v shows it".to_owned()),
         n => Some(format!("{n} warnings: -v shows them")),
     };
-    step.done_with(format!("built {what}"), note.as_deref());
+    step.done_with(format!("{done} {what}"), note.as_deref());
     Ok(())
 }
 
@@ -851,6 +885,16 @@ pub(crate) fn quiet(cmd: &mut Command) -> std::io::Result<(std::process::Child, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_failures_carry_the_compilers_diagnostics() {
+        let error = failure("building App.tsx failed", "  x `nsh` has no export `If`\n");
+        assert_eq!(
+            with_details(&error),
+            "building App.tsx failed\n  x `nsh` has no export `If`"
+        );
+        assert_eq!(with_details(&anyhow::anyhow!("no entry")), "no entry");
+    }
 
     #[test]
     fn links_and_colors_strip_to_their_text() {

@@ -104,8 +104,9 @@ impl Native for MacNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_main(|surface, window| {
             let mounter = surface.mounter.borrow();
-            let ns = mounter.views.get(&id)?.ns();
-            in_window(ns, ns.bounds(), window)
+            let view = mounter.views.get(&id)?;
+            crate::scroll::commit_ancestors(view);
+            in_window(view.ns(), view.ns().bounds(), window)
         })
         .flatten()
     }
@@ -114,6 +115,7 @@ impl Native for MacNative {
         self.on_main(|surface, window| {
             let mounter = surface.mounter.borrow();
             let view = mounter.views.get(&text)?;
+            crate::scroll::commit_ancestors(view);
             let rect = *crate::text::range_rects(&view.state(), start, end).first()?;
             in_window(view.ns(), rect, window)
         })
@@ -199,6 +201,12 @@ impl Native for MacNative {
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         self.on_main(move |_, window| synth::type_text(window, &text));
+    }
+
+    fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        let content = content.clone();
+        self.on_main(move |_, window| crate::text_input::test_paste(window, &content))
+            .unwrap_or_else(|| Err("the window is gone".into()))
     }
 
     fn key(&self, key: Key) {

@@ -63,7 +63,9 @@ colored with the theme's tokens; the app restyles each part over it.
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
 - **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
-  footnote reference `#footnote-<label>`. Nothing opens a URL: the app decides.
+  footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
+  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::ui::open_url`,
+  under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
 
 ## Parts and their default styles
 
@@ -72,18 +74,20 @@ The defaults are a reading typography modeled on Allsum's documents (the constan
 20 / 17 / 15 with lines of 1.25 (level 1) or 1.35 and letter spacing of -0.02 em (level 1) or -0.012 em, with room
 above them after a block (1.1 / 1.6 / 1.4 em, 0.6 em after a heading, none first: their top margin less the gap,
 from `Before`, which the top level's rows keep as a memo); strong text semibold; links underlined 1 pt at 40 % of
-their color, 3 pt below; `<mark>` on a rounded yellow; code, keys and TeX at 13 in `monospace` on a faint rounded
+their color, 3 pt below; `<mark>` on a rounded yellow (a marker's, `HIGHLIGHT`); code, keys and TeX at 13 in the
+theme's `font-mono` (else the system's `monospace`) on a faint rounded
 background (spans have no padding); lists indented 1.4 em, their markers (`•`, `◦`, `▪` by depth, or numbers) right-aligned against the content in
 the indent (so `10.` reaches further left and the items stay in line), items 0.25 em apart, tasks a
 15 pt box drawn as a view (filled with a `✓` when done, the item's text then muted and struck); quotes a 2 pt line at
 their side (the text's color at 15 %, as rules), their text softer; alerts a tinted, bordered box (radius 8, padding 12 / 16) with a ring icon (`alertIcon`);
 code blocks a bordered, rounded box (padding 14 / 16 on the code, inside its scroll view, 13 in 20.8 lines) with the app's actions floating over the
 top right corner (no language label, no row kept for them); tables at 14 in lines of 1.55, cells padded 8 / 12 with 1 pt lines
-(each cell its right and bottom ones, the grid the top and left ones), the header row on the list head color with
+(each cell its right and bottom ones, the grid the top and left ones), the header row on `muted` with
 13 pt muted text; a rule 1 pt with 1.6 em above and below; images rounded 8; footnotes at 13, muted. Colors are
-the theme's (`nsh_base::theme()`: `foreground`, `muted_foreground`, `border`, `muted`, `link`, `list_head`, the
-status colors `info` / `success` / `warning` / `danger` for alerts, violet for `[!IMPORTANT]` unless the theme sets
-`important.background`), read in bindings, so a theme or the appearance changes them natively. Everything is the
+shadcn/ui's tokens of the theme (`nsh_base::theme()`: `foreground`, `muted-foreground`, `border`, `muted`, `primary`
+for links and footnote references), read in bindings, so a theme or the appearance changes them natively; alerts
+take GitHub's alert colors (note blue, tip green, important violet, warning amber, light and dark), a caution the
+theme's `destructive`. Everything is the
 app's to override: `classes` (Tailwind, applied after the part's own styles, so they win) and `styles` (inline, over
 the classes), by part, and `class` / `style` on the root, whose text styles every part inherits (the root's defaults
 are the text's size, line height and color). The root is also the part `root` (its `styles.root` is typed

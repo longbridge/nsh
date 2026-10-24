@@ -29,8 +29,10 @@ type JsContext = qjs::JSContext;
 
 const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 
-/// The host props a list forwards as they are.
+/// The host props a list forwards as they are (`viewport` first: the
+/// mode decides how the core takes the others).
 const FORWARDED: &[&str] = &[
+    "viewport",
     "style",
     "testID",
     "horizontal",
@@ -38,6 +40,7 @@ const FORWARDED: &[&str] = &[
     "refreshing",
     "onRefresh",
     "onLoadMore",
+    "onLoadMoreAtStart",
     "onScrollEnd",
     "scrollValue",
     "keyboardDismissMode",
@@ -45,6 +48,7 @@ const FORWARDED: &[&str] = &[
     "inverted",
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
+    "stickyHeaderOffset",
     "contentStyle",
     "contentClass",
     "viewabilityConfig",
@@ -78,6 +82,7 @@ const OWN: &[&str] = &[
     "keyExtractor",
     "estimatedItemSize",
     "loadMoreThreshold",
+    "loadMoreAtStartThreshold",
     "initialScrollIndex",
     "onViewableItemsChange",
     "header",
@@ -456,6 +461,7 @@ unsafe extern "C" fn forward_run(
         let names = FORWARDED.iter().map(|&n| (n, n)).chain([
             ("estimatedItemSize", "estimatedItemSize"),
             ("loadMoreThreshold", "loadMoreThreshold"),
+            ("loadMoreAtStartThreshold", "loadMoreAtStartThreshold"),
         ]);
         let mut at = 0;
         for (wire, key) in names {
@@ -506,13 +512,16 @@ fn forward(
         if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
             value = match wire {
                 "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
-                "loadMoreThreshold" => qjs::JS_NewFloat64(1.0),
+                "loadMoreThreshold" | "loadMoreAtStartThreshold" => qjs::JS_NewFloat64(1.0),
                 _ => value,
             };
         }
         let old = qjs::JS_GetPropertyUint32(cx, prev, at);
-        let first =
-            qjs::JS_IsUndefined(old) && !matches!(wire, "estimatedItemSize" | "loadMoreThreshold");
+        let first = qjs::JS_IsUndefined(old)
+            && !matches!(
+                wire,
+                "estimatedItemSize" | "loadMoreThreshold" | "loadMoreAtStartThreshold"
+            );
         let result = if qjs::JS_IsStrictEqual(cx, old, value) || first && qjs::JS_IsUndefined(value)
         {
             Ok(())
@@ -1135,7 +1144,8 @@ pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
     "List",
     crate::modules::Export::Function(list, 1),
     crate::modules::Ts::function(
-        "A virtualized, recycling list on a native scroll view. Only rows near the\n\
+        "A virtualized, recycling list on a native scroll view (or, with\n\
+         `viewport=\"parent\"`, in the scroll view around it). Only rows near the\n\
          viewport exist; the native side decides which, and cells are reused.\n\
          Positions, columns, sticky headers and viewability are computed natively.\n\n\
          Rows are recycled: keep per-item state in your data (keyed by id), not in\n\
@@ -1191,6 +1201,12 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
   testID?: string;
   /** How close to the end (in viewports) `onLoadMore` fires; default 1. */
   loadMoreThreshold?: number;
+  /** The start came within `loadMoreAtStartThreshold` viewports, after the
+   * user or a scroll command moved the list: load what comes before the
+   * first item (a chat's newer messages). Once per approach. */
+  onLoadMoreAtStart?: () => void;
+  /** How close to the start (in viewports) `onLoadMoreAtStart` fires; default 1. */
+  loadMoreAtStartThreshold?: number;
   ref?: YNode | ((node: YNode) => void);
   /** Renders one row. Called once per recycled cell; `item` and `index`
    * change when the cell is reused for another item. */

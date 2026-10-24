@@ -28,6 +28,7 @@ import android.widget.ScrollView;
 class Box extends ViewGroup implements Node {
     final Mounter mounter;
     final int id;
+    /** The events it listens to, kinds below 64 ({@link Mounter#wants} has all). */
     long events;
     final Decor decor = new Decor();
     boolean clip;
@@ -353,8 +354,7 @@ class Box extends ViewGroup implements Node {
     }
 
     private boolean pressable() {
-        return wants(Native.PRESS) || wants(Native.LONG_PRESS) || wants(Native.PRESS_IN)
-                || wants(Native.PRESS_OUT) || mounter.hasPressFeedback(id);
+        return mounter.handlesPress(id);
     }
 
     private boolean pannable() {

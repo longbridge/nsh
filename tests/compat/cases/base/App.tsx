@@ -7,17 +7,23 @@ import BaseStatusBar from "./base-status-bar";
 import BaseAlertDialog from "./base-alert-dialog";
 import BaseButton from "./base-button";
 import BaseCheckbox from "./base-checkbox";
+import BaseCollapsible from "./base-collapsible";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
+import BaseDock from "./base-dock";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
 import BasePopups from "./base-popups";
+import BaseProgress from "./base-progress";
 import BaseRadio from "./base-radio";
+import BaseResizable from "./base-resizable";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseSelectionArea from "./base-selection-area";
 import BaseSwitch from "./base-switch";
 import BaseTabs from "./base-tabs";
 import BaseTextView from "./base-text-view";
+import BaseToast from "./base-toast";
+import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
@@ -25,6 +31,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-button": BaseButton,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
+  "base-dock": BaseDock,
   "base-nav-page": BaseNavPage,
   "base-nav-stack": BaseNavStack,
   "base-popups": BasePopups,
@@ -34,7 +41,12 @@ const cases: Record<string, () => JSX.Element> = {
   "base-switch": BaseSwitch,
   "base-checkbox": BaseCheckbox,
   "base-radio": BaseRadio,
+  "base-resizable": BaseResizable,
   "base-tabs": BaseTabs,
+  "base-collapsible": BaseCollapsible,
+  "base-progress": BaseProgress,
+  "base-toast": BaseToast,
+  "base-token": BaseToken,
 };
 const shown = signal("");
 

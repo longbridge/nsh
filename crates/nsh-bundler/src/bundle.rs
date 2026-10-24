@@ -254,9 +254,41 @@ impl ResolveSetup {
     }
 }
 
+/// The design tokens of the app in `dir`: its `nsh.json` `"theme"` over
+/// the default's (`nsh_base::Theme`), or the default's when it has none.
+pub fn theme_tokens(dir: &std::path::Path) -> Result<nsh_core::ui::Tokens, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(nsh_base::Theme::default().into_tokens());
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    match theme_json(dir, &config)? {
+        Some(json) => Ok(nsh_base::Theme::from_json(&json)
+            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
+            .into_tokens()),
+        None => Ok(nsh_base::Theme::default().into_tokens()),
+    }
+}
+
+/// `nsh.json`'s `"theme"`: shadcn's `cssVars` in a file (a path relative
+/// to `nsh.json`) or in place.
+fn theme_json(
+    dir: &std::path::Path,
+    config: &serde_json::Value,
+) -> Result<Option<String>, BundleError> {
+    Ok(match config.get("theme") {
+        None => None,
+        Some(serde_json::Value::String(file)) => Some(
+            std::fs::read_to_string(dir.join(file))
+                .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
+        ),
+        Some(v) => Some(v.to_string()),
+    })
+}
+
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
-/// to `nsh.json`) or its content.
+/// `nsh.json` next to the entry, checked. `"theme"` is shadcn's `cssVars`
+/// ([`theme_json`]).
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
@@ -275,12 +307,7 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
             .map_err(|e| BundleError::other(format!("nsh.json: tailwind: {e}")))?;
         setup.json = Some(json);
     }
-    if let Some(theme) = config.get("theme") {
-        let json = match theme {
-            serde_json::Value::String(file) => std::fs::read_to_string(dir.join(file))
-                .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
-            v => v.to_string(),
-        };
+    if let Some(json) = theme_json(dir, &config)? {
         tokens = nsh_base::Theme::from_json(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
             .into_tokens();
@@ -412,6 +439,9 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     assets.sort();
     assets.dedup();
     let natives = std::mem::take(&mut *natives.lock().expect("natives lock"));
+    if let Some(warning) = ungranted_host(&natives, capabilities.as_ref()) {
+        log::warn!(target: "nsh::build", "{warning}");
+    }
     Ok(Bundle {
         code,
         source_map,
@@ -420,6 +450,22 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         natives: natives.into_iter().collect(),
         capabilities,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+/// The warning for an app that imports `nsh/host` and grants itself none
+/// of the host's functions (`capabilities.host`): each of its calls is
+/// refused, as the host's functions are never granted by default.
+fn ungranted_host<'a>(
+    natives: impl IntoIterator<Item = &'a String>,
+    capabilities: Option<&nsh_core::access::Capabilities>,
+) -> Option<String> {
+    let imports = natives.into_iter().any(|n| n == "nsh/host");
+    let granted = capabilities.is_some_and(|c| !c.host.is_empty());
+    (imports && !granted).then(|| {
+        "the app imports nsh/host and nsh.json declares no `capabilities.host`: every `host.call` is refused \
+         (list the host's functions it calls, prefixes ending in `*`, or `true`)"
+            .to_owned()
     })
 }
 
@@ -682,6 +728,9 @@ pub async fn bundle_hot_async(
     assets.sort();
     assets.dedup();
     let natives = std::mem::take(&mut *natives.lock().expect("natives lock"));
+    if let Some(warning) = ungranted_host(&natives, capabilities.as_ref()) {
+        log::warn!(target: "nsh::build", "{warning}");
+    }
     Ok(HotBundle {
         modules,
         natives: natives.into_iter().collect(),
@@ -697,6 +746,24 @@ pub async fn bundle_hot_async(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn apps_calling_the_host_without_a_grant_are_warned() {
+        use nsh_core::access::Capabilities;
+        let natives = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let caps = |json| Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap();
+        let host = natives(&["nsh", "nsh/host"]);
+        assert!(
+            super::ungranted_host(&host, None)
+                .unwrap()
+                .contains("capabilities.host")
+        );
+        assert!(super::ungranted_host(&host, Some(&caps("{}"))).is_some());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": false}"#))).is_some());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": ["a"]}"#))).is_none());
+        assert!(super::ungranted_host(&host, Some(&caps(r#"{"host": true}"#))).is_none());
+        assert!(super::ungranted_host(&natives(&["nsh"]), None).is_none());
+    }
+
     use super::*;
 
     /// An app whose screens are imported on demand: the first imports what

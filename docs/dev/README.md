@@ -13,6 +13,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [elements.md](elements.md) | Host elements and `nsh/base`'s components, touch, accessibility, the environment, why the main thread never waits for JS |
 | [text.md](text.md) | Text blocks, spans, inline attachments |
 | [text-view.md](text-view.md) | `TextView` (`nsh/base`): Markdown, HTML and documents shown with the primitives, streaming, parts, extensions |
+| [dock.md](dock.md) | `DockArea` and `ResizablePanelGroup` (`nsh/base`): the layout data, render keys keeping panels across moves, drag and drop, compact presentation |
 | [styles.md](styles.md) | Tailwind, effects, view styles, Android differences |
 | [geometry.md](geometry.md) | Units and geometry (`nsh_core::geometry`, as GPUI's): the types, the conversion boundaries, the `unit_types` check, the migration |
 | [scrolling-and-lists.md](scrolling-and-lists.md) | Scroll views, zooming, `List` |
@@ -22,6 +23,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [sandbox.md](sandbox.md) | VM limits, hardening, capabilities |
 | [signed-packages.md](signed-packages.md) | Keys, packages, verification, revocation |
 | [embedding.md](embedding.md) | `nsh package`, the iOS / Android SDKs, native components |
+| [layerfs.md](layerfs.md) | Opt-in Linux development and CI trial: Git, Cargo, snapshots and receipts |
 | [tooling.md](tooling.md) | `.nsh/types`, the dev server, hot reload, symbolication |
 | [macos.md](macos.md) | The macOS backend (AppKit): building, how each area maps to AppKit, `nsh test --target macos`, what differs |
 | [linux.md](linux.md) | The Linux backend (GTK 4): building, how each area maps to GTK, `nsh test --target linux`, what differs |

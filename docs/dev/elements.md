@@ -13,10 +13,10 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Scroll>` | UIScrollView | `horizontal`, `contentStyle` / `contentClass`, `refreshing` + `onRefresh`, `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
 | `<Canvas draw>` | `CanvasView` (drawRect replay) | see [canvas.md](canvas.md) |
 | `<List each>` | UIScrollView + recycled cells | see [scrolling-and-lists.md](scrolling-and-lists.md) |
-| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caret` (`false` hides the caret), `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
+| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onCaretMove` (where the caret is: `bounds` in the input, `pageBounds` in the root view; "Caret" below), `onPaste` + `pasteBehavior` (what was pasted, and whether the input inserts its text; "Paste" below), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caret` (`false` hides the caret), `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
 | `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerVisible`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`, in Rust `header_style_with(|s| ..)`: typed styles in `headerClass`'s place); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange(open, reason)` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange(false, reason)` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
-| `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref or `{ x, y }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
+| `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref, `{ x, y }` or `{ origin, size }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
 | `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`; ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)` |
 | `nativeComponent` (`nsh/native`) | a `NshView` box filled by the registered component's view | see [embedding.md](embedding.md) |
@@ -41,6 +41,11 @@ interface per element group and platform (`InputHostProps`, `IOSInputHostProps`,
 element declares (the root's, the runtime's own) is listed in `INTERNAL_EVENTS`; a test checks every `EventKind` is
 in one of them.
 
+The iOS host prop `backdropMaterial` selects the system material of a `backdropFilter` blur:
+`ultraThin` (default), `thin`, `regular`, `thick`, or `chrome`. Rust uses
+`.backdrop_material(BackdropMaterial::Regular)`. The core keeps the prop separately from the style and
+projects it into `ViewStyle::backdrop_material` when mounting, as it does Android elevation.
+
 ## Primitives only
 
 NSH's runtime provides the primitives and the capabilities; the look of an app is the app's. Styled components are
@@ -62,7 +67,7 @@ text change, may the back button pop, may the sheet close, may this gesture begi
 answered natively from props mounted beforehand, never by asking JS (blocking the main thread drops frames, can deadlock
 and reorders fast input). Events tell JS afterwards. Existing answers: input `maxLength` (`shouldChangeCharactersIn`,
 `InputFilter`), `submitBehavior` (`textFieldShouldReturn`, `textView:shouldChangeTextInRange:`, Android's `OnEditorActionListener` and input connection, AppKit's `doCommandBySelector:`), `popOnSwipe` / `popOnBack` (`gestureRecognizerShouldBegin`,
-`navigationBar:shouldPopItem:`, Android `wantsBack()` / `OnBackInvokedCallback` registration), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
+`navigationBar:shouldPopItem:`, Android `wantsBack()`: the `OnBackInvokedCallback` registration, or, where the window dispatches the back key instead (below 13, `enableOnBackInvokedCallback` off), taking the key in `NshView`'s unhandled key listener, before the activity's `onBackPressed`), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
 (`presentationControllerShouldDismiss`, the dialog's back), `pan` / `pinch` / `hitSlop` / `pointerEvents` /
 `keyboardShouldPersistTaps` / `panActivation` (recognizers), capabilities (`decidePolicyForNavigationAction`, `shouldOverrideUrlLoading`),
 `AlertDialog`'s `closeOnEscape` / `closeOnBackdropPress`. A new capability with such a callback gets a prop (a menu's items, a rule, a flag); what a prop cannot
@@ -79,7 +84,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `checkedStyle`, `indeterminateStyle` (and a `Button`'s `selectedStyle`) on any view (declared in `StateStyleProps`),
   the same as the `active:` / `hover:` / `focus:` / `disabled:` / `selected:` / `checked:` / `indeterminate:` classes:
   the core restyles the view while the platform reports it pressed, hovered or focused, and while its accessibility
-  state is selected, checked or mixed; later
+  state is selected, checked or mixed; a Rust component's touch responder stays pressed from its grant until its
+  touches end, wherever they go (CSS's `:active` until the button is released: a resize handle dragged off its band
+  keeps its `group-active:` look; `Core::hold_pressed`); later
   states win, `disabled` over all (`docs/dev/styles.md`). Press feedback is the app's: the platforms add no fade or
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).
@@ -201,7 +208,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard shortcuts** (`nsh/keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
-  Linux pages' "Keyboard"). Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
+  Linux pages' "Keyboard"). iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
+  inputs (before UIKit's text system) and of the root view (presses nothing inside handled), keys named by their HID
+  usage (`Key::from_hid_usage`) and the character they type, a `repeat` binding firing on a timer of its own while
+  the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused
+  view, after the input method) through `Native.keyDown` / `keyUp`, the table kept in Rust (`keymap.rs`), never
+  encoded for Java. Both leave a composing input method its keys and consume a taken key's release too. Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
 - **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
   and Info.plist holds the default: a page's or dialog's `statusBar` (`{ foreground, hidden, animated }`, a host prop
@@ -217,7 +229,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right) and, right to left, swaps the left and right
-  properties (margins, paddings, insets, borders, corners — always) and places the
+  properties (margins, paddings, insets, borders, corners — always: React Native's rule for style keys; Tailwind's
+  physical classes are resolved for the other side right to left, `tailwind::utilities::directed`, so they come out
+  where they say, as in a browser) and places the
   start / end ones (`marginStart`, `start`, `borderTopEndRadius`, ...). A direction change swaps the current taffy style in place
   (an involution), so authored styles need not be kept. Text: `auto` alignment is the right side right to left, left / right
   swap, `writingDirection` sets the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:
@@ -236,6 +250,47 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   While an input method composes, a `value` is held natively and applied when the composition ends, if no edit came
   after it: setting a field's text ends its composition on every platform, so an app that uppercases or filters its
   value would otherwise commit the pinyin as typed (#170).
+- **Caret**: `onCaretMove` reports where the caret is, for what opens at it (an `@` mention's suggestions):
+  `bounds`, a `Bounds` in the input (its border box: padding, border and the input's own scrolling applied), as wide
+  as the platform draws the caret and as tall as its line, at the selection's `end` (on Windows, GPUI and Linux,
+  whose editors keep a caret inside a selection, at that caret: `start` for a selection made backwards); and
+  `pageBounds`, the same in the root view, which the core adds (`Core::locate_caret`: the input's `measure()`
+  position plus `bounds`, as of the event) and an `Overlay` takes as its `anchor`. It is reported while the input
+  has the focus, whenever the caret moves: with the selection, and with the selection unchanged when the text scrolled
+  (a text area's scroll view, the desktops' wheel) or was laid out again at another size (wrapped elsewhere). A page
+  that scrolls under the input does not report it: `pageBounds` is where the caret was then. It is an event of its
+  own rather than more of `onSelectionChange`'s payload: that event's payload and when it fires are kept as they
+  shipped (`compatibility.md`). Each platform asks its editor: UIKit `caretRectForPosition:` (the shown caret's,
+  even with `caret={false}`, through the input classes' `nshCaretRectForPosition:`), converted to the input's
+  container; Android the EditText's `Layout` (`getPrimaryHorizontal`, the line's top and bottom, the total padding
+  and scroll; Java reports `caretX` / `caretY` / `caretWidth` / `caretHeight`, which `Native.eventMap` folds
+  into `bounds`); AppKit the editing text view's `firstRectForCharacterRange:` (the field editor while a field
+  edits), from the screen to the input view; GTK `gtk_text_compute_cursor_extents` and
+  `gtk_text_view_get_cursor_locations`; Windows and GPUI their own editors' caret (`caret_rect`); the web a hidden
+  copy of the field (its font, box and wrapping) holding the text up to the caret; `nsh test` the headless model of
+  `ApproxTextEngine` (characters `0.55 ×` the font size, lines `1.2 ×`). Empty `bounds` mean the platform
+  could not place it (no layout yet). Rust: `on_caret_move` with a `CaretEvent`, and
+  `overlay().anchor_bounds(...)`.
+
+- **Paste**: `onPaste` reports what the user pasted (`EventPayload::Paste`, `PasteEvent`): `text`, `files` (data on
+  the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
+  or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
+  paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
+  answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
+  images and files are never inserted. The event comes before the `onChangeText` of the text it inserts (Linux:
+  after, GTK reads clipboards asynchronously). Where Paste is offered, it is offered for images and files too while
+  the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
+  `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; Android: `setOnReceiveContentListener` (API 31;
+  the clipboard and keyboards' rich content; images read from their content URIs, through `Native.paste`; the text
+  goes back to the EditText while it inserts) and `onTextContextMenuItem` before; macOS: `TextArea` and a field
+  editor of NSH's (`FieldEditor`, from `FieldCell`'s `fieldEditorForView:`, one per window; masked fields keep
+  AppKit's) override `paste:` / `pasteAsPlainText:` and `validateUserInterfaceItem:`; Windows and GPUI: their own
+  editors' paste (the clipboard's PNG or bitmap, `CF_HDROP`; GPUI's `ClipboardEntry::Image` / `ExternalPaths`);
+  Linux: the `paste-clipboard` signal (stopped for `"report"`); web: the field's `paste` event (`preventDefault` for
+  `"report"`; `clipboardData.files`' bytes handed to `nsh_paste` with a JSON header). `nsh test`'s
+  `app.paste(selector, { text, files, uris })` pastes as the user does (files are paths whose bytes are read):
+  headless, and on macOS and iOS through a pasteboard of the test's own (`TestStep::Paste`), the machine's
+  clipboard untouched. `onPaste` is kind 64: `EventMask` has two words.
 
 Text, styles, scrolling and lists, animation, canvases and images have their own pages.
 
@@ -254,8 +309,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   where, and moves their views (`Insert` / `Remove`), so the platforms need nothing of their own: they draw and
   hit-test it as any view of the root, with the views' own z order.
 - **Layout**: a layout root of its own, laid out in a box the size of its root view (`position: fixed`: its insets,
-  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view, or
-  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`) the core places it on a side of the anchor's
+  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view,
+  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`, or a `Bounds` there, an input's
+  caret, `onCaretMove`'s `pageBounds`: `OverlayAnchor::Bounds`) the core places it on a side of the anchor's
   frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
   side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
@@ -267,8 +323,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   view's coordinates.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
-  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape or the Android back button,
-  to the top overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
+  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or
+  VoiceOver's escape gesture on iOS (`RootView`'s `accessibilityPerformEscape`, as the back button), to the top
+  overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
   the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
 - **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
   JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),

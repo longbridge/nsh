@@ -30,16 +30,19 @@ pub mod embed;
 mod image;
 mod input;
 mod interaction;
+mod keymap;
 mod mount;
 mod native_view;
 mod navigation;
 mod net;
+mod picker;
 mod press;
 mod selection_area;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
 mod system;
+mod system_tab_bar;
 mod target;
 mod text;
 mod text_selection;
@@ -51,7 +54,7 @@ mod visual;
 mod web;
 mod zoom;
 
-pub use nsh_engine::{Bundle, Root};
+pub use nsh_engine::{Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Root};
 
 /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::ui::Registry>>> =

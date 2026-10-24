@@ -367,7 +367,7 @@ nsh.registerComponent("embed.badge") { context -> Badge(this, context) }
 | API | Description |
 |---|---|
 | `NshView.registerComponent(String name, NshComponent.Factory factory)` | Registers a factory under a name; it makes one component per element created from then on (UI thread). |
-| `interface NshComponent` | `View view()`, `void setProp(String, Object)`, `default void command(String, Object)`, `default void destroy()` (the element is gone). Called on the UI thread. |
+| `interface NshComponent` | `View view()`, `void setProp(String, Object)`, `default void command(String, Object)`, `default void destroy()` (the element is gone: removed, or its app stopped by `NshView.destroy()` or replaced by another load; called once per component). Called on the UI thread. |
 | `setProp` values | `String`, `Number`, `Boolean`, `java.util.List`, `java.util.Map`, or `null` when removed (or JSON `null`). |
 | `NshComponentContext.emit(String event, Object data)` | Emits an event; `data` as the same Java types, or `null`. Any thread. |
 | `NshComponentContext.setSize(float width, float height)` | Reports the component's own size in dp. Any thread. |
@@ -596,6 +596,9 @@ with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work
   small values, not large blobs, on every change.
 - **One bundle, both platforms.** Register the same names with the same props and events on iOS and Android, so one
   bundle runs on both.
+- **Names under `nsh/` are NSH's.** NSH's own components (the system's tab bar of `nsh/mobile`'s `TabBar`) are
+  registered under `nsh/`; name yours after your app or company (`embed.badge`), and a registration under `nsh/` logs
+  a warning and keeps NSH's.
 
 ## See also
 

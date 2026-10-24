@@ -251,7 +251,7 @@ The root view covers the whole screen, under the status bar and the home indicat
 The app's layout direction follows the system language, and a view's `direction` style (`"ltr"`, `"rtl"` or `"inherit"`; `.direction(LayoutDirection::Rtl)` in Rust) sets the direction of its subtree. When the app lays out right to left:
 
 - rows run from the right;
-- `left` and `right` properties (margins, paddings, positions, borders, corners) swap sides;
+- `left` and `right` style keys (margins, paddings, positions, borders, corners) swap sides, as in React Native, while Tailwind's physical classes keep theirs, as in a browser: `pl-4`, `ml-2`, `left-0`, `border-l`, `rounded-tl-lg` and `text-left` stay on the left (`ps-4`, `ms-2`, `start-0`, `border-s`, `rounded-ss-lg` and `text-start` follow the direction);
 - `start` and `end` properties always mean the leading and trailing side: `marginStart`, `marginEnd`, `paddingStart`, `paddingEnd`, `start`, `end`, `borderStartWidth`, `borderTopStartRadius`, ... (`.ms(..)`, `.me(..)`, `.ps(..)`, `.pe(..)`, `.border_s(..)`, `.rounded_ss(..)`, ... in Rust);
 - text with `textAlign: "auto"` aligns right, and native controls mirror.
 

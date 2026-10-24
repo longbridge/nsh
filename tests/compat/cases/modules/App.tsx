@@ -9,8 +9,12 @@ import ModAndroid from "./mod-android";
 import ModClipboard from "./mod-clipboard";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
+import ModHost from "./mod-host";
+import ModHostChannel from "./mod-host-channel";
 import ModIos from "./mod-ios";
 import ModKeymap from "./mod-keymap";
+import ModMobile from "./mod-mobile";
+import ModPicker from "./mod-picker";
 import ModStorage from "./mod-storage";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -20,8 +24,12 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-clipboard": ModClipboard,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,
+  "mod-host": ModHost,
+  "mod-host-channel": ModHostChannel,
   "mod-ios": ModIos,
   "mod-keymap": ModKeymap,
+  "mod-mobile": ModMobile,
+  "mod-picker": ModPicker,
   "mod-storage": ModStorage,
 };
 const shown = signal("");
