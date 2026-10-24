@@ -131,7 +131,7 @@ impl HostWindow<'_> {
 /// loads bundles from the dev server and reloads on change.
 pub(crate) fn run(
     entry: &Path,
-    port: u16,
+    port: crate::dev::Port,
     release: bool,
     flags: HostFlags,
     target: Target,
@@ -277,7 +277,7 @@ pub(crate) fn run(
 /// changed) finds its page still open, and it reloads by itself.
 fn run_web(
     entry: &Path,
-    port: u16,
+    port: crate::dev::Port,
     release: bool,
     limits: Option<HostLimits>,
 ) -> anyhow::Result<()> {
@@ -296,7 +296,7 @@ fn run_web(
 /// `nsh` builds it again and runs it anew.
 fn run_rust_app(
     entry: &Path,
-    port: u16,
+    port: crate::dev::Port,
     target: Target,
     device: Option<&str>,
     work: &Path,
@@ -562,7 +562,7 @@ impl Drop for KillOnClose {
 /// host.
 fn run_android(
     entry: &Path,
-    port: u16,
+    port: crate::dev::Port,
     release: bool,
     limits: Option<HostLimits>,
     work: &Path,
