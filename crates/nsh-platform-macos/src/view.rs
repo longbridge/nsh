@@ -146,7 +146,7 @@ pub(crate) struct ViewState {
 }
 
 impl ViewState {
-    fn new(id: NodeId, kind: ViewKind) -> Self {
+    pub(crate) fn new(id: NodeId, kind: ViewKind) -> Self {
         ViewState {
             id,
             kind,

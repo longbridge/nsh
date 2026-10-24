@@ -87,6 +87,10 @@ struct Shape {
     border_style: BorderStyle,
     /// Whether every side has the same color (one ring layer, or four).
     one_color: bool,
+    /// Which sides draw (a width and a color that is not transparent): a
+    /// border that turns visible or invisible (`focus:border-…` over
+    /// `border-transparent`) needs its layers, not only new colors.
+    visible_sides: [bool; 4],
     shadow: bool,
     shadow_offset: (Points, Points),
     solid: bool,
@@ -714,6 +718,11 @@ fn shape_of(s: &ViewState, kind: Kind) -> Shape {
         widths: borders.widths,
         border_style: borders.style,
         one_color: borders.colors.iter().all(|&c| c == borders.colors[0]),
+        visible_sides: {
+            let w = &borders.widths;
+            let widths = [w.top, w.right, w.bottom, w.left];
+            std::array::from_fn(|i| widths[i].0 > 0.0 && !borders.colors[i].is_transparent())
+        },
         shadow: shadow.is_visible() || s.anim.shadow_opacity.is_some(),
         shadow_offset: (style.shadow.offset_x, style.shadow.offset_y),
         solid: !style.background_color.is_transparent() || s.anim.background.is_some(),
@@ -925,4 +934,33 @@ pub(crate) fn set_corners(layer: &CALayer, r: CGFloat, continuous: bool) {
             kCACornerCurveCircular
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::view::ViewState;
+
+    fn bordered(color: Color) -> ViewState {
+        let mut s = ViewState::new(1, nsh_core::ViewKind::View);
+        s.frame = nsh_core::geometry::bounds(
+            nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0)),
+            nsh_core::geometry::size(nsh_core::geometry::px(100.0), nsh_core::geometry::px(40.0)),
+        );
+        s.style.borders.widths = nsh_core::geometry::Edges::all(nsh_core::geometry::px(2.0));
+        s.style.borders.colors = [color; 4];
+        s
+    }
+
+    #[test]
+    fn a_border_turning_visible_reshapes() {
+        // `border-2 border-transparent focus:border-white`: the focused style only changes the
+        // color, but a transparent border has no layer to color, so the shape must differ.
+        let hidden = shape_of(&bordered(Color::TRANSPARENT), Kind::View);
+        let shown = shape_of(&bordered(Color(0xffff_ffff)), Kind::View);
+        assert!(hidden != shown);
+        // Another visible color is only a recoloring.
+        let red = shape_of(&bordered(Color(0xff00_00ff)), Kind::View);
+        assert!(shown == red);
+    }
 }
