@@ -71,7 +71,6 @@ mount(() => <Ring progress={0.7} />);
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `draw` | `canvas(painter)` | `(cx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | 绘制画布。尺寸确定后执行一次，画布尺寸变化时、读取的 signal 变化时再次执行。 |
-| `desktop={{ drawsAsynchronously }}` | `.draws_asynchronously(enabled)` | `boolean` | macOS 在 Core Animation 的线程上绘制画布（`true`，默认），让每帧都在变的画布不占用主线程。设为 `false` 则在主线程上立即绘制，每次绘制不额外占用 GPU 内存：更适合偶尔才变化的小画布，比如每隔几秒更新一次的图表。其他平台按各自的方式绘制所有画布。 |
 
 请通过样式给画布一个尺寸（宽 / 高、`flex`、宽高比）：它的尺寸由样式决定。
 

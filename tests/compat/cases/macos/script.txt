@@ -7,12 +7,6 @@ prop id:bar desktop.windowDrag true
 prop id:body windowDrag false
 covers [props] desktop
 covers [props] desktop.windowDrag
-# desktop-canvas
-tap id:case-desktop-canvas
-expect Two canvases
-prop id:at-once desktop.drawsAsynchronously false
-noprop id:default drawsAsynchronously
-covers [props] desktop.drawsAsynchronously
 # mod-standard-system
 tap id:case-mod-standard-system
 expect console.identity=true

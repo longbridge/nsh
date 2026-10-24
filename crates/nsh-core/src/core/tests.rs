@@ -9607,44 +9607,6 @@ fn window_drag_is_a_view_prop() {
     ));
 }
 
-/// `desktop={{ drawsAsynchronously: false }}` reaches the platform in a
-/// canvas's view props, and clearing it gives the platform its default
-/// again.
-#[test]
-fn draws_asynchronously_is_a_canvas_view_prop() {
-    let mut c = core();
-    let draws = |value| Op::SetProp {
-        id: 2,
-        prop: Prop::DrawsAsynchronously(value),
-    };
-    apply(
-        &mut c,
-        vec![
-            Op::Create {
-                id: 2,
-                tag: Tag::Canvas,
-            },
-            draws(Some(false)),
-            Op::Insert {
-                parent: crate::ROOT_ID,
-                child: 2,
-                before: None,
-            },
-        ],
-    );
-    let batch = c.commit().unwrap();
-    assert!(batch.items.iter().any(|i| matches!(
-        i,
-        MountItem::ViewProps { id: 2, props } if props.draws_asynchronously == Some(false)
-    )));
-    apply(&mut c, vec![draws(None)]);
-    let batch = c.commit().unwrap();
-    assert!(batch.items.iter().any(|i| matches!(
-        i,
-        MountItem::ViewProps { id: 2, props } if props.draws_asynchronously.is_none()
-    )));
-}
-
 /// `focusable={false}` reaches the platform in the view's props.
 #[test]
 fn focusable_is_a_view_prop() {

@@ -265,10 +265,6 @@ pub struct ViewProps {
     /// `windowDrag` (desktops): pressing the view drags the window; `None`
     /// leaves it to the views around it.
     pub window_drag: Option<bool>,
-    /// `drawsAsynchronously` (macOS canvases): `Some(false)` draws the
-    /// canvas at once on the main thread instead of on Core Animation's
-    /// threads; `None` is the platform's way.
-    pub draws_asynchronously: Option<bool>,
     /// `focusable`: `Some(false)` keeps a view that takes presses out of
     /// the keyboard focus's stops (Tab); `None` is the default, a stop.
     pub focusable: Option<bool>,

@@ -339,19 +339,6 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 
 crate::static_reactive!(Painter: Painter, Drawing);
 
-impl CanvasView {
-    /// Whether Core Animation draws it on its own threads (macOS, the
-    /// default) or at once on the main thread (`false`): at once, a small
-    /// canvas that changes now and then holds no GPU memory for its
-    /// drawings ([`Prop::DrawsAsynchronously`]). Other platforms ignore
-    /// it.
-    pub fn draws_asynchronously(self, enabled: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(enabled, |enabled: bool| {
-            Prop::DrawsAsynchronously(Some(enabled))
-        })
-    }
-}
-
 /// A web view loading `url` (a bound one loads again when it changes).
 pub fn web_view(url: impl IntoReactive<String>) -> WebView {
     WebView(ElNode::new(Tag::WebView)).bind_prop(url, |url: String| {
