@@ -304,6 +304,21 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   bench_rects_after_a_path -- --ignored --nocapture`). Memory: visiting a demo again adds nothing; the first visits
   grow by bounded caches (decoded images, up to 128 MB) and libraries loaded on first use (WebKitGTK).
 
+- Windows (Win32 / Direct2D, release; i7-13700KF, RTX 3060 Ti, a 1200 × 800 point window on a 4K 144 Hz display at
+  150%; `--fps` readings through `nsh test --target windows --fps`, 4 s per scenario). Before = this branch with
+  only the monitor added (every canvas whose animated value changed recorded again in full; every view pushed a
+  content clip; every child of a scroll view drawn):
+
+  | Scenario | Before: fps, frame p95, over one refresh, paint / canvas per frame, CPU | After |
+  |---|---|---|
+  | Stocks | 144, 8.2–8.8 ms, 11–28%, 4.4 / 1.8 ms, 87–98% | 144, 6.6–6.9 ms, 3–5%, 2.7 / 0.3 ms, 52–71% |
+  | Canvas demo | 144, 2.7–5.0 ms, 0–1%, 2.2–2.5 / 0.21 ms, 30–32% | 144, 2.6–2.7 ms, 0%, 2.0–2.4 / 0.08 ms, 28–50% |
+
+  Stocks re-recorded ~3100 canvases a second (its 22 sparklines and the chart, on every pulse), 280 ms of the main
+  thread; recording only what follows the first animated operation takes that to ~26 ms (the sparklines erase their
+  left edge with `destination-out`, inside the head). What is left is drawing the whole window on every refresh
+  (~690 views; text ~0.6 ms of it, `EndDraw` ~0.05 ms). CPU readings vary by ±10 points between runs on this machine.
+
 - Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes

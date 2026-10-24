@@ -1,6 +1,6 @@
 ---
 title: Performance report
-description: Measured numbers of NSH apps - commit and frame costs from NSH's baselines, and the gallery's frame rate, CPU and memory page by page on Linux, macOS and iOS - with how to reproduce them.
+description: Measured numbers of NSH apps - commit and frame costs from NSH's baselines, and the gallery's frame rate, CPU and memory page by page on Linux, macOS, Windows and iOS - with how to reproduce them.
 order: 62.5
 group: tools
 ---
@@ -246,6 +246,115 @@ What makes these numbers:
 - **Content drawn when it changes**: texts and canvases draw into layers of their own, again when their content or
   size changes, not when they move or scroll.
 
+## Windows (Win32, Direct2D)
+
+Measured on a Windows 11 desktop (Intel Core i7-13700KF, 32 GB, NVIDIA GeForce RTX 3060 Ti) on a 4K 144 Hz display at
+150%, release builds, the gallery in a 1200 × 800 window (1800 × 1200 pixels), every reading taken automatically by
+`examples/gallery/tools/perf.py` (`nsh test --target windows --fps`, one line a second; CPU is the whole process, in
+percent of one core). The phases are the main thread's per frame: *paint* (Direct2D drawing the window) and, within
+it, *canvas* (recording and replaying drawings).
+
+### Animated demos
+
+<div class="data-table">
+
+| Demo | FPS | Frame p95 | Paint / canvas per frame | CPU |
+|---|---|---|---|---|
+| Stocks: 22 live sparklines, an intraday chart, order book, tape | 144 | 6.6–6.9 ms | 2.7 / 0.3 ms | 52–71% |
+| Canvas: a gauge, a clock, a dot matrix | 144 | 2.6–2.7 ms | 2.0–2.4 / 0.08 ms | 28–50% |
+| Animations: three native loops, springs, sequences | 144 | 2.6–3.7 ms | 2.3 ms | 32–40% |
+
+</div>
+
+Stocks commits 16–17 times a second, each in up to 2.1 ms of JS and 1.7 ms of the core on the engine thread (p95).
+
+### Every page
+
+Every page of the gallery, as it opens and while the test scrolls it, in the same 1200 × 800 window. As on Linux and
+macOS, *FPS* is the rate while something moves (one frame per median gap between drawn frames); at the display's 144,
+every frame of an animation or a scroll comes one refresh after the last. *Over one refresh* is the share of frames
+that took longer than a refresh (6.9 ms). A page at rest draws no frame and uses 0–2% CPU. Images' GIF and WebP play
+at their own frame rates (about 40 FPS here). Physics, Overlays, Menus and Storage are measured in a 900 × 500 window,
+where they have room to scroll.
+
+<div class="data-table">
+
+| Page | Frames come from | FPS | Frame p95 | Over one refresh | CPU |
+|---|---|---|---|---|---|
+| Stocks | Live data, native loops | 144 | 6.6 ms | 3% | 60% |
+| Stocks, scrolling | Live data, scroll | 144 | 6.7 ms | 3% | 66% |
+| Photos, scrolling | Scroll | 143 | 2.5 ms | 0% | 11% |
+| Lists, scrolling | Scroll | 144 | 2.2 ms | 0% | 15% |
+| Scrolling, scrolling | Scroll | 144 | 3.1 ms | 0% | 9% |
+| Navigation, scrolling | Scroll | 144 | 1.4 ms | 0% | 9% |
+| Form, scrolling | Scroll | 144 | 1.5 ms | 0% | 11% |
+| Resizable, scrolling | Scroll | 144 | 1.0 ms | 0% | 15% |
+| Dock, scrolling | Scroll | 144 | 1.4 ms | 1% | 6% |
+| Gestures | Springs, a pulsing ring | 144 | 1.9 ms | 0% | 39% |
+| Physics, scrolling | Scroll (a 900 × 500 window) | 143 | 1.2 ms | 1% | 10% |
+| Animations | Native loops | 144 | 2.6 ms | 0% | 40% |
+| Canvas, scrolling | Scroll, native loops | 144 | 2.7 ms | 0% | 34% |
+| Styles, scrolling | Scroll, a swaying transform | 144 | 2.1 ms | 0% | 31% |
+| Tailwind | `animate-*` utilities | 144 | 2.1 ms | 0% | 27% |
+| Text, scrolling | Scroll | 144 | 2.3 ms | 0% | 13% |
+| Text View, scrolling | Scroll | 144 | 1.9 ms | 0% | 18% |
+| Images, scrolling | Scroll, GIF and WebP frames | 144 | 5.9 ms | 2% | 42% |
+| Components, scrolling | Scroll | 144 | 1.6 ms | 0% | 17% |
+| Overlays, scrolling | Scroll (a 900 × 500 window) | 143 | 1.1 ms | 1% | 8% |
+| Menus, scrolling | Scroll (a 900 × 500 window) | 144 | 1.2 ms | 0% | 15% |
+| Controls | Transitions | 144 | 1.6 ms | 0% | 11% |
+| Web and video, scrolling | Scroll | 144 | 1.6 ms | 0% | 14% |
+| System | `requestAnimationFrame`, timers | 144 | 0.1 ms | 0% | 3% |
+| Storage, scrolling | Scroll (a 900 × 500 window) | 144 | 0.9 ms | 0% | 12% |
+
+</div>
+
+### Memory
+
+At rest, 3 s after start (release runners, a 1200 × 800 window). *Private working set* is the memory the process
+alone uses (Task Manager's Memory column); *private bytes* what it has committed; *working set* adds the pages of the
+system's libraries it shares with other processes (Direct3D, Direct2D, DirectWrite, the GPU driver):
+
+<div class="data-table">
+
+| App | Private working set | Private bytes | Working set |
+|---|---|---|---|
+| Rust app (`nsh init --template rust`) | ~14 MB | ~60 MB | ~53–71 MB |
+| TSX counter (`examples/counter`) | ~15 MB | ~61 MB | ~56–71 MB |
+
+</div>
+
+Through the gallery's tour the working set is ~108–115 MB on Stocks, ~230 MB from the Canvas page, ~320–340 MB from the
+Text View page and ~390–405 MB once Web and video has opened WebView2 (whose pages run in WebView2's own processes),
+with what it caches on purpose (decoded images, bounded at 128 MB; the Text View page's documents).
+
+### App size
+
+The hello world apps made by `nsh init` with each template, as `nsh package --target windows` builds them for x86_64
+(the Rust runners with link-time optimization and stripped, as on Linux). The executable is the app's `<Name>.exe`;
+the zip is the `.zip` written beside its directory:
+
+<div class="data-table">
+
+| App | Written in | Executable | Zip |
+|---|---|---|---|
+| Hello world (`--template rust`) | Rust | 15.0 MB | 6.7 MB |
+| Hello world (`--template ts`) | TSX, on QuickJS | 28.6 MB | 12.4 MB |
+| Hello world (`--template mixed`) | TSX and a Rust crate | 26.3 MB | 11.5 MB |
+
+</div>
+
+What makes these numbers:
+
+- **Frames only for changes**: the compositor-paced ticker runs while a native animation, a transition or a frame
+  callback runs, and the window is drawn when something in it changed.
+- **Canvases record their animated part**: a drawing is recorded as Direct2D command lists, vector and sharp at any
+  scale. When an animated value changes, only the operations from the first one that reads an animated value on are
+  recorded again; what comes before is kept (Stocks: ~26 ms of recording a second for 22 pulsing sparklines and the
+  chart).
+- **Only what shows is drawn**: the children of a scroll view or a clipping view that lie out of sight are left out of
+  the frame, and views with no content of their own draw no more than their background and border.
+
 ## iOS (UIKit)
 
 Measured in the iOS simulator (an iPhone 18 Pro Max, on the MacBook Pro above), release builds, with the same tour
@@ -308,7 +417,7 @@ thread (p95 2.2 and 2.0 ms), which is busy 4–6% of the time.
 
 ## Measuring an app
 
-To measure an app the same way, run its tests or steps with `--fps` and `-v` on `--target linux`, `macos` or `ios`:
+To measure an app the same way, run its tests or steps with `--fps` and `-v` on `--target linux`, `macos`, `windows` or `ios`:
 
 ```sh
 cargo build --release -p nsh-cli

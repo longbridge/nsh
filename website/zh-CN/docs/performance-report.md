@@ -1,6 +1,6 @@
 ---
 title: 性能报告
-description: NSH 应用的实测数据：NSH 基线中的提交与帧开销，以及 gallery 在 Linux、macOS 和 iOS 上逐页的帧率、CPU 和内存，并附复现方法。
+description: NSH 应用的实测数据：NSH 基线中的提交与帧开销，以及 gallery 在 Linux、macOS、Windows 和 iOS 上逐页的帧率、CPU 和内存，并附复现方法。
 order: 62.5
 group: tools
 ---
@@ -225,6 +225,106 @@ gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 
 - **保留 canvas 的静态部分**：绘制内容稳定后，第一个动画操作之前较长的部分保留为一个图层；每帧绘制这个图层，只重放动画的其余部分，并直接在主线程上完成（Canvas 页的仪表盘、时钟和点阵：不占 GPU，内存减半）。
 - **内容变化时才绘制**：文本和 canvas 绘制在各自的 layer 里，内容或尺寸变化时才重绘，移动或滚动时不重绘。
 
+## Windows（Win32、Direct2D）
+
+测量环境：一台 Windows 11 台式机（Intel Core i7-13700KF，32 GB，NVIDIA GeForce RTX 3060 Ti），4K 144 Hz 显示器、150% 缩放，
+release 构建，gallery 运行在 1200 × 800 的窗口里（1800 × 1200 像素），所有读数都由 `examples/gallery/tools/perf.py` 自动采集
+（`nsh test --target windows --fps`，每秒一行；CPU 指整个进程，以单核的百分比计）。阶段是主线程每帧的开销：*paint*（Direct2D
+绘制窗口）以及其中的 *canvas*（录制和重放绘制）。
+
+### 动画演示
+
+<div class="data-table">
+
+| 演示 | FPS | 帧 p95 | 每帧 paint / canvas | CPU |
+|---|---|---|---|---|
+| Stocks：22 条实时走势线、分时图、盘口、逐笔成交 | 144 | 6.6–6.9 ms | 2.7 / 0.3 ms | 52–71% |
+| Canvas：仪表盘、时钟、点阵 | 144 | 2.6–2.7 ms | 2.0–2.4 / 0.08 ms | 28–50% |
+| Animations：三个原生循环、弹簧、序列 | 144 | 2.6–3.7 ms | 2.3 ms | 32–40% |
+
+</div>
+
+Stocks 每秒 commit 16–17 次，每次在引擎线程上用时最多 2.1 ms 的 JS 和 1.7 ms 的 core（p95）。
+
+### 每个页面
+
+gallery 的每个页面，打开时以及测试滚动它时，同样在 1200 × 800 的窗口里。与 Linux 和 macOS 一样，*FPS* 是有东西在动时的速率（每个相邻绘制帧间隔的中位数一帧）；
+达到显示器的 144 时，动画或滚动的每一帧都在上一帧之后的下一次刷新到来。*超过一次刷新*是耗时超过一次刷新（6.9 ms）的帧所占的比例。
+静止的页面不绘制帧，CPU 为 0–2%。图片的 GIF 和 WebP 按各自的帧率播放（这里约 40 FPS）。Physics、Overlays、Menus 和 Storage
+在 900 × 500 的窗口里测量，在那里它们有足够的内容可以滚动。
+
+<div class="data-table">
+
+| 页面 | 帧的来源 | FPS | 帧 p95 | 超过一次刷新 | CPU |
+|---|---|---|---|---|---|
+| Stocks | 实时数据、原生循环 | 144 | 6.6 ms | 3% | 60% |
+| Stocks，滚动中 | 实时数据、滚动 | 144 | 6.7 ms | 3% | 66% |
+| Photos，滚动中 | 滚动 | 143 | 2.5 ms | 0% | 11% |
+| Lists，滚动中 | 滚动 | 144 | 2.2 ms | 0% | 15% |
+| Scrolling，滚动中 | 滚动 | 144 | 3.1 ms | 0% | 9% |
+| Navigation，滚动中 | 滚动 | 144 | 1.4 ms | 0% | 9% |
+| Form，滚动中 | 滚动 | 144 | 1.5 ms | 0% | 11% |
+| Resizable，滚动中 | 滚动 | 144 | 1.0 ms | 0% | 15% |
+| Dock，滚动中 | 滚动 | 144 | 1.4 ms | 1% | 6% |
+| Gestures | 弹簧、脉动的圆环 | 144 | 1.9 ms | 0% | 39% |
+| Physics，滚动中 | 滚动（900 × 500 窗口） | 143 | 1.2 ms | 1% | 10% |
+| Animations | 原生循环 | 144 | 2.6 ms | 0% | 40% |
+| Canvas，滚动中 | 滚动、原生循环 | 144 | 2.7 ms | 0% | 34% |
+| Styles，滚动中 | 滚动、摇摆的变换 | 144 | 2.1 ms | 0% | 31% |
+| Tailwind | `animate-*` 工具类 | 144 | 2.1 ms | 0% | 27% |
+| Text，滚动中 | 滚动 | 144 | 2.3 ms | 0% | 13% |
+| Text View，滚动中 | 滚动 | 144 | 1.9 ms | 0% | 18% |
+| Images，滚动中 | 滚动、GIF 和 WebP 的帧 | 144 | 5.9 ms | 2% | 42% |
+| Components，滚动中 | 滚动 | 144 | 1.6 ms | 0% | 17% |
+| Overlays，滚动中 | 滚动（900 × 500 窗口） | 143 | 1.1 ms | 1% | 8% |
+| Menus，滚动中 | 滚动（900 × 500 窗口） | 144 | 1.2 ms | 0% | 15% |
+| Controls | 过渡 | 144 | 1.6 ms | 0% | 11% |
+| Web and video，滚动中 | 滚动 | 144 | 1.6 ms | 0% | 14% |
+| System | `requestAnimationFrame`、定时器 | 144 | 0.1 ms | 0% | 3% |
+| Storage，滚动中 | 滚动（900 × 500 窗口） | 144 | 0.9 ms | 0% | 12% |
+
+</div>
+
+### 内存
+
+启动 3 秒后的静止内存（release 运行器，1200 × 800 的窗口）。*专用工作集*是只有这个进程使用的内存（任务管理器“内存”一列的值）；
+*专用字节*是它提交的内存；*工作集*还包含它与其他进程共享的系统库的页面（Direct3D、Direct2D、DirectWrite、GPU 驱动）：
+
+<div class="data-table">
+
+| 应用 | 专用工作集 | 专用字节 | 工作集 |
+|---|---|---|---|
+| Rust 应用（`nsh init --template rust`） | ~14 MB | ~60 MB | ~53–71 MB |
+| TSX 计数器（`examples/counter`） | ~15 MB | ~61 MB | ~56–71 MB |
+
+</div>
+
+浏览 gallery 的过程中，工作集在 Stocks 页约 108–115 MB，从 Canvas 页起约 230 MB，从 Text View 页起约 320–340 MB，
+Web and video 页打开 WebView2 之后约 390–405 MB（网页运行在 WebView2 自己的进程里），增长的是它有意保留的缓存（解码后的图片，
+上限 128 MB；Text View 页的文档）。
+
+### 应用体积
+
+用 `nsh init` 的每种模板生成的 hello world 应用，由 `nsh package --target windows` 为 x86_64 构建（Rust 运行器与 Linux 一样以链接时优化构建并去除符号）。
+可执行文件是应用的 `<Name>.exe`；zip 是写在它的目录旁边的 `.zip`：
+
+<div class="data-table">
+
+| 应用 | 编写语言 | 可执行文件 | Zip |
+|---|---|---|---|
+| Hello world（`--template rust`） | Rust | 15.0 MB | 6.7 MB |
+| Hello world（`--template ts`） | TSX，运行在 QuickJS 上 | 28.6 MB | 12.4 MB |
+| Hello world（`--template mixed`） | TSX 加一个 Rust crate | 26.3 MB | 11.5 MB |
+
+</div>
+
+这些数字来自：
+
+- **只为变化绘制帧**：按合成器节奏运行的 ticker 只在原生动画、过渡或帧回调运行时跳动，窗口在其中内容变化时才重绘。
+- **Canvas 只录制动画部分**：绘制被录制为 Direct2D 的 command list，是矢量的，任意缩放都清晰。动画值变化时，只重新录制从第一个读取动画值的操作开始的部分，
+  之前的部分保留（Stocks：22 条脉动的走势线和分时图，每秒约 26 ms 的录制）。
+- **只绘制看得见的部分**：滚动视图或裁剪视图中不在视野内的子视图不进入这一帧，没有自身内容的视图只绘制背景和边框。
+
 ## iOS（UIKit）
 
 测量环境：iOS 模拟器（iPhone 18 Pro Max，运行在上面那台 MacBook Pro 上），release 构建，与上面相同的浏览流程（`perf.py --target ios`：
@@ -283,7 +383,7 @@ Stocks 每秒提交 20 次（每 50 ms 一次行情），每次在引擎线程�
 
 ## 测量应用
 
-用同样的方式测量一个应用，在 `--target linux`、`macos` 或 `ios` 上带上 `--fps` 和 `-v` 运行它的测试或步骤：
+用同样的方式测量一个应用，在 `--target linux`、`macos`、`windows` 或 `ios` 上带上 `--fps` 和 `-v` 运行它的测试或步骤：
 
 ```sh
 cargo build --release -p nsh-cli
