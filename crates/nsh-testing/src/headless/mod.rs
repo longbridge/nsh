@@ -1572,6 +1572,29 @@ mod tests {
         );
     }
 
+    #[component]
+    fn EmptySpans() -> impl IntoElement {
+        text("before ")
+            .child(text("").test_id("middle").underline())
+            .child(text("after").italic())
+            .child(text("").test_id("end").underline())
+            .child(text("").test_id("after"))
+    }
+
+    #[test]
+    fn empty_span_styles_do_not_read_neighbouring_characters() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<EmptySpans>())).unwrap();
+        app.first_render().unwrap();
+        let screen = app.screen();
+        for name in ["id:middle", "id:end", "middle", "end", "id:after", "after"] {
+            assert!(
+                screen.span_style(name).is_err(),
+                "empty span {name} has no first character"
+            );
+        }
+        assert!(screen.span_style("text:after").unwrap().italic);
+    }
+
     /// A count and a button that adds one.
     #[component]
     fn Tally() -> impl IntoElement {

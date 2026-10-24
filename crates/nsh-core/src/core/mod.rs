@@ -681,7 +681,16 @@ struct TextContext<P> {
     cache: Option<(Option<f32>, Size<Points>)>,
     /// Last final layout sent to the platform and the content box it was
     /// made for (where in the view the text goes).
-    laid_out: Option<(Bounds<Points>, TextLayout)>,
+    laid_out: Option<LaidText>,
+    /// New test metadata must be mounted even when the glyphs are unchanged.
+    metadata_changed: bool,
+}
+
+/// The final text can have fitted font sizes, so retain it with its layout.
+struct LaidText {
+    content: Bounds<Points>,
+    layout: TextLayout,
+    text: Arc<AttributedText>,
 }
 
 impl<P> TextContext<P> {
@@ -694,7 +703,28 @@ impl<P> TextContext<P> {
             min_content: None,
             cache: None,
             laid_out: None,
+            metadata_changed: false,
         }
+    }
+    /// Remount metadata in the same box, keeping any fitted font sizes.
+    fn remount_metadata(
+        &mut self,
+        content: Bounds<Points>,
+    ) -> Option<(Arc<AttributedText>, TextLayout)> {
+        if !self.metadata_changed {
+            return None;
+        }
+        let laid = self.laid_out.as_mut().filter(|l| l.content == content)?;
+        let text = if laid.text.spans == self.text.spans {
+            self.text.clone()
+        } else {
+            let mut text = (*laid.text).clone();
+            text.test_ids = self.text.test_ids.clone();
+            Arc::new(text)
+        };
+        laid.text = text.clone();
+        self.metadata_changed = false;
+        Some((text, laid.layout.clone()))
     }
 }
 
@@ -4378,6 +4408,16 @@ impl<M: TextEngine> Core<M> {
             }
             return inserted;
         }
+        if cx.text.test_ids != text.test_ids
+            && !inserted
+            && cx.alignments == alignments
+            && cx.text.rendering_eq(&text)
+        {
+            cx.text = Arc::new(text);
+            cx.metadata_changed = true;
+            return true;
+        }
+        cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
@@ -5111,12 +5151,26 @@ impl<M: TextEngine> Core<M> {
                 // in its zero box would still show where a platform does
                 // not clip text to its box (a browser), so it gets an
                 // empty layout; the text itself stays what it is.
-                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
+                if let Some((text, layout)) = cx.remount_metadata(content) {
+                    self.mount.push(MountItem::Text {
+                        id,
+                        text,
+                        layout,
+                        content,
+                    });
+                    continue;
+                }
+                if matches!(&cx.laid_out, Some(l) if l.content == content) {
                     continue;
                 }
                 let layout =
                     engine.layout(&engine.prepare(&AttributedText::default()), content.size);
-                cx.laid_out = Some((content, layout.clone()));
+                cx.laid_out = Some(LaidText {
+                    content,
+                    layout: layout.clone(),
+                    text: cx.text.clone(),
+                });
+                cx.metadata_changed = false;
                 self.mount.push(MountItem::Text {
                     id,
                     text: cx.text.clone(),
@@ -5140,16 +5194,30 @@ impl<M: TextEngine> Core<M> {
                     content.size.height = height;
                 }
             }
+            if let Some((text, layout)) = cx.remount_metadata(content) {
+                self.mount.push(MountItem::Text {
+                    id,
+                    text,
+                    layout,
+                    content,
+                });
+                continue;
+            }
             let size = content.size;
             if let Some(min) = fit {
                 // Shrunk to fit: its own text, laid out on its own.
-                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
+                if matches!(&cx.laid_out, Some(l) if l.content == content) {
                     continue;
                 }
                 let text = Arc::new(fitted(engine, &cx.text, &cx.alignments, size, min));
                 let prepared = engine.prepare_aligned(&text, &cx.alignments);
                 let text_layout = engine.layout(&prepared, size);
-                cx.laid_out = Some((content, text_layout.clone()));
+                cx.laid_out = Some(LaidText {
+                    content,
+                    layout: text_layout.clone(),
+                    text: text.clone(),
+                });
+                cx.metadata_changed = false;
                 if report_lines {
                     self.events.push(crate::ui::JsEvent::Event(
                         id,
@@ -5169,9 +5237,9 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             let text_layout = match &cx.laid_out {
-                Some((r, _)) if *r == content => continue,
+                Some(l) if l.content == content => continue,
                 // Only moved (padding, vertical alignment): the same layout.
-                Some((r, l)) if r.size == size => l.clone(),
+                Some(l) if l.content.size == size => l.layout.clone(),
                 _ => {
                     let prepared = cx
                         .prepared
@@ -5187,7 +5255,12 @@ impl<M: TextEngine> Core<M> {
                     layout
                 }
             };
-            cx.laid_out = Some((content, text_layout.clone()));
+            cx.laid_out = Some(LaidText {
+                content,
+                layout: text_layout.clone(),
+                text: cx.text.clone(),
+            });
+            cx.metadata_changed = false;
             if !cx.text.attachments.is_empty() {
                 placements.push((key, text_layout.clone(), content));
             }

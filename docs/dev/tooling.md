@@ -247,7 +247,9 @@ the events go to the span's node; they are not texts of their own (`texts()` lis
 `Screen::span_style` reads the resolved style of characters a selector names (`id:<testID>` a nested text's test id,
 `text:<text>` where the text reads it), the first character's, including a nested text's background. `app.spanStyle`
 returns that style. A span's test id is listed on its block's text (`AttributedText::test_ids`). Setting the id
-later rebuilds the block. Steps acting on a view are strict, as Playwright's: the matches
+later updates the block's metadata and remounts its existing final layout, including fitted font sizes, without
+preparing or laying out the text again or reporting `onTextLayout`. Empty spans have no first character:
+queries report an error, including bare selectors whose test id matches an empty span. Steps acting on a view are strict, as Playwright's: the matches
 are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
 and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
 (the accessibility state) fails too. Each step sends what a platform would, to the views that report it:

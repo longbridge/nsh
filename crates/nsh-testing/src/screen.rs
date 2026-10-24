@@ -621,7 +621,8 @@ impl Screen {
     /// inherited from the spans around it. `id:<testID>` names a nested
     /// text's span. `text:<text>` names where the text reads it. The parts
     /// before the last name the views to look in. An error when none or
-    /// several match, or when the last part is not a span name.
+    /// several match, when the matched span is empty, or when the last part
+    /// is not a span name.
     pub fn span_style(&self, selector: &str) -> Result<nsh_core::ResolvedTextStyle, String> {
         let selector = Selector::parse(selector)?;
         let scope = selector.scope().map(|s| self.resolve(&s));
@@ -642,18 +643,24 @@ impl Screen {
                     .test_ids
                     .iter()
                     .filter(|t| &*t.test_id == want)
-                    .map(|t| t.start)
+                    .map(|t| (t.start < t.end).then_some(t.start))
                     .collect(),
-                Matcher::Text(want) => char_starts(&text.text, want),
+                Matcher::Text(want) => char_starts(&text.text, want)
+                    .into_iter()
+                    .map(Some)
+                    .collect(),
                 Matcher::Any(want) => {
-                    let ids: Vec<u32> = text
+                    let ids: Vec<Option<u32>> = text
                         .test_ids
                         .iter()
                         .filter(|t| &*t.test_id == want)
-                        .map(|t| t.start)
+                        .map(|t| (t.start < t.end).then_some(t.start))
                         .collect();
                     if ids.is_empty() {
                         char_starts(&text.text, &TextMatch::Exact(want.trim().to_owned()))
+                            .into_iter()
+                            .map(Some)
+                            .collect()
                     } else {
                         ids
                     }
@@ -670,7 +677,8 @@ impl Screen {
             hits = hits.get(n).copied().into_iter().collect();
         }
         let (id, start) = match hits.as_slice() {
-            [(id, start)] => (*id, *start),
+            [(id, Some(start))] => (*id, *start),
+            [(_, None)] => return Err(format!("span `{selector}` has no characters")),
             [] => return Err(format!("no span matches `{selector}`")),
             many => {
                 return Err(format!(

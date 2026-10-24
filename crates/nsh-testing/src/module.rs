@@ -800,6 +800,7 @@ pub struct MenuEntry {
 /// The style of a span as the app resolved it (`app.spanStyle`). Colors
 /// are `#rrggbbaa`.
 #[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
 pub struct SpanStyle {
     /// Its text color.
     pub color: String,
@@ -816,6 +817,12 @@ pub struct SpanStyle {
     pub underline: bool,
     /// Whether it is struck through.
     pub line_through: bool,
+}
+
+impl Default for SpanStyle {
+    fn default() -> Self {
+        nsh_core::ResolvedTextStyle::default().into()
+    }
 }
 
 impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
@@ -1639,7 +1646,8 @@ impl App {
     /// The style of the characters `selector` names, from the first
     /// character. `id:<testID>` names a nested text. `text:<text>` names
     /// where the text reads it. The parts before the last name the views
-    /// to look in (`id:note >> text:here`).
+    /// to look in (`id:note >> text:here`). Headless tests read this style;
+    /// an empty span reports an error because it has no first character.
     pub fn span_style(&self, selector: String) -> Result<SpanStyle, String> {
         self.with(|app| app.span_style(&selector).map(SpanStyle::from))
     }

@@ -10,6 +10,7 @@ use crate::{
 /// 8pt per char, 16pt per line, wraps at `max_width`. Counts calls.
 #[derive(Default)]
 struct FakeEngine {
+    prepares: Cell<u32>,
     measures: Cell<u32>,
     layouts: Cell<u32>,
 }
@@ -26,6 +27,7 @@ impl TextEngine for FakeEngine {
     type Prepared = (usize, Vec<u32>);
 
     fn prepare(&self, text: &AttributedText) -> (usize, Vec<u32>) {
+        self.prepares.set(self.prepares.get() + 1);
         (
             text.text.chars().count(),
             text.attachments.iter().map(|a| a.index).collect(),
@@ -387,6 +389,11 @@ fn a_spans_test_id_is_in_its_blocks_text() {
                 id: 2,
                 tag: Tag::Text,
             },
+            Op::Listen {
+                id: 2,
+                event: EventKind::TextLayout,
+                enabled: true,
+            },
             Op::CreateText {
                 id: 3,
                 text: "see ".into(),
@@ -422,6 +429,10 @@ fn a_spans_test_id_is_in_its_blocks_text() {
         ],
     );
     assert_eq!(text_of(&mut c).unwrap().test_ids, []);
+    js_events(&mut c);
+    let prepares = c.text_engine.prepares.get();
+    let layouts = c.text_engine.layouts.get();
+    let measures = c.text_engine.measures.get();
     apply(
         &mut c,
         vec![Op::SetProp {
@@ -436,6 +447,52 @@ fn a_spans_test_id_is_in_its_blocks_text() {
             end: 8,
             test_id: "docs".into(),
         }]
+    );
+    assert_eq!(
+        c.text_engine.layouts.get(),
+        layouts,
+        "test IDs are metadata, not glyphs"
+    );
+    assert_eq!(c.text_engine.prepares.get(), prepares);
+    assert_eq!(c.text_engine.measures.get(), measures);
+    assert!(js_events(&mut c).is_empty(), "no onTextLayout for test IDs");
+    for id in [Some("renamed"), None] {
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(id.map(Into::into)),
+            }],
+        );
+        let text = text_of(&mut c).unwrap();
+        assert_eq!(text.test_ids.first().map(|s| s.test_id.as_ref()), id);
+        assert_eq!(c.text_engine.layouts.get(), layouts);
+        assert_eq!(c.text_engine.prepares.get(), prepares);
+        assert_eq!(c.text_engine.measures.get(), measures);
+        assert!(js_events(&mut c).is_empty());
+    }
+    // A simultaneous content change still rebuilds the native text.
+    apply(
+        &mut c,
+        vec![
+            Op::SetText {
+                id: 5,
+                text: "updated docs".into(),
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(Some("updated".into())),
+            },
+        ],
+    );
+    let text = text_of(&mut c).unwrap();
+    assert_eq!(text.text, "see updated docs");
+    assert_eq!(text.test_ids[0].test_id.as_ref(), "updated");
+    assert!(c.text_engine.layouts.get() > layouts);
+    assert!(
+        js_events(&mut c)
+            .iter()
+            .any(|e| e.1 == EventKind::TextLayout)
     );
 }
 
@@ -17441,4 +17498,110 @@ fn audio_session_reaches_the_video() {
         })
         .expect("the video's props");
     assert_eq!(props.audio_session, crate::AudioSession::Playback);
+}
+
+#[test]
+fn span_test_ids_reuse_fitted_and_hidden_layouts() {
+    for (fit, hidden) in [(true, false), (false, true)] {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(16.0)),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::AdjustsFontSizeToFit(fit),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "long enough to shrink".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        if hidden {
+            ops.push(style_op(2, &[("display", StyleValue::Str("none"))]));
+        }
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        let (old_text, old_layout) = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text {
+                    id: 2,
+                    text,
+                    layout,
+                    ..
+                } => Some((text.clone(), layout.clone())),
+                _ => None,
+            })
+            .unwrap();
+        let counts = (
+            c.text_engine.prepares.get(),
+            c.text_engine.layouts.get(),
+            c.text_engine.measures.get(),
+        );
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(Some("cached".into())),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        let (text, layout) = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text {
+                    id: 2,
+                    text,
+                    layout,
+                    ..
+                } => Some((text, layout)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.test_ids[0].test_id.as_ref(), "cached");
+        assert_eq!(
+            text.spans, old_text.spans,
+            "keep the actual drawn font size"
+        );
+        assert!(Arc::ptr_eq(&old_layout.0, &layout.0));
+        assert_eq!(
+            (
+                c.text_engine.prepares.get(),
+                c.text_engine.layouts.get(),
+                c.text_engine.measures.get()
+            ),
+            counts
+        );
+    }
 }
