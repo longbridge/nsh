@@ -45,10 +45,9 @@ pub(crate) fn push_stops(
             x,
             trailing,
         };
-        if stops.last().is_some_and(|s| s.offset == offset) {
-            *stops.last_mut().expect("shared boundary") = stop;
-        } else {
-            stops.push(stop);
+        match stops.last_mut() {
+            Some(last) if last.offset == offset => *last = stop,
+            _ => stops.push(stop),
         }
     };
     let Some(text) = text else {

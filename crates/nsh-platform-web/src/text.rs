@@ -131,83 +131,68 @@ impl WebTextEngine {
             .get_or_init(|| {
                 let mut stops = Vec::new();
                 for part in &line.parts {
-                    // The characters of a text piece, `None` for an
-                    // attachment.
-                    let text = match &part.text {
-                        Some(t) => {
-                            let Some(text) = t
-                                .byte
-                                .checked_add(t.len)
-                                .and_then(|end| layout.runs.get(t.run)?.text.get(t.byte..end))
-                            else {
-                                log::warn!("a piece of a line lost its run");
-                                continue;
-                            };
-                            Some(text)
-                        }
-                        None => None,
-                    };
                     let Some(run) = layout.styles.get(usize::from(part.style)) else {
                         continue;
                     };
-                    match text {
-                        Some(text) => {
-                            let mut ranges = Vec::new();
-                            let (mut byte, mut unit) = (0, 0);
-                            while byte < text.len() {
-                                let next = next_cluster(text, byte);
-                                let Some(cluster) = text.get(byte..next).filter(|_| next > byte)
-                                else {
-                                    break;
-                                };
-                                let end = unit
-                                    + u32::try_from(cluster.encode_utf16().count()).unwrap_or(0);
-                                ranges.push([unit, end]);
-                                unit = end;
-                                byte = next;
-                            }
-                            let mut boxes = vec![[0.0; 2]; ranges.len()];
-                            // Include the whole drawn run: an ellipsis or a
-                            // neighbouring piece can change bidi ordering.
-                            let source = part.text.as_ref().expect("text piece");
-                            let drawn = &layout.runs[source.run];
-                            let base =
-                                u32::try_from(drawn.text[..source.byte].encode_utf16().count())
-                                    .unwrap_or(0);
-                            for range in &mut ranges {
-                                range[0] += base;
-                                range[1] += base;
-                            }
-                            ffi::text_cluster_boxes(
-                                &run.font,
-                                run.numeric.as_deref().unwrap_or(""),
-                                run.style.letter_spacing.0,
-                                &drawn.text,
-                                &ranges,
-                                &mut boxes,
-                            );
-                            let mut boxes = boxes.into_iter();
-                            hit::push_stops(
-                                &mut stops,
-                                drawn.x,
-                                part.width,
-                                part.start,
-                                Some(text),
-                                |_| {
-                                    let [left, right] = boxes.next().expect("cluster geometry");
-                                    (left, right)
-                                },
-                            );
-                        }
-                        None => hit::push_stops(
-                            &mut stops,
-                            part.x,
-                            part.width,
-                            part.start,
-                            None,
-                            |_| (0.0, 0.0),
-                        ),
+                    // An attachment: one unit, its box.
+                    let Some(t) = &part.text else {
+                        hit::push_stops(&mut stops, part.x, part.width, part.start, None, |_| {
+                            (0.0, 0.0)
+                        });
+                        continue;
+                    };
+                    // The piece's characters, its drawn run and what the
+                    // run holds before it.
+                    let Some((drawn, text, before)) = layout.runs.get(t.run).and_then(|drawn| {
+                        let end = t.byte.checked_add(t.len)?;
+                        Some((
+                            drawn,
+                            drawn.text.get(t.byte..end)?,
+                            drawn.text.get(..t.byte)?,
+                        ))
+                    }) else {
+                        log::warn!("a piece of a line lost its run");
+                        continue;
+                    };
+                    // Measured in the whole drawn run: an ellipsis or a
+                    // neighbouring piece can change bidi ordering.
+                    let base = u32::try_from(before.encode_utf16().count()).unwrap_or(0);
+                    let mut ranges = Vec::new();
+                    let (mut byte, mut unit) = (0, base);
+                    while byte < text.len() {
+                        let next = next_cluster(text, byte);
+                        let Some(cluster) = text.get(byte..next).filter(|_| next > byte) else {
+                            break;
+                        };
+                        let end = unit.saturating_add(
+                            u32::try_from(cluster.encode_utf16().count()).unwrap_or(0),
+                        );
+                        ranges.push([unit, end]);
+                        unit = end;
+                        byte = next;
                     }
+                    let mut boxes = vec![[0.0; 2]; ranges.len()];
+                    ffi::text_cluster_boxes(
+                        &run.font,
+                        run.numeric.as_deref().unwrap_or(""),
+                        run.style.letter_spacing.0,
+                        &drawn.text,
+                        &ranges,
+                        &mut boxes,
+                    );
+                    let mut boxes = boxes.into_iter();
+                    hit::push_stops(
+                        &mut stops,
+                        drawn.x,
+                        part.width,
+                        part.start,
+                        Some(text),
+                        |_| {
+                            boxes
+                                .next()
+                                .map_or((0.0, 0.0), |[left, right]| (left, right))
+                        },
+                    );
                 }
                 stops
             })
