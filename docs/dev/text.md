@@ -12,7 +12,10 @@
   caret's line-high box, and the line-high boxes a range covers, appended to the caller's buffer. Each backend's
   selection and `SelectionArea` hit-test with the same code; an engine that only reports `lines` gets an estimate
   (each line's characters spread evenly over its width). The headless engine hit-tests whole characters, 0.55 em
-  each, on its one line.
+  each, on its one line. CoreText retains original offsets for the visible suffix of head / middle
+  truncations and omits the ellipsis from range boxes; mixed-direction ranges split by visual run on both Apple
+  backends. Web hit testing measures cluster rectangles in the complete drawn DOM run on first use, keeps both
+  edges at bidi boundaries and caches them with the layout. Linux selection drawing reuses its rectangle buffer.
   A text out of the layout (`display: none` on it or on a view around it, `hidden`) is sent with an empty layout (its
   text unchanged, for tests and screen readers): its box is zero, and the web, which does not clip text to its box,
   would still draw the glyphs laid out in it.

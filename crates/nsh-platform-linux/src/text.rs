@@ -1173,6 +1173,8 @@ pub(crate) struct DrawnText {
     pub(crate) layout: TextLayout,
     /// The render node, built on first draw.
     node: OnceCell<Option<gsk::RenderNode>>,
+    /// Selection geometry reused across redraws, including selection areas.
+    selection_rects: RefCell<Vec<Bounds<Points>>>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Rc<Selection>>,
 }
@@ -1204,6 +1206,7 @@ pub(crate) fn set(
         content,
         layout: layout.clone(),
         node: OnceCell::new(),
+        selection_rects: RefCell::new(Vec::new()),
         selection,
     });
     if was != text.is_selectable() {
@@ -1251,9 +1254,10 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
             color.alpha() * 0.3,
         );
         let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
-        let mut rects = Vec::new();
+        let mut rects = drawn.selection_rects.borrow_mut();
+        rects.clear();
         layout.range_rects(range.0..range.1, &mut rects);
-        for r in rects {
+        for r in rects.iter() {
             let (x, y) = (cx + r.origin.x.0, cy + r.origin.y.0);
             snapshot.append_color(
                 &color,

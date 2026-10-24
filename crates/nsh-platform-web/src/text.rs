@@ -150,12 +150,64 @@ impl WebTextEngine {
                     let Some(run) = layout.styles.get(usize::from(part.style)) else {
                         continue;
                     };
-                    // Measured as the layout measured the piece, so the
-                    // prefixes add up to its width.
-                    let spacing = run.style.letter_spacing.0;
-                    hit::push_stops(&mut stops, part.x, part.width, part.start, text, |head| {
-                        self.run_width(run, head) + spacing * head.chars().count() as f32
-                    });
+                    match text {
+                        Some(text) => {
+                            let mut ranges = Vec::new();
+                            let (mut byte, mut unit) = (0, 0);
+                            while byte < text.len() {
+                                let next = next_cluster(text, byte);
+                                let Some(cluster) = text.get(byte..next).filter(|_| next > byte)
+                                else {
+                                    break;
+                                };
+                                let end = unit
+                                    + u32::try_from(cluster.encode_utf16().count()).unwrap_or(0);
+                                ranges.push([unit, end]);
+                                unit = end;
+                                byte = next;
+                            }
+                            let mut boxes = vec![[0.0; 2]; ranges.len()];
+                            // Include the whole drawn run: an ellipsis or a
+                            // neighbouring piece can change bidi ordering.
+                            let source = part.text.as_ref().expect("text piece");
+                            let drawn = &layout.runs[source.run];
+                            let base =
+                                u32::try_from(drawn.text[..source.byte].encode_utf16().count())
+                                    .unwrap_or(0);
+                            for range in &mut ranges {
+                                range[0] += base;
+                                range[1] += base;
+                            }
+                            ffi::text_cluster_boxes(
+                                &run.font,
+                                run.numeric.as_deref().unwrap_or(""),
+                                run.style.letter_spacing.0,
+                                &drawn.text,
+                                &ranges,
+                                &mut boxes,
+                            );
+                            let mut boxes = boxes.into_iter();
+                            hit::push_stops(
+                                &mut stops,
+                                drawn.x,
+                                part.width,
+                                part.start,
+                                Some(text),
+                                |_| {
+                                    let [left, right] = boxes.next().expect("cluster geometry");
+                                    (left, right)
+                                },
+                            );
+                        }
+                        None => hit::push_stops(
+                            &mut stops,
+                            part.x,
+                            part.width,
+                            part.start,
+                            None,
+                            |_| (0.0, 0.0),
+                        ),
+                    }
                 }
                 stops
             })
@@ -716,7 +768,7 @@ impl TextEngine for WebTextEngine {
             // Neighbouring pieces of one style draw as one run.
             let mut merge = false;
             line_pieces.clear();
-            let mut hit_parts = Vec::with_capacity(pieces.len());
+            let mut hit_parts: Vec<HitPart> = Vec::with_capacity(pieces.len());
             for part in pieces {
                 let Part {
                     text,
@@ -772,13 +824,22 @@ impl TextEngine for WebTextEngine {
                     }
                 };
                 if !ellipsis {
-                    hit_parts.push(HitPart {
-                        x,
-                        width: w,
-                        style,
-                        start,
-                        text: Some(RunText { run, byte, len }),
-                    });
+                    if let Some(last) = hit_parts.last_mut()
+                        && let Some(previous) = &mut last.text
+                        && previous.run == run
+                        && previous.byte + previous.len == byte
+                    {
+                        previous.len += len;
+                        last.width += w;
+                    } else {
+                        hit_parts.push(HitPart {
+                            x,
+                            width: w,
+                            style,
+                            start,
+                            text: Some(RunText { run, byte, len }),
+                        });
+                    }
                 }
                 merge = true;
                 x += w;

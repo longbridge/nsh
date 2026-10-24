@@ -17,7 +17,7 @@ use objc2_core_text::{
     CTFont, CTFontDescriptor, CTFontManagerRegisterFontsForURL, CTFontManagerScope,
     CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle,
     CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
-    CTRunDelegateCallbacks, CTTextAlignment, CTTypesetter, CTWritingDirection,
+    CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
     kCTFontAttributeName, kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute,
     kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute,
     kCTFontWeightTrait, kCTForegroundColorAttributeName, kCTKernAttributeName,
@@ -61,6 +61,14 @@ pub(crate) fn decoration_key() -> &'static CFString {
 fn background_key() -> &'static CFString {
     static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
     &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshBackground")))
+        .0
+}
+
+/// Attribute marking the ellipsis token of a truncated line (a `CFNumber`):
+/// its run claims the characters it cut, which are not on screen to select.
+fn ellipsis_key() -> &'static CFString {
+    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
+    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshEllipsis")))
         .0
 }
 
@@ -307,7 +315,8 @@ pub(crate) struct LaidLine {
     /// Its characters in the text (before any ellipsis).
     pub(crate) range: CFRange,
     /// Where its caret positions end: `range`'s end, before a hard break
-    /// that ends the line (the caret never goes after it).
+    /// that ends the line (the caret never goes after it). A truncated
+    /// line can display the original text's suffix, up to its full length.
     pub(crate) caret_end: CFIndex,
     /// An ellipsis stands for the text after `range`.
     pub(crate) truncated: bool,
@@ -354,6 +363,108 @@ impl LineBox<'_> {
             .clamp(self.start, self.caret_end)
     }
 
+    /// Fills `spans` with the stretches of x the characters `a..b` cover,
+    /// left to right, adjacent ones joined: one per run (bidirectional text
+    /// splits a range), through the line's end when the range goes on past
+    /// it. The ellipsis token is never covered.
+    fn spans(&self, a: usize, b: usize, spans: &mut Vec<(CGFloat, CGFloat)>) {
+        let (a, b) = (a as CFIndex, b as CFIndex);
+        let (start, end) = (self.start as CFIndex, self.end as CFIndex);
+        spans.clear();
+        let past = b > end;
+        let (a, b) = (a.max(start), b.min(end));
+        let (mut text_left, mut text_right) = (CGFloat::INFINITY, CGFloat::NEG_INFINITY);
+        let (mut first_rtl, mut last_rtl) = (false, false);
+        // SAFETY: the line's own run array (of CTRuns).
+        let runs = unsafe { self.line.line.glyph_runs() };
+        for i in 0..runs.count() {
+            // SAFETY: an index within the array.
+            let run = unsafe { &*runs.value_at_index(i).cast::<CTRun>() };
+            // SAFETY: a valid run; an immutable key of ours.
+            let (range, status, glyphs, token) = unsafe {
+                let key: *const CFString = ellipsis_key();
+                (
+                    run.string_range(),
+                    run.status(),
+                    run.glyph_count(),
+                    run.attributes().contains_ptr_key(key.cast()),
+                )
+            };
+            if token || glyphs <= 0 {
+                continue;
+            }
+            let mut origin = CGPoint::new(0.0, 0.0);
+            // SAFETY: one position (the run has a glyph) into a one-point
+            // buffer, and the whole run's width.
+            let width = unsafe {
+                run.positions(
+                    CFRange {
+                        location: 0,
+                        length: 1,
+                    },
+                    NonNull::from(&mut origin),
+                );
+                run.typographic_bounds(
+                    WHOLE,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            let (left, right) = (self.x + origin.x, self.x + origin.x + width);
+            let rtl = status.contains(CTRunStatus::RightToLeft);
+            text_left = text_left.min(left);
+            text_right = text_right.max(right);
+            let run_end = range.location + range.length;
+            if range.location <= start {
+                first_rtl = rtl;
+            }
+            if run_end >= end {
+                last_rtl = rtl;
+            }
+            let (s, e) = (a.max(range.location), b.min(run_end));
+            if s >= e {
+                continue;
+            }
+            // A run's own edges, not the offsets of the characters beyond
+            // it, which belong to the next run.
+            let edge = |index: CFIndex| {
+                if index <= range.location {
+                    if rtl { right } else { left }
+                } else if index >= run_end {
+                    if rtl { left } else { right }
+                } else {
+                    self.x_of(index as usize)
+                }
+            };
+            let (x1, x2) = (edge(s), edge(e));
+            spans.push((x1.min(x2), x1.max(x2)));
+        }
+        if spans.is_empty() {
+            return;
+        }
+        spans.sort_by(|p, q| p.0.total_cmp(&q.0));
+        if past {
+            // The line's end is its left side in right-to-left text.
+            if first_rtl && last_rtl {
+                if let Some(first) = spans.first_mut() {
+                    first.0 = text_left;
+                }
+            } else if let Some(last) = spans.last_mut() {
+                last.1 = last.1.max(text_right);
+            }
+        }
+        // `dedup_by` hands each span with the last one kept: touching spans
+        // join into it.
+        spans.dedup_by(|(left, right), kept| {
+            let joins = *left <= kept.1 + 0.01;
+            if joins {
+                kept.1 = kept.1.max(*right);
+            }
+            joins
+        });
+    }
+
     /// The bottom edge.
     pub(crate) fn bottom(&self) -> CGFloat {
         self.top + self.height
@@ -382,7 +493,11 @@ impl CoreTextLayout {
                         .typographic_bounds(&mut ascent, &mut descent, &mut leading)
                 } as CGFloat;
                 let start = usize::try_from(l.range.location).unwrap_or(0);
-                let end = start.saturating_add(usize::try_from(l.range.length).unwrap_or(0));
+                let end = if l.truncated {
+                    usize::try_from(l.caret_end).unwrap_or(start)
+                } else {
+                    start.saturating_add(usize::try_from(l.range.length).unwrap_or(0))
+                };
                 LineBox {
                     line: l,
                     start,
@@ -472,34 +587,28 @@ impl CoreTextLayout {
         if a >= b {
             return out;
         }
+        let mut spans = Vec::new();
         for l in &self.boxes() {
             if l.end <= a || l.start >= b {
                 continue;
             }
-            let (from, to) = (a.max(l.start), b.min(l.end));
-            let x1 = l.x_of(from);
-            // Through the line's end when the range goes on past it, but
-            // not through an ellipsis: it is not text.
-            let x2 = if b <= l.end {
-                l.x_of(to)
-            } else if l.line.truncated {
-                l.x_of(l.end)
-            } else {
-                l.x + l.width
-            };
-            out.push((
-                CGRect::new(
-                    CGPoint::new(x1.min(x2), l.top),
-                    CGSize::new((x2 - x1).abs(), l.height),
-                ),
-                a >= l.start,
-                b <= l.end,
-            ));
+            l.spans(a, b, &mut spans);
+            out.extend(spans.iter().map(|&(x1, x2)| {
+                (
+                    CGRect::new(CGPoint::new(x1, l.top), CGSize::new(x2 - x1, l.height)),
+                    a >= l.start && a < l.end && x1 <= l.x_of(a) && l.x_of(a) <= x2,
+                    b <= l.end && b > l.start && x1 <= l.x_of(b) && l.x_of(b) <= x2,
+                )
+            }));
         }
-        if let Some(first) = out.first_mut() {
+        if !out.iter().any(|r| r.1)
+            && let Some(first) = out.first_mut()
+        {
             first.1 = true;
         }
-        if let Some(last) = out.last_mut() {
+        if !out.iter().any(|r| r.2)
+            && let Some(last) = out.last_mut()
+        {
             last.2 = true;
         }
         out
@@ -954,6 +1063,16 @@ impl Prepared {
                     false,
                 );
             }
+            // Marks the token's run (see `ellipsis_key`).
+            CFMutableAttributedString::set_attribute(
+                Some(&token_string),
+                CFRange {
+                    location: 0,
+                    length: 1,
+                },
+                Some(ellipsis_key()),
+                Some(CFNumber::new_i32(1).as_ref()),
+            );
             let token = CTLine::with_attributed_string(&token_string);
             rest.truncated_line(width, kind, Some(&token))
         }
@@ -1084,6 +1203,7 @@ impl TextEngine for CoreTextEngine {
                 // and overflows the end (CSS), centered or not.
                 last.origin.x = x.max(0.0);
                 last.line = truncated;
+                last.caret_end = prepared.length;
                 last.truncated = true;
             }
         }
@@ -1361,5 +1481,88 @@ pub(crate) fn draw_backgrounds(
             objc2_core_graphics::CGContext::add_path(c, Some(&path));
             objc2_core_graphics::CGContext::fill_path(c);
         });
+    }
+}
+
+#[cfg(test)]
+mod hit_regressions {
+    use super::*;
+    fn layout(text: &str, ellipsize: Option<EllipsizeMode>) -> (CoreTextEngine, TextLayout) {
+        let engine = CoreTextEngine::default();
+        let mut text_value = AttributedText::default();
+        text_value.push(
+            text,
+            ResolvedTextStyle {
+                font_size: Points(20.0),
+                ..Default::default()
+            },
+        );
+        if let Some(mode) = ellipsize {
+            text_value.max_lines = 1;
+            text_value.ellipsize = mode;
+        }
+        let prepared = engine.prepare(&text_value);
+        let size = if ellipsize.is_some() {
+            Size::new(Points(65.0), Points(40.0))
+        } else {
+            engine.measure(&prepared, None)
+        };
+        let laid = engine.layout(&prepared, size);
+        (engine, laid)
+    }
+    #[test]
+    fn bidi_ranges_follow_visual_runs() {
+        let (engine, layout) = layout("abc אבג xyz", None);
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..5, &mut rects);
+        assert_eq!(
+            rects.len(),
+            2,
+            "a logical range crosses two disjoint visual runs: {rects:?}"
+        );
+        assert!(rects[0].origin.x + rects[0].size.width < rects[1].origin.x);
+        let boxes = layout
+            .downcast::<CoreTextLayout>()
+            .unwrap()
+            .range_boxes(0, 5);
+        assert_eq!(
+            boxes.iter().map(|r| (r.1, r.2)).collect::<Vec<_>>(),
+            [(true, false), (false, true)]
+        );
+    }
+    #[test]
+    fn truncated_lines_keep_visible_suffix_offsets() {
+        for mode in [EllipsizeMode::Head, EllipsizeMode::Middle] {
+            let (engine, layout) = layout("abcdefghijklmnopqrstuvwxyz", Some(mode));
+            let line = &engine.lines(&layout)[0];
+            let hit = engine.hit_test(
+                &layout,
+                Point::new(
+                    line.x + line.width - Points(1.0),
+                    line.y + line.height * 0.5,
+                ),
+            );
+            assert!(hit.offset >= 24, "{mode:?}: {hit:?}");
+            let mut rects = Vec::new();
+            engine.range_rects(&layout, 25..26, &mut rects);
+            assert!(!rects.is_empty(), "{mode:?}: visible final character");
+            let caret = engine
+                .caret_rect(&layout, TextPosition::new(26, Affinity::Downstream))
+                .unwrap();
+            assert!(
+                caret.origin.x >= line.x + line.width - Points(1.0),
+                "{mode:?}: {caret:?}"
+            );
+        }
+    }
+    #[test]
+    fn head_ellipsis_does_not_highlight_omitted_characters() {
+        let (engine, layout) = layout("abcdefghijklmnopqrstuvwxyz", Some(EllipsizeMode::Head));
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..1, &mut rects);
+        assert!(
+            rects.is_empty(),
+            "the token has no source character: {rects:?}"
+        );
     }
 }

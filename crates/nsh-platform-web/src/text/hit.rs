@@ -4,9 +4,8 @@
 //! and depends on nothing of the browser, so its tests run off WebAssembly
 //! too (`tests/text`).
 //!
-//! The layout places every piece in logical order from the line's left
-//! edge (the browser draws a run as one piece and does not move it), so
-//! the stops of a line are in logical and visual order at once.
+//! A run's logical cluster boundaries keep both visual edges: at a bidi
+//! boundary, the preceding cluster's end and the next one's start differ.
 
 use std::ops::Range;
 
@@ -23,50 +22,59 @@ pub(crate) struct Stop {
     /// The offset (UTF-16 units).
     pub(crate) offset: u32,
     pub(crate) x: f32,
+    /// The trailing edge of the cluster starting here (the next offset).
+    pub(crate) trailing: f32,
 }
 
-/// Appends the stops of one piece of a line, drawn at `x` and `width`
-/// wide, whose first character is at offset `start`: its start, the
-/// boundaries between its clusters (`prefix` measures the text before
-/// one, letter spacing included) and its end. `text` is `None` for an
-/// attachment, one unit that no stop falls inside. A stop at an offset the
-/// line has one at already (where two pieces meet) is left out.
+/// Appends a drawn run's cluster edges in logical order. `bounds` gives
+/// each cluster's visual left/right edges relative to the run (measured
+/// in the full run, so shaping and bidi reordering match what is drawn).
+/// `None` is a one-unit attachment. Joining runs replaces the shared
+/// boundary's downstream edge, retaining the preceding cluster's end.
 pub(crate) fn push_stops(
     stops: &mut Vec<Stop>,
     x: f32,
     width: f32,
     start: u32,
     text: Option<&str>,
-    mut prefix: impl FnMut(&str) -> f32,
+    mut bounds: impl FnMut(Range<usize>) -> (f32, f32),
 ) {
-    let mut push = |offset: u32, x: f32| {
-        if stops.last().is_none_or(|s| s.offset < offset) {
-            stops.push(Stop { offset, x });
+    let mut push = |offset, x, trailing| {
+        let stop = Stop {
+            offset,
+            x,
+            trailing,
+        };
+        if stops.last().is_some_and(|s| s.offset == offset) {
+            *stops.last_mut().expect("shared boundary") = stop;
+        } else {
+            stops.push(stop);
         }
     };
-    let end_x = x + width;
-    push(start, x);
     let Some(text) = text else {
-        push(start.saturating_add(1), end_x);
+        push(start, x, x + width);
+        push(start.saturating_add(1), x + width, x + width);
         return;
     };
-    let mut at = 0;
-    let mut offset = start;
+    // The absolutely placed DOM runs inherit the page's LTR base direction;
+    // strong RTL text still reorders within them.
+    let bidi = unicode_bidi::BidiInfo::new(text, Some(unicode_bidi::Level::ltr()));
+    let (mut at, mut offset, mut last) = (0, start, x);
     while at < text.len() {
         let next = next_cluster(text, at);
-        let (Some(cluster), true) = (text.get(at..next), next > at) else {
+        let Some(cluster) = text.get(at..next).filter(|_| next > at) else {
             break;
         };
-        let units = u32::try_from(cluster.encode_utf16().count()).unwrap_or(u32::MAX);
-        offset = offset.saturating_add(units);
-        match text.get(..next) {
-            // The piece's own width ends it, whatever its prefixes add up
-            // to; a prefix never goes past it.
-            Some(head) if next < text.len() => push(offset, (x + prefix(head)).min(end_x)),
-            _ => push(offset, end_x),
-        }
+        let (left, right) = bounds(at..next);
+        let rtl = bidi.levels.get(at).is_some_and(|level| level.is_rtl());
+        let (leading, trailing) = if rtl { (right, left) } else { (left, right) };
+        push(offset, x + leading, x + trailing);
+        offset = offset
+            .saturating_add(u32::try_from(cluster.encode_utf16().count()).unwrap_or(u32::MAX));
+        last = x + trailing;
         at = next;
     }
+    push(offset, last, last);
 }
 
 /// The x of the caret at `offset` on a line with `stops`: its stop, or the
@@ -79,11 +87,6 @@ fn x_of(stops: &[Stop], offset: u32, line_x: f32) -> f32 {
         .and_then(|i| stops.get(i))
         .or_else(|| stops.first())
         .map_or(line_x, |s| s.x)
-}
-
-/// The x where the drawn text of a line ends.
-fn end_x(stops: &[Stop], line_x: f32) -> f32 {
-    stops.last().map_or(line_x, |s| s.x)
 }
 
 /// The index of the line a point at height `y` lands on: the one at that
@@ -124,17 +127,37 @@ pub(crate) fn hit_test<'a>(
         };
         TextPosition::new(offset, affinity)
     };
-    if x >= end_x(stops, l.x.0) {
-        return at(l.end);
-    }
-    // The first stop right of `x` exists: `x` is left of the last one.
-    let right = stops.partition_point(|s| s.x <= x);
-    let left = right.checked_sub(1).and_then(|i| stops.get(i));
-    let offset = match (left, stops.get(right)) {
-        (Some(left), Some(right)) if x - left.x < right.x - x => left.offset,
-        (_, Some(right)) => right.offset,
-        (Some(left), None) => left.offset,
-        (None, None) => l.start,
+    let nearest = stops
+        .iter()
+        .map(|s| (s.x, s.offset))
+        .chain(
+            stops
+                .windows(2)
+                .map(|pair| (pair[0].trailing, pair[1].offset)),
+        )
+        .min_by(|a, b| {
+            (a.0 - x)
+                .abs()
+                .total_cmp(&(b.0 - x).abs())
+                .then_with(|| b.0.total_cmp(&a.0))
+        });
+    let offset = nearest.map_or(l.start, |(_, o)| o);
+    // A wrap may drop trailing spaces: past its visual end still means
+    // the logical line end, unless the run ends at the left (RTL).
+    let offset = if stops
+        .first()
+        .zip(stops.last())
+        .is_some_and(|(first, last)| {
+            last.offset < l.end
+                && if first.x <= last.x {
+                    x >= last.x
+                } else {
+                    x <= last.x
+                }
+        }) {
+        l.end
+    } else {
+        offset
     };
     at(offset)
 }
@@ -148,14 +171,25 @@ pub(crate) fn caret_rect<'a>(
 ) -> Option<Bounds<Points>> {
     let i = position.line(lines)?;
     let l = lines.get(i)?;
-    let x = x_of(stops(i), position.offset, l.x.0);
+    let edges = stops(i);
+    let x = if position.affinity == Affinity::Upstream {
+        edges
+            .windows(2)
+            .find(|pair| pair[1].offset == position.offset)
+            .map_or_else(
+                || x_of(edges, position.offset, l.x.0),
+                |pair| pair[0].trailing,
+            )
+    } else {
+        x_of(edges, position.offset, l.x.0)
+    };
     Some(Bounds::new(
         point(Points(x), l.y),
         size(Points::ZERO, l.height),
     ))
 }
 
-/// Appends the boxes of the characters of `range`, one per line, line high:
+/// Appends the visual stretches of `range`, split at bidi gaps, line high:
 /// from the range's start on the line to its end, or to the end of the
 /// line's drawn text where the range goes on past the line. A box with
 /// nothing in it (the range covers only spaces a wrap dropped) is left out.
@@ -172,18 +206,33 @@ pub(crate) fn range_rects<'a>(
         if l.start >= range.end || range.start >= l.end {
             continue;
         }
-        let stops = stops(i);
-        let x1 = x_of(stops, range.start, l.x.0);
-        let x2 = if range.end > l.end {
-            end_x(stops, l.x.0)
-        } else {
-            x_of(stops, range.end, l.x.0)
-        };
-        if x2 > x1 {
-            out.push(Bounds::new(
-                point(Points(x1), l.y),
-                size(Points(x2 - x1), l.height),
-            ));
+        let first = out.len();
+        for pair in stops(i).windows(2) {
+            if pair[0].offset < range.end && range.start < pair[1].offset {
+                let (a, b) = (pair[0].x, pair[0].trailing);
+                if (a - b).abs() > 0.001 {
+                    out.push(Bounds::new(
+                        point(Points(a.min(b)), l.y),
+                        size(Points((a - b).abs()), l.height),
+                    ));
+                }
+            }
         }
+        out[first..].sort_by(|a, b| a.origin.x.0.total_cmp(&b.origin.x.0));
+        let mut kept = first;
+        for read in first..out.len() {
+            let r = out[read];
+            if kept > first
+                && r.origin.x <= out[kept - 1].origin.x + out[kept - 1].size.width + Points(0.01)
+            {
+                let p = &mut out[kept - 1];
+                p.size.width =
+                    (p.origin.x + p.size.width).max(r.origin.x + r.size.width) - p.origin.x;
+            } else {
+                out[kept] = r;
+                kept += 1;
+            }
+        }
+        out.truncate(kept);
     }
 }

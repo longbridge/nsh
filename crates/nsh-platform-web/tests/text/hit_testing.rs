@@ -22,8 +22,14 @@ fn line(start: u32, end: u32, row: f32, chars: u32) -> TextLine {
 fn stops(start: u32, text: &str) -> Vec<Stop> {
     let mut stops = Vec::new();
     let width = text.chars().count() as f32 * 10.0;
-    push_stops(&mut stops, 0.0, width, start, Some(text), |head| {
-        head.chars().count() as f32 * 10.0
+    push_stops(&mut stops, 0.0, width, start, Some(text), |range| {
+        let a = text[..range.start].chars().count() as f32 * 10.0;
+        let b = text[..range.end].chars().count() as f32 * 10.0;
+        if text == "אב" {
+            (width - b, width - a)
+        } else {
+            (a, b)
+        }
     });
     stops
 }
@@ -170,9 +176,66 @@ fn a_caret_inside_a_cluster_stands_before_it() {
 #[test]
 fn attachments_are_one_unit_and_pieces_share_their_join() {
     let mut s = Vec::new();
-    push_stops(&mut s, 0.0, 20.0, 0, Some("ab"), |h| h.len() as f32 * 10.0);
-    push_stops(&mut s, 20.0, 15.0, 2, None, |_| 0.0);
-    push_stops(&mut s, 35.0, 10.0, 3, Some("c"), |_| 0.0);
+    push_stops(&mut s, 0.0, 20.0, 0, Some("ab"), |r| {
+        (r.start as f32 * 10.0, r.end as f32 * 10.0)
+    });
+    push_stops(&mut s, 20.0, 15.0, 2, None, |_| (0.0, 0.0));
+    push_stops(&mut s, 35.0, 10.0, 3, Some("c"), |_| (0.0, 10.0));
     let got: Vec<_> = s.iter().map(|s| (s.offset, s.x)).collect();
     assert_eq!(got, [(0, 0.0), (1, 10.0), (2, 20.0), (3, 35.0), (4, 45.0)]);
+}
+
+#[test]
+fn rtl_carets_and_ranges_follow_the_drawn_characters() {
+    let lines = [line(0, 2, 0.0, 2)];
+    let s = [stops(0, "אב")];
+    let c = caret_rect(&lines, |i| s[i].as_slice(), TextPosition::default()).unwrap();
+    assert_eq!(c.origin.x, Points(20.0));
+    assert_eq!(
+        hit_test(&lines, |i| s[i].as_slice(), point(Points(1.0), Points(5.0))).offset,
+        2
+    );
+    let mut out = Vec::new();
+    range_rects(&lines, |i| s[i].as_slice(), 0..1, &mut out);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].origin.x, Points(10.0));
+}
+
+#[test]
+fn mixed_direction_ranges_keep_their_visual_gaps() {
+    let text = "abc אבג xyz";
+    let mut edges = Vec::new();
+    push_stops(&mut edges, 0.0, 110.0, 0, Some(text), |r| {
+        let i = text[..r.start].chars().count();
+        let left = match i {
+            4..=6 => (10 - i) * 10,
+            _ => i * 10,
+        } as f32;
+        (left, left + 10.0)
+    });
+    let lines = [line(0, 11, 0.0, 11)];
+    let mut boxes = Vec::new();
+    range_rects(&lines, |_| &edges, 0..5, &mut boxes);
+    assert_eq!(
+        boxes
+            .iter()
+            .map(|b| (b.origin.x.0, b.size.width.0))
+            .collect::<Vec<_>>(),
+        [(0.0, 40.0), (60.0, 10.0)]
+    );
+    let caret = |affinity| {
+        caret_rect(&lines, |_| &edges, TextPosition::new(4, affinity))
+            .unwrap()
+            .origin
+            .x
+    };
+    assert_eq!(caret(Affinity::Downstream), Points(70.0));
+    assert_eq!(caret(Affinity::Upstream), Points(40.0));
+}
+#[test]
+fn rtl_wraps_drop_spaces_at_the_visual_left() {
+    let lines = [line(0, 3, 0.0, 2), line(3, 4, 1.0, 1)];
+    let edges = [stops(0, "אב"), stops(3, "a")];
+    let hit = hit_test(&lines, |i| &edges[i], point(Points(-10.0), Points(5.0)));
+    assert_eq!(hit, TextPosition::new(3, Affinity::Upstream));
 }

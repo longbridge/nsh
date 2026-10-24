@@ -314,6 +314,8 @@ pub(crate) struct LaidLine {
     /// How many of its last characters (UTF-16 units) are a hard line break
     /// (`\n`, `\r\n`, ...): the caret goes before them, never after.
     pub(crate) break_len: CFIndex,
+    /// End of the source a truncated line can display, including its suffix.
+    hit_end: CFIndex,
 }
 
 /// Finished lines, drawn by [`draw`] on the main thread.
@@ -838,6 +840,7 @@ impl TextEngine for CoreTextEngine {
                         origin: origins[i as usize],
                         range,
                         break_len: break_len(attributed, range),
+                        hit_end: range.location + range.length,
                     }
                 })
                 .collect::<Vec<_>>()
@@ -859,6 +862,8 @@ impl TextEngine for CoreTextEngine {
                 // and overflows the end (CSS), centered or not.
                 last.origin.x = x.max(0.0);
                 last.line = truncated;
+                last.hit_end = prepared.length;
+                last.break_len = 0;
             }
         }
         let attachments = if prepared.attachments.is_empty() {
@@ -1296,7 +1301,7 @@ impl<'a> LineBox<'a> {
                 .typographic_bounds(&mut ascent, &mut descent, &mut leading)
         };
         let start = l.range.location.max(0);
-        let end = start + l.range.length.max(0);
+        let end = l.hit_end.max(start);
         LineBox {
             line: &l.line,
             start,
@@ -1439,14 +1444,6 @@ impl<'a> LineBox<'a> {
             spans.push((x1.min(x2), x1.max(x2)));
         }
         if spans.is_empty() {
-            // No glyphs (an empty line): where the characters would be.
-            let x1 = self.x_of(a);
-            let x2 = if past {
-                self.x + self.width
-            } else {
-                self.x_of(b)
-            };
-            spans.push((x1.min(x2), x1.max(x2)));
             return;
         }
         spans.sort_by(|p, q| p.0.total_cmp(&q.0));
@@ -1563,7 +1560,7 @@ impl CoreTextLayout {
             .iter()
             .map(|l| nsh_core::TextLine {
                 start: to_offset(l.range.location),
-                end: to_offset(l.range.location.saturating_add(l.range.length)),
+                end: to_offset(l.hit_end),
                 ..Default::default()
             })
             .collect();
@@ -2273,5 +2270,80 @@ mod tests {
 
         let (baseline, top, _, _) = place(VerticalAlign::Middle);
         assert!(near(top + 15.0, baseline - x / 2.0), "{top} {baseline}");
+    }
+}
+
+#[cfg(test)]
+mod hit_regressions {
+    use super::*;
+    fn layout(text: &str, ellipsize: Option<EllipsizeMode>) -> (CoreTextEngine, TextLayout) {
+        let engine = CoreTextEngine::default();
+        let mut text_value = AttributedText::default();
+        text_value.push(
+            text,
+            ResolvedTextStyle {
+                font_size: Points(20.0),
+                ..Default::default()
+            },
+        );
+        if let Some(mode) = ellipsize {
+            text_value.max_lines = 1;
+            text_value.ellipsize = mode;
+        }
+        let prepared = engine.prepare(&text_value);
+        let size = if ellipsize.is_some() {
+            Size::new(Points(65.0), Points(40.0))
+        } else {
+            engine.measure(&prepared, None)
+        };
+        let laid = engine.layout(&prepared, size);
+        (engine, laid)
+    }
+    #[test]
+    fn bidi_ranges_follow_visual_runs() {
+        let (engine, layout) = layout("abc אבג xyz", None);
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..5, &mut rects);
+        assert_eq!(
+            rects.len(),
+            2,
+            "a logical range crosses two disjoint visual runs: {rects:?}"
+        );
+        assert!(rects[0].origin.x + rects[0].size.width < rects[1].origin.x);
+    }
+    #[test]
+    fn truncated_lines_keep_visible_suffix_offsets() {
+        for mode in [EllipsizeMode::Head, EllipsizeMode::Middle] {
+            let (engine, layout) = layout("abcdefghijklmnopqrstuvwxyz", Some(mode));
+            let line = &engine.lines(&layout)[0];
+            let hit = engine.hit_test(
+                &layout,
+                Point::new(
+                    line.x + line.width - Points(1.0),
+                    line.y + line.height * 0.5,
+                ),
+            );
+            assert!(hit.offset >= 24, "{mode:?}: {hit:?}");
+            let mut rects = Vec::new();
+            engine.range_rects(&layout, 25..26, &mut rects);
+            assert!(!rects.is_empty(), "{mode:?}: visible final character");
+            let caret = engine
+                .caret_rect(&layout, TextPosition::new(26, Affinity::Downstream))
+                .unwrap();
+            assert!(
+                caret.origin.x >= line.x + line.width - Points(1.0),
+                "{mode:?}: {caret:?}"
+            );
+        }
+    }
+    #[test]
+    fn head_ellipsis_does_not_highlight_omitted_characters() {
+        let (engine, layout) = layout("abcdefghijklmnopqrstuvwxyz", Some(EllipsizeMode::Head));
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..1, &mut rects);
+        assert!(
+            rects.is_empty(),
+            "the token has no source character: {rects:?}"
+        );
     }
 }
