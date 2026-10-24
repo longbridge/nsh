@@ -1468,6 +1468,10 @@ fn down(
     };
     let input = &surface.input;
     input.js_block.set(false);
+    // A press stops the momentum a trackpad flick left running, wherever
+    // it lands; the press still registers (`catch` below is for the app's
+    // own glides on views under the pointer, and swallows it).
+    end_momentum(surface);
     let native = hit.native;
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
