@@ -177,7 +177,8 @@ through NSH's hit testing to web views, as real input does):
 - typing goes into the focused field key by key (`text_input::char_input`), or into the page of a focused web view
   (posted to its window as `WM_CHAR`s); Return, Backspace and select all (Ctrl+A) go through `input::key`, and keys
   without modifiers to a focused page;
-- a scroll is precision touchpad events of at most 20 points, a frame apart;
+- a scroll is precision touchpad events of at most 20 points, one per display refresh (`DwmFlush`: a 16 ms sleep,
+  rounded up by Win32's ~15.6 ms timers, sent fewer events than the display shows frames);
 - a dialog's button is pressed at its laid-out middle (`system::dialog_point`), or outside the card to close it;
 - a screenshot is what the window shows, web views and their layers included, at the window's scale: `PrintWindow`
   with `PW_RENDERFULLCONTENT`, which composes the window's swap chain and DirectComposition content as DWM does,
