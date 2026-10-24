@@ -99,8 +99,10 @@ fn line_at(lines: &[TextLine], y: Points) -> Option<usize> {
 }
 
 /// The caret position nearest `p` (content box): on the line at its
-/// height, at the stop nearest its x. Past the end of a line, the line's
-/// end offset: [`Affinity::Upstream`] where the line wrapped (the next line
+/// height, at the edge nearest its x. A cluster's trailing edge is the
+/// next offset with [`Affinity::Upstream`] (at a bidi boundary it is not
+/// where that offset's own cluster starts). Past the end of a line, the
+/// line's end offset: upstream where the line wrapped (the next line
 /// starts there), so the caret stays on this line, and before the break
 /// character where it ended at one. `stops(i)` are the stops of line `i`.
 pub(crate) fn hit_test<'a>(
@@ -119,32 +121,32 @@ pub(crate) fn hit_test<'a>(
     // Where the line wrapped, its end is also the next line's start: the
     // caret at it stays on this line (upstream).
     let wrapped = l.end > l.start && lines.get(i + 1).is_some_and(|next| next.start == l.end);
-    let at = |offset: u32| {
-        let affinity = if wrapped && offset == l.end {
-            Affinity::Upstream
-        } else {
-            Affinity::Downstream
-        };
-        TextPosition::new(offset, affinity)
-    };
+    // Leading edges first: where both edges of an offset stand at the same
+    // x the first minimum, downstream, wins. A trailing edge apart from the
+    // next offset's own (a bidi boundary) is that offset upstream; within
+    // half a point, measurement noise, it is the same caret.
     let nearest = stops
         .iter()
-        .map(|s| (s.x, s.offset))
-        .chain(
-            stops
-                .windows(2)
-                .map(|pair| (pair[0].trailing, pair[1].offset)),
-        )
+        .map(|s| (s.x, s.offset, Affinity::Downstream))
+        .chain(stops.windows(2).map(|pair| {
+            let apart = (pair[0].trailing - pair[1].x).abs() > 0.5;
+            let affinity = if apart {
+                Affinity::Upstream
+            } else {
+                Affinity::Downstream
+            };
+            (pair[0].trailing, pair[1].offset, affinity)
+        }))
         .min_by(|a, b| {
             (a.0 - x)
                 .abs()
                 .total_cmp(&(b.0 - x).abs())
                 .then_with(|| b.0.total_cmp(&a.0))
         });
-    let offset = nearest.map_or(l.start, |(_, o)| o);
+    let (offset, affinity) = nearest.map_or((l.start, Affinity::Downstream), |(_, o, a)| (o, a));
     // A wrap may drop trailing spaces: past its visual end still means
     // the logical line end, unless the run ends at the left (RTL).
-    let offset = if stops
+    let past_end = stops
         .first()
         .zip(stops.last())
         .is_some_and(|(first, last)| {
@@ -154,12 +156,21 @@ pub(crate) fn hit_test<'a>(
                 } else {
                     x <= last.x
                 }
-        }) {
-        l.end
+        });
+    let (offset, affinity) = if past_end {
+        (l.end, Affinity::Downstream)
     } else {
-        offset
+        (offset, affinity)
     };
-    at(offset)
+    let affinity = if wrapped && offset == l.end {
+        Affinity::Upstream
+    } else if offset == l.end {
+        // The end of a line that did not wrap belongs to it either way.
+        Affinity::Downstream
+    } else {
+        affinity
+    };
+    TextPosition::new(offset, affinity)
 }
 
 /// The caret at `position`: zero wide, as high as its line, at the stop of

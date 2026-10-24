@@ -201,8 +201,9 @@ fn rtl_carets_and_ranges_follow_the_drawn_characters() {
     assert_eq!(out[0].origin.x, Points(10.0));
 }
 
-#[test]
-fn mixed_direction_ranges_keep_their_visual_gaps() {
+/// "abc אבג xyz" on one line: the Hebrew drawn right to left between
+/// x=40 and x=70, so offset 4 starts at x=70 while "c " ends at x=40.
+fn mixed() -> ([TextLine; 1], Vec<Stop>) {
     let text = "abc אבג xyz";
     let mut edges = Vec::new();
     push_stops(&mut edges, 0.0, 110.0, 0, Some(text), |r| {
@@ -213,7 +214,12 @@ fn mixed_direction_ranges_keep_their_visual_gaps() {
         } as f32;
         (left, left + 10.0)
     });
-    let lines = [line(0, 11, 0.0, 11)];
+    ([line(0, 11, 0.0, 11)], edges)
+}
+
+#[test]
+fn mixed_direction_ranges_keep_their_visual_gaps() {
+    let (lines, edges) = mixed();
     let mut boxes = Vec::new();
     range_rects(&lines, |_| &edges, 0..5, &mut boxes);
     assert_eq!(
@@ -231,6 +237,31 @@ fn mixed_direction_ranges_keep_their_visual_gaps() {
     };
     assert_eq!(caret(Affinity::Downstream), Points(70.0));
     assert_eq!(caret(Affinity::Upstream), Points(40.0));
+}
+
+#[test]
+fn hits_at_a_bidi_boundary_keep_the_edge_they_land_on() {
+    let (lines, edges) = mixed();
+    let caret_at = |x: f32| {
+        let at = hit_test(&lines, |_| &edges, point(Points(x), Points(5.0)));
+        let c = caret_rect(&lines, |_| &edges, at).expect("lines");
+        (at, c.origin.x)
+    };
+    // After "abc ": the space's trailing edge, offset 4 upstream.
+    assert_eq!(
+        caret_at(40.0),
+        (TextPosition::new(4, Affinity::Upstream), Points(40.0))
+    );
+    // The leading edge of "א": offset 4 downstream.
+    assert_eq!(
+        caret_at(70.0),
+        (TextPosition::new(4, Affinity::Downstream), Points(70.0))
+    );
+    // Where both edges of an offset meet, downstream.
+    assert_eq!(
+        caret_at(21.0),
+        (TextPosition::new(2, Affinity::Downstream), Points(20.0))
+    );
 }
 #[test]
 fn rtl_wraps_drop_spaces_at_the_visual_left() {
