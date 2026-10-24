@@ -103,9 +103,9 @@ pub use crate::{
         TextStyle, TextTransform, TransformOrigin, VerticalAlign, ViewStyle,
     },
     text::{
-        ATTACHMENT_CHAR, ApproxTextEngine, AttachmentAlignments, AttributedText, BackgroundBox,
-        FontExtent, LinePiece, ResolvedTextStyle, TextAttachment, TextBackground, TextEngine,
-        TextLayout, TextLine, TextLink, TextSpan,
+        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
+        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, TextAttachment, TextBackground,
+        TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
     },
     transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
 };

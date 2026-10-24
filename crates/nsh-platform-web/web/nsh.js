@@ -506,10 +506,29 @@ function measureNumericText(font, numeric, text) {
     document.body.append(box);
   }
   // `font` resets the variant: set it first, as the run's CSS does.
+  numericSpan.style.letterSpacing = "normal";
   numericSpan.style.font = font;
   numericSpan.style.fontVariantNumeric = numeric;
   numericSpan.textContent = text;
   return numericSpan.getBoundingClientRect().width;
+}
+
+/** Cluster rectangles in a complete drawn run. Reuse the measuring span;
+ * range queries keep shaping and bidi ordering exactly as the DOM draws them.
+ * Only the first hit test of a layout pays for these measurements. */
+function textClusterBoxes(font, numeric, spacing, text, ranges) {
+  measureNumericText(font, numeric || "normal", text);
+  numericSpan.style.direction = "ltr";
+  numericSpan.style.letterSpacing = `${spacing}px`;
+  const origin = numericSpan.getBoundingClientRect().left;
+  const node = numericSpan.firstChild;
+  const range = document.createRange();
+  return ranges.map(([start, end]) => {
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const box = range.getBoundingClientRect();
+    return [box.left - origin, box.right - origin];
+  });
 }
 
 /** Whether `locale`'s script is written right to left. */
@@ -640,6 +659,14 @@ class Player {
           if (width != null) return width;
           this.measure.font = font;
           return this.measure.measureText(text).width;
+        },
+        text_cluster_boxes: (fp, fl, np, nl, spacing, tp, tl, rp, op, count) => {
+          const input = new Uint32Array(this.wasm.memory.buffer, rp, count * 2);
+          const ranges = Array.from({ length: count }, (_, i) => [input[2*i], input[2*i+1]]);
+          const boxes = textClusterBoxes(this.str(fp, fl), this.str(np, nl), spacing, this.str(tp, tl), ranges);
+          // DOM layout cannot grow wasm memory, so this view stays valid.
+          const output = new Float32Array(this.wasm.memory.buffer, op, count * 2);
+          boxes.forEach(([left, right], i) => { output[2*i] = left; output[2*i+1] = right; });
         },
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
