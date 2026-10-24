@@ -22,6 +22,18 @@ the native runtime and platform backends. Preserve and improve these capabilitie
 the app. Check the affected platform's documented support rather than assuming every backend has identical system
 integration. See [Input](website/elements/input.md) and [Goals and design principles](website/docs/goals.md).
 
+NSH provides the primitives and unstyled foundation, corresponding to GPUI Kit's `gpui` and `gpui-base` layers.
+The styled-library role of `gpui-component` belongs to applications and third-party libraries. `nsh/base` should
+solve complex behavior, reactive state, input, focus, accessibility and adaptive presentation, with tests at the
+owning layer and customization through states, slots and parts. This includes complex workspace components such
+as `DockArea`; complexity is a reason to share behavior, not to prescribe appearance.
+
+Website demos and Gallery are example applications. Their gradients, shadows, radii and motion exercise the
+framework's customization capabilities; they are not default styling for the base components. Keep visual
+experiments in examples and styled application/community components. Component implementations and PRs must
+preserve this separation, including the existing documented exceptions for system-managed presentation and
+`TextView` reading defaults.
+
 Apply these boundaries when proposing components:
 
 - **Common controls have one shared API.** Extend `nsh/base`'s `Switch`, `Button`, `Checkbox` and similar components.

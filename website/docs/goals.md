@@ -38,6 +38,20 @@ Common controls have one cross-platform home in `nsh/base`. Platform modules are
 
 A shared component can adapt its interaction internally: a menu opens as a popup on a desktop and a sheet on a phone, while the app uses one API and supplies its appearance. System-managed presentations such as navigation headers and alerts follow their documented platform presentation rules. Apps can expose their own native components and services through the [embedding interfaces](./native-components.md).
 
+## The unstyled foundation and the component-library layer
+
+NSH owns the primitives and the unstyled foundation (`nsh-core` and `nsh-base`). Applications and third-party libraries own the styled component-library layer — the role `gpui-component` plays in GPUI Kit. This division gives each product control over its visual language while reusing the difficult parts of component implementation.
+
+The experience behind this choice comes from GPUI Kit. Its styled components grew from work on Longbridge Pro. As applications needed increasingly different designs, customization pressure led users to fork components. Extracting the shared foundation into `gpui-base` made behavior reusable across those designs. Styled components remain useful as a design reference and for applications whose needs fit their customization surface; the foundation gives other applications direct control over presentation.
+
+NSH applies this lesson from the start. `nsh/base` owns complex behavior, interaction, reactive state, focus, accessibility and adaptive presentation, with tests at the layer that owns each behavior. This includes larger structures such as [DockArea](../elements/dock.md). Applications build diverse designs on that foundation through styles, states, slots and parts. Component contributions follow the same boundary: visual defaults and branded variants belong to application or third-party components. The documented system-managed presentations and `TextView` reading defaults retain their specific contracts ([Architecture](./architecture.md#three-layers)).
+
+### What the Gallery demonstrates
+
+The website demos and Gallery are styled example applications. Their gradients, shadows, rounded corners, transitions and motion exercise NSH's customization capabilities and provide source examples. Those choices belong to the demos and Gallery; the reusable base components expose the behavior and parts underneath them. Applications can borrow the examples or build a different visual language.
+
+An independently distributed styled library would belong to the application/community layer described above. Gallery styling illustrates one design direction; suitability for a particular product is a design decision for that product.
+
 ## Rust and TSX on one engine
 
 Rust apps, TSX screens and mixed projects share primitives, base components, signals and layout. Rust provides compiled application logic and reusable native components. TSX supports rapid iteration and modules delivered at run time ([Building with Rust](./rust.md)).
