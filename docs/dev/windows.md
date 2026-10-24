@@ -41,9 +41,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 
 - **One retained view per node, one window per surface.** Each node is an `NshView` (`view.rs`): an `Rc` node with
   its `ViewState` (frame, style, animated values, content), its children in drawing order and a weak parent. A
-  surface's window draws its whole tree with Direct2D into a flip-model swap chain (`render.rs`); NSH content needs
-  no child windows. Changing a view (`changed` / `moved`) invalidates the window; `WM_PAINT` draws the tree once,
-  however many views changed. Only native components that bring a window of their own are child `HWND`s, and they
+  surface's window draws its tree with Direct2D into a flip-model swap chain (`render.rs`); NSH content needs
+  no child windows. Changing a view (`changed` / `moved`) queues it on its surface and invalidates the window;
+  `WM_PAINT` draws once, however many views changed, only where they changed ("Partial frames", below). Only native components that bring a window of their own are child `HWND`s, and they
   sit above everything NSH draws (the "airspace" limit, below).
 - **Window composition for web views** (`compose.rs`). A window without web views has no composition: one swap
   chain, drawn and presented as above. The first web view makes a DirectComposition target on the window (above
@@ -210,10 +210,39 @@ the process' CPU (`GetProcessTimes`) and working set. While it measures, the tic
 close the frames. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
 Windows).
 
-A window is drawn whole on every frame (the swap chain is `FLIP_DISCARD`): what a frame costs grows with what the
-window shows, ~2.7 ms of `paint` for the gallery's Stocks page (~690 views) at 1200 × 800 points on a 150% display, and
-~1–2 ms for most pages. Three things keep it down: canvases record their animated tail only (see the table above),
-views without content of their own push no clip, and the children of a clipping view out of sight are not drawn.
+### Partial frames
+
+A frame draws only what changed since the back buffer was last drawn, and presents only what changed since the last
+frame:
+
+- **What changed** (`Surface::take_damage`): `NshView::changed` (and `moved`, which every frame, style, content,
+  animation, transition and scroll change goes through) puts the view on its surface's list. A view records where the
+  window's frame painted it (`set_painted`: its bounds out by shadows and outline, with the items it hosts, clipped
+  to what was visible; in a pass drawn offscreen for a filter or a 3D transform, that view's area). The damage of a
+  changed view is where it and its subtree were painted (`painted_subtree`) and where its subtree draws now
+  (`to_root` and `drawn_area`). A view taken out of its parent queues itself before it leaves; one inserted queues
+  itself after. The mounter queues the view of every applied item that may change what is drawn (`mount.rs`
+  `redrawn`), whatever applied it, and an item for the whole window (`Appearance`, `LayoutDirection`)
+  invalidates all of it. `Surface::invalidate` (theme, size, scale, chrome, device loss, composition) draws the
+  whole window; so do a change below a projective transform or in a subtree whose area is not known (a hosted item:
+  text editors, alerts), and the system's own `WM_PAINT` with nothing queued.
+- **What is drawn** (`render::frame`): the swap chain is `FLIP_SEQUENTIAL` with two buffers, so the back buffer
+  holds the frame of two presents ago and a frame draws its own damage and the last frame's (`SwapChain::to_draw`;
+  a new or resized chain, a window with web views and the frame after a whole one draw everything). The rectangles,
+  in pixels, are merged where they touch or their union costs nothing, then the cheapest pairs until at most 24 are
+  left (`merged`). The tree is drawn once into them: an axis-aligned clip for one, a layer masked by a geometry
+  group of rectangles for several (pushed on the context's stack, so `flatten` keeps it; `DrawCx::clip_skip` keeps
+  it out of what views record as visible), cleared to the window's background first. A view whose own area meets
+  none of the rectangles is left out with its subtree when it clips its children or has none.
+- **What is presented**: `Present1` with the frame's own changed rectangles, so DWM composes only those.
+
+`render.rs`'s `a_partial_frame_draws_what_a_whole_one_does` draws a tree whole, changes it (a move, a color, a
+removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives.
+
+What a frame costs then follows what changed: the gallery's Stocks page (~690 views, 1200 × 800 points on a 150%
+display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live point), drawn in ~1.4 ms of
+`paint`. Canvases record their animated tail only (see the table above), views without content of their
+own push no clip, and the children of a clipping view out of sight are not drawn.
 
 ## Not implemented, or different
 
