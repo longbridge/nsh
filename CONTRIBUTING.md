@@ -22,7 +22,7 @@ the native runtime and platform backends. Preserve and improve these capabilitie
 the app. Check the affected platform's documented support rather than assuming every backend has identical system
 integration. See [Input](website/elements/input.md) and [Goals and design principles](website/docs/goals.md).
 
-NSH provides the primitives and unstyled foundation, corresponding to GPUI Kit's `gpui` and `gpui-base` layers.
+NSH provides the primitives and unstyled foundation, corresponding to [GPUI Kit](https://gpui-kit.com)'s `gpui` and `gpui-base` layers.
 The styled-library role of `gpui-component` belongs to applications and third-party libraries. `nsh/base` should
 solve complex behavior, reactive state, input, focus, accessibility and adaptive presentation, with tests at the
 owning layer and customization through states, slots and parts. This includes complex workspace components such
@@ -49,7 +49,7 @@ Apply these boundaries when proposing components:
 - **Validate the integration.** Check input, keyboard and focus behavior, accessibility, intrinsic measurement,
   controlled state and customization on the affected targets, alongside the public API and compatibility checks.
 
-GPUI Kit's separation of unstyled behavior and app-owned appearance informs NSH's component layers. NSH's platform
+[GPUI Kit](https://gpui-kit.com)'s separation of unstyled behavior and app-owned appearance informs NSH's component layers. NSH's platform
 backends additionally integrate with platform view and text-input infrastructure. Custom-rendered frameworks must
 supply their own integration with those services; rendering architecture alone does not establish whether a
 particular framework supports accessibility or autofill.

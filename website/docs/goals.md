@@ -21,7 +21,7 @@ The native foundation includes rendering, frame-driven animation, input and acce
 
 This is an architectural distinction from drawing a text field entirely within a custom renderer: a custom renderer supplies its own integration with system editing and accessibility services, while NSH uses platform text controls where its backend provides them. Each backend's documentation defines its integration, including NSH's own editor on Windows and the GPUI embedding backend ([Platforms](./platforms.md)).
 
-GPUI Kit's separation of component behavior from visual design informs NSH's layers. NSH builds on that principle with platform view and input infrastructure. Native integration and app-owned design work together throughout this model.
+[GPUI Kit](https://gpui-kit.com)'s separation of component behavior from visual design informs NSH's layers. NSH builds on that principle with platform view and input infrastructure. Native integration and app-owned design work together throughout this model.
 
 ## One component model across platforms
 
@@ -40,9 +40,9 @@ A shared component can adapt its interaction internally: a menu opens as a popup
 
 ## The unstyled foundation and the component-library layer
 
-NSH owns the primitives and the unstyled foundation (`nsh-core` and `nsh-base`). Applications and third-party libraries own the styled component-library layer — the role `gpui-component` plays in GPUI Kit. This division gives each product control over its visual language while reusing the difficult parts of component implementation.
+NSH owns the primitives and the unstyled foundation (`nsh-core` and `nsh-base`). Applications and third-party libraries own the styled component-library layer — the role `gpui-component` plays in [GPUI Kit](https://gpui-kit.com). This division gives each product control over its visual language while reusing the difficult parts of component implementation.
 
-The experience behind this choice comes from GPUI Kit. Its styled components grew from work on Longbridge Pro. As applications needed increasingly different designs, customization pressure led users to fork components. Extracting the shared foundation into `gpui-base` made behavior reusable across those designs. Styled components remain useful as a design reference and for applications whose needs fit their customization surface; the foundation gives other applications direct control over presentation.
+The experience behind this choice comes from [GPUI Kit](https://gpui-kit.com). Its styled components grew from work on Longbridge Pro. As applications needed increasingly different designs, customization pressure led users to fork components. Extracting the shared foundation into `gpui-base` made behavior reusable across those designs. Styled components remain useful as a design reference and for applications whose needs fit their customization surface; the foundation gives other applications direct control over presentation.
 
 NSH applies this lesson from the start. `nsh/base` owns complex behavior, interaction, reactive state, focus, accessibility and adaptive presentation, with tests at the layer that owns each behavior. This includes larger structures such as [DockArea](../elements/dock.md). Applications build diverse designs on that foundation through styles, states, slots and parts. Component contributions follow the same boundary: visual defaults and branded variants belong to application or third-party components. The documented system-managed presentations and `TextView` reading defaults retain their specific contracts ([Architecture](./architecture.md#three-layers)).
 
