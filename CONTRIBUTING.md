@@ -26,7 +26,7 @@ NSH provides the primitives and unstyled foundation, corresponding to [GPUI Kit]
 The styled-library role of `gpui-component` belongs to applications and third-party libraries. `nsh/base` should
 solve complex behavior, reactive state, input, focus, accessibility and adaptive presentation, with tests at the
 owning layer and customization through states, slots and parts. This includes complex workspace components such
-as `DockArea`; complexity is a reason to share behavior, not to prescribe appearance.
+as `Dock`; complexity is a reason to share behavior, not to prescribe appearance.
 
 Website demos and Gallery are example applications. Their gradients, shadows, radii and motion exercise the
 framework's customization capabilities; they are not default styling for the base components. Keep visual
