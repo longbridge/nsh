@@ -32,7 +32,8 @@ use objc2_ui_kit::{
     UIGestureRecognizerDelegate, UIInterfaceOrientationMask, UIModalPresentationStyle,
     UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
     UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
-    UIPresentationController, UIResponder, UIView, UIViewAutoresizing, UIViewController,
+    UIPresentationController, UIResponder, UIScrollView, UIView, UIViewAutoresizing,
+    UIViewController,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -583,6 +584,24 @@ define_class!(
             // hierarchy after `reconcile` has sized what was there: the one
             // it brought in is only reachable here.
             size_screens(nav);
+            // A drag that starts at the screen's edge belongs to the stack: the
+            // page's scroll view waits for the back gesture to fail before it
+            // pans, so a swipe at the edge goes back instead of scrolling the
+            // page sideways.
+            if let Some(pop) = nav.interactivePopGestureRecognizer()
+                && let Some(view) = nav.topViewController().and_then(|c| c.view())
+            {
+                let mut pending = vec![view];
+                while let Some(view) = pending.pop() {
+                    if let Some(scroll) = view.downcast_ref::<UIScrollView>() {
+                        let pan = scroll.panGestureRecognizer();
+                        pan.requireGestureRecognizerToFail(&pop);
+                    }
+                    for sub in view.subviews().iter() {
+                        pending.push(sub.clone());
+                    }
+                }
+            }
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
             // UIKit installs its own pop delegate while loading the navigation
