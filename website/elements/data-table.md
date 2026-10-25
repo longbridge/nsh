@@ -150,14 +150,20 @@ Three switches decide what a press selects, as in gpui-component:
 
 With `cellSelectable` and the row header hidden (`rowHeader={false}`), pressing the selected cell again selects its
 row. A press with Shift or the platform's command key held selects a row only while `selectOnModifierPress` (default
-`true`), so an app that keeps its own multi-row selection handles those presses itself. A column whose `selectable` is
+`true`), so an app that keeps its own multi-row selection handles those presses itself: `onRowPress` reports every
+press of the body with its row, the column under the pointer, the clicks in a row and the modifier keys held. A column whose `selectable` is
 `false` selects neither itself nor its cells.
 
 Rows count from 0 in the data, and a column is its index among `columns`, whatever order the user moved them to.
 `onSelectionChange` reports what the user selected (`null` for nothing). The `selection` prop sets the selection from
 the app; leave it unset and the table keeps it. `onDoublePress` reports a row, a cell or a title pressed twice, and
 `onContextMenu` a secondary or long press with the point to open the app's [`Menu`](./menu.md) at. Both name the
-cell under the pointer (its `row` and `column`), a row's number (`row` only) or a title (`column` only).
+cell under the pointer (its `row` and `column`), a row's number (`row` only) or a title (`column` only). Until the next
+press, the cell a menu was asked for has the `cellActive` part, or its row the `rowActive` part where cells do not
+select.
+
+Screen readers get a grid (named by `accessibilityLabel`) of column headers and cells, the selected ones said to be
+selected.
 
 ## Keyboard
 
@@ -172,7 +178,7 @@ Pressing the table gives it the keyboard until another press or `blur()`; `focus
 | Escape | Clears the selection, then gives the keyboard back. |
 | Copy shortcut | Puts the selection's text on the clipboard (`copy()`). |
 
-`loopSelection` makes the arrow keys go around the ends.
+`loopSelection` (default `true`) makes the arrow keys go around the ends.
 
 ## Sorting
 
@@ -294,13 +300,14 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `headerCell` | Every column's title cell |
 | `headerCellSorted` | The title of the column the table is sorted by, after `headerCell` |
 | `headerCellSelected` | The title of the selected column, after `headerCell` |
-| `sortIndicator` | The sort button of a sortable column (`⇅`, `↑` or `↓`) |
+| `sortIndicator` | The sort button of a sortable column: up and down chevrons, the sorted direction's in the text color |
 | `resizeHandle` | The line at a column's trailing edge that a drag resizes |
 | `moveIndicator` | The line where a dragged column will drop |
 | `row` | Every body row |
 | `rowOdd` | The odd rows, after `row` (`stripe`) |
 | `rowHover` | The row the pointer is over, after `row` |
 | `rowSelected` | The selected row, after `row` |
+| `rowActive` | The row a context menu was asked for where cells do not select, until the next press, after `row` |
 | `cell` | Every body cell |
 | `cellSelected` | The selected cell, after `cell` |
 | `cellActive` | The cell a context menu was asked for, until the next press, after `cell` |
@@ -327,7 +334,8 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `cellSelectable` | `.cell_selectable(..)` | `boolean` | `false` | Presses and keys select cells. |
 | `selectOnModifierPress` | `.select_on_modifier_press(..)` | `boolean` | `true` | A press with Shift or the command key held selects a row. |
 | `selection` | `.selection(..)` | `DataTableSelection` | | What is selected, when the app sets it. |
-| `loopSelection` | `.loop_selection(..)` | `boolean` | `false` | The arrow keys go around the ends. |
+| `loopSelection` | `.loop_selection(..)` | `boolean` | `true` | The arrow keys go around the ends. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the table. |
 | `rowHeader` | `.row_header(..)` | `boolean` | shown with `cellSelectable` | A column of row numbers at the left. |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | Odd rows get the `rowOdd` part. |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | A drag of a column's edge resizes it. |
@@ -352,6 +360,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | Event | Rust | Description |
 |---|---|---|
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | The user changed the selection: `{ row?, column? }`, or `null`. |
+| `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | A row or cell was pressed: `{ row, column?, clicks, shift, control, alt, platform }`. |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | A row, cell or title was pressed twice: `{ row?, column? }`. |
 | `onContextMenu` | `.on_context_menu(\|event: &DataTableContextMenu\| ..)` | A context menu was asked for: `{ row?, column?, x, y }`, the point in the root view. |
 | `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | A sort button was pressed: the next sort `{ key, direction }`, or `null`. |

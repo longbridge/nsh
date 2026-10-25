@@ -1529,6 +1529,9 @@ expect Visible: 0-5
 # A press on a cell selects it, reported.
 tap text:Cell 1:name fig
 expect Selected: row 1 column 0
+expect Pressed: 1:0 1
+# Screen readers get a grid named by the app.
+prop label:Fruits role grid
 # The ref sets the selection without reporting it, and reads it with the
 # rows in view.
 tap id:select
@@ -1545,6 +1548,7 @@ tap id:sort:name
 expect Sorted: name descending
 tap id:sort:name
 expect Sorted: cleared
+covers [events] DataTable.onRowPress
 covers [nsh/base] DataTable
 covers [props] DataTable.columns
 covers [props] DataTable.data

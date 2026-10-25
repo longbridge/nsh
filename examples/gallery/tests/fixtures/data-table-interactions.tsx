@@ -88,6 +88,7 @@ function App() {
         <DataTable
           ref={(r) => (table = r)}
           testID="t"
+          accessibilityLabel="People"
           columns={columns}
           data={data()}
           groups={[[{ label: "Who", span: 2 }, { label: "Where", span: 1 }, { label: "Numbers", span: 2 }]]}
@@ -104,6 +105,7 @@ function App() {
           empty={<Text>No rows</Text>}
           loadingView={<Text>Loading rows</Text>}
           onSelectionChange={(s) => put("sel", s ? `${s.row ?? "-"}:${s.column ?? "-"}` : "none")}
+          onRowPress={(e) => put("press", `${e.row}:${e.column ?? "-"}:${e.clicks}`)}
           onDoublePress={(t) => put("double", `${t.row ?? "-"}:${t.column ?? "-"}`)}
           onContextMenu={(e) => put("menu", `${e.row ?? "-"}:${e.column ?? "-"}`)}
           onSortChange={(next) => {

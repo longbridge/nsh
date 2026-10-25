@@ -84,3 +84,17 @@ test("the Data table demo serves the rows a far scroll lands on", async () => {
     await app.waitFor(`${names[first % names.length]} ${first}`);
   }
 });
+
+test("the Data table demo's horizontal bar drags the columns, and back", async () => {
+  const app = await open("../App.tsx", desktop);
+  await app.press("role:button[Data table]");
+  await app.waitFor("Ada 0");
+  // The desktops' bar under the table leads while it is dragged: the
+  // table follows it without sending its echoes back.
+  await app.drag("id:data-table-scrollbar", { x: -900, y: 0 });
+  await app.waitFor("Metric 8");
+  expect(app.shows("Metric 1")).toBe(false);
+  await app.drag("id:data-table-scrollbar", { x: 900, y: 0 });
+  await app.waitFor("Metric 1");
+  expect(app.shows("Metric 8")).toBe(false);
+});

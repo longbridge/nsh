@@ -163,6 +163,8 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
     };
     part(
         view()
+            .role(AccessibilityRole::Grid)
+            .optional_label(props.accessibility_label)
             .relative()
             .overflow_hidden()
             .rounded(move || theme().radius)
@@ -636,6 +638,7 @@ fn row_parts(
         let dt = dt.clone();
         computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
     };
+    let active = row_active(dt, row);
     move || {
         let mut list = vec![DataTablePart::Row];
         if props.stripe.get() && row.get().is_some_and(|r| r % 2 == 1) {
@@ -647,8 +650,20 @@ fn row_parts(
         if selected.get() {
             list.push(DataTablePart::RowSelected);
         }
+        if active.get() {
+            list.push(DataTablePart::RowActive);
+        }
         list
     }
+}
+
+/// Whether row `row` is the one a context menu was asked for.
+fn row_active(dt: &Dt, row: Memo<Option<usize>>) -> Memo<bool> {
+    let dt = dt.clone();
+    computed(move || {
+        dt.data_rev.get();
+        row.get().is_some() && dt.st.borrow().active == Some((row.get(), None))
+    })
 }
 
 /// The default look of a row's background, by what it is.
@@ -658,6 +673,7 @@ fn row_background(
 ) -> impl Fn() -> AdaptiveColor + Clone + 'static {
     let props = dt.props;
     let hover = dt.hover;
+    let active = row_active(dt, row);
     let dt = dt.clone();
     move || {
         let Some(row) = row.get() else {
@@ -666,7 +682,7 @@ fn row_background(
         let selected = matches!(dt.selection(), Selection::Row(r) if r == row);
         if selected {
             theme().primary.opacity(0.12)
-        } else if hover.get() == Some(row) {
+        } else if hover.get() == Some(row) || active.get() {
             theme().muted.opacity(0.6)
         } else if props.stripe.get() && row % 2 == 1 {
             theme().muted.opacity(0.35)
@@ -698,6 +714,10 @@ fn body_row(
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let list = row_parts(&dt, row);
     let background = row_background(&dt, row);
+    let row_selected = {
+        let dt = dt.clone();
+        computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
+    };
     let (press_dt, menu_dt) = (dt.clone(), dt.clone());
     let el = parts(
         view()
@@ -733,7 +753,11 @@ fn body_row(
             .h(move || Length::from(px(height_dt.row_height())))
             .border_b_1()
             .border_color(move || theme().border.opacity(0.6))
-            .bg(background),
+            .bg(background)
+            .accessibility_state(move || AccessibilityState {
+                selected: row_selected.get(),
+                ..AccessibilityState::default()
+            }),
         props,
         list,
     );
@@ -858,6 +882,11 @@ fn cell(
     let col_dt = dt.clone();
     let el = column_parts(
         view()
+            .role(AccessibilityRole::Cell)
+            .accessibility_state(move || AccessibilityState {
+                selected: flags.get().selected || flags.get().column_selected,
+                ..AccessibilityState::default()
+            })
             .absolute()
             .top_0()
             .bottom_0()
@@ -1245,6 +1274,11 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
     let col_dt = dt.clone();
     let el = column_parts(
         view()
+            .role(AccessibilityRole::ColumnHeader)
+            .accessibility_state(move || AccessibilityState {
+                selected: selected.get(),
+                ..AccessibilityState::default()
+            })
             .absolute()
             .top(move || {
                 let levels = top_dt.header_levels();

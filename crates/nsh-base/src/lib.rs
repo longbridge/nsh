@@ -60,9 +60,9 @@ pub use crate::{
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
-        DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTableProps,
-        DataTableRange, DataTableRows, DataTableSelection, DataTableSort, DataTableSortDirection,
-        DataTableStyles, DataTableTarget, data_table,
+        DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress,
+        DataTableProps, DataTableRange, DataTableRows, DataTableSelection, DataTableSort,
+        DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
     },
     diff::{
         DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,

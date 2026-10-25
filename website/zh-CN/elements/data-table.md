@@ -137,9 +137,11 @@ const page = signal({ start: 0, rows: load(0) });
 | `columnSelectable`（默认 `true`） | 一列：它的标题 | `{ column }` |
 | `cellSelectable`（默认 `false`） | 一个单元格；行号列（开启时默认显示）选择行 | `{ row, column }` |
 
-开启 `cellSelectable` 并隐藏行号列（`rowHeader={false}`）时，再次按下已选中的单元格会选中它所在的行。按住 Shift 或平台的命令键按下时，只有 `selectOnModifierPress`（默认 `true`）为真才会选中行，这样自己维护多行选择的应用可以自行处理这些按下。`selectable` 为 `false` 的列，它本身和它的单元格都不会被选中。
+开启 `cellSelectable` 并隐藏行号列（`rowHeader={false}`）时，再次按下已选中的单元格会选中它所在的行。按住 Shift 或平台的命令键按下时，只有 `selectOnModifierPress`（默认 `true`）为真才会选中行，这样自己维护多行选择的应用可以自行处理这些按下：`onRowPress` 报告表体的每一次按下，带有所在行、指针下的列、连续点击次数和按住的修饰键。`selectable` 为 `false` 的列，它本身和它的单元格都不会被选中。
 
-行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。两者都指出指针下的单元格（`row` 和 `column`）、行号（只有 `row`）或标题（只有 `column`）。
+行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。两者都指出指针下的单元格（`row` 和 `column`）、行号（只有 `row`）或标题（只有 `column`）。在下一次按下之前，请求菜单的单元格带有 `cellActive` 部件；单元格不可选时，则是它所在的行带有 `rowActive` 部件。
+
+屏幕阅读器得到一个网格（名称来自 `accessibilityLabel`），由列标题和单元格组成，被选中的会读出为已选中。
 
 <a id="keyboard"></a>
 
@@ -156,7 +158,7 @@ const page = signal({ start: 0, rows: load(0) });
 | Escape | 先清除选择，再交出键盘。 |
 | 复制快捷键 | 把选中内容的文字放到剪贴板（`copy()`）。 |
 
-`loopSelection` 让方向键在两端循环。
+`loopSelection`（默认 `true`）让方向键在两端循环。
 
 <a id="sorting"></a>
 
@@ -274,13 +276,14 @@ const columns: DataTableColumn[] = [
 | `headerCell` | 每一列的标题单元格 |
 | `headerCellSorted` | 表格当前排序所依据的列的标题，排在 `headerCell` 之后 |
 | `headerCellSelected` | 被选中列的标题，排在 `headerCell` 之后 |
-| `sortIndicator` | 可排序列的排序按钮（`⇅`、`↑` 或 `↓`） |
+| `sortIndicator` | 可排序列的排序按钮：上下两个箭头，已排序方向的箭头使用文字颜色 |
 | `resizeHandle` | 列尾部边缘供拖动调整的线 |
 | `moveIndicator` | 被拖动的列将放下的位置上的线 |
 | `row` | 每一个表体行 |
 | `rowOdd` | 奇数行，排在 `row` 之后（`stripe`） |
 | `rowHover` | 指针所在的行，排在 `row` 之后 |
 | `rowSelected` | 被选中的行，排在 `row` 之后 |
+| `rowActive` | 单元格不可选时请求过上下文菜单的行，直到下一次按下，排在 `row` 之后 |
 | `cell` | 每一个表体单元格 |
 | `cellSelected` | 被选中的单元格，排在 `cell` 之后 |
 | `cellActive` | 请求过上下文菜单的单元格，直到下一次按下，排在 `cell` 之后 |
@@ -309,7 +312,8 @@ const columns: DataTableColumn[] = [
 | `cellSelectable` | `.cell_selectable(..)` | `boolean` | `false` | 按下和按键可以选择单元格。 |
 | `selectOnModifierPress` | `.select_on_modifier_press(..)` | `boolean` | `true` | 按住 Shift 或命令键按下时选中行。 |
 | `selection` | `.selection(..)` | `DataTableSelection` | | 当前选择，由应用设置。 |
-| `loopSelection` | `.loop_selection(..)` | `boolean` | `false` | 方向键在两端循环。 |
+| `loopSelection` | `.loop_selection(..)` | `boolean` | `true` | 方向键在两端循环。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对表格的称呼。 |
 | `rowHeader` | `.row_header(..)` | `boolean` | 开启 `cellSelectable` 时显示 | 左侧的一列行号。 |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | 奇数行使用 `rowOdd` 部件。 |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | 拖动列的边缘调整宽度。 |
@@ -336,6 +340,7 @@ const columns: DataTableColumn[] = [
 | 事件 | Rust | 说明 |
 |---|---|---|
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | 用户改变了选择：`{ row?, column? }`，或 `null`。 |
+| `onRowPress` | `.on_row_press(\|event: &DataTablePress\| ..)` | 按下了一行或一个单元格：`{ row, column?, clicks, shift, control, alt, platform }`。 |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | 一行、一个单元格或一个标题被连按两次：`{ row?, column? }`。 |
 | `onContextMenu` | `.on_context_menu(\|event: &DataTableContextMenu\| ..)` | 请求了上下文菜单：`{ row?, column?, x, y }`，位置位于根视图中。 |
 | `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | 按下了排序按钮：下一个排序 `{ key, direction }`，或 `null`。 |

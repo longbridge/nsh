@@ -10,8 +10,9 @@ use nsh_core::{
 };
 
 use super::{
-    DataTableColumn, DataTableContextMenu, DataTableDump, DataTableEvent, DataTableProps,
-    DataTableRange, DataTableSelection, DataTableSort, DataTableSortDirection, DataTableTarget,
+    DataTableColumn, DataTableContextMenu, DataTableDump, DataTableEvent, DataTablePress,
+    DataTableProps, DataTableRange, DataTableSelection, DataTableSort, DataTableSortDirection,
+    DataTableTarget,
     axis::Axis,
     columns::{Columns, Spec},
     selection::{self, Move, Nav, Selectable, Selection},
@@ -881,6 +882,15 @@ impl Dt {
         } else {
             self.bump_data();
         }
+        self.cx.emit(DataTableEvent::RowPress(DataTablePress {
+            row: row as u32,
+            column: hit.column.filter(|_| !hit.header).map(|c| c as u32),
+            clicks,
+            shift: modifiers.shift,
+            control: modifiers.ctrl,
+            alt: modifiers.alt,
+            platform: modifiers.cmd,
+        }));
         if double {
             self.cx.emit(DataTableEvent::DoublePress(DataTableTarget {
                 row: Some(row as u32),
@@ -900,7 +910,15 @@ impl Dt {
     fn open_context_menu(&self, hit: Hit, page: Point<Points>) {
         self.set_focus(true);
         let column = hit.column.filter(|_| !hit.header);
-        self.st.borrow_mut().active = Some((hit.row, column));
+        // Where rows select and cells do not, the row is the menu's, as
+        // gpui-component marks it.
+        let cells = untracked(|| self.selectable_kinds()).cells;
+        let mark = if hit.row.is_some() && !cells {
+            None
+        } else {
+            column
+        };
+        self.st.borrow_mut().active = Some((hit.row, mark));
         self.bump_data();
         self.cx
             .emit(DataTableEvent::ContextMenu(DataTableContextMenu {

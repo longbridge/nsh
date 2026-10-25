@@ -63,8 +63,8 @@ pub struct DataTableColumn {
     /// How its cells and title are aligned.
     #[prop(default)]
     pub align: DataTableAlign,
-    /// Pressing its title sorts by it (`onSortChange`; the app sorts its
-    /// data and sets `sort`).
+    /// Its title has a sort button, which reports the next sort
+    /// (`onSortChange`; the app sorts its data and sets `sort`).
     #[prop(default)]
     pub sortable: bool,
     /// It stays at the left while the other columns scroll under it. Fixed
@@ -158,6 +158,30 @@ pub struct DataTableTarget {
     /// The column, its index among the `columns`.
     #[prop(skip_none)]
     pub column: Option<u32>,
+}
+
+/// A press of the body (`onRowPress`): the row, and the column under the
+/// pointer (none on a row's number), the clicks in a row and the modifier
+/// keys held, for the app's own handling of rows (a selection of several,
+/// opening a row).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct DataTablePress {
+    /// The row.
+    pub row: u32,
+    /// The column, its index among the `columns`.
+    #[prop(skip_none)]
+    pub column: Option<u32>,
+    /// The presses in a row: 2 for a double press.
+    pub clicks: u32,
+    /// Shift was held.
+    pub shift: bool,
+    /// Control was held.
+    pub control: bool,
+    /// Option (Apple platforms) or Alt was held.
+    pub alt: bool,
+    /// Command (Apple platforms) or the Super key was held.
+    pub platform: bool,
 }
 
 /// Where a context menu was asked for (`onContextMenu`).
@@ -306,11 +330,13 @@ pub struct DataTableProps {
     /// is cleared.
     pub selection: Prop<Option<DataTableSelection>>,
     /// The arrow keys go around the ends.
-    #[prop(default)]
+    #[prop(default = true)]
     pub loop_selection: Prop<bool>,
     /// A column of row numbers at the left, which selects rows (default
     /// shown when `cellSelectable`, hidden otherwise).
     pub row_header: Prop<Option<bool>>,
+    /// What screen readers call the table.
+    pub accessibility_label: Prop<Option<SharedString>>,
     /// Odd rows get the `rowOdd` part (a faint tint by default).
     #[prop(default)]
     pub stripe: Prop<bool>,
@@ -371,6 +397,11 @@ pub enum DataTableEvent {
     /// `null` for nothing.
     #[args(selection)]
     SelectionChange(Option<DataTableSelection>),
+    /// A row or a cell was pressed (each press, after the selection it
+    /// makes): with `selectOnModifierPress` off, the app handles presses
+    /// with Shift or the secondary modifier here.
+    #[args(event)]
+    RowPress(DataTablePress),
     /// A row, cell or title was pressed twice.
     #[args(target)]
     DoublePress(DataTableTarget),

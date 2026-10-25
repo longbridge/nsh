@@ -75,3 +75,29 @@ them, so a tick costs what is on screen.
 Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`): a scroll frame inside the
 window made commits 4 mount items in ~1 ms; a window shift (row slots taking other rows) ~350 items in ~3 ms, with no
 views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window ~4000 items. A tick of the live quotes commits ~44 items in a median 1.6 ms (at most 2.4 ms).
+
+In a GTK window (`nsh test examples/gallery/App.tsx --target linux --fps`, release, 60 Hz): scrolling the million
+rows and wheeling the horizontal bar hold 60 of 60 frames, ~2.8 ms a frame on average, none over budget; the live
+quotes redraw at their tick (30 frames a second at 33 ms) and at 60 while scrolling during ticks, ~3 ms a frame.
+
+## Compared with gpui-component
+
+The API is gpui-component's `DataTable` / `TableState` / `TableDelegate` as data: the delegate's methods are props
+(`columns`, `data`, `rowCount`, `renderCell`, `renderHeaderCell`, `groups`, `empty`, `loadingView`), its callbacks
+events (`onSortChange` for `perform_sort`, `onColumnMove` for `move_column`, `onLoadMore`, `onVisibleRowsChange`,
+`onVisibleColumnsChange`, `onContextMenu` for `context_menu`, whose menu is the app's `Menu`), and `TableState`'s
+methods the ref's. Deliberate differences:
+
+- The sort cycle is unsorted, ascending, descending (gpui-component's starts descending): the order users expect.
+- `onColumnResize` reports the column's key and width at every step of a drag (gpui-component sends every width,
+  keyless, once at the end).
+- `onLoadMore` fires once per number of rows and waits while `loading` (gpui-component's `load_more` comes again on
+  every range change, for the delegate to guard).
+- One `onSelectionChange` with a `{ row?, column? }` value replaces `SelectRow` / `SelectColumn` / `SelectCell` /
+  `ClearSelection`; the arrow keys skip columns that do not select (gpui-component's land on them).
+- No strings and no fixed look: the empty and loading slots are the app's, and every part (the sort button's chevrons
+  among them) takes the app's classes over the theme's default look (gpui-component draws an inbox icon, a skeleton
+  and a translated "Sort by" label).
+- `onRowPress` is gpui-component's `render_tr` click handler, for the app's own selections of several rows.
+- Focus is the table's own flag (a press, `focus()` / `blur()`, Escape), not a Tab stop.
+

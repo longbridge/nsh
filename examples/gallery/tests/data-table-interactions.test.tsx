@@ -18,9 +18,11 @@ test("a press selects a row, a second one is a double press", async () => {
   const app = await start();
   await app.press("text:Person 3");
   await app.waitFor("text:/sel=3:-/");
+  await app.waitFor("text:/press=3:1:1/");
   // A double press names the cell under the pointer.
   await app.press("text:Person 3");
   await app.waitFor("text:/double=3:1/");
+  await app.waitFor("text:/press=3:1:2/");
   await app.press("text:Person 5");
   await app.waitFor("text:/sel=5:-/");
 });
@@ -255,4 +257,16 @@ test("a column's classes style its titles and cells, by the value's sign", async
   expect(app.spanStyle("text:/^0$/").color).toBe("#0a0a0aff");
   expect(app.shows("Who")).toBe(true);
   expect(app.shows("Numbers")).toBe(true);
+});
+
+test("screen readers get a grid of column headers and cells, selected ones said so", async () => {
+  const app = await start();
+  expect(app.count("role:grid[People]")).toBe(1);
+  expect(app.shows("role:columnheader[City]")).toBe(true);
+  expect(app.shows("role:cell[Person 3]")).toBe(true);
+  // A press reports itself, whatever it selects.
+  await app.press("rows");
+  await app.press("text:Person 4");
+  await app.waitFor("text:/press=4:1:1/");
+  expect(app.shows("text:/sel=/")).toBe(false);
 });

@@ -65,7 +65,8 @@ parts! {
     /// The title cell of the selected column (a title pressed),
     /// after `headerCell`.
     header_cell_selected => HeaderCellSelected,
-    /// The sort indicator of a sortable column (`⇅`, `↑` or `↓`).
+    /// The sort button of a sortable column: up and down chevrons, the
+    /// sorted direction's in the text color.
     sort_indicator => SortIndicator,
     /// The line at a column's trailing edge that a drag resizes (the band
     /// that takes the drag is wider).
@@ -80,6 +81,9 @@ parts! {
     row_hover => RowHover,
     /// The selected row, after `row`.
     row_selected => RowSelected,
+    /// The row a context menu was asked for where cells do not select,
+    /// until the next press, after `row`.
+    row_active => RowActive,
     /// Every body cell.
     cell => Cell,
     /// The selected cell (`cellSelectable`), after `cell`.
