@@ -9,6 +9,8 @@
 //! scaled offset and places them relative to its first row, so what is
 //! drawn is exact at any size, and a scroll bar still spans the content.
 
+use nsh_core::Points;
+
 /// The largest extent, in points, a scroll view is given.
 pub(crate) const MAX_EXTENT: f64 = 3_000_000.0;
 
@@ -58,6 +60,21 @@ impl Axis {
         (content / self.ratio()).clamp(0.0, max)
     }
 
+    /// The scroll offset to give a scroll view to show content offset
+    /// `content` at the start: [`Self::scroll_offset`] as the 32-bit float
+    /// platforms keep, the first that does not stop short of `content`.
+    /// Far down a scaled axis one step of that float is several content
+    /// points, so the nearest could leave a sliver of the row before in
+    /// view (a scroll to row 500 000 showing row 499 999 first).
+    pub(crate) fn scroll_points(&self, content: f64) -> Points {
+        let max = (self.extent() - self.viewport).max(0.0) as f32;
+        let mut at = (self.scroll_offset(content) as f32).min(max);
+        while at < max && self.content_offset(f64::from(at)) < content - 1e-6 {
+            at = at.next_up().min(max);
+        }
+        Points(at)
+    }
+
     /// The content offset that brings `start..end` into view from content
     /// offset `from`: the nearest offset that shows it, unchanged when it
     /// already shows (and it is not taller than the viewport; then its start
@@ -98,6 +115,21 @@ mod tests {
         // And back.
         let at = axis.scroll_offset(axis.content_offset(1_000_000.0));
         assert!((at - 1_000_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn scroll_points_never_stop_short_of_a_row() {
+        // A million rows of 32 points, scaled about ten times.
+        let axis = Axis::new(32_000_000.0, 540.0);
+        for row in [1_u32, 7, 499_999, 500_000, 777_777, 999_983] {
+            let top = f64::from(row) * 32.0;
+            let at = axis.content_offset(f64::from(axis.scroll_points(top).0));
+            assert!(at >= top - 1e-6, "row {row}: {at} < {top}");
+            assert!(at < top + 32.0, "row {row}: {at} past the row");
+        }
+        // Not scaled, offsets are exact.
+        let small = Axis::new(10_000.0, 500.0);
+        assert_eq!(small.scroll_points(1234.5), Points(1234.5));
     }
 
     #[test]

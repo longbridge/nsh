@@ -35,6 +35,10 @@ The table is a hit layer, a body and a header (`view.rs`):
 Rows come from `RowWindow` (`window.rs`, `reaching(margin, ahead)`), columns from the same with a reach of 1 and 3, so
 a scroll inside the window made commits a few mount items only.
 
+The rows' and the scrolling columns' origins move in whole points (`region`, `view.rs`), as layout rounds frames: at a
+fraction, the cells' texts would round to another point in their cells as the origin moves, and every cell's frame would
+be sent again at each scroll frame.
+
 The rows and the scrolling columns are *slots* (`Slots`, `view.rs`): views made once, each showing the item of the
 window whose index leaves its slot number when divided by their count (the most the window has held). When the window
 moves by `k` rows, `k` row slots take other rows: their texts and places change, and no view is made or dropped while
@@ -47,7 +51,9 @@ Platforms keep scroll offsets and content sizes in 32-bit floats, so ten million
 cannot be a scroll view's content. Past `MAX_EXTENT` (3 000 000 points) the scroll view gets that extent and its offset
 is scaled to the content's (`Axis::ratio`); the table finds the rows from the scaled offset and places them relative to
 the first row in view, so what is drawn is exact at any size and the scroll bar still spans the content. The columns
-work the same way on the horizontal axis. Columns hold prefix sums, so finding the column at an x is a binary search.
+work the same way on the horizontal axis. Offsets the table scrolls to (`scrollToRow`, revealing the selection) are
+`Axis::scroll_points`: the 32-bit float that does not stop short of the row, since far down a scaled axis one step of
+that float is several content points. Columns hold prefix sums, so finding the column at an x is a binary search.
 
 ## Columns' own classes, fitting, bounce
 

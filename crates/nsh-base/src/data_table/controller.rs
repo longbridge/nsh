@@ -683,7 +683,7 @@ impl Dt {
         let top = row as f64 * g.row_height as f64;
         let to = g.y.reveal(g.cy, top, top + g.row_height as f64);
         if to != g.cy {
-            let y = Points(g.y.scroll_offset(to) as f32);
+            let y = g.y.scroll_points(to);
             self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
         }
     }
@@ -704,7 +704,7 @@ impl Dt {
         };
         let to = g.x.reveal(g.cx, target.0, target.1);
         if to != g.cx {
-            let x = Points(g.x.scroll_offset(to) as f32);
+            let x = g.x.scroll_points(to);
             self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
         }
     }
@@ -716,7 +716,7 @@ impl Dt {
             return;
         }
         let top = row.min(rows - 1) as f64 * g.row_height as f64;
-        let y = Points(g.y.scroll_offset(top) as f32);
+        let y = g.y.scroll_points(top);
         self.vscroll
             .scroll_to(Point { x: Points::ZERO, y }, animated);
     }
@@ -736,7 +736,7 @@ impl Dt {
             }
             st.columns.start(display) - st.columns.fixed_width()
         };
-        let x = Points(g.x.scroll_offset(start) as f32);
+        let x = g.x.scroll_points(start);
         self.hscroll
             .scroll_to(Point { x, y: Points::ZERO }, animated);
     }
@@ -1057,7 +1057,7 @@ impl Dt {
         }
         let to = g.x.reveal(g.cx, end - 1.0, end);
         if to != g.cx {
-            let x = Points(g.x.scroll_offset(to) as f32);
+            let x = g.x.scroll_points(to);
             self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
         }
     }

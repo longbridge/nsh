@@ -624,19 +624,22 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
             })
             .child(
                 // The rows' origin: the first row of its chunk, scrolled
-                // by the content offsets.
+                // by the content offsets, in whole points as layout rounds
+                // frames: at a fraction the cells' texts would round to
+                // another point in their cells as it changes, and every
+                // cell's frame would be sent again at each scroll frame.
                 view()
                     .absolute()
                     .top(move || {
                         let g = content_dt.geo();
                         let origin = w.row_origin.get() as f64 * g.row_height as f64;
-                        Length::from(px((origin - g.cy) as f32))
+                        Length::from(px((origin - g.cy).round() as f32))
                     })
                     .left(move || match which {
                         Region::Scroll => {
                             let g = x_dt.geo();
                             let origin = x_dt.scroll_start(w.col_origin.get());
-                            Length::from(px((origin - g.cx) as f32))
+                            Length::from(px((origin - g.cx).round() as f32))
                         }
                         _ => Length::from(px(0.0)),
                     })
@@ -1177,7 +1180,7 @@ fn header_region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoEl
                         Region::Scroll => {
                             let g = x_dt.geo();
                             let origin = x_dt.scroll_start(w.col_origin.get());
-                            Length::from(px((origin - g.cx) as f32))
+                            Length::from(px((origin - g.cx).round() as f32))
                         }
                         _ => Length::from(px(0.0)),
                     })
