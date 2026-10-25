@@ -45,7 +45,13 @@
 //!   background while the surface's window is not presented (GPUI's
 //!   `WindowVisibility::Hidden`: minimized, covered or on another desktop,
 //!   as far as the platform reports it), active while one of the windows
-//!   showing a surface is the active one, inactive otherwise.
+//!   showing a surface is the active one, inactive otherwise;
+//! - the time zone (`timeZone()`), as the native backends name it: on
+//!   Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its
+//!   IANA name from the ICU Windows ships; elsewhere `TZ` when it names a
+//!   zone, else the zone `/etc/localtime` links to (else `/etc/timezone`).
+//!   GPUI reports no change of it: it is read again whenever a window
+//!   becomes the active one, as the user comes back from changing it.
 //!
 //! On Windows and macOS the settings are read again whenever the window's
 //! appearance changes (GPUI reports no other setting changes); on Linux
@@ -74,7 +80,7 @@ use nsh_core::{
     Points, ROOT_ID,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
 
 use crate::{
     app::AppView,
@@ -145,6 +151,7 @@ struct Settings {
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
+    time_zone: TimeZone,
     os_version: (u16, u16),
 }
 
@@ -278,6 +285,11 @@ pub(crate) fn watch_environment(
         let active = window.is_window_active();
         with_watched(view.surface().key(), |w| w.active = active);
         lifecycle_changed();
+        // What GPUI reports no change of (the time zone) is read again as
+        // the user comes back.
+        if active {
+            update(view.surface());
+        }
         crate::rt::flush(cx);
     })
     .detach();
@@ -380,6 +392,7 @@ fn update(surface: &Surface) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = settings.locale;
+    env.time_zone = settings.time_zone;
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
     env.rtl = settings.rtl;
@@ -389,6 +402,32 @@ fn update(surface: &Surface) {
     env.keyboard_height = Points(0.0);
     env.lifecycle = lifecycle(surface, env.lifecycle);
     surface.set_environment(env);
+}
+
+/// The time zone on POSIX systems: `TZ` when it names a zone (the process's
+/// local times follow it; not a POSIX rule such as `CET-1CEST`), else the
+/// zone `/etc/localtime` links to, else `/etc/timezone`'s; `UTC` when none
+/// says.
+#[cfg_attr(windows, allow(dead_code))]
+fn posix_time_zone() -> TimeZone {
+    std::env::var("TZ")
+        .ok()
+        .filter(|tz| {
+            let tz = tz.trim_start_matches(':');
+            tz.contains('/') || tz == "UTC"
+        })
+        .and_then(|tz| TimeZone::parse(&tz))
+        .or_else(|| {
+            std::fs::read_link("/etc/localtime")
+                .ok()
+                .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
+        })
+        .or_else(|| {
+            std::fs::read_to_string("/etc/timezone")
+                .ok()
+                .and_then(|name| TimeZone::parse(name.trim()))
+        })
+        .unwrap_or_default()
 }
 
 /// The user's locale on POSIX systems: the first locale variable set that
@@ -448,7 +487,7 @@ mod os {
         zvariant::{OwnedValue, Value},
     };
 
-    use super::{Settings, parse_version, posix_locale, rtl_language};
+    use super::{Settings, parse_version, posix_locale, posix_time_zone, rtl_language};
 
     const PORTAL: &str = "org.freedesktop.portal.Desktop";
     const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -498,6 +537,7 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: desktop.screen_reader,
             locale,
+            time_zone: posix_time_zone(),
             os_version: os_version(),
         }
     }
@@ -663,7 +703,7 @@ mod os {
 mod os {
     use std::ffi::c_void;
 
-    use nsh_engine::Locale;
+    use nsh_engine::{Locale, TimeZone};
 
     use super::{Settings, rtl_language, text_scale};
 
@@ -685,6 +725,9 @@ mod os {
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
+        fn GetDynamicTimeZoneInformation(info: *mut DynamicTimeZoneInformation) -> u32;
+        fn LoadLibraryExW(name: *const u16, file: isize, flags: u32) -> isize;
+        fn GetProcAddress(module: isize, name: *const std::ffi::c_char) -> *mut c_void;
         fn GetUserDefaultLocaleName(name: *mut u16, len: i32) -> i32;
         fn GetUserDefaultUILanguage() -> u16;
         fn LCIDToLocaleName(lcid: u32, name: *mut u16, len: i32, flags: u32) -> i32;
@@ -737,8 +780,83 @@ mod os {
             rtl: ui_language().is_some_and(|l| rtl_language(&l)),
             screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
             locale,
+            time_zone: time_zone(),
             os_version: os_version(),
         }
+    }
+
+    /// `DYNAMIC_TIME_ZONE_INFORMATION`.
+    #[repr(C)]
+    struct DynamicTimeZoneInformation {
+        bias: i32,
+        standard_name: [u16; 32],
+        standard_date: [u16; 8],
+        standard_bias: i32,
+        daylight_name: [u16; 32],
+        daylight_date: [u16; 8],
+        daylight_bias: i32,
+        key_name: [u16; 128],
+        dynamic_daylight_time_disabled: u8,
+    }
+
+    /// The setting's Windows zone by its IANA name (`W. Europe Standard
+    /// Time`: `Europe/Berlin`), from the ICU Windows ships, loaded at run
+    /// time so that apps start where it is missing (then `UTC`).
+    fn time_zone() -> TimeZone {
+        // SAFETY: zeroes are a valid value of the plain C structure the call
+        // fills.
+        let mut info: DynamicTimeZoneInformation = unsafe { std::mem::zeroed() };
+        // SAFETY: an out structure of the layout the call writes.
+        if unsafe { GetDynamicTimeZoneInformation(&mut info) } == u32::MAX {
+            return TimeZone::UTC;
+        }
+        let key = &info.key_name;
+        let len = key.iter().position(|&c| c == 0).unwrap_or(key.len());
+        iana_name(&key[..len])
+            .and_then(|name| TimeZone::parse(&name))
+            .unwrap_or_default()
+    }
+
+    fn iana_name(key: &[u16]) -> Option<String> {
+        type ToIana =
+            unsafe extern "C" fn(*const u16, i32, *const u8, *mut u16, i32, *mut i32) -> i32;
+        const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x0000_0800;
+        thread_local! {
+            static TO_IANA: Option<ToIana> = {
+                // SAFETY: system libraries by name, from System32 only; the
+                // function, if there, has the signature above (ICU's C API).
+                unsafe {
+                    ["icu.dll", "icuin.dll"]
+                        .into_iter()
+                        .map(wide)
+                        .map(|name| LoadLibraryExW(name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32))
+                        .find(|module| *module != 0)
+                        .map(|icu| GetProcAddress(icu, c"ucal_getTimeZoneIDForWindowsID".as_ptr()))
+                        .filter(|proc| !proc.is_null())
+                        .map(|proc| std::mem::transmute::<*mut c_void, ToIana>(proc))
+                }
+            };
+        }
+        let to_iana = TO_IANA.with(|f| *f)?;
+        let mut name = [0u16; 64];
+        let mut status = 0i32;
+        // SAFETY: `key` and `name` hold the lengths given; no region (ICU's
+        // default mapping, `001`).
+        let len = unsafe {
+            to_iana(
+                key.as_ptr(),
+                key.len() as i32,
+                std::ptr::null(),
+                name.as_mut_ptr(),
+                name.len() as i32,
+                &mut status,
+            )
+        };
+        // ICU's errors are positive codes, its warnings negative.
+        if status > 0 || len <= 0 {
+            return None;
+        }
+        String::from_utf16(name.get(..len as usize)?).ok()
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -829,7 +947,7 @@ mod os {
 
     use nsh_engine::Locale;
 
-    use super::{Settings, parse_version, rtl_language};
+    use super::{Settings, parse_version, posix_time_zone, rtl_language};
 
     type CFTypeRef = *const c_void;
     const UTF8: u32 = 0x0800_0100;
@@ -876,6 +994,7 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: universal_access(c"voiceOverOnOffKey"),
             locale,
+            time_zone: posix_time_zone(),
             os_version: os_version(),
         }
     }
