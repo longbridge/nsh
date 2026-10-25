@@ -1147,6 +1147,11 @@ impl Headless {
     /// press), as the platforms count them. `None` when the view has no
     /// bounds.
     fn press_payload(&mut self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+        // A pointer's press takes the keyboard focus off the pressable Tab
+        // gave it to.
+        if self.screen.key_focus().is_some_and(|id| id != view) {
+            self.move_focus(None);
+        }
         let Some(bounds) = self.screen.bounds_in_root(view) else {
             return EventPayload::None;
         };

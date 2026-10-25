@@ -759,8 +759,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: { text: string }) => void",
         "",
     ),
-    (EventKind::Focus, on::INPUT, "() => void", ""),
-    (EventKind::Blur, on::INPUT, "() => void", ""),
+    (
+        EventKind::Focus,
+        on::ALL,
+        "() => void",
+        "It took the keyboard focus: an input, or a view that takes presses reached by Tab on the platforms that move the focus between pressables (macOS, the web).",
+    ),
+    (
+        EventKind::Blur,
+        on::ALL,
+        "() => void",
+        "It lost the keyboard focus.",
+    ),
     (
         EventKind::SelectionChange,
         on::INPUT,

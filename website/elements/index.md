@@ -319,6 +319,8 @@ focusing it, so focus styles show for keyboard focus only.
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `focusable` | `.focusable(..)` | `boolean` | `true` | Whether a view that takes presses is a stop of Tab; `false` leaves it to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
+| `onFocus` | `.on_focus(..)` | `() => void` | | Tab (or `focus()`) gave the view the keyboard focus. |
+| `onBlur` | `.on_blur(..)` | `() => void` | | The keyboard focus left the view. |
 
 ```rust tabs
 view()
