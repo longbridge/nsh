@@ -74,12 +74,13 @@ mount(App);
 
 编辑器的工作方式与代码编辑器相同：
 
-- **多光标。** Alt 点击（Option 点击）添加一个光标，`mod+d` 选中选区的下一处出现，`mod+shift+l` 选中全部出现，添加光标的按键在上一行或下一行添加一个。输入、删除、移动和每个命令都在每个光标处执行；Escape 回到一个。
+- **多光标。** Alt 点击（Option 点击）添加一个光标，`mod+d` 选中选区的下一处出现，`mod+shift+l` 选中全部出现，添加光标的按键在上一行或下一行添加一个。输入、删除、移动和每个命令都在每个光标处执行；Escape 回到一个。`undoSelection`（`cmd+u`、`ctrl+u`）回到上一次移动之前的选区。
+- **选区扩展。** `expandSelection`（`ctrl+shift+cmd+right`、`shift+alt+right`）按单位扩大选区：单词、字符串的内容和整个字符串、一对括号的内容和这对括号、整行、全文；`shrinkSelection` 按原路缩回。`splitSelectionIntoLines`（`shift+alt+i`）把跨多行的选区拆成每行一个选区。
 - **缩进。** 新行保持当前行的缩进，在左括号（Python 的 `:`、Ruby 的 `do` 等）之后再加一级；在一对括号之间按 Enter，右括号单独放到下一行。Tab 和 Shift+Tab 缩进和反缩进所选的行；在行首空格中按 Backspace 回到上一个缩进位置。`autoIndent` 关闭这些行为。
 - **括号和引号** 在输入时自动闭合，包住选区，再次输入闭合符号时跳过它（`autoClose`）。光标处的括号和与它配对的括号会加上边框。
 - **撤销** 以一整段输入为单位：一个单词、一次删除、一个命令。移动或点击开始新的一步。
 - **折叠。** 后面跟着缩进更深的行的那一行，可以用行号栏中的标记把这些行折叠起来：`⌄` 折叠，`›` 和行后的 `⋯` 展开。光标移入折叠处时，折叠会打开。
-- **点击。** 使用指针时，单击放置光标，双击选中一个单词，三击选中一行，Shift 点击扩展选区，拖动按点击所选的单位选择。在触摸屏上，轻点放置光标。
+- **点击。** 使用指针时，单击放置光标，双击选中一个单词，三击选中一行，Shift 点击扩展选区，拖动按点击所选的单位选择。Alt+Shift 拖动（Option+Shift；Linux 上也可用 Control+Alt）选择一个矩形块：每行一个选区，列的范围相同，在较短的行末尾之后也保持这些列。在触摸屏上，轻点放置光标。
 - **剪贴板。** 没有选区时复制和剪切取光标所在的整行，粘贴时这些行会作为整行插入到光标所在行的上方。
 
 `readOnly` 保持文本不变，同时仍可选择、搜索和复制。
@@ -115,11 +116,19 @@ mount(App);
 | `cmd+shift+\` | `ctrl+shift+\` | 跳到匹配的括号 |
 | `ctrl+j` | `ctrl+j` | 合并行 |
 | `ctrl+t` | | 交换光标两侧的字符 |
+| `ctrl+alt+left` / `ctrl+alt+right`，加 Shift 选择 | | 按单词的一部分移动（camelCase、snake_case） |
+| `shift+alt+a` | `shift+alt+a` | 切换块注释 |
+| `shift+alt+i` | `shift+alt+i` | 把选区拆成每行一个 |
+| `ctrl+shift+cmd+right` / `ctrl+shift+cmd+left` | `shift+alt+right` / `shift+alt+left` | 扩展 / 收缩选区 |
+| `cmd+u` | `ctrl+u` | 回到之前的选区 |
+| `cmd+g` / `cmd+shift+g`、`f3` / `shift+f3` | `f3` / `shift+f3` | 查找下一个 / 上一个匹配项 |
+| `cmd+e` | | 查找选中的文本（`onFindWithSelection`） |
+| `cmd+alt+[` / `cmd+alt+]` | `ctrl+shift+[` / `ctrl+shift+]` | 折叠 / 展开光标所在行 |
 | `cmd+c` / `cmd+x` / `cmd+v` | `ctrl+c` / `ctrl+x` / `ctrl+v` | 复制 / 剪切 / 粘贴 |
 
 macOS 和 iOS 还有 Cocoa 的文本按键：`ctrl+b` / `ctrl+f` / `ctrl+p` / `ctrl+n` 移动，`ctrl+h` / `ctrl+d` 删除。
 
-查找、折叠和应用自己的命令使用应用通过 [`nsh/keymap`](../modules/nsh-keymap.md) 绑定的按键，经由 ref 的 `run` 执行：
+没有默认按键的命令和应用自己的命令，使用应用通过 [`nsh/keymap`](../modules/nsh-keymap.md) 绑定的按键，经由 ref 的 `run` 执行：
 
 ```tsx
 import { keymap } from "nsh/keymap";
@@ -127,10 +136,10 @@ import { keymap } from "nsh/keymap";
 let editor!: EditorRef;
 
 keymap.bind({
-  "mod+g": () => editor.run("findNext"),
-  "mod+shift+g": () => editor.run("findPrevious"),
-  "mod+alt+[": () => editor.run("fold"),
-  "mod+alt+]": () => editor.run("unfold"),
+  "f9": () => editor.run("sortLinesAscending"),
+  "mod+shift+u": () => editor.run("transformToUppercase"),
+  "mod+alt+0": () => editor.run("foldAll"),
+  "mod+alt+j": () => editor.run("unfoldAll"),
 });
 ```
 
@@ -138,7 +147,9 @@ keymap.bind({
 
 ## 查找与替换
 
-`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回；`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
+`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回；`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
+
+`inSelection` 只在它打开时选中的内容里查找（没有选中内容时为光标所在的行）：只要它保持打开，这个范围就一直保留，随编辑移动，选区从一个匹配项移到另一个时也不变。`findWithSelection`（macOS 上为 `cmd+e`）用 `onFindWithSelection` 报告选中的文本或光标处的单词，供查找栏作为查询内容。
 
 查找栏由应用自己实现：
 
@@ -329,14 +340,23 @@ let editor!: EditorRef;
 | `moveLeft`、`moveRight`、`moveUp`、`moveDown`、`moveWordLeft`、`moveWordRight`、`moveLineStart`、`moveLineEnd`、`movePageUp`、`movePageDown`、`moveDocumentStart`、`moveDocumentEnd` | 移动光标。 |
 | `selectLeft`、`selectRight`、`selectUp`、`selectDown`、`selectWordLeft`、`selectWordRight`、`selectLineStart`、`selectLineEnd`、`selectPageUp`、`selectPageDown`、`selectDocumentStart`、`selectDocumentEnd` | 扩展选区。 |
 | `moveToMatchingBracket` | 跳到与光标处括号匹配的括号。 |
-| `selectAll`、`selectLine`、`selectWord`、`selectNextOccurrence`、`selectAllOccurrences` | 选择。 |
+| `selectAll`、`selectLine`、`selectWord`、`selectNextOccurrence`、`selectPreviousOccurrence`、`selectAllOccurrences` | 选择。 |
+| `moveSubwordLeft`、`moveSubwordRight`、`selectSubwordLeft`、`selectSubwordRight` | 按单词的一部分（camelCase 的大写处、snake_case 的各段）移动或扩展。 |
+| `moveParagraphUp`、`moveParagraphDown`、`selectParagraphUp`、`selectParagraphDown` | 移动或扩展到段落前后的空行。 |
+| `expandSelection`、`shrinkSelection` | 按单位扩大选区，或缩回。 |
+| `undoSelection`、`redoSelection` | 回到上一次移动之前的选区，或再前进。 |
+| `splitSelectionIntoLines` | 把每个选区拆成每行一个。 |
 | `addCaretAbove`、`addCaretBelow`、`singleSelection` | 添加光标；回到一个选区。 |
 | `deleteBackward`、`deleteForward`、`deleteWordLeft`、`deleteWordRight`、`deleteToLineStart`、`deleteToLineEnd`、`deleteLine` | 删除。 |
-| `newline`、`newlineBelow`、`newlineAbove`、`indent`、`outdent`、`toggleComment` | 行与缩进。 |
+| `newline`、`newlineBelow`、`newlineAbove`、`indent`、`outdent`、`toggleComment`、`toggleBlockComment` | 行、缩进与注释。 |
+| `sortLinesAscending`、`sortLinesDescending` | 对所选的行排序（只有一个光标时为所有行）。 |
+| `transformToUppercase`、`transformToLowercase`、`transformToTitleCase` | 改变选区的大小写（光标：它所在的单词）。 |
+| `trimTrailingWhitespace` | 删除每行末尾的空白。 |
 | `moveLinesUp`、`moveLinesDown`、`duplicateLinesUp`、`duplicateLinesDown`、`joinLines`、`transposeCharacters` | 重新排列。 |
 | `undo`、`redo` | 撤销和重做。 |
 | `fold`、`unfold`、`foldAll`、`unfoldAll` | 在光标所在行折叠，或折叠全部。 |
 | `findNext`、`findPrevious` | 选中 `search` 的下一个或上一个匹配项。 |
+| `findWithSelection` | 为查找栏报告选中的文本（`onFindWithSelection`）。 |
 | `copy`、`cut`、`paste` | 剪贴板。 |
 
 <a id="styling-the-parts"></a>
@@ -435,6 +455,7 @@ let editor!: EditorRef;
 | `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | 鼠标停在一个字符上（[语言功能](#language-features)）。 |
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | 悬停结束了。 |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | 一个字符被点击：带有它的单词、修饰键和点击次数。 |
+| `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | 执行了 `findWithSelection`：作为查找栏查询内容的文本。 |
 
 <a id="accessibility"></a>
 

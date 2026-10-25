@@ -19,8 +19,9 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `hooks.rs` | What language features are built on: hovers (`onHover` / `onHoverEnd`), `onTextPress`, the ref's geometry and scrolling (`caretBounds`, `rangeBounds`, `revealPosition`, `goToLine`, ...), where the editor is in the root view |
 | `buffer.rs` | The text: a `ropey::Rope`, edits as change lists, undo / redo with grouping, UTF-16 positions, the lines each change touched (`LineSpan`) |
 | `types.rs` | `Point`, `Selection`, `Selections` (the primary one, the newest, kept apart), the trait `RowLayout` the moves use |
-| `movement.rs` | Graphemes, words, smart Home / End, vertical moves keeping their x, matching and enclosing brackets |
-| `commands.rs` | `Command`, `Editing`: every editing command at every selection, typing (auto-close, step-over, outdent), paste, copy, cut |
+| `movement.rs` | Graphemes, words and their parts (camelCase, snake_case), paragraphs, smart Home / End, vertical moves keeping their x, matching and enclosing brackets |
+| `commands.rs` | `Command`, `Editing`: every editing command at every selection, typing (auto-close, step-over, outdent), paste, copy, cut; `commands/selecting.rs` (the previous occurrence, splitting into lines) and `commands/transforms.rs` (sorting lines, case, trailing whitespace, block comments) |
+| `select.rs` | The selection history (`undoSelection`), expanding and shrinking selections, block selections, the scope of a search in the selection |
 | `keymap.rs` | The default key bindings as data, in `nsh/keymap`'s keystroke syntax, Apple's and the others' |
 | `language.rs` | `LanguageConfig`: per-language comments, brackets, auto-close pairs, word characters, indentation, tab size and the syntax hint; the lookup by name, alias, extension or file name |
 | `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap and folds as display rows |
@@ -49,7 +50,12 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
   are kept.
 - **Selections** are a list with a primary one (the newest: the last one `onSelectionChange` reports and `selections()`
   returns), merged when they overlap. Every command runs at every selection (`commands.rs` gathers each command's edits
-  as a plan, applies them in one `Buffer::edit` and carries each selection through all the edits).
+  as a plan, applies them in one `Buffer::edit` and carries each selection through all the edits). Each move records
+  the selections it leaves (`select.rs`, at most 100), which `undoSelection` / `redoSelection` go back and forth
+  through; an edit forgets them, as their offsets no longer mean the same text. `expandSelection` grows each selection
+  to the smallest unit around it that is larger, without a syntax tree: the word, a string's contents (the language's
+  `string_quotes`, paired on the line), the string, a bracket pair's contents, the pair, the line's text, the whole
+  lines, the text; `shrinkSelection` retraces those steps while nothing else moved the selections.
 - **The text is controlled or the editor's own.** `value` replaces the text as one undoable edit that changes only
   what differs (the common prefix and suffix stay, so carets and folds away from the change stay put); the value
   `onChange` just reported is recognized and costs nothing. `defaultValue` is the first text of an uncontrolled
@@ -103,16 +109,22 @@ from carets (whole lines) pastes back as whole lines.
 The bindings of `keymap.rs` are registered with `on_key_with` in an effect that runs while the editor has the focus
 (`focused`), so arrows and Tab reach other inputs when it does not. They are data: `default_bindings(apple)` gives
 macOS and iOS their conventions (Option moves by words, Command to line and text ends, Cocoa's Emacs keys) and the
-others theirs (Control by words, Home / End, Control+Home / End), on a common VS Code set. Copy and cut (`mod+c`,
-`mod+x`) are the controller's, through the clipboard. `run(command)` runs the same commands from the app, plus those
-that have no default keys (folding, find next / previous, paste from the clipboard), for the app's own bindings and
-menus.
+others theirs (Control by words, Home / End, Control+Home / End), on a common VS Code set. The commands the
+controller runs itself (find next / previous, folding, `findWithSelection`, the selection history, expanding) are bound
+from `editor_bindings(apple)`, as the `EditorCommand`s `run` takes: VS Code's keys (`cmd+g` / `cmd+shift+g` on Apple
+platforms and `f3` / `shift+f3` everywhere, `cmd+alt+[` / `]` or `ctrl+shift+[` / `]` to fold, `cmd+e`, `cmd+u` or
+`ctrl+u`, `ctrl+shift+cmd+right` / `left` or `shift+alt+right` / `left`). Copy and cut (`mod+c`, `mod+x`) are the
+controller's, through the clipboard. `run(command)` runs the same commands from the app, plus those that have no
+default keys (fold all, sorting lines, changing case, trimming trailing whitespace, paragraph moves, paste from the
+clipboard), for the app's own bindings and menus.
 
 ### Presses
 
 On the desktops a press (`PressDown`) places the caret, a double press selects a word, a triple press a line, Shift
 extends the primary selection, Alt (Option) adds a selection; dragging extends what the press selected by its unit
-(`drag_to`). On touch screens a tap places the caret. A secondary press reports `onContextMenu` with the position in
+(`drag_to`). An Alt+Shift press (on Linux also Control+Alt, where window managers keep Alt drags) drags a block: one
+selection per display row between the press and the pointer, each from the press's x to the pointer's (`select::block`),
+so the block keeps its columns past the end of short rows, which select what they have; the pointer's row is primary. On touch screens a tap places the caret. A secondary press reports `onContextMenu` with the position in
 the text and the point in the root view, for the app's `Menu.popup`. A press on a line number reports
 `onLineNumberPress` (a breakpoint's place); a press on a fold marker or a fold's placeholder toggles the fold.
 
@@ -162,8 +174,11 @@ again for the echo of a controlled `value`. Building it is the one cost of an ed
 Unicode case folding, linear time whatever the query, `^` / `$` at every line's start and end, whole words by word
 boundaries. `findNext` / `findPrevious` (commands) select the next / previous match from the primary selection,
 wrapping; `replace(text)` replaces the current match and selects the next, `replaceAll(text)` replaces every match as
-one edit and returns how many. Replacements expand `$1` and `${name}` for regular expressions. The find bar is the
-app's.
+one edit and returns how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
+the matches inside a scope: what was selected when the search turned to the selection (the carets' lines when nothing
+was), kept while it stays on and carried through edits as marks are (`State::set_search`). The find bar is the app's;
+`findWithSelection` (`cmd+e`) reports the selected text (a caret: its word) with `onFindWithSelection` for it to take
+as its query.
 
 ### Diagnostics and decorations
 

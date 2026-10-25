@@ -11,6 +11,9 @@
 // in view are (`caretBounds`, `visibleRange`, `scrollOffset`), converts
 // offsets (`positionToOffset`, `offsetToPosition`), reads the selected
 // text (`selectedText`) and goes to a line (`goToLine`).
+// (`onSearchChange`); a command changes the selection's case
+// (`run("transformToUppercase")`) and another reports the selection for a
+// find bar (`run("findWithSelection")`, `onFindWithSelection`).
 import { Text, View, signal } from "nsh";
 import { Editor, type EditorRef } from "nsh/base";
 
@@ -22,6 +25,7 @@ export default function BaseEditor() {
   const read = signal("none");
   const query = signal("");
   const hovered = signal("none");
+  const asked = signal("none");
   let editor!: EditorRef;
   const track = async () => history.set(`Undo ${await editor.canUndo()} Redo ${await editor.canRedo()}`);
   return (
@@ -45,6 +49,7 @@ export default function BaseEditor() {
             )
           }
           onHoverEnd={() => hovered.set("ended")}
+          onFindWithSelection={q => asked.set(q)}
           style={{ flex: 1 }}
         />
       </View>
@@ -54,6 +59,7 @@ export default function BaseEditor() {
       <Text>{() => `History: ${history()}`}</Text>
       <Text>{() => `Read: ${read()}`}</Text>
       <Text>{() => `Hover: ${hovered()}`}</Text>
+      <Text>{() => `Asked: ${asked()}`}</Text>
       <View
         testID="to-end"
         style={{ height: 20 }}
@@ -113,6 +119,14 @@ export default function BaseEditor() {
         }}
       />
       <View testID="go-to-line" style={{ height: 20 }} onPress={() => editor.goToLine(0)} />
+        testID="upper"
+        style={{ height: 20 }}
+        onPress={() => {
+          editor.setSelections([{ anchor: { line: 0, column: 0 }, head: { line: 0, column: 3 } }]);
+          editor.run("transformToUppercase");
+        }}
+      />
+      <View testID="ask" style={{ height: 20 }} onPress={() => editor.run("findWithSelection")} />
     </View>
   );
 }

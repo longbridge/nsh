@@ -16,6 +16,11 @@ use super::{
     types::{Point, RowLayout, Selection, Selections},
 };
 
+mod selecting;
+mod transforms;
+
+pub(crate) use transforms::Case;
+
 /// How the editor edits: the app's options, the language's defaults
 /// applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +156,27 @@ pub(crate) enum Command {
     Undo,
     /// Redoes the last undone edit, restoring its selections.
     Redo,
+    /// Selects the previous occurrence of the primary selection's text (its
+    /// word when it is a caret).
+    SelectPreviousOccurrence,
+    /// To the start of the previous part of a word (camelCase, snake_case).
+    SubwordLeft { select: bool },
+    /// Past the end of the next part of a word.
+    SubwordRight { select: bool },
+    /// To the blank line before the paragraph.
+    ParagraphUp { select: bool },
+    /// To the blank line after the paragraph.
+    ParagraphDown { select: bool },
+    /// Sorts the selected lines (every line when there is only a caret).
+    SortLines { descending: bool },
+    /// Changes the case of the selections (a caret: its word).
+    ChangeCase(Case),
+    /// Removes the blanks at the end of every line.
+    TrimTrailingWhitespace,
+    /// Wraps each selection in the language's block comment, or unwraps it.
+    ToggleBlockComment,
+    /// Each selection over several lines becomes one per line.
+    SplitSelectionIntoLines,
 }
 
 /// What a command did.
@@ -367,6 +393,24 @@ impl Editing<'_> {
             TransposeChars => self.transpose(),
             Undo => self.history(true),
             Redo => self.history(false),
+            SelectPreviousOccurrence => self.select_previous_occurrence(),
+            SubwordLeft { select } => self.move_each(select, |cx, s| {
+                movement::prev_subword_start(cx.buffer, s.head, cx.language.word_chars)
+            }),
+            SubwordRight { select } => self.move_each(select, |cx, s| {
+                movement::next_subword_end(cx.buffer, s.head, cx.language.word_chars)
+            }),
+            ParagraphUp { select } => {
+                self.move_each(select, |cx, s| movement::prev_paragraph(cx.buffer, s.head))
+            }
+            ParagraphDown { select } => {
+                self.move_each(select, |cx, s| movement::next_paragraph(cx.buffer, s.head))
+            }
+            SortLines { descending } => self.sort_lines(descending),
+            ChangeCase(case) => self.change_case(case),
+            TrimTrailingWhitespace => self.trim_trailing_whitespace(),
+            ToggleBlockComment => self.toggle_block_comments(),
+            SplitSelectionIntoLines => self.split_into_lines(),
         };
         let vertical = matches!(
             command,
@@ -2021,5 +2065,140 @@ mod tests {
         t.assert("xyzˇbc");
         t.edit(|cx| cx.replace(vec![(3..5, String::new())]));
         t.assert("xyzˇ");
+    }
+
+    #[test]
+    fn select_previous_occurrence() {
+        let mut t = Test::plain("foo bar foo fˇoo");
+        t.run(Command::SelectPreviousOccurrence);
+        t.assert("foo bar foo «foo»");
+        t.run(Command::SelectPreviousOccurrence);
+        t.assert("foo bar «foo» «foo»");
+        t.run(Command::SelectPreviousOccurrence);
+        t.assert("«foo» bar «foo» «foo»");
+        assert_eq!(t.selections.primary().start(), 0);
+        assert_eq!(t.run(Command::SelectPreviousOccurrence), Outcome::Nothing);
+
+        // Wraps around to the end.
+        let mut t = Test::plain("«ab» x ab");
+        t.run(Command::SelectPreviousOccurrence);
+        t.assert("«ab» x «ab»");
+    }
+
+    #[test]
+    fn subword_and_paragraph_moves() {
+        let mut t = Test::plain("ˇfooBar_baz");
+        t.run(Command::SubwordRight { select: false });
+        t.assert("fooˇBar_baz");
+        t.run(Command::SubwordRight { select: true });
+        t.assert("foo«Bar»_baz");
+        t.run(Command::SubwordLeft { select: false });
+        t.assert("fooˇBar_baz");
+
+        let mut t = Test::plain("aˇ\nb\n\nc");
+        t.run(Command::ParagraphDown { select: false });
+        t.assert("a\nb\nˇ\nc");
+        t.run(Command::ParagraphDown { select: true });
+        t.assert("a\nb\n«\nc»");
+        t.run(Command::ParagraphUp { select: false });
+        t.assert("a\nb\nˇ\nc");
+    }
+
+    #[test]
+    fn sort_lines() {
+        let mut t = Test::plain("x\n«c\na\nb»\nw");
+        t.run(Command::SortLines { descending: false });
+        t.assert("x\n«a\nb\nc»\nw");
+        t.run(Command::SortLines { descending: true });
+        t.assert("x\n«c\nb\na»\nw");
+
+        // A caret alone sorts every line.
+        let mut t = Test::plain("b\naˇ\nc");
+        t.run(Command::SortLines { descending: false });
+        assert_eq!(t.buffer.text(), "a\nb\nc");
+
+        // Sorted already: nothing to do; a selection on one line neither.
+        let mut t = Test::plain("«a\nb»");
+        assert_eq!(t.run(Command::SortLines { descending: false }), Outcome::Nothing);
+        let mut t = Test::plain("«b» a\nc");
+        assert_eq!(t.run(Command::SortLines { descending: false }), Outcome::Nothing);
+
+        // A selection ending at a line's start leaves that line out; carets
+        // stay on character boundaries.
+        let mut t = Test::plain("«日本\nab\n»0");
+        t.run(Command::SortLines { descending: false });
+        assert_eq!(t.buffer.text(), "ab\n日本\n0");
+        let mut t = Test::plain("日ˇ本\nbˇ");
+        t.run(Command::SortLines { descending: false });
+        t.assert("b\nˇ日本ˇ");
+    }
+
+    #[test]
+    fn change_case() {
+        let mut t = Test::plain("«hello world» foo");
+        t.run(Command::ChangeCase(Case::Upper));
+        t.assert("«HELLO WORLD» foo");
+        t.run(Command::ChangeCase(Case::Title));
+        t.assert("«Hello World» foo");
+        t.run(Command::ChangeCase(Case::Lower));
+        t.assert("«hello world» foo");
+
+        // A caret changes its word and stays in place.
+        let mut t = Test::plain("one twˇo");
+        t.run(Command::ChangeCase(Case::Upper));
+        t.assert("one TWˇO");
+
+        // Lengths may change: the selection covers the new text.
+        let mut t = Test::plain("«straße»");
+        t.run(Command::ChangeCase(Case::Upper));
+        t.assert("«STRASSE»");
+
+        let mut t = Test::plain("«don't stop»");
+        t.run(Command::ChangeCase(Case::Title));
+        t.assert("«Don't Stop»");
+
+        let mut t = Test::plain("«ABC»");
+        assert_eq!(t.run(Command::ChangeCase(Case::Upper)), Outcome::Nothing);
+    }
+
+    #[test]
+    fn trim_trailing_whitespace() {
+        let mut t = Test::plain("a  \n\t\nb ˇ \nc");
+        t.run(Command::TrimTrailingWhitespace);
+        t.assert("a\n\nbˇ\nc");
+        assert_eq!(t.run(Command::TrimTrailingWhitespace), Outcome::Nothing);
+    }
+
+    #[test]
+    fn toggle_block_comment() {
+        let mut t = Test::rust("    aˇ");
+        t.run(Command::ToggleBlockComment);
+        t.assert("    /* a */ˇ");
+        t.run(Command::ToggleBlockComment);
+        t.assert("    aˇ");
+
+        let mut t = Test::rust("x «a + b» y");
+        t.run(Command::ToggleBlockComment);
+        assert_eq!(t.buffer.text(), "x /* a + b */ y");
+
+        let mut t = Test::plain("aˇ");
+        assert_eq!(t.run(Command::ToggleBlockComment), Outcome::Nothing);
+    }
+
+    #[test]
+    fn split_selection_into_lines() {
+        let mut t = Test::plain("a«bc\n\nde»f\nˇg");
+        t.run(Command::SplitSelectionIntoLines);
+        t.assert("a«bc»\nˇ\n«de»f\nˇg");
+        assert_eq!(t.selections.primary().head, 9);
+
+        // A selection ending at a line's start leaves that line out.
+        let mut t = Test::plain("«ab\ncd\n»ef");
+        t.run(Command::SplitSelectionIntoLines);
+        t.assert("«ab»\n«cd»\nef");
+        assert_eq!(t.selections.primary().start(), 3);
+
+        let mut t = Test::plain("a«b»c");
+        assert_eq!(t.run(Command::SplitSelectionIntoLines), Outcome::Nothing);
     }
 }

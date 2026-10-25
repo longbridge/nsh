@@ -14,10 +14,11 @@ use nsh_core::{
 
 use super::{
     EditorCommand, EditorContextMenuEvent, EditorEvent, EditorProps, EditorSelection,
-    commands::{Command, EditOptions, Outcome},
+    commands::{Case, Command, EditOptions, Outcome},
     diagnostics,
     highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
     keymap, search,
+    select::{ExpandStack, SelectionHistory},
     state::{Font, State},
     types::{Selection, Selections},
 };
@@ -43,6 +44,9 @@ struct Drag {
     /// The scroll offsets at the press (the rows move under the pointer as
     /// they scroll).
     scroll: Point<Points>,
+    /// Where an Alt+Shift press was in the rows' box: the drag makes a block
+    /// selection from there.
+    block: Option<Point<Points>>,
 }
 
 /// What the native input that takes typed text holds.
@@ -100,6 +104,10 @@ pub(crate) struct Ed {
     blink_task: Rc<RefCell<Option<Spawned<()>>>>,
     /// What language features are built on (`hooks.rs`).
     pub(crate) hooks: super::hooks::Hooks,
+    /// The selections moves left, for `undoSelection`.
+    pub(crate) sel_history: Rc<RefCell<SelectionHistory>>,
+    /// What `expandSelection` grew from, for `shrinkSelection`.
+    pub(crate) expansions: Rc<RefCell<ExpandStack>>,
 }
 
 impl Ed {
@@ -119,6 +127,7 @@ impl Ed {
         let options = options_of(&props, language);
         let mut state = State::new(&text, language, options, font, measure);
         state.reported = Some((state.buffer.version(), text));
+        let sel_history = SelectionHistory::new(&state.selections);
         let ed = Ed {
             st: Rc::new(RefCell::new(state)),
             props,
@@ -144,6 +153,8 @@ impl Ed {
             input: element_ref(),
             blink_task: Rc::default(),
             hooks: super::hooks::Hooks::new(),
+            sel_history: Rc::new(RefCell::new(sel_history)),
+            expansions: Rc::default(),
         };
         ed.follow_props();
         ed.follow_hooks();
@@ -249,8 +260,7 @@ impl Ed {
             let search = ed.props.search.get();
             let result = {
                 let mut st = ed.st.borrow_mut();
-                st.search = search;
-                st.find();
+                st.set_search(search);
                 st.search_result()
             };
             ed.marks_rev.update(|r| *r += 1);
@@ -346,6 +356,13 @@ impl Ed {
                     move |_| e.run(command),
                 );
             }
+            for binding in keymap::editor_bindings(apple) {
+                let e = ed.clone();
+                let command = binding.command;
+                on_key_with(binding.keys, always(binding.repeat), move |_| {
+                    e.run_public(command)
+                });
+            }
             let e = ed.clone();
             on_key_with("mod+c", always(false), move |_| e.copy());
             let e = ed.clone();
@@ -376,6 +393,7 @@ impl Ed {
                     st.buffer.break_undo_group();
                     let head = st.primary_head();
                     st.reveal(head);
+                    self.sel_history.borrow_mut().record(&st.selections);
                 }
                 self.empty_sink();
                 self.bump_text_if_folds_changed();
@@ -390,6 +408,7 @@ impl Ed {
                     st.changed(&changes);
                     let head = st.primary_head();
                     st.reveal(head);
+                    self.sel_history.borrow_mut().reset(&st.selections);
                 }
                 self.bump_text();
                 self.bump_selection();
@@ -506,6 +525,43 @@ impl Ed {
                 self.paste_clipboard();
                 None
             }
+            E::SelectPreviousOccurrence => c(Command::SelectPreviousOccurrence),
+            E::UndoSelection => {
+                self.undo_selection(true);
+                None
+            }
+            E::RedoSelection => {
+                self.undo_selection(false);
+                None
+            }
+            E::ExpandSelection => {
+                self.expand_selection(true);
+                None
+            }
+            E::ShrinkSelection => {
+                self.expand_selection(false);
+                None
+            }
+            E::SplitSelectionIntoLines => c(Command::SplitSelectionIntoLines),
+            E::FindWithSelection => {
+                self.find_with_selection();
+                None
+            }
+            E::MoveSubwordLeft => c(Command::SubwordLeft { select: false }),
+            E::MoveSubwordRight => c(Command::SubwordRight { select: false }),
+            E::SelectSubwordLeft => c(Command::SubwordLeft { select: true }),
+            E::SelectSubwordRight => c(Command::SubwordRight { select: true }),
+            E::MoveParagraphUp => c(Command::ParagraphUp { select: false }),
+            E::MoveParagraphDown => c(Command::ParagraphDown { select: false }),
+            E::SelectParagraphUp => c(Command::ParagraphUp { select: true }),
+            E::SelectParagraphDown => c(Command::ParagraphDown { select: true }),
+            E::SortLinesAscending => c(Command::SortLines { descending: false }),
+            E::SortLinesDescending => c(Command::SortLines { descending: true }),
+            E::TransformToUppercase => c(Command::ChangeCase(Case::Upper)),
+            E::TransformToLowercase => c(Command::ChangeCase(Case::Lower)),
+            E::TransformToTitleCase => c(Command::ChangeCase(Case::Title)),
+            E::TrimTrailingWhitespace => c(Command::TrimTrailingWhitespace),
+            E::ToggleBlockComment => c(Command::ToggleBlockComment),
         };
         if let Some(command) = command {
             self.run(command);
@@ -540,6 +596,7 @@ impl Ed {
             {
                 let mut st = self.st.borrow_mut();
                 st.changed(&changes);
+                self.sel_history.borrow_mut().reset(&st.selections);
             }
             self.bump_text();
             self.bump_selection();
@@ -711,7 +768,14 @@ impl Ed {
                 _ => Selection::caret(offset),
             };
             let added = modifiers.alt;
-            if modifiers.shift && clicks <= 1 {
+            // Alt+Shift drags a block; Linux also takes Control+Alt, as
+            // GPUI Kit does, where window managers keep Alt drags.
+            let block = modifiers.alt
+                && clicks <= 1
+                && (modifiers.shift || (modifiers.ctrl && matches!(os(), Os::Linux)));
+            if block {
+                st.selections = Selections::single(Selection::caret(offset));
+            } else if modifiers.shift && clicks <= 1 {
                 let primary = st.selections.primary();
                 let mut all = st.selections.all().to_vec();
                 let index = st.selections.primary_index();
@@ -732,6 +796,7 @@ impl Ed {
                 clicks: clicks.max(1),
                 shift: at - page,
                 scroll: self.scroll_offset(),
+                block: block.then_some(at),
             }));
             st.selections.primary()
         };
@@ -748,6 +813,17 @@ impl Ed {
     pub(crate) fn drag_to(&self, page: Point<Points>) {
         let Some(drag) = self.drag.get() else { return };
         let at = page + drag.shift + (self.scroll_offset() - drag.scroll);
+        if let Some(from) = drag.block {
+            {
+                let mut st = self.st.borrow_mut();
+                let block = st.block_selection(from, at);
+                st.selections = block;
+            }
+            self.bump_selection();
+            self.report_selections();
+            self.show_caret();
+            return;
+        }
         {
             let mut st = self.st.borrow_mut();
             let offset = st.offset_at(at);
@@ -782,7 +858,11 @@ impl Ed {
 
     /// The press ended.
     pub(crate) fn release(&self) {
-        self.drag.set(None);
+        if self.drag.take().is_some() {
+            // What the drag selected is a step `undoSelection` goes back from.
+            let st = self.st.borrow();
+            self.sel_history.borrow_mut().record(&st.selections);
+        }
     }
 
     /// A secondary press at `at` (in the rows' box), `page` in the root

@@ -85,6 +85,11 @@ pub struct EditorSearch {
     /// replacement refers to its groups as `$1` and `${name}`).
     #[prop(default)]
     pub regex: bool,
+    /// Matches only inside what was selected when the search turned to the
+    /// selection (the carets' lines when nothing was): find in selection.
+    /// The scope stays while this stays on, carried through edits.
+    #[prop(default)]
+    pub in_selection: bool,
 }
 
 impl EditorSearch {

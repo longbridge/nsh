@@ -116,6 +116,9 @@ pub(crate) struct State {
     pub(crate) reported: Option<(u64, nsh_core::ui::SharedString)>,
     /// The selections last reported (`onSelectionChange`).
     pub(crate) reported_selections: Vec<EditorSelection>,
+    /// What a search in the selection searches, carried through edits
+    /// (`select::set_search`).
+    pub(crate) search_scope: Option<Vec<Mark<()>>>,
 }
 
 impl State {
@@ -154,6 +157,7 @@ impl State {
             composition: None,
             reported: None,
             reported_selections: Vec::new(),
+            search_scope: None,
         }
     }
 
@@ -198,6 +202,9 @@ impl State {
         }
         diagnostics::adjust(&mut self.diagnostics, changes);
         diagnostics::adjust(&mut self.decorations, changes);
+        if let Some(scope) = &mut self.search_scope {
+            diagnostics::adjust(scope, changes);
+        }
         self.fold_candidates = None;
         self.find();
         let len = self.buffer.len();
@@ -240,7 +247,12 @@ impl State {
             return;
         }
         match search::find_all(&self.buffer, search, MATCH_LIMIT) {
-            Ok(matches) => self.matches = matches,
+            Ok(matches) => {
+                self.matches = match &self.search_scope {
+                    Some(scope) => search::within(matches, scope.iter().map(|m| &m.range)),
+                    None => matches,
+                }
+            }
             Err(error) => self.search_error = Some(error),
         }
     }

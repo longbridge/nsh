@@ -3,9 +3,11 @@
 //! Apple platforms and Control elsewhere.
 //!
 //! Cut, copy and paste are not here: they go through the clipboard, which
-//! the view owns.
+//! the view owns. The controller's own commands (finding, folding, the
+//! selection history and expansion) are bound as the `EditorCommand`s
+//! `run` takes ([`editor_bindings`]).
 
-use super::commands::Command;
+use super::{EditorCommand, commands::Command};
 
 /// One key binding: the keystroke and the command it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,8 @@ const COMMON: &[Binding] = {
         bind("mod+shift+\\", MatchingBracket),
         bind("escape", SingleSelection),
         repeat("ctrl+j", JoinLines),
+        bind("shift+alt+a", ToggleBlockComment),
+        bind("shift+alt+i", SplitSelectionIntoLines),
     ]
 };
 
@@ -120,6 +124,10 @@ const APPLE: &[Binding] = {
         repeat("ctrl+d", Delete),
         repeat("ctrl+k", DeleteToLineEnd),
         repeat("ctrl+t", TransposeChars),
+        repeat("ctrl+alt+left", SubwordLeft { select: false }),
+        repeat("ctrl+alt+shift+left", SubwordLeft { select: true }),
+        repeat("ctrl+alt+right", SubwordRight { select: false }),
+        repeat("ctrl+alt+shift+right", SubwordRight { select: true }),
     ]
 };
 
@@ -146,6 +154,78 @@ const OTHERS: &[Binding] = {
     ]
 };
 
+/// A key binding of a command the controller runs (`run(command)`'s):
+/// finding, folding, the selection history and expansion, which act on more
+/// than the text and the selections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EditorBinding {
+    /// The keystroke, as `nsh/keymap` writes it.
+    pub(crate) keys: &'static str,
+    /// What it runs.
+    pub(crate) command: EditorCommand,
+    /// Whether a held key repeats it.
+    pub(crate) repeat: bool,
+}
+
+const fn run(keys: &'static str, command: EditorCommand) -> EditorBinding {
+    EditorBinding {
+        keys,
+        command,
+        repeat: false,
+    }
+}
+
+const fn run_repeat(keys: &'static str, command: EditorCommand) -> EditorBinding {
+    EditorBinding {
+        keys,
+        command,
+        repeat: true,
+    }
+}
+
+/// VS Code's keys of the controller's commands on every platform.
+const EDITOR_COMMON: &[EditorBinding] = {
+    use EditorCommand::*;
+    &[
+        run_repeat("f3", FindNext),
+        run_repeat("shift+f3", FindPrevious),
+    ]
+};
+
+/// macOS and iOS.
+const EDITOR_APPLE: &[EditorBinding] = {
+    use EditorCommand::*;
+    &[
+        run_repeat("cmd+g", FindNext),
+        run_repeat("cmd+shift+g", FindPrevious),
+        run("cmd+e", FindWithSelection),
+        run_repeat("cmd+u", UndoSelection),
+        run("cmd+alt+[", Fold),
+        run("cmd+alt+]", Unfold),
+        run_repeat("ctrl+shift+cmd+right", ExpandSelection),
+        run_repeat("ctrl+shift+cmd+left", ShrinkSelection),
+    ]
+};
+
+/// Windows, Linux and the web elsewhere.
+const EDITOR_OTHERS: &[EditorBinding] = {
+    use EditorCommand::*;
+    &[
+        run_repeat("ctrl+u", UndoSelection),
+        run("ctrl+shift+[", Fold),
+        run("ctrl+shift+]", Unfold),
+        run_repeat("shift+alt+right", ExpandSelection),
+        run_repeat("shift+alt+left", ShrinkSelection),
+    ]
+};
+
+/// The default bindings of the controller's commands, for Apple platforms
+/// (`apple`) or the others.
+pub(crate) fn editor_bindings(apple: bool) -> Vec<EditorBinding> {
+    let own = if apple { EDITOR_APPLE } else { EDITOR_OTHERS };
+    EDITOR_COMMON.iter().chain(own).copied().collect()
+}
+
 /// The default bindings on Apple platforms (`apple`: Option+arrows move by
 /// words, Command+arrows to line / text ends, Control+A/E/K as Cocoa's
 /// Emacs keys) or elsewhere (Control+arrows by words, Home / End,
@@ -160,17 +240,23 @@ mod tests {
     use nsh_core::keymap::Keystroke;
     use rustc_hash::FxHashMap;
 
-    use super::*;
+    use super::{super::commands::Case, *};
 
     #[test]
     fn every_binding_parses_and_no_keystroke_is_bound_twice() {
         for apple in [true, false] {
             let mut seen: FxHashMap<Keystroke, &str> = FxHashMap::default();
-            for binding in default_bindings(apple) {
+            let keys = default_bindings(apple)
+                .into_iter()
+                .map(|b| b.keys)
+                .chain(editor_bindings(apple).into_iter().map(|b| b.keys))
+                // Copy and cut, which the controller binds itself.
+                .chain(["mod+c", "mod+x"]);
+            for keys in keys {
                 let keystroke =
-                    Keystroke::parse_with(binding.keys, apple).unwrap_or_else(|e| panic!("{e}"));
-                if let Some(other) = seen.insert(keystroke, binding.keys) {
-                    panic!("{other:?} and {:?} are the same keystroke", binding.keys);
+                    Keystroke::parse_with(keys, apple).unwrap_or_else(|e| panic!("{e}"));
+                if let Some(other) = seen.insert(keystroke, keys) {
+                    panic!("{other:?} and {keys:?} are the same keystroke");
                 }
             }
         }
@@ -196,5 +282,38 @@ mod tests {
         assert_eq!(find(false, "ctrl+y"), Some(Command::Redo));
         assert_eq!(find(true, "ctrl+t"), Some(Command::TransposeChars));
         assert_eq!(find(true, "mod+d"), Some(Command::SelectNextOccurrence));
+    }
+
+    #[test]
+    fn the_new_keys_are_vs_codes() {
+        let editor = |apple: bool, keys: &str| {
+            editor_bindings(apple)
+                .into_iter()
+                .find(|b| b.keys == keys)
+                .map(|b| b.command)
+        };
+        assert_eq!(editor(true, "cmd+g"), Some(EditorCommand::FindNext));
+        assert_eq!(editor(false, "cmd+g"), None);
+        assert_eq!(editor(false, "f3"), Some(EditorCommand::FindNext));
+        assert_eq!(editor(true, "cmd+alt+["), Some(EditorCommand::Fold));
+        assert_eq!(editor(false, "ctrl+shift+]"), Some(EditorCommand::Unfold));
+        assert_eq!(editor(true, "cmd+e"), Some(EditorCommand::FindWithSelection));
+        let command = |apple: bool, keys: &str| {
+            default_bindings(apple)
+                .into_iter()
+                .find(|b| b.keys == keys)
+                .map(|b| b.command)
+        };
+        assert_eq!(
+            command(true, "ctrl+alt+right"),
+            Some(Command::SubwordRight { select: false })
+        );
+        assert_eq!(command(false, "shift+alt+a"), Some(Command::ToggleBlockComment));
+        // The case commands have no default keys.
+        assert!(
+            default_bindings(true)
+                .iter()
+                .all(|b| !matches!(b.command, Command::ChangeCase(Case::Upper)))
+        );
     }
 }

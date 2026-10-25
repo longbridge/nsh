@@ -379,7 +379,6 @@ fn find_open(buffer: &Buffer, from: usize, open: char, close: char) -> Option<us
 /// The opening brackets before `range` that are not closed before it are
 /// tried from the nearest out; the first whose partner closes at or after
 /// `range`'s end encloses it.
-#[cfg(test)]
 pub(crate) fn enclosing_brackets(
     buffer: &Buffer,
     range: Range<usize>,
@@ -424,6 +423,140 @@ pub(crate) fn lines_range(buffer: &Buffer, first: usize, last: usize) -> Range<u
         buffer.line_end(first - 1)..buffer.len()
     } else {
         0..buffer.len()
+    }
+}
+
+/// Where the parts of `word` meet, as byte offsets inside it: camelCase
+/// humps (`foo|Bar`), the end of a run of capitals before a capitalized
+/// part (`HTML|Parser`), and both sides of a run of underscores
+/// (`foo|_|bar`).
+fn subword_boundaries(word: &str) -> Vec<usize> {
+    let chars: Vec<(usize, char)> = word.char_indices().collect();
+    let mut bounds = Vec::new();
+    for k in 1..chars.len() {
+        let (at, c) = chars[k];
+        let prev = chars[k - 1].1;
+        let next = chars.get(k + 1).map(|&(_, c)| c);
+        let hump = (prev.is_lowercase() || prev.is_ascii_digit()) && c.is_uppercase();
+        let acronym_end =
+            prev.is_uppercase() && c.is_uppercase() && next.is_some_and(char::is_lowercase);
+        let underscore = (prev == '_') != (c == '_');
+        if hump || acronym_end || underscore {
+            bounds.push(at);
+        }
+    }
+    bounds
+}
+
+/// Past the end of the next part of a word (camelCase humps, snake_case
+/// parts); whitespace before a word is passed, and anywhere else (punctuation,
+/// a line's end) the move is [`next_word_end`]'s.
+pub(crate) fn next_subword_end(buffer: &Buffer, offset: usize, word_chars: &str) -> usize {
+    let offset = buffer.clip(offset);
+    let mut at = offset;
+    if class_at(buffer, at, word_chars) == Some(Class::Space) {
+        at = run_end(buffer, at, Class::Space, word_chars);
+    }
+    if class_at(buffer, at, word_chars) != Some(Class::Word) {
+        return next_word_end(buffer, offset, word_chars);
+    }
+    let start = run_start(buffer, at, Class::Word, word_chars);
+    let end = run_end(buffer, at, Class::Word, word_chars);
+    let word = buffer.slice(start..end);
+    let mut from = at;
+    for bound in subword_boundaries(&word)
+        .into_iter()
+        .map(|b| start + b)
+        .chain([end])
+    {
+        if bound <= from {
+            continue;
+        }
+        // A part of underscores alone goes with the part after it.
+        if word[from - start..bound - start].chars().all(|c| c == '_') {
+            from = bound;
+            continue;
+        }
+        return bound;
+    }
+    end
+}
+
+/// To the start of the previous part of a word: the mirror of
+/// [`next_subword_end`].
+pub(crate) fn prev_subword_start(buffer: &Buffer, offset: usize, word_chars: &str) -> usize {
+    let offset = buffer.clip(offset);
+    let mut at = offset;
+    if let Some((Class::Space, _)) = class_before(buffer, at, word_chars) {
+        at = run_start(buffer, at, Class::Space, word_chars);
+    }
+    if !matches!(class_before(buffer, at, word_chars), Some((Class::Word, _))) {
+        return prev_word_start(buffer, offset, word_chars);
+    }
+    let start = run_start(buffer, at, Class::Word, word_chars);
+    let end = run_end(buffer, at, Class::Word, word_chars);
+    let word = buffer.slice(start..end);
+    let mut to = at;
+    for bound in std::iter::once(start)
+        .chain(subword_boundaries(&word).into_iter().map(|b| start + b))
+        .rev()
+    {
+        if bound >= to {
+            continue;
+        }
+        if word[bound - start..to - start].chars().all(|c| c == '_') {
+            to = bound;
+            continue;
+        }
+        return bound;
+    }
+    start
+}
+
+/// Whether `line` holds only whitespace.
+fn is_blank_line(buffer: &Buffer, line: usize) -> bool {
+    buffer.line_text(line).trim().is_empty()
+}
+
+/// Down a paragraph: to the start of the first blank line after the
+/// paragraph the offset is in (or the next one, from a blank line), else
+/// the text's end.
+pub(crate) fn next_paragraph(buffer: &Buffer, offset: usize) -> usize {
+    let count = buffer.line_count();
+    let current = buffer.line_of(buffer.clip(offset));
+    let mut line = current + 1;
+    if is_blank_line(buffer, current) {
+        while line < count && is_blank_line(buffer, line) {
+            line += 1;
+        }
+    }
+    while line < count && !is_blank_line(buffer, line) {
+        line += 1;
+    }
+    if line < count {
+        buffer.line_start(line)
+    } else {
+        buffer.len()
+    }
+}
+
+/// Up a paragraph: to the start of the blank line before the paragraph the
+/// offset is in (or the previous one, from a blank line), else the text's
+/// start.
+pub(crate) fn prev_paragraph(buffer: &Buffer, offset: usize) -> usize {
+    let mut line = buffer.line_of(buffer.clip(offset));
+    if is_blank_line(buffer, line) {
+        while line > 0 && is_blank_line(buffer, line - 1) {
+            line -= 1;
+        }
+    }
+    while line > 0 && !is_blank_line(buffer, line - 1) {
+        line -= 1;
+    }
+    if line == 0 {
+        0
+    } else {
+        buffer.line_start(line - 1)
     }
 }
 
@@ -762,5 +895,64 @@ mod tests {
         assert_eq!(lines_range(&trailing, 0, 0), 0..2);
         assert_eq!(lines_range(&trailing, 1, 1), 1..2);
         assert_eq!(lines_range(&Buffer::new(""), 0, 0), 0..0);
+    }
+
+    #[test]
+    fn subwords_of_camel_and_snake_case() {
+        let rights = |text: &str| {
+            let buffer = Buffer::new(text);
+            let mut stops = Vec::new();
+            let mut at = 0;
+            while at < buffer.len() {
+                at = next_subword_end(&buffer, at, W);
+                stops.push(at);
+            }
+            stops
+        };
+        let lefts = |text: &str| {
+            let buffer = Buffer::new(text);
+            let mut stops = Vec::new();
+            let mut at = buffer.len();
+            while at > 0 {
+                at = prev_subword_start(&buffer, at, W);
+                stops.push(at);
+            }
+            stops
+        };
+        assert_eq!(rights("fooBar_baz"), vec![3, 6, 10]);
+        assert_eq!(lefts("fooBar_baz"), vec![7, 3, 0]);
+        assert_eq!(rights("HTMLParser"), vec![4, 10]);
+        assert_eq!(rights("__init__"), vec![6, 8]);
+        assert_eq!(rights("get2Fast"), vec![4, 8]);
+        // Whitespace is passed into the next word's first part; punctuation
+        // moves as by words.
+        assert_eq!(rights("a  fooBar"), vec![1, 6, 9]);
+        assert_eq!(lefts("fooBar  x"), vec![8, 3, 0]);
+        assert_eq!(rights("f(x)"), vec![1, 3, 4]);
+        // Multibyte letters keep their case rules.
+        assert_eq!(rights("éÉé"), vec![2, 6]);
+        let empty = Buffer::new("");
+        assert_eq!(next_subword_end(&empty, 0, W), 0);
+        assert_eq!(prev_subword_start(&empty, 0, W), 0);
+    }
+
+    #[test]
+    fn paragraphs_end_at_blank_lines() {
+        // Lines: 0 "a", 1 "b", 2 "", 3 "  ", 4 "c", 5 "", 6 "d".
+        let buffer = Buffer::new("a\nb\n\n  \nc\n\nd");
+        let start = |line| buffer.line_start(line);
+        assert_eq!(next_paragraph(&buffer, 0), start(2));
+        assert_eq!(next_paragraph(&buffer, start(2)), start(5));
+        assert_eq!(next_paragraph(&buffer, start(3)), start(5));
+        assert_eq!(next_paragraph(&buffer, start(5)), buffer.len());
+        assert_eq!(next_paragraph(&buffer, buffer.len()), buffer.len());
+        assert_eq!(prev_paragraph(&buffer, buffer.len()), start(5));
+        assert_eq!(prev_paragraph(&buffer, start(5)), start(3));
+        assert_eq!(prev_paragraph(&buffer, start(4)), start(3));
+        assert_eq!(prev_paragraph(&buffer, start(3)), 0);
+        assert_eq!(prev_paragraph(&buffer, 1), 0);
+        let empty = Buffer::new("");
+        assert_eq!(next_paragraph(&empty, 0), 0);
+        assert_eq!(prev_paragraph(&empty, 0), 0);
     }
 }

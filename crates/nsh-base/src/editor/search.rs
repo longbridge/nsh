@@ -104,6 +104,29 @@ pub(crate) fn previous_match(matches: &[Range<usize>], offset: usize) -> Option<
     })
 }
 
+/// The matches that lie inside one of `scope`'s ranges (a search in the
+/// selection): both kinds sorted, as [`find_all`] returns matches.
+pub(crate) fn within<'a>(
+    matches: Vec<Range<usize>>,
+    scope: impl IntoIterator<Item = &'a Range<usize>>,
+) -> Vec<Range<usize>> {
+    let mut scope: Vec<&Range<usize>> = scope.into_iter().collect();
+    scope.sort_by_key(|r| (r.start, r.end));
+    matches
+        .into_iter()
+        .filter(|m| {
+            // The last scope starting at or before the match is the only one
+            // that can hold it, unless scopes overlap: check those before it
+            // that still reach the match's end.
+            let index = scope.partition_point(|r| r.start <= m.start);
+            scope[..index]
+                .iter()
+                .rev()
+                .any(|r| m.end <= r.end)
+        })
+        .collect()
+}
+
 /// The regular expression `search` runs; None for an empty query.
 fn compile(search: &EditorSearch) -> Result<Option<Regex>, String> {
     let query = search.query.as_str();
@@ -380,5 +403,13 @@ mod tests {
         assert_eq!(previous_match(&matches, 100), Some(2));
         assert_eq!(next_match(&[], 0), None);
         assert_eq!(previous_match(&[], 0), None);
+    }
+
+    #[test]
+    fn matches_within_a_scope() {
+        let matches = vec![0..2, 3..5, 6..8, 9..9, 10..12];
+        let scope = [9..12, 2..6];
+        assert_eq!(within(matches.clone(), &scope), vec![3..5, 9..9, 10..12]);
+        assert_eq!(within(matches, &[]), Vec::<Range<usize>>::new());
     }
 }

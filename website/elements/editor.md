@@ -90,7 +90,12 @@ The editor works as code editors do:
 
 - **Several carets.** Alt-click (Option-click) adds a caret, `mod+d` selects the next occurrence of the selection,
   `mod+shift+l` all of them, and the add-caret keys add one on the row above or below. Typing, deleting, moving and
-  every command act at each one; Escape goes back to one.
+  every command act at each one; Escape goes back to one. `undoSelection` (`cmd+u`, `ctrl+u`) goes back to the
+  selections before the last move.
+- **Selections grow** by units with `expandSelection` (`ctrl+shift+cmd+right`, `shift+alt+right`): the word, a
+  string's contents and the string, a bracket pair's contents and the pair, the line, the text; `shrinkSelection`
+  goes back the same way. `splitSelectionIntoLines` (`shift+alt+i`) turns a selection over several lines into one
+  selection per line.
 - **Indentation.** A new line keeps the line's indentation and adds a level after an opening bracket (Python's `:`,
   Ruby's `do`, ...); Enter between a pair of brackets puts the closing one on its own line. Tab and Shift+Tab indent
   and outdent the selected lines; Backspace in leading spaces goes back to the previous indent stop. `autoIndent` turns
@@ -101,8 +106,9 @@ The editor works as code editors do:
 - **Folding.** A line followed by lines indented deeper folds them away with the marker in the gutter: `⌄` to fold,
   `›` and the `⋯` after the line to unfold. A caret that moves into a fold opens it.
 - **Presses.** With a pointer, a click places the caret, a double click selects a word, a triple click a line,
-  Shift-click extends the selection and a drag selects by what the click selected. On touch screens a tap places the
-  caret.
+  Shift-click extends the selection and a drag selects by what the click selected. An Alt+Shift drag
+  (Option+Shift; Control+Alt on Linux too) selects a block: one selection per row, between the same columns, which
+  keep going past the end of short lines. On touch screens a tap places the caret.
 - **Clipboard.** Copy and cut with no selection take the whole lines of the carets, and those paste back as whole
   lines above the caret's line.
 
@@ -138,13 +144,21 @@ elsewhere (`nsh/keymap`'s keystrokes).
 | `cmd+shift+\` | `ctrl+shift+\` | Go to the matching bracket |
 | `ctrl+j` | `ctrl+j` | Join the lines |
 | `ctrl+t` | | Swap the characters around the caret |
+| `ctrl+alt+left` / `ctrl+alt+right`, with Shift to select | | Move by part of a word (camelCase, snake_case) |
+| `shift+alt+a` | `shift+alt+a` | Toggle the block comment |
+| `shift+alt+i` | `shift+alt+i` | Split the selection into lines |
+| `ctrl+shift+cmd+right` / `ctrl+shift+cmd+left` | `shift+alt+right` / `shift+alt+left` | Expand / shrink the selection |
+| `cmd+u` | `ctrl+u` | Back to the previous selections |
+| `cmd+g` / `cmd+shift+g`, `f3` / `shift+f3` | `f3` / `shift+f3` | Find the next / previous match |
+| `cmd+e` | | Find the selection (`onFindWithSelection`) |
+| `cmd+alt+[` / `cmd+alt+]` | `ctrl+shift+[` / `ctrl+shift+]` | Fold / unfold the caret's line |
 | `cmd+c` / `cmd+x` / `cmd+v` | `ctrl+c` / `ctrl+x` / `ctrl+v` | Copy / cut / paste |
 
 macOS and iOS also have Cocoa's text keys: `ctrl+b` / `ctrl+f` / `ctrl+p` / `ctrl+n` move, `ctrl+h` / `ctrl+d`
 delete.
 
-Find, folding and the app's own commands take the keys the app binds with [`nsh/keymap`](../modules/nsh-keymap.md),
-running them through the ref's `run`:
+The commands without default keys, and the app's own, take the keys the app binds with
+[`nsh/keymap`](../modules/nsh-keymap.md), running them through the ref's `run`:
 
 ```tsx
 import { keymap } from "nsh/keymap";
@@ -152,21 +166,26 @@ import { keymap } from "nsh/keymap";
 let editor!: EditorRef;
 
 keymap.bind({
-  "mod+g": () => editor.run("findNext"),
-  "mod+shift+g": () => editor.run("findPrevious"),
-  "mod+alt+[": () => editor.run("fold"),
-  "mod+alt+]": () => editor.run("unfold"),
+  "f9": () => editor.run("sortLinesAscending"),
+  "mod+shift+u": () => editor.run("transformToUppercase"),
+  "mod+alt+0": () => editor.run("foldAll"),
+  "mod+alt+j": () => editor.run("unfoldAll"),
 });
 ```
 
 ## Find and replace
 
-`search` is what to find: `{ query, caseSensitive?, wholeWord?, regex? }`. Its matches are highlighted, the one the
+`search` is what to find: `{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`. Its matches are highlighted, the one the
 selection is on more strongly, and `onSearchChange` reports `{ count, current, error }`: how many matches, which one
 the selection is on (from 0), and why a regular expression is not valid. `findNext` and `findPrevious` select the next
 and previous match, wrapping around; `replace(text)` replaces the current match and selects the next one, and
 `replaceAll(text)` replaces every match as one edit and returns how many. A regular expression's replacement refers to
 its groups as `$1` and `${name}`.
+
+`inSelection` finds only inside what was selected when it turned on (the carets' lines when nothing was): the scope
+stays while it stays on, through edits, as the selection moves from match to match. `findWithSelection` (`cmd+e` on
+macOS) reports the selected text, or the word at the caret, with `onFindWithSelection`, for the find bar to take as
+its query.
 
 The find bar is the app's own:
 
@@ -361,14 +380,23 @@ let editor!: EditorRef;
 | `moveLeft`, `moveRight`, `moveUp`, `moveDown`, `moveWordLeft`, `moveWordRight`, `moveLineStart`, `moveLineEnd`, `movePageUp`, `movePageDown`, `moveDocumentStart`, `moveDocumentEnd` | Move the carets. |
 | `selectLeft`, `selectRight`, `selectUp`, `selectDown`, `selectWordLeft`, `selectWordRight`, `selectLineStart`, `selectLineEnd`, `selectPageUp`, `selectPageDown`, `selectDocumentStart`, `selectDocumentEnd` | Extend the selections. |
 | `moveToMatchingBracket` | To the bracket matching the one at the caret. |
-| `selectAll`, `selectLine`, `selectWord`, `selectNextOccurrence`, `selectAllOccurrences` | Select. |
+| `selectAll`, `selectLine`, `selectWord`, `selectNextOccurrence`, `selectPreviousOccurrence`, `selectAllOccurrences` | Select. |
+| `moveSubwordLeft`, `moveSubwordRight`, `selectSubwordLeft`, `selectSubwordRight` | Move or extend by part of a word (camelCase humps, snake_case parts). |
+| `moveParagraphUp`, `moveParagraphDown`, `selectParagraphUp`, `selectParagraphDown` | Move or extend to the blank line before or after the paragraph. |
+| `expandSelection`, `shrinkSelection` | Grow the selections by a unit, or back. |
+| `undoSelection`, `redoSelection` | Back to the selections before the last move, or forward again. |
+| `splitSelectionIntoLines` | One selection per line of each selection. |
 | `addCaretAbove`, `addCaretBelow`, `singleSelection` | Add a caret; back to one selection. |
 | `deleteBackward`, `deleteForward`, `deleteWordLeft`, `deleteWordRight`, `deleteToLineStart`, `deleteToLineEnd`, `deleteLine` | Delete. |
-| `newline`, `newlineBelow`, `newlineAbove`, `indent`, `outdent`, `toggleComment` | Lines and indentation. |
+| `newline`, `newlineBelow`, `newlineAbove`, `indent`, `outdent`, `toggleComment`, `toggleBlockComment` | Lines, indentation and comments. |
+| `sortLinesAscending`, `sortLinesDescending` | Sort the selected lines (every line with only a caret). |
+| `transformToUppercase`, `transformToLowercase`, `transformToTitleCase` | Change the case of the selections (a caret: its word). |
+| `trimTrailingWhitespace` | Remove the whitespace at the end of every line. |
 | `moveLinesUp`, `moveLinesDown`, `duplicateLinesUp`, `duplicateLinesDown`, `joinLines`, `transposeCharacters` | Rearrange. |
 | `undo`, `redo` | Undo and redo. |
 | `fold`, `unfold`, `foldAll`, `unfoldAll` | Fold at the caret's line, or everything. |
 | `findNext`, `findPrevious` | Select the next or previous match of `search`. |
+| `findWithSelection` | Report the selected text for the find bar (`onFindWithSelection`). |
 | `copy`, `cut`, `paste` | The clipboard. |
 
 ## Styling the parts
@@ -463,6 +491,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | The mouse rests over a character ([Language features](#language-features)). |
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | The hover ended. |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |
+| `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | `findWithSelection` ran: the text for the find bar's query. |
 
 ## Accessibility
 

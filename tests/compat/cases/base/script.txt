@@ -1290,11 +1290,18 @@ expect Read: selected y
 expect Caret: 0:5
 tap id:go-to-line
 expect Caret: 0:0
+# A command changes the case of the selection, which stays selected,
+# and another reports it for the app's find bar.
+tap id:upper
+expect Value: LET y = 1; // ok
+tap id:ask
+expect Asked: LET
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
 covers [props] Editor.search
 covers [events] Editor.onSearchChange
+covers [events] Editor.onFindWithSelection
 
 # base-diff
 tap id:case-base-diff

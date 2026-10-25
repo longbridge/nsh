@@ -24,6 +24,7 @@ pub(crate) mod language;
 mod movement;
 mod parts;
 mod search;
+mod select;
 pub(crate) mod state;
 mod types;
 mod view;
@@ -168,6 +169,11 @@ pub enum EditorEvent {
     /// Mod held, a definition to go to.
     #[args(event)]
     TextPress(EditorTextPressEvent),
+    /// The user asked to find the primary selection's text (a caret: its
+    /// word; `findWithSelection`, Command+E on Apple platforms): the app's
+    /// find bar takes it as its query.
+    #[args(query)]
+    FindWithSelection(String),
 }
 
 /// Where a context menu was asked for in an [`Editor`].
@@ -312,6 +318,57 @@ pub enum EditorCommand {
     Cut,
     /// Pastes the clipboard's text.
     Paste,
+    /// Adds a selection at the previous occurrence of the selected text (or
+    /// selects the word at the caret).
+    SelectPreviousOccurrence,
+    /// Back to the selections before the last move of the carets.
+    UndoSelection,
+    /// Forward again to the selections `undoSelection` went back from.
+    RedoSelection,
+    /// Grows each selection to the unit around it: the word, a string's
+    /// contents and the string, a bracket pair's contents and the pair, the
+    /// line, the text.
+    ExpandSelection,
+    /// Back to what `expandSelection` grew the selections from.
+    ShrinkSelection,
+    /// Each selection over several lines becomes one selection per line.
+    SplitSelectionIntoLines,
+    /// Reports the selected text (a caret: its word) for the app's find bar
+    /// (`onFindWithSelection`).
+    FindWithSelection,
+    /// To the start of the previous part of a word (camelCase humps,
+    /// snake_case parts).
+    MoveSubwordLeft,
+    /// Past the end of the next part of a word.
+    MoveSubwordRight,
+    /// Extends the selections to the start of the previous part of a word.
+    SelectSubwordLeft,
+    /// Extends the selections past the end of the next part of a word.
+    SelectSubwordRight,
+    /// To the blank line before the paragraph.
+    MoveParagraphUp,
+    /// To the blank line after the paragraph.
+    MoveParagraphDown,
+    /// Extends the selections to the blank line before the paragraph.
+    SelectParagraphUp,
+    /// Extends the selections to the blank line after the paragraph.
+    SelectParagraphDown,
+    /// Sorts the selected lines in ascending order (every line when there
+    /// is only a caret).
+    SortLinesAscending,
+    /// Sorts the selected lines in descending order.
+    SortLinesDescending,
+    /// Upper-cases the selections (a caret: its word).
+    TransformToUppercase,
+    /// Lower-cases the selections.
+    TransformToLowercase,
+    /// Capitalizes each word of the selections.
+    TransformToTitleCase,
+    /// Removes the whitespace at the end of every line.
+    TrimTrailingWhitespace,
+    /// Wraps the selections in the language's block comment, or unwraps
+    /// them.
+    ToggleBlockComment,
 }
 
 /// The methods of an [`Editor`]'s ref.
