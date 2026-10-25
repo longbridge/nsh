@@ -235,47 +235,63 @@ export function wordAt(line: string, column: number): { word: string; start: num
 }
 
 /**
- * The text with string literals and comments blanked out (their
- * characters as spaces, the line breaks kept), so the rules below look at
- * code only. A pass of its own ([`slices`]): a long file has a lot of
- * characters to read.
+ * Where what `open` opened (a string, a template or a block comment) ends
+ * on `text`, from `from`: just past its closing, or -1 when it runs on past
+ * the line (a template or a block comment; a quote ends with its line).
  */
-function* mask(text: string): Generator<void, string> {
-  // Built from slices, not a char at a time: QuickJS copies a string on
-  // every `+=`, which made a long file quadratic.
-  const out: string[] = [];
-  // `text[from..to]` blanked, its line breaks kept.
-  const blank = (from: number, to: number) => out.push(text.slice(from, to).replace(/[^\n]/g, " "));
-  let code = 0;
-  let i = 0;
-  let steps = 0;
-  while (i < text.length) {
-    if (++steps % 4096 === 0) yield;
-    const c = text[i];
-    const next = text[i + 1];
-    let end = -1;
-    if (c === "/" && next === "/") {
-      end = text.indexOf("\n", i);
-      if (end < 0) end = text.length;
-    } else if (c === "/" && next === "*") {
-      const close = text.indexOf("*/", i + 2);
-      end = close < 0 ? text.length : close + 2;
-    } else if (c === '"' || c === "'" || c === "`") {
-      end = i + 1;
-      while (end < text.length && text[end] !== c && (c === "`" || text[end] !== "\n")) end += text[end] === "\\" ? 2 : 1;
-      end = Math.min(end, text.length);
-      if (end < text.length && text[end] === c) end++;
-    }
-    if (end < 0) {
-      i++;
-      continue;
-    }
-    out.push(text.slice(code, i));
-    blank(i, end);
-    i = code = end;
+function closing(open: string, text: string, from: number): number {
+  if (open === "/*") {
+    const close = text.indexOf("*/", from);
+    return close < 0 ? -1 : close + 2;
   }
-  out.push(text.slice(code));
-  return out.join("");
+  let end = from;
+  while (end < text.length && text[end] !== open) end += text[end] === "\\" ? 2 : 1;
+  if (end < text.length) return end + 1;
+  return open === "`" ? -1 : text.length;
+}
+
+/**
+ * The lines with string literals and comments blanked out (their
+ * characters as spaces), so the rules below look at code only. A pass of
+ * its own ([`slices`]), a line at a time: a regular expression jumps to the
+ * next comment or quote, as reading a long file a character at a time in
+ * QuickJS took tens of milliseconds between yields; a template or a block
+ * comment left open runs on into the next lines.
+ */
+function* mask(lines: string[]): Generator<void, string[]> {
+  const out: string[] = new Array(lines.length);
+  const blank = (n: number) => " ".repeat(n);
+  const starts = /\/\/|\/\*|["'`]/g;
+  let open: string | null = null;
+  for (let line = 0; line < lines.length; line++) {
+    if (line % SLICE === 0) yield;
+    const text = lines[line];
+    let masked = "";
+    let code = 0;
+    if (open) {
+      const end = closing(open, text, 0);
+      if (end < 0) {
+        out[line] = blank(text.length);
+        continue;
+      }
+      masked = blank(end);
+      code = end;
+      open = null;
+    }
+    starts.lastIndex = code;
+    let m: RegExpExecArray | null;
+    while ((m = starts.exec(text))) {
+      const at = m.index;
+      masked += text.slice(code, at);
+      const end = m[0] === "//" ? text.length : closing(m[0], text, at + m[0].length);
+      if (end < 0) open = m[0];
+      code = end < 0 ? text.length : end;
+      masked += blank(code - at);
+      starts.lastIndex = code;
+    }
+    out[line] = code === 0 ? text : masked + text.slice(code);
+  }
+  return out;
 }
 
 /** The line of the `}` closing the block opened on line `start`. */
@@ -316,13 +332,23 @@ interface Model {
   declarations: Set<number>;
   /** `symbols` by name: what `lookup` searches, once per name and not
    * through every symbol. */
-  byName: Map<string, SymbolInfo[]>;
+  byName: Map<string, Named>;
+}
+
+/** The symbols of one name, for `lookup`: the first without a scope, and
+ * those with one by where their scope starts, with the furthest end any of
+ * them up to each reaches (`reach`), so a lookup searches a few of them and
+ * not every one (a long file repeats its names). */
+interface Named {
+  global?: SymbolInfo;
+  scoped: SymbolInfo[];
+  reach: number[];
 }
 
 /** Reads the file's declarations, a slice of lines at a time ([`slices`]). */
 function* analyze(text: string): Generator<void, Model> {
   const lines = text.split("\n");
-  const code = (yield* mask(text)).split("\n");
+  const code = yield* mask(lines);
   const symbols: SymbolInfo[] = [];
   const types: Model["types"] = new Map();
   const declarations = new Set<number>();
@@ -426,22 +452,41 @@ function* analyze(text: string): Generator<void, Model> {
     }
   }
   const byName: Model["byName"] = new Map();
-  for (const s of symbols) {
-    const same = byName.get(s.name);
-    if (same) same.push(s);
-    else byName.set(s.name, [s]);
+  for (let i = 0; i < symbols.length; i++) {
+    if (i % (SLICE * 16) === 0) yield;
+    const s = symbols[i];
+    let named = byName.get(s.name);
+    if (!named) byName.set(s.name, (named = { scoped: [], reach: [] }));
+    if (s.scope) named.scoped.push(s);
+    else named.global ??= s;
+  }
+  for (const named of byName.values()) {
+    // Stable: of scopes starting on one line, the last declared wins.
+    named.scoped.sort((a, b) => a.scope!.start - b.scope!.start);
+    let reach = -1;
+    named.reach = named.scoped.map((s) => (reach = Math.max(reach, s.scope!.end)));
   }
   return { lines, code, symbols, types, declarations, byName };
 }
 
 /** The symbol `name` means on line `line`: the innermost one visible there. */
 function lookup(model: Model, name: string, line: number): SymbolInfo | undefined {
-  let found: SymbolInfo | undefined;
-  for (const s of model.byName.get(name) ?? []) {
-    if (s.scope && (line < s.scope.start || line > s.scope.end)) continue;
-    if (!found || (s.scope && (!found.scope || s.scope.start >= found.scope.start))) found = s;
+  const named = model.byName.get(name);
+  if (!named) return undefined;
+  const { scoped, reach } = named;
+  // The last scope starting at or before `line`, then back while one before
+  // may still reach it: the first that does starts last (the innermost).
+  let low = 0;
+  let high = scoped.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (scoped[mid].scope!.start <= line) low = mid + 1;
+    else high = mid;
   }
-  return found;
+  for (let i = low - 1; i >= 0 && reach[i] >= line; i--) {
+    if (scoped[i].scope!.end >= line) return scoped[i];
+  }
+  return named.global;
 }
 
 /** The members after a `.` on a value of `type`. */
@@ -524,7 +569,7 @@ function* lint(model: Model): Generator<void, Problem[]> {
   // The functions' names, which a call of an unknown name may misspell;
   // listed the first time one is needed.
   let functions: string[] | undefined;
-  const functionNames = () => (functions ??= model.symbols.filter((s) => s.kind === "function").map((s) => s.name));
+  const functionNames = () => (functions ??= [...new Set(model.symbols.filter((s) => s.kind === "function").map((s) => s.name))]);
 
   for (let line = 0; line < lines.length; line++) {
     if (line % SLICE === 0) yield;
