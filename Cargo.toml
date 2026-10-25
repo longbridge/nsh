@@ -251,6 +251,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSStream",
   "NSString",
   "NSThread",
+  "NSTimeZone",
   "NSTimer",
   "NSURL",
   "NSURLRequest",
