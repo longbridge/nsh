@@ -136,6 +136,24 @@ pub(crate) struct Input {
     /// Next press / zoom generation (invalidates callbacks of
     /// earlier ones).
     next_gen: Cell<u64>,
+    /// Hears the modifier keys change, once a view hears hover moves.
+    flags: FlagsMonitor,
+}
+
+/// A local monitor of the modifier keys (`flagsChanged`), which reach only
+/// the first responder: a change while the mouse rests is a hover move
+/// where it is ([`modifiers_changed`]). Removed with the surface.
+#[derive(Default)]
+struct FlagsMonitor(RefCell<Option<Retained<objc2::runtime::AnyObject>>>);
+
+impl Drop for FlagsMonitor {
+    fn drop(&mut self) {
+        if let Some(monitor) = self.0.borrow_mut().take() {
+            // SAFETY: a monitor `addLocalMonitorForEventsMatchingMask`
+            // returned.
+            unsafe { NSEvent::removeMonitor(&monitor) };
+        }
+    }
 }
 
 /// What a drag on a view may start.
@@ -1833,6 +1851,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
             }
             s.id
         };
+        watch_flags(surface);
         let (location_x, location_y) = local(surface, &v, x, y);
         let event = nsh_core::HoverEvent {
             position: point(Points(location_x), Points(location_y)),
@@ -1840,6 +1859,52 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
             modifiers: modifiers(flags),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    }
+}
+
+/// Installs the surface's [`FlagsMonitor`], unless it is there.
+fn watch_flags(surface: &Surface) {
+    let monitor = &surface.input.flags.0;
+    if monitor.borrow().is_some() {
+        return;
+    }
+    let key = surface.key();
+    let block = block2::RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit passes a valid event.
+        let e = unsafe { event.as_ref() };
+        if let Some(surface) = Surface::with_key(key) {
+            modifiers_changed(&surface, e);
+        }
+        event.as_ptr()
+    });
+    // SAFETY: the block returns the event it got (never consumed); the
+    // monitor is removed with the surface's input.
+    *monitor.borrow_mut() = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            objc2_app_kit::NSEventMask::FlagsChanged,
+            &block,
+        )
+    };
+}
+
+/// The modifier keys changed (`event`, a `flagsChanged`): while the mouse
+/// rests over the surface's window with no button down, the hovered views
+/// that listen hear `onHoverMove` again where it is, with the modifiers as
+/// they are now (an editor underlines a definition while Command is held),
+/// as they would on the next move.
+fn modifiers_changed(surface: &Surface, event: &NSEvent) {
+    let Some(window) = surface.root.ns().window() else {
+        return;
+    };
+    if event.window(surface.mtm).as_deref() != Some(&*window) {
+        return;
+    }
+    let input = &surface.input;
+    if input.pointer.borrow().is_some() {
+        return;
+    }
+    if let Some((x, y)) = input.last.get() {
+        hover_moved(surface, x, y, event.modifierFlags());
     }
 }
 

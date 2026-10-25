@@ -186,7 +186,7 @@ view()
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `onHoverIn` | `.on_hover_in(..)` | `() => void` | 鼠标移到视图或其内部的视图上。 |
-| `onHoverMove` | `.on_hover_move(..)` | `(e: HoverEvent) => void` | 没有按下按键时，鼠标在视图（或其内部的视图）上移动。 |
+| `onHoverMove` | `.on_hover_move(..)` | `(e: HoverEvent) => void` | 没有按下按键时，鼠标在视图（或其内部的视图）上移动，或鼠标停在那里时按下或松开了修饰键。 |
 | `onHoverOut` | `.on_hover_out(..)` | `() => void` | 鼠标离开视图及其内部的视图，或离开窗口。 |
 
 与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知应用，触摸从不触发；按着按键移动属于触摸（`onTouchMove`、响应者系统）。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 和 Windows 上要等到鼠标下一次移动。

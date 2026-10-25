@@ -463,6 +463,10 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             cancel_all(surface);
             return glib::Propagation::Proceed;
         }
+        T::KeyPress | T::KeyRelease => {
+            modifiers_changed(surface, event, ty == T::KeyPress);
+            return glib::Propagation::Proceed;
+        }
         _ => return glib::Propagation::Proceed,
     }
     // Scroll and touchpad gesture events carry no position in GTK 4: they
@@ -1782,6 +1786,37 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
             modifiers: modifiers(state),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    }
+}
+
+/// A modifier key pressed or released while the mouse rests: the hovered
+/// views that listen hear `onHoverMove` again where it is, with the
+/// modifiers as they are now (an editor underlines a definition while
+/// Control is held), as they would on the next move.
+fn modifiers_changed(surface: &Surface, event: &gdk::Event, pressed: bool) {
+    let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
+        return;
+    };
+    let mask = match key.keyval() {
+        gdk::Key::Control_L | gdk::Key::Control_R => gdk::ModifierType::CONTROL_MASK,
+        gdk::Key::Shift_L | gdk::Key::Shift_R => gdk::ModifierType::SHIFT_MASK,
+        gdk::Key::Alt_L | gdk::Key::Alt_R | gdk::Key::Meta_L | gdk::Key::Meta_R => {
+            gdk::ModifierType::ALT_MASK
+        }
+        gdk::Key::Super_L | gdk::Key::Super_R => gdk::ModifierType::SUPER_MASK,
+        _ => return,
+    };
+    let Some((x, y)) = surface.input.last.get() else {
+        return;
+    };
+    // A key event's state is the one before it.
+    let mut state = event.modifier_state();
+    state.set(mask, pressed);
+    let buttons = gdk::ModifierType::BUTTON1_MASK
+        | gdk::ModifierType::BUTTON2_MASK
+        | gdk::ModifierType::BUTTON3_MASK;
+    if !state.intersects(buttons) {
+        hover_moved(surface, x, y, state);
     }
 }
 

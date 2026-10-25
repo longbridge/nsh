@@ -208,7 +208,7 @@ desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mou
 | Prop | Rust | Type | Description |
 |---|---|---|---|
 | `onHoverIn` | `.on_hover_in(..)` | `() => void` | The mouse came over the view or a view inside it. |
-| `onHoverMove` | `.on_hover_move(..)` | `(e: HoverEvent) => void` | The mouse moved over the view (or a view inside it) with no button down. |
+| `onHoverMove` | `.on_hover_move(..)` | `(e: HoverEvent) => void` | The mouse moved over the view (or a view inside it) with no button down, or a modifier key was pressed or released while it rests there. |
 | `onHoverOut` | `.on_hover_out(..)` | `() => void` | The mouse left the view and the views inside it, or the window. |
 
 Like CSS `:hover`, a view counts as hovered while the mouse is over it or over anything inside it, so the views around

@@ -40,6 +40,8 @@ const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
 const HOVER_EVENTS = ["onHoverIn", "onHoverOut", "onHoverMove"];
+/** The keys whose press or release is reported as a hover move. */
+const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
 // caret (`caretBounds`).
 const CARET_STYLE = [
@@ -4443,6 +4445,7 @@ class Player {
       this.mouseMoved(e);
       if (e.pointerType !== "mouse") return;
       this.hover = [e.clientX, e.clientY];
+      this.hoverButtons = e.buttons;
       // Reveal only a draggable thumb under the pointer.
       if (!this.desktopUI || e.buttons) return;
       const view = this.viewOf(e.target);
@@ -4535,7 +4538,32 @@ class Player {
 
   // Keyboard
 
+  /**
+   * A modifier key went down or up while the mouse rests over the page
+   * with no button down: the hovered views that listen hear
+   * `onHoverMove` again where it is, with the modifiers as they are now
+   * (an editor underlines a definition while Mod is held), as they would
+   * on the next move.
+   */
+  modifiersChanged(e) {
+    if (!MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons) return;
+    const [x, y] = this.hover;
+    const target = document.elementFromPoint(x, y);
+    if (!target || !this.root.contains(target)) return;
+    const r = this.root.getBoundingClientRect();
+    for (const el of this.ancestors(this.viewOf(target))) {
+      if (!el._hoverIn || !el._events?.has("onHoverMove")) continue;
+      const b = el.getBoundingClientRect();
+      this.event(el._id, "onHoverMove", {
+        position: { x: x - b.left, y: y - b.top },
+        pagePosition: { x: x - r.left, y: y - r.top },
+        modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
+      });
+    }
+  }
+
   keyDown(e) {
+    if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
     const focus = document.activeElement;
     const inRoot = focus && this.root.contains(focus);
@@ -4593,6 +4621,7 @@ class Player {
   }
 
   keyUp(e) {
+    if (this.wasm) this.modifiersChanged(e);
     if (e.key === " " && this.keyPress) this.keyPressEnd(true);
   }
 

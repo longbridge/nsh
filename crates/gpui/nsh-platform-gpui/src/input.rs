@@ -2133,6 +2133,21 @@ fn hover_event(surface: &Surface, view: &NshView, kind: EventKind) {
     }
 }
 
+/// The keyboard's modifiers changed (`modifiers` held now): while the
+/// mouse rests over the surface with no button down, the hovered views
+/// that listen hear `onHoverMove` again where it is, with the new
+/// modifiers (an editor underlines a definition while Mod is held), as
+/// they would on the next move.
+pub(crate) fn modifiers_changed(surface: &Surface, modifiers: Modifiers) {
+    let input = &surface.input;
+    if input.pointers.borrow().iter().any(|p| p.key == Key::Mouse) {
+        return;
+    }
+    if let Some((x, y)) = input.last.get() {
+        hover_moved(surface, x, y, modifiers);
+    }
+}
+
 /// Picks the hovered views again under a mouse that did not move: after a
 /// batch or a scroll moved views under it (or away), as on macOS.
 pub(crate) fn rehover(surface: &Surface) {

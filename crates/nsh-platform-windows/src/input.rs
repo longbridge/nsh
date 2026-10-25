@@ -103,6 +103,11 @@ struct TwoFinger {
 const VK_TAB: u16 = 0x09;
 /// `VK_MENU` (Alt).
 const VK_MENU: u16 = 0x12;
+/// The modifier keys' virtual key codes: Shift, Ctrl and Alt (and their
+/// left and right ones), and the Windows keys.
+const MODIFIER_KEYS: [u16; 11] = [
+    0x10, 0x11, VK_MENU, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C,
+];
 
 /// What a pointer did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -930,6 +935,9 @@ pub(crate) fn wheel(surface: &Rc<Surface>, event: WheelEvent) {
 /// repeats) go to the modules; ups are not acted on.
 pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
     let input = &surface.input;
+    if MODIFIER_KEYS.contains(&event.vk) && !event.repeat {
+        modifiers_changed(surface, event.modifiers);
+    }
     if !event.down {
         // `DefWindowProc` opens the window menu when Alt is released after
         // it saw no other key: swallow the release once Alt + key was ours.
@@ -2040,6 +2048,21 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
             modifiers: modifiers.core(),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    }
+}
+
+/// A modifier key went down or up (`modifiers` held now): while the mouse
+/// rests over the surface with no button down, the hovered views that
+/// listen hear `onHoverMove` again where it is, with the new modifiers (an
+/// editor underlines a definition while Ctrl is held), as they would on
+/// the next move.
+fn modifiers_changed(surface: &Surface, modifiers: Modifiers) {
+    let input = &surface.input;
+    if input.pointers.borrow().iter().any(|p| p.key == Key::Mouse) {
+        return;
+    }
+    if let Some((x, y)) = input.last.get() {
+        hover_moved(surface, x, y, modifiers);
     }
 }
 
