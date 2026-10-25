@@ -11,12 +11,12 @@ user-facing page is `website/elements/data-table.md`; how each module works insi
 
 | File | What |
 |---|---|
-| `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSelectionMode`, `DataTableSortDirection` (`PropEnum`s), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
+| `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSortDirection` (`PropEnum`s), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DataTableClasses`, `DataTableStyles` and `DataTablePart` |
 | `data.rs` | `DataTableRows`: the rows from JS, arrays or objects by the columns' keys, and each field as a `Cell` |
 | `axis.rs` | `Axis`: one axis's real extent against the extent the scroll views get (see "Huge tables") |
 | `columns.rs` | `Columns`: the columns' order, widths and prefix sums, the fixed ones, finding the column at an x, resizing, moving |
-| `selection.rs` | `Selection`, and `Nav`: what a key moves the selection to |
+| `selection.rs` | `Selection`, `Selectable` (gpui-component's `rowSelectable`, `columnSelectable`, `cellSelectable`), and `Nav`: what a key moves the selection to |
 | `controller.rs` | `Dt` and `State`: props and the ref's work, revisions bindings subscribe to, presses, keys, resizing, moving, fitting, copying |
 | `view.rs` | The view, in layers (below) |
 
@@ -35,6 +35,12 @@ The table is a hit layer, a body and a header (`view.rs`):
 Rows come from `RowWindow` (`window.rs`, `reaching(margin, ahead)`), columns from the same with a reach of 1 and 3, so
 a scroll inside the window made commits a few mount items only.
 
+The rows and the scrolling columns are *slots* (`Slots`, `view.rs`): views made once, each showing the item of the
+window whose index leaves its slot number when divided by their count (the most the window has held). When the window
+moves by `k` rows, `k` row slots take other rows: their texts and places change, and no view is made or dropped while
+scrolling, however far. This is the retained tree's form of gpui-component's `uniform_list`, which draws the rows in
+view each frame: the cost of a scroll is the cells that change, never the views that would have to be built.
+
 ## Huge tables
 
 Platforms keep scroll offsets and content sizes in 32-bit floats, so ten million rows (a quarter of a billion points)
@@ -43,6 +49,12 @@ is scaled to the content's (`Axis::ratio`); the table finds the rows from the sc
 the first row in view, so what is drawn is exact at any size and the scroll bar still spans the content. The columns
 work the same way on the horizontal axis. Columns hold prefix sums, so finding the column at an x is a binary search.
 
+## Columns' own classes, fitting, bounce
+
+A column's `cellClass` and `headerClass` come after the part's classes (`column_parts`, `view.rs`). Two presses of a
+resize handle that moved less than `MOVE_SLOP`, within `DOUBLE_PRESS` (400 ms), fit the column (`Dt::resize_end`).
+`bounces` sets the bounce of both scroll views.
+
 ## Data
 
 The app holds as many rows as it likes: `rowCount` is the table's length and `data` holds the rows from `dataStart`.
@@ -50,8 +62,16 @@ The app holds as many rows as it likes: `rowCount` is the table's length and `da
 empty until it arrives. The demo in the gallery (`DataTableDemo.tsx`) serves a million rows of sixty columns in pages
 of 400.
 
+## Live data
+
+Rises and falls take their colors natively: a column's `positiveClass` / `negativeClass` apply to the cells whose
+number is above / below zero, or whose text starts with `+` / `-` (`Cell::sign`), with no call into JS per cell. The
+gallery's live quotes (`DataTableQuotes.tsx`, as gpui-component's data table story: 5 000 or 100 000 stocks, 41
+columns, a third of the rows in view moving every 33 ms) format and hand over only the rows in view and a reach around
+them, so a tick costs what is on screen.
+
 ## Performance
 
 Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`): a scroll frame inside the
-window made commits 4 mount items in ~1.1 ms; a window shift ~700 items in ~10 ms; a page swap of the demo ~2400 items
-in ~22 ms.
+window made commits 4 mount items in ~1 ms; a window shift (row slots taking other rows) ~350 items in ~3 ms, with no
+views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window ~4000 items. A tick of the live quotes commits ~44 items in a median 1.6 ms (at most 2.4 ms).

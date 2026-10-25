@@ -31,20 +31,6 @@ pub enum DataTableAlign {
     End,
 }
 
-/// What a press on the table selects.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PropEnum)]
-pub enum DataTableSelectionMode {
-    /// Nothing: presses and keys select nothing.
-    None,
-    /// A row: pressing any of its cells (or its row header).
-    #[default]
-    Row,
-    /// A column: pressing its title.
-    Column,
-    /// A cell.
-    Cell,
-}
-
 /// Which way a column is sorted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PropEnum)]
 pub enum DataTableSortDirection {
@@ -98,6 +84,21 @@ pub struct DataTableColumn {
     /// select.
     #[prop(skip_none)]
     pub selectable: Option<bool>,
+    /// Classes of its cells, after the `cell` part's (paddings and
+    /// alignment of one column, for instance).
+    #[prop(skip_none)]
+    pub cell_class: Option<SharedString>,
+    /// Classes of its title, after the `headerCell` part's.
+    #[prop(skip_none)]
+    pub header_class: Option<SharedString>,
+    /// Classes of its cells that hold a rise: a number above zero, or a
+    /// text starting with `+` (`"text-green-600"` in a quote table).
+    #[prop(skip_none)]
+    pub positive_class: Option<SharedString>,
+    /// Classes of its cells that hold a fall: a number below zero, or a
+    /// text starting with `-` or `−`.
+    #[prop(skip_none)]
+    pub negative_class: Option<SharedString>,
 }
 
 /// A label above columns: `span` of them, in order.
@@ -240,8 +241,8 @@ pub struct DataTableDump {
 /// the columns index; for more rows than the app holds, `rowCount` is the
 /// total and `data` the rows from `dataStart` on, which the app fetches as
 /// `onVisibleRowsChange` tells (or `onLoadMore`). Rows, columns or cells
-/// select (`selectionMode`, `selection`, with the arrow keys, Home, End,
-/// Page Up and Down, Tab), columns resize, move, stay fixed at the left and
+/// select (`rowSelectable`, `columnSelectable`, `cellSelectable`,
+/// `selection`, with the arrow keys, Home, End, Page Up and Down, Tab), columns resize, move, stay fixed at the left and
 /// sort (the app sorts: `sort`, `onSortChange`), titles can sit under group
 /// labels, and a cell or a title can be drawn by the app (`renderCell`,
 /// `renderHeaderCell`). The table has a default look from the theme's
@@ -275,18 +276,41 @@ pub struct DataTableProps {
     pub groups: Prop<Vec<Vec<DataTableColumnGroup>>>,
     /// What the data is sorted by, shown on the title; the app sorts.
     pub sort: Prop<Option<DataTableSort>>,
-    /// What presses and keys select (default rows).
+    /// Whether rows select (default true): a press of a row (of a cell
+    /// when cells do not select) or of its row header, and the vertical
+    /// keys.
+    #[prop(default = true)]
+    pub row_selectable: Prop<bool>,
+    /// Whether columns select (default true): a press of a column's title
+    /// (a column's `selectable` false keeps it out), and the horizontal keys
+    /// when cells do not select.
+    #[prop(default = true)]
+    pub column_selectable: Prop<bool>,
+    /// Whether cells select (default false): a press of a cell selects it,
+    /// and the arrow keys, Home, End, Page Up and Down and Tab move between
+    /// cells. Without a row header, pressing the selected cell again selects
+    /// its row (when `rowSelectable`).
     #[prop(default)]
-    pub selection_mode: Prop<DataTableSelectionMode>,
+    pub cell_selectable: Prop<bool>,
+    /// Whether a press of a row with Shift or the platform's secondary
+    /// modifier (Command on Apple platforms, Control elsewhere) held selects
+    /// it (default true). An app that keeps its own selection of several
+    /// rows sets false and handles those presses itself (a selected cell
+    /// pressed so does not become its row either). It applies where the
+    /// platform reports the modifiers of a press.
+    #[prop(default = true)]
+    pub select_on_modifier_press: Prop<bool>,
     /// What is selected, when the app sets it (a user's selection is
-    /// reported by `onSelectionChange` either way).
+    /// reported by `onSelectionChange` either way). A selection of a kind
+    /// that does not select (a column when `columnSelectable` is false, ...)
+    /// is cleared.
     pub selection: Prop<Option<DataTableSelection>>,
     /// The arrow keys go around the ends.
     #[prop(default)]
     pub loop_selection: Prop<bool>,
-    /// A column of row numbers at the left (it selects rows).
-    #[prop(default)]
-    pub row_header: Prop<bool>,
+    /// A column of row numbers at the left, which selects rows (default
+    /// shown when `cellSelectable`, hidden otherwise).
+    pub row_header: Prop<Option<bool>>,
     /// Odd rows get the `rowOdd` part (a faint tint by default).
     #[prop(default)]
     pub stripe: Prop<bool>,
@@ -317,6 +341,10 @@ pub struct DataTableProps {
     /// The scroll bars (default true).
     #[prop(default = true)]
     pub scrollbar: Prop<bool>,
+    /// Whether scrolling bounces at the ends where the platform does so
+    /// (default true).
+    #[prop(default = true)]
+    pub bounces: Prop<bool>,
     /// The cells of the app's own, drawn by `renderCell` where a column's
     /// cells are not just text (a badge, a button). It is called for the
     /// cells in view only, with the cell's text; the app looks up its own

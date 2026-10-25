@@ -61,7 +61,7 @@ mount(App);
 ```
 
 The table fills the box the app gives it (`flex-1`, a height) and scrolls inside: vertically through the rows and
-sideways through the columns, with scroll bars (`scrollbar={false}` hides them).
+sideways through the columns, with scroll bars (`scrollbar={false}` hides them, `bounces={false}` stops the bounce at the ends where a platform has one).
 
 ## Rows and columns
 
@@ -75,10 +75,14 @@ booleans and strings show as text. A column is a `DataTableColumn`:
 | `width` | Its width, in points. Default `120`. |
 | `minWidth`, `maxWidth` | The narrowest and widest a drag or a fit makes it. Default `20` and `1200`. |
 | `align` | `"start"` (the default), `"center"` or `"end"`, for numbers. Cells and title alike. |
-| `sortable` | Pressing its title asks for a sort (see [Sorting](#sorting)). |
+| `sortable` | Its title has a sort button that asks for a sort (see [Sorting](#sorting)). |
 | `fixed` | It stays at the left while the other columns scroll under it. Fixed columns lead the others, in their order. |
 | `resizable`, `movable` | Whether a drag of its edge resizes it and a drag of its title moves it. Default the table's `resizableColumns` and `movableColumns`. |
 | `selectable` | Whether it takes part in selection. A column of buttons or checkboxes sets `false`. Default `true`. |
+| `cellClass` | Classes of the column's cells, after the `cell` part's: paddings or alignment of one column. |
+| `headerClass` | Classes of the column's title, after the `headerCell` part's. |
+| `positiveClass` | Classes of the column's cells that hold a rise: a number above zero, or a text starting with `+`. |
+| `negativeClass` | Classes of the column's cells that hold a fall: a number below zero, or a text starting with `-`. |
 
 `rowHeight` is the height of a body row (default `32`) and `headerHeight` the height of a title row (default the row
 height). `rowHeader` adds a column of row numbers at the left, which selects rows. `stripe` gives the odd rows the
@@ -136,14 +140,18 @@ Past a few million points of content the scroll bars span a scaled range, so a m
 
 ## Selection
 
-`selectionMode` decides what a press selects:
+Three switches decide what a press selects, as in gpui-component:
 
-| `selectionMode` | A press selects | `selection` |
+| Prop | A press selects | `selection` |
 |---|---|---|
-| `"row"` (the default) | A row: any of its cells, or its row header | `{ row }` |
-| `"column"` | A column: its title | `{ column }` |
-| `"cell"` | A cell | `{ row, column }` |
-| `"none"` | Nothing | |
+| `rowSelectable` (default `true`) | A row: any of its cells, or its row header | `{ row }` |
+| `columnSelectable` (default `true`) | A column: its title | `{ column }` |
+| `cellSelectable` (default `false`) | A cell; the row header (shown by default with it) selects rows | `{ row, column }` |
+
+With `cellSelectable` and the row header hidden (`rowHeader={false}`), pressing the selected cell again selects its
+row. A press with Shift or the platform's command key held selects a row only while `selectOnModifierPress` (default
+`true`), so an app that keeps its own multi-row selection handles those presses itself. A column whose `selectable` is
+`false` selects neither itself nor its cells.
 
 Rows count from 0 in the data, and a column is its index among `columns`, whatever order the user moved them to.
 `onSelectionChange` reports what the user selected (`null` for nothing). The `selection` prop sets the selection from
@@ -167,7 +175,7 @@ Pressing the table gives it the keyboard until another press or `blur()`; `focus
 
 ## Sorting
 
-A `sortable` column shows a sort indicator on its title. Pressing it reports the next sort in the cycle of unsorted,
+A `sortable` column has a sort button at the end of its title, a small ghost button dimmed while the column is unsorted. Pressing it reports the next sort in the cycle of unsorted,
 ascending, descending and unsorted again, with `onSortChange({ key, direction })` (`null` to clear). The table does
 not reorder the rows: the app sorts its data, or asks its server for rows in the new order, and sets `sort` so the
 title shows it. Because the app owns the order, sorting works the same over a million rows the app never holds.
@@ -188,10 +196,29 @@ title shows it. Because the app owns the order, sorting works the same over a mi
 ## Resizing and moving columns
 
 A drag of a column's trailing edge resizes it within its `minWidth` and `maxWidth`, and `onColumnResize(key, width)`
-reports every step. A drag of a title moves the column, and a line shows where it will drop; `onColumnMove` reports
+reports every step. Pressing the edge twice in a row fits the column to its widest text and title. A drag of a title moves the column, and a line shows where it will drop; `onColumnMove` reports
 `{ key, from, to, order }`, `order` being the `key`s of all the columns in the order shown. Fixed columns stay among
 the fixed ones. `resizableColumns` and `movableColumns` turn both off for the table, and a column's `resizable` and
 `movable` win over them.
+
+## Live data
+
+A quote table changes many times a second. The app formats the rows in view and a reach around them (it knows them
+from `onVisibleRowsChange`) and hands those over as `data` from `dataStart`, so an update costs what is on screen,
+whatever the number of rows. Rises and falls take their colors from the column's `positiveClass` and `negativeClass`,
+applied natively to the cells whose value is above or below zero (or whose text starts with `+` or `-`).
+
+```tsx
+const tone = { positiveClass: "text-green-600", negativeClass: "text-red-600" };
+const columns: DataTableColumn[] = [
+  { key: "symbol", title: "Symbol", fixed: true },
+  { key: "price", title: "Price", align: "end", sortable: true },
+  { key: "change", title: "Chg%", align: "end", ...tone },
+];
+```
+
+Rows and columns are slots the table makes once and keeps: scrolling gives them other rows and columns to show, so a
+scroll, however long, changes texts and places only.
 
 ## Drawing cells and titles
 
@@ -266,7 +293,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `headerCell` | Every column's title cell |
 | `headerCellSorted` | The title of the column the table is sorted by, after `headerCell` |
 | `headerCellSelected` | The title of the selected column, after `headerCell` |
-| `sortIndicator` | The sort indicator of a sortable column (`⇅`, `↑` or `↓`) |
+| `sortIndicator` | The sort button of a sortable column (`⇅`, `↑` or `↓`) |
 | `resizeHandle` | The line at a column's trailing edge that a drag resizes |
 | `moveIndicator` | The line where a dragged column will drop |
 | `row` | Every body row |
@@ -294,10 +321,13 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row. |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | Labels above the columns, lowest level first. |
 | `sort` | `.sort(..)` | `DataTableSort` | | What the data is sorted by, shown on the title. |
-| `selectionMode` | `.selection_mode(..)` | `"none" \| "row" \| "column" \| "cell"` | `"row"` | What presses and keys select. |
+| `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | Presses and keys select rows. |
+| `columnSelectable` | `.column_selectable(..)` | `boolean` | `true` | A title's press selects its column, and the horizontal keys move between columns. |
+| `cellSelectable` | `.cell_selectable(..)` | `boolean` | `false` | Presses and keys select cells. |
+| `selectOnModifierPress` | `.select_on_modifier_press(..)` | `boolean` | `true` | A press with Shift or the command key held selects a row. |
 | `selection` | `.selection(..)` | `DataTableSelection` | | What is selected, when the app sets it. |
 | `loopSelection` | `.loop_selection(..)` | `boolean` | `false` | The arrow keys go around the ends. |
-| `rowHeader` | `.row_header(..)` | `boolean` | `false` | A column of row numbers at the left. |
+| `rowHeader` | `.row_header(..)` | `boolean` | shown with `cellSelectable` | A column of row numbers at the left. |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | Odd rows get the `rowOdd` part. |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | A drag of a column's edge resizes it. |
 | `movableColumns` | `.movable_columns(..)` | `boolean` | `true` | A drag of a title moves its column. |
@@ -307,6 +337,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-sans` | The font of the cells. |
 | `fontSize` | `.font_size(..)` | `number` | `14` | The font size of the cells, in points. |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll bars. |
+| `bounces` | `.bounces(..)` | `boolean` | `true` | Whether scrolling bounces at the ends, where the platform does so. |
 | `renderCell` | `.render_cell(..)` | `(cell: DataTableCell) => JSX.Element` | | Draws the cells in view. |
 | `renderHeaderCell` | `.render_header_cell(..)` | `(cell: DataTableHeaderCell) => JSX.Element` | | Draws the titles. |
 | `empty` | `.empty(..)` | `JSX.Element` | | What shows when there are no rows. |
@@ -322,7 +353,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | The user changed the selection: `{ row?, column? }`, or `null`. |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | A row, cell or title was pressed twice: `{ row?, column? }`. |
 | `onContextMenu` | `.on_context_menu(\|event: &DataTableContextMenu\| ..)` | A context menu was asked for: `{ row?, column?, x, y }`, the point in the root view. |
-| `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | A sortable title was pressed: the next sort `{ key, direction }`, or `null`. |
+| `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | A sort button was pressed: the next sort `{ key, direction }`, or `null`. |
 | `onColumnResize` | `.on_column_resize(\|key: &SharedString, width: &Points\| ..)` | A column was resized, at every step of a drag and once more when a fit sets it. |
 | `onColumnMove` | `.on_column_move(\|event: &DataTableColumnMove\| ..)` | A column was moved: `{ key, from, to, order }`. |
 | `onVisibleRowsChange` | `.on_visible_rows_change(\|range: &DataTableRange\| ..)` | The rows in view changed: `{ start, end }`. Fetch rows from here. |

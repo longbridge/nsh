@@ -32,6 +32,17 @@ impl Cell {
         }
     }
 
+    /// Whether it holds a rise (`Some(true)`) or a fall (`Some(false)`).
+    pub(crate) fn sign(&self) -> Option<bool> {
+        match self {
+            Cell::Number(n) if *n > 0.0 => Some(true),
+            Cell::Number(n) if *n < 0.0 => Some(false),
+            Cell::Text(s) if s.starts_with('+') => Some(true),
+            Cell::Text(s) if s.starts_with('-') || s.starts_with('\u{2212}') => Some(false),
+            _ => None,
+        }
+    }
+
     /// The text for width measuring and export, without making a shared
     /// string.
     pub(crate) fn write_to(&self, out: &mut String) {

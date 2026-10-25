@@ -62,7 +62,7 @@ parts! {
     /// The title cell of the column the table is sorted by, after
     /// `headerCell`.
     header_cell_sorted => HeaderCellSorted,
-    /// The title cell of the selected column (`selectionMode="column"`),
+    /// The title cell of the selected column (a title pressed),
     /// after `headerCell`.
     header_cell_selected => HeaderCellSelected,
     /// The sort indicator of a sortable column (`⇅`, `↑` or `↓`).
@@ -82,12 +82,12 @@ parts! {
     row_selected => RowSelected,
     /// Every body cell.
     cell => Cell,
-    /// The selected cell (`selectionMode="cell"`), after `cell`.
+    /// The selected cell (`cellSelectable`), after `cell`.
     cell_selected => CellSelected,
     /// The cell a context menu was asked for, until the next press, after
     /// `cell`.
     cell_active => CellActive,
-    /// The cells of the selected column (`selectionMode="column"`), after
+    /// The cells of the selected column (a title pressed), after
     /// `cell`.
     cell_column_selected => CellColumnSelected,
     /// The row header cells (`rowHeader`): row numbers, which select rows.

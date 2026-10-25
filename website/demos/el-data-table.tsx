@@ -24,7 +24,7 @@ const columns: DataTableColumn[] = [
 // Sorting is the app's: the table reports the next sort (`onSortChange`),
 // the app orders its rows and sets `sort`.
 function App() {
-  const mode = signal<"row" | "cell" | "column">("row");
+  const mode = signal<"row" | "cell">("row");
   const sort = signal<DataTableSort | undefined>(undefined);
   const rows = signal<Person[]>(people);
   const events = signal<string[]>([]);
@@ -48,7 +48,7 @@ function App() {
         width={680}
         inspector={
           <>
-            <Segmented label="selection" options={["row", "cell", "column"] as const} value={mode()} onChange={(v) => mode.set(v)} />
+            <Segmented label="selection" options={["row", "cell"] as const} value={mode()} onChange={(v) => mode.set(v)} />
             <Log title="events" lines={events()} minHeight={96} />
           </>
         }
@@ -59,7 +59,7 @@ function App() {
             data={rows()}
             rowHeader
             stripe
-            selectionMode={mode()}
+            cellSelectable={mode() === "cell"}
             sort={sort()}
             onSortChange={(next) => {
               sortBy(next ?? undefined);

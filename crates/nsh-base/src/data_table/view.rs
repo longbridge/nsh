@@ -73,6 +73,75 @@ fn part<E: Element>(el: E, props: DataTableProps, which: DataTablePart) -> E {
     parts(el, props, move || vec![which])
 }
 
+/// `parts` with the column's own classes after the parts', which are the
+/// more specific: a title's `headerClass` (`row` is `None`), a cell's
+/// `cellClass` and the `positiveClass` or `negativeClass` its value calls
+/// for.
+fn column_parts<E: Element>(
+    el: E,
+    dt: &Dt,
+    def: Memo<Option<usize>>,
+    row: Option<Memo<Option<usize>>>,
+    list: impl Fn() -> Vec<DataTablePart> + Clone + 'static,
+) -> E {
+    let props = dt.props;
+    let dt = dt.clone();
+    let styles = list.clone();
+    let extra = move || {
+        dt.layout_rev.get();
+        let def = def.get()?;
+        let (own, positive, negative) = {
+            let st = dt.st.borrow();
+            let column = st.defs.get(def)?;
+            if row.is_none() {
+                return column.header_class.clone();
+            }
+            let own = column.cell_class.clone();
+            if column.positive_class.is_none() && column.negative_class.is_none() {
+                return own;
+            }
+            (
+                own,
+                column.positive_class.clone(),
+                column.negative_class.clone(),
+            )
+        };
+        let tone = match dt.cell_sign(row?.get()?, def) {
+            Some(true) => positive,
+            Some(false) => negative,
+            None => None,
+        };
+        match (own, tone) {
+            (Some(a), Some(b)) => Some(format!("{a} {b}").into()),
+            (a, b) => a.or(b),
+        }
+    };
+    el.app_class(move || {
+        let own = extra();
+        props.classes.with(|c| {
+            let list = list();
+            let mut joined: Vec<&str> = list
+                .iter()
+                .filter_map(|p| c.get(*p).map(|s| s.as_str()))
+                .collect();
+            if let Some(own) = own.as_ref() {
+                joined.push(own.as_str());
+            }
+            (!joined.is_empty()).then(|| SharedString::from(joined.join(" ")))
+        })
+    })
+    .inline_style(move || {
+        props.styles.with(|s| {
+            Style::from_decls(
+                styles()
+                    .iter()
+                    .filter_map(|p| s.get(*p))
+                    .flat_map(|s| s.decls().iter().cloned()),
+            )
+        })
+    })
+}
+
 /// The table.
 pub(crate) fn render(dt: Dt) -> impl IntoElement {
     let props = dt.props;
@@ -156,6 +225,7 @@ fn hit_layer(dt: Dt) -> impl IntoElement {
         .bottom_0()
         .top(move || Length::from(px(top_dt.geo().header)))
         .scrollbar(move || props.scrollbar.get())
+        .bounces(move || props.bounces.get())
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
         })
@@ -170,6 +240,7 @@ fn hit_layer(dt: Dt) -> impl IntoElement {
                         .element_ref(&dt.hscroll)
                         .flex_1()
                         .scrollbar(false)
+                        .bounces(move || props.bounces.get())
                         .on_scroll(move |e: &ScrollEvent| {
                             hscroll_dt.scroll_x.set(e.offset.x);
                             // The desktops' bar follows (a move of under half
@@ -193,7 +264,7 @@ fn hit_layer(dt: Dt) -> impl IntoElement {
                                 .h(move || Length::from(px(strip_dt.geo().y.extent() as f32)))
                                 .on(EventKind::Press, move |p: &EventPayload| {
                                     if let EventPayload::Press(e) = p {
-                                        press.press(e.position, e.clicks);
+                                        press.press_with(e.position, e.clicks, e.modifiers);
                                     }
                                 })
                                 .on_hover_move(move |e: &HoverEvent| hover.hover_at(e.position))
@@ -264,7 +335,11 @@ fn strip(dt: Dt) -> impl IntoElement {
 /// columns made, and where they are placed from.
 #[derive(Clone, Copy)]
 struct Windows {
-    rows: Memo<Vec<usize>>,
+    /// The rows' slots, over the window of rows.
+    row_slots: Slots,
+    /// The scrolling columns' slots, over the window of their display
+    /// indexes.
+    col_slots: Slots,
     scroll_cols: Memo<Vec<usize>>,
     fixed_cols: Memo<Vec<usize>>,
     /// The first row of the chunk of rows that rows are placed from.
@@ -278,9 +353,22 @@ struct Windows {
 
 fn windows(dt: &Dt) -> Windows {
     let d = dt.clone();
-    let rows = computed(move || d.row_window());
+    let row_slots = Slots::new(move || {
+        let rows = d.row_window();
+        (
+            rows.first().copied().unwrap_or(0),
+            rows.last().map_or(0, |r| r + 1),
+        )
+    });
     let d = dt.clone();
     let scroll_cols = computed(move || d.col_window());
+    let d = dt.clone();
+    let col_slots = Slots::new(move || {
+        let defs = scroll_cols.get();
+        let st = d.st.borrow();
+        let first = defs.first().and_then(|&def| st.columns.display_of(def));
+        first.map_or((0, 0), |first| (first, first + defs.len()))
+    });
     let d = dt.clone();
     let fixed_cols = computed(move || {
         d.layout_rev.get();
@@ -312,7 +400,8 @@ fn windows(dt: &Dt) -> Windows {
         ((end - fixed_width) - from).max(0.0) as f32
     });
     Windows {
-        rows,
+        row_slots,
+        col_slots,
         scroll_cols,
         fixed_cols,
         row_origin,
@@ -377,6 +466,54 @@ fn edge(dt: Dt, props: DataTableProps) -> impl IntoElement {
     })
 }
 
+/// Slots for one axis of the body: views made once and kept while the
+/// table scrolls, each showing the item of the window whose index leaves
+/// its slot number when divided by their count. A scroll that moves the
+/// window by `k` items gives `k` slots other items (their texts and
+/// places change), so no view is made or dropped while scrolling; this is
+/// what drawing only the items in view each frame (gpui-component's
+/// `uniform_list`) is to a retained tree.
+#[derive(Clone, Copy)]
+struct Slots {
+    /// How many there are: the most the window has held, so slots are
+    /// added as the viewport grows and never dropped.
+    count: Memo<usize>,
+    /// The window: a range of item indexes, at most `count` long.
+    window: Memo<(usize, usize)>,
+}
+
+impl Slots {
+    fn new(window: impl Fn() -> (usize, usize) + 'static) -> Slots {
+        let window = computed(window);
+        let most = Rc::new(Cell::new(0usize));
+        let count = computed(move || {
+            let (start, end) = window.get();
+            let n = most.get().max(end - start);
+            most.set(n);
+            n
+        });
+        Slots { count, window }
+    }
+
+    /// The slots' numbers, for `each`.
+    fn list(self) -> Memo<Vec<usize>> {
+        computed(move || (0..self.count.get()).collect())
+    }
+
+    /// The item slot `slot` shows, `None` while the window has none for it.
+    fn item(self, slot: usize) -> Memo<Option<usize>> {
+        computed(move || {
+            let n = self.count.get();
+            let (start, end) = self.window.get();
+            if n == 0 {
+                return None;
+            }
+            let item = start + (slot + n - start % n) % n;
+            (item < end).then_some(item)
+        })
+    }
+}
+
 /// One region of the body: its box (clipped, holding the rows) and the
 /// rows' content.
 fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
@@ -385,7 +522,7 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
     let shown = {
         let dt = dt.clone();
         move || match which {
-            Region::Lead => dt.props.row_header.get(),
+            Region::Lead => dt.row_header_shown(),
             Region::Fixed => dt.layout_rev.get() > 0 && dt.st.borrow().columns.fixed_len() > 0,
             Region::Scroll => true,
         }
@@ -435,10 +572,11 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
                         _ => Length::from(px(0.0)),
                     })
                     .child(each(
-                        w.rows,
-                        |row: &usize| *row,
-                        move |row, _| {
-                            body_row(rows_dt.clone(), row.get_untracked(), which, w, custom)
+                        w.row_slots.list(),
+                        |slot: &usize| *slot,
+                        move |slot, _| {
+                            let row = w.row_slots.item(slot.get_untracked());
+                            body_row(rows_dt.clone(), row, which, w, custom)
                         },
                     )),
             )
@@ -446,21 +584,22 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
 }
 
 /// The `cell_state` of a row of the three regions.
-fn row_parts(dt: &Dt, row: usize) -> impl Fn() -> Vec<DataTablePart> + Clone + 'static {
+fn row_parts(
+    dt: &Dt,
+    row: Memo<Option<usize>>,
+) -> impl Fn() -> Vec<DataTablePart> + Clone + 'static {
     let props = dt.props;
     let hovered = {
         let hover = dt.hover;
-        computed(move || hover.get() == Some(row))
+        computed(move || row.get().is_some() && hover.get() == row.get())
     };
     let selected = {
         let dt = dt.clone();
-        computed(move || {
-            dt.selection().row() == Some(row) && matches!(dt.selection(), Selection::Row(_))
-        })
+        computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
     };
     move || {
         let mut list = vec![DataTablePart::Row];
-        if props.stripe.get() && row % 2 == 1 {
+        if props.stripe.get() && row.get().is_some_and(|r| r % 2 == 1) {
             list.push(DataTablePart::RowOdd);
         }
         if hovered.get() {
@@ -474,11 +613,17 @@ fn row_parts(dt: &Dt, row: usize) -> impl Fn() -> Vec<DataTablePart> + Clone + '
 }
 
 /// The default look of a row's background, by what it is.
-fn row_background(dt: &Dt, row: usize) -> impl Fn() -> AdaptiveColor + Clone + 'static {
+fn row_background(
+    dt: &Dt,
+    row: Memo<Option<usize>>,
+) -> impl Fn() -> AdaptiveColor + Clone + 'static {
     let props = dt.props;
     let hover = dt.hover;
     let dt = dt.clone();
     move || {
+        let Some(row) = row.get() else {
+            return AdaptiveColor::TRANSPARENT;
+        };
         let selected = matches!(dt.selection(), Selection::Row(r) if r == row);
         if selected {
             theme().primary.opacity(0.12)
@@ -492,7 +637,13 @@ fn row_background(dt: &Dt, row: usize) -> impl Fn() -> AdaptiveColor + Clone + '
     }
 }
 
-fn body_row(dt: Dt, row: usize, which: Region, w: Windows, custom: bool) -> impl IntoElement {
+fn body_row(
+    dt: Dt,
+    row: Memo<Option<usize>>,
+    which: Region,
+    w: Windows,
+    custom: bool,
+) -> impl IntoElement {
     let props = dt.props;
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let list = row_parts(&dt, row);
@@ -502,11 +653,15 @@ fn body_row(dt: Dt, row: usize, which: Region, w: Windows, custom: bool) -> impl
         view()
             .absolute()
             .left_0()
+            .style_when(move || row.get().is_none(), |s| s.hidden())
             .on(EventKind::Press, move |p: &EventPayload| {
+                let Some(row) = row.get_untracked() else {
+                    return;
+                };
                 // A press without a position (a script's) lands at the row's start.
-                let (x, clicks) = match p {
-                    EventPayload::Press(e) => (e.position.x, e.clicks),
-                    _ => (Points(0.0), 1),
+                let (x, clicks, modifiers) = match p {
+                    EventPayload::Press(e) => (e.position.x, e.clicks, e.modifiers),
+                    _ => (Points(0.0), 1, Default::default()),
                 };
                 let region = match which {
                     Region::Lead => PressRegion::Lead,
@@ -515,11 +670,12 @@ fn body_row(dt: Dt, row: usize, which: Region, w: Windows, custom: bool) -> impl
                         origin: w.col_origin.get_untracked(),
                     },
                 };
-                press_dt.press_row(row, region, x, clicks);
+                press_dt.press_row_with(row, region, x, clicks, modifiers);
             })
             .top(move || {
                 let origin = w.row_origin.get() as i64;
-                Length::from(px((row as i64 - origin) as f32 * top_dt.row_height()))
+                let row = row.get().unwrap_or(0) as i64;
+                Length::from(px((row - origin) as f32 * top_dt.row_height()))
             })
             .h(move || Length::from(px(height_dt.row_height())))
             .border_b_1()
@@ -537,18 +693,40 @@ fn body_row(dt: Dt, row: usize, which: Region, w: Windows, custom: bool) -> impl
             .child(each(
                 w.fixed_cols,
                 |def: &usize| *def,
-                move |def, _| cell(dt.clone(), row, def.get_untracked(), which, w, custom),
+                move |def, _| {
+                    let def = def.get_untracked();
+                    cell(
+                        dt.clone(),
+                        row,
+                        computed(move || Some(def)),
+                        which,
+                        w,
+                        custom,
+                    )
+                },
             )),
         Region::Scroll => el.w(move || Length::from(px(w.span.get()))).child(each(
-            w.scroll_cols,
-            |def: &usize| *def,
-            move |def, _| cell(dt.clone(), row, def.get_untracked(), which, w, custom),
+            w.col_slots.list(),
+            |slot: &usize| *slot,
+            move |slot, _| {
+                let display = w.col_slots.item(slot.get_untracked());
+                let def = {
+                    let dt = dt.clone();
+                    computed(move || {
+                        let display = display.get()?;
+                        dt.layout_rev.get();
+                        let st = dt.st.borrow();
+                        (display < st.columns.len()).then(|| st.columns.def(display))
+                    })
+                };
+                cell(dt.clone(), row, def, which, w, custom)
+            },
         )),
     }
 }
 
 /// The number of a row, in the row header column.
-fn row_number(dt: Dt, row: usize) -> impl IntoElement {
+fn row_number(dt: Dt, row: Memo<Option<usize>>) -> impl IntoElement {
     let props = dt.props;
     part(
         view()
@@ -561,7 +739,10 @@ fn row_number(dt: Dt, row: usize) -> impl IntoElement {
         props,
         DataTablePart::RowHeader,
     )
-    .child(text(format!("{}", row + 1)).number_of_lines(1))
+    .child(
+        text(move || row.get().map(|r| format!("{}", r + 1)).unwrap_or_default())
+            .number_of_lines(1),
+    )
 }
 
 /// What marks a cell besides its row.
@@ -574,23 +755,29 @@ struct CellFlags {
 
 fn cell(
     dt: Dt,
-    row: usize,
-    def: usize,
+    row: Memo<Option<usize>>,
+    def: Memo<Option<usize>>,
     which: Region,
     w: Windows,
     custom: bool,
 ) -> impl IntoElement {
     let props = dt.props;
-    let align = dt
-        .st
-        .borrow()
-        .defs
-        .get(def)
-        .map_or(DataTableAlign::Start, |c| c.align);
+    let align = {
+        let dt = dt.clone();
+        computed(move || {
+            dt.layout_rev.get();
+            def.get()
+                .and_then(|def| dt.st.borrow().defs.get(def).map(|c| c.align))
+                .unwrap_or(DataTableAlign::Start)
+        })
+    };
     let flags = {
         let dt = dt.clone();
         computed(move || {
             dt.data_rev.get();
+            let (Some(row), Some(def)) = (row.get(), def.get()) else {
+                return CellFlags::default();
+            };
             let st = dt.st.borrow();
             CellFlags {
                 selected: st.selection == Selection::Cell(row, def),
@@ -615,15 +802,17 @@ fn cell(
     };
     let left_dt = dt.clone();
     let width_dt = dt.clone();
-    let el = parts(
+    let col_dt = dt.clone();
+    let el = column_parts(
         view()
             .absolute()
             .top_0()
             .bottom_0()
+            .style_when(move || def.get().is_none(), |s| s.hidden())
             .left(move || {
                 left_dt.layout_rev.get();
                 let st = left_dt.st.borrow();
-                let Some(display) = st.columns.display_of(def) else {
+                let Some(display) = def.get().and_then(|def| st.columns.display_of(def)) else {
                     return Length::from(px(0.0));
                 };
                 let start = st.columns.start(display);
@@ -635,17 +824,23 @@ fn cell(
             })
             .w(move || {
                 width_dt.layout_rev.get();
-                Length::from(px(width_dt.st.borrow().columns.width(def)))
+                let width = def
+                    .get()
+                    .map_or(0.0, |def| width_dt.st.borrow().columns.width(def));
+                Length::from(px(width))
             })
             .flex_row()
             .items_center()
             .px(px(CELL_PAD))
             .overflow_hidden()
-            .map(move |v| match align {
-                DataTableAlign::Start => v.justify_start(),
-                DataTableAlign::Center => v.justify_center(),
-                DataTableAlign::End => v.justify_end(),
-            })
+            .style_when(
+                move || align.get() == DataTableAlign::Center,
+                |s| s.justify_center(),
+            )
+            .style_when(
+                move || align.get() == DataTableAlign::End,
+                |s| s.justify_end(),
+            )
             .style_when(
                 move || flags.get().selected,
                 |s| s.border_1().border_color(move || theme().primary),
@@ -661,13 +856,16 @@ fn cell(
                         .border_color(move || theme().primary.opacity(0.5))
                 },
             ),
-        props,
+        &col_dt,
+        def,
+        Some(row),
         list,
     );
     if custom {
         let render_dt = dt.clone();
         el.child(dynamic(move || {
             let render = props.render_cell.get()?;
+            let (row, def) = (row.get()?, def.get()?);
             let value = {
                 render_dt.data_rev.get();
                 let st = render_dt.st.borrow();
@@ -694,9 +892,12 @@ fn cell(
     } else {
         let text_dt = dt;
         el.child(
-            text(move || text_dt.cell_text(row, def))
-                .number_of_lines(1)
-                .min_w(px(0.0)),
+            text(move || match (row.get(), def.get()) {
+                (Some(row), Some(def)) => text_dt.cell_text(row, def),
+                _ => SharedString::default(),
+            })
+            .number_of_lines(1)
+            .min_w(px(0.0)),
         )
     }
 }
@@ -790,7 +991,7 @@ fn corner(dt: Dt) -> impl IntoElement {
     let props = dt.props;
     let width_dt = dt.clone();
     when(
-        move || dt.props.row_header.get(),
+        move || dt.row_header_shown(),
         move || {
             let width_dt = width_dt.clone();
             part(
@@ -988,7 +1189,8 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
     let drag_dt = dt.clone();
     let moved = Rc::new(Cell::new(false));
     let (down_moved, up_moved) = (moved.clone(), moved.clone());
-    let el = parts(
+    let col_dt = dt.clone();
+    let el = column_parts(
         view()
             .absolute()
             .top(move || {
@@ -1030,7 +1232,6 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
                 |s| s.bg(move || theme().primary.opacity(0.12)),
             )
             .style_when(move || dragging.get(), |s| s.opacity(0.5))
-            .when(sortable, |v| v.cursor_pointer())
             .on(EventKind::Press, move |p: &EventPayload| {
                 // A drag that moved the column is not a press.
                 if up_moved.replace(false) {
@@ -1076,11 +1277,13 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
             })
             .on_responder_release(move |_: &ResponderEvent| up_dt.move_end(true))
             .on_responder_terminate(move |_: &ResponderEvent| end_dt.move_end(false)),
-        props,
+        &col_dt,
+        computed(move || Some(def)),
+        None,
         list,
     );
     let _ = &st_dt;
-    let content = title_content(dt.clone(), def, sorted, sortable, custom, selected);
+    let content = title_content(dt.clone(), def, align, sorted, sortable, custom, selected);
     el.child(content).child(resize_handle(drag_dt, def))
 }
 
@@ -1094,6 +1297,7 @@ impl Dt {
 fn title_content(
     dt: Dt,
     def: usize,
+    align: DataTableAlign,
     sorted: Memo<Option<DataTableSortDirection>>,
     sortable: bool,
     custom: bool,
@@ -1121,34 +1325,71 @@ fn title_content(
         })
         .into_element()
     } else {
+        // The title takes the room the sort button leaves, aligned as the
+        // column's cells.
         text(move || label_dt.title(def))
             .number_of_lines(1)
+            .flex_1()
             .min_w(px(0.0))
+            .map(move |t| match align {
+                DataTableAlign::Start => t.text_left(),
+                DataTableAlign::Center => t.text_center(),
+                DataTableAlign::End => t.text_right(),
+            })
             .into_element()
     };
     let indicator_dt = dt;
     view()
+        .flex_1()
         .flex_row()
         .items_center()
         .min_w(px(0.0))
         .gap(px(4.0))
         .child(label)
         .when(sortable, move |v| {
-            let dt = indicator_dt.clone();
-            v.child(part(
+            v.child(sort_button(indicator_dt.clone(), def, sorted))
+        })
+}
+
+/// The sort button at the end of a sortable title, as gpui-component's: a
+/// small ghost button, dimmed while its column is unsorted, pressing which
+/// asks for the next sort.
+fn sort_button(
+    dt: Dt,
+    def: usize,
+    sorted: Memo<Option<DataTableSortDirection>>,
+) -> impl IntoElement {
+    let props = dt.props;
+    let id = format!("sort:{}", dt.st.borrow().defs[def].key);
+    let hovered = theme().foreground.opacity(0.08);
+    let pressed = theme().foreground.opacity(0.14);
+    part(
+        view()
+            .flex_none()
+            .w(px(SORT_WIDTH))
+            .h(px(SORT_WIDTH))
+            .items_center()
+            .justify_center()
+            .rounded(move || theme().radius / 2.0)
+            .cursor_pointer()
+            .hover(|s| s.bg(hovered))
+            .active(|s| s.bg(pressed))
+            .role(AccessibilityRole::Button)
+            .test_id(&id)
+            .opacity(move || if sorted.get().is_some() { 1.0_f32 } else { 0.5 })
+            .on_press(move || dt.sort_next(def))
+            .child(
                 text(move || match sorted.get() {
                     None => "⇅",
                     Some(DataTableSortDirection::Ascending) => "↑",
                     Some(DataTableSortDirection::Descending) => "↓",
                 })
-                .w(px(SORT_WIDTH - 4.0))
-                .text_center()
-                .opacity(move || if sorted.get().is_some() { 1.0_f32 } else { 0.5 })
-                .on_press(move || dt.sort_next(def)),
-                props,
-                DataTablePart::SortIndicator,
-            ))
-        })
+                .text_size(px(12.0))
+                .text_color(move || theme().secondary_foreground),
+            ),
+        props,
+        DataTablePart::SortIndicator,
+    )
 }
 
 /// The band at a title's trailing edge that a drag resizes the column
@@ -1167,13 +1408,14 @@ fn resize_handle(dt: Dt, def: usize) -> impl IntoElement {
 }
 
 fn handle(props: DataTableProps, start: Dt, drag: Dt, end: Dt, def: usize) -> impl IntoElement {
+    let id = format!("resize:{}", drag.st.borrow().defs[def].key);
     resize_handle_component()
         .edge(HandleEdge::Trailing)
         .on_drag_start(move || start.resize_start(def))
         .on_drag_move(move |offset: &Points| drag.resize_move(*offset))
-        .on_drag_end(move |_: &Points| end.resize_end())
+        .on_drag_end(move |offset: &Points| end.resize_end(*offset))
         .child(part(
-            view().w(px(1.0)).bg(move || theme().border),
+            view().test_id(&id).w(px(1.0)).bg(move || theme().border),
             props,
             DataTablePart::ResizeHandle,
         ))

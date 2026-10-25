@@ -53,7 +53,7 @@ function App() {
 mount(App);
 ```
 
-表格填满应用给它的盒子（`flex-1`、一个高度），在其中滚动：纵向滚动所有行，横向滚动所有列，带滚动条（`scrollbar={false}` 隐藏滚动条）。
+表格填满应用给它的盒子（`flex-1`、一个高度），在其中滚动：纵向滚动所有行，横向滚动所有列，带滚动条（`scrollbar={false}` 隐藏滚动条，`bounces={false}` 关闭有回弹的平台上的边缘回弹）。
 
 <a id="rows-and-columns"></a>
 
@@ -68,10 +68,14 @@ mount(App);
 | `width` | 宽度，单位为点。默认 `120`。 |
 | `minWidth`、`maxWidth` | 拖动或适配宽度时的最小和最大宽度。默认 `20` 和 `1200`。 |
 | `align` | `"start"`（默认）、`"center"` 或 `"end"`（用于数字），单元格和标题一致。 |
-| `sortable` | 按下它的标题会请求排序（见[排序](#sorting)）。 |
+| `sortable` | 标题末端有一个排序按钮，按下会请求排序（见[排序](#sorting)）。 |
 | `fixed` | 其他列在它下面滚动时，它固定在左侧。固定列排在其他列之前，保持各自的顺序。 |
 | `resizable`、`movable` | 拖动它的边缘是否调整宽度，拖动它的标题是否移动。默认取表格的 `resizableColumns` 和 `movableColumns`。 |
 | `selectable` | 是否参与选择。按钮或复选框所在的列设为 `false`。默认 `true`。 |
+| `cellClass` | 该列单元格的 classes，排在 `cell` 部件之后：单列的内边距或对齐。 |
+| `headerClass` | 该列标题的 classes，排在 `headerCell` 部件之后。 |
+| `positiveClass` | 该列中表示上涨的单元格的 classes：大于零的数字，或以 `+` 开头的文本。 |
+| `negativeClass` | 该列中表示下跌的单元格的 classes：小于零的数字，或以 `-` 开头的文本。 |
 
 `rowHeight` 是表体行的高度（默认 `32`），`headerHeight` 是标题行的高度（默认与行高相同）。`rowHeader` 在左侧添加一列行号，它可以选择行。`stripe` 让奇数行使用 `rowOdd` 部件。
 
@@ -125,14 +129,15 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 选择
 
-`selectionMode` 决定按下会选择什么：
+与 gpui-component 一样，由三个开关决定按下会选择什么：
 
-| `selectionMode` | 按下选择 | `selection` |
+| 属性 | 按下选择 | `selection` |
 |---|---|---|
-| `"row"`（默认） | 一行：它的任一单元格或行号 | `{ row }` |
-| `"column"` | 一列：它的标题 | `{ column }` |
-| `"cell"` | 一个单元格 | `{ row, column }` |
-| `"none"` | 什么也不选 | |
+| `rowSelectable`（默认 `true`） | 一行：它的任一单元格或行号 | `{ row }` |
+| `columnSelectable`（默认 `true`） | 一列：它的标题 | `{ column }` |
+| `cellSelectable`（默认 `false`） | 一个单元格；行号列（开启时默认显示）选择行 | `{ row, column }` |
+
+开启 `cellSelectable` 并隐藏行号列（`rowHeader={false}`）时，再次按下已选中的单元格会选中它所在的行。按住 Shift 或平台的命令键按下时，只有 `selectOnModifierPress`（默认 `true`）为真才会选中行，这样自己维护多行选择的应用可以自行处理这些按下。`selectable` 为 `false` 的列，它本身和它的单元格都不会被选中。
 
 行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。
 
@@ -157,7 +162,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 排序
 
-`sortable` 的列在标题上显示排序指示。按下它会按“未排序、升序、降序、再回到未排序”的顺序用 `onSortChange({ key, direction })` 报告下一个排序（`null` 表示清除）。表格不会重新排列行：应用自己对数据排序，或向服务器请求新顺序的行，并设置 `sort` 让标题显示出来。由于顺序归应用所有，对应用从未持有的一百万行同样适用。
+`sortable` 的列在标题末端有一个排序按钮：一个小的 ghost 按钮，该列未排序时显示为半透明。按下它会按“未排序、升序、降序、再回到未排序”的顺序用 `onSortChange({ key, direction })` 报告下一个排序（`null` 表示清除）。表格不会重新排列行：应用自己对数据排序，或向服务器请求新顺序的行，并设置 `sort` 让标题显示出来。由于顺序归应用所有，对应用从未持有的一百万行同样适用。
 
 ```tsx
 <DataTable
@@ -176,7 +181,24 @@ const page = signal({ start: 0, rows: load(0) });
 
 ## 调整和移动列
 
-拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize(key, width)` 报告每一步。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
+拖动列的尾部边缘会在 `minWidth` 和 `maxWidth` 之内调整宽度，`onColumnResize(key, width)` 报告每一步。连续按两次边缘会把该列适配到最宽的文本和标题。拖动标题会移动列，并用一条线显示将放下的位置；`onColumnMove` 报告 `{ key, from, to, order }`，其中 `order` 是所有列当前顺序的 `key`。固定列只能在固定列之间移动。`resizableColumns` 和 `movableColumns` 对整个表格开关这两项，列自己的 `resizable` 和 `movable` 优先。
+
+<a id="live-data"></a>
+
+## 实时数据
+
+行情表每秒会变化多次。应用只格式化视野中的行及其周围一段范围（这些行由 `onVisibleRowsChange` 告知），并把它们作为从 `dataStart` 开始的 `data` 交给表格，所以一次更新的开销取决于屏幕上的内容，与总行数无关。涨跌颜色来自列的 `positiveClass` 和 `negativeClass`，由原生代码应用到值大于或小于零（或文本以 `+`、`-` 开头）的单元格。
+
+```tsx
+const tone = { positiveClass: "text-green-600", negativeClass: "text-red-600" };
+const columns: DataTableColumn[] = [
+  { key: "symbol", title: "Symbol", fixed: true },
+  { key: "price", title: "Price", align: "end", sortable: true },
+  { key: "change", title: "Chg%", align: "end", ...tone },
+];
+```
+
+行和列是表格创建一次并一直保留的槽位：滚动只是让它们显示别的行和列，所以无论滚动多远，变化的只有文字和位置。
 
 <a id="drawing-cells-and-titles"></a>
 
@@ -252,7 +274,7 @@ const page = signal({ start: 0, rows: load(0) });
 | `headerCell` | 每一列的标题单元格 |
 | `headerCellSorted` | 表格当前排序所依据的列的标题，排在 `headerCell` 之后 |
 | `headerCellSelected` | 被选中列的标题，排在 `headerCell` 之后 |
-| `sortIndicator` | 可排序列的排序指示（`⇅`、`↑` 或 `↓`） |
+| `sortIndicator` | 可排序列的排序按钮（`⇅`、`↑` 或 `↓`） |
 | `resizeHandle` | 列尾部边缘供拖动调整的线 |
 | `moveIndicator` | 被拖动的列将放下的位置上的线 |
 | `row` | 每一个表体行 |
@@ -282,10 +304,13 @@ const page = signal({ start: 0, rows: load(0) });
 | `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |
 | `sort` | `.sort(..)` | `DataTableSort` | | 数据的排序依据，显示在标题上。 |
-| `selectionMode` | `.selection_mode(..)` | `"none" \| "row" \| "column" \| "cell"` | `"row"` | 按下和按键所选择的内容。 |
+| `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | 按下和按键可以选择行。 |
+| `columnSelectable` | `.column_selectable(..)` | `boolean` | `true` | 按下标题会选中该列，左右键在列之间移动。 |
+| `cellSelectable` | `.cell_selectable(..)` | `boolean` | `false` | 按下和按键可以选择单元格。 |
+| `selectOnModifierPress` | `.select_on_modifier_press(..)` | `boolean` | `true` | 按住 Shift 或命令键按下时选中行。 |
 | `selection` | `.selection(..)` | `DataTableSelection` | | 当前选择，由应用设置。 |
 | `loopSelection` | `.loop_selection(..)` | `boolean` | `false` | 方向键在两端循环。 |
-| `rowHeader` | `.row_header(..)` | `boolean` | `false` | 左侧的一列行号。 |
+| `rowHeader` | `.row_header(..)` | `boolean` | 开启 `cellSelectable` 时显示 | 左侧的一列行号。 |
 | `stripe` | `.stripe(..)` | `boolean` | `false` | 奇数行使用 `rowOdd` 部件。 |
 | `resizableColumns` | `.resizable_columns(..)` | `boolean` | `true` | 拖动列的边缘调整宽度。 |
 | `movableColumns` | `.movable_columns(..)` | `boolean` | `true` | 拖动标题移动列。 |
@@ -295,6 +320,7 @@ const page = signal({ start: 0, rows: load(0) });
 | `fontFamily` | `.font_family(..)` | `string` | 主题的 `font-sans` | 单元格的字体。 |
 | `fontSize` | `.font_size(..)` | `number` | `14` | 单元格的字号，单位为点。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 滚动条。 |
+| `bounces` | `.bounces(..)` | `boolean` | `true` | 滚动到边缘时是否回弹（平台支持时）。 |
 | `renderCell` | `.render_cell(..)` | `(cell: DataTableCell) => JSX.Element` | | 绘制视野中的单元格。 |
 | `renderHeaderCell` | `.render_header_cell(..)` | `(cell: DataTableHeaderCell) => JSX.Element` | | 绘制标题。 |
 | `empty` | `.empty(..)` | `JSX.Element` | | 没有行时显示的内容。 |
@@ -312,7 +338,7 @@ const page = signal({ start: 0, rows: load(0) });
 | `onSelectionChange` | `.on_selection_change(\|selection: &Option<DataTableSelection>\| ..)` | 用户改变了选择：`{ row?, column? }`，或 `null`。 |
 | `onDoublePress` | `.on_double_press(\|target: &DataTableTarget\| ..)` | 一行、一个单元格或一个标题被连按两次：`{ row?, column? }`。 |
 | `onContextMenu` | `.on_context_menu(\|event: &DataTableContextMenu\| ..)` | 请求了上下文菜单：`{ row?, column?, x, y }`，位置位于根视图中。 |
-| `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | 按下了可排序的标题：下一个排序 `{ key, direction }`，或 `null`。 |
+| `onSortChange` | `.on_sort_change(\|sort: &Option<DataTableSort>\| ..)` | 按下了排序按钮：下一个排序 `{ key, direction }`，或 `null`。 |
 | `onColumnResize` | `.on_column_resize(\|key: &SharedString, width: &Points\| ..)` | 列被调整宽度，拖动的每一步都会触发，适配设置宽度时再触发一次。 |
 | `onColumnMove` | `.on_column_move(\|event: &DataTableColumnMove\| ..)` | 列被移动：`{ key, from, to, order }`。 |
 | `onVisibleRowsChange` | `.on_visible_rows_change(\|range: &DataTableRange\| ..)` | 视野中的行变了：`{ start, end }`。在这里获取行。 |

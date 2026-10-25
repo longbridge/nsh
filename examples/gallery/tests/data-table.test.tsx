@@ -36,19 +36,33 @@ test("the Data table demo selects cells and columns", async () => {
   await app.waitFor("Cell row 1, Score");
   await app.keyboard.press("down");
   await app.waitFor("Cell row 2, Score");
-  await app.press("Columns");
+  // A title selects its column.
   await app.press("text:Name");
   await app.waitFor("Column Name");
 });
 
-test("the Data table demo sorts by a title and scrolls to a row", async () => {
+test("the Data table demo sorts with a title's sort button and scrolls to a row", async () => {
   const app = await open("../App.tsx", desktop);
   await app.press("role:button[Data table]");
   await app.waitFor("Ada 0");
   // Ascending, then descending: the app serves the rows the other way up.
-  await app.press("text:ID");
-  await app.press("text:ID");
+  await app.press("id:sort:id");
+  await app.press("id:sort:id");
   await app.waitFor("Ken 999999");
   await app.press("label:Go to row 500000");
-  await app.waitFor("text:/rows 499999–500014/");
+  await app.waitFor("text:/rows 500000–/");
+});
+
+test("the Data table demo's live quotes tick and sort", async () => {
+  const app = await open("../App.tsx", desktop);
+  await app.press("role:button[Data table]");
+  await app.waitFor("Ada 0");
+  await app.press("Live quotes");
+  // Ticks come every 33 ms, colored by rise and fall.
+  await app.waitFor("text:/tick [1-9]\\d/");
+  // The price's sort button sorts ascending, then descending.
+  await app.press("id:sort:price");
+  await app.waitFor("↑");
+  await app.press("id:sort:price");
+  await app.waitFor("↓");
 });

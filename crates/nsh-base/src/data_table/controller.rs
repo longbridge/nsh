@@ -2,20 +2,24 @@
 //! the revisions bindings subscribe to, the windows of rows and columns
 //! made, and what presses, keys, drags, props and the ref do to them.
 
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::Range,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use nsh_core::{
-    keymap::When,
-    ui::{ElementRef, prelude::*},
+    keymap::{Modifiers, When},
+    ui::{ElementRef, Os, prelude::*},
 };
 
 use super::{
     DataTableColumn, DataTableContextMenu, DataTableDump, DataTableEvent, DataTableProps,
-    DataTableRange, DataTableSelection, DataTableSelectionMode as Mode, DataTableSort,
-    DataTableSortDirection, DataTableTarget,
+    DataTableRange, DataTableSelection, DataTableSort, DataTableSortDirection, DataTableTarget,
     axis::Axis,
     columns::{Columns, Spec},
-    selection::{self, Move, Nav, Selection},
+    selection::{self, Move, Nav, Selectable, Selection},
 };
 use crate::{theme, window::RowWindow};
 
@@ -35,6 +39,8 @@ const COPY_ROWS: usize = 100_000;
 /// A drag of a title moves its column once the pointer is this far from
 /// where it went down.
 pub(crate) const MOVE_SLOP: f32 = 4.0;
+/// The longest between two presses of a resize handle that fit its column.
+const DOUBLE_PRESS: Duration = Duration::from_millis(400);
 
 /// What the layout and the windows need of the table, read at one moment.
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +110,9 @@ pub(crate) struct Dt {
     cols_window: RowWindow,
     /// The width a resize drag started from.
     resizing: Rc<RefCell<Option<(usize, f32)>>>,
+    /// The column whose handle was last pressed without a drag, and when:
+    /// a second press within `DOUBLE_PRESS` fits the column.
+    handle_tap: Rc<RefCell<Option<(usize, Instant)>>>,
 }
 
 fn spec_of(column: &DataTableColumn) -> Spec {
@@ -148,6 +157,7 @@ impl Dt {
             rows_window: RowWindow::default(),
             cols_window: RowWindow::reaching(1, 3),
             resizing: Rc::default(),
+            handle_tap: Rc::default(),
         };
         dt.sync_columns();
         dt.sync_selection();
@@ -207,34 +217,52 @@ impl Dt {
     }
 
     /// The selection follows the app's `selection`, and stays within the
-    /// rows and columns there are and the mode.
+    /// rows and columns there are and of a kind the table selects.
     fn sync_selection(&self) {
         let dt = self.clone();
         effect(move || {
             let given = dt.props.selection.get();
-            let mode = dt.props.selection_mode.get();
+            let allowed = dt.selectable_kinds();
             untracked(|| {
                 if let Some(given) = given {
                     dt.st.borrow_mut().selection = from_public(given);
                 }
-                dt.clamp_selection(mode);
+                dt.clamp_selection(allowed);
             });
         });
         let dt = self.clone();
         effect(move || {
             dt.row_count();
             dt.layout_rev.get();
-            let mode = dt.props.selection_mode.get();
-            untracked(|| dt.clamp_selection(mode));
+            let allowed = dt.selectable_kinds();
+            untracked(|| dt.clamp_selection(allowed));
         });
     }
 
-    fn clamp_selection(&self, mode: Mode) {
+    /// What presses and keys select (tracked).
+    pub(crate) fn selectable_kinds(&self) -> Selectable {
+        Selectable {
+            rows: self.props.row_selectable.get(),
+            columns: self.props.column_selectable.get(),
+            cells: self.props.cell_selectable.get(),
+        }
+    }
+
+    /// Whether the row header shows (tracked): `rowHeader`, else when cells
+    /// select (as gpui-component's table).
+    pub(crate) fn row_header_shown(&self) -> bool {
+        self.props
+            .row_header
+            .get()
+            .unwrap_or_else(|| self.props.cell_selectable.get())
+    }
+
+    fn clamp_selection(&self, allowed: Selectable) {
         let rows = self.row_count();
         let changed = {
             let mut st = self.st.borrow_mut();
             let columns = st.columns.len();
-            let next = selection::clamp(st.selection, mode, rows, columns);
+            let next = selection::clamp(st.selection, allowed, rows, columns);
             let changed = next != st.selection;
             st.selection = next;
             changed
@@ -271,6 +299,17 @@ impl Dt {
             }
             d.cell(at, &column.key, def).text()
         })
+    }
+
+    /// Whether the cell holds a rise or a fall (tracked).
+    pub(crate) fn cell_sign(&self, row: usize, def: usize) -> Option<bool> {
+        let start = self.props.data_start.get() as usize;
+        let at = row.checked_sub(start)?;
+        let st = self.st.borrow();
+        let column = st.defs.get(def)?;
+        self.props
+            .data
+            .with(|d| (at < d.len()).then(|| d.cell(at, &column.key, def).sign())?)
     }
 
     fn write_cell(&self, row: usize, def: usize, out: &mut String) {
@@ -340,7 +379,7 @@ impl Dt {
     /// The width of the row header column (tracked): wide enough for the
     /// biggest row number.
     pub(crate) fn lead_width(&self) -> f32 {
-        if !self.props.row_header.get() {
+        if !self.row_header_shown() {
             return 0.0;
         }
         let digits = self.row_count().max(1).ilog10() as usize + 1;
@@ -528,10 +567,10 @@ impl Dt {
 
     pub(crate) fn select(&self, given: Option<DataTableSelection>, report: bool) {
         let next = given.map_or(Selection::None, from_public);
-        let mode = self.props.selection_mode.get_untracked();
+        let allowed = untracked(|| self.selectable_kinds());
         let rows = self.row_count();
         let columns = self.st.borrow().columns.len();
-        self.set_selection(selection::clamp(next, mode, rows, columns), report);
+        self.set_selection(selection::clamp(next, allowed, rows, columns), report);
         self.reveal_selection();
     }
 
@@ -554,7 +593,7 @@ impl Dt {
     fn key_move(&self, movement: Move) {
         let columns = self.selectable_columns();
         let nav = Nav {
-            mode: self.props.selection_mode.get_untracked(),
+            selectable: untracked(|| self.selectable_kinds()),
             rows: self.row_count(),
             columns: &columns,
             page: self.page_rows(),
@@ -596,6 +635,8 @@ impl Dt {
                     move |_| dt.key_move(movement),
                 );
             }
+            // Escape clears the selection, and with nothing selected gives
+            // up the keyboard.
             let esc = dt.clone();
             on_key_with("escape", KeyOptions::default(), move |_| {
                 if esc.st.borrow().selection == Selection::None {
@@ -727,11 +768,11 @@ impl Dt {
         }
     }
 
-    /// A press (or tap) of the body at `position`; `clicks` counts the
-    /// presses in a row.
-    pub(crate) fn press(&self, position: Point<Points>, clicks: u32) {
+    /// A press (or tap) of the body at `position` with the modifier keys
+    /// held; `clicks` counts the presses in a row.
+    pub(crate) fn press_with(&self, position: Point<Points>, clicks: u32, modifiers: Modifiers) {
         let hit = self.target_at(position);
-        self.press_hit(hit, clicks);
+        self.press_hit(hit, clicks, modifiers);
     }
 
     /// A press of a made row, the views that show the cells (a platform's
@@ -739,7 +780,14 @@ impl Dt {
     /// tests press what they see). `x` is in the row, whose left is where
     /// the region's cells start from: for the scrolling columns, the first
     /// of the chunk they are placed from (`origin`).
-    pub(crate) fn press_row(&self, row: usize, region: PressRegion, x: Points, clicks: u32) {
+    pub(crate) fn press_row_with(
+        &self,
+        row: usize,
+        region: PressRegion,
+        x: Points,
+        clicks: u32,
+        modifiers: Modifiers,
+    ) {
         let column = {
             let st = self.st.borrow();
             let at = match region {
@@ -756,37 +804,63 @@ impl Dt {
             column,
             header: region == PressRegion::Lead,
         };
-        self.press_hit(hit, clicks);
+        self.press_hit(hit, clicks, modifiers);
     }
 
-    fn press_hit(&self, hit: Hit, clicks: u32) {
+    /// Whether a press with `modifiers` held selects a row
+    /// (`selectOnModifierPress`).
+    fn selects_on(&self, modifiers: Modifiers) -> bool {
+        let secondary = if matches!(os(), Os::Ios | Os::MacOs) {
+            modifiers.cmd
+        } else {
+            modifiers.ctrl
+        };
+        self.props.select_on_modifier_press.get_untracked() || !(secondary || modifiers.shift)
+    }
+
+    /// What a press selects, as gpui-component's table: a cell when cells
+    /// select (the selected cell again, without a row header, its row); a
+    /// row when rows select, of a press of its row header or of a row whose
+    /// cells do not select; with Shift or the secondary modifier only when
+    /// `selectOnModifierPress`.
+    fn press_hit(&self, hit: Hit, clicks: u32, modifiers: Modifiers) {
         self.set_focus(true);
         self.st.borrow_mut().active = None;
         let Some(row) = hit.row else {
             self.bump_data();
             return;
         };
-        let mode = self.props.selection_mode.get_untracked();
-        let next = match (mode, hit.column) {
-            (Mode::None, _) => None,
-            (Mode::Row, _) => Some(Selection::Row(row)),
-            (Mode::Cell, _) if hit.header => Some(Selection::Row(row)),
-            (Mode::Cell, Some(c)) if self.selectable(c) => Some(Selection::Cell(row, c)),
-            _ => None,
+        let allowed = untracked(|| self.selectable_kinds());
+        let double = clicks == 2;
+        let cell = hit.column.filter(|_| !hit.header && allowed.cells);
+        let next = match cell {
+            // A cell of a column that does not select: nothing.
+            Some(c) if !self.selectable(c) => None,
+            Some(c) => {
+                let again = self.st.borrow().selection == Selection::Cell(row, c);
+                let escalate = !untracked(|| self.row_header_shown())
+                    && allowed.rows
+                    && again
+                    && !double
+                    && self.selects_on(modifiers);
+                Some(if escalate {
+                    Selection::Row(row)
+                } else {
+                    Selection::Cell(row, c)
+                })
+            }
+            None if allowed.rows && self.selects_on(modifiers) => Some(Selection::Row(row)),
+            None => None,
         };
         if let Some(next) = next {
             self.set_selection(next, true);
         } else {
             self.bump_data();
         }
-        if clicks == 2 {
-            let column = match mode {
-                Mode::Cell | Mode::Row => hit.column.filter(|_| !hit.header),
-                _ => None,
-            };
+        if double {
             self.cx.emit(DataTableEvent::DoublePress(DataTableTarget {
                 row: Some(row as u32),
-                column: column.map(|c| c as u32),
+                column: hit.column.filter(|_| !hit.header).map(|c| c as u32),
             }));
         }
     }
@@ -815,15 +889,12 @@ impl Dt {
         }
     }
 
-    /// A title was pressed.
+    /// A title was pressed: it selects its column when columns select and
+    /// the column does (sorting is the sort button's).
     pub(crate) fn header_press(&self, def: usize, clicks: u32) {
         self.set_focus(true);
-        let mode = self.props.selection_mode.get_untracked();
-        let sortable = self.st.borrow().defs.get(def).is_some_and(|c| c.sortable);
-        if mode == Mode::Column && self.selectable(def) {
+        if self.props.column_selectable.get_untracked() && self.selectable(def) {
             self.set_selection(Selection::Column(def), true);
-        } else if sortable {
-            self.sort_next(def);
         }
         if clicks == 2 {
             self.cx.emit(DataTableEvent::DoublePress(DataTableTarget {
@@ -889,10 +960,52 @@ impl Dt {
             return;
         };
         self.set_width(def, from + offset.0, true);
+        // As gpui-component's: the edge being dragged stays in view, the
+        // table scrolling as it passes the viewport's end.
+        self.reveal_trailing_edge(def);
     }
 
-    pub(crate) fn resize_end(&self) {
-        *self.resizing.borrow_mut() = None;
+    fn reveal_trailing_edge(&self, def: usize) {
+        let g = untracked(|| self.geo());
+        let end = {
+            let st = self.st.borrow();
+            let Some(display) = st.columns.display_of(def) else {
+                return;
+            };
+            if display < st.columns.fixed_len() {
+                return;
+            }
+            st.columns.start(display) - st.columns.fixed_width()
+                + st.columns.display_width(display) as f64
+        };
+        if end <= g.cx + g.x.viewport {
+            return;
+        }
+        let to = g.x.reveal(g.cx, end - 1.0, end);
+        if to != g.cx {
+            let x = Points(g.x.scroll_offset(to) as f32);
+            self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
+        }
+    }
+
+    /// The drag ended at `offset`. A press that did not move the handle,
+    /// twice in a row, fits the column.
+    pub(crate) fn resize_end(&self, offset: Points) {
+        let Some((def, _)) = self.resizing.borrow_mut().take() else {
+            return;
+        };
+        if offset.0.abs() > MOVE_SLOP {
+            *self.handle_tap.borrow_mut() = None;
+            return;
+        }
+        let now = Instant::now();
+        let previous = self.handle_tap.borrow_mut().take();
+        match previous {
+            Some((last, at)) if last == def && now.duration_since(at) < DOUBLE_PRESS => {
+                self.fit(def);
+            }
+            _ => *self.handle_tap.borrow_mut() = Some((def, now)),
+        }
     }
 
     /// Sets column `def`'s width; tells the app when it changed.

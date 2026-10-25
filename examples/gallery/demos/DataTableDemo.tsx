@@ -8,6 +8,7 @@ import {
   type DataTableSort,
 } from "nsh/base";
 import { Segmented } from "../ui";
+import { QuotesTable } from "./DataTableQuotes";
 
 // `nsh/base`'s `DataTable` over a million rows of sixty columns the app does
 // not hold: the table asks for the rows in view (`onVisibleRowsChange`) and
@@ -75,7 +76,54 @@ function Tool(props: { label: string; name: string; onPress: () => void }) {
  * time.
  */
 export function DataTableDemo() {
-  const mode = signal<"row" | "cell" | "column">("row");
+  const dataset = signal<"million" | "quotes">("million");
+  const live = signal(true);
+  const stocks = signal<"5000" | "100000">("5000");
+  return (
+    <View class="flex-1 gap-3 bg-background p-4">
+      <View class="flex-row flex-wrap items-center gap-3">
+        <View class="w-[300px]">
+          <Segmented
+            options={[
+              { value: "million", label: "Million rows" },
+              { value: "quotes", label: "Live quotes" },
+            ]}
+            value={dataset()}
+            onChange={(value) => dataset.set(value)}
+            size="small"
+          />
+        </View>
+        {dataset() === "quotes" ? (
+          <View class="flex-row items-center gap-3">
+            <View class="w-[220px]">
+              <Segmented
+                options={[
+                  { value: "5000", label: "5,000" },
+                  { value: "100000", label: "100,000" },
+                ]}
+                value={stocks()}
+                onChange={(value) => stocks.set(value)}
+                size="small"
+              />
+            </View>
+            <Tool label="Toggle live updates" name={live() ? "Live on" : "Live off"} onPress={() => live.set(!live())} />
+          </View>
+        ) : null}
+      </View>
+      {() =>
+        dataset() === "million" ? (
+          <MillionRows />
+        ) : (
+          <QuotesTable count={Number(stocks())} live={live()} testID="quotes" />
+        )
+      }
+    </View>
+  );
+}
+
+/** A million rows of sixty columns, served a page at a time. */
+function MillionRows() {
+  const mode = signal<"row" | "cell">("row");
   const sort = signal<DataTableSort | undefined>(undefined);
   const page = signal<Page>(load(0, false));
   const selection = signal<DataTableSelection | null>(null);
@@ -104,14 +152,13 @@ export function DataTableDemo() {
   };
 
   return (
-    <View class="flex-1 gap-3 bg-background p-4">
+    <View class="flex-1 gap-3">
       <View class="flex-row flex-wrap items-center gap-3">
         <View class="w-[260px]">
           <Segmented
             options={[
               { value: "row", label: "Rows" },
               { value: "cell", label: "Cells" },
-              { value: "column", label: "Columns" },
             ]}
             value={mode()}
             onChange={(value) => {
@@ -141,7 +188,7 @@ export function DataTableDemo() {
         rowCount={ROWS}
         rowHeader
         stripe={stripe()}
-        selectionMode={mode()}
+        cellSelectable={mode() === "cell"}
         sort={sort()}
         onSortChange={(next) => {
           sort.set(next ?? undefined);
