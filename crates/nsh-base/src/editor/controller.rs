@@ -16,14 +16,12 @@ use super::{
     EditorCommand, EditorContextMenuEvent, EditorEvent, EditorProps, EditorSelection,
     commands::{Command, EditOptions, Outcome},
     diagnostics,
-    highlight::Highlighter,
+    highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
     keymap, search,
     state::{Font, State},
     types::{Selection, Selections},
 };
 
-/// How long highlighting may take on the engine thread per frame.
-const HIGHLIGHT_BUDGET: Duration = Duration::from_millis(4);
 /// Rows made beyond the viewport on each side, so scrolling a little shows
 /// rows that are there already.
 pub(crate) const OVERSCAN: usize = 8;
@@ -118,7 +116,7 @@ impl Ed {
         let language = State::language_for(props.language.get_untracked().as_deref());
         let options = options_of(&props, language);
         let mut state = State::new(&text, language, options, font, measure);
-        state.reported = Some(state.buffer.text());
+        state.reported = Some((state.buffer.version(), text));
         let ed = Ed {
             st: Rc::new(RefCell::new(state)),
             props,
@@ -290,13 +288,18 @@ impl Ed {
     fn take_value(&self, value: &str) {
         let changes = {
             let mut st = self.st.borrow_mut();
-            if st.reported.as_deref() == Some(value) && st.buffer.text() == value {
+            let version = st.buffer.version();
+            if st
+                .reported
+                .as_ref()
+                .is_some_and(|(v, text)| *v == version && text.as_ref() == value)
+            {
                 return;
             }
             let before = st.selections.clone();
             let changes = st.buffer.set_text(value, &before, &before);
             st.changed(&changes);
-            st.reported = Some(value.to_owned());
+            st.reported = Some((st.buffer.version(), value.to_owned().into()));
             changes
         };
         if !changes.is_empty() {
@@ -984,11 +987,12 @@ impl Ed {
     fn report_text(&self) {
         let text = {
             let mut st = self.st.borrow_mut();
-            let text = st.buffer.text();
-            if st.reported.as_deref() == Some(text.as_str()) {
+            let version = st.buffer.version();
+            if st.reported.as_ref().is_some_and(|(v, _)| *v == version) {
                 return;
             }
-            st.reported = Some(text.clone());
+            let text = SharedString::from(st.buffer.text());
+            st.reported = Some((version, text.clone()));
             text
         };
         self.cx.emit(EditorEvent::Change(text));
@@ -1057,6 +1061,7 @@ impl Ed {
         if let Some(target) = target_y {
             self.scroll_y.set(target);
             self.vscroll.scroll_to(Point::new(px(0.0), target), false);
+            self.schedule_highlight();
         }
         if self.props.soft_wrap.get_untracked() {
             return;
@@ -1158,26 +1163,64 @@ impl Ed {
         let ed = self.clone();
         spawn(async move {
             loop {
-                let (changed, done) = {
+                // A guess of the lines in view when they are far past the
+                // parse from the start, then the parse on towards them,
+                // both off the engine thread.
+                let (guess, job, version) = {
                     let rows = untracked(|| ed.visible_rows());
                     let mut st = ed.st.borrow_mut();
                     let st = &mut *st;
-                    let last_row = rows
-                        .end
-                        .saturating_sub(1)
-                        .min(st.display.row_count().saturating_sub(1));
-                    let last_line = st.display.row(last_row).line;
-                    match &mut st.highlighter {
-                        Some(h) => h.highlight(st.buffer.rope(), last_line, HIGHLIGHT_BUDGET),
-                        None => (0..0, true),
+                    let count = st.display.row_count();
+                    if count == 0 {
+                        break;
                     }
+                    let first_line = st.display.row(rows.start.min(count - 1)).line;
+                    let last_line = st
+                        .display
+                        .row(rows.end.saturating_sub(1).min(count - 1))
+                        .line;
+                    let start = first_line.saturating_sub(GUESS_CONTEXT);
+                    let start_offset = st.buffer.line_start(start);
+                    let version = st.buffer.version();
+                    let rope = st.buffer.rope().clone();
+                    let Some(h) = &mut st.highlighter else {
+                        break;
+                    };
+                    let guess = (first_line > h.frontier() + GUESS_DISTANCE)
+                        .then(|| h.guess(&rope, start, start_offset, last_line))
+                        .flatten();
+                    let job = h.job(&rope, last_line + LOOKAHEAD, SLICE);
+                    (guess, job, version)
                 };
-                if !changed.is_empty() {
-                    ed.hl_rev.update(|r| *r += 1);
-                }
-                if done {
+                if guess.is_none() && job.is_none() {
                     break;
                 }
+                if let Some(guess) = guess {
+                    let guessed = off_thread(move || guess.run()).await;
+                    let changed = {
+                        let mut st = ed.st.borrow_mut();
+                        let current = st.buffer.version() == version;
+                        match &mut st.highlighter {
+                            Some(h) if current => !h.guessed(guessed).is_empty(),
+                            _ => false,
+                        }
+                    };
+                    if changed {
+                        ed.hl_rev.update(|r| *r += 1);
+                    }
+                }
+                if let Some(job) = job {
+                    let done = off_thread(move || job.run()).await;
+                    let changed = match &mut ed.st.borrow_mut().highlighter {
+                        Some(h) => !h.finish(done).0.is_empty(),
+                        None => false,
+                    };
+                    if changed {
+                        ed.hl_rev.update(|r| *r += 1);
+                    }
+                }
+                // Without threads the parse ran here: the frame goes on.
+                #[cfg(target_arch = "wasm32")]
                 next_frame().await;
             }
             ed.highlighting.set(false);

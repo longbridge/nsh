@@ -14,10 +14,46 @@
 //! The tokens and their colors are `crate::syntax`'s, shared with
 //! `TextView`'s code blocks.
 
+use std::time::Duration;
+
 #[cfg(not(feature = "highlight"))]
-pub(crate) use self::plain::Highlighter;
+pub(crate) use self::plain::{GUESS_CONTEXT, Highlighter};
 #[cfg(feature = "highlight")]
-pub(crate) use self::syntect_lines::Highlighter;
+pub(crate) use self::syntect_lines::{GUESS_CONTEXT, Highlighter};
+
+/// How long a [`Job`] parses before the view shows what it found: on a
+/// blocking thread where there are threads, else within a frame.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const SLICE: Duration = Duration::from_millis(25);
+/// How long a [`Job`] parses before the view shows what it found: on a
+/// blocking thread where there are threads, else within a frame.
+#[cfg(target_arch = "wasm32")]
+pub(crate) const SLICE: Duration = Duration::from_millis(4);
+
+/// The lines in view are guessed ([`Highlighter::guess`]) when they are
+/// at least this far past the parse from the text's start: further than a
+/// slice or two parses.
+pub(crate) const GUESS_DISTANCE: usize = 500;
+
+/// How far past the last line in view the parse goes on (off the engine
+/// thread, so scrolling down finds the lines highlighted).
+pub(crate) const LOOKAHEAD: usize = 1000;
+
+/// Runs `f` on a blocking thread where there are threads (WebAssembly has
+/// none: there it runs at once).
+pub(crate) async fn off_thread<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match nsh_core::ui::prelude::blocking(f).await {
+            Ok(r) => r,
+            Err(error) => std::panic::resume_unwind(error.into_panic()),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        f()
+    }
+}
 
 #[cfg(feature = "highlight")]
 mod syntect_lines {
@@ -32,29 +68,50 @@ mod syntect_lines {
     /// The parser and the scopes open at a line's start.
     type State = (ParseState, ScopeStack);
 
-    /// What is known of one line.
+    /// A line's tokens: byte ranges within the line, sorted, apart.
+    pub(crate) type Tokens = Vec<(Range<usize>, Token)>;
+
+    /// The parser keeps its state at the start of every this many lines
+    /// (and of the lines it kept one for before an edit shifted them): a
+    /// state per line would cost about a kilobyte a line, and starting a
+    /// parse up to this many lines early costs next to nothing.
+    const CHECKPOINT: usize = 16;
+
+    /// How many lines before the first one in view a guess starts at
+    /// (from a fresh state): enough for most constructs that span lines to
+    /// open again before the lines shown.
+    pub(crate) const GUESS_CONTEXT: usize = 40;
+
+    /// What the parser knows of one line.
     #[derive(Default)]
     struct Line {
-        /// The state at the line's start: the end of the line before as
-        /// last parsed, `None` before that is parsed.
+        /// The state at the line's start, kept for checkpoints: what
+        /// parsing starts again from, and what tells whether a parse that
+        /// reaches the line converged.
         start: Option<State>,
-        /// Its tokens as parsed from `start`, `None` while it is not
-        /// parsed (or was edited since). Whenever these are known, so is
-        /// the next line's `start` (unless this is the last line).
-        tokens: Option<Vec<(Range<usize>, Token)>>,
+        /// Its tokens are current (parsed since the line last changed).
+        done: bool,
         /// Its bytes with its line break, as last parsed.
         len: usize,
     }
 
-    /// Highlights a text line by line, again from where it changed.
-    pub(crate) struct Highlighter {
+    /// The parsing half of a [`Highlighter`]: the states it parses on
+    /// from, which a [`Job`] takes off the engine thread and back.
+    pub(crate) struct Parser {
         syntax: &'static syntect::parsing::SyntaxReference,
         /// The lines from the first one, as far as they have been parsed
         /// (one past the last line parsed, unless that was the last line
         /// of the text).
         lines: Vec<Line>,
-        /// The lines before this one are current; its `start` is known.
+        /// The lines before this one are current.
         parsed: usize,
+        /// Where line `parsed` starts in the text.
+        offset: usize,
+        /// The state at line `parsed`'s start when it has no checkpoint
+        /// (parsing goes on from the line before).
+        state: Option<State>,
+        /// The last line the last job was to parse up to.
+        last_line: usize,
         /// The line being parsed, reused.
         line: String,
         /// How many lines were parsed, for the tests of what an edit costs.
@@ -62,22 +119,97 @@ mod syntect_lines {
         parses: usize,
     }
 
+    /// A line's tokens as the view gets them.
+    struct Known {
+        tokens: Tokens,
+        /// Parsed from a fresh state near the view, not from the text's
+        /// start ([`Highlighter::guess`]): shown until the parse from the
+        /// start reaches the line.
+        guessed: bool,
+    }
+
+    /// Highlights a text line by line, again from where it changed: the
+    /// tokens (on the engine thread, for the view) and the [`Parser`]
+    /// (which parses on, here or on a blocking thread).
+    pub(crate) struct Highlighter {
+        /// Tells its jobs' and guesses' work from another highlighter's
+        /// (one made since for other texts or another language).
+        id: u64,
+        syntax: &'static syntect::parsing::SyntaxReference,
+        tokens: Vec<Option<Known>>,
+        /// `None` while a [`Job`] has it.
+        parser: Option<Parser>,
+        /// The edits made while a job had the parser, in order: given to
+        /// it when it comes back.
+        pending: Vec<(usize, usize, usize)>,
+        /// How far the parser had come, as last known.
+        frontier: usize,
+    }
+
+    /// Parsing on from where a [`Highlighter`] stopped, which may run on
+    /// another thread ([`Job::run`]) while the highlighter keeps showing
+    /// the tokens it has.
+    pub(crate) struct Job {
+        id: u64,
+        parser: Parser,
+        rope: Rope,
+        last_line: usize,
+        budget: Duration,
+    }
+
+    /// What a [`Job`] did, for [`Highlighter::finish`].
+    pub(crate) struct Done {
+        id: u64,
+        parser: Parser,
+        /// Each line parsed, in order, and its tokens.
+        parsed: Vec<(usize, Tokens)>,
+    }
+
+    /// Parsing the lines in view from a fresh state, ahead of the parse
+    /// from the text's start ([`Highlighter::guess`]).
+    pub(crate) struct Guess {
+        id: u64,
+        syntax: &'static syntect::parsing::SyntaxReference,
+        rope: Rope,
+        first: usize,
+        offset: usize,
+        last: usize,
+    }
+
+    /// What a [`Guess`] found: the tokens of its lines from the first.
+    pub(crate) struct Guessed {
+        id: u64,
+        first: usize,
+        tokens: Vec<Tokens>,
+    }
+
     impl Highlighter {
         /// None for plain text, a language syntect lacks. `hint`: the
         /// language's syntax hint (an extension or a name syntect knows).
         /// Loads the syntaxes when they are not loaded yet ([`Self::ready`]).
         pub(crate) fn new(hint: &str) -> Option<Highlighter> {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let syntax = find_syntax(hint)?;
             Some(Highlighter {
+                id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 syntax,
-                lines: vec![Line {
-                    start: Some((ParseState::new(syntax), ScopeStack::new())),
-                    ..Line::default()
-                }],
-                parsed: 0,
-                line: String::new(),
-                #[cfg(test)]
-                parses: 0,
+                tokens: Vec::new(),
+                parser: Some(Parser {
+                    syntax,
+                    lines: vec![Line {
+                        start: Some((ParseState::new(syntax), ScopeStack::new())),
+                        ..Line::default()
+                    }],
+                    parsed: 0,
+                    offset: 0,
+                    state: None,
+                    last_line: 0,
+                    line: String::new(),
+                    #[cfg(test)]
+                    parses: 0,
+                }),
+                pending: Vec::new(),
+                frontier: 0,
             })
         }
 
@@ -94,119 +226,174 @@ mod syntect_lines {
 
         /// Lines `first..first + old_count` became `first..first +
         /// new_count`: the states from `first` on are invalid; the tokens
-        /// of lines after the span shift.
+        /// of lines after the span shift (and stay until parsed again, so
+        /// the colors do not flicker).
         pub(crate) fn edited(&mut self, first: usize, old_count: usize, new_count: usize) {
-            self.parsed = self.parsed.min(first);
-            let Some(line) = self.lines.get_mut(first) else {
-                // Past the lines parsed: nothing known changes.
-                return;
-            };
-            // What comes before the span is unchanged, so is the state at
-            // its start.
-            let start = line.start.take();
-            let end = first + old_count;
-            if end <= self.lines.len() {
-                // The line after the span keeps its start and tokens: the
-                // state its line before ends in tells whether they hold.
-                self.lines.splice(
-                    first..end,
-                    std::iter::repeat_with(Line::default).take(new_count),
-                );
-            } else {
-                // The span reaches past the lines parsed: what follows it
-                // is not known.
-                self.lines.truncate(first);
+            splice(&mut self.tokens, first, old_count, new_count, || None);
+            if let Some(slot) = self.tokens.get_mut(first) {
+                *slot = None;
             }
-            if self.lines.len() == first {
-                self.lines.push(Line::default());
+            self.frontier = self.frontier.min(first);
+            match &mut self.parser {
+                Some(parser) => parser.edited(first, old_count, new_count),
+                None => self.pending.push((first, old_count, new_count)),
             }
-            let line = &mut self.lines[first];
-            line.start = start;
-            line.tokens = None;
         }
 
-        /// Parses dirty lines in order up to `last_line` (inclusive), within
-        /// `budget` (at least one line per call); stops early once a line's
-        /// end state equals what it was before (the rest is unchanged).
-        /// Returns the lines whose tokens changed and whether all lines up
-        /// to `last_line` are current.
+        /// Parses the lines not current in order up to `last_line`
+        /// (inclusive), within `budget` (at least one line per call), here;
+        /// stops early once a line ends in the state the next line started
+        /// with before (the rest is unchanged). Returns the lines whose
+        /// tokens changed and whether all lines up to `last_line` are
+        /// current.
+        #[cfg(test)]
         pub(crate) fn highlight(
             &mut self,
             rope: &Rope,
             last_line: usize,
             budget: Duration,
         ) -> (Range<usize>, bool) {
-            let started = Instant::now();
-            let set = syntaxes();
-            let mut changed: Option<Range<usize>> = None;
-            let mut offset: usize = self.lines[..self.parsed].iter().map(|line| line.len).sum();
-            while self.parsed < self.lines.len() && self.parsed <= last_line {
-                if offset > rope.len_bytes() {
-                    // Edits the highlighter was not told of: the text ends
-                    // before the lines known.
-                    log::warn!("editor: the highlighter missed an edit");
-                    self.lines.truncate(self.parsed.max(1));
-                    break;
-                }
-                let index = self.parsed;
-                let newline = read_line(rope, offset, &mut self.line);
-                let len = self.line.len();
-                let content = len - usize::from(newline);
-                if !newline {
-                    // The syntaxes expect every line with its line break.
-                    self.line.push('\n');
-                }
-                // The first line not current always has its start; were it
-                // missing, parsing from scratch is the best guess.
-                let mut state = self.lines[index]
-                    .start
-                    .clone()
-                    .unwrap_or_else(|| (ParseState::new(self.syntax), ScopeStack::new()));
-                let tokens = parse(&mut state, &self.line, content, set);
-                #[cfg(test)]
-                {
-                    self.parses += 1;
-                }
-                let line = &mut self.lines[index];
-                if line.tokens.as_ref() != Some(&tokens) {
-                    changed = Some(match changed {
-                        Some(range) => range.start..index + 1,
-                        None => index..index + 1,
-                    });
-                }
-                line.tokens = Some(tokens);
-                line.len = len;
-                self.parsed = index + 1;
-                offset += len;
-                if !newline {
-                    // The last line of the text.
-                    self.lines.truncate(index + 1);
-                    break;
-                }
-                match self.lines.get_mut(index + 1) {
-                    None => self.lines.push(Line {
-                        start: Some(state),
-                        ..Line::default()
-                    }),
-                    Some(next) if next.start.as_ref() == Some(&state) => {
-                        // Converged: the lines parsed before from here on
-                        // hold, up to the next one an edit left unparsed.
-                        while let Some(line) = self.lines.get(self.parsed) {
-                            if line.tokens.is_none() {
-                                break;
-                            }
-                            offset += line.len;
-                            self.parsed += 1;
-                        }
-                    }
-                    Some(next) => next.start = Some(state),
-                }
-                if started.elapsed() >= budget {
-                    break;
-                }
+            match self.job(rope, last_line, budget) {
+                Some(job) => self.finish(job.run()),
+                None => (
+                    self.frontier..self.frontier,
+                    self.parser.as_ref().is_some_and(|p| p.current(last_line)),
+                ),
             }
-            let current = self.parsed > last_line || self.parsed == self.lines.len();
-            (changed.unwrap_or(self.parsed..self.parsed), current)
+        }
+
+        /// The parse up to `last_line` within `budget`, to run anywhere
+        /// ([`Job::run`]) and hand back ([`Self::finish`]); None when the
+        /// lines up to `last_line` are current, or a job is running.
+        pub(crate) fn job(
+            &mut self,
+            rope: &Rope,
+            last_line: usize,
+            budget: Duration,
+        ) -> Option<Job> {
+            let parser = self.parser.as_ref()?;
+            if parser.current(last_line) {
+                return None;
+            }
+            Some(Job {
+                id: self.id,
+                parser: self.parser.take()?,
+                rope: rope.clone(),
+                last_line,
+                budget,
+            })
+        }
+
+        /// A job's work: its tokens shown, its parser back, the edits made
+        /// meanwhile given to it. Returns the lines whose tokens changed
+        /// and whether the lines up to the job's last one are current.
+        pub(crate) fn finish(&mut self, done: Done) -> (Range<usize>, bool) {
+            if done.id != self.id {
+                return (0..0, false);
+            }
+            let Done {
+                mut parser, parsed, ..
+            } = done;
+            // What the job parsed holds before the first line edited since.
+            let limit = self.pending.iter().map(|e| e.0).min().unwrap_or(usize::MAX);
+            let mut changed: Option<Range<usize>> = None;
+            for (line, tokens) in parsed {
+                if line >= limit {
+                    // Parsed from the text before the edit: parsed again
+                    // later (never skipped as current).
+                    parser.lines[line].done = false;
+                    continue;
+                }
+                if self.tokens.len() <= line {
+                    self.tokens.resize_with(line + 1, || None);
+                }
+                let slot = &mut self.tokens[line];
+                if slot
+                    .as_ref()
+                    .is_some_and(|k| !k.guessed && k.tokens == tokens)
+                {
+                    continue;
+                }
+                *slot = Some(Known {
+                    tokens,
+                    guessed: false,
+                });
+                changed = Some(match changed {
+                    Some(range) => range.start..line + 1,
+                    None => line..line + 1,
+                });
+            }
+            for (first, old_count, new_count) in self.pending.drain(..) {
+                parser.edited(first, old_count, new_count);
+            }
+            self.frontier = parser.parsed;
+            let last = parser.last_line;
+            let current = parser.current(last);
+            self.parser = Some(parser);
+            (changed.unwrap_or(self.frontier..self.frontier), current)
+        }
+
+        /// How far the parse from the text's start has come: the lines
+        /// before this one are current.
+        pub(crate) fn frontier(&self) -> usize {
+            self.frontier
+        }
+
+        /// The lines `first..=last` parsed from a fresh state, starting at
+        /// byte `offset` (line `first`'s start), for lines far past the
+        /// parse from the start to show colors at once; None when every
+        /// line from `first + GUESS_CONTEXT` to `last` has tokens.
+        pub(crate) fn guess(
+            &self,
+            rope: &Rope,
+            first: usize,
+            offset: usize,
+            last: usize,
+        ) -> Option<Guess> {
+            let shown = (first + GUESS_CONTEXT).min(last)..last + 1;
+            if shown
+                .clone()
+                .all(|line| self.tokens.get(line).is_some_and(Option::is_some))
+            {
+                return None;
+            }
+            Some(Guess {
+                id: self.id,
+                syntax: self.syntax,
+                rope: rope.clone(),
+                first,
+                offset,
+                last,
+            })
+        }
+
+        /// Shows a guess's tokens on the lines the parse from the start has
+        /// not reached (a guess made before an edit is dropped by the
+        /// caller). Returns the lines whose tokens changed.
+        pub(crate) fn guessed(&mut self, guessed: Guessed) -> Range<usize> {
+            if guessed.id != self.id {
+                return 0..0;
+            }
+            let mut changed: Option<Range<usize>> = None;
+            for (i, tokens) in guessed.tokens.into_iter().enumerate() {
+                let line = guessed.first + i;
+                if self.tokens.len() <= line {
+                    self.tokens.resize_with(line + 1, || None);
+                }
+                let slot = &mut self.tokens[line];
+                if slot.as_ref().is_some_and(|k| !k.guessed) {
+                    continue;
+                }
+                *slot = Some(Known {
+                    tokens,
+                    guessed: true,
+                });
+                changed = Some(match changed {
+                    Some(range) => range.start..line + 1,
+                    None => line..line + 1,
+                });
+            }
+            changed.unwrap_or(0..0)
         }
 
         /// The tokens of `line`: byte ranges within the line (without its
@@ -214,7 +401,208 @@ mod syntect_lines {
         /// highlighted yet; a line an edit has not reached yet keeps the
         /// tokens it had.
         pub(crate) fn tokens(&self, line: usize) -> Option<&[(Range<usize>, Token)]> {
-            self.lines.get(line)?.tokens.as_deref()
+            self.tokens.get(line)?.as_ref().map(|k| k.tokens.as_slice())
+        }
+
+        #[cfg(test)]
+        fn parses(&mut self) -> &mut usize {
+            &mut self.parser.as_mut().unwrap().parses
+        }
+    }
+
+    impl Parser {
+        /// Whether the lines up to `last_line` are current.
+        fn current(&self, last_line: usize) -> bool {
+            self.parsed > last_line || self.parsed >= self.lines.len()
+        }
+
+        /// See [`Highlighter::edited`].
+        fn edited(&mut self, first: usize, old_count: usize, new_count: usize) {
+            if first >= self.lines.len() {
+                // Past the lines parsed: nothing known changes.
+                return;
+            }
+            // Parsing starts again at the last kept state before the edit
+            // (what comes before the span is unchanged, so is the state at
+            // its start).
+            if self.parsed > first {
+                let mut at = first;
+                while self.lines[at].start.is_none() {
+                    at -= 1;
+                }
+                // The shorter of the two sums.
+                self.offset = if self.parsed - at < at {
+                    self.offset
+                        - self.lines[at..self.parsed]
+                            .iter()
+                            .map(|l| l.len)
+                            .sum::<usize>()
+                } else {
+                    self.lines[..at].iter().map(|l| l.len).sum()
+                };
+                self.parsed = at;
+                self.state = None;
+            }
+            let start = self.lines[first].start.take();
+            splice(&mut self.lines, first, old_count, new_count, Line::default);
+            if self.lines.len() == first {
+                self.lines.push(Line::default());
+            }
+            let line = &mut self.lines[first];
+            line.start = start;
+            line.done = false;
+        }
+
+        /// Parses on (see [`Highlighter::highlight`]), collecting each
+        /// line's tokens into `out`.
+        fn parse_on(
+            &mut self,
+            rope: &Rope,
+            last_line: usize,
+            budget: Duration,
+            out: &mut Vec<(usize, Tokens)>,
+        ) {
+            let started = Instant::now();
+            let set = syntaxes();
+            while self.parsed < self.lines.len() && self.parsed <= last_line {
+                if self.offset > rope.len_bytes() {
+                    // Edits the highlighter was not told of: the text ends
+                    // before the lines known.
+                    log::warn!("editor: the highlighter missed an edit");
+                    self.lines.truncate(self.parsed.max(1));
+                    self.parsed = self.parsed.min(self.lines.len() - 1);
+                    break;
+                }
+                let index = self.parsed;
+                let newline = read_line(rope, self.offset, &mut self.line);
+                let len = self.line.len();
+                let content = len - usize::from(newline);
+                if !newline {
+                    // The syntaxes expect every line with its line break.
+                    self.line.push('\n');
+                }
+                let mut state = match self.state.take() {
+                    Some(state) => state,
+                    // A line parsing starts at always has a kept state;
+                    // were it missing, parsing from scratch is the best
+                    // guess.
+                    None => self.lines[index]
+                        .start
+                        .clone()
+                        .unwrap_or_else(|| (ParseState::new(self.syntax), ScopeStack::new())),
+                };
+                let tokens = parse(&mut state, &self.line, content, set);
+                #[cfg(test)]
+                {
+                    self.parses += 1;
+                }
+                out.push((index, tokens));
+                let line = &mut self.lines[index];
+                line.done = true;
+                line.len = len;
+                self.parsed = index + 1;
+                self.offset += len;
+                if !newline {
+                    // The last line of the text.
+                    self.lines.truncate(index + 1);
+                    break;
+                }
+                let next = index + 1;
+                if next == self.lines.len() {
+                    self.lines.push(Line::default());
+                }
+                let line = &mut self.lines[next];
+                if line.done && line.start.as_ref() == Some(&state) {
+                    // Converged: the lines parsed before from here on
+                    // hold, up to the next one an edit left unparsed,
+                    // whose parse starts at the kept state before it.
+                    while self.lines.get(self.parsed).is_some_and(|l| l.done) {
+                        self.offset += self.lines[self.parsed].len;
+                        self.parsed += 1;
+                    }
+                    if self.parsed < self.lines.len() {
+                        while self.lines[self.parsed].start.is_none() {
+                            self.parsed -= 1;
+                            self.offset -= self.lines[self.parsed].len;
+                        }
+                    }
+                } else {
+                    if line.start.is_some() || next.is_multiple_of(CHECKPOINT) {
+                        line.start = Some(state.clone());
+                    }
+                    self.state = Some(state);
+                }
+                if started.elapsed() >= budget {
+                    break;
+                }
+            }
+        }
+    }
+
+    impl Job {
+        /// Parses (blocking: on a blocking thread where there are some).
+        pub(crate) fn run(mut self) -> Done {
+            let mut parsed = Vec::new();
+            self.parser.last_line = self.last_line;
+            self.parser
+                .parse_on(&self.rope, self.last_line, self.budget, &mut parsed);
+            Done {
+                id: self.id,
+                parser: self.parser,
+                parsed,
+            }
+        }
+    }
+
+    impl Guess {
+        /// Parses its lines (blocking).
+        pub(crate) fn run(self) -> Guessed {
+            let set = syntaxes();
+            let mut state = (ParseState::new(self.syntax), ScopeStack::new());
+            let mut line = String::new();
+            let mut offset = self.offset;
+            let mut tokens = Vec::new();
+            for _ in self.first..=self.last {
+                if offset > self.rope.len_bytes() {
+                    break;
+                }
+                let newline = read_line(&self.rope, offset, &mut line);
+                let len = line.len();
+                let content = len - usize::from(newline);
+                if !newline {
+                    line.push('\n');
+                }
+                tokens.push(parse(&mut state, &line, content, set));
+                offset += len;
+                if !newline {
+                    break;
+                }
+            }
+            Guessed {
+                id: self.id,
+                first: self.first,
+                tokens,
+            }
+        }
+    }
+
+    /// Replaces `first..first + old_count` of `items` with `new_count` new
+    /// ones; past the end, cuts `items` at `first`.
+    fn splice<T>(
+        items: &mut Vec<T>,
+        first: usize,
+        old_count: usize,
+        new_count: usize,
+        new: impl FnMut() -> T,
+    ) {
+        if first >= items.len() {
+            return;
+        }
+        let end = first + old_count;
+        if end <= items.len() {
+            items.splice(first..end, std::iter::repeat_with(new).take(new_count));
+        } else {
+            items.truncate(first);
         }
     }
 
@@ -238,12 +626,7 @@ mod syntect_lines {
 
     /// The tokens of `line` (with its line break; `content` is its length
     /// without), parsed on from `state`, which it leaves at the line's end.
-    fn parse(
-        state: &mut State,
-        line: &str,
-        content: usize,
-        set: &SyntaxSet,
-    ) -> Vec<(Range<usize>, Token)> {
+    fn parse(state: &mut State, line: &str, content: usize, set: &SyntaxSet) -> Tokens {
         let mut tokens = Vec::new();
         let (parser, scopes) = state;
         // A line syntect cannot parse keeps the scopes it started with;
@@ -263,12 +646,7 @@ mod syntect_lines {
 
     /// Adds `range` with the token of its innermost scope that has one,
     /// merged with the token before when they touch and are alike.
-    fn push(
-        tokens: &mut Vec<(Range<usize>, Token)>,
-        range: Range<usize>,
-        line: &str,
-        scopes: &ScopeStack,
-    ) {
+    fn push(tokens: &mut Tokens, range: Range<usize>, line: &str, scopes: &ScopeStack) {
         if range.start >= range.end {
             return;
         }
@@ -425,34 +803,35 @@ mod syntect_lines {
         fn an_edit_parses_until_the_state_converges() {
             let text = rust_lines(200);
             let mut highlighter = highlighted("rust", &text);
-            assert_eq!(highlighter.parses, 202);
+            assert_eq!(*highlighter.parses(), 202);
 
             // Line 51 is `let x50 = 50;`: a longer number.
             let at = text.find("= 50;").unwrap() + 2;
             let text = edit(&mut highlighter, &text, at..at + 2, "5000");
-            highlighter.parses = 0;
+            *highlighter.parses() = 0;
             assert_eq!(check_fresh(&mut highlighter, "rust", &text), 51..52);
-            assert_eq!(highlighter.parses, 1);
+            // From the kept state before it to the next one.
+            assert!(*highlighter.parses() <= CHECKPOINT);
 
             // A line in, a line out: the lines after shift.
             let at = text.find("    let x10").unwrap();
             let text = edit(&mut highlighter, &text, at..at, "    let s = \"新\";\n");
-            highlighter.parses = 0;
+            *highlighter.parses() = 0;
             check_fresh(&mut highlighter, "rust", &text);
-            assert_eq!(highlighter.parses, 2);
+            assert!(*highlighter.parses() <= 2 * CHECKPOINT);
             let start = text.find("    let x3 ").unwrap();
             let end = text.find("    let x7 ").unwrap();
             let text = edit(&mut highlighter, &text, start..end, "");
-            highlighter.parses = 0;
+            *highlighter.parses() = 0;
             check_fresh(&mut highlighter, "rust", &text);
-            assert_eq!(highlighter.parses, 1);
+            assert!(*highlighter.parses() <= 2 * CHECKPOINT);
 
             // Nothing changed: nothing to parse.
-            highlighter.parses = 0;
+            *highlighter.parses() = 0;
             let (changed, current) =
                 highlighter.highlight(&Rope::from_str(&text), usize::MAX, Duration::MAX);
             assert!(current && changed.is_empty());
-            assert_eq!(highlighter.parses, 0);
+            assert_eq!(*highlighter.parses(), 0);
         }
 
         #[test]
@@ -521,6 +900,50 @@ mod syntect_lines {
             let text = edit(&mut highlighter, &text, at..text.len(), "*/ }");
             check_fresh(&mut highlighter, "rust", &text);
         }
+
+        #[test]
+        fn edits_while_a_job_parses_are_given_to_it_after() {
+            let text = rust_lines(300);
+            let mut highlighter = highlighted("rust", &text);
+            // A block comment opens at line 3: the job parses on from there
+            // while, meanwhile, line 1 changes and the comment closes.
+            let at = text.find("    let x2 ").unwrap();
+            let text = edit(&mut highlighter, &text, at..at, "/* ");
+            let job = highlighter
+                .job(&Rope::from_str(&text), usize::MAX, Duration::MAX)
+                .unwrap();
+            assert!(
+                highlighter
+                    .job(&Rope::from_str(&text), usize::MAX, Duration::MAX)
+                    .is_none()
+            );
+            let at = text.find("    let x0 ").unwrap();
+            let text = edit(&mut highlighter, &text, at..at, "// ");
+            let at = text.find("/* ").unwrap();
+            let text = edit(&mut highlighter, &text, at..at + 3, "");
+            let (_, current) = highlighter.finish(job.run());
+            assert!(!current || highlighter.frontier() < 3);
+            check_fresh(&mut highlighter, "rust", &text);
+        }
+
+        #[test]
+        fn a_guess_shows_lines_far_ahead_until_the_parse_reaches_them() {
+            let text = rust_lines(1000);
+            let rope = Rope::from_str(&text);
+            let mut highlighter = Highlighter::new("rust").unwrap();
+            let offset = text.match_indices('\n').nth(899).unwrap().0 + 1;
+            let guess = highlighter.guess(&rope, 900, offset, 950).unwrap();
+            let changed = highlighter.guessed(guess.run());
+            assert_eq!(changed, 900..951);
+            assert!(highlighter.tokens(899).is_none());
+            assert_eq!(
+                token_of(&highlighter, &text, 920, "let"),
+                Some(Token::Keyword)
+            );
+            assert!(highlighter.guess(&rope, 900, offset, 950).is_none());
+            // The parse from the start takes the lines over.
+            check_fresh(&mut highlighter, "rust", &text);
+        }
     }
 }
 
@@ -552,6 +975,7 @@ mod plain {
 
         pub(crate) fn edited(&mut self, _first: usize, _old_count: usize, _new_count: usize) {}
 
+        #[cfg(test)]
         pub(crate) fn highlight(
             &mut self,
             _rope: &Rope,
@@ -564,5 +988,63 @@ mod plain {
         pub(crate) fn tokens(&self, _line: usize) -> Option<&[(Range<usize>, Token)]> {
             None
         }
+
+        pub(crate) fn job(
+            &mut self,
+            _rope: &Rope,
+            _last_line: usize,
+            _budget: Duration,
+        ) -> Option<Job> {
+            None
+        }
+
+        pub(crate) fn finish(&mut self, _done: Done) -> (Range<usize>, bool) {
+            (0..0, true)
+        }
+
+        pub(crate) fn frontier(&self) -> usize {
+            0
+        }
+
+        pub(crate) fn guess(
+            &self,
+            _rope: &Rope,
+            _first: usize,
+            _offset: usize,
+            _last: usize,
+        ) -> Option<Guess> {
+            None
+        }
+
+        pub(crate) fn guessed(&mut self, _guessed: Guessed) -> Range<usize> {
+            0..0
+        }
     }
+
+    /// Never made without the feature.
+    pub(crate) struct Job(());
+
+    /// Never made without the feature.
+    pub(crate) struct Done(());
+
+    /// Never made without the feature.
+    pub(crate) struct Guess(());
+
+    /// Never made without the feature.
+    pub(crate) struct Guessed(());
+
+    impl Job {
+        pub(crate) fn run(self) -> Done {
+            Done(())
+        }
+    }
+
+    impl Guess {
+        pub(crate) fn run(self) -> Guessed {
+            Guessed(())
+        }
+    }
+
+    /// See the feature's.
+    pub(crate) const GUESS_CONTEXT: usize = 40;
 }

@@ -180,7 +180,6 @@ impl Buffer {
     }
 
     /// Grows with every change (edits, undo, redo, reset).
-    #[cfg(test)]
     pub(crate) fn version(&self) -> u64 {
         self.version
     }

@@ -89,6 +89,8 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
                 .on_scroll(move |e: &ScrollEvent| {
                     vscroll_ed.scroll_y.set(e.offset.y);
                     vscroll_ed.viewport.set(e.size);
+                    // Lines scrolled into view far past the parse are guessed.
+                    vscroll_ed.schedule_highlight();
                 })
                 .on_layout(move |b: &Bounds<Points>| layout_ed.viewport.set(b.size))
                 .child(
@@ -333,7 +335,10 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
             if props.soft_wrap.get() {
                 return None;
             }
-            Some(ed.st.borrow().content_size().width)
+            let rows = ed.visible_rows();
+            let st = ed.st.borrow();
+            st.display.measure_rows(rows);
+            Some(st.content_size().width)
         }
     };
     let height = {

@@ -65,7 +65,8 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 line → row is an index and row → line a field. Tabs advance to the next stop; widths come from the editor's font,
 measured per char with the platform's text engine (`measure_text`) and cached, and summed along a row (exact for
 monospaced fonts, close for others). Without soft wrap a row is a line and nothing is measured while laying out (a
-row's width is measured when the scroll width first needs it), so 100 000 lines lay out in well under 100 ms. With
+row's width is measured when the scroll width first needs it; above 20 000 rows only the rows in view are measured,
+as they show, and the scroll width grows to the widest seen), so 200 000 lines lay out in about 30 ms. With
 `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its continuation
 rows start at its indentation unless that is over half the width. A folded line shows as one row and the lines it
 hides as none. An edit lays out only the lines of its `LineSpan` and shifts the rows after them.
@@ -117,13 +118,21 @@ the text and the point in the root view, for the app's `Menu.popup`. A press on 
 ### Highlighting
 
 `highlight.rs` parses with syntect (the syntaxes and scope mapping of `crate::syntax`, shared with `TextView`), line by
-line, keeping the parser's state at the start of every line parsed. An edit marks the lines from its first one dirty;
-parsing starts there from the state kept and stops as soon as a line ends in the state the next line started with
-before, so typing in a function costs a line or two. Only an edit that changes what follows (opening a block comment
-or a string) parses on. The controller parses up to the last line in view, 4 ms per frame on the engine thread
-(`HIGHLIGHT_BUDGET`), then shows what is parsed and continues on the next frame; lines not parsed again yet keep the
-tokens they had, so colors do not flicker. The syntaxes load on a blocking thread the first time a language needs them
-(after a frame on WebAssembly). Without feature `highlight`, the text is plain.
+line. The tokens stay on the engine thread; the parser's state is kept every 16 lines (and on lines that kept one
+before an edit). An edit marks the lines from its first one dirty; parsing starts at the nearest state kept before it
+and stops as soon as a line ends in the state the next line started with before, so typing in a function costs a few
+lines. Only an edit that changes what follows (opening a block comment or a string) parses on. Parsing runs off the
+engine thread: the controller hands a `Job` (a snapshot of the rope, the state to start from, 25 ms of work) to a
+blocking thread, applies what it returns and hands the next, up to 1000 lines past the last one in view. Edits made
+while a job is out are kept and replayed on its result, which is dropped from the first edited line on. When the lines
+in view are more than 500 lines past the parse (a jump to the end of a long file), a `Guess` parses them from a fresh
+state, starting 40 lines before them, and shows that until the parse from the top reaches them. Lines not parsed again
+yet keep the tokens they had, so colors do not flicker. The syntaxes load on a blocking thread the first time a
+language needs them. On WebAssembly there are no threads: jobs run in place, 4 ms per frame. Without feature
+`highlight`, the text is plain.
+
+`onChange` carries the text as a `SharedString`, built once per version of the buffer: the same text is not built
+again for the echo of a controlled `value`. Building it is the one cost of an edit that grows with the text.
 
 ### Search
 
@@ -149,7 +158,7 @@ bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text.
 Folds are by indentation, as VS Code's indentation folding (`fold.rs`): a line followed by lines indented deeper
 starts a fold that hides them; blank lines inside join it, and the line that ends the block at the start line's
 indentation (a closing bracket, `end`) stays visible. Where folds can start is computed once per edit, when the gutter
-first asks. Folding moves carets inside the fold to the end of its first line; a caret moving into a fold (a move, a
+first asks, in one pass over the rope's chunks (about 4 ms for 200 000 lines). Folding moves carets inside the fold to the end of its first line; a caret moving into a fold (a move, a
 search match, `scrollToLine`) unfolds it. `folding={false}` removes the markers and the folds.
 
 ## Parts and their defaults
@@ -198,8 +207,8 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 ## Limits
 
 - Widths are sums of per-char widths: ligatures and kerning are not applied, and rows lay out left to right.
-- Highlighting parses from the top down to the last line in view: jumping to the end of a long file parses
-  everything before it, a budget per frame.
+- Highlighting parses from the top down: after a jump to the end of a long file, the lines in view show a guess
+  (parsed from 40 lines before them) until the parse reaches them, which can differ inside a long comment or string.
 - At most 10 000 search matches are found and 1000 undo steps kept.
 - Folds come from indentation only.
 - Touch screens place the caret with a tap; selecting is by the commands and keys.

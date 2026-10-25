@@ -84,8 +84,9 @@ Promises in JS, as every component method with a result does (`docs/dev/componen
 
 Each side has its own `editor::highlight::Highlighter` over a rope of its text, the `Editor`'s incremental syntect
 highlighter (`docs/dev/editor.md` "Highlighting"), with the language found by `editor::language::language`. The
-controller parses each side up to its last line in view, 2 ms per side per frame, and continues on the next frame;
-the syntaxes load on a blocking thread the first time (after a frame on WebAssembly). Colors are `crate::syntax`'s
+controller hands both sides' jobs (and guesses, for lines far past the parse) to one blocking thread at a time, up to
+1000 lines past each side's last line in view, as the `Editor` does; the syntaxes load on a blocking thread the first
+time (after a frame on WebAssembly). Colors are `crate::syntax`'s
 tokens, as the `Editor`'s and `TextView`'s code blocks.
 
 ## Parts and their defaults

@@ -32,7 +32,7 @@ fn code() -> impl IntoElement {
     editor()
         .value(move || Some(source.get()))
         .language("rust")
-        .on_change(move |value: &String| source.set(value.clone().into()))
+        .on_change(move |value: &SharedString| source.set(value.clone()))
         .flex_1()
 }
 ```
@@ -409,7 +409,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 
 | Event | Rust | Description |
 |---|---|---|
-| `onChange` | `.on_change(\|value: &String\| ..)` | The text changed: the whole new text. |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | The text changed: the whole new text. |
 | `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | The selections changed: every one, the primary last. |
 | `onFocus`, `onBlur` | `.on_focus(\|\| ..)`, `.on_blur(\|\| ..)` | The editor took or lost the focus. |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ count, current, error }`. |

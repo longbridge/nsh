@@ -82,8 +82,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .read_only(props.read_only)
         .tab_size(4u32)
         .search(move || search.get())
-        .on_change(move |text: &String| {
-            value.set(text.clone());
+        .on_change(move |text: &SharedString| {
+            value.set(text.to_string());
             changes.update(|n| *n += 1);
         })
         .on_selection_change(move |all: &Vec<EditorSelection>| selections.set(selections_text(all)))

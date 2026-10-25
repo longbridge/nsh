@@ -110,8 +110,10 @@ pub(crate) struct State {
     pub(crate) folding: bool,
     /// What an input method is composing at the primary caret.
     pub(crate) composition: Option<String>,
-    /// The text last reported to the app (`onChange`) or set by it.
-    pub(crate) reported: Option<String>,
+    /// The text last reported to the app (`onChange`) or set by it, and
+    /// the buffer's version then: an unchanged version is an unchanged
+    /// text, with no need to make or compare the whole text.
+    pub(crate) reported: Option<(u64, nsh_core::ui::SharedString)>,
     /// The selections last reported (`onSelectionChange`).
     pub(crate) reported_selections: Vec<EditorSelection>,
 }
@@ -844,5 +846,141 @@ impl State {
     /// The language a name or path names.
     pub(crate) fn language_for(name: Option<&str>) -> &'static LanguageConfig {
         language::language(name.unwrap_or(""))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::editor::commands::Outcome;
+
+    /// `n` lines of Rust-like code.
+    fn source(n: usize) -> String {
+        let mut text = String::from("fn main() {\n");
+        for i in 0..n {
+            text.push_str(&format!(
+                "    let value_{i} = compute({i}, \"row {i}\") + offset; // line {i}\n"
+            ));
+        }
+        text.push_str("}\n");
+        text
+    }
+
+    fn state(text: &str) -> State {
+        let font = Font {
+            family: "monospace".into(),
+            size: px(13.0),
+            line_height: px(20.0),
+        };
+        let measure: Rc<dyn Fn(&str) -> Points> =
+            Rc::new(|s: &str| px(s.chars().count() as f32 * 8.0));
+        State::new(
+            text,
+            State::language_for(Some("rust")),
+            EditOptions::default(),
+            font,
+            measure,
+        )
+    }
+
+    fn time<R>(label: &str, f: impl FnOnce() -> R) -> R {
+        let start = Instant::now();
+        let r = f();
+        eprintln!("{label}: {:?}", start.elapsed());
+        r
+    }
+
+    /// The costs of a 200 000 line text: opening it, typing in it, finding
+    /// in it and highlighting it.
+    #[test]
+    #[ignore]
+    fn bench_large_text() {
+        let text = time("source", || source(200_000));
+        eprintln!("{} bytes", text.len());
+        let mut st = time("State::new", || state(&text));
+        time("buffer.text", || st.buffer.text());
+        time("fold candidates", || st.fold_candidates().len());
+        time("content size", || st.content_size());
+        let end = st.buffer.len();
+        st.selections = Selections::single(Selection::caret(end / 2));
+        for round in 0..3 {
+            time(&format!("type {round}"), || {
+                if let Outcome::Edited(changes) = st.editing(40, |e| e.insert("x")) {
+                    st.changed(&changes);
+                }
+            });
+        }
+        st.search = Some(EditorSearch {
+            query: "offset".into(),
+            ..Default::default()
+        });
+        time("find", || st.find());
+        time("type with a search", || {
+            if let Outcome::Edited(changes) = st.editing(40, |e| e.insert("y")) {
+                st.changed(&changes);
+            }
+        });
+        Highlighter::load();
+        let mut h = Highlighter::new("rs").unwrap();
+        let rope = st.buffer.rope().clone();
+        {
+            use syntect::parsing::{ParseState, ScopeStack};
+            let syntax = crate::syntax::find_syntax("rs").unwrap();
+            let set = crate::syntax::syntaxes();
+            let lines: Vec<String> = text
+                .split_inclusive('\n')
+                .take(20_000)
+                .map(String::from)
+                .collect();
+            time("raw syntect, 20 000 lines", || {
+                let mut parser = ParseState::new(syntax);
+                let mut scopes = ScopeStack::new();
+                for line in &lines {
+                    for (_, op) in parser.parse_line(line, set).unwrap() {
+                        let _ = scopes.apply(&op);
+                    }
+                }
+            });
+            time("raw syntect + state clones, 20 000 lines", || {
+                let mut parser = ParseState::new(syntax);
+                let mut scopes = ScopeStack::new();
+                let mut kept = Vec::new();
+                for line in &lines {
+                    for (_, op) in parser.parse_line(line, set).unwrap() {
+                        let _ = scopes.apply(&op);
+                    }
+                    kept.push((parser.clone(), scopes.clone()));
+                }
+                kept.len()
+            });
+            let mut h = Highlighter::new("rs").unwrap();
+            let rope = st.buffer.rope().clone();
+            time("ours, 20 000 lines", || {
+                h.highlight(&rope, 19_999, Duration::from_secs(100))
+            });
+        }
+        time("highlight the first screen", || {
+            h.highlight(&rope, 60, Duration::from_secs(10))
+        });
+        let mut far = Highlighter::new("rs").unwrap();
+        let first = 199_000;
+        let guess = far
+            .guess(
+                &rope,
+                first - 40,
+                st.buffer.line_start(first - 40),
+                first + 60,
+            )
+            .unwrap();
+        time("guess 100 lines at line 199 000", || {
+            far.guessed(guess.run())
+        });
+        if std::env::var_os("NSH_BENCH_ALL").is_some() {
+            time("highlight to the end", || {
+                h.highlight(&rope, st.buffer.line_count() - 1, Duration::from_secs(100))
+            });
+        }
     }
 }

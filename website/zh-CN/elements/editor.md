@@ -23,7 +23,7 @@ fn code() -> impl IntoElement {
     editor()
         .value(move || Some(source.get()))
         .language("rust")
-        .on_change(move |value: &String| source.set(value.clone().into()))
+        .on_change(move |value: &SharedString| source.set(value.clone()))
         .flex_1()
 }
 ```
@@ -386,7 +386,7 @@ let editor!: EditorRef;
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onChange` | `.on_change(\|value: &String\| ..)` | 文本改变了：完整的新文本。 |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | 文本改变了：完整的新文本。 |
 | `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | 选区改变了：所有选区，主选区在最后。 |
 | `onFocus`、`onBlur` | `.on_focus(\|\| ..)`、`.on_blur(\|\| ..)` | 编辑器获得或失去焦点。 |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | 搜索的匹配项改变了：`{ count, current, error }`。 |

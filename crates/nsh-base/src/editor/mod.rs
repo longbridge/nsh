@@ -133,7 +133,7 @@ pub struct EditorProps {
 pub enum EditorEvent {
     /// The text changed (the whole new text).
     #[args(value)]
-    Change(String),
+    Change(SharedString),
     /// The selections changed: every one, the primary (newest) last.
     #[args(selections)]
     SelectionChange(Vec<EditorSelection>),

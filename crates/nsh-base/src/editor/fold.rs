@@ -39,8 +39,8 @@ pub(crate) fn fold_ranges(buffer: &Buffer, tab_size: u32) -> Vec<FoldRange> {
     // The lines whose blocks are open, their indentation growing.
     let mut open: Vec<(usize, usize)> = Vec::new();
     let mut last_non_blank = None;
-    for line in 0..buffer.line_count() {
-        let Some(indent) = indentation(buffer, line, tab_size) else {
+    for (line, indent) in indentations(buffer, tab_size).into_iter().enumerate() {
+        let Some(indent) = indent else {
             continue;
         };
         while let Some(&(start, depth)) = open.last() {
@@ -84,21 +84,52 @@ fn push(ranges: &mut Vec<FoldRange>, start: usize, end: Option<usize>) {
     }
 }
 
-/// The columns of `line`'s leading whitespace (a tab to its next stop);
-/// None for a blank line.
-fn indentation(buffer: &Buffer, line: usize, tab_size: usize) -> Option<usize> {
-    let start = buffer.line_start(line);
-    let end = buffer.line_end(line);
-    let mut columns = 0;
-    for c in buffer.rope().byte_slice(start..end).chars() {
-        match c {
-            '\t' => columns = (columns / tab_size + 1) * tab_size,
-            ' ' => columns += 1,
-            c if c.is_whitespace() => columns += 1,
-            _ => return Some(columns),
+/// The columns of each line's leading whitespace (a tab to its next
+/// stop), None for a blank line: one pass over the text's chunks, which
+/// reads each line's indentation and skips to its line break (a line at a
+/// time through the rope would cost a lookup per line).
+fn indentations(buffer: &Buffer, tab_size: usize) -> Vec<Option<usize>> {
+    let mut out = Vec::with_capacity(buffer.line_count());
+    // The line's columns so far; None once its text began (the rest of
+    // the line is skipped).
+    let mut columns = Some(0);
+    let mut indent = None;
+    for chunk in buffer.rope().chunks() {
+        let mut i = 0;
+        while i < chunk.len() {
+            match columns {
+                Some(c) => {
+                    let Some(ch) = chunk[i..].chars().next() else {
+                        break;
+                    };
+                    match ch {
+                        '\n' => {
+                            out.push(None);
+                            columns = Some(0);
+                        }
+                        '\t' => columns = Some((c / tab_size + 1) * tab_size),
+                        ch if ch.is_whitespace() => columns = Some(c + 1),
+                        _ => {
+                            indent = Some(c);
+                            columns = None;
+                        }
+                    }
+                    i += ch.len_utf8();
+                }
+                None => match chunk[i..].find('\n') {
+                    Some(k) => {
+                        out.push(indent.take());
+                        columns = Some(0);
+                        i += k + 1;
+                    }
+                    None => i = chunk.len(),
+                },
+            }
         }
     }
-    None
+    // The last line, which has no line break.
+    out.push(if columns.is_none() { indent } else { None });
+    out
 }
 
 #[cfg(test)]

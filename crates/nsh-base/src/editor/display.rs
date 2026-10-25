@@ -42,6 +42,11 @@ pub(crate) struct Row {
     pub(crate) indent: Points,
 }
 
+/// Texts of more rows than this measure their rows' widths as the rows
+/// show ([`DisplayMap::measure_rows`]), never all at once: measuring every
+/// row of a long text takes tens of milliseconds.
+const EAGER_ROWS: usize = 20_000;
+
 /// The text laid out in display rows.
 pub(crate) struct DisplayMap {
     metrics: Metrics,
@@ -384,8 +389,13 @@ impl DisplayMap {
         let mut widths = self.widths.borrow_mut();
         let mut text = String::new();
         let mut widest = 0.0f32;
+        let eager = self.rows.len() <= EAGER_ROWS;
         for (row, width) in self.rows.iter().zip(widths.iter_mut()) {
             if width.is_nan() {
+                if !eager {
+                    // Measured once shown (`measure_rows`).
+                    continue;
+                }
                 text.clear();
                 for chunk in self.rope.byte_slice(row.range.clone()).chunks() {
                     text.push_str(chunk);
@@ -396,6 +406,35 @@ impl DisplayMap {
         }
         self.widest.set(Some(widest));
         Points(widest)
+    }
+
+    /// Measures rows `range` (those shown) of a text whose widths are
+    /// measured as its rows show ([`EAGER_ROWS`]): the widest row grows
+    /// with what was seen, as in editors that never read a long text whole.
+    pub(crate) fn measure_rows(&self, range: Range<usize>) {
+        if self.rows.len() <= EAGER_ROWS {
+            return;
+        }
+        let mut widths = self.widths.borrow_mut();
+        let mut text = String::new();
+        let end = range.end.min(self.rows.len());
+        for index in range.start.min(end)..end {
+            let width = &mut widths[index];
+            if !width.is_nan() {
+                continue;
+            }
+            let row = &self.rows[index];
+            text.clear();
+            for chunk in self.rope.byte_slice(row.range.clone()).chunks() {
+                text.push_str(chunk);
+            }
+            *width = row.indent.0 + self.metrics.run_width(&text);
+            if let Some(widest) = self.widest.get()
+                && *width > widest
+            {
+                self.widest.set(Some(*width));
+            }
+        }
     }
 
     /// The width of a space in the editor's font (selections past a line's

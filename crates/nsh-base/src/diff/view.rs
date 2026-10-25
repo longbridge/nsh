@@ -98,6 +98,8 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
                 .on_scroll(move |e: &ScrollEvent| {
                     scroll_dv.scroll_y.set(e.offset.y);
                     scroll_dv.viewport.set(e.size);
+                    // Lines scrolled into view far past the parse are guessed.
+                    scroll_dv.schedule_highlight();
                 })
                 .on_layout(move |b: &Bounds<Points>| layout_dv.viewport.set(b.size))
                 .child(

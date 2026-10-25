@@ -6,7 +6,6 @@ use std::{
     collections::HashMap,
     ops::Range,
     rc::Rc,
-    time::Duration,
 };
 
 use nsh_core::ui::prelude::*;
@@ -20,13 +19,15 @@ use super::{
     patch,
 };
 use crate::{
-    editor::{controller::font_family, highlight::Highlighter, language, state::Font},
+    editor::{
+        controller::font_family,
+        highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
+        language,
+        state::Font,
+    },
     syntax::Token,
 };
 
-/// How long highlighting may take on the engine thread per frame (both
-/// sides together).
-const HIGHLIGHT_BUDGET: Duration = Duration::from_millis(4);
 /// Rows made beyond the viewport on each side.
 pub(crate) const OVERSCAN: usize = 8;
 /// Columns a tab takes.
@@ -687,8 +688,9 @@ impl Dv {
         });
     }
 
-    /// Highlights both sides up to the last lines in view, a budget per
-    /// frame.
+    /// Highlights both sides up to the last lines in view (and on past
+    /// them), off the engine thread; lines in view far past the parse are
+    /// guessed first.
     pub(crate) fn schedule_highlight(&self) {
         if self.highlighting.replace(true) {
             return;
@@ -696,36 +698,79 @@ impl Dv {
         let dv = self.clone();
         spawn(async move {
             loop {
-                let (changed, done) = {
+                let work = {
                     let rows = untracked(|| dv.visible_rows());
                     let mut st = dv.st.borrow_mut();
                     let st = &mut *st;
-                    let (mut old_last, mut new_last) = (0, 0);
+                    // The first and last line of each side in view.
+                    let (mut old_lines, mut new_lines) = ((usize::MAX, 0), (usize::MAX, 0));
                     for row in &st.rows[rows.start.min(st.rows.len())..rows.end.min(st.rows.len())]
                     {
                         if let Row::Line { old, new, .. } = row {
-                            old_last = old_last.max(old.unwrap_or(0));
-                            new_last = new_last.max(new.unwrap_or(0));
+                            for (line, lines) in [(old, &mut old_lines), (new, &mut new_lines)] {
+                                if let Some(line) = *line {
+                                    lines.0 = lines.0.min(line);
+                                    lines.1 = lines.1.max(line);
+                                }
+                            }
                         }
                     }
-                    let budget = HIGHLIGHT_BUDGET / 2;
-                    let mut changed = false;
-                    let mut done = true;
-                    for (side, last) in [(&mut st.old, old_last), (&mut st.new, new_last)] {
+                    let mut work = Vec::new();
+                    for (index, (side, lines)) in
+                        [(&mut st.old, old_lines), (&mut st.new, new_lines)]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        let last = lines.1;
+                        let first = lines.0.min(last);
+                        let start = first.saturating_sub(GUESS_CONTEXT);
+                        let start_offset = side.starts.get(start).copied().unwrap_or(0);
                         if let Some(h) = &mut side.highlighter {
-                            let (lines, current) = h.highlight(&side.rope, last, budget);
-                            changed |= !lines.is_empty();
-                            done &= current;
+                            let guess = (first > h.frontier() + GUESS_DISTANCE)
+                                .then(|| h.guess(&side.rope, start, start_offset, last))
+                                .flatten();
+                            let job = h.job(&side.rope, last + LOOKAHEAD, SLICE);
+                            if guess.is_some() || job.is_some() {
+                                work.push((index, guess, job));
+                            }
                         }
                     }
-                    (changed, done)
+                    work
                 };
+                if work.is_empty() {
+                    break;
+                }
+                let done = off_thread(move || {
+                    work.into_iter()
+                        .map(|(index, guess, job)| {
+                            (index, guess.map(|g| g.run()), job.map(|j| j.run()))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+                let mut changed = false;
+                {
+                    let mut st = dv.st.borrow_mut();
+                    let st = &mut *st;
+                    for (index, guessed, done) in done {
+                        let side = if index == 0 { &mut st.old } else { &mut st.new };
+                        // A highlighter made since for other texts drops
+                        // what was made for the one before.
+                        let Some(h) = &mut side.highlighter else {
+                            continue;
+                        };
+                        if let Some(guessed) = guessed {
+                            changed |= !h.guessed(guessed).is_empty();
+                        }
+                        if let Some(done) = done {
+                            changed |= !h.finish(done).0.is_empty();
+                        }
+                    }
+                }
                 if changed {
                     dv.hl_rev.update(|r| *r += 1);
                 }
-                if done {
-                    break;
-                }
+                #[cfg(target_arch = "wasm32")]
                 next_frame().await;
             }
             dv.highlighting.set(false);
