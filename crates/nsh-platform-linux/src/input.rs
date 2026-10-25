@@ -353,9 +353,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
 }
 
 /// The CSS name of the pointer over a view, `None` to inherit its parent's.
-fn cursor_name(cursor: Cursor, pressable: bool) -> Option<&'static str> {
+fn cursor_name(cursor: Cursor) -> Option<&'static str> {
     Some(match cursor {
-        Cursor::Auto if pressable => "pointer",
         Cursor::Auto => return None,
         Cursor::Default => "default",
         Cursor::Pointer => "pointer",
@@ -381,7 +380,7 @@ fn update_cursor(view: &NshView) {
         let s = view.state();
         // Selectable text and the texts of selection areas show the
         // I-beam (a press target its pointer).
-        cursor_name(s.style.cursor, has_press(s.events)).or_else(|| {
+        cursor_name(s.style.cursor).or_else(|| {
             let selects = crate::text::selectable(&s)
                 || (s.text.is_some() && crate::selection_area::takes_part(view));
             selects.then_some("text")
@@ -2045,10 +2044,10 @@ mod tests {
 
     #[test]
     fn cursors() {
-        assert_eq!(cursor_name(Cursor::Auto, false), None);
-        assert_eq!(cursor_name(Cursor::Auto, true), Some("pointer"));
-        assert_eq!(cursor_name(Cursor::Default, true), Some("default"));
-        assert_eq!(cursor_name(Cursor::NotAllowed, false), Some("not-allowed"));
+        assert_eq!(cursor_name(Cursor::Auto), None);
+        assert_eq!(cursor_name(Cursor::Default), Some("default"));
+        assert_eq!(cursor_name(Cursor::Pointer), Some("pointer"));
+        assert_eq!(cursor_name(Cursor::NotAllowed), Some("not-allowed"));
     }
 
     #[test]

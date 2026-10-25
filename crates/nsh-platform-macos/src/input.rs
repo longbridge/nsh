@@ -383,9 +383,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
 // --- Cursors ------------------------------------------------------------------------
 
 /// The cursor a view asks for, `None` to inherit its parent's.
-fn cursor_of(cursor: Cursor, pressable: bool) -> Option<Cursor> {
+fn cursor_of(cursor: Cursor) -> Option<Cursor> {
     match cursor {
-        Cursor::Auto if pressable => Some(Cursor::Pointer),
         Cursor::Auto => None,
         other => Some(other),
     }
@@ -437,7 +436,7 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .iter()
         .find_map(|v| {
             let s = v.state();
-            cursor_of(s.style.cursor, has_press(s.events))
+            cursor_of(s.style.cursor)
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
                     (v == &hit.view && crate::selection_area::is_area_text(v, &s))
@@ -2309,9 +2308,9 @@ mod tests {
 
     #[test]
     fn cursors() {
-        assert_eq!(cursor_of(Cursor::Auto, false), None);
-        assert_eq!(cursor_of(Cursor::Auto, true), Some(Cursor::Pointer));
-        assert_eq!(cursor_of(Cursor::Default, true), Some(Cursor::Default));
+        assert_eq!(cursor_of(Cursor::Auto), None);
+        assert_eq!(cursor_of(Cursor::Default), Some(Cursor::Default));
+        assert_eq!(cursor_of(Cursor::Pointer), Some(Cursor::Pointer));
     }
 
     #[test]

@@ -140,7 +140,6 @@ const KEYFRAMES = `
 .nsh-run { position: absolute; white-space: pre; }
 .nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
-.nsh-pointer { cursor: pointer; }
 /* The mounter's own styles: no element has an inline style but its frame
    and animated values (generated classes, \`op_css\`, come after these). */
 .nsh-page { overscroll-behavior: none; }
@@ -1679,8 +1678,6 @@ class Player {
     if (el._events.has("onMouseMove")) this.mouseTracked.add(id);
     else this.mouseTracked.delete(id);
     const pressable = PRESS_EVENTS.some((e) => el._events.has(e));
-    // Under the view's own `cursor` (its class).
-    el.classList.toggle("nsh-pointer", pressable);
     el._pressable = pressable;
     this.updateFocusable(el);
     this.updateTouchAction(el);
