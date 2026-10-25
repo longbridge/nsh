@@ -207,7 +207,7 @@ export function QuotesTable(props: { count: number; live: boolean; testID?: stri
   return (
     <View class="flex-1 gap-2">
       <Text class="font-mono text-[12px] text-muted-foreground">
-        {`${props.count.toLocaleString("en-US")} stocks · ${columns.length} columns · tick ${ticks()}`}
+        {`${props.count.toLocaleString("en-US")} stocks · ${columns.length} columns · tick ${ticks()}${sort() ? ` · sorted by ${sort()!.key} ${sort()!.direction}` : ""}`}
       </Text>
       <DataTable
         testID={props.testID}

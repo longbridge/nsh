@@ -52,7 +52,7 @@ function rowAt(at: number, descending: boolean): (string | number)[] {
 type Page = { start: number; rows: (string | number)[][] };
 
 function load(from: number, descending: boolean): Page {
-  const start = Math.max(0, Math.min(ROWS - PAGE, from));
+  const start = Math.max(0, Math.min(ROWS - PAGE, Math.floor(from)));
   return { start, rows: Array.from({ length: PAGE }, (_, i) => rowAt(start + i, descending)) };
 }
 

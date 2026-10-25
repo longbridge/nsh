@@ -156,7 +156,8 @@ row. A press with Shift or the platform's command key held selects a row only wh
 Rows count from 0 in the data, and a column is its index among `columns`, whatever order the user moved them to.
 `onSelectionChange` reports what the user selected (`null` for nothing). The `selection` prop sets the selection from
 the app; leave it unset and the table keeps it. `onDoublePress` reports a row, a cell or a title pressed twice, and
-`onContextMenu` a secondary or long press with the point to open the app's [`Menu`](./menu.md) at.
+`onContextMenu` a secondary or long press with the point to open the app's [`Menu`](./menu.md) at. Both name the
+cell under the pointer (its `row` and `column`), a row's number (`row` only) or a title (`column` only).
 
 ## Keyboard
 

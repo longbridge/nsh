@@ -148,6 +148,10 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
     let layout = dt.clone();
     let custom_cell = computed(move || props.render_cell.with(Option::is_some));
     let custom_head = computed(move || props.render_header_cell.with(Option::is_some));
+    // Which of the desktops' horizontal bar and the table's horizontal
+    // scroll view the user moves, shared so the other follows without
+    // sending its own moves back.
+    let strip_x = Lead::new();
     let (body_dt, header_dt, hit_dt, strip_dt, over_dt) =
         (dt.clone(), dt.clone(), dt.clone(), dt.clone(), dt.clone());
     let (body_dt2, header_dt2) = (dt.clone(), dt.clone());
@@ -181,7 +185,7 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
             .absolute()
             .inset_0()
             .on_layout(move |b: &Bounds<Points>| layout.viewport.set(b.size))
-            .child(hit_layer(hit_dt))
+            .child(hit_layer(hit_dt, strip_x.clone()))
             .child(
                 when(
                     move || custom_cell.get(),
@@ -196,7 +200,7 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
                 )
                 .otherwise(move || header(header_dt2.clone(), false)),
             )
-            .child(strip(strip_dt))
+            .child(strip(strip_dt, strip_x))
             .child(overlays(over_dt)),
     )
 }
@@ -209,14 +213,12 @@ fn content_width(dt: &Dt) -> f32 {
     g.lead + g.fixed + g.x.extent() as f32
 }
 
-fn hit_layer(dt: Dt) -> impl IntoElement {
+fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
     let props = dt.props;
     let (scroll_dt, hscroll_dt, strip_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (press, hover, menu) = (dt.clone(), dt.clone(), dt.clone());
     let leave = dt.clone();
-    let strip_x = Rc::new(Cell::new(0.0f32));
-    let echo = strip_x.clone();
     scroll()
         .element_ref(&dt.vscroll)
         .absolute()
@@ -243,10 +245,8 @@ fn hit_layer(dt: Dt) -> impl IntoElement {
                         .bounces(move || props.bounces.get())
                         .on_scroll(move |e: &ScrollEvent| {
                             hscroll_dt.scroll_x.set(e.offset.x);
-                            // The desktops' bar follows (a move of under half
-                            // a point is its own echo).
-                            if (e.offset.x.0 - echo.get()).abs() > 0.5 {
-                                echo.set(e.offset.x.0);
+                            // The desktops' bar follows, unless it leads.
+                            if lead.take(Side::Table) {
                                 hscroll_dt.strip.scroll_to(
                                     Point {
                                         x: e.offset.x,
@@ -279,16 +279,49 @@ fn hit_layer(dt: Dt) -> impl IntoElement {
                         ),
                 ),
         )
-        .map(move |v| {
-            // Keep a handle on the echo for the bar below.
-            let _ = &strip_x;
-            v
-        })
+}
+
+/// One of two scroll views that follow each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// The table's horizontal scroll view.
+    Table,
+    /// The desktops' horizontal bar.
+    Strip,
+}
+
+/// Which of two scroll views that follow each other leads: the one the
+/// user moves. The other's scroll events, which arrive after the moves
+/// that caused them, are its echoes for a moment after each of the
+/// leader's moves, and are not sent back.
+#[derive(Clone)]
+struct Lead(Rc<Cell<Option<(Side, nsh_core::time::Instant)>>>);
+
+impl Lead {
+    /// How long after a move of the leader the other's moves are echoes.
+    const ECHO: std::time::Duration = std::time::Duration::from_millis(250);
+
+    fn new() -> Lead {
+        Lead(Rc::default())
+    }
+
+    /// A scroll of `side`: whether it leads (its move is to be followed).
+    fn take(&self, side: Side) -> bool {
+        let now = nsh_core::time::now();
+        if let Some((leader, at)) = self.0.get()
+            && leader != side
+            && now.duration_since(at) < Self::ECHO
+        {
+            return false;
+        }
+        self.0.set(Some((side, now)));
+        true
+    }
 }
 
 /// The desktops' horizontal scroll bar: a band over the body's bottom edge
 /// whose own scroll view the bar belongs to, moving the table's.
-fn strip(dt: Dt) -> impl IntoElement {
+fn strip(dt: Dt, lead: Lead) -> impl IntoElement {
     let props = dt.props;
     let shown = {
         let dt = dt.clone();
@@ -302,16 +335,22 @@ fn strip(dt: Dt) -> impl IntoElement {
     let width_dt = dt.clone();
     when(shown, move || {
         let (scroll_dt, width_dt) = (dt.clone(), width_dt.clone());
+        let lead = lead.clone();
         scroll()
             .horizontal()
             .element_ref(&dt.strip)
+            .test_id("data-table-scrollbar")
             .absolute()
             .left_0()
             .right_0()
             .bottom_0()
             .h(px(STRIP))
             .on_scroll(move |e: &ScrollEvent| {
-                if (e.offset.x - scroll_dt.scroll_x.get_untracked()).0.abs() > 0.5 {
+                // The table follows the bar, unless the table leads (the bar
+                // following it): sending that back would fight a drag.
+                if lead.take(Side::Strip)
+                    && (e.offset.x - scroll_dt.scroll_x.get_untracked()).0.abs() > 0.5
+                {
                     scroll_dt.hscroll.scroll_to(
                         Point {
                             x: e.offset.x,
@@ -637,6 +676,17 @@ fn row_background(
     }
 }
 
+/// How a press in a row of `which` region finds its column.
+fn region_of(which: Region, w: Windows) -> PressRegion {
+    match which {
+        Region::Lead => PressRegion::Lead,
+        Region::Fixed => PressRegion::Fixed,
+        Region::Scroll => PressRegion::Scroll {
+            origin: w.col_origin.get_untracked(),
+        },
+    }
+}
+
 fn body_row(
     dt: Dt,
     row: Memo<Option<usize>>,
@@ -648,7 +698,7 @@ fn body_row(
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let list = row_parts(&dt, row);
     let background = row_background(&dt, row);
-    let press_dt = dt.clone();
+    let (press_dt, menu_dt) = (dt.clone(), dt.clone());
     let el = parts(
         view()
             .absolute()
@@ -663,14 +713,17 @@ fn body_row(
                     EventPayload::Press(e) => (e.position.x, e.clicks, e.modifiers),
                     _ => (Points(0.0), 1, Default::default()),
                 };
-                let region = match which {
-                    Region::Lead => PressRegion::Lead,
-                    Region::Fixed => PressRegion::Fixed,
-                    Region::Scroll => PressRegion::Scroll {
-                        origin: w.col_origin.get_untracked(),
-                    },
-                };
-                press_dt.press_row_with(row, region, x, clicks, modifiers);
+                press_dt.press_row_with(row, region_of(which, w), x, clicks, modifiers);
+            })
+            .on_context_menu(move |e: &ContextMenuEvent| {
+                if let Some(row) = row.get_untracked() {
+                    menu_dt.row_context_menu(
+                        row,
+                        region_of(which, w),
+                        e.position.x,
+                        e.page_position,
+                    );
+                }
             })
             .top(move || {
                 let origin = w.row_origin.get() as i64;
@@ -1186,7 +1239,7 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
         dt.clone(),
         dt.clone(),
     );
-    let drag_dt = dt.clone();
+    let (drag_dt, header_menu_dt) = (dt.clone(), dt.clone());
     let moved = Rc::new(Cell::new(false));
     let (down_moved, up_moved) = (moved.clone(), moved.clone());
     let col_dt = dt.clone();
@@ -1242,6 +1295,9 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
                     _ => 1,
                 };
                 press_dt.header_press(def, clicks);
+            })
+            .on_context_menu(move |e: &ContextMenuEvent| {
+                header_menu_dt.header_context_menu(def, e.page_position)
             })
             .claim_touches(TouchClaim::on_move().ask(move |request: &ClaimRequest| {
                 let moving = request.event.gesture.delta.x.0.abs() > MOVE_SLOP
@@ -1376,20 +1432,44 @@ fn sort_button(
             .active(|s| s.bg(pressed))
             .role(AccessibilityRole::Button)
             .test_id(&id)
-            .opacity(move || if sorted.get().is_some() { 1.0_f32 } else { 0.5 })
             .on_press(move || dt.sort_next(def))
-            .child(
-                text(move || match sorted.get() {
-                    None => "⇅",
-                    Some(DataTableSortDirection::Ascending) => "↑",
-                    Some(DataTableSortDirection::Descending) => "↓",
-                })
-                .text_size(px(12.0))
-                .text_color(move || theme().secondary_foreground),
-            ),
+            .child(sort_icon(sorted)),
         props,
         DataTablePart::SortIndicator,
     )
+}
+
+/// The sort button's icon, gpui-component's: two chevrons, up over down
+/// (Lucide's `chevrons-up-down`), both faint while unsorted and the one of
+/// the direction in the text color once sorted.
+fn sort_icon(sorted: Memo<Option<DataTableSortDirection>>) -> impl IntoElement {
+    // Lucide's 24 unit grid, drawn at 12 pt.
+    const K: f32 = 12.0 / 24.0;
+    canvas(move || {
+        let theme = theme();
+        let (on, off) = (theme.foreground, theme.muted_foreground.opacity(0.6));
+        let (up, down) = match sorted.get() {
+            None => (off, off),
+            Some(DataTableSortDirection::Ascending) => (on, off),
+            Some(DataTableSortDirection::Descending) => (off, on),
+        };
+        let chevron = |painter: Painter, points: [f32; 6], paint: AdaptiveColor| {
+            painter
+                .stroke_style(color(paint))
+                .line_width(2.0 * K)
+                .line_cap(nsh_core::canvas::LineCap::Round)
+                .line_join(nsh_core::canvas::LineJoin::Round)
+                .begin_path()
+                .move_to(points[0] * K, points[1] * K)
+                .line_to(points[2] * K, points[3] * K)
+                .line_to(points[4] * K, points[5] * K)
+                .stroke()
+        };
+        let painter = chevron(Painter::new(), [7.0, 9.0, 12.0, 4.0, 17.0, 9.0], up);
+        chevron(painter, [7.0, 15.0, 12.0, 20.0, 17.0, 15.0], down)
+    })
+    .w(px(12.0))
+    .h(px(12.0))
 }
 
 /// The band at a title's trailing edge that a drag resizes the column

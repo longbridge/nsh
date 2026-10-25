@@ -1510,11 +1510,14 @@ tap id:read
 expect Read: 2:1 0-5
 tap id:scroll
 # A sortable column's sort button reports the next sort, which the app
-# sets: the button shows it.
-expect ⇅
+# sets (`sort`): from it, the next press goes on to descending, then
+# clears it.
 tap id:sort:name
 expect Sorted: name ascending
-expect ↑
+tap id:sort:name
+expect Sorted: name descending
+tap id:sort:name
+expect Sorted: cleared
 covers [nsh/base] DataTable
 covers [props] DataTable.columns
 covers [props] DataTable.data

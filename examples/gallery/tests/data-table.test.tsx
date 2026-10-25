@@ -62,7 +62,25 @@ test("the Data table demo's live quotes tick and sort", async () => {
   await app.waitFor("text:/tick [1-9]\\d/");
   // The price's sort button sorts ascending, then descending.
   await app.press("id:sort:price");
-  await app.waitFor("↑");
+  await app.waitFor("text:/sorted by price ascending/");
   await app.press("id:sort:price");
-  await app.waitFor("↓");
+  await app.waitFor("text:/sorted by price descending/");
+});
+
+test("the Data table demo serves the rows a far scroll lands on", async () => {
+  const app = await open("../App.tsx", desktop);
+  await app.press("role:button[Data table]");
+  await app.waitFor("Ada 0");
+  await app.press("label:Go to row 500000");
+  await app.waitFor("text:/rows 500000/");
+  // Whatever the number of rows in view, the page served starts at a
+  // whole row, so the rows landed on show their data.
+  for (const by of [4000, 3990, 8020]) {
+    await app.scroll("id:table", by);
+    await app.wait(200);
+    const range = app.texts().find((t) => t.startsWith("rows "))!;
+    const first = Number(range.slice(5).split("–")[0]) - 1;
+    const names = ["Ada", "Alan", "Grace", "Linus", "Margaret", "Dennis", "Barbara", "Ken"];
+    await app.waitFor(`${names[first % names.length]} ${first}`);
+  }
 });

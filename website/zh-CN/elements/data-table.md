@@ -139,7 +139,7 @@ const page = signal({ start: 0, rows: load(0) });
 
 开启 `cellSelectable` 并隐藏行号列（`rowHeader={false}`）时，再次按下已选中的单元格会选中它所在的行。按住 Shift 或平台的命令键按下时，只有 `selectOnModifierPress`（默认 `true`）为真才会选中行，这样自己维护多行选择的应用可以自行处理这些按下。`selectable` 为 `false` 的列，它本身和它的单元格都不会被选中。
 
-行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。
+行从数据中的 0 开始计数，列是它在 `columns` 中的索引，不受用户移动后顺序的影响。`onSelectionChange` 报告用户的选择（没有选择时为 `null`）。`selection` 属性由应用设置选择；不设置时由表格自己保存。`onDoublePress` 报告一行、一个单元格或一个标题被连按两次，`onContextMenu` 报告次要按下或长按，并给出应用打开 [`Menu`](./menu.md) 的位置。两者都指出指针下的单元格（`row` 和 `column`）、行号（只有 `row`）或标题（只有 `column`）。
 
 <a id="keyboard"></a>
 

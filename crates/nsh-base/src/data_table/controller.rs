@@ -2,12 +2,7 @@
 //! the revisions bindings subscribe to, the windows of rows and columns
 //! made, and what presses, keys, drags, props and the ref do to them.
 
-use std::{
-    cell::RefCell,
-    ops::Range,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
     keymap::{Modifiers, When},
@@ -112,7 +107,7 @@ pub(crate) struct Dt {
     resizing: Rc<RefCell<Option<(usize, f32)>>>,
     /// The column whose handle was last pressed without a drag, and when:
     /// a second press within `DOUBLE_PRESS` fits the column.
-    handle_tap: Rc<RefCell<Option<(usize, Instant)>>>,
+    handle_tap: Rc<RefCell<Option<(usize, nsh_core::time::Instant)>>>,
 }
 
 fn spec_of(column: &DataTableColumn) -> Spec {
@@ -788,6 +783,36 @@ impl Dt {
         clicks: u32,
         modifiers: Modifiers,
     ) {
+        let hit = self.row_hit(row, region, x);
+        self.press_hit(hit, clicks, modifiers);
+    }
+
+    /// A context menu asked for at `x` in row `row`'s `region`, at `page`
+    /// in the root (as [`Dt::press_row_with`]).
+    pub(crate) fn row_context_menu(
+        &self,
+        row: usize,
+        region: PressRegion,
+        x: Points,
+        page: Point<Points>,
+    ) {
+        let hit = self.row_hit(row, region, x);
+        self.open_context_menu(hit, page);
+    }
+
+    /// A context menu asked for at column `def`'s title, at `page` in the
+    /// root.
+    pub(crate) fn header_context_menu(&self, def: usize, page: Point<Points>) {
+        let hit = Hit {
+            row: None,
+            column: Some(def),
+            header: false,
+        };
+        self.open_context_menu(hit, page);
+    }
+
+    /// What is at `x` in row `row`'s `region`.
+    fn row_hit(&self, row: usize, region: PressRegion, x: Points) -> Hit {
         let column = {
             let st = self.st.borrow();
             let at = match region {
@@ -799,12 +824,11 @@ impl Dt {
             };
             at.map(|d| st.columns.def(d))
         };
-        let hit = Hit {
+        Hit {
             row: Some(row).filter(|&r| r < self.row_count()),
             column,
             header: region == PressRegion::Lead,
-        };
-        self.press_hit(hit, clicks, modifiers);
+        }
     }
 
     /// Whether a press with `modifiers` held selects a row
@@ -867,8 +891,14 @@ impl Dt {
 
     /// A context menu asked for at `position`.
     pub(crate) fn context_menu(&self, position: Point<Points>, page: Point<Points>) {
-        self.set_focus(true);
         let hit = self.target_at(position);
+        self.open_context_menu(hit, page);
+    }
+
+    /// Marks what `hit` names as the menu's and tells the app
+    /// (`onContextMenu`).
+    fn open_context_menu(&self, hit: Hit, page: Point<Points>) {
+        self.set_focus(true);
         let column = hit.column.filter(|_| !hit.header);
         self.st.borrow_mut().active = Some((hit.row, column));
         self.bump_data();
@@ -998,7 +1028,7 @@ impl Dt {
             *self.handle_tap.borrow_mut() = None;
             return;
         }
-        let now = Instant::now();
+        let now = nsh_core::time::now();
         let previous = self.handle_tap.borrow_mut().take();
         match previous {
             Some((last, at)) if last == def && now.duration_since(at) < DOUBLE_PRESS => {

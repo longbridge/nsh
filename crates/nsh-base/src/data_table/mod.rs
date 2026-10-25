@@ -374,12 +374,13 @@ pub enum DataTableEvent {
     /// A row, cell or title was pressed twice.
     #[args(target)]
     DoublePress(DataTableTarget),
-    /// A context menu was asked for (a secondary press, a long press): the
-    /// app opens its `Menu` at the point.
+    /// A context menu was asked for (a secondary press, a long press) at a
+    /// cell, a row's number or a title: the app opens its `Menu` at the
+    /// point.
     #[args(event)]
     ContextMenu(DataTableContextMenu),
     /// The user pressed a sortable title: what to sort by next
-    /// (unsorted, descending, ascending, unsorted again), `null` to
+    /// (ascending, descending, then unsorted again), `null` to
     /// clear. Sort the data and set `sort`.
     #[args(sort)]
     SortChange(Option<DataTableSort>),
