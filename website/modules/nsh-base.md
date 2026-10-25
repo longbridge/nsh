@@ -40,7 +40,7 @@ import {
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffHunk, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
+  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffAnnotation, DiffHunk, DiffLineRange, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TabProps, TabsProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
   ToastEntry, ToastMotion, ToastOptions, ToastProps, ToastStackProps, ToastTransitionStatus,
 } from "nsh/base";

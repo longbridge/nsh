@@ -1357,6 +1357,15 @@ expect Read: +2 -2 2 [0@1:1>1:1 1@6:1>6:1]
 # The ref expands the gap: its lines show, the separator goes.
 tap id:expand
 absent Hidden 1 2
+# The app's annotation shows under new line 1.
+expect Note n1
+# The ref goes to the first change below the top, then on from it.
+tap id:next
+expect Hunk: 0
+tap id:next
+expect Hunk: 1
+tap id:current
+expect Hunk: current 1
 # Revert puts the change's old line back in the new text, reported with
 # both texts, which the app sets: one change is left.
 tap id:revert-0
@@ -1371,6 +1380,24 @@ tap id:inspect
 expect Read: +0 -0 0 []
 # A patch shows its hunk under its header.
 expect Header fn main
+# With softWrap the patch's long line wraps: no text holds all of it.
+absent alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega
+# A press on its line's number (42) selects the line and presses the
+# number; the app's add control shows at the selection's end.
+tap text:42
+expect Selection: new 0-0
+expect Pressed: new 0
+expect Add new 0-0
+# The ref clears and sets the selection (to the side's lines) and reads
+# its text.
+tap id:select
+expect Selected: true new 0-0 alpha
+covers [props] DiffView.softWrap
+covers [props] DiffView.annotations
+covers [props] DiffView.renderAnnotation
+covers [props] DiffView.renderAddAnnotation
+covers [events] DiffView.onLineSelectionChange
+covers [events] DiffView.onLineNumberPress
 covers [nsh/base] DiffView
 covers [props] DiffView.oldValue
 covers [props] DiffView.newValue

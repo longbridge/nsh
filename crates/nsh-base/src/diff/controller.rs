@@ -12,8 +12,9 @@ use nsh_core::ui::prelude::*;
 use ropey::Rope;
 
 use super::{
-    DiffChange, DiffExpand, DiffHunk, DiffInline, DiffLayout, DiffLine, DiffSide, DiffStats,
-    DiffViewEvent, DiffViewProps,
+    DiffAnnotation, DiffChange, DiffExpand, DiffHunk, DiffInline, DiffLayout, DiffLineRange,
+    DiffSide, DiffStats, DiffViewEvent, DiffViewProps,
+    geometry::{self, Geometry},
     layout::{self, Expansions, Header, Layout, Options, Row},
     model::{self, DiffModel, InlineMode, Pair},
     patch,
@@ -149,6 +150,24 @@ pub(crate) struct State {
     inline: HashMap<(usize, usize), Changed>,
     /// The pairs of hunks' lines, by hunk (unified rows' words).
     pairs: HashMap<usize, Vec<Pair>>,
+    /// Where the rows are (their wrapped lines, the annotations under
+    /// them).
+    pub(crate) geometry: Geometry,
+    /// The rows are side by side.
+    pub(crate) split: bool,
+    /// The width of a side's text box (`softWrap` wraps in it).
+    pub(crate) text_box: Points,
+    /// Columns a line wraps at, `None` while lines do not wrap.
+    pub(crate) wrap_columns: Option<usize>,
+    /// Each row's wrapped lines.
+    row_lines: Vec<u32>,
+    /// The app's annotations.
+    pub(crate) annotations: Vec<DiffAnnotation>,
+    /// Where each annotation shows: its row and its top; `None` while its
+    /// line is collapsed (or not in the texts).
+    pub(crate) placed: Vec<Option<(usize, Points)>>,
+    /// The annotations' heights as they laid out, by id.
+    pub(crate) annotation_heights: HashMap<SharedString, Points>,
 }
 
 impl State {
@@ -167,6 +186,14 @@ impl State {
             hint: "",
             inline: HashMap::new(),
             pairs: HashMap::new(),
+            geometry: Geometry::default(),
+            split: true,
+            text_box: Points::ZERO,
+            wrap_columns: None,
+            row_lines: Vec::new(),
+            annotations: Vec::new(),
+            placed: Vec::new(),
+            annotation_heights: HashMap::new(),
         }
     }
 
@@ -202,6 +229,7 @@ impl State {
             expand_all: props.expand_all.get_untracked(),
             headers: self.headers.clone(),
         };
+        self.split = options.layout == Layout::Split;
         self.rows = layout::rows(
             &self.model,
             &self.old.text,
@@ -209,6 +237,103 @@ impl State {
             &options,
             &self.expansions,
         );
+        self.wrap_columns = wrap_columns(
+            props.soft_wrap.get_untracked(),
+            self.text_box,
+            self.column,
+        );
+        self.measure_rows();
+    }
+
+    /// Counts each row's wrapped lines again, and places the rows.
+    pub(crate) fn measure_rows(&mut self) {
+        let columns = self.wrap_columns;
+        // Without wrapping, or when every line fits, a row is a line.
+        let fits = columns.is_none_or(|c| self.old.columns <= c && self.new.columns <= c);
+        self.row_lines = if fits {
+            vec![1; self.rows.len()]
+        } else {
+            let columns = columns.unwrap_or(usize::MAX);
+            let count = |side: &Side, line: Option<usize>| {
+                line.map_or(1, |l| {
+                    geometry::wrapped_lines(&expand_tabs(side.line(l)), columns)
+                })
+            };
+            self.rows
+                .iter()
+                .map(|row| match row {
+                    Row::Line { old, new, .. } if self.split => {
+                        count(&self.old, *old).max(count(&self.new, *new)) as u32
+                    }
+                    Row::Line { old, new, .. } => match new {
+                        Some(_) => count(&self.new, *new) as u32,
+                        None => count(&self.old, *old) as u32,
+                    },
+                    Row::Separator { .. } => 1,
+                })
+                .collect()
+        };
+        self.place();
+    }
+
+    /// Places the rows and the annotations under them: a split row's
+    /// annotations stack on their side and the row takes the taller
+    /// stack; unified, they stack in order.
+    pub(crate) fn place(&mut self) {
+        let mut extra = vec![Points::ZERO; self.rows.len()];
+        self.placed = vec![None; self.annotations.len()];
+        if !self.annotations.is_empty() {
+            // The row of every annotated line.
+            let mut at: HashMap<(DiffSide, usize), usize> = self
+                .annotations
+                .iter()
+                .map(|a| ((a.side, a.line as usize), usize::MAX))
+                .collect();
+            for (index, row) in self.rows.iter().enumerate() {
+                if let Row::Line { old, new, .. } = row {
+                    for key in [old.map(|l| (DiffSide::Old, l)), new.map(|l| (DiffSide::New, l))]
+                        .into_iter()
+                        .flatten()
+                    {
+                        if let Some(slot) = at.get_mut(&key) {
+                            *slot = index;
+                        }
+                    }
+                }
+            }
+            let mut stacks: HashMap<(usize, DiffSide), Points> = HashMap::new();
+            for (index, annotation) in self.annotations.iter().enumerate() {
+                let row = at[&(annotation.side, annotation.line as usize)];
+                if row == usize::MAX {
+                    continue;
+                }
+                let stack = if self.split {
+                    annotation.side
+                } else {
+                    DiffSide::New
+                };
+                let below = stacks.entry((row, stack)).or_default();
+                self.placed[index] = Some((row, *below));
+                *below += self
+                    .annotation_heights
+                    .get(&annotation.id)
+                    .copied()
+                    .unwrap_or_default();
+                extra[row] = extra[row].max(*below);
+            }
+        }
+        self.geometry = Geometry::new(&self.row_lines, &extra, self.font.line_height);
+        for (row, top) in self.placed.iter_mut().flatten() {
+            *top += self.geometry.top(*row) + self.geometry.text_height(*row);
+        }
+    }
+
+    /// The row showing line `line` of `side`, `None` while none does (it
+    /// is collapsed).
+    pub(crate) fn row_of(&self, side: DiffSide, line: usize) -> Option<usize> {
+        self.rows
+            .iter()
+            .position(|row| line_at(row, side) == Some(line))
     }
 
     /// The cells of row `row`: the old side's and the new side's (split),
@@ -415,6 +540,46 @@ fn line_of<'a>(text: &'a str, starts: &[usize], line: usize) -> &'a str {
     line.strip_suffix('\r').unwrap_or(line)
 }
 
+/// The line of `side` row `row` shows, `None` for none (a separator, the
+/// filler beside a line the other side lacks).
+pub(crate) fn line_at(row: &Row, side: DiffSide) -> Option<usize> {
+    match (row, side) {
+        (Row::Line { old, .. }, DiffSide::Old) => *old,
+        (Row::Line { new, .. }, DiffSide::New) => *new,
+        _ => None,
+    }
+}
+
+/// The columns lines wrap at in a text box of `width` (less the room
+/// around the text), `None` without `softWrap` or before the box laid out.
+pub(crate) fn wrap_columns(soft_wrap: bool, width: Points, column: Points) -> Option<usize> {
+    let room = width - px(2.0 * super::view::PAD);
+    if !soft_wrap || room <= Points::ZERO || column <= Points::ZERO {
+        return None;
+    }
+    Some(((room / column).floor() as usize).max(1))
+}
+
+/// `line` with its tabs expanded, as its spans show it.
+pub(crate) fn expand_tabs(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains('\t') {
+        return line.into();
+    }
+    let mut out = String::with_capacity(line.len() + TAB);
+    let mut column = 0;
+    for c in line.chars() {
+        if c == '\t' {
+            let n = TAB - column % TAB;
+            out.extend(std::iter::repeat_n(' ', n));
+            column += n;
+        } else {
+            out.push(c);
+            column += 1;
+        }
+    }
+    out.into()
+}
+
 fn display_columns(line: &str) -> usize {
     let mut column = 0;
     for c in line.chars() {
@@ -439,6 +604,25 @@ pub(crate) struct Dv {
     /// The stats reported last (`onStatsChange`).
     reported: Rc<Cell<Option<DiffStats>>>,
     pub(crate) vscroll: ElementRef,
+    /// The rows moved without changing (wrapping, annotations' heights).
+    pub(crate) geo: Signal<u64>,
+    /// The lines selected on the line numbers.
+    pub(crate) selection: Signal<Option<DiffLineRange>>,
+    /// The press selecting lines, while it lasts.
+    pub(crate) line_drag: Rc<Cell<Option<super::review::LineDrag>>>,
+    /// Where a Shift-press extends the selection from: its side and line.
+    pub(crate) anchor: Rc<Cell<Option<(DiffSide, usize)>>>,
+    /// The row and side the pointer is over.
+    pub(crate) hover: Signal<Option<(usize, DiffSide)>>,
+    /// What the pointer is in, by row and part (gutter, text, the add
+    /// control): it leaves one before or after it enters the next.
+    pub(crate) hover_keys: Rc<RefCell<Vec<(usize, super::review::HoverPart)>>>,
+    /// The sides' horizontal scroll views (split): old, new.
+    pub(crate) hscroll: [ElementRef; 2],
+    /// Where the sides scrolled to last, horizontally.
+    pub(crate) hscroll_x: Rc<Cell<Points>>,
+    /// The last navigation, while the view stays where it went.
+    pub(crate) nav: Rc<Cell<Option<super::review::Nav>>>,
 }
 
 impl Dv {
@@ -459,6 +643,15 @@ impl Dv {
             highlighting: Rc::new(Cell::new(false)),
             reported: Rc::default(),
             vscroll: element_ref(),
+            geo: signal(0),
+            selection: signal(None),
+            line_drag: Rc::default(),
+            anchor: Rc::default(),
+            hover: signal(None),
+            hover_keys: Rc::default(),
+            hscroll: [element_ref(), element_ref()],
+            hscroll_x: Rc::default(),
+            nav: Rc::default(),
         };
         dv.follow_props();
         dv
@@ -466,6 +659,11 @@ impl Dv {
 
     fn bump(&self) {
         self.rev.update(|r| *r += 1);
+    }
+
+    /// Reports `event`.
+    pub(crate) fn emit(&self, event: DiffViewEvent) {
+        self.cx.emit(event);
     }
 
     fn follow_props(&self) {
@@ -480,6 +678,9 @@ impl Dv {
                 let mut st = dv.st.borrow_mut();
                 st.column = measure_text(&font.css(), "0");
                 st.font = font;
+                let soft_wrap = dv.props.soft_wrap.get_untracked();
+                st.wrap_columns = wrap_columns(soft_wrap, st.text_box, st.column);
+                st.measure_rows();
             }
             dv.bump();
         });
@@ -507,6 +708,7 @@ impl Dv {
                 st.relayout(&dv.props);
             }
             dv.bump();
+            untracked(|| dv.texts_changed());
             dv.report_stats();
             dv.load_syntaxes();
         });
@@ -515,21 +717,30 @@ impl Dv {
             dv.props.layout.get();
             dv.props.context_lines.get();
             dv.props.expand_all.get();
+            dv.props.soft_wrap.get();
             dv.st.borrow_mut().relayout(&dv.props);
+            dv.bump();
+        });
+        let dv = self.clone();
+        effect(move || {
+            let annotations = dv.props.annotations.get();
+            {
+                let mut st = dv.st.borrow_mut();
+                st.annotations = annotations;
+                st.place();
+            }
             dv.bump();
         });
     }
 
     /// The rows in view, and a few around them.
     pub(crate) fn visible_rows(&self) -> Range<usize> {
+        self.geo.get();
         let st = self.st.borrow();
-        let lh = st.font.line_height.0.max(1.0);
-        let count = st.rows.len();
-        let y = self.scroll_y.get().0.max(0.0);
-        let height = self.viewport.get().height.0.max(lh * 40.0);
-        let first = ((y / lh).floor() as usize).saturating_sub(OVERSCAN);
-        let last = (((y + height) / lh).ceil() as usize + OVERSCAN).min(count);
-        first.min(last)..last
+        let lh = st.font.line_height.max(px(1.0));
+        let y = self.scroll_y.get().max(Points::ZERO);
+        let height = self.viewport.get().height.max(lh * 40.0);
+        st.geometry.range(y, height, OVERSCAN)
     }
 
     // The ref.
@@ -562,9 +773,9 @@ impl Dv {
             let Some(row) = layout::hunk_row(&st.rows, index) else {
                 return;
             };
-            st.font.line_height * row as f32
+            st.geometry.top(row)
         };
-        self.vscroll.scroll_to(point(px(0.0), y), true);
+        self.scroll_to_y(y, Some(index));
     }
 
     pub(crate) fn revert_hunk(&self, index: usize) {
@@ -615,6 +826,7 @@ impl Dv {
         self.bump();
         self.load_syntaxes();
         self.cx.emit(DiffViewEvent::Change(change));
+        self.texts_changed();
         self.report_stats();
     }
 
@@ -652,13 +864,6 @@ impl Dv {
             st.relayout(&self.props);
         }
         self.bump();
-    }
-
-    pub(crate) fn line_number_press(&self, side: DiffSide, line: usize) {
-        self.cx.emit(DiffViewEvent::LineNumberPress(DiffLine {
-            side,
-            line: line as u32,
-        }));
     }
 
     // Highlighting.

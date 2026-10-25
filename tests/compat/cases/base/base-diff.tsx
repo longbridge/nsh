@@ -6,8 +6,14 @@
 // change carries the app's actions (`renderHunkActions`, told the hunk),
 // which revert or keep it through the ref (`revertHunk`, `acceptHunk`),
 // reported with both texts (`onChange`) for the app to set; the ref
-// reads the changes (`hunks`) and their counts (`stats`). A unified
-// `patch` shows its hunks under their headers.
+// reads the changes (`hunks`) and their counts (`stats`), and moves from
+// change to change (`nextHunk`, `currentHunk`). The app's `annotations`
+// show under their lines (`renderAnnotation`). A unified `patch` shows its
+// hunks under their headers; with `softWrap` its long line wraps. Pressing
+// a line number selects its line (`onLineSelectionChange`,
+// `onLineNumberPress`), where the app's add control shows
+// (`renderAddAnnotation`); the ref reads the selection (`selectedLines`,
+// `selectedText`) and sets it (`setSelectedLines`).
 import { Text, View, signal } from "nsh";
 import { DiffView, type DiffViewRef } from "nsh/base";
 
@@ -21,12 +27,23 @@ const PATCH = `--- a/main.rs
 +TWO
  three
 `;
+const LONG = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega";
+const ADDED = `--- a/notes.txt
++++ b/notes.txt
+@@ -41,0 +42 @@
++${LONG}
+`;
 
 export default function BaseDiff() {
   const oldValue = signal(OLD);
   const newValue = signal(NEW);
   const read = signal("none");
+  const hunk = signal("none");
+  const selection = signal("none");
+  const pressed = signal("none");
+  const selected = signal("none");
   let diff!: DiffViewRef;
+  let added!: DiffViewRef;
   const inspect = async () => {
     const stats = await diff.stats();
     const hunks = (await diff.hunks()).map(h => `${h.index}@${h.oldStart}:${h.oldLines}>${h.newStart}:${h.newLines}`);
@@ -56,6 +73,8 @@ export default function BaseDiff() {
             oldValue.set(change.oldValue);
             newValue.set(change.newValue);
           }}
+          annotations={[{ id: "n1", side: "new", line: 1 }]}
+          renderAnnotation={a => <Text>{`Note ${a.id}`}</Text>}
           style={{ flex: 1 }}
         />
       </View>
@@ -66,11 +85,44 @@ export default function BaseDiff() {
           style={{ flex: 1 }}
         />
       </View>
+      <View style={{ width: 390, height: 120 }}>
+        <DiffView
+          ref={r => (added = r)}
+          patch={ADDED}
+          softWrap
+          onLineSelectionChange={r => selection.set(r ? `${r.side} ${r.start}-${r.end}` : "none")}
+          onLineNumberPress={l => pressed.set(`${l.side} ${l.line}`)}
+          renderAddAnnotation={r => <Text>{`Add ${r.side} ${r.start}-${r.end}`}</Text>}
+          style={{ flex: 1 }}
+        />
+      </View>
       <Text>{() => `Old: ${oldValue().trim().split("\n").join(" ")}`}</Text>
       <Text>{() => `New: ${newValue().trim().split("\n").join(" ")}`}</Text>
       <Text>{() => `Read: ${read()}`}</Text>
       <View testID="inspect" style={{ height: 20 }} onPress={inspect} />
       <View testID="expand" style={{ height: 20 }} onPress={() => diff.expand(1)} />
+      <Text>{() => `Hunk: ${hunk()}`}</Text>
+      <Text>{() => `Selection: ${selection()}`}</Text>
+      <Text>{() => `Pressed: ${pressed()}`}</Text>
+      <Text>{() => `Selected: ${selected()}`}</Text>
+      <View testID="next" style={{ height: 20 }} onPress={async () => hunk.set(`${await diff.nextHunk()}`)} />
+      <View
+        testID="current"
+        style={{ height: 20 }}
+        onPress={async () => hunk.set(`current ${await diff.currentHunk()}`)}
+      />
+      <View
+        testID="select"
+        style={{ height: 20 }}
+        onPress={async () => {
+          await added.setSelectedLines(null);
+          const none = await added.selectedLines();
+          await added.setSelectedLines({ side: "new", start: 0, end: 5 });
+          const r = await added.selectedLines();
+          const text = await added.selectedText();
+          selected.set(`${none === null} ${r?.side} ${r?.start}-${r?.end} ${text.split(" ")[0]}`);
+        }}
+      />
     </View>
   );
 }

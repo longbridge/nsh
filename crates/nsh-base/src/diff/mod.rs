@@ -5,10 +5,12 @@
 //! `docs/dev/diff.md` has the design.
 
 mod controller;
+mod geometry;
 mod layout;
 mod model;
 mod parts;
 mod patch;
+mod review;
 mod view;
 
 use nsh_core::ui::prelude::*;
@@ -146,6 +148,35 @@ pub struct DiffLine {
     pub line: u32,
 }
 
+/// Lines `start` to `end` (both included, from 0) of a side: the lines
+/// selected on the line numbers (`onLineSelectionChange`), or the line an
+/// annotation is added to (`renderAddAnnotation`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct DiffLineRange {
+    /// The side.
+    pub side: DiffSide,
+    /// The first line.
+    pub start: u32,
+    /// The last line (`start` or after).
+    pub end: u32,
+}
+
+/// The app's content under a line of a [`DiffView`] (a review comment, a
+/// thread), drawn by `renderAnnotation` across the line's side, as tall as
+/// it lays out. It shows while its line does.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct DiffAnnotation {
+    /// Who it is, unique among the annotations: the app finds its content
+    /// by it.
+    pub id: SharedString,
+    /// The side of its line.
+    pub side: DiffSide,
+    /// Its line, from 0.
+    pub line: u32,
+}
+
 /// The changes between two texts, as code review tools show them: side by
 /// side (`layout="split"`) or one over the other (`"unified"`), the words
 /// changed within lines highlighted, the unchanged lines between changes
@@ -210,6 +241,22 @@ pub struct DiffViewProps {
     /// Inline styles of the view's parts, over their classes.
     #[prop(default)]
     pub styles: Prop<DiffViewStyles>,
+    /// Long lines wrap at the side's width, rather than scrolling
+    /// sideways; a split row is as tall as its taller side.
+    #[prop(default)]
+    pub soft_wrap: Prop<bool>,
+    /// The app's content under lines (review comments), each drawn by
+    /// `renderAnnotation`.
+    #[prop(default)]
+    pub annotations: Prop<Vec<DiffAnnotation>>,
+    /// The content of an annotation, across its line's side under the
+    /// line, as tall as it lays out.
+    pub render_annotation: Prop<Option<Renderer<DiffAnnotation>>>,
+    /// The app's control to add an annotation (a `+`), at the right of the
+    /// gutter of the line the pointer is over and of the last selected
+    /// line: for the selected lines when the line is one of them, else for
+    /// that line.
+    pub render_add_annotation: Prop<Option<Renderer<DiffLineRange>>>,
 }
 
 /// The events of a [`DiffView`].
@@ -227,6 +274,10 @@ pub enum DiffViewEvent {
     /// made).
     #[args(stats)]
     StatsChange(DiffStats),
+    /// The lines selected on the line numbers changed (a press, a drag, a
+    /// Shift-press, other texts): the lines, `null` for none.
+    #[args(range)]
+    LineSelectionChange(Option<DiffLineRange>),
 }
 
 /// The methods of a [`DiffView`]'s ref.
@@ -281,6 +332,47 @@ impl DiffViewApi {
     /// Collapses the unchanged lines again.
     pub fn collapse_all(&self) {
         self.dv.collapse_all();
+    }
+
+    /// The lines selected on the line numbers, `null` for none.
+    pub fn selected_lines(&self) -> Option<DiffLineRange> {
+        self.dv.selection.get_untracked()
+    }
+
+    /// Selects lines (`null`: none), as pressing their numbers does, but
+    /// without `onLineSelectionChange`; lines past the side's are left
+    /// out.
+    pub fn set_selected_lines(&self, range: Option<DiffLineRange>) {
+        self.dv.set_selected_lines(range);
+    }
+
+    /// The selected lines' text (their line breaks between them), empty
+    /// when none are selected.
+    pub fn selected_text(&self) -> String {
+        self.dv.selected_text()
+    }
+
+    /// Scrolls the next change to the top: the one after the change gone
+    /// to last while the view stays there, else the first below the top
+    /// of the view (after the last, the first). Its index, `null` without
+    /// changes.
+    pub fn next_hunk(&self) -> Option<u32> {
+        self.dv.next_hunk().map(|i| i as u32)
+    }
+
+    /// Scrolls the previous change to the top: the one before the change
+    /// gone to last while the view stays there, else the last above the
+    /// top of the view (before the first, the last). Its index, `null`
+    /// without changes.
+    pub fn previous_hunk(&self) -> Option<u32> {
+        self.dv.previous_hunk().map(|i| i as u32)
+    }
+
+    /// The change gone to last while the view stays there, else the one
+    /// at the top of the view, else the first below it in view: its index,
+    /// `null` when none is in view.
+    pub fn current_hunk(&self) -> Option<u32> {
+        self.dv.current_hunk().map(|i| i as u32)
     }
 }
 

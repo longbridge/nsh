@@ -1,6 +1,6 @@
 ---
 title: DiffView
-description: DiffView 组件：两段文本之间或一个补丁中的改动，并排或合并显示，高亮行内改动的单词，未改动的行折叠成可以展开的分隔行，带语法高亮和针对每处改动的操作。
+description: DiffView 组件：两段文本之间或一个补丁中的改动，并排或合并显示，高亮行内改动的单词，未改动的行折叠成可以展开的分隔行，带语法高亮、自动换行、针对每处改动的操作、行选择和评审批注。
 order: 26.3
 group: base
 demo: el-diff-view
@@ -44,7 +44,7 @@ function App() {
 mount(App);
 ```
 
-视图填满应用给它的盒子（`flex-1`、一个高度），在其中滚动：纵向滚动所有行，每一侧横向滚动到它最长的一行。
+视图填满应用给它的盒子（`flex-1`、一个高度），在其中滚动：纵向滚动所有行，横向滚动到最长的一行，并排视图的两侧一起滚动。设置 `softWrap` 时长行在这一侧的宽度处换行，并排的一行和较高的一侧一样高，两侧始终对齐。
 
 <a id="two-texts-or-a-patch"></a>
 
@@ -184,33 +184,59 @@ function Proposal(props: { file: string; current: string; proposed: string; onAp
 | `expand(gap, direction?, lines?)` | 显示分隔行 `gap` 隐藏的行：`"all"`（默认），或者 `lines` 行（默认 20 行），`"up"` 或 `"down"`。 |
 | `expandAll()` | 显示所有未改动的行。 |
 | `collapseAll()` | 重新折叠未改动的行。 |
+| `nextHunk()` | `Promise<number \| null>`：把下一处改动滚动到顶部，并给出它的序号（最后一处之后是第一处）。 |
+| `previousHunk()` | `Promise<number \| null>`：把上一处改动滚动到顶部，并给出它的序号（第一处之前是最后一处）。 |
+| `currentHunk()` | `Promise<number \| null>`：视图仍停在上次跳转到的改动时就是它，否则是视图顶部的改动，或视野中的第一处。 |
+| `selectedLines()` | `Promise<DiffLineRange \| null>`：在行号上选中的行。 |
+| `setSelectedLines(range)` | 选中一侧的若干行（`null`：不选），不触发 `onLineSelectionChange`。 |
+| `selectedText()` | `Promise<string>`：选中各行的文本。 |
 
-上一处和下一处改动的按钮，以及来自 `onStatsChange` 的统计数字：
+视图停在上次跳转到的改动时，`nextHunk()` 和 `previousHunk()` 从那处改动继续，否则从视图顶部算起，所以靠近末尾、无法滚动到顶部的改动也会被数到。上一处和下一处改动的按钮，以及来自 `onStatsChange` 的统计数字：
 
 ```tsx
 let diff!: DiffViewRef;
-const at = signal(0);
 const stats = signal<DiffStats>({ added: 0, deleted: 0, hunks: 0 });
-const go = (index: number) => {
-  at.set(index);
-  diff.goToHunk(index);
-};
 
 <View class="flex-row items-center gap-2 p-2">
   <Text class="text-sm text-green-600">+{stats().added}</Text>
   <Text class="text-sm text-red-600">−{stats().deleted}</Text>
   <Text class="text-sm text-muted-foreground">{stats().hunks} changes</Text>
-  <Button onPress={() => go(Math.max(0, at() - 1))}><Text>Previous</Text></Button>
-  <Button onPress={() => go(Math.min(stats().hunks - 1, at() + 1))}><Text>Next</Text></Button>
+  <Button onPress={() => diff.previousHunk()}><Text>Previous</Text></Button>
+  <Button onPress={() => diff.nextHunk()}><Text>Next</Text></Button>
 </View>
 <DiffView ref={diff} oldValue={before()} newValue={after()} onStatsChange={(s) => stats.set(s)} class="flex-1" />
 ```
 
-<a id="comments-on-lines"></a>
+<a id="review-comments"></a>
 
-## 行上的评论
+## 评审评论
 
-点击行号会报告 `onLineNumberPress({ side, line })`：所在的一侧（`"old"` 或 `"new"`）和从 0 开始的行号，可以在这里放应用显示的评审评论。
+行号用来选中一侧的行：点击选中一行，按住 Shift 点击把选区扩展到这一行，用鼠标在行号上拖动选中经过的各行。`onLineSelectionChange` 报告选中的行（`DiffLineRange`：`{ side, start, end }`，行号从 0 开始，没有选中时为 `null`），点击行号还会报告 `onLineNumberPress({ side, line })`。ref 读取选区（`selectedLines()`、`selectedText()`）并可以设置它。
+
+`annotations` 把应用的内容放在行的下方：每个 `{ id, side, line }` 由 `renderAnnotation` 绘制，横跨所在行的一侧（合并显示时横跨整个视图），高度就是它布局后的高度，所在的行显示时它也显示。`renderAddAnnotation` 是应用用来添加批注的控件，显示在指针所在行和最后一个选中行的行号栏右侧；所在行被选中时它拿到选中的各行，否则拿到这一行。
+
+```tsx
+type Comment = { id: string; side: "old" | "new"; line: number; text: string };
+const comments = signal<Comment[]>([]);
+const drafting = signal<DiffLineRange | null>(null);
+
+<DiffView
+  oldValue={before()}
+  newValue={after()}
+  annotations={comments().map(({ id, side, line }) => ({ id, side, line }))}
+  renderAnnotation={(a) => (
+    <View class="m-2 rounded-md border border-border bg-card p-2">
+      <Text class="text-sm">{comments().find((c) => c.id === a.id)?.text}</Text>
+    </View>
+  )}
+  renderAddAnnotation={(range) => (
+    <Button onPress={() => drafting.set(range)} class="size-4 items-center justify-center rounded bg-primary">
+      <Text class="text-xs text-primary-foreground">+</Text>
+    </Button>
+  )}
+  class="flex-1"
+/>
+```
 
 <a id="styling-the-parts"></a>
 
@@ -254,6 +280,9 @@ const go = (index: number) => {
 | `indicatorDeleted` | 删除行的竖条或 `−` | 红色，3pt 宽 |
 | `separator` | 折叠行的分隔行，或补丁的 hunk 标题 | `muted` 底色上的 `⋯` 和行数 |
 | `hunkActions` | 应用在一处改动上的操作所在的盒子 | 改动的右上角 |
+| `lineSelected` | 覆盖在选中各行所在一侧的行上 | 淡淡的 `primary` 色调 |
+| `annotation` | 一条批注的盒子，在所在行的下方 | 横跨所在行的一侧 |
+| `addAnnotation` | 添加控件的盒子，与行号栏同宽、一行高 | 控件在它的右侧 |
 
 <a id="props"></a>
 
@@ -277,6 +306,10 @@ const go = (index: number) => {
 | `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点。 |
 | `renderSeparator` | `.render_separator(..)` | `(separator: DiffSeparator) => JSX.Element` | | 绘制折叠行的分隔行。 |
 | `renderHunkActions` | `.render_hunk_actions(..)` | `(hunk: DiffHunk) => JSX.Element` | | 应用在每处改动上的操作。 |
+| `softWrap` | `.soft_wrap(..)` | `boolean` | `false` | 长行在这一侧的宽度处换行。 |
+| `annotations` | `.annotations(..)` | `DiffAnnotation[]` | `[]` | 放在行下方的应用内容：`{ id, side, line }`。 |
+| `renderAnnotation` | `.render_annotation(..)` | `(annotation: DiffAnnotation) => JSX.Element` | | 在所在行的下方绘制一条批注。 |
+| `renderAddAnnotation` | `.render_add_annotation(..)` | `(range: DiffLineRange) => JSX.Element` | | 应用用来添加批注的控件，在指针所在行和最后一个选中行旁边。 |
 | `classes` | `.classes(..)` | `DiffViewClasses` | `{}` | 按部件的 Tailwind 类。 |
 | `styles` | `.styles(..)` | `DiffViewStyles` | `{}` | 按部件的内联样式，优先于类。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 视图的盒子。 |
@@ -289,6 +322,7 @@ const go = (index: number) => {
 |---|---|---|
 | `onChange` | `.on_change(\|change: &DiffChange\| ..)` | 一处改动被保留或撤销：`{ oldValue, newValue }`，现在的两段文本。 |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &DiffLine\| ..)` | 行号被点击：`{ side, line }`。 |
+| `onLineSelectionChange` | `.on_line_selection_change(\|range: &Option<DiffLineRange>\| ..)` | 选中的行变了：`{ side, start, end }`，或 `null`。 |
 | `onStatsChange` | `.on_stats_change(\|stats: &DiffStats\| ..)` | 统计数字变了：`{ added, deleted, hunks }`。视图创建时触发一次，之后每次比较文本得到不同的数字时再触发，用于显示“+8 −8 · 5 处改动”这样的一行。 |
 
 <a id="related"></a>

@@ -87,4 +87,13 @@ parts! {
     /// The box of the app's hunk actions (`renderHunkActions`), at the top
     /// right of a change.
     hunk_actions => HunkActions,
+    /// Over the selected lines' rows of their side, gutter and text (a
+    /// faint tint of the theme's `primary`).
+    line_selected => LineSelected,
+    /// The box of an annotation (`renderAnnotation`), under its line
+    /// across its side.
+    annotation => Annotation,
+    /// The box of the add control (`renderAddAnnotation`), as wide as the
+    /// gutter and as tall as a line, the control at its right.
+    add_annotation => AddAnnotation,
 }

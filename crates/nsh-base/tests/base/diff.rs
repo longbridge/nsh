@@ -2,9 +2,14 @@
 //! unified), unchanged lines between changes collapse into separators that
 //! a press or the ref expands; the ref gives the changes and their stats,
 //! and reverts or keeps a change, reporting the texts; a patch's lines are
-//! numbered as in its file; and a long text makes only the rows in view.
+//! numbered as in its file; a long text makes only the rows in view; line
+//! numbers select lines, which the ref reads and sets; the ref moves from
+//! change to change; and the app's annotations show under their lines.
 
-use nsh_base::{DiffChange, DiffExpand, DiffHunk, DiffLayout, DiffView, DiffViewApi, diff_view};
+use nsh_base::{
+    DiffAnnotation, DiffChange, DiffExpand, DiffHunk, DiffLayout, DiffLineRange, DiffSide,
+    DiffView, DiffViewApi, diff_view,
+};
 use nsh_core::{
     Size,
     platform::{Idiom, Os},
@@ -23,6 +28,8 @@ struct HarnessProps {
     patch: Option<String>,
     /// The view's `layout`.
     layout: DiffLayout,
+    /// The view's `annotations`, each drawn as `Note <id>`.
+    annotations: Vec<DiffAnnotation>,
 }
 
 fn texts(old: &str, new: &str) -> HarnessProps {
@@ -31,6 +38,24 @@ fn texts(old: &str, new: &str) -> HarnessProps {
         new: new.into(),
         patch: None,
         layout: DiffLayout::Split,
+        annotations: Vec::new(),
+    }
+}
+
+/// An annotation `id` under `line` of `side`.
+fn annotation(id: &str, side: DiffSide, line: u32) -> DiffAnnotation {
+    let mut a = DiffAnnotation::default();
+    a.id = id.to_string().into();
+    a.side = side;
+    a.line = line;
+    a
+}
+
+/// `side start-end`, or `none`.
+fn range_text(range: Option<DiffLineRange>) -> String {
+    match range {
+        Some(r) => format!("{:?} {}-{}", r.side, r.start, r.end),
+        None => "none".into(),
     }
 }
 
@@ -63,6 +88,10 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let changes = signal(0u32);
     let stats = signal(String::from("-"));
     let hunks = signal(String::from("-"));
+    let selection = signal(String::from("-"));
+    let selected = signal(String::from("-"));
+    let hunk = signal(String::from("-"));
+    let pressed = signal(String::from("-"));
     let dv = component_ref::<DiffView>();
     let api = move |f: &dyn Fn(&DiffViewApi)| {
         if let Some(api) = dv.api::<DiffViewApi>() {
@@ -83,6 +112,12 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             new.set(c.new_value.clone());
             changes.update(|n| *n += 1);
         })
+        .on_line_selection_change(move |r: &Option<DiffLineRange>| selection.set(range_text(*r)))
+        .on_line_number_press(move |l: &nsh_base::DiffLine| {
+            pressed.set(format!("{:?} {}", l.side, l.line))
+        })
+        .annotations(props.annotations.clone())
+        .render_annotation(|a: &DiffAnnotation| text(format!("Note {}", a.id)))
         .component_ref(&dv)
         .size_full();
     el = match props.patch.clone() {
@@ -106,6 +141,10 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .child(text(move || format!("Changes {}", changes.get())))
         .child(text(move || format!("Stats {}", stats.get())))
         .child(text(move || format!("Hunks {}", hunks.get())))
+        .child(text(move || format!("Selection {}", selection.get())))
+        .child(text(move || format!("Selected {:?}", selected.get())))
+        .child(text(move || format!("Hunk {}", hunk.get())))
+        .child(text(move || format!("Pressed {}", pressed.get())))
         .child(
             view()
                 .flex_row()
@@ -125,7 +164,30 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     Box::new(|a| a.expand(1, Some(DiffExpand::Down), Some(2))),
                 ))
                 .child(button("expand-all", Box::new(|a| a.expand_all())))
-                .child(button("collapse-all", Box::new(|a| a.collapse_all()))),
+                .child(button("collapse-all", Box::new(|a| a.collapse_all())))
+                .child(button(
+                    "select-old",
+                    Box::new(move |a| {
+                        let mut range = DiffLineRange::default();
+                        range.side = DiffSide::Old;
+                        range.start = 8;
+                        range.end = 9;
+                        a.set_selected_lines(Some(range));
+                        selection.set(range_text(a.selected_lines()));
+                        selected.set(a.selected_text());
+                    }),
+                ))
+                .child(button(
+                    "next",
+                    Box::new(move |a| {
+                        let next = a.next_hunk();
+                        hunk.set(format!("{next:?}"));
+                    }),
+                ))
+                .child(button(
+                    "current",
+                    Box::new(move |a| hunk.set(format!("{:?} now", a.current_hunk()))),
+                )),
         )
 }
 
@@ -368,4 +430,63 @@ fn a_long_text_makes_only_the_rows_in_view() {
         (20..200).contains(&rows),
         "{rows} line texts made after scrolling"
     );
+}
+
+#[test]
+fn a_press_on_a_line_number_selects_its_line() {
+    let mut app = start(one_change());
+    see(&mut app, "line ten");
+    // A press on the left gutter (the harness presses its middle: the
+    // modified row, old line 10).
+    assert_eq!(count(&app, "13"), 2);
+    app.press("text:13 >> nth=0").unwrap();
+    see(&mut app, "Selection Old 9-9");
+    see(&mut app, "Pressed Old 9");
+}
+
+#[test]
+fn the_ref_sets_the_selected_lines_and_reads_their_text() {
+    let mut app = start(one_change());
+    see(&mut app, "line ten");
+    app.press("id:select-old").unwrap();
+    // Setting them reports nothing: the harness reads them back.
+    see(&mut app, "Selection Old 8-9");
+    see(&mut app, "Selected \"line 9\\nline 10\"");
+}
+
+#[test]
+fn the_ref_moves_from_change_to_change() {
+    let (old, new) = two_changes();
+    let mut app = start(texts(&old, &new));
+    see(&mut app, "line three");
+    // Nothing navigated yet: the first change in view.
+    app.press("id:current").unwrap();
+    see(&mut app, "Hunk Some(0) now");
+    // The first below the top of the view, then on from it, though the
+    // short diff never scrolls.
+    app.press("id:next").unwrap();
+    see(&mut app, "Hunk Some(0)");
+    app.press("id:next").unwrap();
+    see(&mut app, "Hunk Some(1)");
+    app.press("id:current").unwrap();
+    see(&mut app, "Hunk Some(1) now");
+    // From the last, back to the first.
+    app.press("id:next").unwrap();
+    see(&mut app, "Hunk Some(0)");
+}
+
+#[test]
+fn annotations_show_under_their_lines_while_they_show() {
+    let mut app = start(HarnessProps {
+        annotations: vec![
+            annotation("a", DiffSide::New, 9),
+            // Line 1 is collapsed: its annotation waits.
+            annotation("b", DiffSide::Old, 0),
+        ],
+        ..one_change()
+    });
+    see(&mut app, "Note a");
+    assert!(!app.shows("Note b"));
+    app.press("id:expand-all").unwrap();
+    see(&mut app, "Note b");
 }

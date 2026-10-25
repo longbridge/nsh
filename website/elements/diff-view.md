@@ -1,6 +1,6 @@
 ---
 title: DiffView
-description: "The DiffView component: the changes between two texts or of a patch, side by side or unified, with the words changed within lines highlighted, unchanged lines collapsed into separators that expand, syntax highlighting and per-change actions."
+description: "The DiffView component: the changes between two texts or of a patch, side by side or unified, with the words changed within lines highlighted, unchanged lines collapsed into separators that expand, syntax highlighting, soft wrap, per-change actions, line selection and review annotations."
 order: 26.3
 group: base
 demo: el-diff-view
@@ -54,8 +54,9 @@ function App() {
 mount(App);
 ```
 
-The view fills the box the app gives it (`flex-1`, a height) and scrolls inside: vertically through the rows, and each
-side sideways to its longest line.
+The view fills the box the app gives it (`flex-1`, a height) and scrolls inside: vertically through the rows, and
+sideways to the longest line, the two sides of a split view together. With `softWrap` long lines wrap at the side's
+width instead, and a split row is as tall as its taller side, so the sides stay aligned.
 
 ## Two texts or a patch
 
@@ -209,32 +210,65 @@ out of the proposal. A view showing a `patch` shows excerpts of the files, and i
 | `expand(gap, direction?, lines?)` | Shows the lines separator `gap` hides: `"all"` (default), or `lines` (default 20) `"up"` or `"down"`. |
 | `expandAll()` | Shows every unchanged line. |
 | `collapseAll()` | Collapses the unchanged lines again. |
+| `nextHunk()` | `Promise<number \| null>`: scrolls the next change to the top and gives its index (after the last, the first). |
+| `previousHunk()` | `Promise<number \| null>`: scrolls the previous change to the top and gives its index (before the first, the last). |
+| `currentHunk()` | `Promise<number \| null>`: the change gone to last while the view stays there, else the one at the top of the view or the first in view. |
+| `selectedLines()` | `Promise<DiffLineRange \| null>`: the lines selected on the line numbers. |
+| `setSelectedLines(range)` | Selects lines of a side (`null`: none), without `onLineSelectionChange`. |
+| `selectedText()` | `Promise<string>`: the selected lines' text. |
 
-Next and previous change buttons, with the counts from `onStatsChange`:
+`nextHunk()` and `previousHunk()` go on from the change they went to while the view stays there, and otherwise from
+the top of the view, so a change near the end that cannot scroll to the top still counts. Next and previous change
+buttons, with the counts from `onStatsChange`:
 
 ```tsx
 let diff!: DiffViewRef;
-const at = signal(0);
 const stats = signal<DiffStats>({ added: 0, deleted: 0, hunks: 0 });
-const go = (index: number) => {
-  at.set(index);
-  diff.goToHunk(index);
-};
 
 <View class="flex-row items-center gap-2 p-2">
   <Text class="text-sm text-green-600">+{stats().added}</Text>
   <Text class="text-sm text-red-600">−{stats().deleted}</Text>
   <Text class="text-sm text-muted-foreground">{stats().hunks} changes</Text>
-  <Button onPress={() => go(Math.max(0, at() - 1))}><Text>Previous</Text></Button>
-  <Button onPress={() => go(Math.min(stats().hunks - 1, at() + 1))}><Text>Next</Text></Button>
+  <Button onPress={() => diff.previousHunk()}><Text>Previous</Text></Button>
+  <Button onPress={() => diff.nextHunk()}><Text>Next</Text></Button>
 </View>
 <DiffView ref={diff} oldValue={before()} newValue={after()} onStatsChange={(s) => stats.set(s)} class="flex-1" />
 ```
 
-## Comments on lines
+## Review comments
 
-A press on a line number reports `onLineNumberPress({ side, line })`: the side (`"old"` or `"new"`) and the line from
-0, the place for a review comment the app shows.
+The line numbers select lines of a side: a press selects one, a Shift-press extends the selection to it, and dragging
+the mouse over the numbers selects those it goes over. `onLineSelectionChange` reports the lines (`DiffLineRange`:
+`{ side, start, end }`, lines from 0, `null` for none), and a press of a number also reports
+`onLineNumberPress({ side, line })`. The ref reads the selection (`selectedLines()`, `selectedText()`) and sets it.
+
+`annotations` puts the app's content under lines: each `{ id, side, line }` is drawn by `renderAnnotation` across its
+line's side (the whole view when unified), as tall as it lays out, and shows while its line does. `renderAddAnnotation`
+is the app's control to add one, at the right of the gutter of the line the pointer is over and of the last selected
+line; it gets the selected lines when its line is one of them, else that line.
+
+```tsx
+type Comment = { id: string; side: "old" | "new"; line: number; text: string };
+const comments = signal<Comment[]>([]);
+const drafting = signal<DiffLineRange | null>(null);
+
+<DiffView
+  oldValue={before()}
+  newValue={after()}
+  annotations={comments().map(({ id, side, line }) => ({ id, side, line }))}
+  renderAnnotation={(a) => (
+    <View class="m-2 rounded-md border border-border bg-card p-2">
+      <Text class="text-sm">{comments().find((c) => c.id === a.id)?.text}</Text>
+    </View>
+  )}
+  renderAddAnnotation={(range) => (
+    <Button onPress={() => drafting.set(range)} class="size-4 items-center justify-center rounded bg-primary">
+      <Text class="text-xs text-primary-foreground">+</Text>
+    </Button>
+  )}
+  class="flex-1"
+/>
+```
 
 ## Styling the parts
 
@@ -278,6 +312,9 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `indicatorDeleted` | A deleted line's bar or `−` | Red, 3pt wide |
 | `separator` | A separator of collapsed lines, or a patch's hunk header | `⋯` and the count on `muted` |
 | `hunkActions` | The box of the app's actions on a change | At the change's top right |
+| `lineSelected` | Over the selected lines' rows of their side | A faint `primary` tint |
+| `annotation` | The box of an annotation, under its line | Across its line's side |
+| `addAnnotation` | The box of the add control, the gutter's width and a line tall | The control at its right |
 
 ## Props
 
@@ -299,6 +336,10 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points. |
 | `renderSeparator` | `.render_separator(..)` | `(separator: DiffSeparator) => JSX.Element` | | Draws the separators of collapsed lines. |
 | `renderHunkActions` | `.render_hunk_actions(..)` | `(hunk: DiffHunk) => JSX.Element` | | The app's actions on each change. |
+| `softWrap` | `.soft_wrap(..)` | `boolean` | `false` | Long lines wrap at the side's width. |
+| `annotations` | `.annotations(..)` | `DiffAnnotation[]` | `[]` | The app's content under lines: `{ id, side, line }`. |
+| `renderAnnotation` | `.render_annotation(..)` | `(annotation: DiffAnnotation) => JSX.Element` | | Draws an annotation under its line. |
+| `renderAddAnnotation` | `.render_add_annotation(..)` | `(range: DiffLineRange) => JSX.Element` | | The app's control to add an annotation, beside the hovered line and the last selected one. |
 | `classes` | `.classes(..)` | `DiffViewClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `DiffViewStyles` | `{}` | Inline styles by part, over the classes. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The view's box. |
@@ -309,6 +350,7 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 |---|---|---|
 | `onChange` | `.on_change(\|change: &DiffChange\| ..)` | A change was kept or reverted: `{ oldValue, newValue }`, the texts now. |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &DiffLine\| ..)` | A line number was pressed: `{ side, line }`. |
+| `onLineSelectionChange` | `.on_line_selection_change(\|range: &Option<DiffLineRange>\| ..)` | The selected lines changed: `{ side, start, end }`, or `null`. |
 | `onStatsChange` | `.on_stats_change(\|stats: &DiffStats\| ..)` | The counts changed: `{ added, deleted, hunks }`. It fires once when the view is made and again each time the texts are diffed to other counts, for a "+8 −8 · 5 changes" line. |
 
 ## Related

@@ -1,15 +1,21 @@
 //! The diff view's view: a vertical scroll view over a box of every row's
 //! height, which holds the sides (two side by side, or one) and over them
-//! the separators and the app's hunk actions. A side is a gutter of line
-//! numbers beside a horizontal scroll view of the text. Only the rows in
-//! view (and a few around them) are made.
+//! the separators, the app's hunk actions, its annotations and its add
+//! control. A side is a gutter of line numbers (which select lines) beside
+//! a horizontal scroll view of the text (the split sides scroll together;
+//! with soft wrap nothing scrolls sideways). Rows are as tall as their
+//! wrapped lines and the annotations under them. Only the rows in view
+//! (and a few around them) are made.
 
-use nsh_core::ui::{Style, prelude::*};
+use nsh_core::ui::{EventKind, EventPayload, Style, prelude::*};
 
 use super::{
-    DiffExpand, DiffIndicators, DiffLayout, DiffSeparator, DiffSide, DiffViewPart, DiffViewProps,
+    DiffAnnotation, DiffExpand, DiffIndicators, DiffLayout, DiffSeparator, DiffSide, DiffViewPart,
+    DiffViewProps,
     controller::{Dv, RowCell, Span, Tint},
+    geometry,
     layout::Row,
+    review::HoverPart,
 };
 use crate::theme;
 
@@ -20,7 +26,7 @@ const DELETED: AdaptiveColor = AdaptiveColor::rgb(0xdc2626, 0xf87171);
 /// The width of a bar indicator.
 const BAR: f32 = 3.0;
 /// The room around a gutter's numbers and before a line's text.
-const PAD: f32 = 8.0;
+pub(crate) const PAD: f32 = 8.0;
 
 /// `el` with the classes and styles of `list`, in order (later parts win).
 fn parts<E: Element>(el: E, props: DiffViewProps, list: Vec<DiffViewPart>) -> E {
@@ -59,10 +65,20 @@ enum Column {
     Both,
 }
 
+impl Column {
+    /// The side it shows, `None` for both.
+    fn side(self) -> Option<DiffSide> {
+        match self {
+            Column::Old => Some(DiffSide::Old),
+            Column::New => Some(DiffSide::New),
+            Column::Both => None,
+        }
+    }
+}
+
 /// The diff view.
 pub(crate) fn render(dv: Dv) -> impl IntoElement {
     let props = dv.props;
-    let lh = line_height(&dv);
     let (scroll_dv, layout_dv) = (dv.clone(), dv.clone());
     let font = {
         let dv = dv.clone();
@@ -74,11 +90,7 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
     let (font_a, font_b, font_c) = (font.clone(), font.clone(), font);
     let height = {
         let dv = dv.clone();
-        let lh = lh.clone();
-        move || {
-            dv.rev.get();
-            lh() * dv.st.borrow().rows.len() as f32
-        }
+        move || dv.rows_height()
     };
     let rows = visible_rows(dv.clone());
     let split_dv = dv.clone();
@@ -100,6 +112,7 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
                     scroll_dv.viewport.set(e.size);
                     // Lines scrolled into view far past the parse are guessed.
                     scroll_dv.schedule_highlight();
+                    scroll_dv.scrolled_to(e.offset.y);
                 })
                 .on_layout(move |b: &Bounds<Points>| layout_dv.viewport.set(b.size))
                 .child(
@@ -131,7 +144,9 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
                             }),
                         )
                         .child(separators(dv.clone(), rows))
-                        .child(hunk_actions(dv.clone(), rows)),
+                        .child(hunk_actions(dv.clone(), rows))
+                        .child(annotations(dv.clone()))
+                        .child(add_controls(dv.clone())),
                 ),
         )
 }
@@ -192,40 +207,74 @@ fn cell_memo(dv: &Dv, row: usize, column: Column) -> Memo<Option<(RowCell, Optio
     })
 }
 
-/// The gutter of a side: numbers and indicators.
+/// The width of a number column.
+fn number_width(dv: &Dv) -> impl Fn() -> Points + Clone + 'static {
+    let dv = dv.clone();
+    move || {
+        dv.rev.get();
+        dv.st.borrow().number_width()
+    }
+}
+
+/// The width of the `+` / `−` column (`indicators="classic"`).
+fn sign_width(dv: &Dv) -> impl Fn() -> Points + Clone + 'static {
+    let dv = dv.clone();
+    let props = dv.props;
+    move || {
+        dv.rev.get();
+        if props.indicators.get() == DiffIndicators::Classic {
+            dv.st.borrow().column * 2.0
+        } else {
+            px(0.0)
+        }
+    }
+}
+
+/// The width of the gutter of `column`.
+fn gutter_width(dv: &Dv, column: Column) -> impl Fn() -> Points + Clone + 'static {
+    let props = dv.props;
+    let nw = number_width(dv);
+    let sw = sign_width(dv);
+    move || {
+        let numbers = if props.line_numbers.get() {
+            let n = if column == Column::Both { 2.0 } else { 1.0 };
+            nw() * n + px(PAD * (n + 1.0))
+        } else {
+            px(0.0)
+        };
+        numbers + sw() + px(BAR)
+    }
+}
+
+/// The gutter of a side: numbers and indicators. Pressing it selects
+/// lines: a press one, a Shift-press up to it, a drag with the mouse those
+/// it goes over (a finger scrolls).
 fn gutter(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
     let props = dv.props;
-    let number_width = {
+    let number_width = number_width(&dv);
+    let sign_width = sign_width(&dv);
+    let width = gutter_width(&dv, column);
+    // The side a press at `x` selects on, and whether the other side's
+    // line does where it has none (unified rows).
+    let pick = {
         let dv = dv.clone();
-        move || {
-            dv.rev.get();
-            dv.st.borrow().number_width()
-        }
-    };
-    let sign_width = {
-        let dv = dv.clone();
-        move || {
-            dv.rev.get();
-            if props.indicators.get() == DiffIndicators::Classic {
-                dv.st.borrow().column * 2.0
-            } else {
-                px(0.0)
+        move |x: Points| match column {
+            Column::Old => (DiffSide::Old, false),
+            Column::New => (DiffSide::New, false),
+            Column::Both => {
+                let numbers = props.line_numbers.get_untracked();
+                let edge = px(PAD * 1.5) + dv.st.borrow().number_width();
+                if numbers && x < edge {
+                    (DiffSide::Old, true)
+                } else {
+                    (DiffSide::New, true)
+                }
             }
         }
     };
-    let width = {
-        let nw = number_width.clone();
-        let sw = sign_width.clone();
-        move || {
-            let numbers = if props.line_numbers.get() {
-                let n = if column == Column::Both { 2.0 } else { 1.0 };
-                nw() * n + px(PAD * (n + 1.0))
-            } else {
-                px(0.0)
-            };
-            numbers + sw() + px(BAR)
-        }
-    };
+    let desktop = is_desktop();
+    let (down, tap, mov, up, end) = (dv.clone(), dv.clone(), dv.clone(), dv.clone(), dv.clone());
+    let tap_pick = pick.clone();
     let lh = line_height(&dv);
     part(
         view()
@@ -236,6 +285,32 @@ fn gutter(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
         props,
         DiffViewPart::Gutter,
     )
+    .on(EventKind::PressDown, move |p: &EventPayload| {
+        if let (true, EventPayload::Press(e)) = (desktop, p) {
+            let (side, either) = pick(e.position.x);
+            let shift = e.modifiers.shift;
+            down.line_press(e.position, e.page_position, side, either, shift, true);
+        }
+    })
+    .on(EventKind::Press, move |p: &EventPayload| {
+        if desktop {
+            return;
+        }
+        let EventPayload::Press(e) = p else { return };
+        let (side, either) = tap_pick(e.position.x);
+        tap.line_press(e.position, e.page_position, side, either, false, false);
+    })
+    // The mouse selects lines as it drags (a finger scrolls): the gutter
+    // takes its touches, which the scroll view around it keeps off.
+    .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+        if desktop {
+            request.claim();
+        }
+    }))
+    .keep_touches(desktop)
+    .on_responder_move(move |e: &ResponderEvent| mov.line_drag_to(e.page))
+    .on_responder_release(move |_: &ResponderEvent| up.line_release(true))
+    .on_responder_terminate(move |_: &ResponderEvent| end.line_release(false))
     .child(each(
         rows,
         |row: &usize| *row,
@@ -253,6 +328,45 @@ fn gutter(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
     ))
 }
 
+/// The box of row `row`'s lines (its `part`), kept up to date, which
+/// reports the pointer over it.
+fn row_place(dv: &Dv, row: usize, column: Column, part: HoverPart) -> View {
+    let (top, height, hover_in, hover_out) = (dv.clone(), dv.clone(), dv.clone(), dv.clone());
+    view()
+        .absolute()
+        .left_0()
+        .right_0()
+        .top(move || Length::from(top.row_top(row)))
+        .h(move || Length::from(height.row_height(row)))
+        .on_hover_in(move || hover_in.hover_in(row, part, column.side()))
+        .on_hover_out(move || hover_out.hover_out(row, part))
+}
+
+/// The tint of selected lines over row `row` of `column`, while they are.
+fn selected_tint(dv: &Dv, row: usize, column: Column) -> impl IntoElement {
+    let props = dv.props;
+    let selected = {
+        let dv = dv.clone();
+        computed(move || {
+            dv.rev.get();
+            dv.row_selected(row, column.side())
+        })
+    };
+    dynamic(move || {
+        selected.get().then(|| {
+            part(
+                view()
+                    .absolute()
+                    .inset_0()
+                    .pointer_events(PointerEvents::None)
+                    .bg(move || theme().primary.opacity(0.12)),
+                props,
+                DiffViewPart::LineSelected,
+            )
+        })
+    })
+}
+
 fn gutter_row(
     dv: Dv,
     row: usize,
@@ -263,105 +377,102 @@ fn gutter_row(
 ) -> impl IntoElement {
     let props = dv.props;
     let cell = cell_memo(&dv, row, column);
-    let lh2 = lh.clone();
     // A stable view per row: `each` keeps it while the row stays in view,
     // whatever the row shows.
-    let place = view()
-        .absolute()
-        .left_0()
-        .right_0()
-        .top(move || Length::from(lh() * row as f32))
-        .h(move || Length::from(lh2()));
-    place.child(dynamic(move || {
-        let (cell, old_number) = cell.get()?;
-        let tint = cell.kind;
-        let mut el = view()
-            .absolute()
-            .inset_0()
-            .flex_row()
-            .items_center()
-            .bg(move || line_tint(props, tint).unwrap_or(AdaptiveColor::TRANSPARENT));
-        if props.line_numbers.get() {
-            let numbers: Vec<(Option<usize>, DiffSide)> = match column {
-                Column::Old => vec![(cell.number, DiffSide::Old)],
-                Column::New => vec![(cell.number, DiffSide::New)],
-                Column::Both => {
-                    let (old, new) = match tint {
-                        Tint::Deleted => (cell.number, None),
-                        Tint::Added => (None, cell.number),
-                        _ => (old_number, cell.number),
-                    };
-                    vec![(old, DiffSide::Old), (new, DiffSide::New)]
-                }
-            };
-            for (number, side_of) in numbers {
-                let dv = dv.clone();
-                let label = number.map(|n| n.to_string()).unwrap_or_default();
-                let mut list = vec![DiffViewPart::LineNumber];
-                match tint {
-                    Tint::Added => list.push(DiffViewPart::LineNumberAdded),
-                    Tint::Deleted => list.push(DiffViewPart::LineNumberDeleted),
-                    _ => {}
-                }
-                let line = number.map(|n| n.saturating_sub(1));
-                let number = parts(
-                    text(label)
-                        .w(Length::from(number_width()))
-                        .ml(px(PAD))
-                        .text_right()
-                        .text_color(move || theme().muted_foreground),
-                    props,
-                    list,
-                )
-                .on_press(move || {
-                    if let Some(line) = line {
-                        dv.line_number_press(side_of, line);
+    let place = row_place(&dv, row, column, HoverPart::Gutter);
+    let tint_el = selected_tint(&dv, row, column);
+    place
+        .child(dynamic(move || {
+            let (cell, old_number) = cell.get()?;
+            let tint = cell.kind;
+            let mut el = view()
+                .absolute()
+                .inset_0()
+                .bg(move || line_tint(props, tint).unwrap_or(AdaptiveColor::TRANSPARENT));
+            // The numbers and signs beside the first wrapped line.
+            let lh = lh.clone();
+            let mut first = view()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top_0()
+                .h(move || Length::from(lh()))
+                .flex_row()
+                .items_center();
+            if props.line_numbers.get() {
+                let numbers: Vec<Option<usize>> = match column {
+                    Column::Old | Column::New => vec![cell.number],
+                    Column::Both => {
+                        let (old, new) = match tint {
+                            Tint::Deleted => (cell.number, None),
+                            Tint::Added => (None, cell.number),
+                            _ => (old_number, cell.number),
+                        };
+                        vec![old, new]
                     }
-                });
-                el = el.child(number);
+                };
+                for number in numbers {
+                    let label = number.map(|n| n.to_string()).unwrap_or_default();
+                    let mut list = vec![DiffViewPart::LineNumber];
+                    match tint {
+                        Tint::Added => list.push(DiffViewPart::LineNumberAdded),
+                        Tint::Deleted => list.push(DiffViewPart::LineNumberDeleted),
+                        _ => {}
+                    }
+                    first = first.child(parts(
+                        text(label)
+                            .w(Length::from(number_width()))
+                            .ml(px(PAD))
+                            .text_right()
+                            .text_color(move || theme().muted_foreground),
+                        props,
+                        list,
+                    ));
+                }
             }
-        }
-        if props.indicators.get() == DiffIndicators::Classic {
-            let (sign, which) = match tint {
-                Tint::Added => ("+", Some(DiffViewPart::IndicatorAdded)),
-                Tint::Deleted => ("−", Some(DiffViewPart::IndicatorDeleted)),
-                _ => ("", None),
-            };
-            let sign = text(sign)
-                .ml(px(PAD))
-                .w(Length::from(sign_width()))
-                .text_color(move || match tint {
-                    Tint::Added => ADDED,
-                    Tint::Deleted => DELETED,
-                    _ => theme().muted_foreground,
+            if props.indicators.get() == DiffIndicators::Classic {
+                let (sign, which) = match tint {
+                    Tint::Added => ("+", Some(DiffViewPart::IndicatorAdded)),
+                    Tint::Deleted => ("−", Some(DiffViewPart::IndicatorDeleted)),
+                    _ => ("", None),
+                };
+                let sign = text(sign)
+                    .ml(px(PAD))
+                    .w(Length::from(sign_width()))
+                    .text_color(move || match tint {
+                        Tint::Added => ADDED,
+                        Tint::Deleted => DELETED,
+                        _ => theme().muted_foreground,
+                    });
+                first = first.child(match which {
+                    Some(p) => part(sign, props, p),
+                    None => sign,
                 });
-            el = el.child(match which {
-                Some(p) => part(sign, props, p),
-                None => sign,
-            });
-        }
-        if props.indicators.get() == DiffIndicators::Bars {
-            let which = match tint {
-                Tint::Added => Some((DiffViewPart::IndicatorAdded, ADDED)),
-                Tint::Deleted => Some((DiffViewPart::IndicatorDeleted, DELETED)),
-                _ => None,
-            };
-            if let Some((p, color)) = which {
-                el = el.child(part(
-                    view()
-                        .absolute()
-                        .right_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(BAR))
-                        .bg(color),
-                    props,
-                    p,
-                ));
             }
-        }
-        Some(el)
-    }))
+            el = el.child(first);
+            if props.indicators.get() == DiffIndicators::Bars {
+                let which = match tint {
+                    Tint::Added => Some((DiffViewPart::IndicatorAdded, ADDED)),
+                    Tint::Deleted => Some((DiffViewPart::IndicatorDeleted, DELETED)),
+                    _ => None,
+                };
+                if let Some((p, color)) = which {
+                    el = el.child(part(
+                        view()
+                            .absolute()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(px(BAR))
+                            .bg(color),
+                        props,
+                        p,
+                    ));
+                }
+            }
+            Some(el)
+        }))
+        .child(tint_el)
 }
 
 /// The tint of a row's background, `None` for none.
@@ -375,41 +486,53 @@ fn line_tint(props: DiffViewProps, tint: Tint) -> Option<AdaptiveColor> {
     }
 }
 
-/// The text of a side, in a horizontal scroll view.
+/// The text of a side, in a horizontal scroll view (the split sides
+/// scroll together; with soft wrap the text is the view's width).
 fn content(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
     let props = dv.props;
     let width = {
         let dv = dv.clone();
         move || {
             dv.rev.get();
+            if props.soft_wrap.get() {
+                return Length::from(relative(1.0));
+            }
             let st = dv.st.borrow();
-            let side = match column {
-                Column::Old => DiffSide::Old,
-                Column::New => DiffSide::New,
-                Column::Both => {
-                    return st
-                        .text_width(DiffSide::Old)
-                        .max(st.text_width(DiffSide::New));
-                }
-            };
-            st.text_width(side)
+            // The split sides are as wide as the wider, so they scroll
+            // together to the end.
+            let text = st
+                .text_width(DiffSide::Old)
+                .max(st.text_width(DiffSide::New));
+            Length::from(text + px(PAD * 2.0))
         }
     };
     let height = {
         let dv = dv.clone();
-        let lh = line_height(&dv);
-        move || {
-            dv.rev.get();
-            lh() * dv.st.borrow().rows.len() as f32
-        }
+        move || dv.rows_height()
     };
     let lh = line_height(&dv);
-    scroll().horizontal().flex_1().child(
+    let (scrolled, laid_out) = (dv.clone(), dv.clone());
+    let mut el = scroll().horizontal().flex_1();
+    if let Some(side) = column.side() {
+        let index = match side {
+            DiffSide::Old => 0,
+            DiffSide::New => 1,
+        };
+        el = el
+            .element_ref(&dv.hscroll[index])
+            .on_scroll(move |e: &ScrollEvent| scrolled.side_scrolled(side, e.offset.x));
+    }
+    // One side's box tells the width lines wrap at (the split sides are
+    // as wide).
+    if column != Column::Old {
+        el = el.on_layout(move |b: &Bounds<Points>| laid_out.text_box_laid_out(b.size.width));
+    }
+    el.child(
         part(
             view()
                 .relative()
                 .min_w(relative(1.0))
-                .w(move || Length::from(width() + px(PAD * 2.0)))
+                .w(width)
                 .h(move || Length::from(height())),
             props,
             DiffViewPart::Content,
@@ -430,40 +553,53 @@ fn line_row(
 ) -> impl IntoElement {
     let props = dv.props;
     let cell = cell_memo(&dv, row, column);
-    let lh2 = lh.clone();
-    let place = view()
-        .absolute()
-        .left_0()
-        .right_0()
-        .top(move || Length::from(lh() * row as f32))
-        .h(move || Length::from(lh2()));
-    place.child(dynamic(move || {
-        let (cell, _) = cell.get()?;
-        let tint = cell.kind;
-        let mut list = vec![DiffViewPart::Line];
-        match tint {
-            Tint::Added => list.push(DiffViewPart::LineAdded),
-            Tint::Deleted => list.push(DiffViewPart::LineDeleted),
-            Tint::Filler => list.push(DiffViewPart::Filler),
-            Tint::Context => {}
-        }
-        let spans = cell
-            .spans
-            .into_iter()
-            .map(|span| span_view(props, span, tint))
-            .collect::<Vec<_>>();
-        Some(
-            parts(
+    let place = row_place(&dv, row, column, HoverPart::Text);
+    let tint_el = selected_tint(&dv, row, column);
+    let wrap = dv.clone();
+    place
+        .child(dynamic(move || {
+            let (cell, _) = cell.get()?;
+            let tint = cell.kind;
+            let mut list = vec![DiffViewPart::Line];
+            match tint {
+                Tint::Added => list.push(DiffViewPart::LineAdded),
+                Tint::Deleted => list.push(DiffViewPart::LineDeleted),
+                Tint::Filler => list.push(DiffViewPart::Filler),
+                Tint::Context => {}
+            }
+            let lines = match wrap.st.borrow().wrap_columns {
+                Some(columns) => {
+                    let joined: String = cell.spans.iter().map(|s| s.text.as_str()).collect();
+                    let starts = geometry::wrap_starts(&joined, columns);
+                    geometry::wrap_spans(cell.spans, &starts)
+                }
+                None => vec![cell.spans],
+            };
+            let mut el = parts(
                 view()
                     .absolute()
                     .inset_0()
                     .bg(move || line_tint(props, tint).unwrap_or(AdaptiveColor::TRANSPARENT)),
                 props,
                 list,
-            )
-            .child(text("").absolute().top_0().left(px(PAD)).children(spans)),
-        )
-    }))
+            );
+            for (index, spans) in lines.into_iter().enumerate() {
+                let spans = spans
+                    .into_iter()
+                    .map(|span| span_view(props, span, tint))
+                    .collect::<Vec<_>>();
+                let lh = lh.clone();
+                el = el.child(
+                    text("")
+                        .absolute()
+                        .top(move || Length::from(lh() * index as f32))
+                        .left(px(PAD))
+                        .children(spans),
+                );
+            }
+            Some(el)
+        }))
+        .child(tint_el)
 }
 
 fn span_view(props: DiffViewProps, span: Span, tint: Tint) -> AnyElement {
@@ -530,13 +666,13 @@ fn separator(
     lh: impl Fn() -> Points + Clone + 'static,
 ) -> impl IntoElement {
     let props = dv.props;
-    let lh2 = lh.clone();
+    let top = dv.clone();
     let place = move |el: View| {
         el.absolute()
             .left_0()
             .right_0()
-            .top(move || Length::from(lh() * row as f32))
-            .h(move || Length::from(lh2()))
+            .top(move || Length::from(top.row_top(row)))
+            .h(move || Length::from(lh()))
     };
     if let Some(render) = props.render_separator.get_untracked() {
         return place(view())
@@ -571,7 +707,6 @@ fn separator(
 /// The app's actions of the changes whose first row is in view.
 fn hunk_actions(dv: Dv, rows: Memo<Vec<usize>>) -> impl IntoElement {
     let props = dv.props;
-    let lh = line_height(&dv);
     let list = {
         let dv = dv.clone();
         computed(move || {
@@ -603,20 +738,122 @@ fn hunk_actions(dv: Dv, rows: Memo<Vec<usize>>) -> impl IntoElement {
         |(row, hunk)| (*row, *hunk),
         move |item, _| {
             let (row, hunk) = item.get_untracked();
-            let lh = lh.clone();
+            let top = dv.clone();
             // A stable view per change, which `each` keeps while the change
             // stays in view.
             part(
                 view()
                     .absolute()
                     .right(px(PAD))
-                    .top(move || Length::from(lh() * row as f32)),
+                    .top(move || Length::from(top.row_top(row))),
                 props,
                 DiffViewPart::HunkActions,
             )
             .child(dynamic(move || {
                 let render = props.render_hunk_actions.get()?;
                 Some(render.render(format!("hunk:{}", hunk.index), hunk))
+            }))
+        },
+    )
+}
+
+/// The app's annotations whose lines show, under their lines across their
+/// side (split) or the view, as tall as they lay out.
+fn annotations(dv: Dv) -> impl IntoElement {
+    let props = dv.props;
+    let list = {
+        let dv = dv.clone();
+        computed(move || {
+            dv.rev.get();
+            if props.render_annotation.get().is_none() {
+                return Vec::new();
+            }
+            let split = props.layout.get() == DiffLayout::Split;
+            let st = dv.st.borrow();
+            st.annotations
+                .iter()
+                .zip(&st.placed)
+                .filter(|(_, placed)| placed.is_some())
+                .map(|(annotation, _)| (annotation.clone(), split))
+                .collect::<Vec<_>>()
+        })
+    };
+    each(
+        list,
+        |item: &(DiffAnnotation, bool)| item.clone(),
+        move |item, _| {
+            let (annotation, split) = item.get_untracked();
+            let (top, laid_out) = (dv.clone(), dv.clone());
+            let (id_top, id_layout) = (annotation.id.clone(), annotation.id.clone());
+            let mut el = view()
+                .absolute()
+                .top(move || Length::from(top.annotation_top(&id_top).unwrap_or_default()))
+                .on_layout(move |b: &Bounds<Points>| {
+                    laid_out.annotation_laid_out(&id_layout, b.size.height)
+                });
+            el = match (split, annotation.side) {
+                (true, DiffSide::Old) => el.left_0().w(relative(0.5)),
+                (true, DiffSide::New) => el.left(relative(0.5)).w(relative(0.5)),
+                (false, _) => el.left_0().right_0(),
+            };
+            part(el, props, DiffViewPart::Annotation).child(dynamic(move || {
+                let render = props.render_annotation.get()?;
+                let key = format!("annotation:{}", annotation.id);
+                Some(render.render(key, annotation.clone()))
+            }))
+        },
+    )
+}
+
+/// The app's control to add an annotation, at the right of the gutter of
+/// the hovered line and of the last selected line.
+fn add_controls(dv: Dv) -> impl IntoElement {
+    let props = dv.props;
+    let lh = line_height(&dv);
+    let list = {
+        let dv = dv.clone();
+        computed(move || {
+            let split = props.layout.get() == DiffLayout::Split;
+            dv.add_controls()
+                .into_iter()
+                .map(|(row, side, key, range)| (row, side, key, range, split))
+                .collect::<Vec<_>>()
+        })
+    };
+    each(
+        list,
+        |item| *item,
+        move |item, _| {
+            let (row, side, key, range, split) = item.get_untracked();
+            let column = match (split, side) {
+                (true, DiffSide::Old) => Column::Old,
+                (true, DiffSide::New) => Column::New,
+                (false, _) => Column::Both,
+            };
+            let width = gutter_width(&dv, column);
+            let (top, keep, out) = (dv.clone(), dv.clone(), dv.clone());
+            let lh = lh.clone();
+            let mut el = view()
+                .absolute()
+                .top(move || Length::from(top.row_top(row)))
+                .h(move || Length::from(lh()))
+                .w(move || Length::from(width()))
+                .flex_row()
+                .justify_end()
+                .items_center()
+                // Only the app's control takes presses: the gutter under
+                // the rest of the box keeps them.
+                .pointer_events(PointerEvents::BoxNone)
+                .on_hover_in(move || keep.hover_in(row, HoverPart::Control, Some(side)))
+                .on_hover_out(move || out.hover_out(row, HoverPart::Control));
+            el = if split && side == DiffSide::New {
+                el.left(relative(0.5))
+            } else {
+                el.left_0()
+            };
+            part(el, props, DiffViewPart::AddAnnotation).child(dynamic(move || {
+                let render = props.render_add_annotation.get()?;
+                Some(render.render(key, range))
             }))
         },
     )

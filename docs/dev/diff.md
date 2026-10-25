@@ -10,13 +10,15 @@ user-facing page is `website/elements/diff-view.md`; how each module works insid
 
 | File | What |
 |---|---|
-| `mod.rs` | The component: `DiffViewProps`, `DiffViewEvent` (`Change`, `LineNumberPress`, `StatsChange`), `DiffViewApi` (the ref's methods); the values: `DiffLayout`, `DiffInline`, `DiffIndicators`, `DiffSide`, `DiffExpand` (`PropEnum`s), `DiffHunk`, `DiffStats`, `DiffSeparator`, `DiffChange`, `DiffLine` (`JsObject`s) |
+| `mod.rs` | The component: `DiffViewProps`, `DiffViewEvent` (`Change`, `LineNumberPress`, `StatsChange`, `LineSelectionChange`), `DiffViewApi` (the ref's methods); the values: `DiffLayout`, `DiffInline`, `DiffIndicators`, `DiffSide`, `DiffExpand` (`PropEnum`s), `DiffHunk`, `DiffStats`, `DiffSeparator`, `DiffChange`, `DiffLine`, `DiffLineRange`, `DiffAnnotation` (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DiffViewClasses`, `DiffViewStyles` (each a `PartStyle`) and `DiffViewPart` |
 | `model.rs` | `DiffModel`: the line diff and its hunks, the pairs of changed lines that are alike, the words changed within a pair, reverting and accepting one hunk |
 | `layout.rs` | `rows`: the rows a diff shows (`Row::Line`, `Row::Separator`), `Expansions` (what the user expanded of each gap), patch hunk headers |
 | `patch.rs` | Unified diffs: `parse_patch` into `FilePatch`es and `PatchHunk`s, the texts a view shows of a file (`FilePatch::texts`), applying a patch (`FilePatch::apply`) |
 | `controller.rs` | `Dv` and `State`: the two sides (text, rope, line starts, highlighter, numbering), the model and rows, the revisions bindings subscribe to, what props and the ref do; the cells and spans of a row |
-| `view.rs` | The view: the vertical scroll view, the sides (gutter and text), the separators, the app's hunk actions |
+| `geometry.rs` | `Geometry`: each row's top and height (its wrapped lines, the annotations under it), finding the rows at a height; `wrap_starts`: where a line wraps at a column count |
+| `review.rs` | What a reviewer does: line selection on the numbers (press, Shift-press, mouse drag), hover and the app's add control, annotations' heights, navigation between changes, the split sides' horizontal sync |
+| `view.rs` | The view: the vertical scroll view, the sides (gutter and text), the separators, the app's hunk actions, annotations and add control |
 
 ## The model
 
@@ -70,10 +72,37 @@ The view is a vertical `Scroll` over a box of every row's height. In it sit the 
 one for `unified`), each a gutter of line numbers (two columns in `unified`: old and new) beside a horizontal
 `Scroll` of the text, and over them the separators and the app's hunk actions. Only the rows in view are made, plus 8
 on each side (`OVERSCAN`), with at least 40 rows' height before the viewport is known; `each` keeps the rows that stay
-in view. A row's text is one `Text` of spans: runs of one syntax token and one inline state (`controller::spans`).
-Widths are columns of the font's `0` (tabs as 4 columns), so the sides scroll to their widest line.
+in view. A row's text is one `Text` of spans per wrapped line: runs of one syntax token and one inline state
+(`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns); the split sides are as wide as the
+wider side's widest line and scroll sideways together (each side's `onScroll` scrolls the other, a move of under half a
+point ending the echo).
 
-Revisions: `rev` (texts, rows, font, layout options) and `hl_rev` (highlighting progressed).
+Rows are not of one height: `Geometry` keeps every row's top (a prefix sum), found by binary search for the rows in
+view and a press's row. A row is its lines (one, or with `softWrap` the wrapped lines of its line, in a split row the
+taller side's) times `lineHeight`, plus the annotations under it. Soft wrap counts columns, as widths do: the text box's
+width (the new side's horizontal scroll view, reported by its layout) less the room around the text, in columns of
+`0`, each line broken after its last whitespace that fits, else at the edge, whitespace hanging past it
+(`geometry::wrap_starts`); the view draws each wrapped line as a `Text` of its spans, so rows' heights and what they
+show agree. Annotations (`annotations`, drawn by `renderAnnotation`) all render, not only those in view (they are few
+and their heights move the rows below them); each reports its height from its layout, and a split row's annotations
+stack on their side, the row taking the taller stack.
+
+Revisions: `rev` (texts, rows, font, layout options, wrapping), `hl_rev` (highlighting progressed) and `geo` (rows
+moved: an annotation's height).
+
+**Line selection.** The gutter takes presses: a press selects its line on the gutter's side (unified: the number
+column pressed, else the side the row has), a Shift-press extends from the anchor, and on the desktops the gutter
+claims the mouse's touches (`claim_touches`, as the `Editor`'s rows do) so a drag selects the lines it goes over,
+rows without a line on that side keeping the last one. A press without a drag also reports `onLineNumberPress`.
+`onLineSelectionChange` reports each change of the selection (other texts clear it); `setSelectedLines` sets it
+silently. `renderAddAnnotation` shows at the last selected line and at the hovered one (hovers counted over the rows,
+the gutter and the control itself, the hover ending a frame after the last leaves, so moving onto the control keeps
+it).
+
+**Navigation.** `nextHunk` / `previousHunk` go on from the change navigated to last while the view stays there (it
+reached that place and has not scrolled from it, or is still scrolling to it), else from the top of the view, so a
+change near the end that cannot reach the top still counts; they wrap around. `currentHunk` is that change, else the
+one at the top of the view, else the first starting in view.
 
 `onStatsChange` reports `DiffStats` (`{ added, deleted, hunks }`) once when the view is made and again whenever the
 texts are diffed to counts other than those reported last (new props, a hunk kept or reverted), so an app's "+8 −8 ·
@@ -106,9 +135,13 @@ tokens, as the `Editor`'s and `TextView`'s code blocks.
 | `indicatorAdded` / `indicatorDeleted` | `bars`: a 3 point bar at the gutter's edge; `classic`: `+` / `−` in green / red |
 | `separator` | `⋯` and the count (or the hunk header) on `muted`, `muted-foreground`; a press expands the gap |
 | `hunkActions` | The box of the app's actions, 8 points from the right of a change's first row |
+| `lineSelected` | Over the selected rows of their side, gutter and text: `primary` at 12 % |
+| `annotation` | The box of an annotation, under its line across its side (split) or the view (unified) |
+| `addAnnotation` | The box of the add control: the gutter's width, a line tall, the control at its right |
 
 ## Limits
 
 - One file of a patch shows; an app showing a multi-file patch splits it and shows a `DiffView` per file.
-- Widths are columns of the font's `0`: exact for monospaced fonts.
+- Widths are columns of the font's `0`: exact for monospaced fonts. Soft wrap counts characters as columns, so wide
+  characters (CJK) wrap later than they fill the line.
 - Text is shown, not edited: changes revert or keep a hunk at a time.

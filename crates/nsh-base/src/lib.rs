@@ -54,9 +54,10 @@ pub use crate::{
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     diff::{
-        DiffChange, DiffExpand, DiffHunk, DiffIndicators, DiffInline, DiffLayout, DiffLine,
-        DiffSeparator, DiffSide, DiffStats, DiffView, DiffViewApi, DiffViewClasses,
-        DiffViewElement, DiffViewEvent, DiffViewPart, DiffViewProps, DiffViewStyles, diff_view,
+        DiffAnnotation, DiffChange, DiffExpand, DiffHunk, DiffIndicators, DiffInline, DiffLayout,
+        DiffLine, DiffLineRange, DiffSeparator, DiffSide, DiffStats, DiffView, DiffViewApi,
+        DiffViewClasses, DiffViewElement, DiffViewEvent, DiffViewPart, DiffViewProps,
+        DiffViewStyles, diff_view,
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     editor::{
