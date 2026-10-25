@@ -1243,6 +1243,14 @@ tap id:case-base-editor
 # reported before an edit.
 expect let x = 1;
 expect Value: none
+# The mouse resting over `let` reports a hover there once its delay
+# runs out: the character, its word and no diagnostic; leaving the text
+# ends it.
+event text:"let x = 1;" onHoverMove position.x=1 position.y=5
+wait 200
+expect Hover: 0:0 0-3 0
+event text:"let x = 1;" onHoverOut
+expect Hover: ended
 # The ref puts the caret at the line's end, reported with every
 # selection (the primary last).
 tap id:to-end
@@ -1271,7 +1279,20 @@ expect Found: 0
 # The ref reads the text and the selections back.
 tap id:read
 expect Read: let y = 1; // ok (1 selection)
+# Where the caret is (a row tall), the lines in view, the scrolling, and
+# offsets as UTF-16 code units of the text.
+tap id:geometry
+expect Read: caret 20 lines 0-0 scroll 0 offset 4 0:4
+# The primary selection's text, and going to a line puts the caret at
+# its start.
+tap id:select-word
+expect Read: selected y
+expect Caret: 0:5
+tap id:go-to-line
+expect Caret: 0:0
 covers [nsh/base] Editor
+covers [events] Editor.onHover
+covers [events] Editor.onHoverEnd
 covers [props] Editor.search
 covers [events] Editor.onSearchChange
 

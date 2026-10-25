@@ -98,6 +98,8 @@ pub(crate) struct Ed {
     pub(crate) hscroll: ElementRef,
     pub(crate) input: ElementRef,
     blink_task: Rc<RefCell<Option<Spawned<()>>>>,
+    /// What language features are built on (`hooks.rs`).
+    pub(crate) hooks: super::hooks::Hooks,
 }
 
 impl Ed {
@@ -141,8 +143,10 @@ impl Ed {
             hscroll: element_ref(),
             input: element_ref(),
             blink_task: Rc::default(),
+            hooks: super::hooks::Hooks::new(),
         };
         ed.follow_props();
+        ed.follow_hooks();
         ed.bind_keys();
         ed.load_syntaxes();
         ed
@@ -736,7 +740,7 @@ impl Ed {
     }
 
     /// The scroll views' offsets.
-    fn scroll_offset(&self) -> Point<Points> {
+    pub(crate) fn scroll_offset(&self) -> Point<Points> {
         Point::new(self.scroll_x.get_untracked(), self.scroll_y.get_untracked())
     }
 
@@ -1043,7 +1047,7 @@ impl Ed {
 
     /// Scrolls so that a caret at `point` of the rows' box (a line `lh`
     /// tall) shows, with a row of margin.
-    fn scroll_into_view(&self, point: Point<Points>, lh: Points) {
+    pub(crate) fn scroll_into_view(&self, point: Point<Points>, lh: Points) {
         let viewport = self.viewport.get_untracked();
         if viewport.height.0 <= 0.0 {
             return;

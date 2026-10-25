@@ -60,10 +60,10 @@ pub use crate::{
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     editor::{
-        Editor, EditorApi, EditorClasses, EditorCommand, EditorContextMenuEvent, EditorDecoration,
-        EditorDiagnostic, EditorDiagnosticSeverity, EditorElement, EditorEvent, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorSearch, EditorSearchResult,
-        EditorSelection, EditorStyles, editor,
+        Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
+        EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorElement, EditorEvent,
+        EditorHoverEvent, EditorPart, EditorPosition, EditorProps, EditorRange, EditorSearch,
+        EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, editor,
     },
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,

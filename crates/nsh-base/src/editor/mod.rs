@@ -18,6 +18,7 @@ mod diagnostics;
 mod display;
 mod fold;
 pub(crate) mod highlight;
+mod hooks;
 mod keymap;
 pub(crate) mod language;
 mod movement;
@@ -32,6 +33,7 @@ pub use data::{
     EditorSearch, EditorSearchResult, EditorSelection,
 };
 use nsh_core::ui::prelude::*;
+pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
 
 use self::controller::Ed;
@@ -153,6 +155,19 @@ pub enum EditorEvent {
     /// root view, to open a menu at (`Menu.popup(items, { x, y })`).
     #[args(event)]
     ContextMenu(EditorContextMenuEvent),
+    /// The mouse rests over a character (desktops and the web): what to
+    /// ask a language server about and where to show its answer, with the
+    /// diagnostics there. A new hover replaces the last one as the mouse
+    /// moves to another word.
+    #[args(event)]
+    Hover(EditorHoverEvent),
+    /// The hover ended: the mouse left the word or the editor, or the text
+    /// changed or scrolled under it.
+    HoverEnd,
+    /// A character was pressed, after the editor placed its caret: with
+    /// Mod held, a definition to go to.
+    #[args(event)]
+    TextPress(EditorTextPressEvent),
 }
 
 /// Where a context menu was asked for in an [`Editor`].
@@ -383,6 +398,66 @@ impl EditorApi {
     /// Whether there is an edit to do again.
     pub fn can_redo(&self) -> bool {
         self.ed.can_redo()
+    }
+
+    /// The primary caret's box, in the editor and in the root view: where
+    /// a completion menu opens (`null` before the editor is laid out).
+    pub fn caret_bounds(&self) -> Option<EditorBounds> {
+        self.ed.caret_bounds()
+    }
+
+    /// The boxes of `range`, one per row it covers (folded rows have none),
+    /// in the editor and in the root view; an empty range's is the caret's
+    /// place, without a width.
+    pub fn range_bounds(&self, range: EditorRange) -> Vec<EditorBounds> {
+        self.ed.range_bounds(range)
+    }
+
+    /// How far the text is scrolled, down and to the right.
+    pub fn scroll_offset(&self) -> Point<Points> {
+        self.ed.scroll_offset()
+    }
+
+    /// Scrolls the text to `offset` (the horizontal one is ignored while
+    /// lines wrap).
+    pub fn set_scroll_offset(&self, offset: Point<Points>) {
+        self.ed.set_scroll_offset(offset);
+    }
+
+    /// The text the viewport shows: from the start of its first row to the
+    /// end of its last, partly shown rows included.
+    pub fn visible_range(&self) -> EditorRange {
+        self.ed.visible_range()
+    }
+
+    /// The primary selection's text.
+    pub fn selected_text(&self) -> String {
+        self.ed.selected_text()
+    }
+
+    /// The position of `offset`, in UTF-16 code units of the text as
+    /// `value()` returns it (`\r\n` came in as `\n`); past the end, the
+    /// end.
+    pub fn offset_to_position(&self, offset: u32) -> EditorPosition {
+        self.ed.offset_to_position(offset)
+    }
+
+    /// The offset of `position`, in UTF-16 code units of the text as
+    /// `value()` returns it.
+    pub fn position_to_offset(&self, position: EditorPosition) -> u32 {
+        self.ed.position_to_offset(position)
+    }
+
+    /// Scrolls `position` into view (unfolding what hides it), in the
+    /// middle of the viewport with `center`.
+    pub fn reveal_position(&self, position: EditorPosition, center: bool) {
+        self.ed.reveal_position(position, center);
+    }
+
+    /// Puts the caret at the start of line `line` (from 0) and scrolls it
+    /// to the middle of the viewport.
+    pub fn go_to_line(&self, line: u32) {
+        self.ed.go_to_line(line);
     }
 }
 

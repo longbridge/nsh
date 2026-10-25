@@ -16,6 +16,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `controller.rs` | `Ed`: the state, the revisions bindings subscribe to, and what props, keys, typing, presses, the clipboard and the ref do to them; scrolling the caret into view; scheduling the highlighter |
 | `state.rs` | `State`: what the editor holds between frames, outside the reactive graph (buffer, selections, display map, highlighter, marks, matches); what the view draws of each row (`row_content`, `gutter_row`, the rectangles of selections, matches, brackets, diagnostics, indent guides) |
 | `view.rs` | The view: the scroll views, the gutter, the rows' box and its layers, the sink |
+| `hooks.rs` | What language features are built on: hovers (`onHover` / `onHoverEnd`), `onTextPress`, the ref's geometry and scrolling (`caretBounds`, `rangeBounds`, `revealPosition`, `goToLine`, ...), where the editor is in the root view |
 | `buffer.rs` | The text: a `ropey::Rope`, edits as change lists, undo / redo with grouping, UTF-16 positions, the lines each change touched (`LineSpan`) |
 | `types.rs` | `Point`, `Selection`, `Selections` (the primary one, the newest, kept apart), the trait `RowLayout` the moves use |
 | `movement.rs` | Graphemes, words, smart Home / End, vertical moves keeping their x, matching and enclosing brackets |
@@ -115,6 +116,25 @@ extends the primary selection, Alt (Option) adds a selection; dragging extends w
 the text and the point in the root view, for the app's `Menu.popup`. A press on a line number reports
 `onLineNumberPress` (a breakpoint's place); a press on a fold marker or a fold's placeholder toggles the fold.
 
+### Language features
+
+The editor draws no completion menu, hover card or code action list: it gives the app what gpui-base's `lsp` hooks
+use, and the app shows its own popups (`hooks.rs`). The mouse resting 150 ms (`HOVER_DELAY`) over a character reports
+`onHover`: the character's position and UTF-16 offset, its word's range, the pointer and the word's box in the root
+view, the modifiers and the diagnostics there. While a hover is shown, moving inside its word reports nothing and
+moving to another word reports the next one at once; leaving the text, an edit, a new layout or scrolling reports
+`onHoverEnd`. One task waits for the pointer to rest, whatever the number of moves. A press on a character reports
+`onTextPress` (position, word, modifiers, clicks) after the editor placed its caret: Mod-click is the app's go to
+definition. The ref places popups and moves: `caretBounds()` and `rangeBounds(range)` give boxes in the editor (its
+scrolling applied) and in the root view, `visibleRange()` what the viewport shows, `revealPosition` / `goToLine`
+scroll (centered on request), `offsetToPosition` / `positionToOffset` convert UTF-16 offsets of `value()`.
+
+Where the text is in the root view: the editor and its rows' box are measured (`ElementRef::measure`) after their
+layouts and when the gutter changes width, and every pointer event over the rows tells where they are then (its
+`pagePosition` less its `position`). The rows move in the editor only with its own scrolling, which the controller
+knows, so a box is placed with what was last seen and the scrolling since: an editor moved by a scroll view around it
+is placed right again on the next pointer event or layout.
+
 ### Highlighting
 
 `highlight.rs` parses with syntect (the syntaxes and scope mapping of `crate::syntax`, shared with `TextView`), line by
@@ -201,7 +221,8 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 | Tree-sitter highlighting, themes | Syntect with Allsum's palette (`crate::syntax`), incremental per line; the app's `decorations` for semantic highlighting |
 | `DisplayMap` (wrap, folds) | `display.rs` on measured char widths; folds by indentation |
 | Search panel | `search` prop, `onSearchChange`, `findNext` / `replace` / `replaceAll`: the find bar is the app's |
-| Diagnostics with hover popovers | `diagnostics` marked and carried through edits; messages shown by the app |
+| Diagnostics with hover popovers | `diagnostics` marked and carried through edits; `onHover` carries those under the mouse, the app shows them |
+| `lsp` providers (hover, completion, definition, code actions) | `onHover` / `onHoverEnd`, `onTextPress`, `caretBounds` / `rangeBounds`: the app asks its language server and draws the popups |
 | Key bindings as GPUI actions | `keymap.rs` data on `nsh/keymap`, bound while focused; `run(command)` |
 
 ## Limits

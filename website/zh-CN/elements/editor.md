@@ -245,11 +245,43 @@ const breakpoints = signal<number[]>([]);
 />
 ```
 
+<a id="language-features"></a>
+
+## 语言功能
+
+补全、悬停信息、跳转到定义和代码操作来自应用的语言服务器；编辑器告诉应用时机和位置，由应用画出自己的弹出层（锚定到 `pageBounds` 的 [`Overlay`](./overlay.md)）。
+
+- `onHover(event)`：鼠标停在一个字符上（桌面和 Web）。`event` 包含它的 `position`、UTF-16 的 `offset`、所在单词的 `range`、指针的 `pagePosition`、单词的 `pageBounds`、按住的 `modifiers`，以及那里的 `diagnostics`，应用显示它们的消息。移到另一个单词时立即报告下一次悬停。
+- `onHoverEnd()`：鼠标离开了单词或编辑器，或者它下面的文本改变或滚动了。
+- `onTextPress(event)`：一个字符被点击，在编辑器放好光标之后：`{ position, offset, range, pagePosition, modifiers, clicks }`。Mod 点击（Mac 上是 `modifiers.platform`，其他平台是 `modifiers.control`）用来跳转到定义。
+- `caretBounds()` 和 `rangeBounds(range)`：光标和一个范围的位置 `{ bounds, pageBounds }`（在编辑器中和在根视图中）：补全菜单在光标处打开。
+
+```tsx
+const hover = signal<EditorHoverEvent | null>(null);
+
+<Editor
+  ref={editor}
+  value={source()}
+  language="ts"
+  onHover={(event) => hover.set(event)}
+  onHoverEnd={() => hover.set(null)}
+  onTextPress={(event) => event.modifiers.platform && goToDefinition(event.position)}
+  class="flex-1"
+/>
+<If when={hover()}>
+  {(event) => (
+    <Overlay anchor={event().pageBounds} placement="top" class="rounded-md border border-border bg-popover p-2">
+      <Text>{event().diagnostics.map((d) => d.message).join("\n") || describe(event().range)}</Text>
+    </Overlay>
+  )}
+</If>
+```
+
 <a id="methods"></a>
 
 ## 方法
 
-`ref={editor}` 提供编辑器的方法（`EditorRef`），供应用的按钮、菜单和按键使用。返回值的方法（`value()`、`selections()`、`replaceAll()`、`canUndo()`、`canRedo()`）在 JS 中返回一个 `Promise`，所以要 `await` 它们：`const text = await editor.value()`。
+`ref={editor}` 提供编辑器的方法（`EditorRef`），供应用的按钮、菜单和按键使用。返回值的方法（`value()`、`selections()`、`replaceAll()`、`canUndo()`、`caretBounds()` 等）在 JS 中返回一个 `Promise`，所以要 `await` 它们：`const text = await editor.value()`。
 
 | 方法 | 说明 |
 |---|---|
@@ -265,6 +297,14 @@ const breakpoints = signal<number[]>([]);
 | `fold(line)`、`unfold(line)` | 折叠第 `line` 行（从 0 开始）下面的行，或展开它。 |
 | `scrollToLine(line)` | 把第 `line` 行滚动到视野中，并展开隐藏它的折叠。 |
 | `canUndo()`、`canRedo()` | `Promise<boolean>`：是否有可以撤销或重做的编辑。 |
+| `caretBounds()` | `Promise<EditorBounds \| null>`：主光标的框 `{ bounds, pageBounds }`，在编辑器中（已计入它的滚动）和在根视图中；编辑器布局之前为 `null`。 |
+| `rangeBounds(range)` | `Promise<EditorBounds[]>`：`range` 的框，它覆盖的每一行一个。 |
+| `scrollOffset()`、`setScrollOffset(offset)` | `Promise<Point>`：文本滚动了多远；把它滚动到 `{ x, y }`。 |
+| `visibleRange()` | `Promise<EditorRange>`：视口显示的文本，从第一行的开头到最后一行的结尾。 |
+| `selectedText()` | `Promise<string>`：主选区的文本。 |
+| `offsetToPosition(offset)`、`positionToOffset(position)` | `Promise<EditorPosition>`、`Promise<number>`：在 `value()` 的 UTF-16 偏移和位置之间转换。 |
+| `revealPosition(position, center)` | 把 `position` 滚动到视野中，并展开隐藏它的折叠；`center` 时滚动到中间。 |
+| `goToLine(line)` | 把光标放到第 `line` 行（从 0 开始）的开头，并把它滚动到中间。 |
 
 ```tsx
 let editor!: EditorRef;
@@ -392,6 +432,9 @@ let editor!: EditorRef;
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | 搜索的匹配项改变了：`{ count, current, error }`。 |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | 行号被点击：行号，从 0 开始。 |
 | `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | 在文本上按下了辅助按键：`{ position, x, y }`。 |
+| `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | 鼠标停在一个字符上（[语言功能](#language-features)）。 |
+| `onHoverEnd` | `.on_hover_end(\|\| ..)` | 悬停结束了。 |
+| `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | 一个字符被点击：带有它的单词、修饰键和点击次数。 |
 
 <a id="accessibility"></a>
 

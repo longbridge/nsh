@@ -11,7 +11,7 @@ use super::{EditorDiagnosticSeverity, EditorPart, EditorProps, controller::Ed, s
 use crate::theme;
 
 /// The width of a caret.
-const CARET_WIDTH: f32 = 2.0;
+pub(crate) const CARET_WIDTH: f32 = 2.0;
 /// The height of a diagnostic's mark under its text.
 const MARK_HEIGHT: f32 = 2.0;
 
@@ -74,7 +74,10 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
     let (font_a, font_b, font_c) = (font.clone(), font.clone(), font);
     let vscroll_ed = ed.clone();
     let layout_ed = ed.clone();
+    let place_ed = ed.clone();
     view()
+        .element_ref(&ed.hooks.outer)
+        .on_layout(move |_: &Bounds<Points>| place_ed.measure_place())
         .relative()
         .overflow_hidden()
         .text_color(move || theme().foreground)
@@ -353,7 +356,9 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
     let end = ed.clone();
     let menu = ed.clone();
     let layout = ed.clone();
+    let (hover, hover_end) = (ed.clone(), ed.clone());
     let mut el = view()
+        .element_ref(&ed.hooks.rows)
         .relative()
         .cursor(Cursor::Text)
         .h(move || Length::from(height()))
@@ -362,10 +367,12 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
             if props.soft_wrap.get_untracked() {
                 layout.text_width.set(b.size.width);
             }
+            layout.measure_place();
         })
         .on(EventKind::PressDown, move |p: &EventPayload| {
             if let (true, EventPayload::Press(e)) = (desktop, p) {
                 down.press(e.position, e.page_position, e.modifiers, e.clicks);
+                down.text_press(e.position, e.page_position, e.modifiers, e.clicks);
             }
         })
         .on(EventKind::Press, move |p: &EventPayload| {
@@ -374,7 +381,10 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
             }
             let EventPayload::Press(e) = p else { return };
             tap.press(e.position, e.page_position, Default::default(), 1);
+            tap.text_press(e.position, e.page_position, Default::default(), 1);
         })
+        .on_hover_move(move |e: &HoverEvent| hover.hover_move(e))
+        .on_hover_out(move || hover_end.hover_out())
         // The mouse selects as it drags (a finger scrolls): the rows take
         // its touches, which the scroll views around them keep off.
         .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {

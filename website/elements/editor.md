@@ -274,10 +274,47 @@ const breakpoints = signal<number[]>([]);
 />
 ```
 
+## Language features
+
+Completion, hover information, go to definition and code actions come from the app's language server; the editor
+gives the app the moments and the places, and the app draws its popups (an [`Overlay`](./overlay.md) anchored to a
+`pageBounds`).
+
+- `onHover(event)`: the mouse rests over a character (desktops and the web). `event` has its `position`, its UTF-16
+  `offset`, the `range` of its word, the pointer's `pagePosition`, the word's `pageBounds`, the `modifiers` held and
+  the `diagnostics` there, whose messages the app shows. Moving to another word reports the next hover at once.
+- `onHoverEnd()`: the mouse left the word or the editor, or the text changed or scrolled under it.
+- `onTextPress(event)`: a character was pressed, after the editor placed its caret: `{ position, offset, range,
+  pagePosition, modifiers, clicks }`. Mod-click (`modifiers.platform` on a Mac, `modifiers.control` elsewhere) is the
+  place for go to definition.
+- `caretBounds()` and `rangeBounds(range)`: where the caret and a range are, `{ bounds, pageBounds }` (in the editor
+  and in the root view): a completion menu opens at the caret.
+
+```tsx
+const hover = signal<EditorHoverEvent | null>(null);
+
+<Editor
+  ref={editor}
+  value={source()}
+  language="ts"
+  onHover={(event) => hover.set(event)}
+  onHoverEnd={() => hover.set(null)}
+  onTextPress={(event) => event.modifiers.platform && goToDefinition(event.position)}
+  class="flex-1"
+/>
+<If when={hover()}>
+  {(event) => (
+    <Overlay anchor={event().pageBounds} placement="top" class="rounded-md border border-border bg-popover p-2">
+      <Text>{event().diagnostics.map((d) => d.message).join("\n") || describe(event().range)}</Text>
+    </Overlay>
+  )}
+</If>
+```
+
 ## Methods
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
-value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `canRedo()`) return a `Promise` of it in JS, so `await`
+value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `caretBounds()`, ...) return a `Promise` of it in JS, so `await`
 them: `const text = await editor.value()`.
 
 | Method | Description |
@@ -294,6 +331,14 @@ them: `const text = await editor.value()`.
 | `fold(line)`, `unfold(line)` | Folds the lines under line `line` (from 0), or unfolds it. |
 | `scrollToLine(line)` | Scrolls line `line` into view, unfolding what hides it. |
 | `canUndo()`, `canRedo()` | `Promise<boolean>`: whether there is an edit to take back, or to do again. |
+| `caretBounds()` | `Promise<EditorBounds \| null>`: the primary caret's box, `{ bounds, pageBounds }`, in the editor (its scrolling applied) and in the root view; `null` before the editor is laid out. |
+| `rangeBounds(range)` | `Promise<EditorBounds[]>`: the boxes of `range`, one per row it covers. |
+| `scrollOffset()`, `setScrollOffset(offset)` | `Promise<Point>`: how far the text is scrolled; scrolls it to `{ x, y }`. |
+| `visibleRange()` | `Promise<EditorRange>`: the text the viewport shows, from its first row's start to its last row's end. |
+| `selectedText()` | `Promise<string>`: the primary selection's text. |
+| `offsetToPosition(offset)`, `positionToOffset(position)` | `Promise<EditorPosition>`, `Promise<number>`: between UTF-16 offsets of `value()` and positions. |
+| `revealPosition(position, center)` | Scrolls `position` into view, unfolding what hides it; to the middle with `center`. |
+| `goToLine(line)` | Puts the caret at line `line`'s start (from 0) and scrolls it to the middle. |
 
 ```tsx
 let editor!: EditorRef;
@@ -415,6 +460,9 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ count, current, error }`. |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | A line number was pressed: the line, from 0. |
 | `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | The secondary button was pressed over the text: `{ position, x, y }`. |
+| `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | The mouse rests over a character ([Language features](#language-features)). |
+| `onHoverEnd` | `.on_hover_end(\|\| ..)` | The hover ended. |
+| `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |
 
 ## Accessibility
 
