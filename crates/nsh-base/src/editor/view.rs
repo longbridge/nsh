@@ -173,9 +173,11 @@ struct GutterPointer {
 fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
     let props = ed.props;
     let shown = move || props.line_numbers.get() || props.folding.get();
+    // Memos: every row reads them, and an edit would measure the digit
+    // again for each.
     let number_width = {
         let ed = ed.clone();
-        move || {
+        let width = computed(move || {
             ed.text_rev.get();
             if !props.line_numbers.get() {
                 return px(0.0);
@@ -187,17 +189,19 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
             // a measured width up, so a number laid out in the exact width
             // of its digits is a fraction too wide and shows as "…".
             (zero * digits.max(2) as f32).ceil()
-        }
+        });
+        move || width.get()
     };
     let fold_width = {
         let ed = ed.clone();
-        move || {
+        let width = computed(move || {
             if !props.folding.get() {
                 return px(0.0);
             }
             ed.text_rev.get();
             ed.st.borrow().line_height()
-        }
+        });
+        move || width.get()
     };
     let height = {
         let ed = ed.clone();
@@ -206,16 +210,13 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
     let rows = visible_rows(ed.clone());
     let top = ed.rows_top;
     when(shown, move || {
-        let (nw, fw) = (number_width.clone(), fold_width.clone());
-        let (number_width, fold_width) = (number_width.clone(), fold_width.clone());
         let height = height.clone();
         let row_ed = ed.clone();
         let press_ed = ed.clone();
-        let hit_nw = nw.clone();
         let inner = view()
             .relative()
             .mt(move || Length::from(top.get()))
-            .w(move || Length::from(nw() + fw()))
+            .w(move || Length::from(number_width() + fold_width()))
             .h(move || Length::from(height()));
         let inner = match layer {
             Layer::Paint => inner.child(each(
@@ -225,8 +226,8 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                     gutter_row(
                         row_ed.clone(),
                         row.get_untracked(),
-                        number_width.clone(),
-                        fold_width.clone(),
+                        number_width,
+                        fold_width,
                         pointer,
                     )
                 },
@@ -236,7 +237,7 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
             Layer::Hit => inner
                 .on(EventKind::Press, move |p: &EventPayload| {
                     let EventPayload::Press(e) = p else { return };
-                    if !props.line_numbers.get_untracked() || e.position.x >= hit_nw() {
+                    if !props.line_numbers.get_untracked() || e.position.x >= number_width() {
                         return;
                     }
                     let row = {
@@ -255,8 +256,8 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                         fold_hit(
                             row_ed.clone(),
                             row.get_untracked(),
-                            number_width.clone(),
-                            fold_width.clone(),
+                            number_width,
+                            fold_width,
                             pointer,
                         )
                     },
@@ -378,13 +379,17 @@ fn gutter_row(
                 let number = move || info.get().number.map(|n| n.to_string()).unwrap_or_default();
                 let ed = press_ed.clone();
                 let number_width = number_width.clone();
+                // The row's number changes with each edit above it: the
+                // text follows it, the element is made again only for
+                // another part.
+                let active = computed(move || info.get().active);
                 dynamic(move || {
-                    let active = info.get().active;
+                    let active = active.get();
                     let el = text(number)
                         .w(Length::from(number_width()))
                         .text_right()
                         .text_color(move || {
-                            if info.get().active {
+                            if active {
                                 theme().foreground
                             } else {
                                 theme().muted_foreground
@@ -411,8 +416,9 @@ fn gutter_row(
             move || {
                 let ed = fold_ed.clone();
                 let width = fold_width.clone();
+                let fold = computed(move || info.get().fold);
                 dynamic(move || {
-                    let fold = info.get().fold;
+                    let fold = fold.get();
                     let ed = ed.clone();
                     let size = width();
                     let el = view()
