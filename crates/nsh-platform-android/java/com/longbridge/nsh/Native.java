@@ -256,6 +256,12 @@ final class Native {
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
 
+    /**
+     * A scroll view came to rest: the snapping animated values that follow it settle. Returns
+     * bound values when one starts moving, else null.
+     */
+    static native float[] scrollEnded(long handle, int id);
+
     /** A zoomable scroll view's zoom scale, reported before its offset. */
     static native void zoom(long handle, int id, float scale);
 

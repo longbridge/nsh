@@ -2,7 +2,16 @@
 
 - **Animation**: `createAnimatedValue()` → `timing` / `spring` / `decay` (return a Promise), `interpolate` (numbers, colors or
   `"deg"` / `"rad"` angles; `extrapolate` / `extrapolateLeft` / `extrapolateRight`: `clamp` (default) / `extend` / `identity`;
-  `easing`), `add/sub/mul/div/mod`, `diffClamp(min, max)`. `Easing` (React Native's: `linear`, `ease`, `quad`, `cubic`, `poly`,
+  `easing`), `add/sub/mul/div/mod`, `diffClamp(min, max, { snap })`. A snapping `diffClamp` settles at its nearer bound
+  in 200 ms, easing out, when the scroll view whose scroll value it follows (through any nodes) comes to rest
+  (`Graph::settle`), at `max` only once its input reached `max`; scrolling that view again ends the settling where it
+  is, and a snapping `diffClamp` it reads, settling too, moves its input without ending it. A snapping dependent
+  already at a bound holds there while its upstream nodes settle, then follows new scrolling from that baseline.
+  Every platform calls it
+  where it sends `onScrollEnd`, listened to or not: the desktops through `ScrollHost::settled`
+  (`nsh-core`'s `scroll.rs`; macOS from its own `emit`), iOS in `scroll_event`, Android through `Native.scrollEnded`
+  (`ScrollBox.settled`), the web through `nsh_scroll_ended` (`nsh.js` `scrollEvent`), the headless driver at its
+  scroll steps' and drags' ends. `Easing` (React Native's: `linear`, `ease`, `quad`, `cubic`, `poly`,
   `sin`, `circle`, `exp`, `elastic`, `back`, `bounce`, `bezier`, `in` / `out` / `inOut`) is data decoded in Rust
   (`nsh_core::animation::Easing::Curve`), never a JS function: the curves, their parameters and defaults are one table
   (`nsh_core::js::animation`), which decodes them, declares their types (`animation::declarations`) and gives `nsh/animated` its curves (`animation::tables`). `Animated.timing` / `spring` / `decay` / `sequence` / `parallel` / `stagger` /

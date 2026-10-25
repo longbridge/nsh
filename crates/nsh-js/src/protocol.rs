@@ -635,6 +635,7 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
             input: r.int()? as nsh_core::animation::NodeId,
             min: r.number()?,
             max: r.number()?,
+            snap: r.value()?.as_bool().unwrap_or(false),
         },
         ANIMATION_START_COMPOSITE => {
             // `node` carries the animation id here.

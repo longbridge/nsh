@@ -56,6 +56,7 @@ re-exported by `nsh`). Apps import a primitive's tag from `nsh` (`native-pipelin
 | `nsh/native` | `nativeComponent(name, { props, events })`: a component for a native component the embedding app registered; `nativeModule(specifier)`: the exports of a UI set the embedding app gave its engines (`EngineConfig::ui_sets`), as one object made by the loader's code (`modules::host_module`, the same values an import of the set gets) and kept per specifier; only the host's sets, never nsh's own modules or the runtime's registries | `platform_modules.rs`, `modules.rs` |
 | `nsh/ios` | `isAvailable`, `InputAccessoryView` | `platform_modules.rs` |
 | `nsh/android` | `isAvailable`, `Toast.show(message, "short" \| "long")`, `BackHandler` (`onBackPress` native: it returns the function that removes the listener, which goes with the owner it was added under, as `keymap.bind`'s bindings do; `exitApp` Rust) | `platform_modules.rs` + its registry |
+| `nsh/mobile` | What iOS and Android share: `isAvailable`, `TabBar` (a Rust component of the runtime, `nsh_core::mobile`; its root is the native component `nsh/tab-bar` (`nsh_core::platform::TAB_BAR_COMPONENT`), which the iOS (`UITabBar`, `system_tab_bar.rs`) and Android (Material 3's navigation bar, `TabBarComponent.java`) backends register themselves; `items` (`{ title, icon }`), `selectedIndex`, `onChange(index)`; a hidden view elsewhere). The engine gives the core the runtime registries' components with the UI sets' (`Registry::merged`) | `platform_modules.rs` + its registry |
 | `nsh/desktop` | `isAvailable`, `titleBar()` (the environment's `title_bar`), `Menu.setApplicationMenu` / `Menu.popup` (decoded natively into `nsh_core::desktop::MenuItem`s, the items' functions kept by id, called on the root's `onMenu`), `Window` (Rust: `setTitle`, `setTitleBar`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setLevel`, `orderFront`, `close`); all of it is `Command::Desktop` on the root, which mobile platforms ignore | `desktop.rs` + its registry |
 | `nsh/base` | The unstyled foundation of an app's UI. Navigation: `NavStack`, `NavPage`, `createNavStack`, `Dialog` (natives of `nsh-js`, `Registry::native_values`). Safe areas: `SafeAreaView` (Rust, with `Edge`), `safeArea()`, `safeAreaInsets()`, `Insets` (re-exported from the environment). Alerts: `AlertDialog.show({ title, description, actions, presentation })` (a promise of the chosen action's `id`, its `label` without one, `null` when closed without one; `presentation: "actionSheet"` is a list dialog on Android), the platform's own. A press target: `Button` (Rust; no look of its own). A checked / unchecked / indeterminate control: `Checkbox` (Rust; its indicator is a part the app styles and fills with its mark, the `indicator` slot, `checked:` / `indeterminate:` / `disabled:` following the checkbox through `Interactive::project_checked` / `project_indeterminate`). A set of options the user picks one of: `Radio` in a `RadioGroup` (Rust; the group holds no value, each radio its `checked`, the app's indicator its children with `group-checked:` classes). An on / off control: `Switch` (Rust; its track and thumb are parts the app styles, `checked:` / `disabled:` following the switch through `Interactive::project_checked`). The tabs of a tab list: `Tab` in `Tabs` (Rust; the list holds no value, each tab its `selected` and `onPress`, the app shows the selected section's content). A region that expands and collapses: `Collapsible` (Rust; its children always, its `content` slot after them while `open`, kept while collapsed; the trigger and its `expanded` state are the app's). How far a task is: `Progress` (Rust; the progress bar role with the range 0 to 100 and its value, `Accessible::accessibility_value`, none while `indeterminate`; its track and indicator are parts the app styles, the indicator `value` percent of the track's width). Documents: `TextView` (Rust; Markdown, HTML or blocks, `docs/dev/text-view.md`). The keyboard: `KeyboardAvoidingView` (Rust, with `AvoidBehavior`), `Keyboard.dismiss`, `keyboardFrame()` (re-exported from the environment). The status bar: `statusBar` of `NavPage` and `Dialog` (a host prop of screens and modals; `StatusBar`, `StatusBarForeground` declared with the navigation) over `nsh.json`'s `"statusBar"` | `nsh_base::registry()` (`crates/nsh-base`); `navigation.rs`, `env.rs` |
 | an app's UI set (`app/native`) | The Rust components, modules and classes of the app's crate (`#[native_module("app/native")]`) | the registry (`components.rs`, `classes.rs`) |
@@ -79,6 +80,23 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   `headerLargeTitle`, `headerBackTitle`, AlertDialog's `closeOnEscape` / `closeOnBackdropPress`; `api-naming.md`).
 - A module's exports are made when a bundle first imports it; what must always happen (the root's direction, the
   themes) is the renderer's (`dom.rs`, `setup`), not a module's.
+
+## Component scope and project goals
+
+NSH targets native views and interaction with app-owned visual design. Common controls have one cross-platform
+home in `nsh/base`: `Switch` owns behavior, state, focus and accessibility while the app styles its track, thumb and
+states. A system-styled version of an existing control does not justify a second platform-specific public component.
+Improve the shared component's behavior and customization surface instead.
+
+Platform modules expose capabilities with platform-specific semantics. `nsh/mobile`'s `TabBar` is a mobile navigation
+capability; `nsh/base`'s `Tabs` switches tabbed content across platforms. Its presence does not establish a parallel
+catalog of system-styled form controls. Existing system-managed presentations (navigation headers and alerts) keep
+their documented behavior. An embedding app can register a particular native control when its product requires one.
+
+For additions, classify the capability by role, keep shared state and event contracts coherent across targets,
+and verify input, accessibility, measurement and app styling on affected platforms. The public
+[Goals and design principles](../../website/docs/goals.md) describes this boundary for app developers.
+The discussion in [PR #438](https://github.com/longbridge/nsh/pull/438#issuecomment-6380656764) records the rationale.
 
 ## Where new things go
 

@@ -172,6 +172,7 @@ impl Mounter {
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
+                        crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
                 }
@@ -218,6 +219,7 @@ impl Mounter {
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
                 crate::input::style_changed(view);
                 crate::transition::style_changed(surface, view, &old);
+                crate::access::style_changed(view, &old);
                 view.moved();
             }
             MountItem::Text {
@@ -367,6 +369,17 @@ impl Mounter {
             // The animator's (`Surface::apply`).
             MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
         }
+        // What the item may change on screen is drawn again, whether or not
+        // what applied it said so: a partial frame draws only that.
+        match redrawn(item) {
+            Redraw::Nothing => {}
+            Redraw::View(id) => {
+                if let Some(view) = self.views.get(id) {
+                    view.changed();
+                }
+            }
+            Redraw::Window => surface.invalidate(),
+        }
     }
 
     /// Takes `view` out of its parent (a modal is dismissed).
@@ -432,5 +445,57 @@ impl Mounter {
             }
             other => crate::system::command(surface, id, other),
         }
+    }
+}
+
+/// What a mount item may change on screen.
+enum Redraw {
+    Nothing,
+    /// The view and its subtree.
+    View(NodeId),
+    /// Anything.
+    Window,
+}
+
+/// What `item` may change on screen once applied. Insertions and removals
+/// draw their parents again themselves ([`NshView::insert_before`],
+/// [`NshView::unparent`]); a new view is drawn when it is inserted.
+fn redrawn(item: &MountItem) -> Redraw {
+    match item {
+        MountItem::Create { .. }
+        | MountItem::Insert { .. }
+        | MountItem::Remove { .. }
+        | MountItem::Delete { .. }
+        | MountItem::TrackStates { .. }
+        | MountItem::Events { .. }
+        | MountItem::AccessibilityLabel { .. }
+        | MountItem::Gestures { .. }
+        | MountItem::Keymap(_)
+        | MountItem::LayoutAnimation(_)
+        | MountItem::Animation(_)
+        | MountItem::AnimationBindings { .. } => Redraw::Nothing,
+        MountItem::Frame { id, .. }
+        | MountItem::ViewStyle { id, .. }
+        | MountItem::Text { id, .. }
+        | MountItem::Image { id, .. }
+        | MountItem::ScrollConfig { id, .. }
+        | MountItem::ScrollContent { id, .. }
+        | MountItem::ScrollBy { id, .. }
+        | MountItem::Overflow { id, .. }
+        | MountItem::StickyCells { id, .. }
+        | MountItem::ScrollBehavior { id, .. }
+        | MountItem::Refreshing { id, .. }
+        | MountItem::Canvas { id, .. }
+        | MountItem::ViewProps { id, .. }
+        | MountItem::Input { id, .. }
+        | MountItem::InputValue { id, .. }
+        | MountItem::InputContent { id, .. }
+        | MountItem::ScreenConfig { id, .. }
+        | MountItem::ModalConfig { id, .. }
+        | MountItem::NativeProps { id, .. }
+        | MountItem::Component { id, .. }
+        | MountItem::ComponentProps { id, .. }
+        | MountItem::Command { id, .. } => Redraw::View(*id),
+        MountItem::LayoutDirection { .. } | MountItem::Appearance { .. } => Redraw::Window,
     }
 }

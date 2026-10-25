@@ -256,7 +256,11 @@ reasons: `reactive-components.md`.
   the host itself (no view of its own); a region as the root goes in the host view.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
-  `measure_text(font, text)` is `measureText`; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
+  `measure_text(font, text)` is `measureText`; `.fill_style_from_view(initial)`, `.stroke_style_from_view(initial)`,
+  `.line_width_from_view()` and `.line_dash_from_view()` paint with the canvas view's `fill` / `stroke` /
+  `strokeWidth` / `strokeDasharray` (inherited as CSS inherits them, `currentColor` its text color), which the core
+  sets before the platform gets the drawing (`Drawing::view_paints`), so a component's shapes take the app's
+  `fill-*` / `stroke-*` classes and follow them and the appearance without being drawn again; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
   in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(point, rule)` /
   `.is_point_in_stroke(point)` and, with a `Path2D`, `.path_contains(&path, point, rule)` /
   `.stroke_contains(&path, point)`, on a painter made by a function the drawing and the press handler both call, to
@@ -837,7 +841,7 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
 - **`onOpenChange(open, reason)`**: every request to open or close (`OpenState::request`; not a request for what it
   already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
-  `"contextMenu"`. The app changing `open` itself is not reported here.
+  `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
   motion is over; a popup at once), whoever opened or closed it, the app's `open` included (`lifecycle`, an effect on
   what is shown). `Tooltip` has these two and `onOpenChange`.
@@ -857,6 +861,23 @@ is for, never by replacing one popup with another everywhere:
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
 | `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
+
+`Sheet` opts into downward dragging with `closeOnSwipe` (default false, bottom side). Its pan updates
+`SheetMotion.drag_y` on the platform's animation graph; a clamped fraction of the measured panel height drives both
+translation and backdrop opacity. Release past 30% or 800 points/second requests `onOpenChange(false, "swipe")`
+after `onCancel`; a shorter, cancelled or declined gesture returns the panel. Reduced motion snaps the release.
+`Interactive::pan_enabled` filters the mounted pan values and event mask together, retaining the listeners and
+children while a sheet enters, exits or changes permission. `pan_scroll_handoff` asks UIKit to share the touched
+descendant scroll's pan: its initial offset consumes the first part of the drag, and the remaining downward
+distance moves the panel while the scroll stays at its adjusted top. Other backends retain their usual scroll
+arbitration. `SheetMotion` tags completion callbacks and fallback timers with a generation, so a prior exit cannot
+unmount a reopened sheet or its backdrop.
+
+`SheetMotion` derives the programmatic translation from the remaining fade fraction times the current measured
+distance from the edge. Lazy JS children can fill in over several layout rounds in one native batch; later content
+can also resize a panel during its entrance. Each layout updates that distance in the native graph, preserving the
+animation's progress and completion time. `Sheet`, phone menus and compact dock drawers share this path. Dragging
+is a separate value in points, so entrance measurement does not clamp or replace the finger's displacement.
 
 The menus' items reach their menu through context (`MenuContext`: the close function, the sheet's path of submenus,
 the level's open submenu), so the app arranges them freely. Every item of a sheet's hidden levels is out of the tree

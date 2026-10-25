@@ -150,6 +150,17 @@ impl Animator {
         true
     }
 
+    /// Scroll view `id` came to rest (its drag and momentum ended): the
+    /// snapping `diffClamp`s that follow its scroll value settle
+    /// ([`super::Graph::settle`]). True if one starts moving: the platform
+    /// runs its frames.
+    pub fn scroll_ended(&mut self, id: u32) -> bool {
+        let Some(&(node, _)) = self.scrolls.get(&id) else {
+            return false;
+        };
+        self.graph.settle(node)
+    }
+
     /// A drag began: grabbing an animating value stops it where it is.
     pub fn pan_began(&mut self, id: u32) {
         let graph = &self.graph;
@@ -309,5 +320,44 @@ mod tests {
             cells: vec![cell(None)],
         });
         assert!(a.sticky_views().is_empty());
+    }
+
+    #[test]
+    fn a_scroll_view_at_rest_settles_the_values_that_follow_it() {
+        let mut a = Animator::default();
+        a.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        a.apply(&MountItem::Animation(AnimationOp::CreateDiffClamp {
+            node: 3,
+            input: 2,
+            min: 0.0,
+            max: 50.0,
+            snap: true,
+        }));
+        a.apply(&MountItem::ScrollConfig {
+            id: 4,
+            horizontal: false,
+            scrollbar_visible: true,
+            scroll_value: Some(2),
+            keyboard_dismiss: Default::default(),
+            mirrored: false,
+        });
+        for y in [0.0, 200.0, 190.0] {
+            a.scrolled(
+                4,
+                crate::geometry::point(crate::Points(0.0), crate::Points(y)),
+            );
+            a.graph.eval(3);
+        }
+        // Another scroll view's end settles nothing.
+        assert!(!a.scroll_ended(5));
+        assert!(a.scroll_ended(4));
+        assert!(a.animating());
+        a.tick(1.0);
+        a.tick(1.3);
+        assert_eq!(a.graph.eval(3).number(), 50.0);
+        assert!(!a.animating());
     }
 }

@@ -146,6 +146,19 @@ expect Bound: not bound
 tap id:bind
 expect Bound: function function
 covers [nsh/keymap] keymap
+# mod-mobile
+tap id:case-mod-mobile
+expect Mobile: true
+# The system's bar, in the frame the app's style gives it; the app owns
+# which tab is selected and follows the user's choice (`onChange`).
+expect Tab: 0
+frame id:tab-bar 0 784 390 60
+tap id:tab-next
+expect Tab: 1
+tap id:tab-rename
+frame id:tab-bar 0 784 390 60
+covers [nsh/mobile] isAvailable
+covers [nsh/mobile] TabBar
 # mod-storage
 tap id:case-mod-storage
 # a key set twice keeps its last value, and a missing key reads null.

@@ -115,6 +115,13 @@ impl ScrollHost for Host<'_> {
         });
     }
 
+    fn settled(&self) {
+        let id = self.view.id();
+        if self.surface.anim.borrow_mut().scroll_ended(id) {
+            self.surface.ensure_ticking();
+        }
+    }
+
     fn dark(&self) -> bool {
         self.surface.environment.get().color_scheme == nsh_engine::ColorScheme::Dark
     }

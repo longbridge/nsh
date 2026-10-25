@@ -107,6 +107,14 @@ impl UiAnimation {
         self.graph.is_animating()
     }
 
+    /// Scroll view `id` came to rest: the snapping values that follow its
+    /// scroll value settle (the next frame request runs them).
+    pub(crate) fn scroll_ended(&mut self, id: u32) {
+        if let Some(&(node, _)) = self.scrolls.get(&id) {
+            self.graph.settle(node);
+        }
+    }
+
     /// A scroll view moved: feeds its scroll value.
     pub(crate) fn scrolled(&mut self, id: u32, x: f32, y: f32) -> bool {
         let Some(&(node, horizontal)) = self.scrolls.get(&id) else {

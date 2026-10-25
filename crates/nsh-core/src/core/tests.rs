@@ -10,6 +10,7 @@ use crate::{
 /// 8pt per char, 16pt per line, wraps at `max_width`. Counts calls.
 #[derive(Default)]
 struct FakeEngine {
+    prepares: Cell<u32>,
     measures: Cell<u32>,
     layouts: Cell<u32>,
 }
@@ -26,6 +27,7 @@ impl TextEngine for FakeEngine {
     type Prepared = (usize, Vec<u32>);
 
     fn prepare(&self, text: &AttributedText) -> (usize, Vec<u32>) {
+        self.prepares.set(self.prepares.get() + 1);
         (
             text.text.chars().count(),
             text.attachments.iter().map(|a| a.index).collect(),
@@ -254,6 +256,64 @@ fn core() -> Core<FakeEngine> {
     c
 }
 
+#[test]
+fn pan_permission_filters_native_values_and_events_without_losing_them() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PanValues(None, Some(7)),
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::PanEnd,
+                enabled: true,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::Press,
+                enabled: true,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PanEnabled(false),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|item| matches!(item,
+        MountItem::Events { id: 2, events } if events.contains(EventKind::Press) && !events.contains(EventKind::PanEnd)
+    )));
+    assert!(batch.items.iter().any(|item| matches!(item,
+        MountItem::Gestures { id: 2, values } if values.pan_y.is_none()
+    )));
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::PanEnabled(true),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|item| matches!(item,
+        MountItem::Events { id: 2, events } if events.contains(EventKind::PanEnd) && events.contains(EventKind::Press)
+    )));
+    assert!(batch.items.iter().any(|item| matches!(item,
+        MountItem::Gestures { id: 2, values } if values.pan_y == Some(7)
+    )));
+}
+
 /// The tokens of a theme file of the tests' own format, `{ "key":
 /// "#rrggbb", … }` over the sample's (`None`: the sample's): the core reads
 /// `uiTheme` with what a UI set brings.
@@ -369,6 +429,129 @@ fn mounts_subtree_built_detached() {
     assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 36.0)));
     assert_eq!(frame_of(&batch, 3), Some(rect(10.0, 10.0, 300.0, 16.0)));
     assert!(c.commit().is_none(), "second commit is a no-op");
+}
+
+#[test]
+fn a_spans_test_id_is_in_its_blocks_text() {
+    let mut c = core();
+    let text_of = |c: &mut Core<_>| {
+        c.commit().unwrap().items.into_iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text),
+            _ => None,
+        })
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::TextLayout,
+                enabled: true,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "see ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "docs".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(text_of(&mut c).unwrap().test_ids, []);
+    js_events(&mut c);
+    let prepares = c.text_engine.prepares.get();
+    let layouts = c.text_engine.layouts.get();
+    let measures = c.text_engine.measures.get();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::TestId(Some("docs".into())),
+        }],
+    );
+    assert_eq!(
+        text_of(&mut c).unwrap().test_ids,
+        [crate::SpanTestId {
+            start: 4,
+            end: 8,
+            test_id: "docs".into(),
+        }]
+    );
+    assert_eq!(
+        c.text_engine.layouts.get(),
+        layouts,
+        "test IDs are metadata, not glyphs"
+    );
+    assert_eq!(c.text_engine.prepares.get(), prepares);
+    assert_eq!(c.text_engine.measures.get(), measures);
+    assert!(js_events(&mut c).is_empty(), "no onTextLayout for test IDs");
+    for id in [Some("renamed"), None] {
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(id.map(Into::into)),
+            }],
+        );
+        let text = text_of(&mut c).unwrap();
+        assert_eq!(text.test_ids.first().map(|s| s.test_id.as_ref()), id);
+        assert_eq!(c.text_engine.layouts.get(), layouts);
+        assert_eq!(c.text_engine.prepares.get(), prepares);
+        assert_eq!(c.text_engine.measures.get(), measures);
+        assert!(js_events(&mut c).is_empty());
+    }
+    // A simultaneous content change still rebuilds the native text.
+    apply(
+        &mut c,
+        vec![
+            Op::SetText {
+                id: 5,
+                text: "updated docs".into(),
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(Some("updated".into())),
+            },
+        ],
+    );
+    let text = text_of(&mut c).unwrap();
+    assert_eq!(text.text, "see updated docs");
+    assert_eq!(text.test_ids[0].test_id.as_ref(), "updated");
+    assert!(c.text_engine.layouts.get() > layouts);
+    assert!(
+        js_events(&mut c)
+            .iter()
+            .any(|e| e.1 == EventKind::TextLayout)
+    );
 }
 
 #[test]
@@ -1524,9 +1707,21 @@ fn render_binds(
     cells: &mut Vec<u32>,
     row_height: f32,
 ) -> usize {
+    render_list_binds(c, next_id, cells, row_height, usize::MAX)
+}
+
+/// [`render_binds`] with at most `paced` of the overscan's waiting binds,
+/// as an engine short of time.
+fn render_list_binds(
+    c: &mut Core<FakeEngine>,
+    next_id: &mut u32,
+    cells: &mut Vec<u32>,
+    row_height: f32,
+    paced: usize,
+) -> usize {
     let mut binds = Vec::new();
     c.take_list_binds(&mut binds);
-    c.take_paced_list_binds(usize::MAX, &mut binds);
+    c.take_paced_list_binds(paced, &mut binds);
     let mut count = 0;
     for bind in binds {
         for (slot, index) in bind.binds {
@@ -1676,6 +1871,311 @@ fn list_keeps_visible_content_anchored() {
     assert!(
         shift > 0.0,
         "rows above the viewport grew; content must be shifted down"
+    );
+}
+
+/// Whether `batch` last hid view `id` from sight (`visibility: hidden`)
+/// and from screen readers, if it sent either.
+fn hidden_in(batch: &MountBatch, id: NodeId) -> (Option<bool>, Option<bool>) {
+    let style = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewStyle { id: i, style } if *i == id => Some(style.hidden),
+        _ => None,
+    });
+    let props = batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ViewProps { id: i, props } if *i == id => Some(props.accessibility.hidden),
+        _ => None,
+    });
+    (style, props)
+}
+
+/// A list of 1000 rows estimated at 50 pt in a 400 pt viewport.
+fn thousand_rows(c: &mut Core<FakeEngine>) {
+    apply(
+        c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(1000),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+}
+
+#[test]
+fn spare_list_cells_are_hidden_until_placed_again() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    let batch = c.commit().unwrap();
+    for &cell in &cells {
+        assert_eq!(
+            hidden_in(&batch, cell),
+            (None, None),
+            "cell {cell} shows its row"
+        );
+    }
+
+    // The data shrinks: the cells left without a row still show their
+    // last one, so they are hidden as well as moved out of sight.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(3),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    for &cell in &cells[..3] {
+        assert_eq!(
+            hidden_in(&batch, cell),
+            (None, None),
+            "cell {cell} keeps its row"
+        );
+    }
+    for (row, &cell) in cells.iter().enumerate().skip(3) {
+        assert_eq!(
+            hidden_in(&batch, cell),
+            (Some(true), Some(true)),
+            "spare cell {cell}"
+        );
+        // Those in the render window (to 800 pt) move out of sight too.
+        let moved = (row < 16).then_some(-1.0e6);
+        assert_eq!(
+            frame_of(&batch, cell).map(|f| f.origin.y.0),
+            moved,
+            "spare cell {cell}"
+        );
+    }
+
+    // It grows again: the cells come back with their new rows.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(1000),
+        }],
+    );
+    c.commit();
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 14);
+    let batch = c.commit().unwrap();
+    let mut rows: Vec<f32> = cells[3..]
+        .iter()
+        .map(|&cell| {
+            assert_eq!(
+                hidden_in(&batch, cell),
+                (Some(false), Some(false)),
+                "cell {cell}"
+            );
+            frame_of(&batch, cell).expect("placed").origin.y.0
+        })
+        .collect();
+    rows.sort_by(f32::total_cmp);
+    assert_eq!(
+        rows,
+        (3..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
+    );
+
+    // Far down, the window takes all 17 cells and 8 more; back at the
+    // top, the 8 it no longer needs stay where the window left them,
+    // showing their own rows there.
+    c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
+    c.commit();
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
+    c.commit();
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+    assert!(
+        c.commit().is_none(),
+        "nothing to mount before the rows are bound"
+    );
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    let placed = c.commit().unwrap();
+    let mut spare = Vec::new();
+    for &cell in &cells {
+        assert_eq!(hidden_in(&placed, cell), (None, None), "cell {cell}");
+        match frame_of(&placed, cell) {
+            Some(frame) => assert!(frame.origin.y.0 <= 800.0, "cell {cell} at {frame:?}"),
+            None => spare.push(cell),
+        }
+    }
+    assert_eq!(spare.len(), 8);
+    // Once the items change, the rows they show may be gone: hidden.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(999),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    for &cell in &cells {
+        let hidden = if spare.contains(&cell) {
+            Some(true)
+        } else {
+            None
+        };
+        assert_eq!(hidden_in(&batch, cell), (hidden, hidden), "cell {cell}");
+        assert_eq!(frame_of(&batch, cell), None, "cell {cell}");
+    }
+}
+
+#[test]
+fn scrolling_on_hides_no_cells() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    // 70 pt rows estimated at 50: the cells made for the rows that do
+    // not fit after all are hidden.
+    let mut hidden = Vec::new();
+    for _ in 0..2 {
+        render_binds(&mut c, &mut next_id, &mut cells, 70.0);
+        let Some(batch) = c.commit() else { continue };
+        for &cell in &cells {
+            match hidden_in(&batch, cell).0 {
+                Some(true) => hidden.push(cell),
+                Some(false) => hidden.retain(|&h| h != cell),
+                None => {}
+            }
+        }
+    }
+    assert!(!hidden.is_empty());
+    // Then the window loses a row at one end before it gains one at the
+    // other (1200 pt is no multiple of 70), which takes the cell left
+    // behind: no cell is hidden, those hidden are shown once reused.
+    let mut at = 0.0;
+    while at < 3000.0 {
+        at += 10.0;
+        c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+        let mut batches: Vec<MountBatch> = c.commit().into_iter().collect();
+        render_binds(&mut c, &mut next_id, &mut cells, 70.0);
+        batches.extend(c.commit());
+        for batch in &batches {
+            for &cell in &cells {
+                match hidden_in(batch, cell).0 {
+                    None => {}
+                    Some(false) if hidden.contains(&cell) => hidden.retain(|&h| h != cell),
+                    other => panic!("cell {cell} at {at}: {other:?}"),
+                }
+            }
+        }
+    }
+    assert!(hidden.is_empty(), "{hidden:?}");
+}
+
+#[test]
+fn list_cells_unbound_before_they_are_placed_are_hidden() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    // The data shrinks before the new cells were placed: those without a
+    // row show the content made for it, with no frame to move them away.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(3),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    for (row, &cell) in cells.iter().enumerate() {
+        if row < 3 {
+            assert_eq!(hidden_in(&batch, cell), (None, None), "cell {cell}");
+            assert!(frame_of(&batch, cell).is_some());
+        } else {
+            assert_eq!(
+                hidden_in(&batch, cell),
+                (Some(true), Some(true)),
+                "cell {cell}"
+            );
+            assert_eq!(frame_of(&batch, cell), None, "cell {cell} was never placed");
+        }
+    }
+}
+
+#[test]
+fn spare_list_cells_waiting_for_a_paced_bind_show_when_it_lands() {
+    let mut c = core();
+    thousand_rows(&mut c);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 17);
+    c.commit();
+    // Shrunk to 3 rows, the other 14 cells are hidden; grown back, the
+    // viewport's rows bind at once and the overscan's wait.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(3),
+        }],
+    );
+    c.commit();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Count(1000),
+        }],
+    );
+    c.commit();
+    assert_eq!(
+        render_list_binds(&mut c, &mut next_id, &mut cells, 50.0, 0),
+        5
+    );
+    assert!(c.has_paced_list_binds());
+    let batch = c.commit().unwrap();
+    let mut waiting = Vec::new();
+    for &cell in &cells[3..] {
+        match hidden_in(&batch, cell) {
+            (Some(false), Some(false)) => {
+                assert!(frame_of(&batch, cell).is_some(), "cell {cell}")
+            }
+            // Still hidden, out of sight, until its bind lands.
+            (None, None) => {
+                assert_eq!(frame_of(&batch, cell), None, "cell {cell}");
+                waiting.push(cell);
+            }
+            other => panic!("cell {cell}: {other:?}"),
+        }
+    }
+    assert_eq!(waiting.len(), 9);
+    // The paced binds land: those cells show, at their rows.
+    assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 9);
+    assert!(!c.has_paced_list_binds());
+    let batch = c.commit().unwrap();
+    let mut rows: Vec<f32> = waiting
+        .iter()
+        .map(|&cell| {
+            assert_eq!(
+                hidden_in(&batch, cell),
+                (Some(false), Some(false)),
+                "cell {cell}"
+            );
+            frame_of(&batch, cell).expect("placed").origin.y.0
+        })
+        .collect();
+    rows.sort_by(f32::total_cmp);
+    assert_eq!(
+        rows,
+        (8..17).map(|row| 50.0 * row as f32).collect::<Vec<_>>()
     );
 }
 
@@ -8683,6 +9183,72 @@ mod painter {
         assert!(!p.stroke_contains(&top, at(50.0, 5.0)));
     }
 
+    /// A drawing painting with its view's style: the stroke, width and
+    /// dashes of the canvas's own style, the fill `currentColor`, the text
+    /// color the canvas inherits.
+    #[component]
+    fn ViewPainted() -> impl IntoElement {
+        use crate::{PatchValue, StyleDecl, StyleKey, SvgPaint};
+        let set = |key, value: &str| StyleDecl::Set(key, PatchValue::Str(value.into()));
+        let p = Painter::new()
+            .fill_style_from_view(SvgPaint::CurrentColor)
+            .stroke_style_from_view(SvgPaint::None)
+            .line_width_from_view()
+            .line_dash_from_view()
+            .fill_rect(0.0, 0.0, 10.0, 10.0);
+        view()
+            .inline_style(crate::ui::Style::from_decls([set(
+                StyleKey::Color,
+                "#00ff00",
+            )]))
+            .child(canvas(p).inline_style(crate::ui::Style::from_decls([
+                set(StyleKey::Stroke, "#ff0000"),
+                set(StyleKey::StrokeWidth, "3"),
+                set(StyleKey::StrokeDasharray, "2 1"),
+            ])))
+            .child(canvas(
+                Painter::new()
+                    .fill_style_from_view(SvgPaint::None)
+                    .stroke_style_from_view(SvgPaint::CurrentColor)
+                    .line_width_from_view()
+                    .line_dash_from_view(),
+            ))
+    }
+
+    #[test]
+    fn drawings_paint_with_their_views_style() {
+        let mut c = core();
+        c.mount_root(&crate::ui::Root::new::<ViewPainted>(|| ()));
+        let batch = c.commit().unwrap();
+        let drawings: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Canvas { drawing, .. } => Some(drawing.clone()),
+                _ => None,
+            })
+            .collect();
+        let [styled, plain] = &drawings[..] else {
+            panic!("{drawings:?}")
+        };
+        let green = crate::style::Color(0x00ff_00ff);
+        assert_eq!(styled.ops[0], CanvasOp::FillStyle(Paint::Color(green)));
+        assert_eq!(
+            styled.ops[1],
+            CanvasOp::StrokeStyle(Paint::Color(crate::style::Color(0xff00_00ff)))
+        );
+        assert_eq!(styled.ops[2], CanvasOp::LineWidth(Num::Const(3.0)));
+        assert_eq!(styled.ops[3], CanvasOp::LineDash([px(2.0), px(1.0)].into()));
+        // Nothing set: the drawing's initial paints, CSS's width of 1 and a
+        // solid line.
+        assert_eq!(
+            plain.ops[0],
+            CanvasOp::FillStyle(Paint::Color(crate::style::Color::TRANSPARENT))
+        );
+        assert_eq!(plain.ops[1], CanvasOp::StrokeStyle(Paint::Color(green)));
+        assert_eq!(plain.ops[2], CanvasOp::LineWidth(Num::Const(1.0)));
+        assert_eq!(plain.ops[3], CanvasOp::LineDash([].into()));
+    }
     /// A label placed by its measured width, gradients, a stroked SVG path
     /// and an operation built by hand reading an animated value.
     #[component]
@@ -10829,6 +11395,47 @@ mod views {
             })
             .expect("a screen");
         assert_eq!(config.right_system_item, None);
+    }
+
+    /// A Rust component that renders a native component.
+    #[derive(Default)]
+    struct NativeHost;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct NativeHostProps {}
+
+    impl Component for NativeHost {
+        type Props = NativeHostProps;
+        type Event = NoEvent;
+
+        fn view(_: NativeHostProps, _: Scope<NoEvent>) -> impl IntoElement {
+            crate::ui::native("test.native")
+                .prop("items", serde_json::json!([1]))
+                .flex_1()
+        }
+    }
+
+    /// The platform is told which component a Rust `native()` element holds,
+    /// and gets its props.
+    #[test]
+    fn a_native_component_from_rust_is_named() {
+        let mut c = core();
+        c.mount_root(&Root::new::<NativeHost>(|| NativeHostProps {}));
+        let batch = c.commit().unwrap();
+        let named = batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Component { name, .. } if &**name == "test.native"));
+        assert!(
+            named,
+            "the platform is told which component to make: {:#?}",
+            batch.items
+        );
+        let props = batch.items.iter().any(|i| {
+            matches!(i, MountItem::ComponentProps { props, .. }
+            if props.iter().any(|(k, _)| &**k == "items"))
+        });
+        assert!(props, "its props reach it");
     }
 
     /// A holder of its children as its view's root.
@@ -14927,6 +15534,49 @@ fn a_list_below_a_header_renders_the_rows_in_the_pages_viewport() {
     assert_eq!(frame_of(&batch, cell), Some(rect(0.0, 2000.0, 320.0, 50.0)));
 }
 
+#[test]
+fn a_page_lists_spare_cells_are_hidden_when_its_rows_change() {
+    let mut c = core();
+    page(&mut c, 100.0, &[100]);
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    let mut batches = Vec::new();
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    batches.extend(c.commit());
+    // Far down the page, then other rows and back to the top, as an app
+    // switching what the page shows does.
+    c.set_scroll_offset(2, point(px(0.0), px(4000.0)), 0);
+    batches.extend(c.commit());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    batches.extend(c.commit());
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::Count(20),
+        }],
+    );
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), 0);
+    batches.extend(c.commit());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    batches.extend(c.commit());
+    // Every cell without a row is hidden, every cell with one shows.
+    let list = c.nodes[c.key(4).unwrap() as usize].list.as_ref().unwrap();
+    let mut spare = 0;
+    for (slot, &cell) in cells.iter().enumerate() {
+        let (mut style, mut props) = (false, false);
+        for batch in &batches {
+            let (s, p) = hidden_in(batch, cell);
+            style = s.unwrap_or(style);
+            props = p.unwrap_or(props);
+        }
+        let unbound = list.slots[slot].index.is_none();
+        spare += unbound as u32;
+        assert_eq!((style, props), (unbound, unbound), "cell {cell}");
+    }
+    assert!(spare > 0);
+}
+
 /// The slot list `id` bound item `index` to.
 fn bound_slot(c: &Core<FakeEngine>, id: NodeId, index: u32) -> u32 {
     let list = c.nodes[c.key(id).unwrap() as usize].list.as_ref().unwrap();
@@ -16972,4 +17622,110 @@ fn audio_session_reaches_the_video() {
         })
         .expect("the video's props");
     assert_eq!(props.audio_session, crate::AudioSession::Playback);
+}
+
+#[test]
+fn span_test_ids_reuse_fitted_and_hidden_layouts() {
+    for (fit, hidden) in [(true, false), (false, true)] {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(16.0)),
+                    ("fontSize", StyleValue::Number(20.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::AdjustsFontSizeToFit(fit),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "long enough to shrink".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        if hidden {
+            ops.push(style_op(2, &[("display", StyleValue::Str("none"))]));
+        }
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        let (old_text, old_layout) = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text {
+                    id: 2,
+                    text,
+                    layout,
+                    ..
+                } => Some((text.clone(), layout.clone())),
+                _ => None,
+            })
+            .unwrap();
+        let counts = (
+            c.text_engine.prepares.get(),
+            c.text_engine.layouts.get(),
+            c.text_engine.measures.get(),
+        );
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 4,
+                prop: Prop::TestId(Some("cached".into())),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        let (text, layout) = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text {
+                    id: 2,
+                    text,
+                    layout,
+                    ..
+                } => Some((text, layout)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.test_ids[0].test_id.as_ref(), "cached");
+        assert_eq!(
+            text.spans, old_text.spans,
+            "keep the actual drawn font size"
+        );
+        assert!(Arc::ptr_eq(&old_layout.0, &layout.0));
+        assert_eq!(
+            (
+                c.text_engine.prepares.get(),
+                c.text_engine.layouts.get(),
+                c.text_engine.measures.get()
+            ),
+            counts
+        );
+    }
 }

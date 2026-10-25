@@ -387,6 +387,7 @@ impl Headless {
         if offset < Points::ZERO {
             self.scroll_to(view, Points::ZERO);
         }
+        self.animator.scroll_ended(view);
         self.send(view, EventKind::ScrollEnd, self.scroll_payload(view));
     }
 

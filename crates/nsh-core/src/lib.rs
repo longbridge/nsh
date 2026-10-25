@@ -29,6 +29,7 @@ pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
+pub mod mobile;
 mod mount;
 pub mod navigation;
 pub mod open_url;
@@ -97,14 +98,15 @@ pub use crate::{
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, FontFamily,
-        FontVariant, ObjectPosition, PatchValue, PositionAxis, Shadow, Style, StyleDecl,
-        StyleError, StyleKey, StylePatch, StyleValue, TextAlign, TextDecoration, TextShadow,
-        TextStyle, TextTransform, TransformOrigin, VerticalAlign, ViewStyle,
+        FontVariant, ObjectPosition, PaintStyle, PatchValue, PositionAxis, Shadow, Style,
+        StyleDecl, StyleError, StyleKey, StylePatch, StyleValue, SvgPaint, TextAlign,
+        TextDecoration, TextShadow, TextStyle, TextTransform, TransformOrigin, VerticalAlign,
+        ViewStyle,
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
-        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, TextAttachment, TextBackground,
-        TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
+        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
+        TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
     },
     transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
 };

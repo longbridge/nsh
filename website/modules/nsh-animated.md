@@ -150,7 +150,7 @@ class AnimatedNode {
     extrapolateRight?: Extrapolation;
     easing?: Easing;
   }): AnimatedNode;
-  diffClamp(min: number, max: number): AnimatedNode;
+  diffClamp(min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   add(b: AnimatedNode | number): AnimatedNode;
   sub(b: AnimatedNode | number): AnimatedNode;
   mul(b: AnimatedNode | number): AnimatedNode;
@@ -166,7 +166,7 @@ A node of the native animation graph: a `AnimatedValue`, or a value derived from
 | Method | Rust | Description |
 |---|---|---|
 | `interpolate(config)` | `interpolate(&input, &output)`, `interpolate_colors(&input, &colors)`, `interpolate_with(&input, output, Interpolation { … })` | Maps the input through piecewise ranges. `outputRange` holds numbers, colors (`"#ff0000"`, `"rgba(…)"`) or angles (`"45deg"`, `"1rad"`). Outside `inputRange` it clamps by default; `extrapolate` (or `extrapolateLeft` / `extrapolateRight`) can be `"extend"` (continue the line), `"clamp"` or `"identity"` (pass the input through). `easing` shapes each segment. Rust takes numbers, theme colors (which follow the appearance) and angles as degrees for `bind_rotate`. |
-| `diffClamp(min, max)` | `diff_clamp(min, max)` | Follows the input's changes but keeps the result within `min..max`: a header that hides while content scrolls up and comes back as soon as it scrolls down. |
+| `diffClamp(min, max, options?)` | `diff_clamp(min, max)`, `diff_clamp_with(min, max, DiffClamp::snapping())` | Follows the input's changes but keeps the result within `min..max`: a header that hides while content scrolls up and comes back as soon as it scrolls down. `snap: true` settles it at the nearer bound in 200 ms when its scroll view comes to rest, at `max` only once the input reached `max`. |
 | `add`, `sub`, `mul`, `div` | `add`, `sub`, `mul`, `div` | Arithmetic with another node or a constant. |
 | `mod(b)` | `modulo(b)` | Modulo, never negative for a positive `b` (keeping angles in 0..360). |
 
@@ -345,7 +345,7 @@ const Animated: {
   multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
-  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   sampleSpring(config: SpringConfig & { from?: number }, fps?: number): number[];
   sampleDecay(config: DecayConfig & { from?: number }, fps?: number): number[];
 };
@@ -474,7 +474,7 @@ value.timing(1, { easing: "easeOut" });
 const LayoutAnimation: {
   configureNext(config: LayoutAnimationConfig, onEnd?: () => void): void;
   create(duration: number, type?: LayoutAnimationType, property?: LayoutAnimationProperty): LayoutAnimationConfig;
-  Types: { easeInEaseOut; spring; linear; easeIn; easeOut };
+  Types: { easeInEaseOut; spring; linear; easeIn; easeOut; keyboard };
   Properties: { opacity; scaleXY };
   Presets: { easeInEaseOut: LayoutAnimationConfig; linear: LayoutAnimationConfig; spring: LayoutAnimationConfig };
   easeInEaseOut(onEnd?: () => void): void;
@@ -490,7 +490,7 @@ interface LayoutAnimationConfig {
 }
 
 interface LayoutAnimationAnimation {
-  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut";
+  type?: "easeInEaseOut" | "spring" | "linear" | "easeIn" | "easeOut" | "keyboard";
   property?: "opacity" | "scaleXY" | "scale";
   duration?: number;
   delay?: number;

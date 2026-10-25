@@ -1359,7 +1359,14 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
-        core.set_components(nsh_core::ui::Registry::merged(&config.ui_sets));
+        // The runtime's components (`nsh/mobile`'s `TabBar`) and the UI
+        // sets the host serves.
+        let sets: Vec<_> = nsh_core::runtime::registries()
+            .iter()
+            .chain(&config.ui_sets)
+            .cloned()
+            .collect();
+        core.set_components(nsh_core::ui::Registry::merged(&sets));
         // The JS calls Rust posts queue in one place, which the core
         // releases in order with the ops (a post during a synchronous call)
         // and the script runs.

@@ -12,6 +12,7 @@ import android.util.SparseLongArray;
 import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.AccelerateInterpolator;
+import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
 import android.view.ViewConfiguration;
@@ -95,11 +96,12 @@ final class Mounter {
 
     /** One part of a layout animation (`encode.rs` `layout_transition`). */
     private static final class Transition {
-        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring
+        int curve; // 0 linear, 1 ease in, 2 ease out, 3 ease in-out, 4 spring, 5 the keyboard's
         float damping;
         int property; // 0 opacity, 1 scale
         long duration, delay;
 
+        /** The curve's interpolator; the keyboard's (5) is {@link Mounter#interpolator}'s. */
         TimeInterpolator interpolator() {
             switch (curve) {
                 case 0: return new LinearInterpolator();
@@ -191,6 +193,7 @@ final class Mounter {
         this.context = host.getContext();
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
+        components.put(TabBarComponent.NAME, c -> new TabBarComponent(context, c, this::night));
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
         images.inline = uri -> {
             long handle = handle();
@@ -362,6 +365,12 @@ final class Mounter {
                 }
                 case APPEARANCE: {
                     appearance = b.getInt();
+                    for (int i = 0; i < views.size(); i++) {
+                        View v = views.valueAt(i);
+                        if (v instanceof ComponentBox && ((ComponentBox) v).component instanceof TabBarComponent) {
+                            ((TabBarComponent) ((ComponentBox) v).component).appearanceChanged();
+                        }
+                    }
                     if (barStyle == 0) {
                         SystemUi.statusBar(context, barStyle, barHidden, night());
                         for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
@@ -527,6 +536,41 @@ final class Mounter {
         outputs(Native.afterBatch(handle(), seq));
     }
 
+    // --- The keyboard's motion --------------------------------------------------
+
+    /** How the software keyboard last moved: what curve 5 follows (`LayoutCurve::Keyboard`). */
+    private TimeInterpolator keyboardInterpolator = new AccelerateDecelerateInterpolator();
+    private long keyboardDuration = 250;
+    /** When it started to move ({@link AnimationUtils#currentAnimationTimeMillis}). */
+    private long keyboardStart = Long.MIN_VALUE;
+
+    /** The keyboard starts to move, along {@code interpolator} for {@code duration} ms. */
+    void keyboardMotion(TimeInterpolator interpolator, long duration) {
+        keyboardInterpolator = interpolator != null ? interpolator : new AccelerateDecelerateInterpolator();
+        keyboardDuration = duration;
+        keyboardStart = AnimationUtils.currentAnimationTimeMillis();
+    }
+
+    private TimeInterpolator interpolator(Transition t) {
+        return t.curve == 5 ? keyboardInterpolator : t.interpolator();
+    }
+
+    /**
+     * Starts {@code a}; on the keyboard's curve, as if it had started when
+     * the keyboard did, so that it keeps pace with the keyboard however late
+     * the batch came (the engine thread answers the insets a frame or more
+     * after the system dispatched them).
+     */
+    private void start(ValueAnimator a, Transition t) {
+        a.start();
+        if (t.curve == 5) keyboardAligned(a);
+    }
+
+    private void keyboardAligned(ValueAnimator a) {
+        long elapsed = AnimationUtils.currentAnimationTimeMillis() - keyboardStart - a.getStartDelay();
+        if (elapsed > 0 && elapsed < a.getDuration()) a.setCurrentPlayTime(elapsed);
+    }
+
     private static Transition transition(ByteBuffer b) {
         if (b.getInt() == 0) return null;
         Transition t = new Transition();
@@ -591,7 +635,10 @@ final class Mounter {
         if (layoutAnimation != null) created.add(id);
     }
 
-    /** The components the app registered ({@link NshView#registerComponent}). */
+    /**
+     * The components the app registered ({@link NshView#registerComponent}),
+     * and NSH's own (named under {@code nsh/}), which the app cannot replace.
+     */
     final java.util.Map<String, NshComponent.Factory> components = new java.util.HashMap<>();
     private final java.util.Set<String> missingComponents = new java.util.HashSet<>();
 
@@ -678,7 +725,7 @@ final class Mounter {
         ValueAnimator a = ValueAnimator.ofFloat(0, 1);
         a.setDuration(t.duration);
         a.setStartDelay(t.delay);
-        a.setInterpolator(t.interpolator());
+        a.setInterpolator(interpolator(t));
         float alpha = v.getAlpha(), sx = v.getScaleX(), sy = v.getScaleY();
         a.addUpdateListener(x -> {
             float f = 1 - (float) x.getAnimatedValue();
@@ -708,7 +755,7 @@ final class Mounter {
             }
         });
         layoutAnimators.put(id, a);
-        a.start();
+        start(a, t);
     }
 
     /** Fades or grows in the views a layout animation created. */
@@ -727,7 +774,7 @@ final class Mounter {
             ValueAnimator a = ValueAnimator.ofFloat(0, 1);
             a.setDuration(t.duration);
             a.setStartDelay(t.delay);
-            a.setInterpolator(t.interpolator());
+            a.setInterpolator(interpolator(t));
             a.addUpdateListener(x -> {
                 float f = (float) x.getAnimatedValue();
                 if (t.property == 1) {
@@ -737,7 +784,7 @@ final class Mounter {
                     v.setAlpha(alpha * f);
                 }
             });
-            a.start();
+            start(a, t);
         }
     }
 
@@ -816,7 +863,7 @@ final class Mounter {
             ValueAnimator a = ValueAnimator.ofFloat(0, 1);
             a.setDuration(t.duration);
             a.setStartDelay(t.delay);
-            a.setInterpolator(t.interpolator());
+            a.setInterpolator(interpolator(t));
             a.addUpdateListener(x2 -> {
                 float k = (float) x2.getAnimatedValue();
                 f.left = Math.round(from[0] + (to[0] - from[0]) * k);
@@ -827,7 +874,7 @@ final class Mounter {
             });
             if (running != null) running.cancel();
             layoutAnimators.put(id, a);
-            a.start();
+            start(a, t);
         } else {
             f.left = to[0];
             f.top = to[1];
@@ -2109,7 +2156,14 @@ final class Mounter {
         int margin = px(12);
         ScrollBox scroll = scrollAround(focused);
         if (scroll != null) {
-            scroll.reveal(focused, margin);
+            // With the keyboard: along its curve, from when it started.
+            ValueAnimator a = ValueAnimator.ofFloat(0, 1);
+            a.setDuration(keyboardDuration);
+            a.setInterpolator(keyboardInterpolator);
+            if (scroll.reveal(focused, margin, a)) {
+                a.start();
+                keyboardAligned(a);
+            }
         } else {
             Rect r = new Rect(0, -margin, focused.getWidth(), focused.getHeight() + margin);
             focused.requestRectangleOnScreen(r, false);
@@ -2213,6 +2267,11 @@ final class Mounter {
 
     void scroll(int id, float x, float y, int applied) {
         outputs(Native.scroll(handle(), id, x, y, applied));
+    }
+
+    /** Scroll view {@code id} came to rest: snapping animated values settle. */
+    void scrollEnded(int id) {
+        outputs(Native.scrollEnded(handle(), id));
     }
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {

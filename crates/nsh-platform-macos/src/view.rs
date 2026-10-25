@@ -45,7 +45,7 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D};
 
 use crate::surface::{Surface, quiet};
@@ -365,8 +365,23 @@ define_class!(
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
             let dirty = CGContext::clip_bounding_box(c);
-            crate::canvas::draw(cx, &state, dirty);
+            let (size, scale) = (layer.bounds().size, layer.contentsScale());
+            let asynchronous = layer.drawsAsynchronously();
+            if crate::fps::measuring() && state.canvas.is_some() {
+                let start = std::time::Instant::now();
+                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous);
+                crate::fps::drew_canvas(start.elapsed());
+            } else {
+                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous);
+            }
             CGContext::restore_g_state(c);
+            // Where the next paint happens (`canvas.rs`): Core Animation's
+            // threads for a canvas painting often, at once for the rest.
+            if let Some(canvas) = &state.canvas
+                && canvas.draws_asynchronously() != asynchronous
+            {
+                layer.setDrawsAsynchronously(!asynchronous);
+            }
         }
 
         // Nothing nsh changes animates implicitly.
@@ -687,6 +702,23 @@ define_class!(
             unsafe { msg_send![super(self), setFrameSize: size] }
             if let Some(surface) = self.surface() {
                 surface.resized(size.width as f32, size.height as f32);
+            }
+        }
+
+        // None while VoiceOver must not reach the children
+        // ([`crate::access::hides_children`]), else AppKit's.
+        #[unsafe(method_id(accessibilityChildren))]
+        fn accessibility_children(&self) -> Option<Retained<NSArray>> {
+            let hides = self
+                .ivars()
+                .state
+                .try_borrow()
+                .is_ok_and(|s| crate::access::hides_children(&s));
+            if hides {
+                Some(NSArray::new())
+            } else {
+                // SAFETY: NSView's own children.
+                unsafe { msg_send![super(self), accessibilityChildren] }
             }
         }
 
@@ -1165,11 +1197,12 @@ impl NshView {
         layer.setDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*drawer)));
         layer.setAnchorPoint(CGPoint::new(0.0, 0.0));
         layer.setNeedsDisplayOnBoundsChange(true);
-        // Canvases are drawn on Core Animation's threads (paths and
-        // gradients are costly; measured on the Stocks demo, main-thread
-        // time per frame went from 3.5 to 1.8 ms); text is cheap to draw
-        // and drawn at once, which was faster.
-        layer.setDrawsAsynchronously(self.state().canvas.is_some());
+        // Drawn at once: text is cheap to draw, which measured faster than
+        // asynchronously, and a canvas moves to Core Animation's threads
+        // once it paints often (`canvas.rs`; paths and gradients are
+        // costly: on the Stocks demo main-thread time per frame went from
+        // 3.5 to 1.8 ms).
+        layer.setDrawsAsynchronously(false);
         layer.setContentsScale(self.backing_scale());
         // Above the decoration behind it (fills, gradients, inset
         // shadows), below the children and the borders in front.

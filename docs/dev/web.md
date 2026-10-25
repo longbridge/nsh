@@ -487,9 +487,11 @@ browsers' touches into what phones report:
   (`grabBar`: `onScrollDragStart` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
-  Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
-  passed as the character they type without modifiers, else the US layout's character of their `code`; `mod` was
-  resolved by the browser's platform, `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
+  Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding.
+  Its `f64` result preserves the full `u32` ID range, including Rust shortcuts and overlay Escape, apart from
+  the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
+  modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
+  `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
   cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selection area the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
@@ -588,7 +590,13 @@ between them); the core bounds their travel by the list's end. A cell's animated
 
 A smooth scroll of the core's (`scrollTo` with `animated`) in flight moves with a `ScrollBy` (`op_sb` retargets it),
 as the native backends move theirs: setting `scrollTop` would stop the browser's smooth scroll. The user's wheel,
-pointer, touch or key takes it over.
+pointer, touch or key takes it over. The glides of the wheel and the keys are nsh's (`scrollSmoothly`, on animation
+frames), and each frame writes the glide's offset: a `ScrollBy` moves the glide with the content, and `scrollTo` /
+`scrollToEnd` stop it where it is (`stopGlide`) before they scroll, as the native backends interrupt theirs. The
+scroll they stop ends with theirs (the browser's `scrollend`), or at once when they leave the view where it is.
+The stationary check uses exact clamped offsets: fractional movement can reach another physical pixel. If a
+fractional target instead rounds back to the current offset, a 200 ms quiet-period fallback ends the scroll;
+scroll events postpone it, and the browser's `scrollend` cancels it.
 
 ## Platform services
 

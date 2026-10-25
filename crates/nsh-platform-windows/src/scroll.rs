@@ -115,6 +115,13 @@ impl ScrollHost for Host<'_> {
             shared::frame(&host, now * 1000.0)
         });
     }
+
+    fn settled(&self) {
+        let id = self.view.id();
+        if self.surface.anim.borrow_mut().scroll_ended(id) {
+            self.surface.ensure_ticking();
+        }
+    }
 }
 
 /// Whether `view` is a scroll view the user can scroll by `(dx, dy)`

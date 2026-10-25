@@ -57,6 +57,8 @@ pub fn registries() -> &'static [Registry] {
         storage.module::<storage::Storage>();
         let mut desktop = Registry::runtime("nsh/desktop");
         desktop.module::<desktop::Window>();
+        let mut mobile = Registry::runtime("nsh/mobile");
+        mobile.register::<crate::mobile::TabBar>();
         let mut os = Registry::runtime("os");
         os.module::<os::Os>();
         let mut process = Registry::runtime("process");
@@ -83,6 +85,7 @@ pub fn registries() -> &'static [Registry] {
             picker,
             storage,
             desktop,
+            mobile,
             os,
             net,
             process,

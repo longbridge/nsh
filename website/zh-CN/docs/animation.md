@@ -610,6 +610,16 @@ const header = scroll.diffClamp(0, 56);
 <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: header.mul(-1) }] }}>…</View>
 ```
 
+加上 `{ snap: true }`（Rust 中为 `diff_clamp_with(min, max, DiffClamp::snapping())`）后，滚动停止时只显示了一部分的标题栏会把移动做完：它在 UI 线程上用 200 ms 停到完全显示或完全隐藏，取较近的一端。只有当页面滚动的距离至少达到标题栏的高度时它才会隐藏，因此滚动距离不足的页面会显示整个标题栏。移动过程中再次滚动，标题栏会从当前位置继续跟随滚动。
+
+```rust tabs
+let header = offset.diff_clamp_with(0.0, 56.0, DiffClamp::snapping());
+```
+
+```tsx tabs
+const header = scroll.diffClamp(0, 56, { snap: true });
+```
+
 ## 组合动画
 
 动画由步骤搭建（Rust 中的 `Animation`，TSX 中 `nsh/animated` 的 `Animated`），整棵动画树在原生端运行：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也不运行你的代码。
@@ -777,7 +787,7 @@ const remove = () => {
 | `easeInEaseOut(onEnd?)`、`linear(onEnd?)`、`spring(onEnd?)` | 用预设调用 `animate_layout` | 使用预设调用 `configureNext`。 |
 | `Types`、`Properties` | `LayoutCurve`、`LayoutProperty` | 构造配置时用的名称。 |
 
-配置为 `{ duration, create?, update?, delete? }`（Rust 中为 `LayoutAnimation { create, update, delete }`）：`create` 用于插入的视图，`update` 用于移动或改变尺寸的视图，`delete` 用于删除的视图。每个阶段为 `{ type?, property?, duration?, delay?, springDamping? }`（`LayoutTransition { curve, property, duration_ms, delay_ms }`），其中 `type` 为 `"easeInEaseOut"`、`"spring"`、`"linear"`、`"easeIn"` 或 `"easeOut"`；`property` 是出现和消失的视图做什么动画（`"opacity"`、`"scaleXY"`、`"scale"`）；`springDamping`（0..1，默认 0.7；`LayoutCurve::Spring { damping }`）决定弹簧的过冲程度。
+配置为 `{ duration, create?, update?, delete? }`（Rust 中为 `LayoutAnimation { create, update, delete }`）：`create` 用于插入的视图，`update` 用于移动或改变尺寸的视图，`delete` 用于删除的视图。每个阶段为 `{ type?, property?, duration?, delay?, springDamping? }`（`LayoutTransition { curve, property, duration_ms, delay_ms }`），其中 `type` 为 `"easeInEaseOut"`、`"spring"`、`"linear"`、`"easeIn"`、`"easeOut"` 或 `"keyboard"`（软键盘自己的曲线，从键盘开始移动时算起，让为它让位的内容与它一起移动；`LayoutCurve::Keyboard`）；`property` 是出现和消失的视图做什么动画（`"opacity"`、`"scaleXY"`、`"scale"`）；`springDamping`（0..1，默认 0.7；`LayoutCurve::Spring { damping }`）决定弹簧的过冲程度。
 
 ```rust tabs
 use nsh_core::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};

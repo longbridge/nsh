@@ -334,7 +334,14 @@ pub(crate) fn can_bounce(view: &NshView, dx: f32, dy: f32) -> bool {
 }
 
 /// Sends `kind` with the offset if JS listens to it.
-fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
+fn emit(surface: &Rc<Surface>, view: &NshView, kind: EventKind) {
+    if kind == EventKind::ScrollEnd {
+        // Snapping animated values that follow it settle.
+        let id = view.state().id;
+        if surface.anim.borrow_mut().scroll_ended(id) {
+            surface.ensure_ticking();
+        }
+    }
     let (id, x, y) = {
         let state = view.state();
         if !state.events.contains(kind) {

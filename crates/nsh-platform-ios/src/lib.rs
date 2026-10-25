@@ -27,6 +27,7 @@ mod decor;
 pub mod dev;
 #[cfg(feature = "embed")]
 pub mod embed;
+mod fps;
 mod image;
 mod input;
 mod interaction;
@@ -42,6 +43,7 @@ mod surface;
 #[cfg(feature = "dev")]
 mod synth;
 mod system;
+mod system_tab_bar;
 mod target;
 mod text;
 mod text_selection;

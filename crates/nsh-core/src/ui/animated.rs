@@ -410,13 +410,41 @@ impl AnimatedNode {
     /// Follows the value's changes but stays within `min..=max` (a header
     /// hiding as content scrolls up).
     pub fn diff_clamp(&self, min: f32, max: f32) -> AnimatedNode {
+        self.diff_clamp_with(min, max, DiffClamp::default())
+    }
+
+    /// [`Self::diff_clamp`] with options: [`DiffClamp::snapping`] settles at
+    /// the nearer bound when the scroll view the value follows comes to rest
+    /// (TS: `diffClamp(min, max, { snap: true })`).
+    pub fn diff_clamp_with(&self, min: f32, max: f32, options: DiffClamp) -> AnimatedNode {
         let op = AnimationOp::CreateDiffClamp {
             node: 0,
             input: self.id(),
             min,
             max,
+            snap: options.snap,
         };
         self.derive(DerivedKey { op, dark: None }, None, None).0
+    }
+}
+
+/// Options of [`AnimatedNode::diff_clamp_with`] (TS: `diffClamp`'s third
+/// argument). By default it only follows its input.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct DiffClamp {
+    /// When the scroll view the value follows comes to rest between the
+    /// bounds, it settles at the nearer one in 200 ms, easing out: a
+    /// floating bar shows or hides fully. It settles at `max` only once
+    /// the value reached `max`, so a page scrolled less than the bar's
+    /// height shows the whole bar.
+    pub snap: bool,
+}
+
+impl DiffClamp {
+    /// Settles at the nearer bound when its scroll view rests.
+    pub const fn snapping() -> Self {
+        Self { snap: true }
     }
 }
 
@@ -809,6 +837,11 @@ impl AnimatedValue {
     /// See [`AnimatedNode::diff_clamp`].
     pub fn diff_clamp(&self, min: f32, max: f32) -> AnimatedNode {
         self.0.diff_clamp(min, max)
+    }
+
+    /// See [`AnimatedNode::diff_clamp_with`].
+    pub fn diff_clamp_with(&self, min: f32, max: f32, options: DiffClamp) -> AnimatedNode {
+        self.0.diff_clamp_with(min, max, options)
     }
 
     /// See [`AnimatedNode::add`].

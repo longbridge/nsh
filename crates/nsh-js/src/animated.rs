@@ -467,12 +467,17 @@ fn derived_hash(op: &AnimationOp) -> u64 {
             }
         }
         AnimationOp::CreateDiffClamp {
-            input, min, max, ..
+            input,
+            min,
+            max,
+            snap,
+            ..
         } => {
             kind = 1;
             ids[0] = *input;
             f(*min);
             f(*max);
+            snap.hash(&mut h);
         }
         AnimationOp::CreateMath { a, b, .. } => {
             kind = 2;
@@ -547,6 +552,9 @@ unsafe extern "C" fn node_diff_clamp(
         int(input),
         dup(cx, arg(argc, argv, 0)),
         dup(cx, arg(argc, argv, 1)),
+        // `{ snap }`: settles at the nearer bound when its scroll view
+        // rests (undefined without options).
+        get(cx, arg(argc, argv, 2), c"snap"),
     ];
     derived(cx, vec![dup(cx, this)], ANIMATION_DIFF_CLAMP, args)
 }
@@ -2089,8 +2097,12 @@ pub(crate) const EXPORTS: &[Item] = &[
     easing?: Easing;
   }): AnimatedNode;
   /** Follows this node's changes, kept within `min..max` (a header that
-   * hides while content scrolls up and comes back as it scrolls down). */
-  diffClamp(min: number, max: number): AnimatedNode;
+   * hides while content scrolls up and comes back as it scrolls down).
+   * `snap`: when the scroll view it follows comes to rest between the
+   * bounds, it settles at the nearer one in 200 ms, easing out (a floating
+   * bar shows or hides fully); at `max` only once this node reached
+   * `max`, so a page scrolled less than the bar's height shows all of it. */
+  diffClamp(min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   add(b: AnimatedNode | number): AnimatedNode;
   sub(b: AnimatedNode | number): AnimatedNode;
   mul(b: AnimatedNode | number): AnimatedNode;
@@ -2374,7 +2386,7 @@ export interface AnimatedModule {
   multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
-  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   /** The values a spring moves through from `from` (0), one per frame at
    * `fps` (60) until it rests: the exact curve the native driver runs. */
   sampleSpring(config: SpringConfig & { from?: number }, fps?: number): number[];
@@ -2623,6 +2635,39 @@ mod tests {
             ops.contains(&nsh_core::animation::AnimationOp::Release { node: 2 }),
             "{ops:?}"
         );
+    }
+
+    #[test]
+    fn a_diff_clamp_asks_to_snap() {
+        use nsh_core::animation::AnimationOp as A;
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { Animated, AnimatedValue } from "nsh/animated";
+            import { text } from "nsh:rt";
+            const scroll = new AnimatedValue(0);
+            const plain = scroll.diffClamp(0, 56);
+            const snapping = scroll.diffClamp(0, 56, { snap: true });
+            globalThis.report = () =>
+                text([
+                    plain === snapping,
+                    Animated.diffClamp(scroll, 0, 56, { snap: true }) === snapping,
+                    scroll.diffClamp(0, 56, { snap: false }) === plain,
+                ].join(","));
+            globalThis.keep = [scroll, plain, snapping];
+            "#,
+        )
+        .unwrap();
+        let snaps: Vec<bool> = animation_ops(&host)
+            .into_iter()
+            .filter_map(|o| match o {
+                A::CreateDiffClamp { snap, .. } => Some(snap),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(snaps, [false, true]);
+        // Equal ones share a node; a snapping one is not a plain one.
+        assert_eq!(report(&host).as_deref(), Some("false,true,true"));
     }
 
     #[test]

@@ -309,6 +309,10 @@ pub enum AnimationOp {
         min: f32,
         /// Upper bound.
         max: f32,
+        /// Settles at the nearer bound when the scroll view its input
+        /// follows comes to rest ([`super::Graph::settle`]): a floating bar
+        /// shows or hides fully.
+        snap: bool,
     },
     /// Combines two operands.
     CreateMath {

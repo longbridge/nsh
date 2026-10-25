@@ -182,6 +182,10 @@ pub trait ScrollHost {
     fn attached(&self) -> bool;
     /// Runs [`frame`] on every frame from now until it returns false.
     fn start_ticking(&self);
+    /// The scroll view came to rest (its drag and momentum ended, as it
+    /// sends `onScrollEnd`): the snapping animated values that follow it
+    /// settle ([`crate::animation::Animator::scroll_ended`]).
+    fn settled(&self) {}
     /// Whether the surface is dark, kept in [`Live::dark`] when the
     /// indicator shows.
     fn dark(&self) -> bool {
@@ -610,6 +614,9 @@ fn enabled(host: &impl ScrollHost) -> bool {
 
 /// Sends `kind` with the offset if JS listens to it.
 fn emit(host: &impl ScrollHost, kind: EventKind) {
+    if kind == EventKind::ScrollEnd {
+        host.settled();
+    }
     if !host.listens(kind) {
         return;
     }

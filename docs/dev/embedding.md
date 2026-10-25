@@ -40,7 +40,9 @@
 - **Native components** (`nsh/native`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`
-  (`NativeComponent`) — one registry per view, no globals. JS declares one with `nativeComponent<P, E>(name, { props,
+  (`NativeComponent`) — one registry per view, no globals. Names under `nsh/` are NSH's own
+  (`nsh_core::platform::is_reserved_component`): each backend registers them itself (`nsh/tab-bar`, `nsh/mobile`'s
+  `TabBar`, on iOS and Android) and refuses an embedding app's registration of one with a warning. JS declares one with `nativeComponent<P, E>(name, { props,
   events })`; the element is a `<native>` leaf: `component` names it, each own prop goes as `$name` (any JSON value,
   `nsh_core::JsonValue`, sent when it changes; `undefined` removes it), view props (style, classes, accessibility, `ref`)
   stay the box's. The core sends `Create` (`ViewKind::Native`, a box decorated and placed like any view), then

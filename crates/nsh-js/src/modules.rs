@@ -390,6 +390,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: decl!(desktop::TYPES),
     },
     NativeModule {
+        name: "nsh/mobile",
+        exports: platform_modules::MOBILE_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: "",
+    },
+    NativeModule {
         name: "nsh/webview",
         exports: platform_modules::WEBVIEW_EXPORTS,
         also: &[],
