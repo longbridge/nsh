@@ -31,7 +31,13 @@
 //!   background while the surface's window is not shown (the root
 //!   unmapped, the window minimized, or suspended: on another workspace or
 //!   covered, where the compositor says so), active while one of the
-//!   app's windows has the focus, inactive otherwise.
+//!   app's windows has the focus, inactive otherwise;
+//! - the time zone (`timeZone()`): the process's own (`TZ`, when it names
+//!   a zone: its local times follow it), else the system's as systemd's
+//!   `timedated` keeps it (`org.freedesktop.timedate1`'s `Timezone` on the
+//!   system bus, live: a change of the setting comes as a property
+//!   change), else the zone `/etc/localtime` links to, else
+//!   `/etc/timezone`'s.
 //!
 //! Safe area and keyboard height are zero: desktop windows have neither.
 //!
@@ -61,7 +67,7 @@ use nsh_core::{
     geometry::{Point, Size, px},
     platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -156,6 +162,8 @@ struct System {
     /// GTK's scheme before this module set it.
     initial_dark: bool,
     screen_reader: bool,
+    /// `timedated`'s zone: `None` until it gives one (or without it).
+    time_zone: Option<TimeZone>,
     /// The D-Bus proxies, kept for their signals.
     proxies: Vec<gio::DBusProxy>,
     overlays: Vec<Overlay>,
@@ -250,6 +258,7 @@ fn install() {
     settings.connect_gtk_enable_animations_notify(|_| system_changed());
     watch_portal();
     watch_screen_reader();
+    watch_time_zone();
 }
 
 /// The system's settings now.
@@ -358,6 +367,7 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface);
+    env.time_zone = time_zone();
     surface.set_environment(env);
     // Images decoded for the old scale (a Wayland fractional scale arrives
     // after the first frame) decode again at the new one.
@@ -496,6 +506,72 @@ fn watch_portal() {
             SYSTEM.with(|s| s.borrow_mut().proxies.push(proxy));
         },
     );
+}
+
+/// The time zone (`timeZone()`): the process's own (`TZ`), else the
+/// system's.
+fn time_zone() -> TimeZone {
+    // As `Intl` takes `TZ`: a zone's name, not a POSIX rule (`CET-1CEST`).
+    let own = std::env::var("TZ")
+        .ok()
+        .filter(|tz| {
+            let tz = tz.trim_start_matches(':');
+            tz.contains('/') || tz == "UTC"
+        })
+        .and_then(|tz| TimeZone::parse(&tz));
+    own.or_else(|| SYSTEM.with(|s| s.borrow().time_zone))
+        .or_else(|| {
+            std::fs::read_link("/etc/localtime")
+                .ok()
+                .and_then(|target| TimeZone::parse(&target.to_string_lossy()))
+        })
+        .or_else(|| {
+            std::fs::read_to_string("/etc/timezone")
+                .ok()
+                .and_then(|name| TimeZone::parse(name.trim()))
+        })
+        .unwrap_or_default()
+}
+
+/// Follows the system's time zone as `timedated` keeps it: a change of the
+/// setting (the system's settings, `timedatectl`) comes as a change of its
+/// `Timezone` property. Without a system bus or `timedated` (a container,
+/// a CI's virtual display) the zone comes from `/etc` alone.
+fn watch_time_zone() {
+    gio::DBusProxy::for_bus(
+        gio::BusType::System,
+        gio::DBusProxyFlags::NONE,
+        None,
+        "org.freedesktop.timedate1",
+        "/org/freedesktop/timedate1",
+        "org.freedesktop.timedate1",
+        gio::Cancellable::NONE,
+        |proxy| {
+            let proxy = match proxy {
+                Ok(proxy) => proxy,
+                Err(err) => return log::debug!("no timedated: {err}"),
+            };
+            timedated_zone(&proxy);
+            proxy.connect_g_properties_changed(|proxy, _, _| timedated_zone(proxy));
+            SYSTEM.with(|s| s.borrow_mut().proxies.push(proxy));
+        },
+    );
+}
+
+/// `timedated`'s `Timezone` as the proxy has it now: every surface follows a
+/// change.
+fn timedated_zone(proxy: &gio::DBusProxy) {
+    let zone = proxy
+        .cached_property("Timezone")
+        .and_then(|value| value.get::<String>())
+        .and_then(|name| TimeZone::parse(&name));
+    let changed = SYSTEM.with(|s| {
+        let mut s = s.borrow_mut();
+        std::mem::replace(&mut s.time_zone, zone) != zone
+    });
+    if changed {
+        system_changed();
+    }
 }
 
 /// The portal's `color-scheme` value (a `u`, possibly boxed in a `v`).
