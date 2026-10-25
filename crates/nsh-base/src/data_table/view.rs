@@ -234,7 +234,7 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
     let (scroll_dt, hscroll_dt, strip_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (top_dt, height_dt, width_dt) = (dt.clone(), dt.clone(), dt.clone());
     let (press, hover, menu) = (dt.clone(), dt.clone(), dt.clone());
-    let leave = dt.clone();
+    let (leave, focus, blur) = (dt.clone(), dt.clone(), dt.clone());
     scroll()
         .element_ref(&dt.vscroll)
         .absolute()
@@ -288,6 +288,10 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                         press.press_with(e.position, e.clicks, e.modifiers);
                                     }
                                 })
+                                // Tab stops at the table here, as at gpui-component's
+                                // (a `tab_stop` focus handle): its keys follow.
+                                .on_focus(move || focus.set_focus(true))
+                                .on_blur(move || blur.set_focus(false))
                                 .on_hover_move(move |e: &HoverEvent| hover.hover_at(e.position))
                                 .on_hover_out(move || {
                                     if leave.hover.get_untracked().is_some() {
@@ -748,6 +752,8 @@ fn body_row(
             .absolute()
             .left_0()
             .style_when(move || row.get().is_none(), |s| s.hidden())
+            // The table is one stop of Tab, its hit layer.
+            .focusable(false)
             .on(EventKind::Press, move |p: &EventPayload| {
                 let Some(row) = row.get_untracked() else {
                     return;
@@ -1344,6 +1350,7 @@ fn title(dt: Dt, def: usize, which: Region, w: Windows, custom: bool) -> impl In
                 |s| s.bg(move || theme().primary.opacity(0.12)),
             )
             .style_when(move || dragging.get(), |s| s.opacity(0.5))
+            .focusable(false)
             .on(EventKind::Press, move |p: &EventPayload| {
                 // A drag that moved the column is not a press.
                 if up_moved.replace(false) {
@@ -1491,6 +1498,7 @@ fn sort_button(
             .active(|s| s.bg(pressed))
             .role(AccessibilityRole::Button)
             .test_id(&id)
+            .focusable(false)
             .on_press(move || dt.sort_next(def))
             .child(sort_icon(sorted)),
         props,

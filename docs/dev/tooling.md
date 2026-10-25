@@ -291,8 +291,11 @@ report it:
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh/keymap` parses it for the
   environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
   (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
-  root hears `KeyCommand`; else the focused input takes a character, Backspace or the return key, else Escape goes
-  back when there is something to go back from;
+  root hears `KeyCommand`; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
+  (`Screen::tab_stops`: editable inputs and pressables not `focusable={false}`, in tree order, around), telling the
+  views `Blur` / `Focus` and the pressable its `FOCUSED` state, and Return or Space presses the pressable it is on (a
+  press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
+  Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
   of its JS condition), `idle` (until quiet for a while).

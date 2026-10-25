@@ -279,6 +279,8 @@ import { Menu } from "nsh/desktop";
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `focusable` | `.focusable(..)` | `boolean` | `true` | 可按压的视图是否是 Tab 的停靠点；`false` 把它留给指针（关闭浮层的背景层、用方向键切换的列表行）。 |
+| `onFocus` | `.on_focus(..)` | `() => void` | | Tab（或 `focus()`）让视图获得了键盘焦点。 |
+| `onBlur` | `.on_blur(..)` | `() => void` | | 键盘焦点离开了视图。 |
 
 ```rust tabs
 view()

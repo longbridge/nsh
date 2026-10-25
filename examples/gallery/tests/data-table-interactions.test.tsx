@@ -110,6 +110,36 @@ test("the keys move the selection, Escape clears it, the shortcut copies it", as
   await app.waitFor("text:/sel=none/");
 });
 
+test("Tab reaches the table as one stop, and Escape lets Tab move on", async () => {
+  const app = await start();
+  // Tab goes from stop to stop until it reaches the table, whose rows,
+  // titles and sort buttons are no stops of their own; the first arrow key
+  // there selects the first row. (Where Tab starts is the platform's: a
+  // browser starts where the page was last clicked.)
+  let tabs = 0;
+  while (!app.shows("text:/sel=0:-/")) {
+    expect(++tabs).toBeLessThan(40);
+    await app.keyboard.press("tab");
+    await app.keyboard.press("down");
+    await app.wait(50);
+  }
+  await app.keyboard.press("down");
+  await app.waitFor("text:/sel=1:-/");
+  // Escape clears the selection, then gives the keyboard back: Shift+Tab
+  // moves on, to the stop before the table, and the arrow keys leave it.
+  await app.keyboard.press("escape");
+  await app.waitFor("text:/sel=none/");
+  await app.keyboard.press("escape");
+  await app.keyboard.press("shift+tab");
+  await app.keyboard.press("down");
+  await app.wait(100);
+  expect(app.shows("text:/sel=none/")).toBe(true);
+  // Return presses the stop Tab is on: the last switch, which reads the
+  // table.
+  await app.keyboard.press("enter");
+  await app.waitFor("text:/read=none rows/");
+});
+
 test("loopSelection wraps the arrow keys, and Tab moves between cells", async () => {
   const app = await start();
   await app.press("loop");
