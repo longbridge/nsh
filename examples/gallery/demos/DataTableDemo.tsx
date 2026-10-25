@@ -155,7 +155,7 @@ function row(id: number, n: Float64Array): (string | number)[] {
   const out: (string | number)[] = [
     id + 1,
     symbol,
-    `${name} ${id}`,
+    `${name} ${id + 1}`,
     market,
     n[F.price].toFixed(2),
     signed(n[F.change]),
@@ -175,8 +175,9 @@ function row(id: number, n: Float64Array): (string | number)[] {
     n[F.ratio].toFixed(2),
     n[F.ranking].toFixed(1),
   ];
+  // Indicators move with the change, each by a share of its own.
   for (let i = 0; i < INDICATORS; i++) {
-    out.push(signed(n[(i + 1) % FIELDS] * (i % 2 ? 0.01 : -0.01) * n[F.percent] * 100));
+    out.push(signed(n[F.percent] * 100 * (i % 2 ? 1 : -1) * (0.25 + (i % 7) * 0.2), 2, "%"));
   }
   return out;
 }
@@ -327,7 +328,6 @@ export function DataTableDemo() {
         rowCount={ROWS}
         rowHeight={28}
         fontSize={13}
-        rowHeader
         stripe={stripe()}
         cellSelectable={mode() === "cell"}
         sort={sort()}
