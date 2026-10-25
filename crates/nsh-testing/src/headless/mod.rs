@@ -788,8 +788,8 @@ impl Headless {
 
     /// The step `idle`: applies batches until none comes for `quiet`, or
     /// for 10 s at most (false then). Long enough, it lets the engine's
-    /// idle collection run (every second at most), so what the app keeps
-    /// alive shows.
+    /// idle collection run (every second at most, after 0.3 s without
+    /// work), so what the app keeps alive shows.
     pub fn idle(&mut self, quiet: Duration) -> Result<bool, String> {
         self.step("idle");
         let quiet = self.quiet(quiet, MAX_IDLE);
