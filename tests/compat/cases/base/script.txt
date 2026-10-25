@@ -1018,6 +1018,33 @@ covers [props] Progress.trackStyle
 covers [props] Progress.indicatorClass
 covers [props] Progress.indicatorStyle
 
+# base-table
+tap id:case-base-table
+# The roles and the table's label for screen readers.
+expect Recent invoices
+prop id:table role table
+prop id:table accessibilityLabel Invoices
+prop id:head role rowgroup
+prop id:body role rowgroup
+prop id:foot role rowgroup
+prop id:head-row role row
+prop id:title role columnheader
+prop id:cell role cell
+# A row's cells side by side; the groups and the caption stacked.
+frame id:head 0 20 390 30
+frame id:title 0 0 100 30
+frame id:amount 100 0 80 24
+frame id:foot 0 74 390 24
+frame id:caption 0 98 390 16
+covers [nsh/base] Table
+covers [nsh/base] TableHeader
+covers [nsh/base] TableBody
+covers [nsh/base] TableFooter
+covers [nsh/base] TableRow
+covers [nsh/base] TableHead
+covers [nsh/base] TableCell
+covers [nsh/base] TableCaption
+
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
 expect token up #138a5aff

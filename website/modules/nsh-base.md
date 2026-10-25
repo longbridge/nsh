@@ -11,7 +11,7 @@ demo: ui-navigation
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
 [Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), workspaces the user arranges (`ResizablePanel`s in a
-`ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`DataTable`), selections across texts
+`ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), selections across texts
 (`SelectionArea`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
@@ -36,7 +36,7 @@ use nsh_base::{
 import {
   AlertDialog, Button, Checkbox, Collapsible, ContextMenu, createNavStack, DataTable, Dialog, DiffView, DockArea, Editor, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu, Progress,
   MenuItem, MenuSeparator, NavPage, NavStack, Popover, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
-  Submenu, Switch, Tab, Tabs, TextView, Toast, ToastManager, ToastStack, Tooltip,
+  Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, Toast, ToastManager, ToastStack, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
@@ -70,6 +70,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`TextView`](../elements/text-view.md) | `text_view()` | A document of Markdown, HTML or blocks, drawn with texts and views, for streamed AI replies. |
 | [`Editor`](../elements/editor.md) | `editor()` | A code editor: syntax highlighting, several carets, folding, find and replace, diagnostics. |
 | [`DiffView`](../elements/diff-view.md) | `diff_view()` | The changes between two texts or of a patch, side by side or unified, with per-change actions. |
+| [`Table`, `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell`, `TableCaption`](../elements/table.md) | `table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles for screen readers. |
 | [`DataTable`](../elements/data-table.md) | `data_table()` | A table of any number of rows and columns: selection, sorting, fixed, resizable and movable columns, rows served a page at a time. |
 | [`SelectionArea`](../elements/selection-area.md) | `selection_area()` | One selection across the texts inside it. |
 | [`Popover`](../elements/popover.md) | `popover()` | Content anchored to a trigger, on top of everything. |
@@ -175,6 +176,11 @@ the theme's tokens that the app restyles part by part. See [Editor](../elements/
 `DiffView` shows the changes between two texts, or of the files of a patch, as code review tools do: side by side or
 unified, the words changed within lines highlighted, unchanged lines collapsed into separators that expand, in the
 `Editor`'s syntax colors. The app's actions keep or revert each change. See [DiffView](../elements/diff-view.md).
+
+### Table
+
+`Table` and its parts lay out a few rows the app writes as children, and give screen readers a table: groups of rows,
+rows, column headers and cells. Every part takes the app's look. See [Table](../elements/table.md).
 
 ### DataTable
 
@@ -344,7 +350,7 @@ launch screen.
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
 - [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
-  [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [DataTable](../elements/data-table.md),
+  [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [SelectionArea](../elements/selection-area.md), [Text](../elements/text.md) and
   [Input](../elements/input.md).
 - [Device and environment](../docs/device-and-environment.md).

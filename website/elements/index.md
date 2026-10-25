@@ -119,6 +119,7 @@ and take their look from the app.
 | `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
 | `<Editor>` | `nsh_base::editor()` | A code editor with highlighting, several carets, folding and search | [Editor](./editor.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
+| `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<DataTable>` | `nsh_base::data_table()` | A table of rows and columns of any number, selectable, sortable, with resizable and movable columns | [DataTable](./data-table.md) |
 | `<SelectionArea>` | `nsh_base::selection_area()` | Makes the texts inside it select together | [SelectionArea](./selection-area.md) |
 | `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
