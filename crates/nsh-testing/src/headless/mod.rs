@@ -210,6 +210,10 @@ enum Pumped {
     Exited,
 }
 
+/// How soon a press follows the last on the same view to count as its next
+/// click: the platforms' default double-click time.
+const CLICK_INTERVAL: Duration = Duration::from_millis(500);
+
 /// An app on a headless engine ([`start`]) and what it shows ([`Screen`]),
 /// driven by steps: press views, type into inputs, scroll, go back, wait
 /// for what it shows.
@@ -264,6 +268,9 @@ pub struct Headless {
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
+    /// The last press: its view and when, for counting a double press as
+    /// the platforms do ([`CLICK_INTERVAL`]).
+    last_press: Option<(NodeId, nsh_core::time::Instant, u32)>,
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
@@ -302,6 +309,7 @@ impl Headless {
             clock,
             wanted,
             host,
+            last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
         })
@@ -1134,12 +1142,22 @@ impl Headless {
     }
 
     /// A press at `at` in `view` (else the view's center), in that view
-    /// and in the root, as one click with no modifier keys. `None` when the
-    /// view has no bounds.
-    fn press_payload(&self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+    /// and in the root, with no modifier keys. Presses on one view within
+    /// [`CLICK_INTERVAL`] of each other count up (`clicks` 2 is a double
+    /// press), as the platforms count them. `None` when the view has no
+    /// bounds.
+    fn press_payload(&mut self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
         let Some(bounds) = self.screen.bounds_in_root(view) else {
             return EventPayload::None;
         };
+        let now = self.clock.now();
+        let clicks = match self.last_press {
+            Some((last, at, clicks)) if last == view && now.duration_since(at) < CLICK_INTERVAL => {
+                clicks + 1
+            }
+            _ => 1,
+        };
+        self.last_press = Some((view, now, clicks));
         let position = at.unwrap_or_else(|| {
             point(
                 Points(bounds.size.width.0 / 2.0),
@@ -1153,7 +1171,7 @@ impl Headless {
                 Points(bounds.origin.y.0 + position.y.0),
             ),
             modifiers: nsh_core::keymap::Modifiers::default(),
-            clicks: 1,
+            clicks,
         })
     }
 

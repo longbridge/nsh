@@ -257,7 +257,8 @@ and more than one fails the step; a press whose match, or a view between it and 
 report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`, at the match's center
-  (a press of a text inside a pressable view lands on the text, as a finger does);
+  (a press of a text inside a pressable view lands on the text, as a finger does); presses of one view within
+  500 ms count up (`clicks` 2 is a double press), as the platforms count them;
 - `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
   `delayLongPress` (500 ms) `LongPress` and `PressOut`;
 - `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
