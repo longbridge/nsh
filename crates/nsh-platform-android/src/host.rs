@@ -23,7 +23,7 @@ use nsh_core::{
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
-    Idiom, Lifecycle, Locale, MountSink, Policy, Root,
+    Idiom, Lifecycle, Locale, MountSink, Policy, Root, TimeZone,
 };
 
 use crate::{
@@ -1054,6 +1054,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     values: JFloatArray<'_>,
     dark: jboolean,
     locale: JString<'_>,
+    time_zone: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -1091,6 +1092,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
     };
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();
+    }
+    if let Ok(name) = env.get_string(&time_zone) {
+        environment.time_zone = TimeZone::parse(&String::from(name)).unwrap_or_default();
     }
     environment.color_scheme = if dark != 0 {
         ColorScheme::Dark

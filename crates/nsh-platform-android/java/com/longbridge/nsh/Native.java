@@ -218,8 +218,9 @@ final class Native {
      * values: safe area top, right, bottom, left, keyboard height, keyboard
      * animation duration (s), font scale, 1 if the language is right to left.
      * locale: the default locale's language tag (`Intl`'s default).
+     * timeZone: the system's time zone's ID (`Europe/Berlin`).
      */
-    static native void environment(long handle, float[] values, boolean dark, String locale);
+    static native void environment(long handle, float[] values, boolean dark, String locale, String timeZone);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
 
