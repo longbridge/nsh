@@ -18,7 +18,9 @@
 // third folds where the app's `foldRanges` say, by level, recursively and
 // by hand, reporting the folded ranges (`onFoldChange`, `folds`), its text
 // colored by the app's tokens alone (`decorations` with a `token`,
-// `highlighting={false}`).
+// `highlighting={false}`). A context menu asked for over the text reports
+// where in it, and whether a touch selection asked for it (`selection`,
+// its box in the root view) or a pointer (`onContextMenu`).
 import { Text, View, signal } from "nsh";
 import { Editor, type EditorFoldRange, type EditorRef } from "nsh/base";
 
@@ -32,6 +34,7 @@ export default function BaseEditor() {
   const hovered = signal("none");
   const asked = signal("none");
   const folded = signal("none");
+  const menu = signal("none");
   let editor!: EditorRef;
   let grown!: EditorRef;
   let outline!: EditorRef;
@@ -59,6 +62,9 @@ export default function BaseEditor() {
           }
           onHoverEnd={() => hovered.set("ended")}
           onFindWithSelection={q => asked.set(q)}
+          onContextMenu={e =>
+            menu.set(`${e.position.line}:${e.position.column} ${e.selection ? `touch ${e.selection.width}` : "pointer"}`)
+          }
           style={{ flex: 1 }}
         />
       </View>
@@ -98,6 +104,7 @@ export default function BaseEditor() {
       <Text>{() => `Read: ${read()}`}</Text>
       <Text>{() => `Hover: ${hovered()}`}</Text>
       <Text>{() => `Asked: ${asked()}`}</Text>
+      <Text>{() => `Menu: ${menu()}`}</Text>
       <View
         testID="to-end"
         style={{ height: 20 }}

@@ -29,6 +29,7 @@ mod parts;
 mod search;
 mod select;
 pub(crate) mod state;
+mod touch;
 mod types;
 mod view;
 
@@ -40,6 +41,7 @@ pub use layout::EditorScrollBeyond;
 use nsh_core::ui::prelude::*;
 pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
+pub use touch::EditorRect;
 
 use self::controller::Ed;
 
@@ -183,8 +185,9 @@ pub enum EditorEvent {
     #[args(line)]
     LineNumberPress(u32),
     /// The secondary button was pressed over the text (a right click,
-    /// Control-click on Apple platforms): where, in the text and in the
-    /// root view, to open a menu at (`Menu.popup(items, { x, y })`).
+    /// Control-click on Apple platforms), or a touch selected text (with
+    /// `selection`): where, in the text and in the root view, to open a
+    /// menu at (`Menu.popup(items, { x, y })`).
     #[args(event)]
     ContextMenu(EditorContextMenuEvent),
     /// The mouse rests over a character (desktops and the web): what to
@@ -221,6 +224,12 @@ pub struct EditorContextMenuEvent {
     pub x: Points,
     /// The pointer's y in the root view.
     pub y: Points,
+    /// On touch screens, where the selection a touch made is in the root
+    /// view (a long press, a double tap, a handle let go, a tap on the
+    /// selection): the edit menu goes above or below it; `x` and `y` are
+    /// then its top middle.
+    #[prop(skip_none)]
+    pub selection: Option<EditorRect>,
 }
 
 /// A command of an [`Editor`] (`run(command)`), as its keys run it.

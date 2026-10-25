@@ -80,7 +80,7 @@ mount(App);
 - **括号和引号** 在输入时自动闭合，包住选区，再次输入闭合符号时跳过它（`autoClose`）。光标处的括号和与它配对的括号会加上边框。
 - **撤销** 以一整段输入为单位：一个单词、一次删除、一个命令。移动或点击开始新的一步。
 - **折叠。** 后面跟着缩进更深的行的那一行，可以用行号栏中的标记把这些行折叠起来：`⌄` 折叠，`›` 和行后的 `⋯` 展开。光标移入折叠处时，折叠会打开（[折叠](#folding)）。
-- **点击。** 使用指针时，单击放置光标，双击选中一个单词，三击选中一行，Shift 点击扩展选区，拖动按点击所选的单位选择。Alt+Shift 拖动（Option+Shift；Linux 上也可用 Control+Alt）选择一个矩形块：每行一个选区，列的范围相同，在较短的行末尾之后也保持这些列。在触摸屏上，轻点放置光标。
+- **点击。** 使用指针时，单击放置光标，双击选中一个单词，三击选中一行，Shift 点击扩展选区，拖动按点击所选的单位选择。Alt+Shift 拖动（Option+Shift；Linux 上也可用 Control+Alt）选择一个矩形块：每行一个选区，列的范围相同，在较短的行末尾之后也保持这些列。在触摸屏上，轻点放置光标，双击或长按选中手指下的单词，选区两端的手柄随手指拖动移动各自的一端（手柄周围的文本仍可用手指滚动）。
 - **剪贴板。** 没有选区时复制和剪切取光标所在的整行，粘贴时这些行会作为整行插入到光标所在行的上方。
 
 `readOnly` 保持文本不变，同时仍可选择、搜索和复制。
@@ -282,7 +282,16 @@ const folded = new Map<string, EditorFoldRange[]>();
 
 ## 断点和上下文菜单
 
-点击行号会报告 `onLineNumberPress(line)`，可以在这里设置断点，由应用画成一个装饰。辅助按键（右键单击、Mac 上的 Control 点击）报告 `onContextMenu({ position, x, y })`：指针下文本中的位置和根视图中的坐标，应用在那里打开自己的菜单。
+点击行号会报告 `onLineNumberPress(line)`，可以在这里设置断点，由应用画成一个装饰。辅助按键（右键单击、Mac 上的 Control 点击）报告 `onContextMenu({ position, x, y })`：指针下文本中的位置和根视图中的坐标，应用在那里打开自己的菜单。在触摸屏上，长按、双击、松开手柄和轻点选区也会报告它，并带有 `selection`：选区在根视图中的范围（`{ x, y, width, height }`），`x` / `y` 是它顶边的中点，用来放置编辑菜单。
+
+```tsx
+<Editor
+  value={source()}
+  onContextMenu={({ x, y, selection }) =>
+    Menu.popup(selection ? editItems : contextItems, { x, y })
+  }
+/>
+```
 
 ```tsx
 const breakpoints = signal<number[]>([]);
@@ -476,6 +485,8 @@ let editor!: EditorRef;
 | `diagnosticHint` | 提示下方的线 | `muted-foreground` |
 | `whitespace` | 空格和制表符的标记（`showWhitespaces`） | `·` 和 `→`，`muted-foreground` 的 60 % |
 | `ruler` | `rulers` 的线 | 1 点宽的 `border` 线 |
+| `selectionHandle` | 触摸选区两端手柄的圆点 | 10pt 的 `primary` 圆点 |
+| `selectionHandleStart`、`selectionHandleEnd` | 起点的圆点（在其行上方）和终点的圆点（在其行下方），在 `selectionHandle` 之后 | |
 
 <a id="props"></a>
 
@@ -528,7 +539,7 @@ let editor!: EditorRef;
 | `onFocus`、`onBlur` | `.on_focus(\|\| ..)`、`.on_blur(\|\| ..)` | 编辑器获得或失去焦点。 |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | 搜索的匹配项改变了：`{ count, current, error }`。 |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | 行号被点击：行号，从 0 开始。 |
-| `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | 在文本上按下了辅助按键：`{ position, x, y }`。 |
+| `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | 在文本上按下了辅助按键，或触摸选中了文本：`{ position, x, y, selection? }`。 |
 | `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | 鼠标停在一个字符上（[语言功能](#language-features)）。 |
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | 悬停结束了。 |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | 一个字符被点击：带有它的单词、修饰键和点击次数。 |

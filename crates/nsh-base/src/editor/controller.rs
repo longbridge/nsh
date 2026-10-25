@@ -119,6 +119,8 @@ pub(crate) struct Ed {
     pub(crate) content_height: Signal<Points>,
     /// Scrolling while a drag selects past the viewport's edge.
     autoscroll: Rc<RefCell<AutoScroll>>,
+    /// The selection a touch made, its handles and their drag.
+    pub(crate) touch: super::touch::Touch,
 }
 
 impl Ed {
@@ -169,6 +171,7 @@ impl Ed {
             rows_left: signal(px(0.0)),
             content_height: signal(px(0.0)),
             autoscroll: Rc::default(),
+            touch: super::touch::Touch::new(),
         };
         ed.follow_props();
         ed.follow_hooks();
@@ -939,6 +942,7 @@ impl Ed {
             position,
             x: page.x,
             y: page.y,
+            ..Default::default()
         };
         self.cx.emit(EditorEvent::ContextMenu(event));
     }
@@ -1181,7 +1185,7 @@ impl Ed {
         self.cx.emit(EditorEvent::Change(text));
     }
 
-    fn report_selections(&self) {
+    pub(crate) fn report_selections(&self) {
         let selections = {
             let mut st = self.st.borrow_mut();
             let selections = st.editor_selections();

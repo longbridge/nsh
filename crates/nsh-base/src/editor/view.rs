@@ -34,7 +34,7 @@ fn part<E: Element>(el: E, props: EditorProps, part: EditorPart) -> E {
 
 /// `el` with the classes and styles of `parts`, in order (later parts
 /// win).
-fn parts<E: Element>(el: E, props: EditorProps, list: &'static [EditorPart]) -> E {
+pub(crate) fn parts<E: Element>(el: E, props: EditorProps, list: &'static [EditorPart]) -> E {
     el.app_class(move || {
         props.classes.with(|c| {
             let joined: Vec<&str> = list
@@ -383,6 +383,7 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
     let desktop = is_desktop();
     let down = ed.clone();
     let tap = ed.clone();
+    let long = ed.clone();
     let mov = ed.clone();
     let up = ed.clone();
     let end = ed.clone();
@@ -413,8 +414,17 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
                 return;
             }
             let EventPayload::Press(e) = p else { return };
-            tap.press(e.position, e.page_position, Default::default(), 1);
-            tap.text_press(e.position, e.page_position, Default::default(), 1);
+            tap.tap(e.position, e.page_position, e.clicks);
+            tap.text_press(e.position, e.page_position, Default::default(), e.clicks.max(1));
+        })
+        // A long press selects the word under the finger (touch screens;
+        // the mouse drags instead).
+        .when(!desktop, |v| {
+            v.on(EventKind::LongPress, move |p: &EventPayload| {
+                if let EventPayload::Press(e) = p {
+                    long.long_press(e.position, e.page_position);
+                }
+            })
         })
         .on_hover_move(move |e: &HoverEvent| hover.hover_move(e))
         .on_hover_out(move || hover_end.hover_out())
@@ -449,6 +459,7 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
         .child(placeholder(ed.clone()))
         .child(carets(ed.clone(), lh.clone()))
         .child(composition(ed.clone(), lh.clone()))
+        .child(super::touch::handles(ed.clone()))
         .child(sink(ed, lh))
 }
 

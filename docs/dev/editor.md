@@ -18,6 +18,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `view.rs` | The view: the scroll views, the gutter, the rows' box and its layers, the sink |
 | `hooks.rs` | What language features are built on: hovers (`onHover` / `onHoverEnd`), `onTextPress`, the ref's geometry and scrolling (`caretBounds`, `rangeBounds`, `revealPosition`, `goToLine`, ...), where the editor is in the root view |
 | `layout.rs` | Sizing and scrolling: `EditorScrollBeyond`, the height of an editor growing with its text, the margin around the caret, scrolling while a drag is past the edges |
+| `touch.rs` | Touch selection: taps, double taps and long presses, the range a touch made, its handles and their drags, the edit menu's `onContextMenu` (`EditorRect`) |
 | `buffer.rs` | The text: a `ropey::Rope`, edits as change lists, undo / redo with grouping, UTF-16 positions, the lines each change touched (`LineSpan`) |
 | `types.rs` | `Point`, `Selection`, `Selections` (the primary one, the newest, kept apart), the trait `RowLayout` the moves use |
 | `movement.rs` | Graphemes, words and their parts (camelCase, snake_case), paragraphs, smart Home / End, vertical moves keeping their x, matching and enclosing brackets |
@@ -145,7 +146,17 @@ On the desktops a press (`PressDown`) places the caret, a double press selects a
 extends the primary selection, Alt (Option) adds a selection; dragging extends what the press selected by its unit
 (`drag_to`). An Alt+Shift press (on Linux also Control+Alt, where window managers keep Alt drags) drags a block: one
 selection per display row between the press and the pointer, each from the press's x to the pointer's (`select::block`),
-so the block keeps its columns past the end of short rows, which select what they have; the pointer's row is primary. On touch screens a tap places the caret. A secondary press reports `onContextMenu` with the position in
+so the block keeps its columns past the end of short rows, which select what they have; the pointer's row is primary. On touch screens (`touch.rs`) a tap places the caret, a double tap (two taps within 300 ms and 24 points,
+or a platform's click count of 2) or a long press selects the word under the finger (a long press on blank space places
+the caret), and the range it made becomes the touch selection. While it is the selection (one selection, exactly that
+range) and the editor has the focus, a handle stands at each end: a hit area 32 points wide over the end's line and
+the knob's room (above the start's line, below the end's), holding the `selectionHandle` knob. A handle claims its
+touches on start and keeps them from the scroll views (as a resize handle does), so the text around it still scrolls
+with a finger; dragging moves that end (`drag_selection`: the other end stays, the end stops at the other one, and
+passing it swaps them), scrolling near the viewport's edges as the caret shows. Anything else that changes the
+selection drops the touch selection without a word. A long press, a double tap, a handle let go and a tap on the
+selection (or a handle) report `onContextMenu` with `selection`, the selection's box in the root view (its rows in
+view), and `x` / `y` at its top middle: the app opens its edit menu there. A secondary press reports `onContextMenu` with the position in
 the text and the point in the root view, for the app's `Menu.popup`. A press on a line number reports
 `onLineNumberPress` (a breakpoint's place); a press on a fold marker or a fold's placeholder toggles the fold.
 
@@ -266,6 +277,7 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `diagnosticError` / `Warning` / `Info` / `Hint` | A 2 point line: `destructive` / amber / blue / `muted-foreground` |
 | `whitespace` | `·` per space, `→` per tab, `muted-foreground` at 60 %, while `showWhitespaces` |
 | `ruler` | A 1 point line of `border` at each of `rulers`' columns |
+| `selectionHandle` / `selectionHandleStart` / `selectionHandleEnd` | A 10 point dot of `primary`, centered in the knob's 16 point room |
 
 Syntax colors are `crate::syntax`'s `Token` styles, Allsum's palette in light and dark (the table in `text-view.md`
 "Syntax highlighting"). The font is a prop, not a class: the editor measures its text in it.
@@ -294,4 +306,4 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 - Highlighting parses from the top down: after a jump to the end of a long file, the lines in view show a guess
   (parsed from 40 lines before them) until the parse reaches them, which can differ inside a long comment or string.
 - At most 10 000 search matches are found and 1000 undo steps kept.
-- Touch screens place the caret with a tap; selecting is by the commands and keys.
+- On touch screens the sweep after a long press does not extend the selection: the handles do.

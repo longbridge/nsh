@@ -108,7 +108,9 @@ The editor works as code editors do:
 - **Presses.** With a pointer, a click places the caret, a double click selects a word, a triple click a line,
   Shift-click extends the selection and a drag selects by what the click selected. An Alt+Shift drag
   (Option+Shift; Control+Alt on Linux too) selects a block: one selection per row, between the same columns, which
-  keep going past the end of short lines. On touch screens a tap places the caret.
+  keep going past the end of short lines. On touch screens a tap places the caret, a double tap or a long press selects
+  the word under the finger, and handles at the ends of that selection move each end as a finger drags them (the
+  text around them still scrolls).
 - **Clipboard.** Copy and cut with no selection take the whole lines of the carets, and those paste back as whole
   lines above the caret's line.
 
@@ -327,7 +329,18 @@ const folded = new Map<string, EditorFoldRange[]>();
 
 A press on a line number reports `onLineNumberPress(line)`, the place for a breakpoint the app draws as a decoration.
 The secondary button (a right click, Control-click on a Mac) reports `onContextMenu({ position, x, y })`: the
-position in the text under the pointer and the point in the root view, where the app opens its own menu.
+position in the text under the pointer and the point in the root view, where the app opens its own menu. On touch
+screens a long press, a double tap, a handle let go and a tap on the selection report it too, with `selection`: the
+selection's box in the root view (`{ x, y, width, height }`), and `x` / `y` at its top middle, for the edit menu.
+
+```tsx
+<Editor
+  value={source()}
+  onContextMenu={({ x, y, selection }) =>
+    Menu.popup(selection ? editItems : contextItems, { x, y })
+  }
+/>
+```
 
 ```tsx
 const breakpoints = signal<number[]>([]);
@@ -527,6 +540,8 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `diagnosticHint` | The line under a hint | `muted-foreground` |
 | `whitespace` | The marks of spaces and tabs (`showWhitespaces`) | `·` and `→`, `muted-foreground` at 60 % |
 | `ruler` | The lines of `rulers` | A 1 point line of `border` |
+| `selectionHandle` | The knobs of the handles at the ends of a touch selection | A 10pt dot of `primary` |
+| `selectionHandleStart`, `selectionHandleEnd` | The start's knob (above its line) and the end's (below), after `selectionHandle` | |
 
 ## Props
 
@@ -575,7 +590,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `onFocus`, `onBlur` | `.on_focus(\|\| ..)`, `.on_blur(\|\| ..)` | The editor took or lost the focus. |
 | `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ count, current, error }`. |
 | `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | A line number was pressed: the line, from 0. |
-| `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | The secondary button was pressed over the text: `{ position, x, y }`. |
+| `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | The secondary button was pressed over the text, or a touch selected text: `{ position, x, y, selection? }`. |
 | `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | The mouse rests over a character ([Language features](#language-features)). |
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | The hover ended. |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |

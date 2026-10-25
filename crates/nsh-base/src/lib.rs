@@ -63,8 +63,8 @@ pub use crate::{
         Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
         EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorElement, EditorEvent,
         EditorFoldRange, EditorHoverEvent, EditorPart, EditorPosition, EditorProps, EditorRange,
-        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
-        EditorTextPressEvent, EditorToken, editor,
+        EditorRect, EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection,
+        EditorStyles, EditorTextPressEvent, EditorToken, editor,
     },
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,

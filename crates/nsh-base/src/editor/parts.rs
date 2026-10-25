@@ -107,4 +107,12 @@ parts! {
     whitespace => Whitespace,
     /// The lines of `rulers` (a 1 point line in the theme's `border`).
     ruler => Ruler,
+    /// The knobs of the handles at the ends of a selection a touch made
+    /// (a 10 point dot in `primary`, above the start's line and below the
+    /// end's); the hit area around each is the editor's.
+    selection_handle => SelectionHandle,
+    /// The start's knob, after `selectionHandle`.
+    selection_handle_start => SelectionHandleStart,
+    /// The end's knob, after `selectionHandle`.
+    selection_handle_end => SelectionHandleEnd,
 }

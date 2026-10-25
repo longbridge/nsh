@@ -1324,9 +1324,15 @@ expect Folded: 2-4
 tap id:set-folds
 expect Folded: 0-4
 expect Read: folds 0-4
+# The secondary button over the text: where in the text, from a pointer
+# (no touch selection).
+expect Menu: none
+event text:"LET y = 1; // ok" onContextMenu
+expect Menu: 0:0 pointer
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
+covers [events] Editor.onContextMenu
 covers [props] Editor.search
 covers [events] Editor.onSearchChange
 covers [events] Editor.onFindWithSelection
