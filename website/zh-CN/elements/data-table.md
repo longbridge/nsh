@@ -246,6 +246,7 @@ const columns: DataTableColumn[] = [
 | `dump(start?, end?)` | 给定行（默认全部已持有的行）和标题的文字，与显示一致：`{ headers, rows }`，用于导出。 |
 | `copy()` | 把选中内容的文字放到剪贴板：一行的单元格以制表符分隔，一列的以换行分隔，一个单元格就是它的文字。 |
 | `focus()`、`blur()` | 让表格获得或交出键盘。 |
+| `menuTarget()`、`clearMenuTarget()` | 上一次请求上下文菜单的位置（`{ row?, column? }`，由 `cellActive` / `rowActive` 标记），以及在应用的菜单关闭时清除该标记。 |
 
 <a id="styling-the-parts"></a>
 
@@ -324,6 +325,7 @@ const columns: DataTableColumn[] = [
 | `fontFamily` | `.font_family(..)` | `string` | 主题的 `font-sans` | 单元格的字体。 |
 | `fontSize` | `.font_size(..)` | `number` | `14` | 单元格的字号，单位为点。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 滚动条。 |
+| `verticalScrollbar`、`horizontalScrollbar` | `.vertical_scrollbar(..)`、`.horizontal_scrollbar(..)` | `boolean` | `scrollbar` | 单个方向的滚动条（水平的是桌面平台表格下方的滚动条）。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 滚动到边缘时是否回弹（平台支持时）。 |
 | `renderCell` | `.render_cell(..)` | `(cell: DataTableCell) => JSX.Element` | | 绘制视野中的单元格。 |
 | `renderHeaderCell` | `.render_header_cell(..)` | `(cell: DataTableHeaderCell) => JSX.Element` | | 绘制标题。 |

@@ -271,6 +271,7 @@ columns.
 | `dump(start?, end?)` | The texts of the rows given (default all those held) and of the titles, as shown: `{ headers, rows }`, for export. |
 | `copy()` | Puts the selection's text on the clipboard: a row's cells with tabs between, a column's with line breaks, a cell's text. |
 | `focus()`, `blur()` | Gives the keyboard to the table or takes it. |
+| `menuTarget()`, `clearMenuTarget()` | What the last context menu was asked for at (`{ row?, column? }`, marked by `cellActive` / `rowActive`), and dropping that mark when the app's menu closes. |
 
 ## Styling the parts
 
@@ -346,6 +347,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-sans` | The font of the cells. |
 | `fontSize` | `.font_size(..)` | `number` | `14` | The font size of the cells, in points. |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll bars. |
+| `verticalScrollbar`, `horizontalScrollbar` | `.vertical_scrollbar(..)`, `.horizontal_scrollbar(..)` | `boolean` | `scrollbar` | One axis's scroll bar (the horizontal one is the desktops' bar under the table). |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Whether scrolling bounces at the ends, where the platform does so. |
 | `renderCell` | `.render_cell(..)` | `(cell: DataTableCell) => JSX.Element` | | Draws the cells in view. |
 | `renderHeaderCell` | `.render_header_cell(..)` | `(cell: DataTableHeaderCell) => JSX.Element` | | Draws the titles. |

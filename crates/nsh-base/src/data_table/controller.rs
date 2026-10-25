@@ -899,6 +899,24 @@ impl Dt {
         }
     }
 
+    /// The context menu's mark (the ref's `menuTarget`).
+    pub(crate) fn menu_target(&self) -> Option<DataTableTarget> {
+        self.st
+            .borrow()
+            .active
+            .map(|(row, column)| DataTableTarget {
+                row: row.map(|r| r as u32),
+                column: column.map(|c| c as u32),
+            })
+    }
+
+    /// Drops the context menu's mark.
+    pub(crate) fn clear_menu_target(&self) {
+        if self.st.borrow_mut().active.take().is_some() {
+            self.bump_data();
+        }
+    }
+
     /// A context menu asked for at `position`.
     pub(crate) fn context_menu(&self, position: Point<Points>, page: Point<Points>) {
         let hit = self.target_at(position);

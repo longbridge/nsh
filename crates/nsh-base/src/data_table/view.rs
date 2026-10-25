@@ -228,7 +228,12 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .right_0()
         .bottom_0()
         .top(move || Length::from(px(top_dt.geo().header)))
-        .scrollbar(move || props.scrollbar.get())
+        .scrollbar(move || {
+            props
+                .vertical_scrollbar
+                .get()
+                .unwrap_or(props.scrollbar.get())
+        })
         .bounces(move || props.bounces.get())
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
@@ -328,10 +333,15 @@ fn strip(dt: Dt, lead: Lead) -> impl IntoElement {
     let shown = {
         let dt = dt.clone();
         move || {
-            is_desktop() && props.scrollbar.get() && {
-                let g = dt.geo();
-                g.x.extent() > g.x.viewport
-            }
+            is_desktop()
+                && props
+                    .horizontal_scrollbar
+                    .get()
+                    .unwrap_or(props.scrollbar.get())
+                && {
+                    let g = dt.geo();
+                    g.x.extent() > g.x.viewport
+                }
         }
     };
     let width_dt = dt.clone();

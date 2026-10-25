@@ -23,6 +23,7 @@ function App() {
   const loading = signal(false);
   const more = signal(false);
   const movable = signal(true);
+  const vbar = signal<boolean | undefined>(undefined);
   const sort = signal<DataTableSort | undefined>(undefined);
   const log = signal<Record<string, string>>({});
   const put = (key: string, value: string) => log.set({ ...log(), [key]: value });
@@ -76,6 +77,12 @@ function App() {
           put("dump", `${d.headers.join("|")} / ${d.rows.map((r) => r.join("|")).join(" / ")}`);
         })}
         {button("copy", () => table.copy())}
+        {button("menu-target", async () => {
+          const t = await table.menuTarget();
+          put("target", t ? `${t.row ?? "-"}:${t.column ?? "-"}` : "none");
+        })}
+        {button("clear-target", () => table.clearMenuTarget())}
+        {button("no-vbar", () => vbar.set(false))}
         {button("read", async () => {
           const s = await table.selection();
           const v = await table.visibleRows();
@@ -102,6 +109,7 @@ function App() {
           hasMore={more()}
           loadMoreThreshold={5}
           movableColumns={movable()}
+          verticalScrollbar={vbar()}
           empty={<Text>No rows</Text>}
           loadingView={<Text>Loading rows</Text>}
           onSelectionChange={(s) => put("sel", s ? `${s.row ?? "-"}:${s.column ?? "-"}` : "none")}

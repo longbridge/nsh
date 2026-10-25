@@ -367,6 +367,11 @@ pub struct DataTableProps {
     /// The scroll bars (default true).
     #[prop(default = true)]
     pub scrollbar: Prop<bool>,
+    /// The vertical scroll bar, else as `scrollbar`.
+    pub vertical_scrollbar: Prop<Option<bool>>,
+    /// The horizontal scroll bar (the desktops' bar under the table), else
+    /// as `scrollbar`.
+    pub horizontal_scrollbar: Prop<Option<bool>>,
     /// Whether scrolling bounces at the ends where the platform does so
     /// (default true).
     #[prop(default = true)]
@@ -509,6 +514,18 @@ impl DataTableApi {
     /// press or `blur`.
     pub fn focus(&self) {
         self.dt.set_focus(true);
+    }
+
+    /// What the last context menu was asked for at (`onContextMenu`), marked
+    /// by the `cellActive` / `rowActive` parts until the next press or
+    /// [`Self::clear_menu_target`]; `null` for nothing.
+    pub fn menu_target(&self) -> Option<DataTableTarget> {
+        self.dt.menu_target()
+    }
+
+    /// Drops the context menu's mark: call it when the app's menu closes.
+    pub fn clear_menu_target(&self) {
+        self.dt.clear_menu_target();
     }
 
     /// Takes the keyboard from the table.

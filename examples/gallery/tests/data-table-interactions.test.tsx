@@ -138,6 +138,16 @@ test("a secondary press asks for a context menu at a cell or a title", async () 
   await app.waitFor("text:/menu=2:1/");
   await app.rightClick("text:City");
   await app.waitFor("text:/menu=-:2/");
+  // The ref reads the menu's mark and drops it when the app's menu closes;
+  // where cells do not select, a row's menu marks the row.
+  await app.press("menu-target");
+  await app.waitFor("text:/target=-:2/");
+  await app.rightClick("text:Person 2");
+  await app.press("menu-target");
+  await app.waitFor("text:/target=2:-/");
+  await app.press("clear-target");
+  await app.press("menu-target");
+  await app.waitFor("text:/target=none/");
 });
 
 test("a sort button sorts ascending, descending, then not at all", async () => {
