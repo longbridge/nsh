@@ -65,26 +65,30 @@ resize handle that moved less than `MOVE_SLOP`, within `DOUBLE_PRESS` (400 ms), 
 
 The app holds as many rows as it likes: `rowCount` is the table's length and `data` holds the rows from `dataStart`.
 `onVisibleRowsChange` reports the rows in view, so the app serves the page around them; rows outside `data` show as
-empty until it arrives. The demo in the gallery (`DataTableDemo.tsx`) serves a million rows of sixty columns in pages
-of 400.
+empty until it arrives. The demo in the gallery (`DataTableDemo.tsx`) serves a million stocks of sixty columns in pages
+of 120 rows, formatting only the rows a new page brings.
 
 ## Live data
 
 Rises and falls take their colors natively: a column's `positiveClass` / `negativeClass` apply to the cells whose
 number is above / below zero, or whose text starts with `+` / `-` (`Cell::sign`), with no call into JS per cell. The
-gallery's live quotes (`DataTableQuotes.tsx`, as gpui-component's data table story: 5 000 or 100 000 stocks, 41
-columns, a third of the rows in view moving every 33 ms) format and hand over only the rows in view and a reach around
-them, so a tick costs what is on screen.
+gallery's demo ticks as gpui-component's data table story does: every 33 ms a third of the rows of the page held move
+and only those are formatted again, so a tick over the million stocks costs what is on screen. The stocks it does not
+show keep the quote they opened with, computed from their id.
 
 ## Performance
 
-Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`): a scroll frame inside the
-window made commits 4 mount items in ~1 ms; a window shift (row slots taking other rows) ~350 items in ~3 ms, with no
-views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window ~4000 items. A tick of the live quotes commits ~44 items in a median 1.6 ms (at most 2.4 ms).
+Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`, 390 × 844): a scroll frame
+inside the window made commits 4 mount items in ~1.2 ms; a window shift (row slots taking other rows) ~340 items in
+~4 ms, with no views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window
+~4000 items. A tick commits ~33 items in a median 1.7 ms (at most 2.7 ms); scrolling while it ticks, a frame with a
+tick ~44 items in ~3 ms. Before the origins moved in whole points, a scroll frame at a fraction sent ~470 items: every
+cell text's frame.
 
-In a GTK window (`nsh test examples/gallery/App.tsx --target linux --fps`, release, 60 Hz): scrolling the million
-rows and wheeling the horizontal bar hold 60 of 60 frames, ~2.8 ms a frame on average, none over budget; the live
-quotes redraw at their tick (30 frames a second at 33 ms) and at 60 while scrolling during ticks, ~3 ms a frame.
+In a GTK window (`nsh test examples/gallery/App.tsx --target linux --fps`, release, 144 Hz): scrolling the million
+rows holds 144 of 144 frames, ~2.2 ms a frame on average, none over budget; wheeling the horizontal bar 110–118 frames
+a second, ~2 ms a frame, 1–2 % over budget; the ticks redraw at their rate (30 frames a second at 33 ms), ~2 ms a
+frame, and scrolling while they tick holds 143 of 144 frames, ~3 ms a frame.
 
 ## Keyboard focus
 
