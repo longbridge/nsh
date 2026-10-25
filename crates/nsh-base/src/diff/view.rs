@@ -382,6 +382,7 @@ fn gutter_row(
     // whatever the row shows.
     let place = row_place(&dv, row, column, HoverPart::Gutter);
     let tint_el = selected_tint(&dv, row, column);
+    let press_dv = dv.clone();
     place
         .child(dynamic(move || {
             let (cell, old_number) = cell.get()?;
@@ -412,8 +413,14 @@ fn gutter_row(
                         vec![old, new]
                     }
                 };
-                for number in numbers {
+                let sides = match column {
+                    Column::Old => [Some(DiffSide::Old), None],
+                    Column::New => [Some(DiffSide::New), None],
+                    Column::Both => [Some(DiffSide::Old), Some(DiffSide::New)],
+                };
+                for (number, side) in numbers.into_iter().zip(sides) {
                     let label = number.map(|n| n.to_string()).unwrap_or_default();
+                    let pressed = number.and(side).map(|side| (press_dv.clone(), side));
                     let mut list = vec![DiffViewPart::LineNumber];
                     match tint {
                         Tint::Added => list.push(DiffViewPart::LineNumberAdded),
@@ -425,7 +432,15 @@ fn gutter_row(
                             .w(Length::from(number_width()))
                             .ml(px(PAD))
                             .text_right()
-                            .text_color(move || theme().muted_foreground),
+                            .text_color(move || theme().muted_foreground)
+                            // The gutter takes the mouse's presses and drags
+                            // (a press target here would take them from it);
+                            // on touch screens the number takes its tap, so
+                            // a tap with no place to read (assistive
+                            // technologies) selects its line too.
+                            .when_some(pressed.filter(|_| !is_desktop()), |t, (dv, side)| {
+                                t.on_press(move || dv.number_press(row, side))
+                            }),
                         props,
                         list,
                     ));
@@ -568,6 +583,9 @@ fn line_row(
                 Tint::Filler => list.push(DiffViewPart::Filler),
                 Tint::Context => {}
             }
+            // The columns lines wrap at change with the box's width (`rev`),
+            // the cell staying as it was.
+            wrap.rev.get();
             let lines = match wrap.st.borrow().wrap_columns {
                 Some(columns) => {
                     let joined: String = cell.spans.iter().map(|s| s.text.as_str()).collect();

@@ -1304,17 +1304,18 @@ frame id:grow 0 0 300 40
 tap id:grow-more
 wait 100
 frame id:grow 0 0 300 60
-# The app's fold ranges: level 2 folds the inner block alone.
+# The app's fold ranges (the outer one shorter than the indentation's):
+# level 2 folds the inner block alone.
 tap id:fold-level
 expect Folded: 1-2
 # Folding the outer block recursively keeps the inner one folded, so
 # unfolding the outer block alone leaves it folded.
 tap id:fold-recursive
-expect Folded: 0-3 1-2
+expect Folded: 0-2 1-2
 tap id:unfold
 expect Folded: 1-2
 tap id:fold-recursive
-expect Folded: 0-3 1-2
+expect Folded: 0-2 1-2
 tap id:unfold-recursive
 expect Folded: -
 # Any lines fold by hand, wherever folds start.
@@ -1332,7 +1333,6 @@ expect Menu: 0:0 pointer
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
-covers [events] Editor.onContextMenu
 covers [props] Editor.search
 covers [events] Editor.onSearchChange
 covers [events] Editor.onFindWithSelection
@@ -1340,8 +1340,6 @@ covers [props] Editor.minRows
 covers [props] Editor.maxRows
 covers [props] Editor.showWhitespaces
 covers [props] Editor.foldRanges
-covers [props] Editor.highlighting
-covers [props] Editor.decorations
 covers [events] Editor.onFoldChange
 
 # base-diff

@@ -191,7 +191,7 @@ pub(crate) struct State {
 
 impl State {
     fn new(font: Font) -> State {
-        let column = measure_text(&font.css(), "0");
+        let column = crate::editor::controller::text_width(&font.css(), "0");
         State {
             old: Side::new(String::new(), Vec::new()),
             new: Side::new(String::new(), Vec::new()),
@@ -743,7 +743,7 @@ impl Dv {
             };
             {
                 let mut st = dv.st.borrow_mut();
-                st.column = measure_text(&font.css(), "0");
+                st.column = crate::editor::controller::text_width(&font.css(), "0");
                 st.font = font;
                 let soft_wrap = dv.props.soft_wrap.get_untracked();
                 st.wrap_columns = wrap_columns(soft_wrap, st.text_box, st.column);

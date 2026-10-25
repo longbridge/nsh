@@ -75,7 +75,7 @@ export default function BaseEditor() {
           language="rust"
           highlighting={false}
           foldRanges={[
-            { startLine: 0, endLine: 3 },
+            { startLine: 0, endLine: 2 },
             { startLine: 1, endLine: 2 },
           ]}
           decorations={[{ range: { start: { line: 0, column: 0 }, end: { line: 0, column: 3 } }, token: "keyword" }]}

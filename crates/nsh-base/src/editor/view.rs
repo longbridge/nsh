@@ -128,7 +128,7 @@ fn gutter(ed: Ed) -> impl IntoElement {
             }
             let st = ed.st.borrow();
             let digits = st.buffer.line_count().max(1).ilog10() as usize + 1;
-            let zero = measure_text(&st.font.css(), "0");
+            let zero = super::controller::text_width(&st.font.css(), "0");
             zero * digits.max(2) as f32
         }
     };
@@ -258,26 +258,62 @@ fn gutter_row(
                 dynamic(move || {
                     let fold = info.get().fold;
                     let ed = ed.clone();
-                    let glyph = match fold {
-                        Some(true) => "›",
-                        Some(false) => "⌄",
-                        None => "",
-                    };
+                    let size = width();
                     let el = view()
-                        .w(Length::from(width()))
+                        .w(Length::from(size))
+                        .h(Length::from(size))
                         .items_center()
                         .justify_center()
-                        .when(fold.is_some(), |v| {
-                            v.on_press(move || {
-                                let line = ed.st.borrow().display.row(row).line;
-                                ed.fold(line, None);
-                            })
-                        })
-                        .child(text(glyph).text_color(move || theme().muted_foreground));
+                        .when_some(fold, |v, folded| {
+                            let hovered = theme().foreground.opacity(0.08);
+                            let pressed = theme().foreground.opacity(0.14);
+                            // A ghost button smaller than the line, so
+                            // markers on lines next to each other stay apart.
+                            let button = (size * 0.7).round();
+                            v.child(
+                                view()
+                                    .w(Length::from(button))
+                                    .h(Length::from(button))
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(3.0))
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(hovered))
+                                    .active(|s| s.bg(pressed))
+                                    .on_press(move || {
+                                        let line = ed.st.borrow().display.row(row).line;
+                                        ed.fold(line, None);
+                                    })
+                                    .child(chevron(size, folded)),
+                            )
+                        });
                     part(el, props, EditorPart::FoldMarker)
                 })
             },
         ))
+}
+
+/// A fold marker's chevron, `size` the marker's: two sides of a square
+/// turned to point down (open) or right (folded), drawn rather than a
+/// glyph so it sits in the middle of the line in every font.
+fn chevron(size: Points, folded: bool) -> impl IntoElement {
+    let side = (size * 0.3).round();
+    // The turned square's corner points one way: half its diagonal is
+    // empty on the other side, so it moves back to look centered.
+    let shift = px(-(side.0 * std::f32::consts::SQRT_2 / 4.0).round());
+    let el = view()
+        .w(Length::from(side))
+        .h(Length::from(side))
+        .border_r(px(1.5))
+        .border_b(px(1.5))
+        .border_color(move || theme().muted_foreground);
+    if folded {
+        el.rotate(Radians(-std::f32::consts::FRAC_PI_4))
+            .translate_x(shift)
+    } else {
+        el.rotate(Radians(std::f32::consts::FRAC_PI_4))
+            .translate_y(shift)
+    }
 }
 
 /// The display rows to make, as a list `each` keeps rows of.

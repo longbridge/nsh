@@ -1527,7 +1527,21 @@ pub(crate) fn font_family(family: Option<SharedString>) -> SharedString {
 /// The width of a string in `font`, by the platform's text engine.
 fn measurer(font: &Font) -> Rc<dyn Fn(&str) -> Points> {
     let css = font.css();
-    Rc::new(move |text: &str| measure_text(&css, text))
+    Rc::new(move |text: &str| text_width(&css, text))
+}
+
+/// How many copies of a short text are measured at once.
+const COPIES: usize = 64;
+
+/// The width of `text` in `css` (a CSS `font`), exact enough to sum: text
+/// engines round a measured width up to a whole point, so a char measured
+/// alone is up to a point wider than it draws, and a row of them drifts
+/// right of the text. A short text is measured as `COPIES` copies of it.
+pub(crate) fn text_width(css: &str, text: &str) -> Points {
+    if text.is_empty() || text.len() > 8 {
+        return measure_text(css, text);
+    }
+    measure_text(css, &text.repeat(COPIES)) / COPIES as f32
 }
 
 /// The app's fold range as the editor's lines.

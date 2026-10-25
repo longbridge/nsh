@@ -185,6 +185,22 @@ impl Dv {
         }
     }
 
+    /// A press on the number of `side`'s line in `row` without a pointer's
+    /// place to read (a tap on the number itself, assistive technologies):
+    /// selects that line.
+    pub(crate) fn number_press(&self, row: usize, side: DiffSide) {
+        let line = {
+            let st = self.st.borrow();
+            st.rows.get(row).and_then(|r| line_at(r, side))
+        };
+        let Some(line) = line else {
+            return;
+        };
+        self.anchor.set(Some((side, line)));
+        self.select(Some(range(side, line, line)));
+        self.line_number_press(side, line);
+    }
+
     /// The pointer moved to `page` (in the root view) while pressed on the
     /// numbers.
     pub(crate) fn line_drag_to(&self, page: Point<Points>) {

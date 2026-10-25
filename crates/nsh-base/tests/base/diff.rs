@@ -31,6 +31,8 @@ struct HarnessProps {
     layout: DiffLayout,
     /// The view's `annotations`, each drawn as `Note <id>`.
     annotations: Vec<DiffAnnotation>,
+    /// The view's `softWrap`.
+    soft_wrap: bool,
 }
 
 fn texts(old: &str, new: &str) -> HarnessProps {
@@ -40,6 +42,7 @@ fn texts(old: &str, new: &str) -> HarnessProps {
         patch: None,
         layout: DiffLayout::Split,
         annotations: Vec::new(),
+        soft_wrap: false,
     }
 }
 
@@ -110,6 +113,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     };
     let mut el = diff_view()
         .layout(props.layout)
+        .soft_wrap(props.soft_wrap)
         .on_change(move |c: &DiffChange| {
             old.set(c.old_value.clone());
             new.set(c.new_value.clone());
@@ -216,12 +220,17 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 
 /// The harness of `props` on a Linux desktop's headless surface, shown.
 fn start(props: HarnessProps) -> Headless {
+    start_on(props, Os::Linux, Idiom::Desktop)
+}
+
+/// The harness of `props` on `os` in `idiom`, shown.
+fn start_on(props: HarnessProps, os: Os, idiom: Idiom) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(900.0), px(900.0)),
         ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
     };
-    config.environment.os = Os::Linux;
-    config.environment.idiom = Idiom::Desktop;
+    config.environment.os = os;
+    config.environment.idiom = idiom;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Changes 0").unwrap();
     app
@@ -465,6 +474,38 @@ fn a_press_on_a_line_number_selects_its_line() {
     app.press("text:13 >> nth=0").unwrap();
     see(&mut app, "Selection Old 9-9");
     see(&mut app, "Pressed Old 9");
+}
+
+#[test]
+fn a_tap_on_a_line_number_selects_its_line_on_a_phone() {
+    let mut app = start_on(one_change(), Os::Ios, Idiom::Phone);
+    see(&mut app, "line ten");
+    // The number itself takes the tap: number 13 is line 12.
+    app.press("text:13 >> nth=0").unwrap();
+    see(&mut app, "Selection Old 12-12");
+    see(&mut app, "Pressed Old 12");
+}
+
+#[test]
+fn a_tap_on_a_wrapped_patch_line_number_selects_it_on_a_phone() {
+    let long = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron \
+                pi rho sigma tau upsilon phi chi psi omega alpha beta gamma delta epsilon zeta \
+                eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi";
+    // Taller than the view, wrapped: the view scrolls.
+    let long = long.repeat(12);
+    let patch = format!("--- a/notes.txt\n+++ b/notes.txt\n@@ -41,0 +42 @@\n+{long}\n");
+    let mut app = start_on(
+        HarnessProps {
+            patch: Some(patch),
+            soft_wrap: true,
+            ..texts("", "")
+        },
+        Os::Ios,
+        Idiom::Phone,
+    );
+    see(&mut app, "42");
+    app.press("text:42").unwrap();
+    see(&mut app, "Selection New 0-0");
 }
 
 #[test]
