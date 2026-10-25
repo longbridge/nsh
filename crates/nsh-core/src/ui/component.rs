@@ -1241,10 +1241,12 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
     };
     for spec in &specs {
         // A component with rows is generic over their type, like `List`.
-        let (generic, extends) = match spec.items() {
-            Some(_) => ("<T>", ", ListItemsProps<T>"),
-            None if spec.generic => ("<T>", ""),
-            None => ("", ""),
+        // Props generic over their rows' type default it to `any`, so a mark
+        // without rows of its own takes any field name.
+        let (generic, params, extends) = match spec.items() {
+            Some(_) => ("<T>", "<T>", ", ListItemsProps<T>"),
+            None if spec.generic => ("<T>", "<T = any>", ""),
+            None => ("", "", ""),
         };
         // A component with methods: its ref is an object of them.
         let host = if spec.methods.is_empty() {
@@ -1274,7 +1276,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         };
         let _ = writeln!(
             out,
-            "export interface {}Props{generic} extends {host}{extends} {{",
+            "export interface {}Props{params} extends {host}{extends} {{",
             spec.export
         );
         if !spec.methods.is_empty() {
@@ -1314,7 +1316,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         }
         let _ = write!(
             out,
-            "export declare const {}: ({generic}(props: {}Props{generic}) => JSX.Element){with};\n\n",
+            "export declare const {}: ({params}(props: {}Props{generic}) => JSX.Element){with};\n\n",
             spec.export, spec.export,
         );
     }
