@@ -461,17 +461,48 @@ pub fn measure_line(
     font: &CanvasFont,
     text: &str,
 ) -> Points {
-    let mut attributed = crate::text::AttributedText {
-        no_wrap: true,
-        max_lines: 1,
-        ..Default::default()
-    };
-    attributed.push(text, font.text_style());
-    if attributed.text.is_empty() {
+    if text.is_empty() {
         return Points::ZERO;
     }
-    let prepared = engine.prepare(&attributed);
-    engine.measure(&prepared, None).width
+    advance(engine, font, text)
+}
+
+/// What closes a text ending in white space while it is measured.
+const MARK: &str = "x";
+
+/// How far `text` advances on one line in `font`, its trailing white space
+/// included, as canvas `measureText` counts it. Text engines lay a line
+/// out without the white space at its end (it hangs past the line, as in
+/// CSS), so a run of spaces measures 0 and `"a "` as `"a"`: such a text is
+/// measured with a mark after it, less the mark.
+fn advance(engine: &impl crate::text::TextEngine, font: &CanvasFont, text: &str) -> Points {
+    let width = |text: &str| {
+        let mut attributed = crate::text::AttributedText {
+            no_wrap: true,
+            max_lines: 1,
+            ..Default::default()
+        };
+        attributed.push(text, font.text_style());
+        let prepared = engine.prepare(&attributed);
+        engine.measure(&prepared, None).width
+    };
+    // A line break ends the line: what follows it is not on it.
+    let hangs = text.ends_with(|c: char| c.is_whitespace() && !is_line_break(c));
+    if !hangs {
+        return width(text);
+    }
+    let mut marked = String::with_capacity(text.len() + MARK.len());
+    marked.push_str(text);
+    marked.push_str(MARK);
+    (width(&marked) - width(MARK)).max(Points::ZERO)
+}
+
+/// Whether `c` breaks a line (Unicode's mandatory breaks).
+fn is_line_break(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+    )
 }
 
 /// How `text` sits on one line in a canvas font ([`line_metrics`]): its
@@ -510,7 +541,7 @@ pub fn line_metrics(
     let width = if text.is_empty() {
         Points::ZERO
     } else {
-        size.width
+        advance(engine, font, text)
     };
     let layout = engine.layout(&prepared, size);
     match engine.lines(&layout).first() {
@@ -1292,6 +1323,65 @@ fn arc_to_cubics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::{AttributedText, TextEngine, TextLayout};
+
+    /// Lays a line out as text engines do: 10 points a character, without
+    /// the white space at its end.
+    struct Hanging;
+
+    impl TextEngine for Hanging {
+        type Prepared = String;
+
+        fn prepare(&self, text: &AttributedText) -> String {
+            text.text.to_string()
+        }
+
+        fn prepare_aligned(
+            &self,
+            text: &AttributedText,
+            _: &crate::text::AttachmentAlignments,
+        ) -> String {
+            self.prepare(text)
+        }
+
+        fn measure(&self, text: &String, _: Option<Points>) -> Size<Points> {
+            let shown = text.trim_end_matches(|c: char| c.is_whitespace());
+            Size::new(Points(10.0 * shown.chars().count() as f32), Points(12.0))
+        }
+
+        fn layout(&self, _: &String, _: Size<Points>) -> TextLayout {
+            TextLayout(std::sync::Arc::new(()))
+        }
+    }
+
+    #[test]
+    fn trailing_white_space_advances_as_canvas_measures_it() {
+        let font = CanvasFont::default();
+        for (text, width) in [
+            ("", 0.0),
+            ("ab", 20.0),
+            (" ", 10.0),
+            ("   ", 30.0),
+            ("  items: ", 90.0),
+            ("a\t", 20.0),
+            // Chinese and its ideographic space, a character each.
+            ("名字\u{3000}", 30.0),
+            ("你好 ", 30.0),
+            // A line break ends the line.
+            ("ab\n", 20.0),
+        ] {
+            assert_eq!(
+                measure_line(&Hanging, &font, text),
+                Points(width),
+                "{text:?}"
+            );
+            assert_eq!(
+                line_metrics(&Hanging, &font, text).width,
+                Points(width),
+                "{text:?}"
+            );
+        }
+    }
 
     fn consts(op: &PathOp) -> Vec<f32> {
         let v = |n: &Num| match n {
