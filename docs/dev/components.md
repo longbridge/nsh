@@ -237,11 +237,15 @@ reasons: `reactive-components.md`.
   arguments (`move || ..`), or a `Listener` (a type may implement `Fn()` and `Fn(&())`, so one `From` could not take
   both: the marker `M`, inferred, tells them apart; a helper passing a listener on takes `impl IntoListener<E, M>`
   too). It runs
-  under the owner current when it was made (the component, region or row whose view made it: `Owner::scope`, no
-  batch, so writes notify as they happen), so the signals, animated values, refs and tasks it makes are that owner's
-  and go with it rather than living as long as the surface. Once that owner is disposed the listener no longer runs
-  (its view is gone). When the owner is disposed while a listener or task runs under it (a press closing the view it
-  is in, then going on), the graph's current owner becomes `reactive::DISPOSED` rather than the freed slot's id, and
+  under the owner current when it was made (the component, the run of a region or the row whose view made it:
+  `Owner::scope`, no batch, so writes notify as they happen), so the signals, animated values, refs and tasks it
+  makes are that owner's and go with it rather than living as long as the surface. Once that owner is disposed the
+  listener no longer runs (its view is gone), events already queued for its node included: a region that runs again
+  disposes its last run's owner at once, while the core drops that run's handlers only when it reconciles the region,
+  in the commit. A node made again that goes on listening to its layout reports its frame to the new run's listener,
+  as a listener added after layout learns it. When the owner is disposed while a listener or task runs under it (a
+  press closing the view it is in, then going on), the graph's current owner becomes `reactive::DISPOSED` rather than
+  the freed slot's id, and
   what is made from then on goes at once: signals and memos are disposed (using them panics, as with any disposed
   signal), effects never run, cleanups run at once (a task spawned there is cancelled), animated values and refs do
   nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
@@ -708,8 +712,9 @@ what changed.
 - **Regions** are effects too (`Patch::Region`): the core reconciles that region's nodes alone, in place among its
   parent's other children before the region's anchor (the next static node, or the next region's first node);
   keyed elements (an `Each`'s rows) match by key and stay. Each element of a region is made under an owner of its
-  own (the branch, the row), disposed with what it made when the element leaves; a region in a nested component's
-  content joins that component's children in place (`join_nested_at`).
+  own (the run of a `dynamic`, `when` or `catch_error`, the row of an `each`), disposed with what it made when the
+  element leaves: a region that runs again disposes its last run's; a region in a nested component's content joins
+  that component's children in place (`join_nested_at`).
 - **Failures**: Rust code of the view (its body, a binding, a listener, an effect, a task) runs shielded. A panic
   disposes the owner it happened under and goes to the nearest `catch_error` above it (`boundary_of`), else it is
   logged (`js` target). A panic never unwinds through the graph.

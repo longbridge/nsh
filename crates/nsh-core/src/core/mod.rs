@@ -1422,17 +1422,10 @@ impl<M: TextEngine> Core<M> {
                 let node = &mut self.nodes[key as usize];
                 let before = node.events;
                 node.events.set(event, enabled);
-                // A listener added after layout still learns the frame.
                 if event == EventKind::Layout && enabled && !before.contains(event) {
-                    let f = node.frame;
-                    if !f.origin.x.0.is_nan() {
-                        self.events.push(crate::ui::JsEvent::Event(
-                            id,
-                            event,
-                            EventPayload::Layout(f),
-                        ));
-                    }
+                    self.report_frame(key);
                 }
+                let node = &self.nodes[key as usize];
                 if node.events != before {
                     let relink = node.inline && (pressable(before) || pressable(node.events));
                     self.mark(key, dirty::EVENTS);
@@ -5505,6 +5498,19 @@ impl<M: TextEngine> Core<M> {
             }
             self.nodes[key as usize].children = children;
             self.update_overflow(key);
+        }
+    }
+
+    /// Queues node `key`'s frame for its layout listeners once it was laid
+    /// out: a listener added after layout still learns the frame.
+    fn report_frame(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if !node.frame.origin.x.0.is_nan() {
+            self.events.push(crate::ui::JsEvent::Event(
+                node.id,
+                EventKind::Layout,
+                EventPayload::Layout(node.frame),
+            ));
         }
     }
 

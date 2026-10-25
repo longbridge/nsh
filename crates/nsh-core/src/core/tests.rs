@@ -10090,6 +10090,81 @@ mod views {
         assert!(!texts.iter().any(|t| t.starts_with("On")), "{texts:?}");
     }
 
+    /// A box whose layout flips a region in it; the region's node writes a
+    /// signal of its own run as it lays out, and logs the run.
+    #[component]
+    fn LayoutRerun() -> impl IntoElement {
+        let width = signal(100.0_f32);
+        let wide = signal(false);
+        let log = signal(String::new());
+        view()
+            .child(text("grow").on_press(move || width.update(|w| *w += 100.0)))
+            .child(
+                view()
+                    .w(move || px(width.get()))
+                    .h(px(40.0))
+                    .on_layout(move |b: &Bounds<Points>| wide.set(b.size.width.0 > 150.0))
+                    .child(dynamic(move || {
+                        let is_wide = wide.get();
+                        let size = signal(0.0_f32);
+                        view()
+                            .w_full()
+                            .h(px(20.0))
+                            .on_layout(move |b: &Bounds<Points>| {
+                                log.update(|l| l.push_str(if is_wide { "W" } else { "n" }));
+                                size.set(b.size.width.0);
+                            })
+                            .child(text(move || format!("wide {is_wide} inner {}", size.get())))
+                    })),
+            )
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    /// Hands the core's events to the components and commits, as the
+    /// engine does, until nothing changes: the texts the batches set, in
+    /// order.
+    fn settle(c: &mut Core<FakeEngine>) -> Vec<String> {
+        let mut texts_set = Vec::new();
+        loop {
+            for (id, kind, payload) in js_events(c) {
+                c.component_event(id, kind, &payload);
+            }
+            let Some(batch) = c.commit() else {
+                return texts_set;
+            };
+            texts_set.extend(texts(&batch));
+        }
+    }
+
+    /// The last of `texts` starting with `prefix`.
+    fn last_with<'a>(texts: &'a [String], prefix: &str) -> &'a str {
+        texts
+            .iter()
+            .rev()
+            .find(|t| t.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no {prefix:?} in {texts:?}"))
+    }
+
+    #[test]
+    fn a_layout_queued_for_a_replaced_runs_node_does_not_reach_its_listener() {
+        let mut c = core();
+        c.mount_root(&Root::new::<LayoutRerun>(|| ()));
+        let batch = c.commit().unwrap();
+        let grow = text_node(&batch, "grow");
+        let set = settle(&mut c);
+        assert_eq!(last_with(&set, "wide"), "wide false inner 100");
+        assert_eq!(last_with(&set, "log"), "log n");
+        // The box's layout and the region's node's come in one pass: the
+        // box's flips the region, whose old run goes (its `size` with it)
+        // before the old node's layout is handed out. That listener no
+        // longer runs; the new run's hears the node's frame once it is
+        // mounted.
+        assert!(c.component_event(grow, EventKind::Press, &EventPayload::None));
+        let set = settle(&mut c);
+        assert_eq!(last_with(&set, "wide"), "wide true inner 200");
+        assert_eq!(last_with(&set, "log"), "log nW");
+    }
+
     /// A list of rows by key.
     #[derive(Default)]
     struct Rows;

@@ -18,9 +18,10 @@ use crate::{
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
 /// writes the signals it captured. It runs under the owner current when it
-/// was made (the component, region or row whose view made it), so what it
-/// makes (signals, animated values, element refs, tasks) is that owner's
-/// and goes with it; once that owner is disposed it no longer runs.
+/// was made (the component, the run of a region or the row whose view made
+/// it), so what it makes (signals, animated values, element refs, tasks) is
+/// that owner's and goes with it; once that owner is disposed it no longer
+/// runs, not even for an event already queued for its node.
 pub struct Listener<E: ?Sized> {
     f: Rc<dyn Fn(&E)>,
     owner: super::Owner,

@@ -2464,6 +2464,18 @@ impl<M: TextEngine> Core<M> {
             mask.set(*kind, true);
             inst.handlers.push((id, *kind, handler.clone()));
         }
+        // A node made again that goes on listening to its layout: this
+        // run's listener learns the frame, as one added after layout does
+        // (`Op::Listen`); the last run's, which heard it, went with its run.
+        if old.contains(EventKind::Layout)
+            && el
+                .handlers
+                .iter()
+                .any(|(kind, _)| *kind == EventKind::Layout)
+            && let Ok(key) = self.key(id)
+        {
+            self.report_frame(key);
+        }
         // The responder hears the touches the platform reports.
         if let Some(responder) = &el.responder {
             mask.set(EventKind::Touch, true);

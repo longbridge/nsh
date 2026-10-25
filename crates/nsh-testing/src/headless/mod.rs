@@ -1654,6 +1654,47 @@ mod tests {
         app.wait_for("seen: at 40 20 in 40 30").unwrap();
     }
 
+    /// A box whose layout flips a region in it, whose node keeps its width
+    /// in a signal of the region's run (#448).
+    #[component]
+    fn GrowingBox() -> impl IntoElement {
+        let width = signal(100.0_f32);
+        let wide = signal(false);
+        view()
+            .child(
+                view()
+                    .on_press(move || width.update(|w| *w += 100.0))
+                    .child(text("Grow")),
+            )
+            .child(
+                view()
+                    .w(move || px(width.get()))
+                    .h(px(40.0))
+                    .on_layout(move |b: &Bounds<Points>| wide.set(b.size.width.0 > 150.0))
+                    .child(dynamic(move || {
+                        let is_wide = wide.get();
+                        let size = signal(0.0_f32);
+                        view()
+                            .w_full()
+                            .h(px(20.0))
+                            .on_layout(move |b: &Bounds<Points>| size.set(b.size.width.0))
+                            .child(text(move || format!("wide {is_wide} inner {}", size.get())))
+                    })),
+            )
+    }
+
+    #[test]
+    fn a_region_run_replaced_in_a_layout_pass_misses_its_nodes_layout() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<GrowingBox>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("wide false inner 100").unwrap();
+        // The box's layout flips the region before the old node's, from the
+        // same pass, is handed out: its listener, whose `size` went with its
+        // run, no longer runs, and the new run's learns the width.
+        app.press("Grow").unwrap();
+        app.wait_for("wide true inner 200").unwrap();
+    }
+
     #[test]
     fn steps_press_what_a_text_is_in_and_wait_for_what_it_shows() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
