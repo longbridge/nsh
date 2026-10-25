@@ -212,6 +212,11 @@ Things that were found the hard way. Read the section of the area you change bef
   drawn one raises it while zoomed, so neither is the screen's scale. Images decoded at it came out at a third of their
   pixels and blurred; the scale is the trait collection's `displayScale` (`Mounter::display_scale`).
 
+- **iOS, ProMotion**: a `CADisplayLink` left at its default fires at 60 Hz on a 120 Hz iPhone, so native
+  animations, `scrollValue` bindings and JS frames moved at half the rate of the system's own scrolling. Both links ask
+  for the screen's `maximumFramesPerSecond` (`animation.rs` `full_rate`); an iPhone grants more than 60 Hz only to
+  apps whose `Info.plist` sets `CADisableMinimumFrameDurationOnPhone` (`nsh package`, the development host; embedding
+  apps set it themselves, `website/docs/ios.md`). iPads ignore the key.
 - **iOS, secondary clicks**: `buttonMaskRequired` only holds touches that have buttons. A finger has none, so a tap
   recognizer requiring the secondary button recognized every tap, and as a tap recognizer it cancelled the presses inside
   (a `ContextMenu`'s trigger opened its menu instead of pressing). The `onContextMenu` recognizer allows only
@@ -340,9 +345,17 @@ Things that were found the hard way. Read the section of the area you change bef
   controlled input's value comes back lose characters, so keys come at a typist's pace.
 - **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
   velocity and flings. A drag whose path leaves the scroll view moves it much further than the finger.
-- **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
-  scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
-  it only stops it.
+- **Interactive back needs system-delivered touches**: the agent's IOHID drags can start UIKit's navigation
+  gestures in the simulator. Test with `app.drag` from an element at the leading edge; `app.back()` exercises
+  the back button instead. On iOS 26 a leading-edge drag can be recognized by
+  `interactiveContentPopGestureRecognizer`, so both it and `interactivePopGestureRecognizer` need the stack's
+  permission delegate after the navigation view has loaded. A scroll view's glide or bounce is not a Core
+  Animation animation: `isDecelerating` says it moves, and a tap during it only stops it.
+- **Interactive back and editing**: the outgoing page remains attached while the finger moves, so removing its
+  input only ends editing after the pop. The stack's gesture delegate ends editing after the permission, root and
+  transition guards allow the gesture. `didShowViewController:` restores that editor if its page returns after
+  cancellation and no other control took focus. Rejected gestures keep focus. The regression observes `onBlur` while the
+  root's system-delivered touch is still down, rather than checking only after the page has detached.
 - **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
   UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
   keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
@@ -488,6 +501,6 @@ Things that were found the hard way. Read the section of the area you change bef
   of other apps (e.g. a Slack huddle bar at window level 1001) silently swallow clicks over a band of the app. When a tap does
   nothing, list the windows at the point (`CGWindowListCopyWindowInfo`) before suspecting hit testing.
 - **Not supported / not verifiable here**: keeping left and right unswapped right to left (left / right always swap right to left);
-  after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms (as in React Native); the iOS simulator cannot
-  inject edge swipes (interactive back is untested there); Android's stylus handwriting mode (on by default on recent
+  after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms
+  (as in React Native); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.

@@ -36,7 +36,7 @@ use crate::{
         ROOT_ID, ResizeMode, ScreenAnimation, ScreenProp, ScrollProp, Tag,
     },
     props::{AccessibilityProp, EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
-    style::{Color, EllipsizeMode, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
+    style::{Color, EllipsizeMode, PaintStyle, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
     tailwind::{ClassEnvironment, ClassList, ClassProps, Tailwind},
     text::{AttributedText, MeasureCache, ResolvedTextStyle, TextEngine, TextLayout},
 };
@@ -398,6 +398,9 @@ struct Node {
     base_layout: Option<Box<taffy::Style>>,
     view_style: ViewStyle,
     text_style: TextStyle,
+    /// SVG's paint properties as written on the node (inherited by the
+    /// canvases inside it); `None` while it sets none.
+    paint: Option<Box<PaintStyle>>,
     animated: Vec<(AnimationProp, crate::animation::NodeId)>,
     /// What a canvas draws.
     drawing: Option<Arc<crate::canvas::Drawing>>,
@@ -482,6 +485,8 @@ struct Node {
     slot: Option<CellSlot>,
     /// Animated values driven by gestures on the view.
     gestures: GestureValues,
+    /// Keeps pan listeners and values while their native gesture is disabled.
+    pan_enabled: bool,
     /// The native view exists.
     created: bool,
     /// Last frame sent to the platform.
@@ -526,6 +531,10 @@ impl Node {
     /// on it goes on to the nearest enabled listener around it.
     fn mounted_events(&self) -> EventMask {
         let mut events = self.events;
+        if !self.pan_enabled {
+            events.set(EventKind::PanStart, false);
+            events.set(EventKind::PanEnd, false);
+        }
         if self.overlay_watched != 0 {
             events.set(EventKind::Touch, true);
         }
@@ -604,6 +613,7 @@ impl Node {
             base_layout: None,
             view_style: ViewStyle::default(),
             text_style: TextStyle::default(),
+            paint: None,
             animated: Vec::new(),
             drawing: None,
             inline_style: StylePatch::default(),
@@ -651,6 +661,7 @@ impl Node {
             component: matches!(kind, Kind::Native).then(Box::default),
             slot: None,
             gestures: GestureValues::default(),
+            pan_enabled: true,
             created: false,
             frame: Bounds::UNSET,
             overflow: None,
@@ -681,7 +692,16 @@ struct TextContext<P> {
     cache: Option<(Option<f32>, Size<Points>)>,
     /// Last final layout sent to the platform and the content box it was
     /// made for (where in the view the text goes).
-    laid_out: Option<(Bounds<Points>, TextLayout)>,
+    laid_out: Option<LaidText>,
+    /// New test metadata must be mounted even when the glyphs are unchanged.
+    metadata_changed: bool,
+}
+
+/// The final text can have fitted font sizes, so retain it with its layout.
+struct LaidText {
+    content: Bounds<Points>,
+    layout: TextLayout,
+    text: Arc<AttributedText>,
 }
 
 impl<P> TextContext<P> {
@@ -694,7 +714,28 @@ impl<P> TextContext<P> {
             min_content: None,
             cache: None,
             laid_out: None,
+            metadata_changed: false,
         }
+    }
+    /// Remount metadata in the same box, keeping any fitted font sizes.
+    fn remount_metadata(
+        &mut self,
+        content: Bounds<Points>,
+    ) -> Option<(Arc<AttributedText>, TextLayout)> {
+        if !self.metadata_changed {
+            return None;
+        }
+        let laid = self.laid_out.as_mut().filter(|l| l.content == content)?;
+        let text = if laid.text.spans == self.text.spans {
+            self.text.clone()
+        } else {
+            let mut text = (*laid.text).clone();
+            text.test_ids = self.text.test_ids.clone();
+            Arc::new(text)
+        };
+        laid.text = text.clone();
+        self.metadata_changed = false;
+        Some((text, laid.layout.clone()))
     }
 }
 
@@ -2067,6 +2108,7 @@ impl<M: TextEngine> Core<M> {
             mut layout,
             mut view,
             text,
+            paint,
             animated,
             z_index,
             vertical_align,
@@ -2173,12 +2215,15 @@ impl<M: TextEngine> Core<M> {
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
         let animation_changed = node.animated != animated;
+        let paint = (paint != PaintStyle::default()).then(|| Box::new(paint));
+        let paint_changed = node.paint != paint;
         let z_changed = node.z_index != z_index;
         // An attachment's place in its line is part of its block's text.
         let align_changed =
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         node.view_style = view;
         node.text_style = text;
+        node.paint = paint;
         node.animated = animated;
         node.z_index = z_index;
         node.vertical_align = vertical_align;
@@ -2250,6 +2295,11 @@ impl<M: TextEngine> Core<M> {
             let color = node.text_style.color.or(node.inherited_color);
             self.inherit_color(key, color);
         }
+        // A canvas painting with its view's style (`currentColor` too) sees
+        // the change, and so do the ones inside it, which inherit it.
+        if paint_changed || text_changed {
+            self.mark_view_painted(key);
+        }
         if flipped {
             self.update_children_direction(key);
             // Its own `direction` turned it: classes resolved for the other
@@ -2259,6 +2309,48 @@ impl<M: TextEngine> Core<M> {
             }
         }
         Ok(())
+    }
+
+    /// Marks the canvases at and inside `key` that paint with their view's
+    /// style ([`crate::canvas::Drawing::view_paints`]) to be sent again.
+    fn mark_view_painted(&mut self, key: Key) {
+        let mut stack = vec![key];
+        while let Some(k) = stack.pop() {
+            let node = &self.nodes[k as usize];
+            match node.kind {
+                Kind::Canvas => {
+                    if node
+                        .drawing
+                        .as_ref()
+                        .is_some_and(|d| !d.view_paints.is_empty())
+                    {
+                        self.mark(k, dirty::CANVAS);
+                    }
+                }
+                Kind::Text | Kind::RawText | Kind::Input => {}
+                _ => stack.extend_from_slice(&self.nodes[k as usize].children),
+            }
+        }
+    }
+
+    /// The paint properties canvas `key` paints with (its own over those
+    /// of the views around it, as CSS inherits them) and its text color,
+    /// for `currentColor`.
+    fn resolved_paint(&self, key: Key) -> (PaintStyle, crate::style::Color) {
+        let node = &self.nodes[key as usize];
+        let mut paint = node.paint.as_deref().cloned().unwrap_or_default();
+        let mut k = node.parent;
+        while k != NO_KEY {
+            if let Some(p) = self.nodes[k as usize].paint.as_deref() {
+                paint = paint.inherit(p);
+            }
+            k = self.nodes[k as usize].parent;
+        }
+        let color = node
+            .text_style
+            .color
+            .unwrap_or_else(|| self.inherited_text_style(key).color);
+        (paint, color)
     }
 
     /// The direction `key` lays out in: its own, else its parent's (the
@@ -2490,6 +2582,7 @@ impl<M: TextEngine> Core<M> {
         }
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
+        let mut rebuild_span = false;
         match prop {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
@@ -2729,6 +2822,19 @@ impl<M: TextEngine> Core<M> {
                 (node.gestures.pan_x, node.gestures.pan_y) = (x, y);
                 flags |= dirty::PAN;
             }
+            Prop::PanEnabled(enabled) => {
+                if node.pan_enabled != enabled {
+                    node.pan_enabled = enabled;
+                    flags |= dirty::PAN | dirty::EVENTS;
+                }
+            }
+            Prop::PanScrollHandoff(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.pan_scroll_handoff != value {
+                    props.pan_scroll_handoff = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::PinchValue(value) => {
                 node.gestures.pinch = value;
                 flags |= dirty::PAN;
@@ -2944,6 +3050,10 @@ impl<M: TextEngine> Core<M> {
                 if props.test_id != value {
                     props.test_id = value;
                     flags |= dirty::VIEW_PROPS;
+                    // A span's id is recorded in its block's text.
+                    if node.kind == Kind::Text && node.inline {
+                        rebuild_span = true;
+                    }
                 }
             }
             Prop::WindowDrag(value) => {
@@ -3295,6 +3405,9 @@ impl<M: TextEngine> Core<M> {
         }
         if flags != 0 {
             self.mark(key, flags);
+        }
+        if rebuild_span {
+            self.mark_text_block(key);
         }
         Ok(())
     }
@@ -4047,16 +4160,21 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::CANVAS != 0
                 && let Some(drawing) = &node.drawing
             {
-                self.mount.push(MountItem::Canvas {
-                    id,
-                    drawing: drawing.clone(),
-                });
+                let drawing = if drawing.view_paints.is_empty() {
+                    drawing.clone()
+                } else {
+                    let (paint, current) = self.resolved_paint(key);
+                    Arc::new(drawing.painted(&paint, current))
+                };
+                self.mount.push(MountItem::Canvas { id, drawing });
             }
             if flags & dirty::PAN != 0 {
-                self.mount.push(MountItem::Gestures {
-                    id,
-                    values: node.gestures,
-                });
+                let mut values = node.gestures;
+                if !node.pan_enabled {
+                    values.pan_x = None;
+                    values.pan_y = None;
+                }
+                self.mount.push(MountItem::Gestures { id, values });
             }
             if flags & dirty::VIEW_PROPS != 0 {
                 let props = node.mounted_props();
@@ -4370,6 +4488,16 @@ impl<M: TextEngine> Core<M> {
             }
             return inserted;
         }
+        if cx.text.test_ids != text.test_ids
+            && !inserted
+            && cx.alignments == alignments
+            && cx.text.rendering_eq(&text)
+        {
+            cx.text = Arc::new(text);
+            cx.metadata_changed = true;
+            return true;
+        }
+        cx.metadata_changed = false;
         let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
         cx.alignments = alignments;
         cx.text = Arc::new(text);
@@ -4428,6 +4556,13 @@ impl<M: TextEngine> Core<M> {
                             end: out.len_utf16(),
                             node: child.id,
                             events: child.events,
+                        });
+                    }
+                    if let Some(test_id) = child.props.as_ref().and_then(|p| p.test_id.clone()) {
+                        out.test_ids.push(crate::text::SpanTestId {
+                            start,
+                            end: out.len_utf16(),
+                            test_id,
                         });
                     }
                 }
@@ -5096,12 +5231,26 @@ impl<M: TextEngine> Core<M> {
                 // in its zero box would still show where a platform does
                 // not clip text to its box (a browser), so it gets an
                 // empty layout; the text itself stays what it is.
-                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
+                if let Some((text, layout)) = cx.remount_metadata(content) {
+                    self.mount.push(MountItem::Text {
+                        id,
+                        text,
+                        layout,
+                        content,
+                    });
+                    continue;
+                }
+                if matches!(&cx.laid_out, Some(l) if l.content == content) {
                     continue;
                 }
                 let layout =
                     engine.layout(&engine.prepare(&AttributedText::default()), content.size);
-                cx.laid_out = Some((content, layout.clone()));
+                cx.laid_out = Some(LaidText {
+                    content,
+                    layout: layout.clone(),
+                    text: cx.text.clone(),
+                });
+                cx.metadata_changed = false;
                 self.mount.push(MountItem::Text {
                     id,
                     text: cx.text.clone(),
@@ -5125,16 +5274,30 @@ impl<M: TextEngine> Core<M> {
                     content.size.height = height;
                 }
             }
+            if let Some((text, layout)) = cx.remount_metadata(content) {
+                self.mount.push(MountItem::Text {
+                    id,
+                    text,
+                    layout,
+                    content,
+                });
+                continue;
+            }
             let size = content.size;
             if let Some(min) = fit {
                 // Shrunk to fit: its own text, laid out on its own.
-                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
+                if matches!(&cx.laid_out, Some(l) if l.content == content) {
                     continue;
                 }
                 let text = Arc::new(fitted(engine, &cx.text, &cx.alignments, size, min));
                 let prepared = engine.prepare_aligned(&text, &cx.alignments);
                 let text_layout = engine.layout(&prepared, size);
-                cx.laid_out = Some((content, text_layout.clone()));
+                cx.laid_out = Some(LaidText {
+                    content,
+                    layout: text_layout.clone(),
+                    text: text.clone(),
+                });
+                cx.metadata_changed = false;
                 if report_lines {
                     self.events.push(crate::ui::JsEvent::Event(
                         id,
@@ -5154,9 +5317,9 @@ impl<M: TextEngine> Core<M> {
                 continue;
             }
             let text_layout = match &cx.laid_out {
-                Some((r, _)) if *r == content => continue,
+                Some(l) if l.content == content => continue,
                 // Only moved (padding, vertical alignment): the same layout.
-                Some((r, l)) if r.size == size => l.clone(),
+                Some(l) if l.content.size == size => l.layout.clone(),
                 _ => {
                     let prepared = cx
                         .prepared
@@ -5172,7 +5335,12 @@ impl<M: TextEngine> Core<M> {
                     layout
                 }
             };
-            cx.laid_out = Some((content, text_layout.clone()));
+            cx.laid_out = Some(LaidText {
+                content,
+                layout: text_layout.clone(),
+                text: cx.text.clone(),
+            });
+            cx.metadata_changed = false;
             if !cx.text.attachments.is_empty() {
                 placements.push((key, text_layout.clone(), content));
             }

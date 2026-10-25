@@ -19,8 +19,8 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
-    rc::Retained,
+    DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
+    rc::{Retained, Weak},
     runtime::{AnyClass, AnyObject, ProtocolObject},
 };
 use objc2_core_foundation::{CGFloat, CGSize};
@@ -32,7 +32,8 @@ use objc2_ui_kit::{
     UIGestureRecognizerDelegate, UIInterfaceOrientationMask, UIModalPresentationStyle,
     UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
     UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
-    UIPresentationController, UIResponder, UIView, UIViewAutoresizing, UIViewController,
+    UIPresentationController, UIResponder, UIScrollView, UIView, UIViewAutoresizing,
+    UIViewController,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -174,6 +175,15 @@ impl ScreenController {
                 .dispatch_event(id, EventKind::Insets, insets_payload(insets));
         }
     }
+}
+
+fn first_responder(view: &UIView) -> Option<Retained<UIView>> {
+    if view.isFirstResponder() {
+        return Some(view.retain());
+    }
+    view.subviews()
+        .iter()
+        .find_map(|child| first_responder(&child))
 }
 
 pub(crate) struct ModalIvars {
@@ -388,6 +398,29 @@ pub(crate) struct NavIvars {
     applying: Cell<bool>,
 }
 
+/// A drag that starts at the screen's edge belongs to the stack: the top
+/// screen's scroll views wait for the back gesture to fail before they pan,
+/// so a swipe at the edge goes back instead of scrolling the page. The
+/// gesture fails at once for a drag that is not at the edge. Scroll views
+/// mounted after the screen's last stack change get it with the next one.
+fn defer_to_back_swipe(nav: &UINavigationController) {
+    let Some(pop) = nav.interactivePopGestureRecognizer() else {
+        return;
+    };
+    let Some(view) = nav.topViewController().and_then(|c| c.view()) else {
+        return;
+    };
+    let mut pending = vec![view];
+    while let Some(view) = pending.pop() {
+        if let Some(scroll) = view.downcast_ref::<UIScrollView>() {
+            scroll
+                .panGestureRecognizer()
+                .requireGestureRecognizerToFail(&pop);
+        }
+        pending.extend(view.subviews().iter());
+    }
+}
+
 /// Gives every screen whose view UIKit left empty its parent's bounds.
 ///
 /// UIKit sizes a pushed controller's view from the navigation view, which
@@ -548,6 +581,8 @@ impl NavController {
 pub(crate) struct StackDelegateIvars {
     stack: NodeId,
     mounter: SharedMounter,
+    /// An accepted gesture ended editing; return it if the same page wins.
+    editor: RefCell<Option<Weak<UIView>>>,
 }
 
 define_class!(
@@ -575,14 +610,25 @@ define_class!(
         fn did_show(
             &self,
             nav: &UINavigationController,
-            _controller: &UIViewController,
+            controller: &UIViewController,
             _animated: bool,
         ) {
+            if let Some(editor) = self.ivars().editor.borrow_mut().take()
+                && let Some(editor) = editor.load()
+                && let Some(view) = controller.view()
+                && editor.isDescendantOfView(&view)
+                && let Some(window) = editor.window()
+                && first_responder(&window).is_none()
+            {
+                // The swipe was cancelled. Another control's focus wins.
+                editor.becomeFirstResponder();
+            }
             // An animated change of screens is deferred to a layout pass of
             // the navigation view, which puts the screen that arrives in the
             // hierarchy after `reconcile` has sized what was there: the one
             // it brought in is only reachable here.
             size_screens(nav);
+            defer_to_back_swipe(nav);
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
             // UIKit installs its own pop delegate while loading the navigation
@@ -598,13 +644,26 @@ define_class!(
         /// Swipe back: only with something to go back to, if the top
         /// screen allows it.
         #[unsafe(method(gestureRecognizerShouldBegin:))]
-        fn should_begin(&self, _recognizer: &UIGestureRecognizer) -> bool {
+        fn should_begin(&self, recognizer: &UIGestureRecognizer) -> bool {
             let stack = self.ivars().stack;
             let mtm = self.mtm();
-            match self.ivars().mounter.get(mtm).try_borrow() {
+            let allowed = match self.ivars().mounter.get(mtm).try_borrow() {
                 Ok(m) => m.as_ref().is_some_and(|m| m.stack_can_pop(stack)),
                 Err(_) => false,
+            };
+            if allowed
+                && let Some(view) = recognizer.view()
+                && let Some(editor) = first_responder(&view)
+            {
+                // The outgoing view stays attached until the pop ends.
+                // Resign now, after the permission/root/transition guards,
+                // so the keyboard hides while the finger is still down.
+                self.ivars()
+                    .editor
+                    .replace(Some(Weak::from_retained(&editor)));
+                view.endEditing(true);
             }
+            allowed
         }
     }
 );
@@ -670,7 +729,11 @@ fn system_bar_item(item: HeaderSystemItem) -> UIBarButtonSystemItem {
 
 impl StackDelegate {
     fn new(mtm: MainThreadMarker, stack: NodeId, mounter: SharedMounter) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(StackDelegateIvars { stack, mounter });
+        let this = Self::alloc(mtm).set_ivars(StackDelegateIvars {
+            stack,
+            mounter,
+            editor: RefCell::new(None),
+        });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
     }
@@ -711,15 +774,24 @@ impl StackHost {
         // SAFETY: the delegate lives as long as the stack.
         unsafe { nav.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
         keep_in_window(&nav.navigationBar());
-        if let Some(pop) = nav.interactivePopGestureRecognizer() {
-            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-        }
         if let Some(view) = nav.view() {
             view.setAutoresizingMask(
                 UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
             );
             view.setFrame(container.bounds());
             container.addSubview(&view);
+        }
+        // Loading the navigation view installs UIKit's gesture delegates.
+        // Apply our permission delegate afterwards, to both recognizers:
+        // on iOS 26 even an edge drag can use the content recognizer, whose
+        // default delegate prevents popping with a hidden navigation bar.
+        if let Some(pop) = nav.interactivePopGestureRecognizer() {
+            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        }
+        if nav.respondsToSelector(objc2::sel!(interactiveContentPopGestureRecognizer))
+            && let Some(pop) = nav.interactiveContentPopGestureRecognizer()
+        {
+            pop.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         }
         Self {
             container,
@@ -796,6 +868,7 @@ impl StackHost {
         // empty until something unrelated (a rotation, a change of
         // appearance) forces a layout pass.
         size_screens(&self.nav);
+        defer_to_back_swipe(&self.nav);
     }
 }
 
