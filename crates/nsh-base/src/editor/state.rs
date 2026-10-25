@@ -595,17 +595,17 @@ impl State {
         let row = ((point.y.0 / lh).floor().max(0.0) as usize).min(rows.saturating_sub(1));
         let before = self.buffer.snapshot();
         let layout = self.display.layout(&before);
-        let x = point.x - self.display.row(row).indent;
-        layout.offset_at(row, x.max(px(0.0)))
+        // The layout's x counts a continuation row's indent itself.
+        layout.offset_at(row, point.x.max(px(0.0)))
     }
 
     /// Where `offset` is drawn: its row's top left and its x.
     pub(crate) fn caret_point(&self, offset: usize) -> Pt<Points> {
         let before = self.buffer.snapshot();
         let layout = self.display.layout(&before);
+        // The x counts a continuation row's indent.
         let (row, x) = layout.locate(offset);
-        let indent = self.display.row(row).indent;
-        Pt::new(x + indent, self.line_height() * row as f32)
+        Pt::new(x, self.line_height() * row as f32)
     }
 
     /// How many rows a page moves: the viewport's height in rows, less
@@ -811,12 +811,9 @@ impl State {
             let x0 = if start <= info.range.start {
                 px(0.0)
             } else {
-                self.display.x_of(&self.buffer, start) + info.indent
+                self.display.x_in(&self.buffer, row, start)
             };
-            let mut x1 = self.display.x_of(&self.buffer, end) + info.indent;
-            if row == first_row && start > info.range.start {
-                // x0 already exact.
-            }
+            let mut x1 = self.display.x_in(&self.buffer, row, end);
             // The line break, or the wrap, is selected: a sliver past
             // the end.
             if newline && range.end > info.range.end {
@@ -1249,6 +1246,32 @@ mod tests {
             font,
             measure,
         )
+    }
+
+    #[test]
+    fn a_wrapped_rows_carets_and_selections_count_its_indent_once() {
+        let mut st = state("    aaaa bbbb cccc dddd\n");
+        st.display.set_wrap_width(Some(px(80.0)));
+        st.relayout();
+        // The line wraps; its continuation rows start at its indentation.
+        let row = st.display.row(1);
+        assert!(!row.first && row.indent == px(32.0), "{:?}", row.indent);
+        let start = row.range.start;
+        // A caret after the row's first char: the indent and one char.
+        let caret = st.caret_point(start + 1);
+        assert_eq!(caret, Pt::new(px(40.0), px(20.0)));
+        // A press there finds it again.
+        assert_eq!(st.offset_at(Pt::new(px(41.0), px(30.0))), start + 1);
+        // Selecting the line covers the first row to its end, not to
+        // where the next row starts.
+        let first_end = st.display.row(0).range.end;
+        let rects = st.range_rects(0..first_end + 2, 0..3, false);
+        assert_eq!(
+            rects[0].size.width,
+            st.display.x_in(&st.buffer, 0, first_end)
+        );
+        assert_eq!(rects[1].origin.x, px(0.0));
+        assert_eq!(rects[1].size.width, px(48.0));
     }
 
     fn pairs(folds: &[FoldRange]) -> Vec<(usize, usize)> {

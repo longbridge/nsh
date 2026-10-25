@@ -327,6 +327,7 @@ impl DisplayMap {
 
     /// The x of `offset` within its row (from the text's left edge: a
     /// continuation row's indent included).
+    #[cfg(test)]
     pub(crate) fn x_of(&self, buffer: &Buffer, offset: usize) -> Points {
         self.locate(buffer, offset).1
     }
@@ -446,6 +447,13 @@ impl DisplayMap {
     /// A `RowLayout` over this map and `buffer`.
     pub(crate) fn layout<'a>(&'a self, buffer: &'a Buffer) -> impl RowLayout + 'a {
         MapLayout { map: self, buffer }
+    }
+
+    /// The x of `offset` (clamped to the row) in display row `row`, its
+    /// indent included: a wrapped row's end is on it, where [`Self::locate`]
+    /// puts the next row's start.
+    pub(crate) fn x_in(&self, buffer: &Buffer, row: usize, offset: usize) -> Points {
+        self.x_in_row(buffer.rope(), row, offset)
     }
 
     /// The x of `offset` (clamped to the row) in row `row`.
