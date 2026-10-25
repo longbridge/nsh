@@ -93,14 +93,14 @@ parts! {
     fold_placeholder => FoldPlaceholder,
     /// The placeholder, shown while the text is empty.
     placeholder => Placeholder,
-    /// The mark under an error's range (a line in the theme's
-    /// `destructive`).
+    /// An error's range: its text underlined with a 1 point wavy line in
+    /// the theme's `destructive` (a short line on an empty line).
     diagnostic_error => DiagnosticError,
-    /// The mark under a warning's range (amber).
+    /// A warning's range, underlined the same way in amber.
     diagnostic_warning => DiagnosticWarning,
-    /// The mark under an information's range (blue).
+    /// An information's range, underlined the same way in blue.
     diagnostic_info => DiagnosticInfo,
-    /// The mark under a hint's range (dotted, muted).
+    /// A hint's range, underlined the same way in `muted-foreground`.
     diagnostic_hint => DiagnosticHint,
     /// The text of an `unnecessary` diagnostic (unused, unreachable code):
     /// faded, in the theme's `muted-foreground`; a hint's mark is left

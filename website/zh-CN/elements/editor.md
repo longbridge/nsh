@@ -225,7 +225,7 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
 
 ## 诊断
 
-`diagnostics` 标记语言服务器或 linter 报告的问题：在每个范围下方画一条线，颜色由严重程度决定（`error`、`warning`、`info`、`hint`）。位置是从 0 开始的行和 UTF-16 列，与语言服务器相同，所以它的诊断可以原样传入。用户输入时这些标记留在它们的文本上，直到应用传入新的诊断；消息的显示（一个列表、行旁的悬浮卡片）由应用负责。
+`diagnostics` 标记语言服务器或 linter 报告的问题：在每个范围的文字下方画一条细波浪线，颜色由严重程度决定（`error`、`warning`、`info`、`hint`）。位置是从 0 开始的行和 UTF-16 列，与语言服务器相同，所以它的诊断可以原样传入。用户输入时这些标记留在它们的文本上，直到应用传入新的诊断；消息的显示（一个列表、行旁的悬浮卡片）由应用负责。
 
 诊断也带着语言服务器 `Diagnostic` 的其余字段。它的 `tags` 按语言客户端的方式绘制文本：`unnecessary` 的代码（未使用的变量、不可达的代码）淡化显示，`deprecated` 的代码加删除线，分别使用 `unnecessaryText` 和 `deprecatedText` 部件；带标签的提示只体现在它的文本上。`codeDescription.href` 是描述其代码的页面（一条 lint 规则的页面），`relatedInformation` 列出与它相关的其他位置（`{ location: { uri?, range }, message }`）：悬停把两者交给应用，由应用在悬浮卡片中显示并打开页面。语言服务器以数字（`1`、`2`）发送标签，编辑器接收它们的名称。
 

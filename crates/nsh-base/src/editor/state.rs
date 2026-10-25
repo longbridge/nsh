@@ -59,13 +59,18 @@ pub(crate) struct Span {
     pub(crate) token: Option<Token>,
     /// The decorations over it (indexes into the editor's decorations).
     pub(crate) decorations: Vec<usize>,
-    /// The tags of the diagnostics over it (faded, struck through).
+    /// The diagnostics over it: their tags (faded, struck through) and
+    /// the most serious one's underline.
     pub(crate) tags: SpanTags,
 }
 
-/// The tags of the diagnostics over a span: how its text is drawn.
+/// The diagnostics over a span: how its text is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct SpanTags {
+    /// The most serious diagnostic's severity: a wavy underline of its
+    /// color (a tagged hint shows in its text alone, as language clients
+    /// draw it).
+    pub(crate) severity: Option<EditorDiagnosticSeverity>,
     /// Under an `unnecessary` diagnostic: faded.
     pub(crate) unnecessary: bool,
     /// Under a `deprecated` diagnostic: struck through.
@@ -75,20 +80,32 @@ pub(crate) struct SpanTags {
 impl SpanTags {
     /// The tags of `diagnostic`.
     fn of(diagnostic: &EditorDiagnostic) -> SpanTags {
+        let quiet =
+            diagnostic.severity == EditorDiagnosticSeverity::Hint && !diagnostic.tags.is_empty();
         SpanTags {
+            severity: (!quiet).then_some(diagnostic.severity),
             unnecessary: diagnostic.tags.contains(&EditorDiagnosticTag::Unnecessary),
             deprecated: diagnostic.tags.contains(&EditorDiagnosticTag::Deprecated),
         }
     }
 
-    /// Neither tag.
+    /// Nothing to draw.
     pub(crate) fn is_empty(self) -> bool {
-        !self.unnecessary && !self.deprecated
+        self.severity.is_none() && !self.unnecessary && !self.deprecated
     }
 
     /// Both spans' tags.
     fn union(self, other: SpanTags) -> SpanTags {
+        let severity = match (self.severity, other.severity) {
+            (Some(a), Some(b)) => Some(if diagnostics::rank(b) < diagnostics::rank(a) {
+                b
+            } else {
+                a
+            }),
+            (a, b) => a.or(b),
+        };
         SpanTags {
+            severity,
             unnecessary: self.unnecessary || other.unnecessary,
             deprecated: self.deprecated || other.deprecated,
         }
@@ -135,8 +152,8 @@ pub(crate) struct State {
     pub(crate) options: EditOptions,
     pub(crate) font: Font,
     pub(crate) diagnostics: Vec<Mark<EditorDiagnostic>>,
-    /// The longest tagged diagnostic's bytes: a row looks for the tags
-    /// over it among the diagnostics starting this far before it.
+    /// The longest diagnostic's bytes: a row looks for the diagnostics
+    /// over it among those starting this far before it.
     tag_reach: usize,
     /// The decorations' ranges, each carrying its index in `decoration_items`.
     pub(crate) decorations: Vec<Mark<usize>>,
@@ -285,7 +302,7 @@ impl State {
             diagnostics::adjust(scope, changes);
         }
         self.decoration_reach = app_highlight::reach(&self.decorations);
-        self.tag_reach = diagnostics::tag_reach(&self.diagnostics);
+        self.tag_reach = app_highlight::reach(&self.diagnostics);
         self.fold_candidates = None;
         self.find();
         let len = self.buffer.len();
@@ -723,7 +740,7 @@ impl State {
             info.range.start,
             info.range.end,
         )
-        .map(|(_, m)| (SpanTags::of(&m.item), m.range.clone()))
+        .map(|(_, m)| (SpanTags::of(&m.item), self.marked_range(m.range.clone())))
         .filter(|(tags, r)| {
             !tags.is_empty() && r.start < info.range.end && r.end > info.range.start
         })
@@ -817,7 +834,7 @@ impl State {
 
     /// Sets the diagnostics, resolved.
     pub(crate) fn set_diagnostics(&mut self, marks: Vec<Mark<EditorDiagnostic>>) {
-        self.tag_reach = diagnostics::tag_reach(&marks);
+        self.tag_reach = app_highlight::reach(&marks);
         self.diagnostics = marks;
     }
 
@@ -987,8 +1004,24 @@ impl State {
         out
     }
 
-    /// The diagnostics' marks on `rows`: a rectangle under the text and its
-    /// severity.
+    /// What a diagnostic over `range` marks: the range, else the char
+    /// after it, else the one before it (the end of a line).
+    fn marked_range(&self, mut range: Range<usize>) -> Range<usize> {
+        if range.is_empty() {
+            let next = movement::next_grapheme(&self.buffer, range.start);
+            let line_end = self.buffer.line_end(self.buffer.line_of(range.start));
+            range.end = next.min(line_end.max(range.start));
+            if range.is_empty() && range.start > 0 {
+                let line_start = self.buffer.line_start(self.buffer.line_of(range.start));
+                range.start = movement::prev_grapheme(&self.buffer, range.start).max(line_start);
+            }
+        }
+        range
+    }
+
+    /// The marks on `rows` of the diagnostics with no text to underline
+    /// (on an empty line): a space wide line under the row, and their
+    /// severity. The others underline their text (`row_content`).
     pub(crate) fn diagnostic_rects(
         &self,
         rows: Range<usize>,
@@ -999,24 +1032,20 @@ impl State {
             if mark.range.end < start || mark.range.start > end {
                 continue;
             }
-            // A tagged hint shows in its text alone (faded, struck
-            // through), as language clients draw it.
-            if mark.item.severity == EditorDiagnosticSeverity::Hint && !mark.item.tags.is_empty() {
+            if SpanTags::of(&mark.item).severity.is_none() {
                 continue;
             }
-            let mut range = mark.range.clone();
-            if range.is_empty() {
-                // The char after it, or the end of its line.
-                let next = movement::next_grapheme(&self.buffer, range.start);
-                let line_end = self.buffer.line_end(self.buffer.line_of(range.start));
-                range.end = next.min(line_end.max(range.start));
-                if range.is_empty() && range.start > 0 {
-                    range.start = movement::prev_grapheme(&self.buffer, range.start);
-                }
+            let range = self.marked_range(mark.range.clone());
+            if !range.is_empty() {
+                continue;
             }
-            for r in self.range_rects(range, rows.clone(), false) {
-                out.push((r, mark.item.severity));
+            let at = self.caret_point(range.start);
+            let row = (at.y.0 / self.line_height().0.max(1.0)).round() as usize;
+            if !rows.contains(&row) {
+                continue;
             }
+            let size = Size::new(self.display.space_width(), self.line_height());
+            out.push((Bounds::new(at, size), mark.item.severity));
         }
         out
     }
@@ -1697,12 +1726,29 @@ mod tests {
         // Carried through an edit above it.
         insert(&mut st, 0, "\n");
         assert_eq!(tag_spans(&st, 4), vec![("second".to_owned(), true, false)]);
-        // Tagged hints draw no mark under their text; the others do.
-        let severities: Vec<_> = st
-            .diagnostic_rects(0..st.display.row_count())
-            .into_iter()
-            .map(|(_, s)| s)
-            .collect();
-        assert_eq!(severities, vec![Info, Warning, Error]);
+        // Tagged hints draw no underline under their text; the others
+        // underline it in their severity's color, the most serious on top.
+        let severities = |st: &State, line: usize| -> Vec<_> {
+            st.row_content(st.display.line_row(line))
+                .spans
+                .into_iter()
+                .map(|span| span.tags.severity)
+                .collect()
+        };
+        assert_eq!(
+            severities(&st, 1),
+            vec![None, Some(Info), None, None, Some(Warning), None]
+        );
+        assert_eq!(severities(&st, 2), vec![Some(Error)]);
+        // Text to underline: no mark of their own.
+        assert!(st.diagnostic_rects(0..st.display.row_count()).is_empty());
+        // On an empty line, a mark of its own.
+        diagnose(
+            &mut st,
+            vec![tagged_diagnostic((0, 0), (0, 0), Error, vec![])],
+        );
+        let marks = st.diagnostic_rects(0..st.display.row_count());
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].1, Error);
     }
 }

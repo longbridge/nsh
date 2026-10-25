@@ -270,8 +270,8 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
 
 ## Diagnostics
 
-`diagnostics` marks the problems a language server or a linter reports: a line under each range in its severity's
-color (`error`, `warning`, `info`, `hint`). Positions are lines and UTF-16 columns from 0, as a language server's, so
+`diagnostics` marks the problems a language server or a linter reports: a thin wavy underline under each range in its
+severity's color (`error`, `warning`, `info`, `hint`). Positions are lines and UTF-16 columns from 0, as a language server's, so
 its diagnostics pass through as they come. The marks stay on their text while the user types, until the app passes
 new ones; showing the messages (a list, a hover card at the line) is the app's.
 

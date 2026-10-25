@@ -16,8 +16,8 @@ use crate::theme;
 
 /// The width of a caret.
 pub(crate) const CARET_WIDTH: f32 = 2.0;
-/// The height of a diagnostic's mark under its text.
-const MARK_HEIGHT: f32 = 2.0;
+/// The thickness of a diagnostic's underline, as GPUI Kit draws it.
+const MARK_HEIGHT: f32 = 1.0;
 
 /// Search matches' background (amber), and the current match's.
 const MATCH: AdaptiveColor = AdaptiveColor::rgb(0xfbbf24, 0xd97706);
@@ -978,6 +978,19 @@ fn spans(ed: Ed, row: usize, content: RowContent) -> Vec<AnyElement> {
             if tags.deprecated {
                 el = el.line_through();
             }
+            if let Some(severity) = tags.severity {
+                let (color, _) = severity_look(severity);
+                // `line_through` and `underline` are one decoration: both
+                // lines, in the mark's color.
+                el = if tags.deprecated {
+                    el.underline().line_through()
+                } else {
+                    el.underline()
+                }
+                .text_decoration_wavy()
+                .text_decoration_color(color)
+                .text_decoration_thickness(px(MARK_HEIGHT));
+            }
             let classes: Vec<String> = span
                 .decorations
                 .iter()
@@ -1027,11 +1040,14 @@ fn tagged(
     classes: Vec<String>,
     styles: Vec<Style>,
 ) -> Text {
-    let list: &'static [EditorPart] = match (tags.unnecessary, tags.deprecated) {
-        (true, true) => &[EditorPart::UnnecessaryText, EditorPart::DeprecatedText],
-        (true, false) => &[EditorPart::UnnecessaryText],
-        _ => &[EditorPart::DeprecatedText],
-    };
+    let list: Vec<EditorPart> = tags
+        .severity
+        .map(|s| severity_look(s).1)
+        .into_iter()
+        .chain(tags.unnecessary.then_some(EditorPart::UnnecessaryText))
+        .chain(tags.deprecated.then_some(EditorPart::DeprecatedText))
+        .collect();
+    let style_list = list.clone();
     let classes = classes.join(" ");
     el.app_class(move || {
         props.classes.with(|c| {
@@ -1046,7 +1062,8 @@ fn tagged(
     .inline_style(move || {
         props.styles.with(|s| {
             Style::from_decls(
-                list.iter()
+                style_list
+                    .iter()
                     .filter_map(|p| s.get(*p))
                     .chain(styles.iter())
                     .flat_map(|s| s.decls().iter().cloned()),
@@ -1055,7 +1072,18 @@ fn tagged(
     })
 }
 
-/// The diagnostics' marks in view.
+/// A severity's color and part.
+fn severity_look(severity: EditorDiagnosticSeverity) -> (fn() -> AdaptiveColor, EditorPart) {
+    match severity {
+        EditorDiagnosticSeverity::Error => (|| theme().destructive, EditorPart::DiagnosticError),
+        EditorDiagnosticSeverity::Warning => (|| WARNING, EditorPart::DiagnosticWarning),
+        EditorDiagnosticSeverity::Info => (|| INFO, EditorPart::DiagnosticInfo),
+        EditorDiagnosticSeverity::Hint => (|| theme().muted_foreground, EditorPart::DiagnosticHint),
+    }
+}
+
+/// The marks in view of the diagnostics on empty lines (the others
+/// underline their text).
 fn diagnostic_marks(ed: Ed) -> impl IntoElement {
     let props = ed.props;
     dynamic(move || {
@@ -1070,18 +1098,7 @@ fn diagnostic_marks(ed: Ed) -> impl IntoElement {
                     Point::new(b.origin.x, b.origin.y + b.size.height - px(MARK_HEIGHT)),
                     Size::new(b.size.width, px(MARK_HEIGHT)),
                 );
-                let (color, which): (fn() -> AdaptiveColor, EditorPart) = match severity {
-                    EditorDiagnosticSeverity::Error => {
-                        (|| theme().destructive, EditorPart::DiagnosticError)
-                    }
-                    EditorDiagnosticSeverity::Warning => {
-                        (|| WARNING, EditorPart::DiagnosticWarning)
-                    }
-                    EditorDiagnosticSeverity::Info => (|| INFO, EditorPart::DiagnosticInfo),
-                    EditorDiagnosticSeverity::Hint => {
-                        (|| theme().muted_foreground, EditorPart::DiagnosticHint)
-                    }
-                };
+                let (color, which) = severity_look(severity);
                 part(rect(bar).bg(color), props, which)
             })
             .collect::<Vec<_>>()

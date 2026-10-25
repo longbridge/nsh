@@ -147,19 +147,8 @@ pub(crate) fn line_severities(
     severities
 }
 
-/// The bytes of the longest of `marks` with a tag: how far before a row a
-/// tagged diagnostic over it can start.
-pub(crate) fn tag_reach(marks: &[Mark<EditorDiagnostic>]) -> usize {
-    marks
-        .iter()
-        .filter(|m| !m.item.tags.is_empty())
-        .map(|m| m.range.len())
-        .max()
-        .unwrap_or(0)
-}
-
 /// How serious a severity is: lower is more serious.
-fn rank(severity: EditorDiagnosticSeverity) -> u8 {
+pub(crate) fn rank(severity: EditorDiagnosticSeverity) -> u8 {
     match severity {
         EditorDiagnosticSeverity::Error => 0,
         EditorDiagnosticSeverity::Warning => 1,
@@ -335,21 +324,5 @@ mod tests {
         // A diagnostic counts on its first line only.
         assert_eq!(line_severities(&marks, &buffer, 2..3), vec![]);
         assert_eq!(line_severities(&marks, &buffer, 1..2), vec![(1, Error)]);
-    }
-
-    #[test]
-    fn tag_reach_counts_tagged_diagnostics_only() {
-        use super::super::data::EditorDiagnosticTag;
-        let buffer = Buffer::new("one\ntwo\nthree\nfour");
-        let mut long = diagnostic(range(0, 0, 3, 0), EditorDiagnosticSeverity::Error);
-        let mut short = diagnostic(range(1, 0, 1, 2), EditorDiagnosticSeverity::Hint);
-        let marks = resolve(&buffer, &[long.clone(), short.clone()], |d| d.range);
-        assert_eq!(tag_reach(&marks), 0);
-        short.tags = vec![EditorDiagnosticTag::Unnecessary];
-        let marks = resolve(&buffer, &[long.clone(), short.clone()], |d| d.range);
-        assert_eq!(tag_reach(&marks), 2);
-        long.tags = vec![EditorDiagnosticTag::Deprecated];
-        let marks = resolve(&buffer, &[long, short], |d| d.range);
-        assert_eq!(tag_reach(&marks), 14);
     }
 }

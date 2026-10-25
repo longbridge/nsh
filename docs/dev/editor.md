@@ -310,8 +310,10 @@ as its query.
 
 `diagnostics` and `decorations` are resolved into byte ranges once when the app sets them (`diagnostics::resolve`)
 and carried through every edit (`adjust`, through `map_offset`), so a mark stays on its text while the user types and
-the linter has not answered yet. A diagnostic draws a 2 point mark under its range, in its severity's part; an empty
-range marks the character after it. A decoration's `class` / `style` style its text (the spans are cut at its
+the linter has not answered yet. A diagnostic underlines its text with a 1 point wavy line in its severity's part, as GPUI
+Kit draws it: the spans are cut at its bounds and carry the most serious severity over them (`SpanTags`), so the text
+engine draws the line; an empty range marks the character after it (the one before it at a line's end), and on an
+empty line a short line a space wide is drawn under the row (`diagnostic_rects`). A decoration's `class` / `style` style its text (the spans are cut at its
 bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A row looks for its decorations by two
 binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
 (`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
@@ -377,7 +379,7 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `indentGuide` | A 1 point line of `border` per level |
 | `foldPlaceholder` | ` ⋯ ` after a folded line, `muted-foreground` |
 | `placeholder` | `muted-foreground` |
-| `diagnosticError` / `Warning` / `Info` / `Hint` | A 2 point line: `destructive` / amber / blue / `muted-foreground` |
+| `diagnosticError` / `Warning` / `Info` / `Hint` | A 1 point wavy underline: `destructive` / amber / blue / `muted-foreground` |
 | `unnecessaryText` / `deprecatedText` | The text of tagged diagnostics: `muted-foreground` / struck through |
 | `whitespace` | `·` per space, `→` per tab, `muted-foreground` at 60 %, while `showWhitespaces` |
 | `ruler` | A 1 point line of `border` at each of `rulers`' columns |
