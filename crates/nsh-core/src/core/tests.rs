@@ -10146,63 +10146,68 @@ mod views {
         );
     }
 
+    /// A list whose rows are regions: row 2 shows nothing until `LATE`.
+    #[derive(Default)]
+    struct RegionRows;
+
     thread_local! {
-        static SHOWN: Cell<Option<Signal<u32>>> = const { Cell::new(None) };
-        static WHEN_ITEMS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        static REGION_ITEMS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        static LATE: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
     }
 
-    #[derive(Clone, PartialEq, Props)]
-    struct WhenRowsProps {}
-
-    /// Rows that are a `when` each: row `n` shows while `n` is at most
-    /// `SHOWN`.
-    struct WhenRows;
-
-    impl Component for WhenRows {
-        type Props = WhenRowsProps;
+    impl Component for RegionRows {
+        type Props = RowsProps;
         type Event = NoEvent;
 
-        fn view(_: WhenRowsProps, _: Scope<NoEvent>) -> impl IntoElement {
-            let items = signal(vec![1, 2, 3]);
-            let shown = signal(1);
-            WHEN_ITEMS.with(|i| i.set(Some(items)));
-            SHOWN.with(|s| s.set(Some(shown)));
+        fn view(_: RowsProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let items = signal(vec![1, 2]);
+            let late = signal(false);
+            REGION_ITEMS.with(|i| i.set(Some(items)));
+            LATE.with(|l| l.set(Some(late)));
             view().child(each(
                 items,
                 |n| *n,
-                move |item, _| {
-                    when(
-                        move || item.get() <= shown.get(),
-                        move || text(move || format!("row {}", item.get())),
-                    )
+                move |item, index| {
+                    dynamic(move || {
+                        let n = item.get();
+                        (n != 2 || late.get()).then(|| text(format!("{n}@{}", index.get())))
+                    })
                 },
             ))
         }
     }
 
     #[test]
-    fn each_keeps_rows_that_are_regions_and_they_show_later() {
+    fn each_keeps_rows_whose_root_is_a_region() {
         let mut c = core();
-        c.mount_root(&Root::new::<WhenRows>(|| WhenRowsProps {}));
+        c.mount_root(&Root::new::<RegionRows>(|| RowsProps {}));
         let batch = c.commit().unwrap();
         let list = root_host(&batch);
-        assert_eq!(order(&c, list), ["row 1"]);
-        let items = WHEN_ITEMS.with(Cell::get).unwrap();
-        let shown = SHOWN.with(Cell::get).unwrap();
-        // The rows stay (an empty `when` among them), one is added.
+        assert_eq!(order(&c, list), ["1@0"]);
+        let items = REGION_ITEMS.with(Cell::get).unwrap();
+        let late = LATE.with(Cell::get).unwrap();
+        // Row 1 stays and its region runs again (its index moved); row 2
+        // stays, still empty.
         {
             let _entered = c.components.runtime.enter();
-            items.set(vec![1, 2, 3, 4]);
+            items.set(vec![3, 1, 2]);
         }
         c.commit();
-        assert_eq!(order(&c, list), ["row 1"]);
-        // A kept row that showed nothing shows, in its place.
+        assert_eq!(order(&c, list), ["3@0", "1@1"]);
+        // Row 2's region, kept empty, shows its row now.
         {
             let _entered = c.components.runtime.enter();
-            shown.set(3);
+            late.set(true);
         }
         c.commit();
-        assert_eq!(order(&c, list), ["row 1", "row 2", "row 3"]);
+        assert_eq!(order(&c, list), ["3@0", "1@1", "2@2"]);
+        // Rows kept as they are, a new one after them.
+        {
+            let _entered = c.components.runtime.enter();
+            items.set(vec![3, 1, 2, 4]);
+        }
+        c.commit();
+        assert_eq!(order(&c, list), ["3@0", "1@1", "2@2", "4@3"]);
     }
 
     /// Made with `#[component]`: reads the appearance and a timer.

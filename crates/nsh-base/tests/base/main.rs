@@ -10,3 +10,4 @@ mod editor_diagnostics;
 mod editor_languages;
 mod resizable;
 mod sheet;
+mod text_view;

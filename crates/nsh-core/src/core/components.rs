@@ -2787,11 +2787,11 @@ impl<M: TextEngine> Core<M> {
             // A view's region: bound, its nodes come with its patches.
             ElKind::Region(region) => {
                 let id = self.bind_region(host, parent, region);
-                let mut placeholder = super::views::region_placeholder(id);
-                // An `Each` row made of a `when` or a `dynamic` is found by
-                // its key when it stays.
-                placeholder.key = el.key.take();
-                out.push(placeholder);
+                let mut e = super::views::region_placeholder(id);
+                // An `Each` row's region keeps its row's key: a run that
+                // keeps the row finds it by that key (`ElKind::Keep`).
+                e.key = el.key;
+                out.push(e);
             }
             // An `Each` row that stays: as it was.
             ElKind::Keep => {
