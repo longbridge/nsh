@@ -1,0 +1,371 @@
+//! `DiffView`: a modified line shows side by side (or one over the other,
+//! unified), unchanged lines between changes collapse into separators that
+//! a press or the ref expands; the ref gives the changes and their stats,
+//! and reverts or keeps a change, reporting the texts; a patch's lines are
+//! numbered as in its file; and a long text makes only the rows in view.
+
+use nsh_base::{DiffChange, DiffExpand, DiffHunk, DiffLayout, DiffView, DiffViewApi, diff_view};
+use nsh_core::{
+    Size,
+    platform::{Idiom, Os},
+    ui::{Root, prelude::*},
+};
+use nsh_engine::EngineConfig;
+use nsh_testing::Headless;
+
+#[derive(Clone, PartialEq, Props)]
+struct HarnessProps {
+    /// The first old text.
+    old: String,
+    /// The first new text.
+    new: String,
+    /// A patch, shown instead of the texts.
+    patch: Option<String>,
+    /// The view's `layout`.
+    layout: DiffLayout,
+}
+
+fn texts(old: &str, new: &str) -> HarnessProps {
+    HarnessProps {
+        old: old.into(),
+        new: new.into(),
+        patch: None,
+        layout: DiffLayout::Split,
+    }
+}
+
+/// `line 1` to `line <count>`, a line each.
+fn numbered(count: usize) -> Vec<String> {
+    (1..=count).map(|i| format!("line {i}")).collect()
+}
+
+/// The hunks as text: `old_start,old_lines>new_start,new_lines` each.
+fn hunks_text(hunks: &[DiffHunk]) -> String {
+    hunks
+        .iter()
+        .map(|h| {
+            format!(
+                "{},{}>{},{}",
+                h.old_start, h.old_lines, h.new_start, h.new_lines
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A diff view of 800 × 400 at the top left (in a view `diff`); the app
+/// keeps the texts it reports (`Old "…"`, `New "…"` while short), counts
+/// its changes and has buttons for the ref's methods.
+#[component]
+fn Harness(props: HarnessProps) -> impl IntoElement {
+    let old = signal(props.old.clone());
+    let new = signal(props.new.clone());
+    let changes = signal(0u32);
+    let stats = signal(String::from("-"));
+    let hunks = signal(String::from("-"));
+    let dv = component_ref::<DiffView>();
+    let api = move |f: &dyn Fn(&DiffViewApi)| {
+        if let Some(api) = dv.api::<DiffViewApi>() {
+            f(&api);
+        }
+    };
+    let button = move |id: &str, f: Box<dyn Fn(&DiffViewApi)>| {
+        view()
+            .test_id(id)
+            .w(px(20.0))
+            .h(px(20.0))
+            .on_press(move || api(&*f))
+    };
+    let mut el = diff_view()
+        .layout(props.layout)
+        .on_change(move |c: &DiffChange| {
+            old.set(c.old_value.clone());
+            new.set(c.new_value.clone());
+            changes.update(|n| *n += 1);
+        })
+        .component_ref(&dv)
+        .size_full();
+    el = match props.patch.clone() {
+        Some(patch) => el.patch(patch),
+        None => el
+            .old_value(move || SharedString::from(old.get()))
+            .new_value(move || SharedString::from(new.get())),
+    };
+    // Long texts would be measured as one text: only short ones show.
+    let shown = |s: String| {
+        if s.len() < 2000 {
+            format!("{s:?}")
+        } else {
+            "…".into()
+        }
+    };
+    view()
+        .child(view().test_id("diff").w(px(800.0)).h(px(400.0)).child(el))
+        .child(text(move || format!("Old {}", shown(old.get()))))
+        .child(text(move || format!("New {}", shown(new.get()))))
+        .child(text(move || format!("Changes {}", changes.get())))
+        .child(text(move || format!("Stats {}", stats.get())))
+        .child(text(move || format!("Hunks {}", hunks.get())))
+        .child(
+            view()
+                .flex_row()
+                .child(button(
+                    "read",
+                    Box::new(move |a| {
+                        let s = a.stats();
+                        stats.set(format!("{} {} {}", s.added, s.deleted, s.hunks));
+                        hunks.set(hunks_text(&a.hunks()));
+                    }),
+                ))
+                .child(button("revert-0", Box::new(|a| a.revert_hunk(0))))
+                .child(button("revert-1", Box::new(|a| a.revert_hunk(1))))
+                .child(button("accept-0", Box::new(|a| a.accept_hunk(0))))
+                .child(button(
+                    "expand-1-down",
+                    Box::new(|a| a.expand(1, Some(DiffExpand::Down), Some(2))),
+                ))
+                .child(button("expand-all", Box::new(|a| a.expand_all())))
+                .child(button("collapse-all", Box::new(|a| a.collapse_all()))),
+        )
+}
+
+/// The harness of `props` on a Linux desktop's headless surface, shown.
+fn start(props: HarnessProps) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(900.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Changes 0").unwrap();
+    app
+}
+
+fn see(app: &mut Headless, text: &str) {
+    app.wait_for(&format!("text:{text}")).unwrap();
+}
+
+/// How many texts on screen read `text` (spaces around them aside).
+fn count(app: &Headless, text: &str) -> usize {
+    app.screen()
+        .texts()
+        .iter()
+        .filter(|t| t.trim() == text)
+        .count()
+}
+
+/// The texts on screen that start with `prefix`.
+fn count_starting(app: &Headless, prefix: &str) -> usize {
+    app.screen()
+        .texts()
+        .iter()
+        .filter(|t| t.trim_start().starts_with(prefix))
+        .count()
+}
+
+/// Twenty lines, line 10 changed to `line ten`: one hunk, 6 unchanged
+/// lines collapsed above it and 7 below (3 of context on each side).
+fn one_change() -> HarnessProps {
+    let old = numbered(20);
+    let mut new = old.clone();
+    new[9] = "line ten".into();
+    texts(&old.join("\n"), &new.join("\n"))
+}
+
+/// Twenty lines, line 3 changed to `line three` and line 15 deleted.
+fn two_changes() -> (String, String) {
+    let old = numbered(20);
+    let mut new = old.clone();
+    new[2] = "line three".into();
+    new.remove(14);
+    (old.join("\n"), new.join("\n"))
+}
+
+#[test]
+fn a_modified_line_shows_side_by_side() {
+    let mut app = start(one_change());
+    see(&mut app, "line ten");
+    // The old line on the left, the new one on the right, in one row.
+    assert_eq!(count(&app, "line 10"), 1);
+    assert_eq!(count(&app, "line ten"), 1);
+    // Context lines show on both sides, numbered on both.
+    assert_eq!(count(&app, "line 7"), 2);
+    assert_eq!(count(&app, "line 13"), 2);
+    assert_eq!(count(&app, "10"), 2);
+    assert_eq!(count(&app, "7"), 2);
+    // Lines further away are collapsed.
+    assert!(!app.shows("line 1") && !app.shows("line 6"));
+    assert!(!app.shows("line 14") && !app.shows("line 20"));
+    assert!(app.shows("⋯ 6") && app.shows("⋯ 7"));
+}
+
+#[test]
+fn unified_shows_the_deleted_line_above_the_added_one() {
+    let mut app = start(HarnessProps {
+        layout: DiffLayout::Unified,
+        ..one_change()
+    });
+    see(&mut app, "line ten");
+    // One column: each line once.
+    assert_eq!(count(&app, "line 10"), 1);
+    assert_eq!(count(&app, "line ten"), 1);
+    assert_eq!(count(&app, "line 7"), 1);
+    // A context row numbers both sides; the deleted row its old number,
+    // the added row its new one.
+    assert_eq!(count(&app, "7"), 2);
+    assert_eq!(count(&app, "10"), 2);
+    // The deleted line's row is above the added line's.
+    let texts = app.screen().texts().join("\n");
+    let deleted = texts.find("line 10").unwrap();
+    let added = texts.find("line ten").unwrap();
+    assert!(deleted < added, "the deleted line comes first");
+    assert!(app.shows("⋯ 6") && app.shows("⋯ 7"));
+}
+
+#[test]
+fn a_press_on_a_separator_shows_its_lines() {
+    let mut app = start(one_change());
+    see(&mut app, "⋯ 6");
+    app.press("text:⋯ 6").unwrap();
+    see(&mut app, "line 1");
+    see(&mut app, "line 6");
+    assert!(!app.shows("⋯ 6"));
+    assert!(app.shows("⋯ 7"));
+}
+
+#[test]
+fn the_ref_expands_part_of_a_gap_everything_and_collapses_again() {
+    let mut app = start(one_change());
+    see(&mut app, "⋯ 7");
+    // Two lines below the change above the last separator.
+    app.press("id:expand-1-down").unwrap();
+    see(&mut app, "⋯ 5");
+    see(&mut app, "line 15");
+    assert!(!app.shows("line 16"));
+    app.press("id:expand-all").unwrap();
+    see(&mut app, "line 20");
+    see(&mut app, "line 1");
+    assert_eq!(count_starting(&app, "⋯"), 0);
+    app.press("id:collapse-all").unwrap();
+    see(&mut app, "⋯ 6");
+    see(&mut app, "⋯ 7");
+    assert!(!app.shows("line 1") && !app.shows("line 20"));
+}
+
+#[test]
+fn the_ref_gives_the_hunks_and_stats() {
+    let (old, new) = two_changes();
+    let mut app = start(texts(&old, &new));
+    see(&mut app, "line three");
+    app.press("id:read").unwrap();
+    see(&mut app, "Stats 1 2 2");
+    see(&mut app, "Hunks 2,1>2,1 14,1>14,0");
+}
+
+#[test]
+fn reverting_a_hunk_puts_its_old_lines_back_and_reports_the_texts() {
+    let (old, new) = two_changes();
+    let mut app = start(texts(&old, &new));
+    see(&mut app, "line three");
+    app.press("id:revert-1").unwrap();
+    see(&mut app, "Changes 1");
+    // The old text stays; the new one has line 15 again.
+    let mut expected = numbered(20);
+    expected[2] = "line three".into();
+    see(&mut app, &format!("Old {old:?}"));
+    see(&mut app, &format!("New {:?}", expected.join("\n")));
+    app.press("id:read").unwrap();
+    see(&mut app, "Stats 1 1 1");
+    see(&mut app, "Hunks 2,1>2,1");
+}
+
+#[test]
+fn accepting_a_hunk_makes_its_new_lines_the_old_text_s() {
+    let (old, new) = two_changes();
+    let mut app = start(texts(&old, &new));
+    see(&mut app, "line three");
+    app.press("id:accept-0").unwrap();
+    see(&mut app, "Changes 1");
+    // The old text has `line three` now, and still line 15.
+    let mut expected = numbered(20);
+    expected[2] = "line three".into();
+    see(&mut app, &format!("Old {:?}", expected.join("\n")));
+    see(&mut app, &format!("New {new:?}"));
+    app.press("id:read").unwrap();
+    see(&mut app, "Stats 0 1 1");
+    // The change shows no more: `line 3` is on neither side.
+    assert!(!app.shows("line 3"));
+}
+
+#[test]
+fn a_patch_numbers_its_lines_as_in_its_file() {
+    let patch = "\
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -10,3 +10,4 @@ fn main() {
+     let a = 1;
+-    let b = 2;
++    let b = 3;
++    let c = 4;
+     println!(\"{a}\");
+";
+    let mut app = start(HarnessProps {
+        patch: Some(patch.into()),
+        ..texts("", "")
+    });
+    see(&mut app, "let c = 4;");
+    // The hunk's header is its separator.
+    see(&mut app, "fn main() {");
+    for shown in [
+        "let a = 1;",
+        "let b = 2;",
+        "let b = 3;",
+        "println!(\"{a}\");",
+    ] {
+        assert!(app.shows(shown), "{shown} shows");
+    }
+    // Old lines 10–12, new lines 10–13.
+    assert_eq!(count(&app, "10"), 2);
+    assert_eq!(count(&app, "11"), 2);
+    assert_eq!(count(&app, "12"), 2);
+    assert_eq!(count(&app, "13"), 1);
+    assert_eq!(count(&app, "1"), 0);
+    assert_eq!(count(&app, "9"), 0);
+    // A patch's lines are excerpts: nothing reverts.
+    app.press("id:revert-0").unwrap();
+    app.wait(std::time::Duration::from_millis(100)).unwrap();
+    assert!(app.shows("Changes 0"));
+}
+
+#[test]
+fn a_long_text_makes_only_the_rows_in_view() {
+    let old = numbered(20_000);
+    let mut new = old.clone();
+    for i in [99, 9_999, 19_899] {
+        new[i] = format!("changed {}", i + 1);
+    }
+    let mut app = start(texts(&old.join("\n"), &new.join("\n")));
+    see(&mut app, "changed 100");
+    app.press("id:read").unwrap();
+    see(&mut app, "Stats 3 3 3");
+    // Collapsed: the changes and their context, each change's rows once.
+    assert!(app.shows("changed 10000") && app.shows("changed 19900"));
+    assert!(count_starting(&app, "line ") < 60);
+    // Every line shown: still only the rows in view (400 points of 20-point
+    // rows and a few around them, on two sides).
+    app.press("id:expand-all").unwrap();
+    see(&mut app, "line 1");
+    let rows = count_starting(&app, "line ");
+    assert!((20..200).contains(&rows), "{rows} line texts made");
+    assert!(!app.shows("changed 10000"));
+    assert!(!app.shows("line 19999"));
+    app.scroll("id:diff", px(1000.0)).unwrap();
+    see(&mut app, "line 60");
+    assert!(!app.shows("line 1"));
+    let rows = count_starting(&app, "line ");
+    assert!(
+        (20..200).contains(&rows),
+        "{rows} line texts made after scrolling"
+    );
+}

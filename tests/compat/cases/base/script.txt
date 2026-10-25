@@ -1236,3 +1236,76 @@ covers [events] Toast.onDismissRequest
 covers [props] ToastStack.motion
 covers [props] ToastStack.placement
 covers [events] ToastStack.onExpandedChange
+
+# base-editor
+tap id:case-base-editor
+# The text is the editor's own, drawn a row per line; nothing is
+# reported before an edit.
+expect let x = 1;
+expect Value: none
+# The ref puts the caret at the line's end, reported with every
+# selection (the primary last).
+tap id:to-end
+expect Caret: 0:10
+# Typed through the ref: the whole new text is reported, the caret
+# after what was typed, and there is an edit to take back.
+tap id:insert
+expect Value: let x = 1; // ok
+expect Caret: 0:16
+expect History: Undo true Redo false
+# Undo takes it back, redo does it again.
+tap id:undo
+expect Value: let x = 1;
+expect History: Undo false Redo true
+tap id:redo
+expect Value: let x = 1; // ok
+expect History: Undo true Redo false
+# A search finds its matches (case-sensitive: one `x`), and replacing
+# them all is one edit reporting how many.
+tap id:find
+expect Found: 1
+tap id:replace-all
+expect Read: replaced 1
+expect Value: let y = 1; // ok
+expect Found: 0
+# The ref reads the text and the selections back.
+tap id:read
+expect Read: let y = 1; // ok (1 selection)
+covers [nsh/base] Editor
+covers [props] Editor.search
+covers [events] Editor.onSearchChange
+
+# base-diff
+tap id:case-base-diff
+# Two changes, one line each, with a line of context around them: the
+# two unchanged lines between them collapse into the app's separator,
+# told its gap (between changes 0 and 1) and how many lines it hides.
+expect Hidden 1 2
+expect Revert 0
+expect Keep 1
+tap id:inspect
+expect Read: +2 -2 2 [0@1:1>1:1 1@6:1>6:1]
+# The ref expands the gap: its lines show, the separator goes.
+tap id:expand
+absent Hidden 1 2
+# Revert puts the change's old line back in the new text, reported with
+# both texts, which the app sets: one change is left.
+tap id:revert-0
+expect New: a b c d e f G h
+expect Old: a b c d e f g h
+tap id:inspect
+expect Read: +1 -1 1 [0@6:1>6:1]
+# Keep makes the change's new line the old text's: nothing differs.
+tap id:keep-0
+expect Old: a b c d e f G h
+tap id:inspect
+expect Read: +0 -0 0 []
+# A patch shows its hunk under its header.
+expect Header fn main
+covers [nsh/base] DiffView
+covers [props] DiffView.oldValue
+covers [props] DiffView.newValue
+covers [props] DiffView.patch
+covers [props] DiffView.contextLines
+covers [props] DiffView.renderSeparator
+covers [props] DiffView.renderHunkActions
