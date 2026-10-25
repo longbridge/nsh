@@ -39,6 +39,12 @@ struct Drag {
     origin: Selection,
     /// 1: characters, 2: words, 3: lines.
     clicks: u32,
+    /// The press in the rows' box less the press in the root view: what
+    /// turns the pointer's root position into the rows' while it drags.
+    shift: Point<Points>,
+    /// The scroll offsets at the press (the rows move under the pointer as
+    /// they scroll).
+    scroll: Point<Points>,
 }
 
 /// What the native input that takes typed text holds.
@@ -671,6 +677,7 @@ impl Ed {
     pub(crate) fn press(
         &self,
         at: Point<Points>,
+        page: Point<Points>,
         modifiers: nsh_core::keymap::Modifiers,
         clicks: u32,
     ) {
@@ -716,6 +723,8 @@ impl Ed {
                     selection
                 },
                 clicks: clicks.max(1),
+                shift: at - page,
+                scroll: self.scroll_offset(),
             }));
             st.selections.primary()
         };
@@ -723,9 +732,15 @@ impl Ed {
         self.after(Outcome::Moved);
     }
 
-    /// The pointer moved to `at` while pressed.
-    pub(crate) fn drag_to(&self, at: Point<Points>) {
+    /// The scroll views' offsets.
+    fn scroll_offset(&self) -> Point<Points> {
+        Point::new(self.scroll_x.get_untracked(), self.scroll_y.get_untracked())
+    }
+
+    /// The pointer moved to `page` (in the root view) while pressed.
+    pub(crate) fn drag_to(&self, page: Point<Points>) {
         let Some(drag) = self.drag.get() else { return };
+        let at = page + drag.shift + (self.scroll_offset() - drag.scroll);
         {
             let mut st = self.st.borrow_mut();
             let offset = st.offset_at(at);

@@ -556,14 +556,13 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 return;
             }
             input.last.set(Some((x, y)));
-            let shift = event.modifierFlags().contains(NSEventModifierFlags::Shift);
             down(
                 surface,
                 x,
                 y,
                 time,
                 event.clickCount().max(1) as usize,
-                shift,
+                event.modifierFlags(),
             );
         }
         NSEventType::LeftMouseDragged
@@ -625,12 +624,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
             let event = nsh_core::ContextMenuEvent {
                 position: point(Points(location_x), Points(location_y)),
                 page_position: point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flags.contains(NSEventModifierFlags::Control),
-                    alt: flags.contains(NSEventModifierFlags::Option),
-                    shift: flags.contains(NSEventModifierFlags::Shift),
-                    cmd: flags.contains(NSEventModifierFlags::Command),
-                },
+                modifiers: modifiers(flags),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
@@ -655,7 +649,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
             let events = view.state().events;
             for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
                 if events.contains(kind) {
-                    press_event(surface, view.id(), kind);
+                    // From the keyboard: no pointer to report.
+                    log::debug!(target: "nsh::input", "{} on {} (keyboard)", kind.prop_name(), view.id());
+                    surface.event(view.id(), kind, EventPayload::None);
                 }
             }
         }
@@ -1042,7 +1038,15 @@ fn put(surface: &Surface, p: Pointer) {
     *surface.input.pointer.borrow_mut() = Some(p);
 }
 
-fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: bool) {
+fn down(
+    surface: &Rc<Surface>,
+    x: f32,
+    y: f32,
+    time: f64,
+    clicks: usize,
+    flags: NSEventModifierFlags,
+) {
+    let shift = flags.contains(NSEventModifierFlags::Shift);
     // A release we never saw.
     if let Some(stale) = take(surface) {
         finish(surface, stale, true);
@@ -1140,6 +1144,7 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
         None
     } else {
         find_press(surface, &hit.view, &views, x, y)
+            .map(|p| p.clicked(modifiers(flags), clicks as u32))
     };
     match &selecting {
         Some(area) if crate::selection_area::is_area(area) => {
@@ -1190,14 +1195,14 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
     }
     if let Some(press) = &mut p.press {
         let generation = press.generation;
-        press_in(surface, press);
+        press_in(surface, press, (x, y));
         if press.events.contains(EventKind::LongPress) {
             let delay = press.long_delay.max(0.0) as u64;
             after(surface, generation, delay, |surface, p| {
                 let Some(press) = &mut p.press else { return };
-                press_in(surface, press);
+                press_in(surface, press, (p.x, p.y));
                 press.long = true;
-                press_event(surface, press.node, EventKind::LongPress);
+                press_event(surface, press, EventKind::LongPress, (p.x, p.y));
             });
         }
     }
@@ -1330,11 +1335,12 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
                 cancel_press(surface, &mut p);
             }
             if let Some(mut press) = p.press.take() {
+                let at = (p.x, p.y);
                 if cancelled {
-                    press_out(surface, &mut press, false);
+                    press_out(surface, &mut press, false, at);
                 } else {
                     let inside = released_inside(surface, &press.view, p.x, p.y);
-                    press_out(surface, &mut press, inside);
+                    press_out(surface, &mut press, inside, at);
                 }
             }
         }
@@ -1458,28 +1464,48 @@ fn find_press(
     })
 }
 
-fn press_in(surface: &Rc<Surface>, press: &mut Press) {
+/// Presses in: `onPressDown`, the first time. `at` is the pointer in root
+/// coordinates.
+fn press_in(surface: &Rc<Surface>, press: &mut Press, at: (f32, f32)) {
     if let Some(kind) = press.press_in() {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
 /// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
 /// and it was no long press.
-fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
+fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool, at: (f32, f32)) {
     for kind in press.press_out(fire) {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
-fn press_event(surface: &Surface, node: NodeId, kind: EventKind) {
-    log::debug!(target: "nsh::input", "{} on {node}", kind.prop_name());
-    surface.event(node, kind, EventPayload::None);
+/// Sends `kind` of `press` with the pointer at `(x, y)` (root coordinates).
+fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, f32)) {
+    log::debug!(target: "nsh::input", "{} on {}", kind.prop_name(), press.node);
+    let (location_x, location_y) = local(surface, &press.view, x, y);
+    let event = nsh_core::PressEvent {
+        position: point(Points(location_x), Points(location_y)),
+        page_position: point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
+    };
+    surface.event(press.node, kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
     if let Some(mut press) = p.press.take() {
-        press_out(surface, &mut press, false);
+        press_out(surface, &mut press, false, (p.x, p.y));
+    }
+}
+
+/// The modifier keys of AppKit's `flags`.
+fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifiers {
+    nsh_core::keymap::Modifiers {
+        ctrl: flags.contains(NSEventModifierFlags::Control),
+        alt: flags.contains(NSEventModifierFlags::Option),
+        shift: flags.contains(NSEventModifierFlags::Shift),
+        cmd: flags.contains(NSEventModifierFlags::Command),
     }
 }
 
@@ -1811,12 +1837,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
         let event = nsh_core::HoverEvent {
             position: point(Points(location_x), Points(location_y)),
             page_position: point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: flags.contains(NSEventModifierFlags::Control),
-                alt: flags.contains(NSEventModifierFlags::Option),
-                shift: flags.contains(NSEventModifierFlags::Shift),
-                cmd: flags.contains(NSEventModifierFlags::Command),
-            },
+            modifiers: modifiers(flags),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }

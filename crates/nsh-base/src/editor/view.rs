@@ -345,6 +345,7 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
     let tap = ed.clone();
     let mov = ed.clone();
     let up = ed.clone();
+    let end = ed.clone();
     let menu = ed.clone();
     let layout = ed.clone();
     let mut el = view()
@@ -359,21 +360,27 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
         })
         .on(EventKind::PressDown, move |p: &EventPayload| {
             if let (true, EventPayload::Press(e)) = (desktop, p) {
-                down.press(e.position, e.modifiers, e.clicks);
+                down.press(e.position, e.page_position, e.modifiers, e.clicks);
             }
         })
         .on(EventKind::Press, move |p: &EventPayload| {
             if desktop {
                 return;
             }
-            let position = match p {
-                EventPayload::Press(e) => e.position,
-                _ => return,
-            };
-            tap.press(position, Default::default(), 1);
+            let EventPayload::Press(e) = p else { return };
+            tap.press(e.position, e.page_position, Default::default(), 1);
         })
-        .on_mouse_move(move |at: &Point<Points>| mov.drag_to(*at))
-        .on(EventKind::PressUp, move |_: &EventPayload| up.release())
+        // The mouse selects as it drags (a finger scrolls): the rows take
+        // its touches, which the scroll views around them keep off.
+        .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+            if desktop {
+                request.claim();
+            }
+        }))
+        .keep_touches(desktop)
+        .on_responder_move(move |e: &ResponderEvent| mov.drag_to(e.page))
+        .on_responder_release(move |_: &ResponderEvent| up.release())
+        .on_responder_terminate(move |_: &ResponderEvent| end.release())
         .on_context_menu(move |e: &ContextMenuEvent| {
             menu.context_menu(e.position, e.page_position)
         });
@@ -831,6 +838,8 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         .top(move || Length::from(at.get().y))
         .w(px(1.0))
         .h(move || Length::from(lh()))
+        // Presses at the caret are the rows' (a click there places it).
+        .pointer_events(PointerEvents::None)
         .p_0()
         .border(px(0.0))
         .bg(AdaptiveColor::TRANSPARENT)

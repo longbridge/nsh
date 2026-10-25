@@ -130,6 +130,9 @@ pub(crate) struct Input {
     /// Where the pointer last was (root coordinates), for events GTK
     /// gives no position (wheels, touchpad gestures).
     last: Cell<Option<(f32, f32)>>,
+    /// The last mouse press (time, root position, click count), for
+    /// counting double and triple clicks.
+    click: Cell<Option<(f64, f32, f32, u32)>>,
     /// Next touch identifier.
     next_id: Cell<u32>,
     /// Next press generation (invalidates callbacks of earlier ones).
@@ -576,12 +579,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
             let event = nsh_core::ContextMenuEvent {
                 position: point(Points(location_x), Points(location_y)),
                 page_position: point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
-                    alt: state.contains(gdk::ModifierType::ALT_MASK),
-                    shift: state.contains(gdk::ModifierType::SHIFT_MASK),
-                    cmd: state.contains(gdk::ModifierType::SUPER_MASK),
-                },
+                modifiers: modifiers(state),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return true;
@@ -980,7 +978,13 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: g
     let press = if native {
         None
     } else {
+        let clicks = if touch {
+            1
+        } else {
+            click_count(input, x, y, time)
+        };
         find_press(surface, &hit.view, &views, x, y)
+            .map(|p| p.clicked(self::modifiers(modifiers), clicks))
     };
     if let Some(area) = &area {
         // Over a press target in the area a drag selects only once the
@@ -1033,20 +1037,20 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: g
                 SCROLL_PRESS_DELAY,
                 |surface, p| {
                     if let Some(press) = &mut p.press {
-                        press_in(surface, press);
+                        press_in(surface, press, (p.x, p.y));
                     }
                 },
             );
         } else {
-            press_in(surface, press);
+            press_in(surface, press, (x, y));
         }
         if press.events.contains(EventKind::LongPress) {
             let delay = press.long_delay.max(0.0) as u64;
             after(surface, key, generation, delay, |surface, p| {
                 let Some(press) = &mut p.press else { return };
-                press_in(surface, press);
+                press_in(surface, press, (p.x, p.y));
                 press.long = true;
-                press_event(surface, press.node, EventKind::LongPress);
+                press_event(surface, press, EventKind::LongPress, (p.x, p.y));
             });
         }
     }
@@ -1181,13 +1185,14 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free => {
             if let Some(mut press) = p.press.take() {
+                let at = (p.x, p.y);
                 if cancelled {
-                    press_out(surface, &mut press, false);
+                    press_out(surface, &mut press, false, at);
                 } else {
                     // A quick tap inside a scroll view: the press in now.
-                    press_in(surface, &mut press);
+                    press_in(surface, &mut press, at);
                     let inside = released_inside(surface, &press.view, p.x, p.y);
-                    press_out(surface, &mut press, inside);
+                    press_out(surface, &mut press, inside, at);
                 }
             }
         }
@@ -1325,29 +1330,72 @@ fn find_press(
     })
 }
 
-fn press_in(surface: &Rc<Surface>, press: &mut Press) {
+/// Presses in: `onPressDown`, the first time. `at` is the pointer in root
+/// coordinates.
+fn press_in(surface: &Rc<Surface>, press: &mut Press, at: (f32, f32)) {
     if let Some(kind) = press.press_in() {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
 /// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
 /// and it was no long press.
-fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
+fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool, at: (f32, f32)) {
     for kind in press.press_out(fire) {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
-fn press_event(surface: &Surface, node: NodeId, kind: EventKind) {
-    log::debug!(target: "nsh::input", "{} on {node}", kind.prop_name());
-    surface.event(node, kind, EventPayload::None);
+/// Sends `kind` of `press` with the pointer at `(x, y)` (root coordinates).
+fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, f32)) {
+    log::debug!(target: "nsh::input", "{} on {}", kind.prop_name(), press.node);
+    let (location_x, location_y) = local(surface, &press.view, x, y);
+    let event = nsh_core::PressEvent {
+        position: point(Points(location_x), Points(location_y)),
+        page_position: point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
+    };
+    surface.event(press.node, kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
     if let Some(mut press) = p.press.take() {
-        press_out(surface, &mut press, false);
+        press_out(surface, &mut press, false, (p.x, p.y));
     }
+}
+
+/// The modifier keys of GDK's `state`.
+fn modifiers(state: gdk::ModifierType) -> nsh_core::keymap::Modifiers {
+    nsh_core::keymap::Modifiers {
+        ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+        alt: state.contains(gdk::ModifierType::ALT_MASK),
+        shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+        cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+    }
+}
+
+/// A mouse press's click count: 2 or 3 when it follows the last one
+/// quickly and close by, as GTK counts double clicks.
+fn click_count(input: &Input, x: f32, y: f32, time: f64) -> u32 {
+    let settings = gtk::Settings::default();
+    let interval = settings.as_ref().map_or(400, |s| s.gtk_double_click_time()) as f64;
+    let distance = settings
+        .as_ref()
+        .map_or(5, |s| s.gtk_double_click_distance()) as f32;
+    let count = match input.click.get() {
+        Some((t, cx, cy, n))
+            if time - t >= 0.0
+                && time - t <= interval
+                && (x - cx).abs() <= distance
+                && (y - cy).abs() <= distance =>
+        {
+            (n % 3) + 1
+        }
+        _ => 1,
+    };
+    input.click.set(Some((time, x, y, count)));
+    count
 }
 
 /// Whether a release at `(x, y)` (root coordinates) is on `view`, its hit
@@ -1731,12 +1779,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
         let event = nsh_core::HoverEvent {
             position: point(Points(location_x), Points(location_y)),
             page_position: point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
-                alt: state.contains(gdk::ModifierType::ALT_MASK),
-                shift: state.contains(gdk::ModifierType::SHIFT_MASK),
-                cmd: state.contains(gdk::ModifierType::SUPER_MASK),
-            },
+            modifiers: modifiers(state),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
