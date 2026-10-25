@@ -625,9 +625,14 @@ function* lint(model: Model): Generator<void, Problem[]> {
   // Variables declared and never read. Every name of the text counted in
   // one pass, not the whole text searched once per variable.
   const uses = new Map<string, number>();
+  const names = /(?<![\w$.])[A-Za-z_$][\w$]*/g;
   for (let line = 0; line < lines.length; line++) {
     if (line % SLICE === 0) yield;
-    for (const [name] of lines[line].matchAll(/(?<![\w$.])[A-Za-z_$][\w$]*/g)) uses.set(name, (uses.get(name) ?? 0) + 1);
+    // `exec`, not `matchAll`, which compiles a copy of the expression per
+    // call.
+    names.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = names.exec(lines[line]))) uses.set(m[0], (uses.get(m[0]) ?? 0) + 1);
   }
   for (let i = 0; i < model.symbols.length; i++) {
     if (i % SLICE === 0) yield;
@@ -656,14 +661,17 @@ const kindOf = (kind: SymbolKind | Builtin["kind"]): EditorCompletionItem["kind"
 /** The simulated server: one file, kept up to date by `change`. */
 export class LanguageServer {
   private text = "";
+  // Counts the texts: comparing a long text with the one a pass reads
+  // would compare every character, once a slice.
+  private version = 0;
   private analyzed: Promise<Model> | undefined;
 
   /** What the server knows of the current text, read in slices once per
    * text: a request made while an older text is read gets the newer one's. */
   private model(): Promise<Model> {
     if (!this.analyzed) {
-      const text = this.text;
-      this.analyzed = slices(analyze(text), () => text !== this.text).catch((e) => {
+      const version = this.version;
+      this.analyzed = slices(analyze(this.text), () => version !== this.version).catch((e) => {
         if (e === STALE) return this.model();
         throw e;
       });
@@ -675,6 +683,7 @@ export class LanguageServer {
   change(text: string) {
     if (text === this.text) return;
     this.text = text;
+    this.version++;
     this.analyzed = undefined;
   }
 
