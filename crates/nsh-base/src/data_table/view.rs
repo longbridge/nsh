@@ -46,14 +46,28 @@ fn parts<E: Element>(
     props: DataTableProps,
     list: impl Fn() -> Vec<DataTablePart> + Clone + 'static,
 ) -> E {
+    parts_with(el, props, list, || None)
+}
+
+/// [`parts`], with `own` classes after the parts' (a row's `rowClasses`).
+fn parts_with<E: Element>(
+    el: E,
+    props: DataTableProps,
+    list: impl Fn() -> Vec<DataTablePart> + Clone + 'static,
+    own: impl Fn() -> Option<SharedString> + 'static,
+) -> E {
     let styles = list.clone();
     el.app_class(move || {
+        let own = own();
         props.classes.with(|c| {
             let list = list();
-            let joined: Vec<&str> = list
+            let mut joined: Vec<&str> = list
                 .iter()
                 .filter_map(|p| c.get(*p).map(|s| s.as_str()))
                 .collect();
+            if let Some(own) = own.as_ref() {
+                joined.push(own.as_str());
+            }
             (!joined.is_empty()).then(|| SharedString::from(joined.join(" ")))
         })
     })
@@ -728,8 +742,8 @@ fn body_row(
         let dt = dt.clone();
         computed(move || matches!(dt.selection(), Selection::Row(r) if Some(r) == row.get()))
     };
-    let (press_dt, menu_dt) = (dt.clone(), dt.clone());
-    let el = parts(
+    let (press_dt, menu_dt, class_dt) = (dt.clone(), dt.clone(), dt.clone());
+    let el = parts_with(
         view()
             .absolute()
             .left_0()
@@ -770,6 +784,7 @@ fn body_row(
             }),
         props,
         list,
+        move || class_dt.row_class(row.get()?),
     );
     match which {
         Region::Lead => el

@@ -24,6 +24,7 @@ function App() {
   const more = signal(false);
   const movable = signal(true);
   const vbar = signal<boolean | undefined>(undefined);
+  const hbar = signal<boolean | undefined>(undefined);
   const sort = signal<DataTableSort | undefined>(undefined);
   const log = signal<Record<string, string>>({});
   const put = (key: string, value: string) => log.set({ ...log(), [key]: value });
@@ -83,6 +84,7 @@ function App() {
         })}
         {button("clear-target", () => table.clearMenuTarget())}
         {button("no-vbar", () => vbar.set(false))}
+        {button("no-hbar", () => hbar.set(false))}
         {button("read", async () => {
           const s = await table.selection();
           const v = await table.visibleRows();
@@ -98,6 +100,7 @@ function App() {
           accessibilityLabel="People"
           columns={columns}
           data={data()}
+          rowClasses={data().map((r) => (r.id % 5 === 0 ? "line-through" : ""))}
           groups={[[{ label: "Who", span: 2 }, { label: "Where", span: 1 }, { label: "Numbers", span: 2 }]]}
           sort={sort()}
           cellSelectable={cells()}
@@ -110,6 +113,7 @@ function App() {
           loadMoreThreshold={5}
           movableColumns={movable()}
           verticalScrollbar={vbar()}
+          horizontalScrollbar={hbar()}
           empty={<Text>No rows</Text>}
           loadingView={<Text>Loading rows</Text>}
           onSelectionChange={(s) => put("sel", s ? `${s.row ?? "-"}:${s.column ?? "-"}` : "none")}

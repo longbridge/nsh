@@ -297,6 +297,14 @@ impl Dt {
         })
     }
 
+    /// Row `row`'s own class (`rowClasses`, tracked).
+    pub(crate) fn row_class(&self, row: usize) -> Option<SharedString> {
+        let at = row.checked_sub(self.props.data_start.get() as usize)?;
+        self.props
+            .row_classes
+            .with(|c| c.get(at).filter(|c| !c.is_empty()).cloned())
+    }
+
     /// Whether the cell holds a rise or a fall (tracked).
     pub(crate) fn cell_sign(&self, row: usize, def: usize) -> Option<bool> {
         let start = self.props.data_start.get() as usize;
@@ -1125,17 +1133,27 @@ impl Dt {
         let from = visible.start.saturating_sub(FIT_ROWS).max(loaded.start);
         let to = (visible.end + FIT_ROWS).min(rows).min(loaded.end);
         let mut widest = measure_text(&css, &self.title(def)).0;
-        if self.st.borrow().defs.get(def)?.sortable {
+        let (sortable, padding) = {
+            let st = self.st.borrow();
+            let column = st.defs.get(def)?;
+            (
+                column.sortable,
+                column.fit_padding.map_or(0.0, |p| p.0.max(0.0)),
+            )
+        };
+        if sortable {
             widest += SORT_WIDTH;
         }
+        let title = widest;
         let mut text = String::new();
         for row in from..to.max(from) {
             text.clear();
             self.write_cell(row, def, &mut text);
             if !text.is_empty() {
-                widest = widest.max(measure_text(&css, &text).0);
+                widest = widest.max(measure_text(&css, &text).0 + padding);
             }
         }
+        widest = widest.max(title);
         self.set_width(def, widest.ceil() + CELL_PAD * 2.0, true)
     }
 

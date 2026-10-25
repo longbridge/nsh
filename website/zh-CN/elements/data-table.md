@@ -67,6 +67,7 @@ mount(App);
 | `title` | 标题的文字。默认为 `key`。 |
 | `width` | 宽度，单位为点。默认 `120`。 |
 | `minWidth`、`maxWidth` | 拖动或适配宽度时的最小和最大宽度。默认 `20` 和 `1200`。 |
+| `fitPadding` | 应用绘制单元格（`renderCell`）时在文字宽度之外增加的宽度（图标、徽标），适配列宽时计入。 |
 | `align` | `"start"`（默认）、`"center"` 或 `"end"`（用于数字），单元格和标题一致。 |
 | `sortable` | 标题末端有一个排序按钮，按下会请求排序（见[排序](#sorting)）。 |
 | `fixed` | 其他列在它下面滚动时，它固定在左侧。固定列排在其他列之前，保持各自的顺序。 |
@@ -304,6 +305,7 @@ const columns: DataTableColumn[] = [
 | `data` | `.data(..)` | `Row[]` | `[]` | 行：按列 `key` 取字段的对象，或按位置索引的数组。 |
 | `rowCount` | `.row_count(..)` | `number` | 已持有的行数 | 行的总数。 |
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |
+| `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | 所给各行的类名，按它们在 `data` 中的位置对应：行自己的外观，不需要每行调用 JS。 |
 | `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点。 |
 | `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |

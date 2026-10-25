@@ -280,3 +280,28 @@ test("screen readers get a grid of column headers and cells, selected ones said 
   await app.waitFor("text:/press=4:1:1/");
   expect(app.shows("text:/sel=/")).toBe(false);
 });
+
+test("the desktops' horizontal bar shows while the columns overflow, unless turned off", async () => {
+  const app = await start();
+  expect(app.shows("id:data-table-scrollbar")).toBe(true);
+  // The vertical bar alone off leaves the horizontal one.
+  await app.press("no-vbar");
+  await app.wait(100);
+  expect(app.shows("id:data-table-scrollbar")).toBe(true);
+  await app.press("no-hbar");
+  await app.wait(100);
+  expect(app.shows("id:data-table-scrollbar")).toBe(false);
+});
+
+test("rowClasses give rows their own look, following the data", async () => {
+  const app = await start();
+  // ID 5 (Person 4) is struck through; its neighbors are not.
+  expect(app.spanStyle("text:Person 4").lineThrough).toBe(true);
+  expect(app.spanStyle("text:Person 3").lineThrough).toBe(false);
+  // Sorted the other way, the classes follow their rows.
+  await app.press("id:sort:id");
+  await app.press("id:sort:id");
+  await app.waitFor("Person 59");
+  expect(app.spanStyle("text:Person 59").lineThrough).toBe(true);
+  expect(app.spanStyle("text:Person 58").lineThrough).toBe(false);
+});

@@ -98,6 +98,9 @@ methods the ref's. Deliberate differences:
 - No strings and no fixed look: the empty and loading slots are the app's, and every part (the sort button's chevrons
   among them) takes the app's classes over the theme's default look (gpui-component draws an inbox icon, a skeleton
   and a translated "Sort by" label).
-- `onRowPress` is gpui-component's `render_tr` click handler, for the app's own selections of several rows.
+- `onRowPress` is gpui-component's `render_tr` click handler, for the app's own selections of several rows;
+  `rowClasses`, data beside `data`, is `render_tr`'s per-row look without a call into JS per row.
+- A fit measures the cells' texts natively; `fitPadding` adds what the app's drawing adds to them (gpui-component
+  asks its delegate to measure).
 - Focus is the table's own flag (a press, `focus()` / `blur()`, Escape), not a Tab stop.
 

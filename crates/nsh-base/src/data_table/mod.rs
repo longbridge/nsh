@@ -60,6 +60,11 @@ pub struct DataTableColumn {
     /// The widest a drag or a fit makes it (default 1200).
     #[prop(skip_none)]
     pub max_width: Option<Points>,
+    /// What the app's drawing of a cell (`renderCell`) adds to its text's
+    /// width (an icon, a badge), counted when a fit sizes the column to its
+    /// widest text.
+    #[prop(skip_none)]
+    pub fit_padding: Option<Points>,
     /// How its cells and title are aligned.
     #[prop(default)]
     pub align: DataTableAlign,
@@ -288,6 +293,11 @@ pub struct DataTableProps {
     /// are empty until the app supplies them.
     #[prop(default)]
     pub data_start: Prop<u32>,
+    /// Classes of the rows given, by their place in `data` (row
+    /// `dataStart + i` takes `rowClasses[i]`): a row's own look (a closed
+    /// order muted, an alert highlighted) with no call into JS per row.
+    #[prop(default)]
+    pub row_classes: Prop<Vec<SharedString>>,
     /// The height of a body row, in points (default 32).
     #[prop(default = Points(32.0))]
     pub row_height: Prop<Points>,

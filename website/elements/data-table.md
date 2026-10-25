@@ -74,6 +74,7 @@ booleans and strings show as text. A column is a `DataTableColumn`:
 | `title` | The text of its title. Default its `key`. |
 | `width` | Its width, in points. Default `120`. |
 | `minWidth`, `maxWidth` | The narrowest and widest a drag or a fit makes it. Default `20` and `1200`. |
+| `fitPadding` | What the app's drawing of a cell (`renderCell`) adds to its text's width (an icon, a badge), counted when a fit sizes the column. |
 | `align` | `"start"` (the default), `"center"` or `"end"`, for numbers. Cells and title alike. |
 | `sortable` | Its title has a sort button that asks for a sort (see [Sorting](#sorting)). |
 | `fixed` | It stays at the left while the other columns scroll under it. Fixed columns lead the others, in their order. |
@@ -326,6 +327,7 @@ a part's classes come after its own default styles, so they win, and its `styles
 | `data` | `.data(..)` | `Row[]` | `[]` | The rows: objects by column `key`, or arrays by position. |
 | `rowCount` | `.row_count(..)` | `number` | the rows held | How many rows there are in all. |
 | `dataStart` | `.data_start(..)` | `number` | `0` | The row of the first row of `data`. |
+| `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | Classes of the rows given, by their place in `data`: a row's own look, with no call into JS per row. |
 | `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points. |
 | `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row. |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | Labels above the columns, lowest level first. |
