@@ -40,7 +40,13 @@
 //!   the window (an embedded surface's root window) is minimized or hidden,
 //!   active while the app is the active one (its windows get
 //!   `WM_ACTIVATEAPP`; before the first, the foreground window is the
-//!   process's), inactive otherwise.
+//!   process's), inactive otherwise;
+//! - the time zone (`timeZone()`): the zone of the system's setting
+//!   (`GetDynamicTimeZoneInformation`, its Windows key name) by its IANA
+//!   name, which the ICU Windows ships knows
+//!   (`ucal_getTimeZoneIDForWindowsID`, loaded when first needed: `UTC`
+//!   without it); re-read on `WM_TIMECHANGE` too, which a change of the
+//!   zone sends.
 //!
 //! Safe area and keyboard height are zero: desktop windows have neither.
 //!
@@ -63,7 +69,7 @@ use nsh_core::{
     geometry::px,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
 use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
@@ -81,12 +87,17 @@ use windows::{
             },
         },
         System::{
-            LibraryLoader::{GetModuleHandleW, GetProcAddress},
+            LibraryLoader::{
+                GetModuleHandleW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+            },
             Registry::{
                 HKEY, HKEY_CURRENT_USER, RRF_RT_REG_BINARY, RRF_RT_REG_DWORD, RegGetValueW,
             },
             SystemInformation::OSVERSIONINFOW,
             Threading::GetCurrentProcessId,
+            Time::{
+                DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation, TIME_ZONE_ID_INVALID,
+            },
         },
         UI::{
             Shell::{SetCurrentProcessExplicitAppUserModelID, ShellExecuteW},
@@ -320,7 +331,64 @@ fn update(surface: &Surface, settings: Settings) {
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface, env.lifecycle);
+    env.time_zone = time_zone();
     surface.set_environment(env);
+}
+
+/// The system's time zone (`timeZone()`): the setting's Windows zone by its
+/// IANA name.
+fn time_zone() -> TimeZone {
+    let mut info = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    // SAFETY: an out structure of the size the call writes.
+    if unsafe { GetDynamicTimeZoneInformation(&mut info) } == TIME_ZONE_ID_INVALID {
+        return TimeZone::UTC;
+    }
+    let key = &info.TimeZoneKeyName;
+    let len = key.iter().position(|&c| c == 0).unwrap_or(key.len());
+    iana_name(&key[..len])
+        .and_then(|name| TimeZone::parse(&name))
+        .unwrap_or_default()
+}
+
+/// The IANA name of the Windows zone `key` (`W. Europe Standard Time`:
+/// `Europe/Berlin`), from the ICU Windows ships (`icu.dll` since Windows 10
+/// 1903, `icuin.dll` before), loaded at run time so that apps start where
+/// it is missing.
+fn iana_name(key: &[u16]) -> Option<String> {
+    type ToIana = unsafe extern "C" fn(*const u16, i32, *const u8, *mut u16, i32, *mut i32) -> i32;
+    thread_local! {
+        static TO_IANA: Option<ToIana> = {
+            // SAFETY: system libraries by name, from System32 only; the
+            // function, if there, has the signature above (ICU's C API).
+            unsafe {
+                [w!("icu.dll"), w!("icuin.dll")]
+                    .into_iter()
+                    .find_map(|name| LoadLibraryExW(name, None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok())
+                    .and_then(|icu| GetProcAddress(icu, s!("ucal_getTimeZoneIDForWindowsID")))
+                    .map(|proc| std::mem::transmute::<_, ToIana>(proc))
+            }
+        };
+    }
+    let to_iana = TO_IANA.with(|f| *f)?;
+    let mut name = [0u16; 64];
+    let mut status = 0i32;
+    // SAFETY: `key` and `name` hold the lengths given; no region (ICU's
+    // default mapping, `001`).
+    let len = unsafe {
+        to_iana(
+            key.as_ptr(),
+            key.len() as i32,
+            std::ptr::null(),
+            name.as_mut_ptr(),
+            name.len() as i32,
+            &mut status,
+        )
+    };
+    // ICU's errors are positive codes, its warnings negative.
+    if status > 0 || len <= 0 {
+        return None;
+    }
+    String::from_utf16(name.get(..len as usize)?).ok()
 }
 
 /// A `REG_DWORD` value, if it is set.
