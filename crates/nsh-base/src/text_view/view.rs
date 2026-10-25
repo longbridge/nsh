@@ -238,6 +238,13 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         // Selectable: its texts share one selection, block to block (inside
         // a `SelectionArea`, the outer area's).
         .selection_area(props.selectable)
+        .map(|mut el| {
+            if let Some(parts) = use_context::<TextViewParts>() {
+                let style = std::mem::take(el.style());
+                *el.style() = parts.refine(Part::Root, style);
+            }
+            el
+        })
         .app_class(move || props.classes.with(|c| c.root.clone()))
         .inline_style(move || {
             props
