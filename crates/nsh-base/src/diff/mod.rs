@@ -5,6 +5,7 @@
 //! `docs/dev/diff.md` has the design.
 
 mod controller;
+mod files;
 mod geometry;
 mod layout;
 mod model;
@@ -81,6 +82,10 @@ pub struct DiffHunk {
     pub new_start: u32,
     /// How many new lines it puts there (added lines).
     pub new_lines: u32,
+    /// The index of its file in `files()` (0 for two texts). With a patch
+    /// of several files, `index` counts across them in order, and the
+    /// lines count in its file's texts (the hunks' lines of that file).
+    pub file: u32,
 }
 
 /// What a [`DiffView`]'s texts differ by.
@@ -177,12 +182,55 @@ pub struct DiffAnnotation {
     pub line: u32,
 }
 
+/// How a file of a [`DiffView`]'s patch changed, in git's terms.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PropEnum)]
+pub enum DiffFileStatus {
+    /// Its lines changed (or only its mode).
+    #[default]
+    Modified,
+    /// A new file.
+    Added,
+    /// A deleted file.
+    Deleted,
+    /// Moved from `oldPath` (its lines may have changed too).
+    Renamed,
+    /// Copied from `oldPath`.
+    Copied,
+}
+
+/// A file of a [`DiffView`]'s patch (`files()`, `renderFileHeader`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct DiffFile {
+    /// Its index among the patch's files.
+    pub index: u32,
+    /// Its path: the new one, or the old one of a deleted file.
+    pub path: SharedString,
+    /// The path it was renamed or copied from.
+    #[prop(skip_none)]
+    pub old_path: Option<SharedString>,
+    /// How it changed.
+    pub status: DiffFileStatus,
+    /// Its contents are binary: the patch shows no lines of it.
+    pub binary: bool,
+    /// Lines added.
+    pub added: u32,
+    /// Lines deleted.
+    pub deleted: u32,
+    /// Its changes (hunks).
+    pub hunks: u32,
+    /// The index of its first change among all the patch's (`goToHunk`).
+    pub first_hunk: u32,
+    /// Its lines are hidden under its header.
+    pub collapsed: bool,
+}
+
 /// The changes between two texts, as code review tools show them: side by
 /// side (`layout="split"`) or one over the other (`"unified"`), the words
 /// changed within lines highlighted, the unchanged lines between changes
 /// collapsed into separators that expand, highlighted with the editor's
-/// syntaxes. The texts are `oldValue` and `newValue`, or a file of a
-/// unified `patch` (`git diff`'s, a pull request's). Changes revert or keep
+/// syntaxes. The texts are `oldValue` and `newValue`, or the files of a
+/// unified `patch` (`git diff`'s, a pull request's), each under a header. Changes revert or keep
 /// one at a time through the ref (`revertHunk`, `acceptHunk`), which the
 /// app's `renderHunkActions` calls; `onChange` reports the texts then.
 #[derive(Clone, Copy, PartialEq, Props)]
@@ -191,9 +239,11 @@ pub struct DiffViewProps {
     pub old_value: Prop<Option<SharedString>>,
     /// The new text.
     pub new_value: Prop<Option<SharedString>>,
-    /// A unified diff of one file (`git diff`, `diff -u`), shown without
-    /// the files: its hunks' lines, numbered as in the files, each hunk
-    /// under its header. Used when `oldValue` and `newValue` are not set.
+    /// A unified diff (`git diff`, `diff -u`), shown without the files:
+    /// its hunks' lines, numbered as in the files, each hunk under its
+    /// header, each file of several under a file header
+    /// (`renderFileHeader`). Used when `oldValue` and `newValue` are not
+    /// set.
     pub patch: Prop<Option<SharedString>>,
     /// The language, as the editor's `language` (a name, an extension or a
     /// file name); default plain text (with a `patch`, its file's).
@@ -257,6 +307,12 @@ pub struct DiffViewProps {
     /// line: for the selected lines when the line is one of them, else for
     /// that line.
     pub render_add_annotation: Prop<Option<Renderer<DiffLineRange>>>,
+    /// The header above each file of a `patch`, drawn by the app across
+    /// the view, one row tall (by default the path, `+` and `−` counts,
+    /// and a press collapses or expands the file; the app's header calls
+    /// the ref's `toggleFile`). Headers show when the patch has several
+    /// files or this is set.
+    pub render_file_header: Prop<Option<Renderer<DiffFile>>>,
 }
 
 /// The events of a [`DiffView`].
@@ -278,6 +334,11 @@ pub enum DiffViewEvent {
     /// Shift-press, other texts): the lines, `null` for none.
     #[args(range)]
     LineSelectionChange(Option<DiffLineRange>),
+    /// A file of the patch was collapsed or expanded (its header pressed,
+    /// or the ref's `collapseFile`, `expandFile`, `toggleFile`): the file
+    /// now.
+    #[args(file)]
+    FileToggle(DiffFile),
 }
 
 /// The methods of a [`DiffView`]'s ref.
@@ -373,6 +434,32 @@ impl DiffViewApi {
     /// `null` when none is in view.
     pub fn current_hunk(&self) -> Option<u32> {
         self.dv.current_hunk().map(|i| i as u32)
+    }
+
+    /// The files of the patch, in order, with their counts (empty for two
+    /// texts).
+    pub fn files(&self) -> Vec<DiffFile> {
+        self.dv.files()
+    }
+
+    /// Scrolls the header of the file at `path` (its `path`) to the top.
+    pub fn scroll_to_file(&self, path: String) {
+        self.dv.scroll_to_file(&path);
+    }
+
+    /// Hides the lines of the file at `path`: its header stays.
+    pub fn collapse_file(&self, path: String) {
+        self.dv.set_file_collapsed(&path, Some(true));
+    }
+
+    /// Shows the lines of the file at `path` again.
+    pub fn expand_file(&self, path: String) {
+        self.dv.set_file_collapsed(&path, Some(false));
+    }
+
+    /// Collapses the file at `path`, or expands it when it is collapsed.
+    pub fn toggle_file(&self, path: String) {
+        self.dv.set_file_collapsed(&path, None);
     }
 }
 

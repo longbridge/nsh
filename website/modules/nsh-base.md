@@ -40,7 +40,7 @@ import {
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffAnnotation, DiffHunk, DiffLineRange, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
+  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffAnnotation, DiffFile, DiffHunk, DiffLineRange, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TabProps, TabsProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
   ToastEntry, ToastMotion, ToastOptions, ToastProps, ToastStackProps, ToastTransitionStatus,
 } from "nsh/base";
@@ -171,7 +171,7 @@ the theme's tokens that the app restyles part by part. See [Editor](../elements/
 
 ### DiffView
 
-`DiffView` shows the changes between two texts, or of a file of a patch, as code review tools do: side by side or
+`DiffView` shows the changes between two texts, or of the files of a patch, as code review tools do: side by side or
 unified, the words changed within lines highlighted, unchanged lines collapsed into separators that expand, in the
 `Editor`'s syntax colors. The app's actions keep or revert each change. See [DiffView](../elements/diff-view.md).
 

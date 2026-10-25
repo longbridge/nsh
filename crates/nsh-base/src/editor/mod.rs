@@ -37,9 +37,9 @@ pub use data::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorFoldRange, EditorPosition,
     EditorRange, EditorSearch, EditorSearchResult, EditorSelection, EditorToken,
 };
+pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use layout::EditorScrollBeyond;
 use nsh_core::ui::prelude::*;
-pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
 pub use touch::EditorRect;
 

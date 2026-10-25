@@ -1392,6 +1392,21 @@ expect Add new 0-0
 # its text.
 tap id:select
 expect Selected: true new 0-0 alpha
+# A patch of two files: each under the app's header, told the file.
+expect File 0 a.ts modified +1 -1
+expect File 1 b.ts added +1 -0
+expect BETA
+# The files, and their changes counted across them.
+tap id:files
+expect Files: a.ts@0 b.ts@1 hunks 0:0 1:1
+# The app's header collapses its file through the ref, reported.
+tap id:file-0
+expect Toggled: a.ts true
+expect File 0 a.ts modified +1 -1 collapsed
+absent BETA
+tap id:file-0
+expect Toggled: a.ts false
+expect BETA
 covers [props] DiffView.softWrap
 covers [props] DiffView.annotations
 covers [props] DiffView.renderAnnotation
@@ -1405,3 +1420,5 @@ covers [props] DiffView.patch
 covers [props] DiffView.contextLines
 covers [props] DiffView.renderSeparator
 covers [props] DiffView.renderHunkActions
+covers [props] DiffView.renderFileHeader
+covers [events] DiffView.onFileToggle

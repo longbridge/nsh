@@ -297,7 +297,10 @@ mod tests {
         assert_eq!(editor(false, "f3"), Some(EditorCommand::FindNext));
         assert_eq!(editor(true, "cmd+alt+["), Some(EditorCommand::Fold));
         assert_eq!(editor(false, "ctrl+shift+]"), Some(EditorCommand::Unfold));
-        assert_eq!(editor(true, "cmd+e"), Some(EditorCommand::FindWithSelection));
+        assert_eq!(
+            editor(true, "cmd+e"),
+            Some(EditorCommand::FindWithSelection)
+        );
         let command = |apple: bool, keys: &str| {
             default_bindings(apple)
                 .into_iter()
@@ -308,7 +311,10 @@ mod tests {
             command(true, "ctrl+alt+right"),
             Some(Command::SubwordRight { select: false })
         );
-        assert_eq!(command(false, "shift+alt+a"), Some(Command::ToggleBlockComment));
+        assert_eq!(
+            command(false, "shift+alt+a"),
+            Some(Command::ToggleBlockComment)
+        );
         // The case commands have no default keys.
         assert!(
             default_bindings(true)

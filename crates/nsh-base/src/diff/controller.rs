@@ -12,12 +12,12 @@ use nsh_core::ui::prelude::*;
 use ropey::Rope;
 
 use super::{
-    DiffAnnotation, DiffChange, DiffExpand, DiffHunk, DiffInline, DiffLayout, DiffLineRange,
-    DiffSide, DiffStats, DiffViewEvent, DiffViewProps,
+    DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffHunk, DiffInline, DiffLayout,
+    DiffLineRange, DiffSide, DiffStats, DiffViewEvent, DiffViewProps,
+    files::{self, Files, Joined, Segment},
     geometry::{self, Geometry},
     layout::{self, Expansions, Header, Layout, Options, Row},
     model::{self, DiffModel, InlineMode, Pair},
-    patch,
 };
 use crate::{
     editor::{
@@ -47,6 +47,9 @@ pub(crate) struct Side {
     /// A patch's numbering: `(first line in the text, its number in the
     /// file)` of each hunk, in order. Empty: line `i` is number `i + 1`.
     numbers: Vec<(usize, usize)>,
+    /// A patch's files' lines, each highlighted on its own (`files.rs`);
+    /// empty: `highlighter` highlights the whole text.
+    pub(crate) segments: Vec<Segment>,
 }
 
 impl Side {
@@ -63,6 +66,7 @@ impl Side {
             highlighter: None,
             columns,
             numbers,
+            segments: Vec::new(),
         }
     }
 
@@ -85,9 +89,22 @@ impl Side {
         }
     }
 
+    /// The largest number a line shows (numbers restart with each file of
+    /// a patch).
+    fn last_number(&self) -> usize {
+        let mut last = self.number(self.lines());
+        for pair in self.numbers.windows(2) {
+            last = last.max(pair[0].1 + (pair[1].0 - pair[0].0));
+        }
+        last
+    }
+
     /// The tokens of `line` (ranges within it), empty while it is not
     /// highlighted.
     fn tokens(&self, line: usize) -> Vec<(Range<usize>, Token)> {
+        if !self.segments.is_empty() {
+            return files::tokens(&self.segments, line);
+        }
         self.highlighter
             .as_ref()
             .and_then(|h| h.tokens(line))
@@ -130,7 +147,7 @@ pub(crate) struct Span {
 /// The changed ranges within a paired old line and new line.
 type Changed = (Vec<Range<usize>>, Vec<Range<usize>>);
 /// A patch's numbering of each side (`Side::numbers`).
-type Numbers = (Vec<(usize, usize)>, Vec<(usize, usize)>);
+pub(crate) type Numbers = (Vec<(usize, usize)>, Vec<(usize, usize)>);
 
 /// The view's state.
 pub(crate) struct State {
@@ -168,6 +185,8 @@ pub(crate) struct State {
     pub(crate) placed: Vec<Option<(usize, Points)>>,
     /// The annotations' heights as they laid out, by id.
     pub(crate) annotation_heights: HashMap<SharedString, Points>,
+    /// A patch's files (none for two texts).
+    pub(crate) files: Files,
 }
 
 impl State {
@@ -194,6 +213,7 @@ impl State {
             annotations: Vec::new(),
             placed: Vec::new(),
             annotation_heights: HashMap::new(),
+            files: Files::default(),
         }
     }
 
@@ -208,13 +228,53 @@ impl State {
         self.expansions.clear();
         self.inline.clear();
         self.pairs.clear();
+        self.files.set(Vec::new());
         self.make_highlighters();
     }
 
+    /// Shows a patch's files, joined.
+    fn set_patch(&mut self, joined: Joined) {
+        let Joined {
+            old,
+            new,
+            numbers,
+            model,
+            segments,
+            sections,
+            ..
+        } = joined;
+        self.model = model;
+        self.old = Side::new(old, numbers.0);
+        self.new = Side::new(new, numbers.1);
+        self.old.segments = segments.0;
+        self.new.segments = segments.1;
+        // Each file's hunk headers are its section's.
+        self.headers = Vec::new();
+        self.patch = true;
+        self.expansions.clear();
+        self.inline.clear();
+        self.pairs.clear();
+        self.files.set(sections);
+        self.make_highlighters();
+    }
+
+    /// Whether a side has a language to highlight.
+    fn highlighted(&self) -> bool {
+        !self.hint.is_empty()
+            || files::hinted(&self.old.segments)
+            || files::hinted(&self.new.segments)
+    }
+
     fn make_highlighters(&mut self) {
-        let ready = Highlighter::ready() && !self.hint.is_empty();
+        let loaded = Highlighter::ready();
+        let ready = loaded && !self.hint.is_empty();
         for side in [&mut self.old, &mut self.new] {
-            side.highlighter = ready.then(|| Highlighter::new(self.hint)).flatten();
+            if side.segments.is_empty() {
+                side.highlighter = ready.then(|| Highlighter::new(self.hint)).flatten();
+            } else {
+                side.highlighter = None;
+                files::make_highlighters(&mut side.segments, loaded);
+            }
         }
     }
 
@@ -230,18 +290,21 @@ impl State {
             headers: self.headers.clone(),
         };
         self.split = options.layout == Layout::Split;
-        self.rows = layout::rows(
-            &self.model,
-            &self.old.text,
-            &self.new.text,
-            &options,
-            &self.expansions,
-        );
-        self.wrap_columns = wrap_columns(
-            props.soft_wrap.get_untracked(),
-            self.text_box,
-            self.column,
-        );
+        self.rows = if self.files.any() {
+            let headers =
+                self.files.count() > 1 || props.render_file_header.get_untracked().is_some();
+            self.files.rows(options.layout, headers)
+        } else {
+            layout::rows(
+                &self.model,
+                &self.old.text,
+                &self.new.text,
+                &options,
+                &self.expansions,
+            )
+        };
+        self.wrap_columns =
+            wrap_columns(props.soft_wrap.get_untracked(), self.text_box, self.column);
         self.measure_rows();
     }
 
@@ -269,7 +332,7 @@ impl State {
                         Some(_) => count(&self.new, *new) as u32,
                         None => count(&self.old, *old) as u32,
                     },
-                    Row::Separator { .. } => 1,
+                    Row::Separator { .. } | Row::File { .. } => 1,
                 })
                 .collect()
         };
@@ -291,9 +354,12 @@ impl State {
                 .collect();
             for (index, row) in self.rows.iter().enumerate() {
                 if let Row::Line { old, new, .. } = row {
-                    for key in [old.map(|l| (DiffSide::Old, l)), new.map(|l| (DiffSide::New, l))]
-                        .into_iter()
-                        .flatten()
+                    for key in [
+                        old.map(|l| (DiffSide::Old, l)),
+                        new.map(|l| (DiffSide::New, l)),
+                    ]
+                    .into_iter()
+                    .flatten()
                     {
                         if let Some(slot) = at.get_mut(&key) {
                             *slot = index;
@@ -412,7 +478,8 @@ impl State {
 
     /// The hunks, as the ref gives them.
     pub(crate) fn hunks(&self) -> Vec<DiffHunk> {
-        self.model
+        let mut hunks = self
+            .model
             .hunks
             .iter()
             .enumerate()
@@ -422,8 +489,11 @@ impl State {
                 old_lines: h.old.len() as u32,
                 new_start: h.new.start as u32,
                 new_lines: h.new.len() as u32,
+                ..Default::default()
             })
-            .collect()
+            .collect::<Vec<_>>();
+        self.files.localize(&mut hunks);
+        hunks
     }
 
     /// The width of a side's text box.
@@ -437,10 +507,7 @@ impl State {
 
     /// The width of a number column.
     pub(crate) fn number_width(&self) -> Points {
-        let last = self
-            .old
-            .number(self.old.lines())
-            .max(self.new.number(self.new.lines()));
+        let last = self.old.last_number().max(self.new.last_number());
         let digits = (last.max(1).ilog10() as usize + 1).max(2);
         self.column * digits as f32
     }
@@ -690,21 +757,26 @@ impl Dv {
             let new = dv.props.new_value.get();
             let patch_text = dv.props.patch.get();
             let language = dv.props.language.get();
-            let (old, new, numbers, headers, path) = match (old, new, patch_text) {
-                (None, None, Some(text)) => from_patch(&text),
-                (old, new, _) => (
-                    old.map(|s| s.to_string()).unwrap_or_default(),
-                    new.map(|s| s.to_string()).unwrap_or_default(),
-                    Default::default(),
-                    Vec::new(),
-                    None,
-                ),
-            };
-            let name = language.map(|l| l.to_string()).or(path);
             {
                 let mut st = dv.st.borrow_mut();
-                st.hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
-                st.set_texts(old, new, numbers, headers);
+                match (old, new, patch_text) {
+                    (None, None, Some(text)) => {
+                        let joined = files::join(&text, language.as_ref().map(|l| l.as_str()));
+                        let name = language.map(|l| l.to_string()).or(joined.path.clone());
+                        st.hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
+                        st.set_patch(joined);
+                    }
+                    (old, new, _) => {
+                        let name = language.map(|l| l.to_string());
+                        st.hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
+                        st.set_texts(
+                            old.map(|s| s.to_string()).unwrap_or_default(),
+                            new.map(|s| s.to_string()).unwrap_or_default(),
+                            Default::default(),
+                            Vec::new(),
+                        );
+                    }
+                }
                 st.relayout(&dv.props);
             }
             dv.bump();
@@ -718,6 +790,7 @@ impl Dv {
             dv.props.context_lines.get();
             dv.props.expand_all.get();
             dv.props.soft_wrap.get();
+            dv.props.render_file_header.get();
             dv.st.borrow_mut().relayout(&dv.props);
             dv.bump();
         });
@@ -768,6 +841,10 @@ impl Dv {
     }
 
     pub(crate) fn go_to_hunk(&self, index: usize) {
+        let collapsed = self.st.borrow().files.collapsed_file_of_hunk(index);
+        if let Some(path) = collapsed {
+            self.set_file_collapsed(&path, Some(false));
+        }
         let y = {
             let st = self.st.borrow();
             let Some(row) = layout::hunk_row(&st.rows, index) else {
@@ -866,10 +943,47 @@ impl Dv {
         self.bump();
     }
 
+    // Files.
+
+    pub(crate) fn files(&self) -> Vec<DiffFile> {
+        self.st.borrow().files.list()
+    }
+
+    /// Collapses, expands or toggles (`None`) the file at `path`, and
+    /// reports it when that changed it.
+    pub(crate) fn set_file_collapsed(&self, path: &str, collapsed: Option<bool>) {
+        let file = {
+            let mut st = self.st.borrow_mut();
+            let Some(file) = st.files.set_collapsed(path, collapsed) else {
+                return;
+            };
+            st.relayout(&self.props);
+            file
+        };
+        self.bump();
+        self.schedule_highlight();
+        self.cx.emit(DiffViewEvent::FileToggle(file));
+    }
+
+    pub(crate) fn scroll_to_file(&self, path: &str) {
+        let y = {
+            let st = self.st.borrow();
+            let Some(row) = st
+                .files
+                .index(path)
+                .and_then(|index| files::file_row(&st.rows, index))
+            else {
+                return;
+            };
+            st.font.line_height * row as f32
+        };
+        self.vscroll.scroll_to(point(px(0.0), y), true);
+    }
+
     // Highlighting.
 
     fn load_syntaxes(&self) {
-        if self.st.borrow().hint.is_empty() {
+        if !self.st.borrow().highlighted() {
             return;
         }
         if Highlighter::ready() {
@@ -920,12 +1034,24 @@ impl Dv {
                             }
                         }
                     }
+                    // By side and, for a patch's files, segment.
                     let mut work = Vec::new();
                     for (index, (side, lines)) in
                         [(&mut st.old, old_lines), (&mut st.new, new_lines)]
                             .into_iter()
                             .enumerate()
                     {
+                        if !side.segments.is_empty() {
+                            // No line of this side in view: nothing to do.
+                            if lines.0 <= lines.1 {
+                                for (segment, guess, job) in
+                                    files::work(&mut side.segments, lines.0..lines.1 + 1)
+                                {
+                                    work.push((index, Some(segment), guess, job));
+                                }
+                            }
+                            continue;
+                        }
                         let last = lines.1;
                         let first = lines.0.min(last);
                         let start = first.saturating_sub(GUESS_CONTEXT);
@@ -936,7 +1062,7 @@ impl Dv {
                                 .flatten();
                             let job = h.job(&side.rope, last + LOOKAHEAD, SLICE);
                             if guess.is_some() || job.is_some() {
-                                work.push((index, guess, job));
+                                work.push((index, None, guess, job));
                             }
                         }
                     }
@@ -947,8 +1073,8 @@ impl Dv {
                 }
                 let done = off_thread(move || {
                     work.into_iter()
-                        .map(|(index, guess, job)| {
-                            (index, guess.map(|g| g.run()), job.map(|j| j.run()))
+                        .map(|(index, segment, guess, job)| {
+                            (index, segment, guess.map(|g| g.run()), job.map(|j| j.run()))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -957,8 +1083,12 @@ impl Dv {
                 {
                     let mut st = dv.st.borrow_mut();
                     let st = &mut *st;
-                    for (index, guessed, done) in done {
+                    for (index, segment, guessed, done) in done {
                         let side = if index == 0 { &mut st.old } else { &mut st.new };
+                        if let Some(segment) = segment {
+                            changed |= files::finish(&mut side.segments, segment, guessed, done);
+                            continue;
+                        }
                         // A highlighter made since for other texts drops
                         // what was made for the one before.
                         let Some(h) = &mut side.highlighter else {
@@ -981,37 +1111,6 @@ impl Dv {
             dv.highlighting.set(false);
         });
     }
-}
-
-/// The texts, numbering, headers and file path of `text`'s first file.
-#[allow(clippy::type_complexity)]
-fn from_patch(text: &str) -> (String, String, Numbers, Vec<Header>, Option<String>) {
-    let files = match patch::parse_patch(text) {
-        Ok(files) => files,
-        Err(e) => {
-            log::warn!("DiffView: the patch is not a unified diff: {e}");
-            return Default::default();
-        }
-    };
-    let Some(file) = files.into_iter().next() else {
-        return Default::default();
-    };
-    let (old, new, firsts) = file.texts();
-    let mut headers = Vec::with_capacity(file.hunks.len());
-    let (mut old_numbers, mut new_numbers) = (Vec::new(), Vec::new());
-    let places = file.hunks.iter().zip(firsts).zip(file.text_starts());
-    for ((hunk, (old_first, new_first)), (old_at, new_at)) in places {
-        headers.push(Header {
-            old: old_at,
-            new: new_at,
-            text: hunk.header.trim().to_string(),
-        });
-        // The files' lines count from 0 here, the numbers from 1.
-        old_numbers.push((old_at, old_first + 1));
-        new_numbers.push((new_at, new_first + 1));
-    }
-    let path = file.new_path.or(file.old_path);
-    (old, new, (old_numbers, new_numbers), headers, path)
 }
 
 #[cfg(test)]

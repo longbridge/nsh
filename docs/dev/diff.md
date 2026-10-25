@@ -3,17 +3,18 @@
 `DiffView` (`nsh/base`, `crates/nsh-base/src/diff/`) shows the changes between two texts as code review tools do:
 side by side (`layout="split"`) or one over the other (`"unified"`), the words changed within lines highlighted, the
 unchanged lines between changes collapsed into separators that expand, and the text highlighted with the `Editor`'s
-syntaxes. The texts are `oldValue` and `newValue`, or one file of a unified `patch` (`git diff`'s, a pull request's).
+syntaxes. The texts are `oldValue` and `newValue`, or the files of a unified `patch` (`git diff`'s, a pull request's).
 As `TextView` and `Editor` do, it has a default look built from the theme's tokens, with added lines green and
 deleted lines red (an exception to "No styles in NSH", `AGENTS.md`), every part of which the app restyles. The
 user-facing page is `website/elements/diff-view.md`; how each module works inside is in its `//!` docs.
 
 | File | What |
 |---|---|
-| `mod.rs` | The component: `DiffViewProps`, `DiffViewEvent` (`Change`, `LineNumberPress`, `StatsChange`, `LineSelectionChange`), `DiffViewApi` (the ref's methods); the values: `DiffLayout`, `DiffInline`, `DiffIndicators`, `DiffSide`, `DiffExpand` (`PropEnum`s), `DiffHunk`, `DiffStats`, `DiffSeparator`, `DiffChange`, `DiffLine`, `DiffLineRange`, `DiffAnnotation` (`JsObject`s) |
+| `mod.rs` | The component: `DiffViewProps`, `DiffViewEvent` (`Change`, `LineNumberPress`, `StatsChange`, `LineSelectionChange`, `FileToggle`), `DiffViewApi` (the ref's methods); the values: `DiffLayout`, `DiffInline`, `DiffIndicators`, `DiffSide`, `DiffExpand`, `DiffFileStatus` (`PropEnum`s), `DiffHunk`, `DiffStats`, `DiffSeparator`, `DiffChange`, `DiffLine`, `DiffLineRange`, `DiffAnnotation`, `DiffFile` (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DiffViewClasses`, `DiffViewStyles` (each a `PartStyle`) and `DiffViewPart` |
 | `model.rs` | `DiffModel`: the line diff and its hunks, the pairs of changed lines that are alike, the words changed within a pair, reverting and accepting one hunk |
-| `layout.rs` | `rows`: the rows a diff shows (`Row::Line`, `Row::Separator`), `Expansions` (what the user expanded of each gap), patch hunk headers |
+| `layout.rs` | `rows`: the rows a diff shows (`Row::Line`, `Row::Separator`; `Row::File`, a file header, made by `files.rs`), `Expansions` (what the user expanded of each gap), patch hunk headers |
+| `files.rs` | A patch's files: each diffed on its own and joined into the two sides (`join`), their header rows (`Row::File`) and collapsing (`Files`), each file's highlighting (`Segment`), the default file header |
 | `patch.rs` | Unified diffs: `parse_patch` into `FilePatch`es and `PatchHunk`s, the texts a view shows of a file (`FilePatch::texts`), applying a patch (`FilePatch::apply`) |
 | `controller.rs` | `Dv` and `State`: the two sides (text, rope, line starts, highlighter, numbering), the model and rows, the revisions bindings subscribe to, what props and the ref do; the cells and spans of a row |
 | `geometry.rs` | `Geometry`: each row's top and height (its wrapped lines, the annotations under it), finding the rows at a height; `wrap_starts`: where a line wraps at a column count |
@@ -60,10 +61,31 @@ and one separator, so a big text with few changes lays out in time proportional 
 
 `patch.rs` reads the files of a unified diff: `git diff` and `git format-patch` (renames, copies, modes, new,
 deleted and binary files; text before the first file, a commit message, is skipped) and `diff -u`. Errors name the
-patch's line. A `DiffView` shows the patch's first file: its hunks' lines only (`FilePatch::texts`), so nothing
+patch's line. A `DiffView` shows every file of the patch: its hunks' lines only (`FilePatch::texts`), so nothing
 collapses, each hunk under a separator of its header (the text after the second `@@`, a function's name), and the
-lines numbered as in the files (each side's `numbers`). The file's path decides the language when `language` is not
-set. A patch's texts are excerpts, so reverting and accepting hunks act only on `oldValue` / `newValue`.
+lines numbered as in the files (each side's `numbers`). Each file's path decides its language when `language` is not
+set (`language` is every file's). A patch's texts are excerpts, so reverting and accepting hunks act only on
+`oldValue` / `newValue`.
+
+Files (`files.rs`): each file's texts are diffed on their own, then joined into the view's two texts, so the rows,
+cells and ref work as for one file. Indexes stay coherent this way:
+
+- **Lines.** File `i`'s lines start at its `old_at` / `new_at` in the joined texts; each file's text ends with a line
+  break there, so no two files share a line. Numbers restart with each file (one `numbers` entry per hunk of every
+  file).
+- **Hunks.** The joined model's hunks are the files' in order: `DiffHunk.index`, `goToHunk` and `renderHunkActions`
+  count across files, a file's being `firstHunk..firstHunk + hunks` (`DiffFile`); `DiffHunk.file` is its file's index
+  and its lines count in that file's texts. `stats()` and `onStatsChange` are the sum of the files'.
+- **Hunk headers.** Their separators' `gap` counts across files.
+
+A header row (`Row::File`, one row tall) is above each file when the patch has several files or the app sets
+`renderFileHeader` (told the `DiffFile`: `path`, `oldPath` for renames and copies, `status`, `binary`, `added`,
+`deleted`, `hunks`, `firstHunk`, `collapsed`). A collapsed file shows its header only; collapsed paths stay collapsed
+while a new patch still has them. `collapseFile`, `expandFile` and `toggleFile` (the ref, by path) collapse and
+expand, and each change is reported with `onFileToggle` (the default header toggles on a press; the app's calls
+`toggleFile`). `files()` lists the files, `scrollToFile(path)` scrolls a header to the top, and `goToHunk` expands a
+collapsed file first. Each file and side is highlighted on its own (`Segment`, a highlighter and rope per file), so
+one file's syntax state never runs into the next; a frame's budget is shared among the files in view.
 `FilePatch::apply` applies a patch to the old file's text, giving the new one.
 
 ## The view
@@ -115,8 +137,9 @@ Each side has its own `editor::highlight::Highlighter` over a rope of its text, 
 highlighter (`docs/dev/editor.md` "Highlighting"), with the language found by `editor::language::language`. The
 controller hands both sides' jobs (and guesses, for lines far past the parse) to one blocking thread at a time, up to
 1000 lines past each side's last line in view, as the `Editor` does; the syntaxes load on a blocking thread the first
-time (after a frame on WebAssembly). Colors are `crate::syntax`'s
-tokens, as the `Editor`'s and `TextView`'s code blocks.
+time (after a frame on WebAssembly). A patch's files each have a highlighter per side, in their own language
+(`files::Segment`), whose jobs go out with the others'. Colors are `crate::syntax`'s tokens, as the `Editor`'s and
+`TextView`'s code blocks.
 
 ## Parts and their defaults
 
@@ -138,10 +161,10 @@ tokens, as the `Editor`'s and `TextView`'s code blocks.
 | `lineSelected` | Over the selected rows of their side, gutter and text: `primary` at 12 % |
 | `annotation` | The box of an annotation, under its line across its side (split) or the view (unified) |
 | `addAnnotation` | The box of the add control: the gutter's width, a line tall, the control at its right |
+| `fileHeader` | A file's header: `▾` / `▸`, the path (`old → new` when moved), `+n` green and `−n` red on `secondary`, a `border` line below; a press collapses or expands the file |
 
 ## Limits
 
-- One file of a patch shows; an app showing a multi-file patch splits it and shows a `DiffView` per file.
 - Widths are columns of the font's `0`: exact for monospaced fonts. Soft wrap counts characters as columns, so wide
   characters (CJK) wrap later than they fill the line.
 - Text is shown, not edited: changes revert or keep a hunk at a time.

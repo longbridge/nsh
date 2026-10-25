@@ -44,7 +44,10 @@ impl Geometry {
     /// The top of row `row` (the bottom of the last past the end).
     pub(crate) fn top(&self, row: usize) -> Points {
         let last = self.tops.len().saturating_sub(1);
-        self.tops.get(row.min(last)).copied().unwrap_or(Points::ZERO)
+        self.tops
+            .get(row.min(last))
+            .copied()
+            .unwrap_or(Points::ZERO)
     }
 
     /// The height of row `row`'s lines.

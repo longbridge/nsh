@@ -180,7 +180,11 @@ pub(crate) fn drag_selection(fixed: usize, offset: usize) -> Option<(Selection, 
     if offset == fixed {
         return None;
     }
-    let edge = if offset < fixed { Edge::Start } else { Edge::End };
+    let edge = if offset < fixed {
+        Edge::Start
+    } else {
+        Edge::End
+    };
     Some((Selection::new(fixed, offset), edge))
 }
 
@@ -432,7 +436,12 @@ pub(crate) fn handles(ed: Ed) -> impl IntoElement {
             ed.focused.get() && ed.touch_range().is_some_and(|(start, end)| start < end)
         }
     };
-    when(shown, move || [handle(ed.clone(), Edge::Start), handle(ed.clone(), Edge::End)])
+    when(shown, move || {
+        [
+            handle(ed.clone(), Edge::Start),
+            handle(ed.clone(), Edge::End),
+        ]
+    })
 }
 
 /// `edge`'s handle: a hit area around the end, holding the knob (the
@@ -461,7 +470,10 @@ fn handle(ed: Ed, edge: Edge) -> impl IntoElement {
         }
     };
     let list: &'static [EditorPart] = match edge {
-        Edge::Start => &[EditorPart::SelectionHandle, EditorPart::SelectionHandleStart],
+        Edge::Start => &[
+            EditorPart::SelectionHandle,
+            EditorPart::SelectionHandleStart,
+        ],
         Edge::End => &[EditorPart::SelectionHandle, EditorPart::SelectionHandleEnd],
     };
     let knob = parts(
@@ -596,7 +608,10 @@ mod tests {
         assert_eq!(start.origin.x + start.size.width / 2.0, px(48.0));
         assert_eq!(end.origin.x + end.size.width / 2.0, px(96.0));
         // The knob's room below the end's line is the handle's, not the text's.
-        assert!(contains(end, Point::new(px(96.0), px(20.0 + KNOB_ROOM / 2.0))));
+        assert!(contains(
+            end,
+            Point::new(px(96.0), px(20.0 + KNOB_ROOM / 2.0))
+        ));
         assert!(!contains(end, Point::new(px(96.0), px(-1.0))));
     }
 

@@ -96,4 +96,7 @@ parts! {
     /// The box of the add control (`renderAddAnnotation`), as wide as the
     /// gutter and as tall as a line, the control at its right.
     add_annotation => AddAnnotation,
+    /// The header of a file of a patch (the path and counts on
+    /// `secondary`), across the view.
+    file_header => FileHeader,
 }

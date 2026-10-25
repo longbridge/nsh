@@ -3101,7 +3101,8 @@ impl Mounter {
             && s.events.contains(EventKind::LongPress)
         {
             let payload = self.press_payload(id, at);
-            self.control.dispatch_event(id, EventKind::LongPress, payload);
+            self.control
+                .dispatch_event(id, EventKind::LongPress, payload);
         }
     }
 

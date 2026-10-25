@@ -4,11 +4,12 @@
 //! and reverts or keeps a change, reporting the texts; a patch's lines are
 //! numbered as in its file; a long text makes only the rows in view; line
 //! numbers select lines, which the ref reads and sets; the ref moves from
-//! change to change; and the app's annotations show under their lines.
+//! change to change; the app's annotations show under their lines; and
+//! several files show each under a header that collapses it.
 
 use nsh_base::{
-    DiffAnnotation, DiffChange, DiffExpand, DiffHunk, DiffLayout, DiffLineRange, DiffSide,
-    DiffView, DiffViewApi, diff_view,
+    DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffHunk, DiffLayout, DiffLineRange,
+    DiffSide, DiffView, DiffViewApi, diff_view,
 };
 use nsh_core::{
     Size,
@@ -92,6 +93,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let selected = signal(String::from("-"));
     let hunk = signal(String::from("-"));
     let pressed = signal(String::from("-"));
+    let files = signal(String::from("-"));
+    let toggled = signal(String::from("-"));
     let dv = component_ref::<DiffView>();
     let api = move |f: &dyn Fn(&DiffViewApi)| {
         if let Some(api) = dv.api::<DiffViewApi>() {
@@ -118,6 +121,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         })
         .annotations(props.annotations.clone())
         .render_annotation(|a: &DiffAnnotation| text(format!("Note {}", a.id)))
+        .on_file_toggle(move |f: &DiffFile| toggled.set(format!("{} {}", f.index, f.collapsed)))
         .component_ref(&dv)
         .size_full();
     el = match props.patch.clone() {
@@ -145,6 +149,8 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .child(text(move || format!("Selected {:?}", selected.get())))
         .child(text(move || format!("Hunk {}", hunk.get())))
         .child(text(move || format!("Pressed {}", pressed.get())))
+        .child(text(move || format!("Files {}", files.get())))
+        .child(text(move || format!("Toggled {}", toggled.get())))
         .child(
             view()
                 .flex_row()
@@ -187,6 +193,23 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 .child(button(
                     "current",
                     Box::new(move |a| hunk.set(format!("{:?} now", a.current_hunk()))),
+                ))
+                .child(button(
+                    "files",
+                    Box::new(move |a| {
+                        let list: Vec<String> = a
+                            .files()
+                            .iter()
+                            .map(|f| {
+                                format!("{}:+{}-{}@{}", f.index, f.added, f.deleted, f.first_hunk)
+                            })
+                            .collect();
+                        files.set(list.join(" "));
+                    }),
+                ))
+                .child(button(
+                    "toggle-a",
+                    Box::new(|a| a.toggle_file("a.rs".into())),
                 )),
         )
 }
@@ -489,4 +512,47 @@ fn annotations_show_under_their_lines_while_they_show() {
     assert!(!app.shows("Note b"));
     app.press("id:expand-all").unwrap();
     see(&mut app, "Note b");
+}
+
+#[test]
+fn a_patch_of_several_files_shows_each_under_its_header() {
+    let patch = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,2 @@
+ keep a
+-old a
++new a
+diff --git a/b.rs b/b.rs
+--- a/b.rs
++++ b/b.rs
+@@ -5,1 +5,2 @@
+ keep b
++added b
+";
+    let mut app = start(HarnessProps {
+        patch: Some(patch.into()),
+        ..texts("", "")
+    });
+    see(&mut app, "added b");
+    // Each file under its header (the path), numbered as in it.
+    assert!(app.shows("a.rs") && app.shows("b.rs"));
+    assert!(app.shows("new a") && app.shows("old a"));
+    assert_eq!(count(&app, "5"), 2);
+    assert_eq!(count(&app, "6"), 1);
+    // Hunks count across the files, their lines in their files' texts.
+    app.press("id:read").unwrap();
+    see(&mut app, "Stats 2 1 2");
+    see(&mut app, "Hunks 1,1>1,1 1,0>1,1");
+    app.press("id:files").unwrap();
+    see(&mut app, "Files 0:+1-1@0 1:+1-0@1");
+    // A press on a header collapses its file; the ref expands it.
+    app.press("text:a.rs").unwrap();
+    see(&mut app, "Toggled 0 true");
+    assert!(!app.shows("new a"));
+    assert!(app.shows("added b") && app.shows("a.rs"));
+    app.press("id:toggle-a").unwrap();
+    see(&mut app, "Toggled 0 false");
+    see(&mut app, "new a");
 }

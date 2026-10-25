@@ -10,11 +10,10 @@ use nsh_core::geometry::{Bounds, Point as Pt, Points, Size, px};
 
 use super::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorPosition, EditorSearch,
-    EditorSearchResult, EditorSelection,
+    EditorSearchResult, EditorSelection, app_highlight,
     buffer::{Buffer, Change},
     commands::{EditOptions, Editing},
     diagnostics::{self, Mark},
-    app_highlight,
     display::DisplayMap,
     fold::{self, FoldRange},
     fold_set,
@@ -391,7 +390,8 @@ impl State {
             return self.unfold_hiding(line);
         };
         let before = self.folded.len();
-        self.folded.retain(|f| f.start < outer.start || f.end > outer.end);
+        self.folded
+            .retain(|f| f.start < outer.start || f.end > outer.end);
         let changed = self.folded.len() != before;
         if changed {
             self.sync_folds();
@@ -530,12 +530,11 @@ impl State {
         let buffer = &self.buffer;
         let display = &self.display;
         let hidden = |offset: usize| display.hiding_fold(buffer.line_of(offset));
-        self.selections.map(|s| {
-            match hidden(s.head).or_else(|| hidden(s.anchor)) {
+        self.selections
+            .map(|s| match hidden(s.head).or_else(|| hidden(s.anchor)) {
                 Some(fold) => Selection::caret(buffer.line_end(fold.start)),
                 None => s,
-            }
-        });
+            });
     }
 
     /// The folds and the app's ranges after an edit of lines `first..first
@@ -645,13 +644,13 @@ impl State {
             info.range.start,
             info.range.end,
         )
-            .filter(|(_, m)| m.range.start < info.range.end && m.range.end > info.range.start)
-            .filter(|(_, m)| {
-                let d = &self.decoration_items[m.item];
-                d.class.is_some() || d.style.is_some() || d.token.is_some()
-            })
-            .map(|(i, m)| (i, m.range.clone()))
-            .collect();
+        .filter(|(_, m)| m.range.start < info.range.end && m.range.end > info.range.start)
+        .filter(|(_, m)| {
+            let d = &self.decoration_items[m.item];
+            d.class.is_some() || d.style.is_some() || d.token.is_some()
+        })
+        .map(|(i, m)| (i, m.range.clone()))
+        .collect();
         for (_, r) in &decorations {
             cuts.push(r.start);
             cuts.push(r.end);
@@ -677,11 +676,11 @@ impl State {
                 start..end,
             )
             .or_else(|| {
-                    tokens
-                        .iter()
-                        .find(|(r, _)| line_start + r.start <= start && line_start + r.end >= end)
-                        .map(|(_, t)| *t)
-                });
+                tokens
+                    .iter()
+                    .find(|(r, _)| line_start + r.start <= start && line_start + r.end >= end)
+                    .map(|(_, t)| *t)
+            });
             let decorations: Vec<usize> = decorations
                 .iter()
                 .filter(|(_, r)| r.start <= start && r.end >= end)
@@ -711,18 +710,18 @@ impl State {
             line_start,
             self.buffer.line_end(info.line),
         )
-            .map(|(_, m)| m)
-            .filter(|m| {
-                let first = self.buffer.line_of(m.range.start);
-                let last = self.buffer.line_of(m.range.end);
-                info.line >= first && info.line <= last
-            })
-            .map(|m| m.item)
-            .filter(|i| {
-                let d = &self.decoration_items[*i];
-                d.line_class.is_some() || d.line_style.is_some()
-            })
-            .collect();
+        .map(|(_, m)| m)
+        .filter(|m| {
+            let first = self.buffer.line_of(m.range.start);
+            let last = self.buffer.line_of(m.range.end);
+            info.line >= first && info.line <= last
+        })
+        .map(|m| m.item)
+        .filter(|i| {
+            let d = &self.decoration_items[*i];
+            d.line_class.is_some() || d.line_style.is_some()
+        })
+        .collect();
         RowContent {
             spans,
             folded,
@@ -731,7 +730,11 @@ impl State {
     }
 
     /// Sets the decorations, resolved (`marks`) and as the app gave them.
-    pub(crate) fn set_decorations(&mut self, marks: Vec<Mark<usize>>, items: Vec<EditorDecoration>) {
+    pub(crate) fn set_decorations(
+        &mut self,
+        marks: Vec<Mark<usize>>,
+        items: Vec<EditorDecoration>,
+    ) {
         self.decoration_reach = app_highlight::reach(&marks);
         self.decorations = marks;
         self.decoration_items = items;
@@ -1381,7 +1384,10 @@ mod tests {
     #[test]
     fn the_apps_folds() {
         let mut st = state(TEXT);
-        let ranges = vec![FoldRange { start: 1, end: 2 }, FoldRange { start: 0, end: 4 }];
+        let ranges = vec![
+            FoldRange { start: 1, end: 2 },
+            FoldRange { start: 0, end: 4 },
+        ];
         assert!(st.set_folds(ranges.clone()));
         assert!(!st.set_folds(ranges));
         assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);

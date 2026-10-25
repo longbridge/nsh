@@ -2119,9 +2119,15 @@ mod tests {
 
         // Sorted already: nothing to do; a selection on one line neither.
         let mut t = Test::plain("«a\nb»");
-        assert_eq!(t.run(Command::SortLines { descending: false }), Outcome::Nothing);
+        assert_eq!(
+            t.run(Command::SortLines { descending: false }),
+            Outcome::Nothing
+        );
         let mut t = Test::plain("«b» a\nc");
-        assert_eq!(t.run(Command::SortLines { descending: false }), Outcome::Nothing);
+        assert_eq!(
+            t.run(Command::SortLines { descending: false }),
+            Outcome::Nothing
+        );
 
         // A selection ending at a line's start leaves that line out; carets
         // stay on character boundaries.

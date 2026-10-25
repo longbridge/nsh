@@ -26,7 +26,9 @@ impl Editing<'_> {
                 .any(|s| s.start() == start && s.end() == start + needle.len())
         };
         let (start, end) = (primary.start(), primary.end());
-        let before = text[..start].rmatch_indices(needle.as_str()).map(|(i, _)| i);
+        let before = text[..start]
+            .rmatch_indices(needle.as_str())
+            .map(|(i, _)| i);
         let wrapped = text[end..]
             .rmatch_indices(needle.as_str())
             .map(|(i, _)| end + i);

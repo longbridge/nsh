@@ -27,7 +27,7 @@ import {
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffAnnotation, DiffHunk, DiffLineRange, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
+  CheckboxProps, CollapsibleProps, DialogChangeReason, DialogProps, DiffAnnotation, DiffFile, DiffHunk, DiffLineRange, DiffSeparator, DiffStats, DiffViewProps, DiffViewRef, DockAreaLayout, DockNode, DockRegion, EditorDecoration, EditorDiagnostic, EditorProps, EditorRef, EditorSearch, EditorSearchResult, EditorSelection, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, ProgressProps, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TabProps, TabsProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
   ToastEntry, ToastMotion, ToastOptions, ToastProps, ToastStackProps, ToastTransitionStatus,
 } from "nsh/base";
@@ -150,7 +150,7 @@ import type {
 
 ### DiffView
 
-`DiffView` 像代码评审工具那样显示两段文本之间或补丁中一个文件的改动：并排或合并显示，高亮行内改动的单词，未改动的行折叠成可以展开的分隔行，使用 `Editor` 的语法颜色。应用的操作可以保留或撤销每处改动。见 [DiffView](../elements/diff-view.md)。
+`DiffView` 像代码评审工具那样显示两段文本之间或补丁中各个文件的改动：并排或合并显示，高亮行内改动的单词，未改动的行折叠成可以展开的分隔行，使用 `Editor` 的语法颜色。应用的操作可以保留或撤销每处改动。见 [DiffView](../elements/diff-view.md)。
 
 <a id="selection"></a>
 

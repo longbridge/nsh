@@ -239,7 +239,10 @@ pub(crate) fn block(
     indent: &dyn Fn(usize) -> Points,
 ) -> Selections {
     let last = layout.row_count().saturating_sub(1);
-    let (top, bottom) = (anchor.0.min(head.0).min(last), anchor.0.max(head.0).min(last));
+    let (top, bottom) = (
+        anchor.0.min(head.0).min(last),
+        anchor.0.max(head.0).min(last),
+    );
     let all: Vec<Selection> = (top..=bottom)
         .map(|row| {
             let at = |x: Points| layout.offset_at(row, (x - indent(row)).max(px(0.0)));

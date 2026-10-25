@@ -13,7 +13,11 @@
 // a line number selects its line (`onLineSelectionChange`,
 // `onLineNumberPress`), where the app's add control shows
 // (`renderAddAnnotation`); the ref reads the selection (`selectedLines`,
-// `selectedText`) and sets it (`setSelectedLines`).
+// `selectedText`) and sets it (`setSelectedLines`). A patch of two files
+// shows each under the app's header (`renderFileHeader`, told the file),
+// which collapses it through the ref (`toggleFile`), reported
+// (`onFileToggle`); the ref lists the files (`files`), whose changes
+// count across them.
 import { Text, View, signal } from "nsh";
 import { DiffView, type DiffViewRef } from "nsh/base";
 
@@ -33,6 +37,20 @@ const ADDED = `--- a/notes.txt
 @@ -41,0 +42 @@
 +${LONG}
 `;
+const FILES = `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1,2 +1,2 @@
+ alpha
+-beta
++BETA
+diff --git a/b.ts b/b.ts
+new file mode 100644
+--- /dev/null
++++ b/b.ts
+@@ -0,0 +1 @@
++gamma
+`;
 
 export default function BaseDiff() {
   const oldValue = signal(OLD);
@@ -44,6 +62,14 @@ export default function BaseDiff() {
   const selected = signal("none");
   let diff!: DiffViewRef;
   let added!: DiffViewRef;
+  let files!: DiffViewRef;
+  const listed = signal("none");
+  const toggled = signal("none");
+  const list = async () => {
+    const all = (await files.files()).map(f => `${f.path}@${f.firstHunk}`);
+    const hunks = (await files.hunks()).map(h => `${h.index}:${h.file}`);
+    listed.set(`${all.join(" ")} hunks ${hunks.join(" ")}`);
+  };
   const inspect = async () => {
     const stats = await diff.stats();
     const hunks = (await diff.hunks()).map(h => `${h.index}@${h.oldStart}:${h.oldLines}>${h.newStart}:${h.newLines}`);
@@ -123,6 +149,23 @@ export default function BaseDiff() {
           selected.set(`${none === null} ${r?.side} ${r?.start}-${r?.end} ${text.split(" ")[0]}`);
         }}
       />
+      <View style={{ width: 390, height: 160 }}>
+        <DiffView
+          ref={r => (files = r)}
+          patch={FILES}
+          layout="unified"
+          renderFileHeader={file => (
+            <View testID={`file-${file.index}`} onPress={() => files.toggleFile(file.path)}>
+              <Text>{`File ${file.index} ${file.path} ${file.status} +${file.added} -${file.deleted}${file.collapsed ? " collapsed" : ""}`}</Text>
+            </View>
+          )}
+          onFileToggle={file => toggled.set(`${file.path} ${file.collapsed}`)}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Files: ${listed()}`}</Text>
+      <Text>{() => `Toggled: ${toggled()}`}</Text>
+      <View testID="files" style={{ height: 20 }} onPress={list} />
     </View>
   );
 }

@@ -183,7 +183,10 @@ mod tests {
     }
 
     fn pairs(ranges: &[FoldRange]) -> Vec<(usize, usize)> {
-        ranges.iter().map(|range| (range.start, range.end)).collect()
+        ranges
+            .iter()
+            .map(|range| (range.start, range.end))
+            .collect()
     }
 
     #[test]
@@ -194,7 +197,10 @@ mod tests {
         assert_eq!(pairs(&normalize(given, 10)), vec![(0, 3), (5, 7), (8, 9)]);
         // Nested and disjoint ranges stay.
         let given = ranges(&[(1, 2), (0, 9), (4, 6), (5, 6)]);
-        assert_eq!(pairs(&normalize(given, 10)), vec![(0, 9), (1, 2), (4, 6), (5, 6)]);
+        assert_eq!(
+            pairs(&normalize(given, 10)),
+            vec![(0, 9), (1, 2), (4, 6), (5, 6)]
+        );
         assert!(normalize(ranges(&[(0, 3)]), 0).is_empty());
         assert!(normalize(ranges(&[(0, 3)]), 1).is_empty());
     }
@@ -204,7 +210,11 @@ mod tests {
         let set = ranges(&[(0, 9), (1, 2), (4, 8), (5, 6), (10, 12)]);
         assert_eq!(levels(&set), vec![1, 2, 2, 3, 1]);
         assert_eq!(
-            pairs(&within(&set, FoldRange { start: 4, end: 8 }).copied().collect::<Vec<_>>()),
+            pairs(
+                &within(&set, FoldRange { start: 4, end: 8 })
+                    .copied()
+                    .collect::<Vec<_>>()
+            ),
             vec![(4, 8), (5, 6)]
         );
         assert_eq!(pairs(&outermost(&set)), vec![(0, 9), (10, 12)]);

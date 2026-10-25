@@ -241,6 +241,23 @@ impl DiffModel {
         (ra, rb)
     }
 
+    /// A model of `old` and `new` whose hunks are given, not computed: the
+    /// hunks of several files' models, moved to where each file's lines
+    /// start in the joined texts (`files::join`).
+    pub(crate) fn joined(old: &str, new: &str, hunks: Vec<Hunk>) -> DiffModel {
+        let old_starts = line_starts(old);
+        let new_starts = line_starts(new);
+        DiffModel {
+            old_lines: old_starts.len(),
+            new_lines: new_starts.len(),
+            hunks,
+            old_final_newline: old.ends_with('\n'),
+            new_final_newline: new.ends_with('\n'),
+            old_starts,
+            new_starts,
+        }
+    }
+
     /// Lines added and deleted.
     pub(crate) fn stats(&self) -> (usize, usize) {
         self.hunks.iter().fold((0, 0), |(added, deleted), hunk| {

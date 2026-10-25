@@ -17,9 +17,9 @@
 use std::time::Duration;
 
 #[cfg(not(feature = "highlight"))]
-pub(crate) use self::plain::{GUESS_CONTEXT, Highlighter};
+pub(crate) use self::plain::{Done, GUESS_CONTEXT, Guess, Guessed, Highlighter, Job};
 #[cfg(feature = "highlight")]
-pub(crate) use self::syntect_lines::{GUESS_CONTEXT, Highlighter};
+pub(crate) use self::syntect_lines::{Done, GUESS_CONTEXT, Guess, Guessed, Highlighter, Job};
 
 /// How long a [`Job`] parses before the view shows what it found: on a
 /// blocking thread where there are threads, else within a frame.

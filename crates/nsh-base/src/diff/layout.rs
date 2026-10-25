@@ -50,6 +50,9 @@ pub(crate) enum Row {
         last: bool,
         header: Option<String>,
     },
+    /// The header of file `file` of a patch of several files (`files.rs`):
+    /// its rows follow unless it is collapsed.
+    File { file: usize },
 }
 
 /// How the two texts show.

@@ -11,8 +11,8 @@ demo: el-diff-view
 `DiffView` shows the changes between two texts as code review tools do: side by side, the old text on the left and the
 new on the right with their lines aligned, or unified, the deleted lines above the added ones. Within a changed line
 the words that changed are highlighted, the unchanged lines between changes fold into separators that expand, and the
-text is highlighted in the [`Editor`](./editor.md)'s syntax colors. It shows two texts (`oldValue` and `newValue`) or a
-file of a unified diff (`patch`: `git diff`'s, a pull request's), and it is made for reviewing changes, an AI's
+text is highlighted in the [`Editor`](./editor.md)'s syntax colors. It shows two texts (`oldValue` and `newValue`) or the
+files of a unified diff (`patch`: `git diff`'s, a pull request's), each under its header, and it is made for reviewing changes, an AI's
 proposed edits among them: the app's actions on each change keep it or revert it. Only the rows in view are made, so a
 long file scrolls as a short one does.
 
@@ -62,10 +62,11 @@ width instead, and a split row is as tall as its taller side, so the sides stay 
 
 - **Two texts**: `oldValue` and `newValue`. The lines are compared as they are, so a final line break added or
   removed is a change, as git shows it.
-- **A patch**: `patch`, a unified diff of one file (`git diff`, `git format-patch`, `diff -u`; renames, modes, new and
-  deleted files, and a commit message before it, read as git writes them). The view shows its hunks' lines, numbered as
-  in the file, each hunk under a separator of its header (the function it is in). The file's path names the language
-  when `language` is not set.
+- **A patch**: `patch`, a unified diff of one file or several (`git diff`, `git format-patch`, `diff -u`; renames,
+  modes, new, deleted and binary files, and a commit message before it, read as git writes them). The view shows its
+  hunks' lines, numbered as in the file, each hunk under a separator of its header (the function it is in), and each
+  file of several under a header of its own ([Files of a patch](#files-of-a-patch)). Each file's path names its
+  language when `language` is not set.
 
 ```tsx
 const PATCH = `diff --git a/src/total.rs b/src/total.rs
@@ -83,6 +84,52 @@ const PATCH = `diff --git a/src/total.rs b/src/total.rs
 
 `language` names the language as the `Editor`'s does: a name, an alias, an extension or a file name (`"rust"`,
 `"tsx"`, `"main.go"`, `"Dockerfile"`).
+
+## Files of a patch
+
+A patch of several files shows each file under a header row: by default its path (`old → new` when renamed), its
+added and deleted line counts, and `▾`, and a press on it collapses the file to its header (`▸`) or expands it.
+`renderFileHeader` draws the headers the app's way (and shows one above a patch of a single file too), told the file
+(`DiffFile`): `index`, `path`, `oldPath` (renamed or copied from), `status` (`"modified"`, `"added"`, `"deleted"`,
+`"renamed"`, `"copied"`), `binary` (the patch shows no lines of it), `added`, `deleted`, `hunks`, `firstHunk` and
+`collapsed`. The app's header calls the ref's `toggleFile(path)`; `collapseFile` and `expandFile` set the state, and
+every change is reported with `onFileToggle(file)`. A collapsed file stays collapsed while a new `patch` still has it.
+
+Changes count across files, in order: a file's changes are `firstHunk` to `firstHunk + hunks - 1`, which
+`goToHunk`, `renderHunkActions` and `hunks()` use (a `DiffHunk`'s `file` is its file's index and its lines count in
+that file), and `stats()` adds up every file's. `goToHunk` expands a collapsed file first.
+
+```tsx
+let diff!: DiffViewRef;
+const files = signal<DiffFile[]>([]);
+
+<View class="flex-1 flex-row">
+  <View class="w-48">
+    <Each of={files()}>
+      {(file) => (
+        <Button onPress={() => diff.scrollToFile(file().path)} class="px-2 py-1">
+          <Text class="text-sm">{file().path} +{file().added} −{file().deleted}</Text>
+        </Button>
+      )}
+    </Each>
+  </View>
+  <DiffView
+    ref={(r) => {
+      diff = r;
+      r.files().then((list) => files.set(list));
+    }}
+    patch={PULL_REQUEST}
+    renderFileHeader={(file) => (
+      <Button onPress={() => diff.toggleFile(file.path)} class="flex-1 flex-row items-center gap-2 bg-muted px-2">
+        <Text>{file.collapsed ? "▸" : "▾"}</Text>
+        <Text class="flex-1 text-sm font-medium">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</Text>
+        <Text class="text-xs text-muted-foreground">{file.binary ? "Binary" : file.status}</Text>
+      </Button>
+    )}
+    class="flex-1"
+  />
+</View>
+```
 
 ## Layout and inline changes
 
@@ -149,7 +196,7 @@ let diff!: DiffViewRef;
 ## Keeping and reverting changes
 
 `renderHunkActions` puts the app's actions at the top right of each change in view, told the change (`DiffHunk`:
-`index`, `oldStart`, `oldLines`, `newStart`, `newLines`, lines from 0). They call the ref: `revertHunk(index)` puts
+`index`, `oldStart`, `oldLines`, `newStart`, `newLines`, lines from 0, and `file`, its file's index in a patch). They call the ref: `revertHunk(index)` puts
 the change's old lines back into the new text, `acceptHunk(index)` makes its new lines the old text's. The view shows
 the result at once and reports both texts with `onChange({ oldValue, newValue })`, which the app sets as the props.
 Keeping or reverting an AI's edit one change at a time is this:
@@ -216,6 +263,11 @@ out of the proposal. A view showing a `patch` shows excerpts of the files, and i
 | `selectedLines()` | `Promise<DiffLineRange \| null>`: the lines selected on the line numbers. |
 | `setSelectedLines(range)` | Selects lines of a side (`null`: none), without `onLineSelectionChange`. |
 | `selectedText()` | `Promise<string>`: the selected lines' text. |
+| `files()` | `Promise<DiffFile[]>`: the patch's files, in order, with their counts (none for two texts). |
+| `scrollToFile(path)` | Scrolls the header of the file at `path` to the top. |
+| `collapseFile(path)` | Shows only the header of the file at `path`. |
+| `expandFile(path)` | Shows the lines of the file at `path` again. |
+| `toggleFile(path)` | Collapses the file at `path`, or expands it when collapsed. |
 
 `nextHunk()` and `previousHunk()` go on from the change they went to while the view stays there, and otherwise from
 the top of the view, so a change near the end that cannot scroll to the top still counts. Next and previous change
@@ -315,6 +367,7 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `lineSelected` | Over the selected lines' rows of their side | A faint `primary` tint |
 | `annotation` | The box of an annotation, under its line | Across its line's side |
 | `addAnnotation` | The box of the add control, the gutter's width and a line tall | The control at its right |
+| `fileHeader` | The header of a file of a patch | The path and counts on `secondary`, a `border` line below |
 
 ## Props
 
@@ -322,8 +375,8 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 |---|---|---|---|---|
 | `oldValue` | `.old_value(..)` | `string` | | The old text. |
 | `newValue` | `.new_value(..)` | `string` | | The new text. |
-| `patch` | `.patch(..)` | `string` | | A unified diff of one file, shown when `oldValue` and `newValue` are not set. |
-| `language` | `.language(..)` | `string` | plain text (a patch: its file's) | A language's name, alias, extension or file name. |
+| `patch` | `.patch(..)` | `string` | | A unified diff of one file or several, shown when `oldValue` and `newValue` are not set. |
+| `language` | `.language(..)` | `string` | plain text (a patch: each file's) | A language's name, alias, extension or file name. |
 | `layout` | `.layout(..)` | `"split" \| "unified"` | `"split"` | Side by side or one column. |
 | `inline` | `.inline(..)` | `"wordAlt" \| "word" \| "char" \| "none"` | `"wordAlt"` | What is highlighted within changed lines. |
 | `indicators` | `.indicators(..)` | `"bars" \| "classic" \| "none"` | `"bars"` | How changed lines are marked beside their numbers. |
@@ -340,6 +393,7 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `annotations` | `.annotations(..)` | `DiffAnnotation[]` | `[]` | The app's content under lines: `{ id, side, line }`. |
 | `renderAnnotation` | `.render_annotation(..)` | `(annotation: DiffAnnotation) => JSX.Element` | | Draws an annotation under its line. |
 | `renderAddAnnotation` | `.render_add_annotation(..)` | `(range: DiffLineRange) => JSX.Element` | | The app's control to add an annotation, beside the hovered line and the last selected one. |
+| `renderFileHeader` | `.render_file_header(..)` | `(file: DiffFile) => JSX.Element` | | Draws the header of each file of a patch, one row tall. |
 | `classes` | `.classes(..)` | `DiffViewClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `DiffViewStyles` | `{}` | Inline styles by part, over the classes. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The view's box. |
@@ -352,6 +406,7 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `onLineNumberPress` | `.on_line_number_press(\|line: &DiffLine\| ..)` | A line number was pressed: `{ side, line }`. |
 | `onLineSelectionChange` | `.on_line_selection_change(\|range: &Option<DiffLineRange>\| ..)` | The selected lines changed: `{ side, start, end }`, or `null`. |
 | `onStatsChange` | `.on_stats_change(\|stats: &DiffStats\| ..)` | The counts changed: `{ added, deleted, hunks }`. It fires once when the view is made and again each time the texts are diffed to other counts, for a "+8 −8 · 5 changes" line. |
+| `onFileToggle` | `.on_file_toggle(\|file: &DiffFile\| ..)` | A file of the patch was collapsed or expanded (its header, or the ref): the `DiffFile` now. |
 
 ## Related
 

@@ -154,13 +154,11 @@ impl Dv {
             // Beside an annotation, under the row's lines, is no line.
             let below = at.y >= st.geometry.top(row) + st.geometry.text_height(row);
             st.rows.get(row).filter(|_| !below).and_then(|r| {
-                line_at(r, prefer)
-                    .map(|line| (prefer, line))
-                    .or_else(|| {
-                        either
-                            .then(|| line_at(r, other(prefer)).map(|l| (other(prefer), l)))
-                            .flatten()
-                    })
+                line_at(r, prefer).map(|line| (prefer, line)).or_else(|| {
+                    either
+                        .then(|| line_at(r, other(prefer)).map(|l| (other(prefer), l)))
+                        .flatten()
+                })
             })
         };
         let Some((side, line)) = found else {

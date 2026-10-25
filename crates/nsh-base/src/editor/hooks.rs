@@ -344,11 +344,7 @@ impl Ed {
         let gutter = computed(move || {
             ed.text_rev.get();
             let digits = ed.st.borrow().buffer.line_count().max(1).ilog10();
-            (
-                ed.props.line_numbers.get(),
-                ed.props.folding.get(),
-                digits,
-            )
+            (ed.props.line_numbers.get(), ed.props.folding.get(), digits)
         });
         let ed = self.clone();
         effect(move || {
@@ -764,7 +760,10 @@ mod tests {
                 .collect()
         };
         assert_eq!(messages(5), ["unused"]);
-        assert_eq!(diagnostics_at(&st, 5)[0].range.end, EditorPosition::new(0, 7));
+        assert_eq!(
+            diagnostics_at(&st, 5)[0].range.end,
+            EditorPosition::new(0, 7)
+        );
         assert!(messages(7).is_empty());
         assert_eq!(messages(10), ["at bar"]);
         assert!(messages(11).is_empty());

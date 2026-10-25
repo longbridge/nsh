@@ -415,7 +415,12 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
             }
             let EventPayload::Press(e) = p else { return };
             tap.tap(e.position, e.page_position, e.clicks);
-            tap.text_press(e.position, e.page_position, Default::default(), e.clicks.max(1));
+            tap.text_press(
+                e.position,
+                e.page_position,
+                Default::default(),
+                e.clicks.max(1),
+            );
         })
         // A long press selects the word under the finger (touch screens;
         // the mouse drags instead).

@@ -117,7 +117,11 @@ impl Editing<'_> {
         let selections = self.selections.clone();
         let mut plan = Plan::new(selections.primary_index());
         for &s in selections.all() {
-            let target = if s.is_empty() { self.word_at(s) } else { Some(s) };
+            let target = if s.is_empty() {
+                self.word_at(s)
+            } else {
+                Some(s)
+            };
             let Some(target) = target else {
                 plan.follow(s);
                 continue;

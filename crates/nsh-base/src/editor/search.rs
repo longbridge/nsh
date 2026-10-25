@@ -119,10 +119,7 @@ pub(crate) fn within<'a>(
             // that can hold it, unless scopes overlap: check those before it
             // that still reach the match's end.
             let index = scope.partition_point(|r| r.start <= m.start);
-            scope[..index]
-                .iter()
-                .rev()
-                .any(|r| m.end <= r.end)
+            scope[..index].iter().rev().any(|r| m.end <= r.end)
         })
         .collect()
 }

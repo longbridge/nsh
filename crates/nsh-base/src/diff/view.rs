@@ -20,9 +20,9 @@ use super::{
 use crate::theme;
 
 /// Added lines' green.
-const ADDED: AdaptiveColor = AdaptiveColor::rgb(0x16a34a, 0x4ade80);
+pub(crate) const ADDED: AdaptiveColor = AdaptiveColor::rgb(0x16a34a, 0x4ade80);
 /// Deleted lines' red.
-const DELETED: AdaptiveColor = AdaptiveColor::rgb(0xdc2626, 0xf87171);
+pub(crate) const DELETED: AdaptiveColor = AdaptiveColor::rgb(0xdc2626, 0xf87171);
 /// The width of a bar indicator.
 const BAR: f32 = 3.0;
 /// The room around a gutter's numbers and before a line's text.
@@ -52,7 +52,7 @@ fn parts<E: Element>(el: E, props: DiffViewProps, list: Vec<DiffViewPart>) -> E 
     })
 }
 
-fn part<E: Element>(el: E, props: DiffViewProps, part: DiffViewPart) -> E {
+pub(crate) fn part<E: Element>(el: E, props: DiffViewProps, part: DiffViewPart) -> E {
     parts(el, props, vec![part])
 }
 
@@ -144,6 +144,7 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
                             }),
                         )
                         .child(separators(dv.clone(), rows))
+                        .child(super::files::headers(dv.clone(), rows))
                         .child(hunk_actions(dv.clone(), rows))
                         .child(annotations(dv.clone()))
                         .child(add_controls(dv.clone())),
