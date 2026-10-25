@@ -175,4 +175,73 @@ pub struct EditorDecoration {
     /// The inline style of those rows, over `lineClass`.
     #[prop(skip_none)]
     pub line_style: Option<Style>,
+    /// The kind of token its text is, colored as the built-in highlighting
+    /// colors it, in place of what that found there (the app's own
+    /// highlighter: a language server's semantic tokens, a parser's). Its
+    /// `class` and `style` apply over the token's colors.
+    #[prop(skip_none)]
+    pub token: Option<EditorToken>,
+}
+
+/// A kind of token of an editor's syntax highlighting, as the built-in
+/// highlighter colors it (the palette `TextView`'s code blocks share), for
+/// the app's tokens ([`EditorDecoration::token`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+pub enum EditorToken {
+    /// Comments (italic).
+    Comment,
+    /// Keywords, and operators that are words (`as`, `typeof`).
+    Keyword,
+    /// Strings, regular expressions, escapes.
+    String,
+    /// Numbers, constants and literals (`true`, `null`).
+    Number,
+    /// Names of functions and classes.
+    Title,
+    /// Attributes, parameters, properties, keys, `self` / `this`.
+    Attr,
+    /// Built-ins: types, functions, macros; tags.
+    Built,
+    /// Removed lines.
+    Deletion,
+}
+
+impl EditorToken {
+    /// The built-in highlighter's token of this kind.
+    pub(crate) fn syntax(self) -> crate::syntax::Token {
+        use crate::syntax::Token;
+        match self {
+            Self::Comment => Token::Comment,
+            Self::Keyword => Token::Keyword,
+            Self::String => Token::String,
+            Self::Number => Token::Number,
+            Self::Title => Token::Title,
+            Self::Attr => Token::Attr,
+            Self::Built => Token::Built,
+            Self::Deletion => Token::Deletion,
+        }
+    }
+}
+
+/// Lines of an editor that fold: line `startLine` stays visible and shows
+/// the fold, the lines after it through `endLine` hide. A language
+/// server's `FoldingRange` has this shape (its other keys are ignored), so
+/// its ranges pass through as they come.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct EditorFoldRange {
+    /// The line that stays visible, from 0.
+    pub start_line: u32,
+    /// The last line it hides.
+    pub end_line: u32,
+}
+
+impl EditorFoldRange {
+    /// Lines `start_line + 1..=end_line` hidden under `start_line`.
+    pub fn new(start_line: u32, end_line: u32) -> EditorFoldRange {
+        EditorFoldRange {
+            start_line,
+            end_line,
+        }
+    }
 }

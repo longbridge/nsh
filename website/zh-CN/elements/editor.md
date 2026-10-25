@@ -79,7 +79,7 @@ mount(App);
 - **缩进。** 新行保持当前行的缩进，在左括号（Python 的 `:`、Ruby 的 `do` 等）之后再加一级；在一对括号之间按 Enter，右括号单独放到下一行。Tab 和 Shift+Tab 缩进和反缩进所选的行；在行首空格中按 Backspace 回到上一个缩进位置。`autoIndent` 关闭这些行为。
 - **括号和引号** 在输入时自动闭合，包住选区，再次输入闭合符号时跳过它（`autoClose`）。光标处的括号和与它配对的括号会加上边框。
 - **撤销** 以一整段输入为单位：一个单词、一次删除、一个命令。移动或点击开始新的一步。
-- **折叠。** 后面跟着缩进更深的行的那一行，可以用行号栏中的标记把这些行折叠起来：`⌄` 折叠，`›` 和行后的 `⋯` 展开。光标移入折叠处时，折叠会打开。
+- **折叠。** 后面跟着缩进更深的行的那一行，可以用行号栏中的标记把这些行折叠起来：`⌄` 折叠，`›` 和行后的 `⋯` 展开。光标移入折叠处时，折叠会打开（[折叠](#folding)）。
 - **点击。** 使用指针时，单击放置光标，双击选中一个单词，三击选中一行，Shift 点击扩展选区，拖动按点击所选的单位选择。Alt+Shift 拖动（Option+Shift；Linux 上也可用 Control+Alt）选择一个矩形块：每行一个选区，列的范围相同，在较短的行末尾之后也保持这些列。在触摸屏上，轻点放置光标。
 - **剪贴板。** 没有选区时复制和剪切取光标所在的整行，粘贴时这些行会作为整行插入到光标所在行的上方。
 
@@ -236,6 +236,48 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 />
 ```
 
+<a id="your-own-highlighting"></a>
+
+### 应用自己的高亮
+
+装饰的 `token` 按内置高亮给这类记号的颜色给其文本着色（`comment`、`keyword`、`string`、`number`、`title`、`attr`、`built`、`deletion`），取代内置高亮器在那里找到的记号：应用自己的高亮器（语言服务器的语义记号、应用自己的解析器）把它的记号映射到这些种类上，就得到编辑器在浅色和深色下的颜色。最内层装饰的记号优先；`class` 和 `style` 作用在它之上。`highlighting={false}` 关闭内置高亮器，文本只由应用的记号着色，而 `language` 仍然决定注释、括号和缩进。
+
+```tsx
+const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "title", string: "string", type: "built" };
+
+<Editor
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  highlighting={false}
+  decorations={semanticTokens().map((t) => ({ range: range(t.line, t.start, t.end), token: kinds[t.type] }))}
+  class="flex-1"
+/>
+```
+
+<a id="folding"></a>
+
+## 折叠
+
+折叠从缩进比上一行更深的行开始。`foldRanges` 改用应用自己的范围（`{ startLine, endLine }`，即语言服务器折叠范围的形状，可以原样传入）：第 `startLine` 行显示折叠，其后直到 `endLine` 的行被折叠起来。它们在编辑中留在自己的行上，直到应用传入新的范围。
+
+折叠可以嵌套：折叠一个块时，块内的折叠保持折叠，所以展开这个块时它们仍是原来的样子。`foldRecursive` 折叠一个块和其中的每个块，`unfoldRecursive` 把它们全部展开，`foldLevel(n)` 折叠嵌套层级为 `n` 的每个块，`foldSelection`（或 `foldRange(range)`）折叠任意的行，不论折叠从哪里开始。`onFoldChange` 在每次改变后报告已折叠的范围，`folds()` / `setFolds(ranges)` 读取并恢复它们，以便与文件一起保存。
+
+```tsx
+const ranges = signal<EditorFoldRange[]>([]);
+const folded = new Map<string, EditorFoldRange[]>();
+
+<Editor
+  ref={editor}
+  value={file().text}
+  language={file().name}
+  foldRanges={ranges()} // 来自语言服务器的 textDocument/foldingRange
+  onFoldChange={(folds) => folded.set(file().name, folds)}
+  class="flex-1"
+/>
+<Button onPress={() => editor.foldLevel(2)}><Text>折叠方法</Text></Button>
+```
+
 <a id="breakpoints-and-context-menus"></a>
 
 ## 断点和上下文菜单
@@ -311,7 +353,7 @@ const hover = signal<EditorHoverEvent | null>(null);
 
 ## 方法
 
-`ref={editor}` 提供编辑器的方法（`EditorRef`），供应用的按钮、菜单和按键使用。返回值的方法（`value()`、`selections()`、`replaceAll()`、`canUndo()`、`caretBounds()` 等）在 JS 中返回一个 `Promise`，所以要 `await` 它们：`const text = await editor.value()`。
+`ref={editor}` 提供编辑器的方法（`EditorRef`），供应用的按钮、菜单和按键使用。返回值的方法（`value()`、`selections()`、`replaceAll()`、`canUndo()`、`caretBounds()`、`folds()` 等）在 JS 中返回一个 `Promise`，所以要 `await` 它们：`const text = await editor.value()`。
 
 | 方法 | 说明 |
 |---|---|
@@ -325,6 +367,11 @@ const hover = signal<EditorHoverEvent | null>(null);
 | `replace(text)` | 替换当前匹配项并选中下一个。 |
 | `replaceAll(text)` | `Promise<number>`：把所有匹配项作为一次编辑替换；返回数量。 |
 | `fold(line)`、`unfold(line)` | 折叠第 `line` 行（从 0 开始）下面的行，或展开它。 |
+| `foldRecursive(line)`、`unfoldRecursive(line)` | 折叠第 `line` 行的折叠及其中的每个折叠，或把它们全部展开。 |
+| `foldLevel(level)` | 折叠嵌套层级为 `level` 的每个折叠（1：最外层）。 |
+| `foldRange(range)` | 折叠 `range`（`{ startLine, endLine }`）中的行，不论折叠从哪里开始。 |
+| `folds()` | `Promise<EditorFoldRange[]>`：已折叠的范围，包括嵌套的。 |
+| `setFolds(folds)` | 恰好折叠 `folds`。 |
 | `scrollToLine(line)` | 把第 `line` 行滚动到视野中，并展开隐藏它的折叠。 |
 | `canUndo()`、`canRedo()` | `Promise<boolean>`：是否有可以撤销或重做的编辑。 |
 | `caretBounds()` | `Promise<EditorBounds \| null>`：主光标的框 `{ bounds, pageBounds }`，在编辑器中（已计入它的滚动）和在根视图中；编辑器布局之前为 `null`。 |
@@ -374,6 +421,8 @@ let editor!: EditorRef;
 | `moveLinesUp`、`moveLinesDown`、`duplicateLinesUp`、`duplicateLinesDown`、`joinLines`、`transposeCharacters` | 重新排列。 |
 | `undo`、`redo` | 撤销和重做。 |
 | `fold`、`unfold`、`foldAll`、`unfoldAll` | 在光标所在行折叠，或折叠全部。 |
+| `foldRecursive`、`unfoldRecursive` | 折叠光标所在的折叠及其中的每个折叠，或把它们展开。 |
+| `foldSelection` | 折叠每个跨越多行的选区中的行。 |
 | `findNext`、`findPrevious` | 选中 `search` 的下一个或上一个匹配项。 |
 | `findWithSelection` | 为查找栏报告选中的文本（`onFindWithSelection`）。 |
 | `copy`、`cut`、`paste` | 剪贴板。 |
@@ -445,6 +494,8 @@ let editor!: EditorRef;
 | `tabSize` | `.tab_size(..)` | `number` | 语言的设置 | 一个制表符和一级缩进的列数。 |
 | `hardTabs` | `.hard_tabs(..)` | `boolean` | 语言的设置 | 用制表符缩进。 |
 | `folding` | `.folding(..)` | `boolean` | `true` | 缩进的行可以用行号栏中的标记折叠。 |
+| `foldRanges` | `.fold_ranges(..)` | `EditorFoldRange[]` | 按缩进 | 折叠开始的地方，由应用给出（[折叠](#folding)）。 |
+| `highlighting` | `.highlighting(..)` | `boolean` | `true` | 内置的语法高亮（[应用自己的高亮](#your-own-highlighting)）。 |
 | `autoClose` | `.auto_close(..)` | `boolean` | `true` | 括号和引号在输入时自动闭合。 |
 | `autoIndent` | `.auto_indent(..)` | `boolean` | `true` | 新行保持缩进，并在左括号之后增加缩进。 |
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | 高亮有光标的行。 |
@@ -482,6 +533,7 @@ let editor!: EditorRef;
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | 悬停结束了。 |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | 一个字符被点击：带有它的单词、修饰键和点击次数。 |
 | `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | 执行了 `findWithSelection`：作为查找栏查询内容的文本。 |
+| `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | 已折叠的范围改变了：每一个，包括嵌套的。 |
 
 <a id="accessibility"></a>
 

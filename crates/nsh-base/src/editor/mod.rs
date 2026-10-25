@@ -10,6 +10,7 @@
 //! primary caret, which holds only what was just typed. `docs/dev/editor.md`
 //! has the design.
 
+mod app_highlight;
 mod buffer;
 mod commands;
 pub(crate) mod controller;
@@ -17,6 +18,7 @@ mod data;
 mod diagnostics;
 mod display;
 mod fold;
+mod fold_set;
 pub(crate) mod highlight;
 mod hooks;
 mod keymap;
@@ -31,8 +33,8 @@ mod types;
 mod view;
 
 pub use data::{
-    EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorPosition, EditorRange,
-    EditorSearch, EditorSearchResult, EditorSelection,
+    EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorFoldRange, EditorPosition,
+    EditorRange, EditorSearch, EditorSearchResult, EditorSelection, EditorToken,
 };
 pub use layout::EditorScrollBeyond;
 use nsh_core::ui::prelude::*;
@@ -149,6 +151,15 @@ pub struct EditorProps {
     /// one, at most a quarter of the editor's height; never more than
     /// half of what the caret's row leaves).
     pub cursor_surrounding_lines: Prop<Option<u32>>,
+    /// Where folds can start, the app's (a language server's folding
+    /// ranges), instead of by indentation; carried through edits until the
+    /// app sets new ones. An empty list: nothing folds.
+    pub fold_ranges: Prop<Option<Vec<EditorFoldRange>>>,
+    /// The built-in syntax highlighting (default true). Off, the language
+    /// still decides comments, brackets and indentation, and the app's
+    /// decorations (their `token`s) color the text alone.
+    #[prop(default = true)]
+    pub highlighting: Prop<bool>,
 }
 
 /// The events of an [`Editor`].
@@ -194,6 +205,10 @@ pub enum EditorEvent {
     /// find bar takes it as its query.
     #[args(query)]
     FindWithSelection(String),
+    /// The folded ranges changed (a fold, an unfold, an edit or a caret
+    /// moving into a fold): every one, nested ones included, by start.
+    #[args(folds)]
+    FoldChange(Vec<EditorFoldRange>),
 }
 
 /// Where a context menu was asked for in an [`Editor`].
@@ -389,6 +404,13 @@ pub enum EditorCommand {
     /// Wraps the selections in the language's block comment, or unwraps
     /// them.
     ToggleBlockComment,
+    /// Folds the caret's fold and every fold inside it.
+    FoldRecursive,
+    /// Unfolds the caret's fold and every fold inside it.
+    UnfoldRecursive,
+    /// Folds the lines of each selection that spans several, wherever
+    /// they are.
+    FoldSelection,
 }
 
 /// The methods of an [`Editor`]'s ref.
@@ -535,6 +557,42 @@ impl EditorApi {
     /// to the middle of the viewport.
     pub fn go_to_line(&self, line: u32) {
         self.ed.go_to_line(line);
+    }
+
+    /// Folds the fold on line `line` (starting there, else the innermost
+    /// one around it) and every fold inside it.
+    pub fn fold_recursive(&self, line: u32) {
+        let line = line as usize;
+        self.ed.fold_with(|st| st.fold_recursive(line));
+    }
+
+    /// Unfolds the fold on line `line` and every fold inside it.
+    pub fn unfold_recursive(&self, line: u32) {
+        let line = line as usize;
+        self.ed.fold_with(|st| st.unfold_recursive(line));
+    }
+
+    /// Folds every fold at nesting level `level` (1: those inside no
+    /// other), leaving the others as they are.
+    pub fn fold_level(&self, level: u32) {
+        self.ed.fold_with(|st| st.fold_level(level as usize));
+    }
+
+    /// Folds the lines of `range`, whether a fold can start there or not.
+    pub fn fold_range(&self, range: EditorFoldRange) {
+        let (start, end) = (range.start_line as usize, range.end_line as usize);
+        self.ed.fold_with(|st| st.fold_lines(start, end));
+    }
+
+    /// The folded ranges, nested ones included, by start.
+    pub fn folds(&self) -> Vec<EditorFoldRange> {
+        self.ed.folds()
+    }
+
+    /// Replaces the folded ranges (any lines; a range crossing an earlier
+    /// one's end is dropped).
+    pub fn set_folds(&self, folds: Vec<EditorFoldRange>) {
+        self.ed.set_folds(&folds);
     }
 }
 

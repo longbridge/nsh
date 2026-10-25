@@ -14,8 +14,10 @@ use super::{
     buffer::{Buffer, Change},
     commands::{EditOptions, Editing},
     diagnostics::{self, Mark},
+    app_highlight,
     display::DisplayMap,
     fold::{self, FoldRange},
+    fold_set,
     highlight::Highlighter,
     language::{self, LanguageConfig},
     movement, search,
@@ -101,6 +103,11 @@ pub(crate) struct State {
     pub(crate) decorations: Vec<Mark<usize>>,
     /// The decorations as the app gave them (classes and styles by index).
     pub(crate) decoration_items: Vec<EditorDecoration>,
+    /// The longest decoration's bytes: a row looks for the decorations
+    /// over it among those starting this far before it, not among all.
+    decoration_reach: usize,
+    /// The built-in highlighting on (`highlighting`).
+    pub(crate) highlighting: bool,
     pub(crate) search: Option<EditorSearch>,
     pub(crate) matches: Vec<Range<usize>>,
     pub(crate) search_error: Option<String>,
@@ -108,6 +115,13 @@ pub(crate) struct State {
     fold_candidates: Option<Vec<FoldRange>>,
     /// Folding on.
     pub(crate) folding: bool,
+    /// The app's `foldRanges` (normalized, carried through edits); None:
+    /// folds by indentation.
+    app_folds: Option<Vec<FoldRange>>,
+    /// Every folded range, nested ones included (sorted, normalized).
+    folded: Vec<FoldRange>,
+    /// The folded ranges last reported (`onFoldChange`).
+    pub(crate) reported_folds: Vec<FoldRange>,
     /// What an input method is composing at the primary caret.
     pub(crate) composition: Option<String>,
     /// The text last reported to the app (`onChange`) or set by it, and
@@ -149,11 +163,16 @@ impl State {
             diagnostics: Vec::new(),
             decorations: Vec::new(),
             decoration_items: Vec::new(),
+            decoration_reach: 0,
+            highlighting: true,
             search: None,
             matches: Vec::new(),
             search_error: None,
             fold_candidates: None,
             folding: true,
+            app_folds: None,
+            folded: Vec::new(),
+            reported_folds: Vec::new(),
             composition: None,
             reported: None,
             reported_selections: Vec::new(),
@@ -197,6 +216,7 @@ impl State {
                 if let Some(h) = &mut self.highlighter {
                     h.edited(span.first, span.old_count, span.new_count);
                 }
+                self.folds_edited(span.first, span.old_count, span.new_count);
             }
             None => self.relayout(),
         }
@@ -205,6 +225,7 @@ impl State {
         if let Some(scope) = &mut self.search_scope {
             diagnostics::adjust(scope, changes);
         }
+        self.decoration_reach = app_highlight::reach(&self.decorations);
         self.fold_candidates = None;
         self.find();
         let len = self.buffer.len();
@@ -214,6 +235,15 @@ impl State {
     /// Lays everything out and highlights again (a new text, font or
     /// language).
     pub(crate) fn relayout(&mut self) {
+        // The folds past the text's lines (a new text) go.
+        let lines = self.buffer.line_count();
+        if self.folded.iter().any(|f| f.end >= lines) {
+            self.folded = fold_set::normalize(std::mem::take(&mut self.folded), lines);
+            self.display.set_folds(fold_set::outermost(&self.folded));
+        }
+        if let Some(ranges) = &mut self.app_folds {
+            *ranges = fold_set::normalize(std::mem::take(ranges), lines);
+        }
         self.display.rebuild(&self.buffer);
         if let Some(h) = &mut self.highlighter {
             let lines = self.buffer.line_count();
@@ -227,7 +257,7 @@ impl State {
             return;
         }
         self.language = language;
-        self.highlighter = Highlighter::ready()
+        self.highlighter = (self.highlighting && Highlighter::ready())
             .then(|| Highlighter::new(language.syntax_hint))
             .flatten();
         if let Some(h) = &mut self.highlighter {
@@ -272,14 +302,22 @@ impl State {
     }
 
     // Folds.
+    //
+    // `folded` is every fold the user folded, nested ones included (as VS
+    // Code keeps them): folding a block keeps the folds inside it, so
+    // unfolding it shows them folded still. The display map hides the
+    // outermost ones.
 
-    /// Where folds can start.
+    /// Where folds can start: the app's `foldRanges` when it gives them,
+    /// else the indentation's.
     pub(crate) fn fold_candidates(&mut self) -> &[FoldRange] {
         if self.fold_candidates.is_none() {
-            let ranges = if self.folding {
-                fold::fold_ranges(&self.buffer, self.options.tab_size)
-            } else {
+            let ranges = if !self.folding {
                 Vec::new()
+            } else if let Some(ranges) = &self.app_folds {
+                ranges.clone()
+            } else {
+                fold::fold_ranges(&self.buffer, self.options.tab_size)
             };
             self.fold_candidates = Some(ranges);
         }
@@ -295,94 +333,232 @@ impl State {
             .map(|i| candidates[i])
     }
 
+    /// The app's fold ranges (`foldRanges`; None: by indentation).
+    pub(crate) fn set_app_folds(&mut self, ranges: Option<Vec<FoldRange>>) {
+        let lines = self.buffer.line_count();
+        self.app_folds = ranges.map(|ranges| fold_set::normalize(ranges, lines));
+        self.fold_candidates = None;
+    }
+
+    /// The folded ranges, nested ones included (sorted).
+    pub(crate) fn folded(&self) -> &[FoldRange] {
+        &self.folded
+    }
+
     /// Folds (`Some(true)`), unfolds (`Some(false)`) or toggles (`None`)
-    /// the fold starting on `line`. Carets inside a new fold move to its
+    /// the fold starting on `line`; folding a line no fold starts on folds
+    /// the innermost one it is in. Carets inside a new fold move to its
     /// first line's end.
     pub(crate) fn set_fold(&mut self, line: usize, fold: Option<bool>) -> bool {
-        let mut folds = self.display.folds().to_vec();
-        let existing = folds.iter().position(|f| f.start == line);
-        let want = fold.unwrap_or(existing.is_none());
-        match (existing, want) {
+        let existing = self.folded.iter().position(|f| f.start == line);
+        match (existing, fold.unwrap_or(existing.is_none())) {
             (Some(i), false) => {
-                folds.remove(i);
+                self.folded.remove(i);
+                self.sync_folds();
+                true
             }
+            (None, false) => self.unfold_hiding(line),
             (None, true) => {
-                let Some(range) = self.fold_at(line) else {
+                let Some(range) = fold_set::fold_for(self.fold_candidates(), line) else {
                     return false;
                 };
-                // A fold inside the new one goes into it.
-                folds.retain(|f| f.start < range.start || f.start > range.end);
-                let at = folds.partition_point(|f| f.start < range.start);
-                folds.insert(at, range);
-                let hidden_start = self.buffer.line_start(range.start + 1);
-                let hidden_end = self.buffer.line_end(range.end);
-                let end_of_first = self.buffer.line_end(range.start);
-                self.selections.map(|s| {
-                    let inside = |o: usize| o >= hidden_start && o <= hidden_end;
-                    if inside(s.head) || inside(s.anchor) {
-                        Selection::caret(end_of_first)
-                    } else {
-                        s
-                    }
-                });
+                self.add_folds(vec![range])
             }
-            _ => return false,
+            (Some(_), true) => false,
         }
-        self.display.set_folds(folds);
-        self.display.rebuild(&self.buffer);
+    }
+
+    /// Folds the fold on `line` (as [`Self::set_fold`] finds it) and every
+    /// fold inside it.
+    pub(crate) fn fold_recursive(&mut self, line: usize) -> bool {
+        let candidates = self.fold_candidates();
+        let Some(outer) = fold_set::fold_for(candidates, line) else {
+            return false;
+        };
+        let ranges = fold_set::within(candidates, outer).copied().collect();
+        self.add_folds(ranges)
+    }
+
+    /// Unfolds the fold on `line` (a folded one starting there, else the
+    /// one [`Self::set_fold`] would fold) and every fold inside it.
+    pub(crate) fn unfold_recursive(&mut self, line: usize) -> bool {
+        let folded = self.folded.iter().find(|f| f.start == line).copied();
+        let outer = match folded {
+            Some(f) => Some(f),
+            None => fold_set::fold_for(self.fold_candidates(), line),
+        };
+        let Some(outer) = outer else {
+            return self.unfold_hiding(line);
+        };
+        let before = self.folded.len();
+        self.folded.retain(|f| f.start < outer.start || f.end > outer.end);
+        let changed = self.folded.len() != before;
+        if changed {
+            self.sync_folds();
+        }
+        changed
+    }
+
+    /// Folds every fold at nesting level `level` (1: those inside no
+    /// other), leaving the others as they are.
+    pub(crate) fn fold_level(&mut self, level: usize) -> bool {
+        let candidates = self.fold_candidates();
+        let ranges = candidates
+            .iter()
+            .zip(fold_set::levels(candidates))
+            .filter(|(_, l)| *l == level)
+            .map(|(f, _)| *f)
+            .collect();
+        self.add_folds(ranges)
+    }
+
+    /// Folds lines `start + 1..=end` under line `start`, whether a fold
+    /// can start there or not (a fold of the selection's lines).
+    pub(crate) fn fold_lines(&mut self, start: usize, end: usize) -> bool {
+        self.add_folds(vec![FoldRange { start, end }])
+    }
+
+    /// Folds the lines of every selection that spans several (a selection
+    /// ending at a line's start leaves that line out).
+    pub(crate) fn fold_selections(&mut self) -> bool {
+        let ranges = self
+            .selections
+            .all()
+            .iter()
+            .filter_map(|s| {
+                let start = self.buffer.line_of(s.start());
+                let mut end = self.buffer.line_of(s.end());
+                if end > start && self.buffer.line_start(end) == s.end() {
+                    end -= 1;
+                }
+                (end > start).then_some(FoldRange { start, end })
+            })
+            .collect();
+        self.add_folds(ranges)
+    }
+
+    /// Folds every fold that can start (`true`), nested ones too, or
+    /// unfolds everything.
+    pub(crate) fn fold_all(&mut self, fold: bool) {
+        if fold {
+            let ranges = self.fold_candidates().to_vec();
+            self.add_folds(ranges);
+        } else if !self.folded.is_empty() {
+            self.folded.clear();
+            self.sync_folds();
+        }
+    }
+
+    /// Replaces the folded ranges with `ranges` (the app's `setFolds`), any
+    /// lines, not only where folds can start.
+    pub(crate) fn set_folds(&mut self, ranges: Vec<FoldRange>) -> bool {
+        if !self.folding {
+            return false;
+        }
+        let folds = fold_set::normalize(ranges, self.buffer.line_count());
+        if folds == self.folded {
+            return false;
+        }
+        self.folded = folds;
+        self.sync_folds();
+        self.move_carets_out_of_folds();
         true
     }
 
-    /// Folds every fold that can start (`true`), or none.
-    pub(crate) fn fold_all(&mut self, fold: bool) {
-        let folds = if fold {
-            // The outermost ones.
-            let mut outer: Vec<FoldRange> = Vec::new();
-            for f in self.fold_candidates().iter().copied() {
-                if outer.last().is_none_or(|o| f.start > o.end) {
-                    outer.push(f);
-                }
-            }
-            outer
-        } else {
-            Vec::new()
-        };
-        self.display.set_folds(folds);
-        self.display.rebuild(&self.buffer);
-        if fold {
-            let rows = self.display.layout(&self.buffer);
-            let _ = rows;
-            let positions: Vec<usize> = self.selections.all().iter().map(|s| s.head).collect();
-            let mut moved = Vec::new();
-            for head in positions {
-                let line = self.buffer.line_of(head);
-                if self.display.is_hidden(line) {
-                    let row = self.display.line_row(line);
-                    let first_line = self.display.row(row).line;
-                    moved.push(Selection::caret(self.buffer.line_end(first_line)));
-                } else {
-                    moved.push(Selection::caret(head));
-                }
-            }
-            self.selections = Selections::new(moved, 0);
-        }
+    /// Unfolds everything and forgets the folds (`folding` turned off).
+    pub(crate) fn clear_folds(&mut self) {
+        self.folded.clear();
+        self.display.set_folds(Vec::new());
+        self.fold_candidates = None;
     }
 
     /// Unfolds what hides `offset` (a caret moved there, a search match).
     pub(crate) fn reveal(&mut self, offset: usize) {
         let line = self.buffer.line_of(offset);
-        if !self.display.is_hidden(line) {
+        if self.display.is_hidden(line) {
+            self.unfold_hiding(line);
+        }
+    }
+
+    /// Unfolds every fold hiding `line`, nested ones included.
+    fn unfold_hiding(&mut self, line: usize) -> bool {
+        let before = self.folded.len();
+        self.folded.retain(|f| !(line > f.start && line <= f.end));
+        let changed = self.folded.len() != before;
+        if changed {
+            self.sync_folds();
+        }
+        changed
+    }
+
+    /// Adds `ranges` to the folded ones; those crossing a folded range's
+    /// end (or one another's) are dropped. Carets they hide move to the end
+    /// of their fold's first line. Whether anything was folded.
+    fn add_folds(&mut self, ranges: Vec<FoldRange>) -> bool {
+        if !self.folding || ranges.is_empty() {
+            return false;
+        }
+        let crosses = |a: &FoldRange, b: &FoldRange| {
+            (a.start < b.start && b.start <= a.end && a.end < b.end)
+                || (b.start < a.start && a.start <= b.end && b.end < a.end)
+        };
+        let mut folds = self.folded.clone();
+        folds.extend(
+            ranges
+                .into_iter()
+                .filter(|range| !self.folded.iter().any(|f| crosses(f, range))),
+        );
+        let folds = fold_set::normalize(folds, self.buffer.line_count());
+        if folds == self.folded {
+            return false;
+        }
+        self.folded = folds;
+        self.sync_folds();
+        self.move_carets_out_of_folds();
+        true
+    }
+
+    /// The display map hides the outermost folded ranges.
+    fn sync_folds(&mut self) {
+        self.display.set_folds(fold_set::outermost(&self.folded));
+        self.display.rebuild(&self.buffer);
+    }
+
+    /// Selections with an end in a hidden line become a caret at the end
+    /// of the fold's first line.
+    fn move_carets_out_of_folds(&mut self) {
+        let buffer = &self.buffer;
+        let display = &self.display;
+        let hidden = |offset: usize| display.hiding_fold(buffer.line_of(offset));
+        self.selections.map(|s| {
+            match hidden(s.head).or_else(|| hidden(s.anchor)) {
+                Some(fold) => Selection::caret(buffer.line_end(fold.start)),
+                None => s,
+            }
+        });
+    }
+
+    /// The folds and the app's ranges after an edit of lines `first..first
+    /// + old_count` (now `first..first + new_count`), the display map's
+    /// folds already carried ([`DisplayMap::edited`]).
+    fn folds_edited(&mut self, first: usize, old_count: usize, new_count: usize) {
+        if let Some(ranges) = &mut self.app_folds {
+            *ranges = ranges
+                .iter()
+                .filter_map(|r| fold_set::carry(*r, first, old_count, new_count))
+                .collect();
+            let lines = self.buffer.line_count();
+            *ranges = fold_set::normalize(std::mem::take(ranges), lines);
+        }
+        if self.folded.is_empty() {
             return;
         }
-        let folds: Vec<FoldRange> = self
-            .display
-            .folds()
-            .iter()
-            .copied()
-            .filter(|f| !(line > f.start && line <= f.end))
-            .collect();
-        self.display.set_folds(folds);
-        self.display.rebuild(&self.buffer);
+        self.folded = fold_set::edited(&self.folded, first, old_count, new_count);
+        // A fold the edit unfolded may have held folds the edit kept: they
+        // hide now.
+        if fold_set::outermost(&self.folded) != self.display.folds() {
+            self.sync_folds();
+        }
     }
 
     // Positions.
@@ -456,20 +632,23 @@ impl State {
         let tokens = self
             .highlighter
             .as_ref()
+            .filter(|_| self.highlighting)
             .and_then(|h| h.tokens(info.line))
             .unwrap_or_default();
         for (range, _) in tokens {
             cuts.push(line_start + range.start);
             cuts.push(line_start + range.end);
         }
-        let decorations: Vec<(usize, Range<usize>)> = self
-            .decorations
-            .iter()
-            .enumerate()
+        let decorations: Vec<(usize, Range<usize>)> = app_highlight::near(
+            &self.decorations,
+            self.decoration_reach,
+            info.range.start,
+            info.range.end,
+        )
             .filter(|(_, m)| m.range.start < info.range.end && m.range.end > info.range.start)
             .filter(|(_, m)| {
                 let d = &self.decoration_items[m.item];
-                d.class.is_some() || d.style.is_some()
+                d.class.is_some() || d.style.is_some() || d.token.is_some()
             })
             .map(|(i, m)| (i, m.range.clone()))
             .collect();
@@ -491,10 +670,18 @@ impl State {
             if text.is_empty() {
                 continue;
             }
-            let token = tokens
-                .iter()
-                .find(|(r, _)| line_start + r.start <= start && line_start + r.end >= end)
-                .map(|(_, t)| *t);
+            let token = app_highlight::token(
+                &decorations,
+                &self.decorations,
+                &self.decoration_items,
+                start..end,
+            )
+            .or_else(|| {
+                    tokens
+                        .iter()
+                        .find(|(r, _)| line_start + r.start <= start && line_start + r.end >= end)
+                        .map(|(_, t)| *t)
+                });
             let decorations: Vec<usize> = decorations
                 .iter()
                 .filter(|(_, r)| r.start <= start && r.end >= end)
@@ -518,9 +705,13 @@ impl State {
                 .binary_search_by_key(&info.line, |f| f.start)
                 .is_ok()
             && self.row_is_last_of_line(row);
-        let line_decorations = self
-            .decorations
-            .iter()
+        let line_decorations = app_highlight::near(
+            &self.decorations,
+            self.decoration_reach,
+            line_start,
+            self.buffer.line_end(info.line),
+        )
+            .map(|(_, m)| m)
             .filter(|m| {
                 let first = self.buffer.line_of(m.range.start);
                 let last = self.buffer.line_of(m.range.end);
@@ -537,6 +728,13 @@ impl State {
             folded,
             line_decorations,
         }
+    }
+
+    /// Sets the decorations, resolved (`marks`) and as the app gave them.
+    pub(crate) fn set_decorations(&mut self, marks: Vec<Mark<usize>>, items: Vec<EditorDecoration>) {
+        self.decoration_reach = app_highlight::reach(&marks);
+        self.decorations = marks;
+        self.decoration_items = items;
     }
 
     fn row_is_last_of_line(&self, row: usize) -> bool {
@@ -890,7 +1088,7 @@ impl State {
 }
 
 #[cfg(test)]
-mod tests {
+mod bench {
     use std::time::{Duration, Instant};
 
     use super::*;
@@ -1022,5 +1220,280 @@ mod tests {
                 h.highlight(&rope, st.buffer.line_count() - 1, Duration::from_secs(100))
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::buffer::EditKind;
+
+    /// Folds by indentation: lines 0..=4 under line 0, 1..=2 under line 1.
+    const TEXT: &str = "fn a() {\n    if x {\n        y();\n    }\n    z();\n}\nw\n";
+
+    fn state(text: &str) -> State {
+        let font = Font {
+            family: "monospace".into(),
+            size: px(13.0),
+            line_height: px(20.0),
+        };
+        let measure: Rc<dyn Fn(&str) -> Points> =
+            Rc::new(|text: &str| px(text.chars().count() as f32 * 8.0));
+        State::new(
+            text,
+            &language::PLAIN_TEXT,
+            EditOptions::default(),
+            font,
+            measure,
+        )
+    }
+
+    fn pairs(folds: &[FoldRange]) -> Vec<(usize, usize)> {
+        folds.iter().map(|f| (f.start, f.end)).collect()
+    }
+
+    fn insert(st: &mut State, at: usize, text: &str) {
+        let selections = st.selections.clone();
+        let changes = st.buffer.edit(
+            vec![(at..at, text.to_owned())],
+            &selections,
+            &selections,
+            EditKind::Typing,
+        );
+        st.changed(&changes);
+    }
+
+    #[test]
+    fn folds_inside_a_fold_stay_folded() {
+        let mut st = state(TEXT);
+        assert!(st.set_fold(1, Some(true)));
+        assert!(st.set_fold(0, Some(true)));
+        assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);
+        assert_eq!(pairs(st.display.folds()), vec![(0, 4)]);
+        // Folding again changes nothing.
+        assert!(!st.set_fold(0, Some(true)));
+        // Unfolding the outer fold shows the inner one folded.
+        assert!(st.set_fold(0, None));
+        assert_eq!(pairs(st.display.folds()), vec![(1, 2)]);
+        assert!(st.display.is_hidden(2) && !st.display.is_hidden(3));
+    }
+
+    #[test]
+    fn folding_inside_a_block_folds_it() {
+        let mut st = state(TEXT);
+        // No fold starts on line 4: the innermost one it is in folds.
+        assert!(st.set_fold(4, Some(true)));
+        assert_eq!(pairs(st.folded()), vec![(0, 4)]);
+        assert!(!st.set_fold(6, Some(true)));
+        // Unfolding a hidden line unfolds what hides it.
+        assert!(st.set_fold(2, Some(false)));
+        assert!(st.folded().is_empty());
+    }
+
+    #[test]
+    fn recursive_folds_and_levels() {
+        let mut st = state(TEXT);
+        assert!(st.fold_recursive(0));
+        assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);
+        assert!(st.unfold_recursive(0));
+        assert!(st.folded().is_empty());
+        assert!(!st.unfold_recursive(6));
+
+        assert!(st.fold_level(2));
+        assert_eq!(pairs(st.folded()), vec![(1, 2)]);
+        assert!(!st.fold_level(3));
+        assert!(st.fold_level(1));
+        assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);
+        st.fold_all(false);
+        assert!(st.folded().is_empty() && st.display.folds().is_empty());
+        st.fold_all(true);
+        assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);
+    }
+
+    #[test]
+    fn carets_leave_what_folds() {
+        let mut st = state(TEXT);
+        let inside = st.buffer.line_start(2) + 4;
+        st.selections = Selections::single(Selection::new(st.buffer.line_start(1), inside));
+        assert!(st.set_fold(1, Some(true)));
+        let end_of_first = st.buffer.line_end(1);
+        assert_eq!(st.selections.all(), &[Selection::caret(end_of_first)]);
+    }
+
+    #[test]
+    fn a_selections_lines_fold() {
+        let mut st = state(TEXT);
+        // Lines 4 and 5, the selection ending at line 6's start.
+        let (start, end) = (st.buffer.line_start(4), st.buffer.line_start(6));
+        st.selections = Selections::single(Selection::new(start, end));
+        assert!(st.fold_selections());
+        assert_eq!(pairs(st.folded()), vec![(4, 5)]);
+        assert_eq!(st.gutter_row(st.display.line_row(4)).fold, Some(true));
+        // A selection on one line folds nothing.
+        st.fold_all(false);
+        st.selections = Selections::single(Selection::new(start, start + 2));
+        assert!(!st.fold_selections());
+        // Any lines fold by hand; lines crossing a folded range's end do
+        // not.
+        assert!(st.fold_lines(5, 6));
+        assert!(!st.fold_lines(4, 5));
+        assert_eq!(pairs(st.folded()), vec![(5, 6)]);
+        assert!(st.fold_lines(4, 6));
+        assert_eq!(pairs(st.folded()), vec![(4, 6), (5, 6)]);
+    }
+
+    #[test]
+    fn folds_follow_edits() {
+        let mut st = state(TEXT);
+        st.set_fold(1, Some(true));
+        // A line inserted above shifts the fold.
+        insert(&mut st, 0, "// c\n");
+        assert_eq!(pairs(st.folded()), vec![(2, 3)]);
+        assert_eq!(pairs(st.display.folds()), vec![(2, 3)]);
+        // An edit on an outer fold's first line unfolds it; the fold
+        // inside it stays folded and hides its lines now.
+        st.fold_recursive(1);
+        assert_eq!(pairs(st.folded()), vec![(1, 5), (2, 3)]);
+        let at = st.buffer.line_start(1);
+        insert(&mut st, at, "x");
+        assert_eq!(pairs(st.folded()), vec![(2, 3)]);
+        assert_eq!(pairs(st.display.folds()), vec![(2, 3)]);
+        assert!(st.display.is_hidden(3) && !st.display.is_hidden(2));
+    }
+
+    #[test]
+    fn the_apps_ranges_replace_the_indentation() {
+        let mut st = state(TEXT);
+        st.set_app_folds(Some(vec![FoldRange { start: 0, end: 5 }]));
+        assert_eq!(pairs(st.fold_candidates()), vec![(0, 5)]);
+        assert_eq!(st.fold_at(1), None);
+        // Carried through edits until the app gives new ones: lines
+        // inserted inside a range grow it.
+        let at = st.buffer.line_start(2);
+        insert(&mut st, at, "\n");
+        assert_eq!(pairs(st.fold_candidates()), vec![(0, 6)]);
+        st.set_app_folds(Some(Vec::new()));
+        assert!(st.fold_candidates().is_empty());
+        st.set_app_folds(None);
+        assert_eq!(pairs(st.fold_candidates()), vec![(0, 5), (1, 3)]);
+    }
+
+    #[test]
+    fn the_apps_folds() {
+        let mut st = state(TEXT);
+        let ranges = vec![FoldRange { start: 1, end: 2 }, FoldRange { start: 0, end: 4 }];
+        assert!(st.set_folds(ranges.clone()));
+        assert!(!st.set_folds(ranges));
+        assert_eq!(pairs(st.folded()), vec![(0, 4), (1, 2)]);
+        // Revealing a hidden line unfolds every fold hiding it.
+        let offset = st.buffer.line_start(2);
+        st.reveal(offset);
+        assert!(st.folded().is_empty());
+        // Folding turned off forgets the folds and refuses new ones.
+        st.set_folds(vec![FoldRange { start: 0, end: 4 }]);
+        st.folding = false;
+        st.clear_folds();
+        assert!(st.folded().is_empty() && st.display.folds().is_empty());
+        assert!(!st.set_folds(vec![FoldRange { start: 0, end: 4 }]));
+        assert!(!st.fold_recursive(0));
+    }
+
+    fn decorate(st: &mut State, items: Vec<EditorDecoration>) {
+        let indexes: Vec<usize> = (0..items.len()).collect();
+        let marks = diagnostics::resolve(&st.buffer, &indexes, |i| items[*i].range);
+        st.set_decorations(marks, items);
+    }
+
+    fn decoration(line: u32, from: u32, to: u32) -> EditorDecoration {
+        EditorDecoration {
+            range: crate::editor::EditorRange::new(
+                EditorPosition::new(line, from),
+                EditorPosition::new(line, to),
+            ),
+            ..Default::default()
+        }
+    }
+
+    fn spans(st: &State, line: usize) -> Vec<(String, Option<Token>, usize)> {
+        st.row_content(st.display.line_row(line))
+            .spans
+            .into_iter()
+            .map(|span| (span.text, span.token, span.decorations.len()))
+            .collect()
+    }
+
+    #[test]
+    fn the_apps_tokens_color_the_text() {
+        use crate::editor::EditorToken;
+        let mut st = state("let x = 1;\nfn f() {}\n");
+        let keyword = EditorDecoration {
+            token: Some(EditorToken::Keyword),
+            ..decoration(0, 0, 3)
+        };
+        // A token inside another: the inner one wins its range.
+        let outer = EditorDecoration {
+            token: Some(EditorToken::String),
+            ..decoration(1, 0, 9)
+        };
+        let inner = EditorDecoration {
+            token: Some(EditorToken::Title),
+            ..decoration(1, 3, 4)
+        };
+        // A class alone styles over the syntax's token, not instead of it.
+        let class = EditorDecoration {
+            class: Some("underline".into()),
+            ..decoration(0, 8, 9)
+        };
+        decorate(&mut st, vec![keyword, outer, inner, class]);
+        assert_eq!(
+            spans(&st, 0),
+            vec![
+                ("let".to_owned(), Some(Token::Keyword), 1),
+                (" x = ".to_owned(), None, 0),
+                ("1".to_owned(), None, 1),
+                (";".to_owned(), None, 0),
+            ]
+        );
+        assert_eq!(
+            spans(&st, 1),
+            vec![
+                ("fn ".to_owned(), Some(Token::String), 1),
+                ("f".to_owned(), Some(Token::Title), 2),
+                ("() {}".to_owned(), Some(Token::String), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn rows_find_their_decorations_among_many() {
+        let text: String = (0..2000).map(|i| format!("line {i}\n")).collect();
+        let mut st = state(&text);
+        let mut items: Vec<EditorDecoration> = (0..2000)
+            .map(|line| EditorDecoration {
+                class: Some("font-bold".into()),
+                ..decoration(line, 0, 4)
+            })
+            .collect();
+        // One long decoration from line 10 to line 1500, behind the rows.
+        items.push(EditorDecoration {
+            range: crate::editor::EditorRange::new(
+                EditorPosition::new(10, 0),
+                EditorPosition::new(1500, 0),
+            ),
+            line_class: Some("bg-muted".into()),
+            ..Default::default()
+        });
+        decorate(&mut st, items);
+        assert_eq!(
+            spans(&st, 1200),
+            vec![("line".to_owned(), None, 1), (" 1200".to_owned(), None, 0)]
+        );
+        let row = st.display.line_row(1200);
+        assert_eq!(st.row_content(row).line_decorations, vec![2000]);
+        let row = st.display.line_row(1600);
+        assert!(st.row_content(row).line_decorations.is_empty());
+        // Edits keep the window right: a line inserted above shifts all.
+        insert(&mut st, 0, "\n");
+        assert_eq!(spans(&st, 1201)[0], ("line".to_owned(), None, 1));
     }
 }

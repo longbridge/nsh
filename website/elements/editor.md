@@ -104,7 +104,7 @@ The editor works as code editors do:
   again (`autoClose`). The bracket at the caret and its partner are outlined.
 - **Undo** takes back whole runs of typing: a word, a deletion, a command. A move or a press starts a new step.
 - **Folding.** A line followed by lines indented deeper folds them away with the marker in the gutter: `⌄` to fold,
-  `›` and the `⋯` after the line to unfold. A caret that moves into a fold opens it.
+  `›` and the `⋯` after the line to unfold. A caret that moves into a fold opens it ([Folding](#folding)).
 - **Presses.** With a pointer, a click places the caret, a double click selects a word, a triple click a line,
   Shift-click extends the selection and a drag selects by what the click selected. An Alt+Shift drag
   (Option+Shift; Control+Alt on Linux too) selects a block: one selection per row, between the same columns, which
@@ -273,6 +273,56 @@ const range = (line: number, start: number, end: number) => ({ start: { line, co
 />
 ```
 
+### Your own highlighting
+
+A decoration's `token` colors its text as the built-in highlighting colors that kind of token (`comment`, `keyword`,
+`string`, `number`, `title`, `attr`, `built`, `deletion`), in place of what the built-in highlighter found there: the
+app's own highlighter (a language server's semantic tokens, a parser of its own) maps its tokens onto these and gets
+the editor's colors in light and dark. The innermost decoration's token wins; `class` and `style` apply over it.
+`highlighting={false}` turns the built-in highlighter off, so the app's tokens color the text alone, while `language`
+still decides comments, brackets and indentation.
+
+```tsx
+const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "title", string: "string", type: "built" };
+
+<Editor
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  highlighting={false}
+  decorations={semanticTokens().map((t) => ({ range: range(t.line, t.start, t.end), token: kinds[t.type] }))}
+  class="flex-1"
+/>
+```
+
+## Folding
+
+Folds start where lines are indented deeper than the line before them. `foldRanges` gives the editor the app's
+own ranges instead (`{ startLine, endLine }`, the shape of a language server's folding ranges, which pass through as
+they come): line `startLine` shows the fold and the lines after it through `endLine` fold away. They stay on their
+lines through edits until the app passes new ones.
+
+Folds nest: folding a block keeps the folds inside it folded, so unfolding the block shows them as they were.
+`foldRecursive` folds a block and every block inside it, `unfoldRecursive` unfolds them all, `foldLevel(n)` folds
+every block at nesting level `n`, and `foldSelection` (or `foldRange(range)`) folds any lines, wherever folds start.
+`onFoldChange` reports the folded ranges after every change, and `folds()` / `setFolds(ranges)` read and restore
+them, to keep them with the file.
+
+```tsx
+const ranges = signal<EditorFoldRange[]>([]);
+const folded = new Map<string, EditorFoldRange[]>();
+
+<Editor
+  ref={editor}
+  value={file().text}
+  language={file().name}
+  foldRanges={ranges()} // from the language server's textDocument/foldingRange
+  onFoldChange={(folds) => folded.set(file().name, folds)}
+  class="flex-1"
+/>
+<Button onPress={() => editor.foldLevel(2)}><Text>Fold the methods</Text></Button>
+```
+
 ## Breakpoints and context menus
 
 A press on a line number reports `onLineNumberPress(line)`, the place for a breakpoint the app draws as a decoration.
@@ -355,7 +405,7 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 ## Methods
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
-value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `caretBounds()`, ...) return a `Promise` of it in JS, so `await`
+value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `caretBounds()`, `folds()`, ...) return a `Promise` of it in JS, so `await`
 them: `const text = await editor.value()`.
 
 | Method | Description |
@@ -370,6 +420,11 @@ them: `const text = await editor.value()`.
 | `replace(text)` | Replaces the current match and selects the next. |
 | `replaceAll(text)` | `Promise<number>`: replaces every match as one edit; how many. |
 | `fold(line)`, `unfold(line)` | Folds the lines under line `line` (from 0), or unfolds it. |
+| `foldRecursive(line)`, `unfoldRecursive(line)` | Folds the fold on line `line` and every fold inside it, or unfolds them all. |
+| `foldLevel(level)` | Folds every fold at nesting level `level` (1: the outermost). |
+| `foldRange(range)` | Folds the lines of `range` (`{ startLine, endLine }`), wherever folds start. |
+| `folds()` | `Promise<EditorFoldRange[]>`: the folded ranges, nested ones included. |
+| `setFolds(folds)` | Folds exactly `folds`. |
 | `scrollToLine(line)` | Scrolls line `line` into view, unfolding what hides it. |
 | `canUndo()`, `canRedo()` | `Promise<boolean>`: whether there is an edit to take back, or to do again. |
 | `caretBounds()` | `Promise<EditorBounds \| null>`: the primary caret's box, `{ bounds, pageBounds }`, in the editor (its scrolling applied) and in the root view; `null` before the editor is laid out. |
@@ -417,6 +472,8 @@ let editor!: EditorRef;
 | `moveLinesUp`, `moveLinesDown`, `duplicateLinesUp`, `duplicateLinesDown`, `joinLines`, `transposeCharacters` | Rearrange. |
 | `undo`, `redo` | Undo and redo. |
 | `fold`, `unfold`, `foldAll`, `unfoldAll` | Fold at the caret's line, or everything. |
+| `foldRecursive`, `unfoldRecursive` | Fold the caret's fold and every fold inside it, or unfold them. |
+| `foldSelection` | Fold the lines of each selection that spans several. |
 | `findNext`, `findPrevious` | Select the next or previous match of `search`. |
 | `findWithSelection` | Report the selected text for the find bar (`onFindWithSelection`). |
 | `copy`, `cut`, `paste` | The clipboard. |
@@ -486,6 +543,8 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `tabSize` | `.tab_size(..)` | `number` | the language's | The columns of a tab and of an indentation level. |
 | `hardTabs` | `.hard_tabs(..)` | `boolean` | the language's | Indents with tabs. |
 | `folding` | `.folding(..)` | `boolean` | `true` | Indented lines fold with the gutter's markers. |
+| `foldRanges` | `.fold_ranges(..)` | `EditorFoldRange[]` | by indentation | Where folds start, the app's ([Folding](#folding)). |
+| `highlighting` | `.highlighting(..)` | `boolean` | `true` | The built-in syntax highlighting ([Your own highlighting](#your-own-highlighting)). |
 | `autoClose` | `.auto_close(..)` | `boolean` | `true` | Brackets and quotes close as they are typed. |
 | `autoIndent` | `.auto_indent(..)` | `boolean` | `true` | A new line keeps the indentation and indents after an opening bracket. |
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | The rows of the lines with a caret are highlighted. |
@@ -521,6 +580,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | The hover ended. |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |
 | `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | `findWithSelection` ran: the text for the find bar's query. |
+| `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | The folded ranges changed: every one, nested ones included. |
 
 ## Accessibility
 

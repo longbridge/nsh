@@ -27,9 +27,11 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `language.rs` | `LanguageConfig`: per-language comments, brackets, auto-close pairs, word characters, indentation, tab size and the syntax hint; the lookup by name, alias, extension or file name |
 | `display.rs` | `DisplayMap`: tabs, measured widths, soft wrap and folds as display rows |
 | `fold.rs` | Where folds can start, by indentation |
+| `fold_set.rs` | Folds as sets of ranges: the app's `foldRanges` normalized and carried through edits, the folded set after an edit, levels, nesting, the outermost folds |
 | `search.rs` | Find and replace on `regex`: matches, replacements with groups, the next and previous match |
 | `diagnostics.rs` | `Mark<T>`: the app's ranges resolved to byte ranges once and carried through edits |
 | `highlight.rs` | `Highlighter`: incremental syntect highlighting, line by line (feature `highlight`) |
+| `app_highlight.rs` | The app's highlighting: decorations' `token`s over the highlighter's tokens; a row's decorations found by binary search |
 | `../syntax.rs` | What `TextView`'s code blocks and the editor share: `Token`, Allsum's palette, the syntaxes and the scope → token mapping |
 
 ## How it works
@@ -180,7 +182,8 @@ in view are more than 500 lines past the parse (a jump to the end of a long file
 state, starting 40 lines before them, and shows that until the parse from the top reaches them. Lines not parsed again
 yet keep the tokens they had, so colors do not flicker. The syntaxes load on a blocking thread the first time a
 language needs them. On WebAssembly there are no threads: jobs run in place, 4 ms per frame. Without feature
-`highlight`, the text is plain.
+`highlight`, the text is plain. `highlighting={false}` drops the highlighter (and never loads the syntaxes for it)
+while the language keeps deciding comments, brackets and indentation.
 
 `onChange` carries the text as a `SharedString`, built once per version of the buffer: the same text is not built
 again for the echo of a controlled `value`. Building it is the one cost of an edit that grows with the text.
@@ -205,15 +208,37 @@ as its query.
 and carried through every edit (`adjust`, through `map_offset`), so a mark stays on its text while the user types and
 the linter has not answered yet. A diagnostic draws a 2 point mark under its range, in its severity's part; an empty
 range marks the character after it. A decoration's `class` / `style` style its text (the spans are cut at its
-bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text.
+bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A row looks for its decorations by two
+binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
+(`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
+
+A decoration's `token` (`EditorToken`: the built-in kinds of `crate::syntax`) is the app's highlighting: its text takes
+that token's colors in place of the built-in highlighter's there (the innermost decoration's token wins), its `class` /
+`style` over them. It is how an app plugs in a highlighter of its own (a language server's semantic tokens, a parser in
+the app), rather than a second API beside decorations: the ranges are the same data, resolved and carried through edits
+the same way, and the tokens give the app's highlighting the editor's palette in both appearances. The app's
+highlighter runs in the app (JS cannot be asked for tokens while a row draws), so its tokens arrive as data;
+`highlighting={false}` leaves them alone on the text.
 
 ### Folds
 
 Folds are by indentation, as VS Code's indentation folding (`fold.rs`): a line followed by lines indented deeper
 starts a fold that hides them; blank lines inside join it, and the line that ends the block at the start line's
-indentation (a closing bracket, `end`) stays visible. Where folds can start is computed once per edit, when the gutter
-first asks, in one pass over the rope's chunks (about 4 ms for 200 000 lines). Folding moves carets inside the fold to the end of its first line; a caret moving into a fold (a move, a
-search match, `scrollToLine`) unfolds it. `folding={false}` removes the markers and the folds.
+indentation (a closing bracket, `end`) stays visible. `foldRanges` replaces them with the app's (`{ startLine, endLine }`,
+an LSP `FoldingRange`'s shape): normalized as the indentation's are (sorted, one per start line, crossing ones
+dropped) and carried through edits (`fold_set::carry`: a range around an edit grows and shrinks with it) until the app sets
+new ones. Where folds can start is computed once per edit, when the gutter first asks, in one pass over the rope's
+chunks (about 4 ms for 200 000 lines).
+
+The state keeps every folded range, nested ones included (`State::folded`, as VS Code does); the display map hides the
+outermost ones. Folding a block keeps the folds inside it, so unfolding it shows them folded; an edit that unfolds a
+fold (one of its lines changed) leaves the folds inside it folded. `fold` on a line no fold starts on folds the
+innermost one around it; `foldRecursive` / `unfoldRecursive` take a fold and every fold inside it, `foldLevel(n)` the
+folds at nesting level `n`, `foldAll` every fold (nested ones too), `foldSelection` / `foldRange` any lines (a fold
+crossing a folded one's end is refused). Folding moves carets inside the fold to the end of its first line; a caret
+moving into a fold (a move, a search match, `scrollToLine`) unfolds every fold hiding it. The folds are reported with
+`onFoldChange` after each change and read and set with `folds()` / `setFolds()`, as the selections are: the editor owns
+them, the app restores them. `folding={false}` removes the markers and the folds.
 
 ## Parts and their defaults
 
@@ -255,7 +280,8 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 |---|---|
 | `InputState` with `code_editor(language)` | `<Editor value language>`: controlled text, the model inside the component |
 | Tree-sitter highlighting, themes | Syntect with Allsum's palette (`crate::syntax`), incremental per line; the app's `decorations` for semantic highlighting |
-| `DisplayMap` (wrap, folds) | `display.rs` on measured char widths; folds by indentation |
+| `InputHighlighter` (the app's highlighter), highlight names resolved to styles | `decorations` with a `token` (the built-in palette's kinds) and `highlighting={false}` |
+| `DisplayMap` (wrap, folds), the highlighter's fold candidates | `display.rs` on measured char widths; folds by indentation or the app's `foldRanges`, nested folds kept |
 | Search panel | `search` prop, `onSearchChange`, `findNext` / `replace` / `replaceAll`: the find bar is the app's |
 | Diagnostics with hover popovers | `diagnostics` marked and carried through edits; `onHover` carries those under the mouse, the app shows them |
 | `lsp` providers (hover, completion, definition, code actions) | `onHover` / `onHoverEnd`, `onTextPress`, `caretBounds` / `rangeBounds`: the app asks its language server and draws the popups |
@@ -268,5 +294,4 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 - Highlighting parses from the top down: after a jump to the end of a long file, the lines in view show a guess
   (parsed from 40 lines before them) until the parse reaches them, which can differ inside a long comment or string.
 - At most 10 000 search matches are found and 1000 undo steps kept.
-- Folds come from indentation only.
 - Touch screens place the caret with a tap; selecting is by the commands and keys.

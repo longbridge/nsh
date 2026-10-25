@@ -14,9 +14,13 @@
 // changes the selection's case (`run("transformToUppercase")`) and another
 // reports the selection for a find bar (`run("findWithSelection")`,
 // `onFindWithSelection`). A second editor grows with its text between
-// `minRows` and `maxRows` and shows its whitespace (`showWhitespaces`).
+// `minRows` and `maxRows` and shows its whitespace (`showWhitespaces`). A
+// third folds where the app's `foldRanges` say, by level, recursively and
+// by hand, reporting the folded ranges (`onFoldChange`, `folds`), its text
+// colored by the app's tokens alone (`decorations` with a `token`,
+// `highlighting={false}`).
 import { Text, View, signal } from "nsh";
-import { Editor, type EditorRef } from "nsh/base";
+import { Editor, type EditorFoldRange, type EditorRef } from "nsh/base";
 
 export default function BaseEditor() {
   const value = signal("none");
@@ -27,8 +31,11 @@ export default function BaseEditor() {
   const query = signal("");
   const hovered = signal("none");
   const asked = signal("none");
+  const folded = signal("none");
   let editor!: EditorRef;
   let grown!: EditorRef;
+  let outline!: EditorRef;
+  const show = (folds: EditorFoldRange[]) => folds.map(f => `${f.startLine}-${f.endLine}`).join(" ") || "-";
   const track = async () => history.set(`Undo ${await editor.canUndo()} Redo ${await editor.canRedo()}`);
   return (
     <View style={{ paddingTop: 20 }}>
@@ -55,6 +62,35 @@ export default function BaseEditor() {
           style={{ flex: 1 }}
         />
       </View>
+      <View style={{ width: 390, height: 100 }}>
+        <Editor
+          ref={r => (outline = r)}
+          defaultValue={"mod a {\n  fn b() {\n    c();\n  }\n}\n"}
+          language="rust"
+          highlighting={false}
+          foldRanges={[
+            { startLine: 0, endLine: 3 },
+            { startLine: 1, endLine: 2 },
+          ]}
+          decorations={[{ range: { start: { line: 0, column: 0 }, end: { line: 0, column: 3 } }, token: "keyword" }]}
+          onFoldChange={folds => folded.set(show(folds))}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Folded: ${folded()}`}</Text>
+      <View testID="fold-level" style={{ height: 20 }} onPress={() => outline.foldLevel(2)} />
+      <View testID="fold-recursive" style={{ height: 20 }} onPress={() => outline.foldRecursive(0)} />
+      <View testID="unfold" style={{ height: 20 }} onPress={() => outline.unfold(0)} />
+      <View testID="unfold-recursive" style={{ height: 20 }} onPress={() => outline.unfoldRecursive(0)} />
+      <View testID="fold-range" style={{ height: 20 }} onPress={() => outline.foldRange({ startLine: 2, endLine: 4 })} />
+      <View
+        testID="set-folds"
+        style={{ height: 20 }}
+        onPress={async () => {
+          outline.setFolds([{ startLine: 0, endLine: 4 }]);
+          read.set(`folds ${show(await outline.folds())}`);
+        }}
+      />
       <Text>{() => `Value: ${value()}`}</Text>
       <Text>{() => `Caret: ${caret()}`}</Text>
       <Text>{() => `Found: ${found()}`}</Text>

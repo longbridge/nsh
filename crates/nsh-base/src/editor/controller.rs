@@ -13,9 +13,11 @@ use nsh_core::{
 };
 
 use super::{
-    EditorCommand, EditorContextMenuEvent, EditorEvent, EditorProps, EditorSelection,
+    EditorCommand, EditorContextMenuEvent, EditorEvent, EditorFoldRange, EditorProps,
+    EditorSelection,
     commands::{Case, Command, EditOptions, Outcome},
     diagnostics,
+    fold::FoldRange,
     highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
     keymap,
     layout::{self, AutoScroll},
@@ -232,13 +234,43 @@ impl Ed {
             let mut st = ed.st.borrow_mut();
             if st.folding != folding {
                 st.folding = folding;
+                // Also forgets where folds could start while it was off.
+                st.clear_folds();
                 if !folding {
-                    st.display.set_folds(Vec::new());
                     st.relayout();
                 }
                 drop(st);
                 ed.bump_text();
+                ed.report_folds();
             }
+        });
+        let ed = self.clone();
+        effect(move || {
+            let on = ed.props.highlighting.get();
+            let changed = {
+                let mut st = ed.st.borrow_mut();
+                let changed = st.highlighting != on;
+                st.highlighting = on;
+                if changed && !on {
+                    st.highlighter = None;
+                }
+                changed
+            };
+            if changed {
+                if on {
+                    ed.load_syntaxes();
+                }
+                ed.hl_rev.update(|r| *r += 1);
+            }
+        });
+        let ed = self.clone();
+        effect(move || {
+            let ranges = ed.props.fold_ranges.get();
+            ed.st
+                .borrow_mut()
+                .set_app_folds(ranges.map(|ranges| ranges.iter().map(fold_range).collect()));
+            // The gutter's markers.
+            ed.bump_text();
         });
         let ed = self.clone();
         effect(move || {
@@ -295,8 +327,7 @@ impl Ed {
                 let mut st = ed.st.borrow_mut();
                 let indexes: Vec<usize> = (0..items.len()).collect();
                 let marks = diagnostics::resolve(&st.buffer, &indexes, |i| items[*i].range);
-                st.decorations = marks;
-                st.decoration_items = items;
+                st.set_decorations(marks, items);
             }
             ed.marks_rev.update(|r| *r += 1);
             ed.bump_text();
@@ -412,6 +443,7 @@ impl Ed {
                 self.bump_selection();
                 self.report_selections();
                 self.report_search_position();
+                self.report_folds();
                 self.show_caret();
             }
             Outcome::Edited(changes) => {
@@ -428,6 +460,7 @@ impl Ed {
                 self.report_text();
                 self.report_selections();
                 self.report_search();
+                self.report_folds();
                 self.schedule_highlight();
                 self.show_caret();
             }
@@ -515,6 +548,20 @@ impl Ed {
             }
             E::UnfoldAll => {
                 self.fold_all(false);
+                None
+            }
+            E::FoldRecursive => {
+                let line = self.primary_line();
+                self.fold_with(|st| st.fold_recursive(line));
+                None
+            }
+            E::UnfoldRecursive => {
+                let line = self.primary_line();
+                self.fold_with(|st| st.unfold_recursive(line));
+                None
+            }
+            E::FoldSelection => {
+                self.fold_with(State::fold_selections);
                 None
             }
             E::FindNext => {
@@ -1066,12 +1113,7 @@ impl Ed {
     // Folding.
 
     pub(crate) fn fold(&self, line: usize, fold: Option<bool>) {
-        let changed = self.st.borrow_mut().set_fold(line, fold);
-        if changed {
-            self.bump_text();
-            self.bump_selection();
-            self.report_selections();
-        }
+        self.fold_with(|st| st.set_fold(line, fold));
     }
 
     pub(crate) fn fold_all(&self, fold: bool) {
@@ -1079,6 +1121,48 @@ impl Ed {
         self.bump_text();
         self.bump_selection();
         self.report_selections();
+        self.report_folds();
+    }
+
+    /// Runs `f`, a change of the folds, and tells the view and the app
+    /// when it changed them.
+    pub(crate) fn fold_with(&self, f: impl FnOnce(&mut State) -> bool) {
+        let changed = f(&mut self.st.borrow_mut());
+        if changed {
+            self.bump_text();
+            self.bump_selection();
+            self.report_selections();
+            self.report_folds();
+        }
+    }
+
+    /// The folded ranges, nested ones included.
+    pub(crate) fn folds(&self) -> Vec<EditorFoldRange> {
+        self.st
+            .borrow()
+            .folded()
+            .iter()
+            .map(|f| EditorFoldRange::new(f.start as u32, f.end as u32))
+            .collect()
+    }
+
+    /// Replaces the folded ranges.
+    pub(crate) fn set_folds(&self, ranges: &[EditorFoldRange]) {
+        let ranges = ranges.iter().map(fold_range).collect();
+        self.fold_with(|st| st.set_folds(ranges));
+    }
+
+    /// Tells the app the folded ranges when they changed (`onFoldChange`).
+    fn report_folds(&self) {
+        {
+            let mut st = self.st.borrow_mut();
+            if st.reported_folds.as_slice() == st.folded() {
+                return;
+            }
+            let folded = st.folded().to_vec();
+            st.reported_folds = folded;
+        }
+        self.cx.emit(EditorEvent::FoldChange(self.folds()));
     }
 
     // Reports.
@@ -1196,6 +1280,7 @@ impl Ed {
             (st.caret_point(offset), st.line_height())
         };
         self.bump_text();
+        self.report_folds();
         self.scroll_into_view(point, lh);
     }
 
@@ -1217,7 +1302,7 @@ impl Ed {
     fn load_syntaxes(&self) {
         let needs = {
             let st = self.st.borrow();
-            st.highlighter.is_none() && !st.language.syntax_hint.is_empty()
+            st.highlighting && st.highlighter.is_none() && !st.language.syntax_hint.is_empty()
         };
         if !needs {
             self.schedule_highlight();
@@ -1245,7 +1330,7 @@ impl Ed {
     fn make_highlighter(&self) {
         {
             let mut st = self.st.borrow_mut();
-            if st.highlighter.is_some() {
+            if st.highlighter.is_some() || !st.highlighting {
                 return;
             }
             st.highlighter = Highlighter::new(st.language.syntax_hint);
@@ -1439,6 +1524,14 @@ pub(crate) fn font_family(family: Option<SharedString>) -> SharedString {
 fn measurer(font: &Font) -> Rc<dyn Fn(&str) -> Points> {
     let css = font.css();
     Rc::new(move |text: &str| measure_text(&css, text))
+}
+
+/// The app's fold range as the editor's lines.
+fn fold_range(range: &EditorFoldRange) -> FoldRange {
+    FoldRange {
+        start: range.start_line as usize,
+        end: range.end_line as usize,
+    }
 }
 
 /// Key options of a binding that works while the editor's sink has the
