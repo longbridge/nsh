@@ -417,11 +417,12 @@ fn a_long_text_makes_only_the_rows_in_view() {
     let text: Vec<String> = (0..5000).map(|i| format!("line {i}")).collect();
     let mut app = start(props(&text.join("\n")));
     see(&mut app, "line 0");
-    // 400 points of 20-point rows, and a few around them.
+    // 400 points of 20-point rows (40 before the viewport is known) and a
+    // viewport and a half ahead.
     let rows = count_texts(&app, "line ");
-    assert!((20..100).contains(&rows), "{rows} rows made");
+    assert!((20..150).contains(&rows), "{rows} rows made");
     let numbers = count_numbers(&app);
-    assert!((20..100).contains(&numbers), "{numbers} line numbers made");
+    assert!((20..150).contains(&numbers), "{numbers} line numbers made");
     assert!(!app.shows("line 4999"));
     app.press("id:to-4000").unwrap();
     see(&mut app, "line 4000");
@@ -429,7 +430,7 @@ fn a_long_text_makes_only_the_rows_in_view() {
     assert!(!app.shows("line 0"));
     let rows = count_texts(&app, "line ");
     assert!(
-        (20..100).contains(&rows),
+        (20..150).contains(&rows),
         "{rows} rows made after scrolling"
     );
 }

@@ -151,6 +151,87 @@ pub struct EditorDiagnostic {
     /// Its code (`"E0308"`).
     #[prop(skip_none)]
     pub code: Option<SharedString>,
+    /// Where its code is described (a rule's page): a link the app opens
+    /// from its hover card.
+    #[prop(skip_none)]
+    pub code_description: Option<EditorDiagnosticCodeDescription>,
+    /// What else it is (`unnecessary` code is faded, `deprecated` code
+    /// struck through: the `unnecessaryText` / `deprecatedText` parts).
+    #[prop(default)]
+    pub tags: Vec<EditorDiagnosticTag>,
+    /// Other places that tell about it (the first definition of a name
+    /// defined twice), for the app's hover card.
+    #[prop(default)]
+    pub related_information: Vec<EditorDiagnosticRelatedInformation>,
+}
+
+/// Where a diagnostic's code is described (LSP's `CodeDescription`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct EditorDiagnosticCodeDescription {
+    /// The page's URL.
+    pub href: SharedString,
+}
+
+impl EditorDiagnosticCodeDescription {
+    /// The page at `href`.
+    pub fn new(href: impl Into<SharedString>) -> EditorDiagnosticCodeDescription {
+        EditorDiagnosticCodeDescription { href: href.into() }
+    }
+}
+
+/// What else a diagnostic is (LSP's `DiagnosticTag`, by name: `1` is
+/// `unnecessary`, `2` `deprecated`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PropEnum)]
+pub enum EditorDiagnosticTag {
+    /// Code that is not needed: unused, unreachable (faded).
+    Unnecessary,
+    /// Code that uses what is deprecated (struck through).
+    Deprecated,
+}
+
+/// A place in a document: its range in the editor's text, or in the
+/// document at `uri` (LSP's `Location`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct EditorLocation {
+    /// The document (absent: the editor's own).
+    #[prop(skip_none)]
+    pub uri: Option<SharedString>,
+    /// Where in it.
+    pub range: EditorRange,
+}
+
+impl EditorLocation {
+    /// `range` of the document at `uri` (`None`: the editor's own).
+    pub fn new(uri: Option<SharedString>, range: EditorRange) -> EditorLocation {
+        EditorLocation { uri, range }
+    }
+}
+
+/// Another place that tells about a diagnostic, and what it says there
+/// (LSP's `DiagnosticRelatedInformation`). Its range is passed back as the
+/// app gave it, not carried through edits.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct EditorDiagnosticRelatedInformation {
+    /// The place.
+    pub location: EditorLocation,
+    /// What it says about it.
+    pub message: SharedString,
+}
+
+impl EditorDiagnosticRelatedInformation {
+    /// `message` about `location`.
+    pub fn new(
+        location: EditorLocation,
+        message: impl Into<SharedString>,
+    ) -> EditorDiagnosticRelatedInformation {
+        EditorDiagnosticRelatedInformation {
+            location,
+            message: message.into(),
+        }
+    }
 }
 
 /// A range of an editor's text the app styles: semantic highlights, a
@@ -242,6 +323,27 @@ impl EditorFoldRange {
         EditorFoldRange {
             start_line,
             end_line,
+        }
+    }
+}
+
+/// A replacement of an editor's text (`edit`): `range`, as the text is
+/// before the edit, becomes `text`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, JsObject)]
+#[non_exhaustive]
+pub struct EditorEdit {
+    /// What is replaced (empty: `text` goes in at its start).
+    pub range: EditorRange,
+    /// What takes its place (empty: the range is deleted).
+    pub text: SharedString,
+}
+
+impl EditorEdit {
+    /// `range` replaced with `text`.
+    pub fn new(range: EditorRange, text: impl Into<SharedString>) -> EditorEdit {
+        EditorEdit {
+            range,
+            text: text.into(),
         }
     }
 }

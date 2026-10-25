@@ -20,7 +20,23 @@
 // colored by the app's tokens alone (`decorations` with a `token`,
 // `highlighting={false}`). A context menu asked for over the text reports
 // where in it, and whether a touch selection asked for it (`selection`,
-// its box in the root view) or a pointer (`onContextMenu`).
+// its box in the root view) or a pointer (`onContextMenu`). A fourth
+// editor completes (`completion`): typing a word asks the app
+// (`onCompletionRequest`), whose answer (`presentCompletions`) shows as
+// a list that typing on filters; pressing an item inserts it
+// (`onCompletionAccept`); a trigger character asks with an empty query
+// (`completionTriggerCharacters`); and a pause in typing asks for an
+// inline completion (`onInlineCompletionRequest`,
+// `inlineCompletionDelay`), shown at the caret
+// (`presentInlineCompletion`). A fifth editor marks a language server's
+// diagnostics (`diagnostics`): unnecessary code in its part's style
+// (`styles`), deprecated code struck through, and a hover carries a
+// diagnostic's tags, its code's page and its related information. A sixth
+// editor goes to definitions: Mod held over a word asks the app
+// (`onDefinitionRequest`, trigger `hover`), whose answer underlines it
+// (`presentDefinitionLink`, `hideDefinitionLink`); `run("goToDefinition")`
+// asks at the caret (trigger `key`), and `run("showCodeActions")` asks for
+// the code actions at the selection (`onCodeActionRequest`).
 import { Text, View, signal } from "nsh";
 import { Editor, type EditorFoldRange, type EditorRef } from "nsh/base";
 
@@ -35,9 +51,18 @@ export default function BaseEditor() {
   const asked = signal("none");
   const folded = signal("none");
   const menu = signal("none");
+  const requested = signal("none");
+  const completed = signal("none");
+  const accepted = signal("none");
+  const inlined = signal("none");
+  const tagged = signal("none");
+  const defined = signal("none");
+  const acted = signal("none");
   let editor!: EditorRef;
   let grown!: EditorRef;
   let outline!: EditorRef;
+  let completer!: EditorRef;
+  let navigator!: EditorRef;
   const show = (folds: EditorFoldRange[]) => folds.map(f => `${f.startLine}-${f.endLine}`).join(" ") || "-";
   const track = async () => history.set(`Undo ${await editor.canUndo()} Redo ${await editor.canRedo()}`);
   return (
@@ -134,6 +159,17 @@ export default function BaseEditor() {
           track();
         }}
       />
+      <View
+        testID="edit"
+        style={{ height: 20 }}
+        onPress={() => {
+          editor.edit([
+            { range: { start: { line: 0, column: 0 }, end: { line: 0, column: 3 } }, text: "const" },
+            { range: { start: { line: 0, column: 9 }, end: { line: 0, column: 9 } }, text: "0" },
+          ]);
+          track();
+        }}
+      />
       <View testID="find" style={{ height: 20 }} onPress={() => query.set("x")} />
       <View testID="replace-all" style={{ height: 20 }} onPress={async () => read.set(`replaced ${await editor.replaceAll("y")}`)} />
       <View
@@ -179,6 +215,109 @@ export default function BaseEditor() {
         </View>
       </View>
       <View testID="grow-more" style={{ height: 20 }} onPress={() => grown.setValue("1\n2\n3\n4\n5")} />
+      <View style={{ width: 390, height: 120 }}>
+        <Editor
+          ref={r => (completer = r)}
+          accessibilityLabel="Complete"
+          completion
+          completionTriggerCharacters={["."]}
+          inlineCompletionDelay={50}
+          onChange={v => completed.set(v)}
+          onCompletionRequest={e => {
+            requested.set(`${e.id} ${e.query || "-"} ${e.trigger}`);
+            completer.presentCompletions(e.id, [
+              { label: "print", kind: "function", detail: "(value)" },
+              { label: "println" },
+              { label: "private" },
+            ]);
+          }}
+          onCompletionAccept={e => accepted.set(e.item.label)}
+          onInlineCompletionRequest={e => {
+            inlined.set(`${e.id}`);
+            completer.presentInlineCompletion(e.id, "value");
+          }}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Requested: ${requested()}`}</Text>
+      <Text>{() => `Completed: ${completed()}`}</Text>
+      <Text>{() => `Accepted: ${accepted()}`}</Text>
+      <Text>{() => `Inlined: ${inlined()}`}</Text>
+      <View style={{ width: 390, height: 60 }}>
+        <Editor
+          defaultValue="unused = legacy();"
+          diagnostics={[
+            {
+              range: { start: { line: 0, column: 0 }, end: { line: 0, column: 6 } },
+              severity: "hint",
+              message: "never read",
+              code: "no-unused-vars",
+              codeDescription: { href: "https://eslint.org/docs/latest/rules/no-unused-vars" },
+              tags: ["unnecessary"],
+              relatedInformation: [
+                {
+                  location: { uri: "file:///lib.ts", range: { start: { line: 2, column: 0 }, end: { line: 2, column: 6 } } },
+                  message: "declared here",
+                },
+              ],
+            },
+            {
+              range: { start: { line: 0, column: 9 }, end: { line: 0, column: 15 } },
+              severity: "warning",
+              message: "deprecated",
+              tags: ["deprecated"],
+            },
+          ]}
+          styles={{ unnecessaryText: { color: "#00ff00" } }}
+          onHover={e => {
+            const d = e.diagnostics[0];
+            const related = d?.relatedInformation?.[0];
+            tagged.set(
+              d
+                ? `${d.message} ${d.tags?.join(",")} ${d.codeDescription?.href} ${related?.message} ${related?.location.uri} ${related?.location.range.start.line}`
+                : "nothing",
+            );
+          }}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Tagged: ${tagged()}`}</Text>
+      <View style={{ width: 390, height: 60 }}>
+        <Editor
+          ref={r => (navigator = r)}
+          defaultValue="goto target();"
+          classes={{ definitionLink: "bg-blue-500" }}
+          onDefinitionRequest={e => {
+            defined.set(`${e.id} ${e.trigger} ${e.offset} ${e.range.start.column}-${e.range.end.column}`);
+            if (e.trigger === "hover") navigator.presentDefinitionLink(e.id, e.range);
+          }}
+          onCodeActionRequest={e =>
+            acted.set(
+              `${e.range.start.column}-${e.range.end.column} ${e.position.column} ${e.bounds ? "placed" : "unplaced"}`,
+            )
+          }
+          style={{ flex: 1 }}
+        />
+      </View>
+      <Text>{() => `Defined: ${defined()}`}</Text>
+      <Text>{() => `Acted: ${acted()}`}</Text>
+      <View testID="hide-link" style={{ height: 20 }} onPress={() => navigator.hideDefinitionLink()} />
+      <View
+        testID="go-to-definition"
+        style={{ height: 20 }}
+        onPress={() => {
+          navigator.setSelections([{ anchor: { line: 0, column: 7 }, head: { line: 0, column: 7 } }]);
+          navigator.run("goToDefinition");
+        }}
+      />
+      <View
+        testID="code-actions"
+        style={{ height: 20 }}
+        onPress={() => {
+          navigator.setSelections([{ anchor: { line: 0, column: 11 }, head: { line: 0, column: 5 } }]);
+          navigator.run("showCodeActions");
+        }}
+      />
     </View>
   );
 }

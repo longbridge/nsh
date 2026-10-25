@@ -73,7 +73,8 @@ Line breaks are `\n`: `\r\n` and `\r` in a text that comes in become `\n`.
 `"typescript"`, `"tsx"`, `"main.go"`, `"Dockerfile"`, `"Makefile"`. It decides the highlighting, the comment that
 `mod+/` toggles, the brackets that match and indent, the pairs typing closes, the characters words are made of, and
 the default indentation: four spaces, two for web languages (JavaScript, TypeScript, JSON, HTML, CSS, YAML, ...), tabs
-for Go and Makefiles. `tabSize` and `hardTabs` set the indentation for every language. Any other name is plain text.
+for Go and Makefiles. `tabSize` and `hardTabs` set the indentation for every language. Any other name is plain text,
+unless the app registered it ([its own languages](#your-own-languages)).
 
 The languages: Rust, JavaScript, JSX, TypeScript, TSX, JSON, Python, Go, C, C++, C#, Java, Kotlin, Swift, Objective-C,
 Objective-C++, Ruby, PHP, Lua, Shell, Fish, PowerShell, SQL, HTML, XML, Vue, Svelte, CSS, SCSS, Sass, Less, Markdown,
@@ -82,6 +83,44 @@ Julia, Nix, Terraform, Protocol Buffers, GraphQL and Diff.
 
 ```tsx
 <Editor value={source()} onChange={(v) => source.set(v)} language={file().name} tabSize={2} softWrap class="flex-1" />
+```
+
+### Your own languages
+
+Rust code teaches an app's editors more languages, and highlights any language with a highlighter of its own (a
+tree-sitter grammar, a parser of the app's). `register_language` registers an `EditorLanguage`: its name, aliases,
+extensions and file names, and its editing rules (comments, brackets, the pairs typing closes, word characters,
+indentation), with `syntax` naming a built-in grammar to highlight it with. `register_highlighter` gives a language,
+built-in or registered, the app's highlighter: a type implementing `EditorHighlighter`, which hears every edit (lines,
+bytes and positions, as tree-sitter's edits take them) and gives each line's tokens (`EditorToken`, or a tree-sitter
+capture or TextMate scope through `EditorToken::from_scope`) within a time budget, off the UI thread. The editor keeps
+the tokens, moves them with the text as it is edited and asks again for the lines in view, as it does of the built-in
+highlighter. `language` finds the registered languages first, by name, alias, extension or path, in editors and diff
+views alike.
+
+Each engine keeps its own languages. A Rust app registers them in its root before it mounts its editors; an app's
+crate registers them for the TSX app in the setup of its UI set, which every engine running the app calls first.
+
+```rust
+use nsh_base::editor::{EditorLanguage, register_highlighter, register_language};
+use nsh_core::ui::prelude::*;
+
+static NIMBLE: EditorLanguage = EditorLanguage::new("Nimble")
+    .extensions(&["nb"])
+    .line_comment("#")
+    .tab_size(2);
+
+#[native_module("my-app/native")]
+fn native(registry: &mut Registry) {
+    registry.setup(|| {
+        register_language(&NIMBLE);
+        register_highlighter("nimble", || Box::new(NimbleHighlighter::default()));
+    });
+}
+```
+
+```tsx
+<Editor value={source()} onChange={(v) => source.set(v)} language="build.nb" class="flex-1" />
 ```
 
 ## Editing
@@ -154,6 +193,8 @@ elsewhere (`nsh/keymap`'s keystrokes).
 | `cmd+g` / `cmd+shift+g`, `f3` / `shift+f3` | `f3` / `shift+f3` | Find the next / previous match |
 | `cmd+e` | | Find the selection (`onFindWithSelection`) |
 | `cmd+alt+[` / `cmd+alt+]` | `ctrl+shift+[` / `ctrl+shift+]` | Fold / unfold the caret's line |
+| `f12` | `f12` | Go to the definition at the caret (`onDefinitionRequest`) |
+| `cmd+.` | `ctrl+.` | Code actions at the selection (`onCodeActionRequest`) |
 | `cmd+c` / `cmd+x` / `cmd+v` | `ctrl+c` / `ctrl+x` / `ctrl+v` | Copy / cut / paste |
 
 macOS and iOS also have Cocoa's text keys: `ctrl+b` / `ctrl+f` / `ctrl+p` / `ctrl+n` move, `ctrl+h` / `ctrl+d`
@@ -234,11 +275,19 @@ color (`error`, `warning`, `info`, `hint`). Positions are lines and UTF-16 colum
 its diagnostics pass through as they come. The marks stay on their text while the user types, until the app passes
 new ones; showing the messages (a list, a hover card at the line) is the app's.
 
+A diagnostic carries the rest of a language server's `Diagnostic` too. Its `tags` draw its text as language clients do:
+`unnecessary` code (an unused variable, unreachable code) is faded and `deprecated` code struck through, in the
+`unnecessaryText` and `deprecatedText` parts; a hint with a tag shows in its text alone. `codeDescription.href` is the
+page that describes its code (a lint rule's), and `relatedInformation` lists the other places that tell about it
+(`{ location: { uri?, range }, message }`): the hover hands both to the app, which shows them in its hover card and
+opens the page. A language server sends tags as numbers (`1`, `2`); the editor takes their names.
+
 ```tsx
 const problems = signal<EditorDiagnostic[]>([]);
 
 async function lint(text: string) {
-  problems.set(await check(text)); // [{ range, severity, message, source?, code? }]
+  // [{ range, severity, message, source?, code?, codeDescription?, tags?, relatedInformation? }]
+  problems.set(await check(text));
 }
 
 <Editor
@@ -249,7 +298,7 @@ async function lint(text: string) {
   }}
   language="ts"
   diagnostics={problems()}
-  classes={{ diagnosticWarning: "bg-orange-500" }}
+  classes={{ diagnosticWarning: "bg-orange-500", unnecessaryText: "text-zinc-400" }}
   class="flex-1"
 />
 ```
@@ -358,19 +407,73 @@ const breakpoints = signal<number[]>([]);
 
 ## Language features
 
-Completion, hover information, go to definition and code actions come from the app's language server; the editor
+Suggestions, hover information, go to definition and code actions come from the app's language server. The editor
+draws the completion list, the inline completion and the definition link itself, with their keys; for the rest it
 gives the app the moments and the places, and the app draws its popups (an [`Overlay`](./overlay.md) anchored to a
 `pageBounds`).
+
+### Completion
+
+With `completion`, the editor asks the app for suggestions and shows them as a list under the word being typed (above
+it near the bottom of the window):
+
+- Typing a letter, digit or `_` at the end of a word asks with `onCompletionRequest(event)`, trigger `"typing"`: `event`
+  has its `id`, the caret's `offset` and `position`, the `query` (the word typed so far) and the `queryStart` offset
+  where it starts. Each of `completionTriggerCharacters` (`["."]`, `["::", "<"]`) asks with an empty query after it,
+  trigger `"character"` (and the `character`), and `showCompletions()` or `run("showCompletions")` asks at the caret,
+  trigger `"invoked"`.
+- The app answers with `presentCompletions(event.id, items)`. Each item is a language server's `CompletionItem` shape:
+  `label`, and optionally `kind` (`"function"`, `"variable"`, `"class"`, ...), `detail`, `documentation`,
+  `insertText`, `filterText`, `sortText` and `range`. The answer to the latest request shows; an earlier one, or one
+  for a word the caret has left, is set aside.
+- Typing on filters the list in place: the query matches each item's `filterText` (else its label) as letters in
+  order, in any case, words starting with the query first, then the closest matches, then by `sortText`. The matched
+  letters stand out. Pass `incomplete: true` (`presentCompletions(id, items, true)`) for the editor to ask again as
+  typing goes on.
+- Up and Down (and Control+P / Control+N) move through the list, Page Up and Page Down by a page, Enter and Tab
+  accept, Escape closes it. The pointer marks an item and a click (a tap on touch screens) accepts it. The selected
+  item's `documentation` shows beside the list.
+- Accepting replaces the item's `range` (else the query) with its `insertText` (else its label), as one step undo
+  takes back, at the caret and at every other caret with the same text before it, and reports
+  `onCompletionAccept({ item })`.
+- The list closes as the caret leaves the word, on a space or other punctuation, when the editor loses the focus and
+  when the caret scrolls out of view.
+
+A pause in typing (`inlineCompletionDelay`, 300 ms by default) with no list showing asks for an inline completion:
+`onInlineCompletionRequest({ id, offset, position })`. `presentInlineCompletion(id, text)` shows `text` at the caret in
+a muted color, Tab inserts it, and Escape, an edit or a move clears it.
+
+```tsx
+let editor!: EditorRef;
+
+<Editor
+  ref={(r) => (editor = r)}
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  completion
+  completionTriggerCharacters={["."]}
+  onCompletionRequest={async (e) => {
+    const items = await server.completion(e.position);
+    editor.presentCompletions(e.id, items);
+  }}
+  onInlineCompletionRequest={async (e) => {
+    editor.presentInlineCompletion(e.id, await assistant.suggest(e.offset));
+  }}
+  class="flex-1"
+/>
+```
+
+### Hovers and presses
 
 - `onHover(event)`: the mouse rests over a character (desktops and the web). `event` has its `position`, its UTF-16
   `offset`, the `range` of its word, the pointer's `pagePosition`, the word's `pageBounds`, the `modifiers` held and
   the `diagnostics` there, whose messages the app shows. Moving to another word reports the next hover at once.
 - `onHoverEnd()`: the mouse left the word or the editor, or the text changed or scrolled under it.
 - `onTextPress(event)`: a character was pressed, after the editor placed its caret: `{ position, offset, range,
-  pagePosition, modifiers, clicks }`. Mod-click (`modifiers.platform` on a Mac, `modifiers.control` elsewhere) is the
-  place for go to definition.
+  pagePosition, modifiers, clicks }`.
 - `caretBounds()` and `rangeBounds(range)`: where the caret and a range are, `{ bounds, pageBounds }` (in the editor
-  and in the root view): a completion menu opens at the caret.
+  and in the root view): a popup of the app's opens there.
 
 ```tsx
 const hover = signal<EditorHoverEvent | null>(null);
@@ -381,7 +484,6 @@ const hover = signal<EditorHoverEvent | null>(null);
   language="ts"
   onHover={(event) => hover.set(event)}
   onHoverEnd={() => hover.set(null)}
-  onTextPress={(event) => event.modifiers.platform && goToDefinition(event.position)}
   class="flex-1"
 />
 <If when={hover()}>
@@ -391,6 +493,48 @@ const hover = signal<EditorHoverEvent | null>(null);
     </Overlay>
   )}
 </If>
+```
+
+### Go to definition and code actions
+
+Holding Mod (Command on macOS and iOS, Control elsewhere) turns the words under the mouse into links, as in code
+editors:
+
+- With Mod held over a word (pressed while the mouse rests there, or the mouse moved there with it held), the editor
+  asks with `onDefinitionRequest(event)`, trigger `"hover"`: `event` has its `id`, the character's `position` and
+  `offset`, and the word's `range`. Answer with `presentDefinitionLink(event.id, range)` when the language server
+  finds a definition: the range is underlined (the `definitionLink` part) and the pointer becomes a hand over it. The
+  link goes when Mod is released, the mouse leaves it or the text changes or scrolls, or with `hideDefinitionLink()`.
+  The answer to the latest request shows; an earlier one is set aside.
+- A Mod-click on a word asks with trigger `"press"`; on the link the caret stays where it is. F12 (`goToDefinition`,
+  `run("goToDefinition")`) asks for the word at the caret, trigger `"key"`. The app goes to the definition:
+  `revealPosition` and `setSelections` for one in the same text, its own navigation for another file.
+- Mod+. (`showCodeActions`, `run("showCodeActions")`) reports `onCodeActionRequest({ range, position, bounds })`: the
+  primary selection (start first), the caret and its box. The app asks its language server for actions, shows its
+  menu at `bounds.pageBounds` (a [`Menu`](./menu.md) or an `Overlay`), and applies the chosen one's edits with
+  `edit(edits)`.
+
+```tsx
+let editor!: EditorRef;
+
+<Editor
+  ref={(r) => (editor = r)}
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  onDefinitionRequest={async (e) => {
+    const target = await server.definition(e.position);
+    if (!target) return;
+    if (e.trigger === "hover") editor.presentDefinitionLink(e.id, target.originRange ?? e.range);
+    else editor.revealPosition(target.range.start, true);
+  }}
+  onCodeActionRequest={async (e) => {
+    const actions = await server.codeActions(e.range);
+    const picked = await choose(actions, e.bounds?.pageBounds);
+    if (picked) editor.edit(picked.edits);
+  }}
+  class="flex-1"
+/>
 ```
 
 ## Size and scrolling
@@ -427,6 +571,7 @@ them: `const text = await editor.value()`.
 | `value()` | `Promise<string>`: the text. |
 | `setValue(value)` | Replaces the text, as an edit undo takes back. |
 | `insert(text)` | Types `text` at each selection, as it is (brackets do not close). |
+| `edit(edits)` | Applies `{ range, text }` replacements (ranges of the current text; one overlapping an earlier one is skipped) as one step undo takes back; the selections move with the text around them. Code actions and formatting edits go here. |
 | `selections()` | `Promise<EditorSelection[]>`: every selection, `{ anchor, head }`, the primary (newest) last. |
 | `setSelections(selections)` | Sets the selections (the last one primary) and scrolls the primary one into view. |
 | `run(command)` | Runs a command, as its keys would ([Commands](#commands)). |
@@ -448,6 +593,11 @@ them: `const text = await editor.value()`.
 | `offsetToPosition(offset)`, `positionToOffset(position)` | `Promise<EditorPosition>`, `Promise<number>`: between UTF-16 offsets of `value()` and positions. |
 | `revealPosition(position, center)` | Scrolls `position` into view, unfolding what hides it; to the middle with `center`. |
 | `goToLine(line)` | Puts the caret at line `line`'s start (from 0) and scrolls it to the middle. |
+| `showCompletions()` | Asks for completions at the caret, the word before it the query ([Completion](#completion)). |
+| `presentCompletions(id, items, incomplete?)` | Answers completion request `id`: the list shows `items`, filtered by what has been typed since; with `incomplete`, typing on asks again. No items close the list. |
+| `hideCompletions()` | Closes the completion list. |
+| `presentInlineCompletion(id, text)`, `hideInlineCompletion()` | Answers inline completion request `id` with `text`, shown at the caret; clears it. |
+| `presentDefinitionLink(id, range)`, `hideDefinitionLink()` | Answers definition request `id` (trigger `"hover"`): `range` is underlined as a link ([Go to definition](#go-to-definition-and-code-actions)); hides it. |
 
 ```tsx
 let editor!: EditorRef;
@@ -490,6 +640,9 @@ let editor!: EditorRef;
 | `findNext`, `findPrevious` | Select the next or previous match of `search`. |
 | `findWithSelection` | Report the selected text for the find bar (`onFindWithSelection`). |
 | `copy`, `cut`, `paste` | The clipboard. |
+| `showCompletions` | Ask for completions at the caret ([Completion](#completion)). |
+| `goToDefinition` | Ask for the definition of the word at the caret (`onDefinitionRequest`, trigger `"key"`). |
+| `showCodeActions` | Ask for the code actions at the selection (`onCodeActionRequest`). |
 
 ## Styling the parts
 
@@ -538,10 +691,21 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `diagnosticWarning` | The line under a warning | Amber |
 | `diagnosticInfo` | The line under an information | Blue |
 | `diagnosticHint` | The line under a hint | `muted-foreground` |
+| `unnecessaryText` | The text of an `unnecessary` diagnostic | `muted-foreground` |
+| `deprecatedText` | The text of a `deprecated` diagnostic | Struck through |
 | `whitespace` | The marks of spaces and tabs (`showWhitespaces`) | `·` and `→`, `muted-foreground` at 60 % |
 | `ruler` | The lines of `rulers` | A 1 point line of `border` |
 | `selectionHandle` | The knobs of the handles at the ends of a touch selection | A 10pt dot of `primary` |
 | `selectionHandleStart`, `selectionHandleEnd` | The start's knob (above its line) and the end's (below), after `selectionHandle` | |
+| `completionMenu` | The completion list's box | `popover`, a 1pt `border`, rounded, a shadow |
+| `completionItem` | Every item of the list | A row's height, 8pt of padding |
+| `selectedCompletionItem` | The selected item, after `completionItem` | `accent` |
+| `completionMatch` | The letters of a label the query matched | Semibold, `primary` |
+| `completionDetail` | An item's detail, after its label | Right-aligned, `muted-foreground` |
+| `completionKind` | An item's kind, before its label | A short name (`fn`, `var`, `cls`), `muted-foreground` |
+| `completionDocumentation` | The selected item's documentation, beside the list | As `completionMenu`, at most 320pt wide |
+| `inlineCompletion` | The inline completion at the caret | `muted-foreground` |
+| `definitionLink` | The underline of the definition link | A 1pt line of `primary` under the text |
 
 ## Props
 
@@ -579,6 +743,9 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `minRows` | `.min_rows(..)` | `number` | | The editor grows with its text from this many rows ([Size and scrolling](#size-and-scrolling)). |
 | `maxRows` | `.max_rows(..)` | `number` | | The editor grows with its text up to this many rows, then scrolls. |
 | `cursorSurroundingLines` | `.cursor_surrounding_lines(..)` | `number` | `1` | The rows kept in view above and below the caret. |
+| `completion` | `.completion(..)` | `boolean` | `false` | The editor asks for suggestions and shows them as a list ([Completion](#completion)). |
+| `completionTriggerCharacters` | `.completion_trigger_characters(..)` | `string[]` | `[]` | What else asks for completions as it is typed. |
+| `inlineCompletionDelay` | `.inline_completion_delay(..)` | `number` | `300` | Milliseconds typing pauses before an inline completion is asked for. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The editor's box. |
 
 ## Events
@@ -596,6 +763,11 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |
 | `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | `findWithSelection` ran: the text for the find bar's query. |
 | `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | The folded ranges changed: every one, nested ones included. |
+| `onCompletionRequest` | `.on_completion_request(\|event: &EditorCompletionRequest\| ..)` | The editor asks for completions: `{ id, offset, position, query, queryStart, trigger, character? }` ([Completion](#completion)). |
+| `onCompletionAccept` | `.on_completion_accept(\|event: &EditorCompletionAcceptEvent\| ..)` | An item was accepted and inserted: `{ item }`. |
+| `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | Typing paused: `{ id, offset, position }`, for an inline completion. |
+| `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | The editor asks for a definition: `{ id, position, offset, range, trigger }` ([Go to definition](#go-to-definition-and-code-actions)). |
+| `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | The user asked for code actions: `{ range, position, bounds? }`. |
 
 ## Accessibility
 

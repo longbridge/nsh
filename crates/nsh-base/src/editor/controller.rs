@@ -27,9 +27,6 @@ use super::{
     types::{Selection, Selections},
 };
 
-/// Rows made beyond the viewport on each side, so scrolling a little shows
-/// rows that are there already.
-pub(crate) const OVERSCAN: usize = 8;
 /// The sink is emptied once it holds this many bytes (and no composition
 /// is in progress).
 const SINK_LIMIT: usize = 256;
@@ -121,6 +118,12 @@ pub(crate) struct Ed {
     autoscroll: Rc<RefCell<AutoScroll>>,
     /// The selection a touch made, its handles and their drag.
     pub(crate) touch: super::touch::Touch,
+    /// The rows made last.
+    rows_window: crate::window::RowWindow,
+    /// Completion: the session, the list, inline completion.
+    pub(crate) completion: super::completion::Completion,
+    /// The definition link: the hover request out, the range underlined.
+    pub(crate) definition: super::definition::Definition,
 }
 
 impl Ed {
@@ -136,9 +139,12 @@ impl Ed {
             .get_untracked()
             .or_else(|| props.default_value.get_untracked())
             .unwrap_or_default();
-        let language = State::language_for(props.language.get_untracked().as_deref());
+        let name = props.language.get_untracked();
+        let (language, syntax) =
+            untracked(|| super::languages::resolve(name.as_deref().unwrap_or("")));
         let options = options_of(&props, language);
         let mut state = State::new(&text, language, options, font, measure);
+        state.set_language(language, syntax);
         state.reported = Some((state.buffer.version(), text));
         let sel_history = SelectionHistory::new(&state.selections);
         let ed = Ed {
@@ -172,9 +178,14 @@ impl Ed {
             content_height: signal(px(0.0)),
             autoscroll: Rc::default(),
             touch: super::touch::Touch::new(),
+            rows_window: Default::default(),
+            completion: super::completion::Completion::new(),
+            definition: super::definition::Definition::new(),
         };
         ed.follow_props();
         ed.follow_hooks();
+        ed.follow_completion();
+        ed.follow_definition();
         ed.bind_keys();
         ed.load_syntaxes();
         ed
@@ -195,13 +206,15 @@ impl Ed {
         let ed = self.clone();
         effect(move || {
             let name = ed.props.language.get();
-            let language = State::language_for(name.as_deref());
+            // The engine's languages too: a registration since finds the
+            // language again.
+            let (language, syntax) = super::languages::resolve(name.as_deref().unwrap_or(""));
             let changed = {
                 let mut st = ed.st.borrow_mut();
-                let before = st.language;
-                st.set_language(language);
+                let changed = !std::ptr::eq(st.language, language) || !st.syntax.same(&syntax);
+                st.set_language(language, syntax);
                 st.options = options_of(&ed.props, language);
-                !std::ptr::eq(before, language)
+                changed
             };
             if changed {
                 ed.load_syntaxes();
@@ -319,7 +332,7 @@ impl Ed {
             {
                 let mut st = ed.st.borrow_mut();
                 let marks = diagnostics::resolve(&st.buffer, &items, |d| d.range);
-                st.diagnostics = marks;
+                st.set_diagnostics(marks);
             }
             ed.marks_rev.update(|r| *r += 1);
         });
@@ -448,6 +461,7 @@ impl Ed {
                 self.report_search_position();
                 self.report_folds();
                 self.show_caret();
+                self.completion_moved();
             }
             Outcome::Edited(changes) => {
                 {
@@ -466,6 +480,7 @@ impl Ed {
                 self.report_folds();
                 self.schedule_highlight();
                 self.show_caret();
+                self.completion_edited(&changes);
             }
         }
         self.restart_blink();
@@ -624,6 +639,18 @@ impl Ed {
             E::TransformToTitleCase => c(Command::ChangeCase(Case::Title)),
             E::TrimTrailingWhitespace => c(Command::TrimTrailingWhitespace),
             E::ToggleBlockComment => c(Command::ToggleBlockComment),
+            E::ShowCompletions => {
+                self.show_completions();
+                None
+            }
+            E::GoToDefinition => {
+                self.go_to_definition();
+                None
+            }
+            E::ShowCodeActions => {
+                self.show_code_actions();
+                None
+            }
         };
         if let Some(command) = command {
             self.run(command);
@@ -647,7 +674,11 @@ impl Ed {
             st.composition = None;
             st.editing(1, |e| e.insert(text))
         };
+        let edited = matches!(outcome, Outcome::Edited(_));
         self.after_typing(outcome);
+        if edited {
+            self.completion_typed(text);
+        }
     }
 
     /// [`Self::after`] for typing, which keeps the sink as it is (the text
@@ -714,7 +745,7 @@ impl Ed {
 
     /// Empties the sink (the caret moved away from what it holds), unless
     /// an input method is composing there.
-    fn empty_sink(&self) {
+    pub(crate) fn empty_sink(&self) {
         let mut sink = self.sink.borrow_mut();
         if sink.composing || sink.text.is_empty() {
             return;
@@ -978,6 +1009,7 @@ impl Ed {
         });
         if !focused {
             self.drag.set(None);
+            self.completion_blurred();
         }
         self.restart_blink();
     }
@@ -1248,7 +1280,8 @@ impl Ed {
             Some(top + lh + margin - viewport.height)
         } else {
             None
-        };
+        }
+        .filter(|&target| target != y);
         if let Some(target) = target_y {
             self.scroll_y.set(target);
             self.vscroll.scroll_to(Point::new(px(0.0), target), false);
@@ -1269,7 +1302,8 @@ impl Ed {
             Some(point.x + space * 4.0 - width)
         } else {
             None
-        };
+        }
+        .filter(|&target| target != x);
         if let Some(target) = target_x {
             self.scroll_x.set(target);
             self.hscroll.scroll_to(Point::new(target, px(0.0)), false);
@@ -1294,9 +1328,9 @@ impl Ed {
         let count = self.st.borrow().display.row_count();
         let y = (self.scroll_y.get() - self.rows_top.get()).0.max(0.0);
         let height = self.viewport.get().height.0.max(lh * 40.0);
-        let first = ((y / lh).floor() as usize).saturating_sub(OVERSCAN);
-        let last = (((y + height) / lh).ceil() as usize + OVERSCAN).min(count);
-        first.min(last)..last
+        let last = (((y + height) / lh).ceil() as usize).min(count);
+        let first = ((y / lh).floor() as usize).min(last);
+        self.rows_window.rows(first..last, count)
     }
 
     // Highlighting.
@@ -1306,13 +1340,13 @@ impl Ed {
     fn load_syntaxes(&self) {
         let needs = {
             let st = self.st.borrow();
-            st.highlighting && st.highlighter.is_none() && !st.language.syntax_hint.is_empty()
+            st.highlighting && st.highlighter.is_none() && !st.syntax.is_plain()
         };
         if !needs {
             self.schedule_highlight();
             return;
         }
-        if Highlighter::ready() {
+        if self.st.borrow().syntax.ready() {
             self.make_highlighter();
             return;
         }
@@ -1337,10 +1371,10 @@ impl Ed {
             if st.highlighter.is_some() || !st.highlighting {
                 return;
             }
-            st.highlighter = Highlighter::new(st.language.syntax_hint);
-            let lines = st.buffer.line_count();
+            let st = &mut *st;
+            st.highlighter = Highlighter::with(&st.syntax);
             if let Some(h) = &mut st.highlighter {
-                h.edited(0, lines, lines);
+                h.reset(&st.buffer);
             }
         }
         self.schedule_highlight();
@@ -1378,7 +1412,7 @@ impl Ed {
                     let Some(h) = &mut st.highlighter else {
                         break;
                     };
-                    let guess = (first_line > h.frontier() + GUESS_DISTANCE)
+                    let guess = (first_line > h.frontier().saturating_add(GUESS_DISTANCE))
                         .then(|| h.guess(&rope, start, start_offset, last_line))
                         .flatten();
                     let job = h.job(&rope, last_line + LOOKAHEAD, SLICE);

@@ -13,16 +13,20 @@
 mod app_highlight;
 mod buffer;
 mod commands;
+mod completion;
 pub(crate) mod controller;
 mod data;
+mod definition;
 mod diagnostics;
 mod display;
 mod fold;
 mod fold_set;
 pub(crate) mod highlight;
+mod highlighter;
 mod hooks;
 mod keymap;
 pub(crate) mod language;
+pub(crate) mod languages;
 mod layout;
 mod movement;
 mod parts;
@@ -33,11 +37,22 @@ mod touch;
 mod types;
 mod view;
 
+pub use completion::{
+    EditorCompletionAcceptEvent, EditorCompletionItem, EditorCompletionKind,
+    EditorCompletionRequest, EditorCompletionTrigger, EditorInlineCompletionRequest,
+};
 pub use data::{
-    EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorFoldRange, EditorPosition,
-    EditorRange, EditorSearch, EditorSearchResult, EditorSelection, EditorToken,
+    EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
+    EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag, EditorEdit,
+    EditorFoldRange, EditorLocation, EditorPosition, EditorRange, EditorSearch, EditorSearchResult,
+    EditorSelection, EditorToken,
+};
+pub use definition::{EditorCodeActionRequest, EditorDefinitionRequest, EditorDefinitionTrigger};
+pub use highlighter::{
+    EditorHighlighter, EditorText, EditorTextEdit, EditorTextPoint, EditorTokens,
 };
 pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
+pub use languages::{EditorLanguage, register_highlighter, register_language};
 pub use layout::EditorScrollBeyond;
 use nsh_core::ui::prelude::*;
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
@@ -162,6 +177,22 @@ pub struct EditorProps {
     /// decorations (their `token`s) color the text alone.
     #[prop(default = true)]
     pub highlighting: Prop<bool>,
+    /// Completion: typing a word, a trigger character or
+    /// `showCompletions` asks the app (`onCompletionRequest`), whose
+    /// answer (`presentCompletions`) the editor shows as a list below the
+    /// caret, filters as typing goes on, and inserts from (Up / Down,
+    /// Enter / Tab, Escape); a pause in typing asks for an inline
+    /// completion (`onInlineCompletionRequest`).
+    #[prop(default)]
+    pub completion: Prop<bool>,
+    /// What else asks for completions as it is typed, with an empty query
+    /// after it (`["."]`, `["::", "<"]`; default none).
+    #[prop(default)]
+    pub completion_trigger_characters: Prop<Vec<SharedString>>,
+    /// Milliseconds typing pauses before an inline completion is asked for
+    /// (default 300).
+    #[prop(default = 300.0)]
+    pub inline_completion_delay: Prop<f64>,
 }
 
 /// The events of an [`Editor`].
@@ -212,6 +243,28 @@ pub enum EditorEvent {
     /// moving into a fold): every one, nested ones included, by start.
     #[args(folds)]
     FoldChange(Vec<EditorFoldRange>),
+    /// The editor asks for completions at its caret (with `completion`):
+    /// a word is being typed, a trigger character was, or
+    /// `showCompletions`. Answer with `presentCompletions(id, items)`.
+    #[args(event)]
+    CompletionRequest(EditorCompletionRequest),
+    /// A completion item was accepted and inserted.
+    #[args(event)]
+    CompletionAccept(EditorCompletionAcceptEvent),
+    /// Typing paused for `inlineCompletionDelay` with no list open (with
+    /// `completion`): answer with `presentInlineCompletion(id, text)`.
+    #[args(event)]
+    InlineCompletionRequest(EditorInlineCompletionRequest),
+    /// The editor asks for the definition of a word: Mod held over it
+    /// (trigger `hover`: answer with `presentDefinitionLink(id, range)` to
+    /// underline it), a Mod-click on it (`press`) or `goToDefinition`
+    /// (F12, `key`) at the caret: go to it.
+    #[args(event)]
+    DefinitionRequest(EditorDefinitionRequest),
+    /// The user asked for the code actions at the primary selection
+    /// (`showCodeActions`, Mod+.): the app shows its menu at `bounds`.
+    #[args(event)]
+    CodeActionRequest(EditorCodeActionRequest),
 }
 
 /// Where a context menu was asked for in an [`Editor`].
@@ -420,6 +473,15 @@ pub enum EditorCommand {
     /// Folds the lines of each selection that spans several, wherever
     /// they are.
     FoldSelection,
+    /// Asks for completions at the caret, the word before it the query
+    /// (with `completion`; no default keys).
+    ShowCompletions,
+    /// Asks for the definition of the word at the primary caret
+    /// (`onDefinitionRequest`, trigger `key`; F12).
+    GoToDefinition,
+    /// Asks for the code actions at the primary selection
+    /// (`onCodeActionRequest`; Mod+.).
+    ShowCodeActions,
 }
 
 /// The methods of an [`Editor`]'s ref.
@@ -447,6 +509,13 @@ impl EditorApi {
     /// Replaces the text, as an edit undo takes back.
     pub fn set_value(&self, value: String) {
         self.ed.set_text(&value);
+    }
+
+    /// Applies `edits` (ranges of the text as it is, not overlapping; an
+    /// overlapping one is dropped) as one edit undo takes back in one step:
+    /// the selections follow the text as they do through any edit.
+    pub fn edit(&self, edits: Vec<EditorEdit>) {
+        self.ed.edit(&edits);
     }
 
     /// Types `text` at each selection (as typing it would, without the
@@ -602,6 +671,57 @@ impl EditorApi {
     /// one's end is dropped).
     pub fn set_folds(&self, folds: Vec<EditorFoldRange>) {
         self.ed.set_folds(&folds);
+    }
+
+    /// Asks for completions at the caret (`onCompletionRequest`, trigger
+    /// `invoked`), the word before it the query.
+    pub fn show_completions(&self) {
+        self.ed.show_completions();
+    }
+
+    /// Answers completion request `id` with `items`: the list shows them,
+    /// filtered by what has been typed since; `incomplete`, typing on asks
+    /// again. Dropped when stale (a request since, the caret left the
+    /// word); no items close the list.
+    pub fn present_completions(
+        &self,
+        id: u32,
+        items: Vec<EditorCompletionItem>,
+        incomplete: Option<bool>,
+    ) {
+        self.ed
+            .present_completions(id, items, incomplete.unwrap_or(false));
+    }
+
+    /// Closes the completion list.
+    pub fn hide_completions(&self) {
+        self.ed.hide_completions();
+    }
+
+    /// Answers inline completion request `id` with `text`, shown at the
+    /// caret until Tab inserts it or an edit or a move clears it; dropped
+    /// when stale (the caret or the text changed since).
+    pub fn present_inline_completion(&self, id: u32, text: String) {
+        self.ed.present_inline_completion(id, text);
+    }
+
+    /// Clears the inline completion.
+    pub fn hide_inline_completion(&self) {
+        self.ed.hide_inline_completion();
+    }
+
+    /// Answers definition request `id` (trigger `hover`) with `range`, the
+    /// symbol a definition was found for: it is underlined, with a hand
+    /// over it, until Mod is released, the pointer leaves it or the text
+    /// changes. Dropped when stale (a request since, Mod released, an
+    /// edit).
+    pub fn present_definition_link(&self, id: u32, range: EditorRange) {
+        self.ed.present_definition_link(id, range);
+    }
+
+    /// Hides the definition link.
+    pub fn hide_definition_link(&self) {
+        self.ed.hide_definition_link();
     }
 }
 

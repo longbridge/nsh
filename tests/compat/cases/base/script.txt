@@ -1268,6 +1268,12 @@ expect History: Undo false Redo true
 tap id:redo
 expect Value: let x = 1; // ok
 expect History: Undo true Redo false
+# Edits by range, as a language server's: all in one step, which one
+# undo takes back.
+tap id:edit
+expect Value: const x = 10; // ok
+tap id:undo
+expect Value: let x = 1; // ok
 # A search finds its matches (case-sensitive: one `x`), and replacing
 # them all is one edit reporting how many.
 tap id:find
@@ -1330,6 +1336,60 @@ expect Read: folds 0-4
 expect Menu: none
 event text:"LET y = 1; // ok" onContextMenu
 expect Menu: 0:0 pointer
+# The fourth editor completes. Typing a word asks the app once, and its
+# answer shows as a list that typing on filters.
+event label:Complete onFocus
+type label:Complete pr
+expect Requested: 1 p typing
+expect private
+type label:Complete in
+absent private
+expect print
+# Pressing an item puts it in place of what was typed.
+tap text:println
+expect Completed: println
+expect Accepted: println
+# A trigger character asks with an empty query: every item shows.
+type label:Complete .
+expect Requested: 2 - character
+tap text:private
+expect Completed: println.private
+expect Accepted: private
+# A pause in typing asks for an inline completion, shown at the caret.
+type label:Complete (
+expect Inlined: 1
+expect value
+# The fifth editor's diagnostics: the unnecessary code in its part's
+# style, the deprecated code struck through.
+style span:unused color #00ff00ff
+style span:legacy textDecorationLine line-through
+# Resting over the unnecessary code reports its diagnostic with its tags,
+# its code's page and the place related to it.
+event text:"unused = legacy();" onHoverMove position.x=1 position.y=5
+wait 200
+expect Tagged: never read unnecessary https://eslint.org/docs/latest/rules/no-unused-vars declared here file:///lib.ts 2
+# The sixth editor goes to definitions. Without Mod the pointer asks
+# nothing; with Mod (Command here) held over `goto` it asks at once, and
+# the app's answer underlines the word.
+event text:"goto target();" onHoverMove position.x=1 position.y=5
+wait 50
+expect Defined: none
+event text:"goto target();" onHoverMove position.x=1 position.y=5 modifiers.platform=true
+expect Defined: 1 hover 0 0-4
+# Moving inside the word asks nothing more; hiding the link and holding
+# Mod over the word again asks again.
+event text:"goto target();" onHoverMove position.x=2 position.y=6 modifiers.platform=true
+wait 50
+expect Defined: 1 hover 0 0-4
+tap id:hide-link
+event text:"goto target();" onHoverMove position.x=2 position.y=6 modifiers.platform=true
+expect Defined: 2 hover 0 0-4
+# The command asks at the caret, inside `target`.
+tap id:go-to-definition
+expect Defined: 3 key 7 5-11
+# Code actions at the selection, start first, with the caret's box.
+tap id:code-actions
+expect Acted: 5-11 5 placed
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
@@ -1341,6 +1401,15 @@ covers [props] Editor.maxRows
 covers [props] Editor.showWhitespaces
 covers [props] Editor.foldRanges
 covers [events] Editor.onFoldChange
+covers [props] Editor.completion
+covers [props] Editor.completionTriggerCharacters
+covers [events] Editor.onCompletionRequest
+covers [events] Editor.onCompletionAccept
+covers [events] Editor.onInlineCompletionRequest
+covers [props] Editor.diagnostics
+covers [props] Editor.styles
+covers [events] Editor.onDefinitionRequest
+covers [events] Editor.onCodeActionRequest
 
 # base-diff
 tap id:case-base-diff

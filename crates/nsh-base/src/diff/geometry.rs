@@ -36,7 +36,6 @@ impl Geometry {
     }
 
     /// How many rows there are.
-    #[cfg(test)]
     pub(crate) fn rows(&self) -> usize {
         self.text.len()
     }

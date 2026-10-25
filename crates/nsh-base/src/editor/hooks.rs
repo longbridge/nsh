@@ -1,6 +1,7 @@
-//! What an app builds language features on (completion, hover information,
-//! go to definition, code actions), as gpui-base's `lsp` hooks allow: the
-//! editor draws no popup of its own, it tells the app where the pointer
+//! What an app builds language features on (hover information, go to
+//! definition, code actions; completion is built in, `completion.rs`), as
+//! gpui-base's `lsp` hooks allow: the editor draws no popup of its own for
+//! them, it tells the app where the pointer
 //! rests (`onHover`, `onHoverEnd`) and what was pressed (`onTextPress`),
 //! and its ref says where the text is (`caretBounds`, `rangeBounds`) and
 //! scrolls (`revealPosition`, `goToLine`), so the app places its popups
@@ -145,6 +146,8 @@ pub(crate) struct Hooks {
     /// The rows' box.
     pub(crate) rows: ElementRef,
     place: Rc<RefCell<Option<Place>>>,
+    /// Changes when `place` is measured again.
+    placed: Signal<u64>,
     hover: Rc<RefCell<Hover>>,
 }
 
@@ -154,6 +157,7 @@ impl Hooks {
             outer: element_ref(),
             rows: element_ref(),
             place: Rc::default(),
+            placed: signal(0),
             hover: Rc::default(),
         }
     }
@@ -207,7 +211,7 @@ pub(crate) fn hit(st: &State, point: Point<Points>) -> Hit {
 
 /// The word (or run of punctuation or blanks) the character at `offset` is
 /// in.
-fn word_at(st: &State, offset: usize) -> Range<usize> {
+pub(crate) fn word_at(st: &State, offset: usize) -> Range<usize> {
     let word = movement::word_range(&st.buffer, offset, st.language.word_chars);
     // At a word's end the word before is the one `word_range` picks (a
     // double click there selects it); the character after is the one here.
@@ -367,7 +371,20 @@ impl Ed {
                 rows: rows.page - outer.page,
                 scroll: ed.scroll_offset(),
             });
+            ed.hooks.placed.update(|n| *n += 1);
         });
+    }
+
+    /// `local`, a point of the rows' box, in the editor's box, following
+    /// where the rows are and the scroll views (tracked); the rows' box's
+    /// own point until the editor was measured.
+    pub(crate) fn in_editor(&self, local: Point<Points>) -> Point<Points> {
+        self.hooks.placed.get();
+        let scroll = Point::new(self.scroll_x.get(), self.scroll_y.get());
+        match *self.hooks.place.borrow() {
+            Some(place) => local + place.rows_at(scroll),
+            None => local,
+        }
     }
 
     /// The pointer at `local` of the rows' box is at `page` in the root
@@ -392,23 +409,38 @@ impl Ed {
 
     // Hover.
 
-    /// The mouse moved over the rows (no button down).
+    /// The mouse moved over the rows (no button down), or the modifiers
+    /// changed while it rests (the platforms report that as a move to
+    /// where it is).
     pub(crate) fn hover_move(&self, e: &HoverEvent) {
         self.pointer_seen(e.position, e.page_position);
+        let before = self.hooks.hover.borrow().pointer;
+        // Only the modifiers changed: the pointer still rests since it came.
+        let moved = match before {
+            Some(p) if p.local == e.position => p.moved,
+            _ => now(),
+        };
+        let modifiers_changed = before.is_some_and(|p| p.modifiers != e.modifiers);
         let pointer = Pointer {
             local: e.position,
             page: e.page_position,
             modifiers: e.modifiers,
-            moved: now(),
+            moved,
         };
         let shown = {
             let mut hover = self.hooks.hover.borrow_mut();
             hover.pointer = Some(pointer);
             hover.shown.clone()
         };
+        self.definition_hover(e.position, e.modifiers);
         if let Some(shown) = shown {
             let hit = hit(&self.st.borrow(), e.position);
             if hit.over && holds(&shown, hit.offset) {
+                // The same word with other modifiers: reported again, as
+                // they decide what it is for (Mod: a definition).
+                if modifiers_changed {
+                    self.show_hover(pointer);
+                }
                 return;
             }
             // Off the word shown: the next one at once (a popup is open),
@@ -473,6 +505,7 @@ impl Ed {
     /// The mouse left the rows.
     pub(crate) fn hover_out(&self) {
         self.hooks.hover.borrow_mut().pointer = None;
+        self.hide_definition_link();
         self.end_hover();
     }
 

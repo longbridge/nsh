@@ -22,15 +22,15 @@ use super::{
 use crate::{
     editor::{
         controller::font_family,
-        highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
-        language,
+        highlight::{
+            GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, Syntax, off_thread,
+        },
+        languages,
         state::Font,
     },
     syntax::Token,
 };
 
-/// Rows made beyond the viewport on each side.
-pub(crate) const OVERSCAN: usize = 8;
 /// Columns a tab takes.
 const TAB: usize = 4;
 
@@ -162,7 +162,9 @@ pub(crate) struct State {
     pub(crate) font: Font,
     /// The width of a column.
     pub(crate) column: Points,
-    hint: &'static str,
+    /// What highlights the texts' language (a patch's files: each
+    /// segment's own).
+    syntax: Syntax,
     /// The changed ranges of paired lines, by `(old, new)` line.
     inline: HashMap<(usize, usize), Changed>,
     /// The pairs of hunks' lines, by hunk (unified rows' words).
@@ -202,7 +204,7 @@ impl State {
             patch: false,
             font,
             column,
-            hint: "",
+            syntax: Syntax::Plain,
             inline: HashMap::new(),
             pairs: HashMap::new(),
             geometry: Geometry::default(),
@@ -260,20 +262,25 @@ impl State {
 
     /// Whether a side has a language to highlight.
     fn highlighted(&self) -> bool {
-        !self.hint.is_empty()
+        !self.syntax.is_plain()
             || files::hinted(&self.old.segments)
             || files::hinted(&self.new.segments)
     }
 
+    /// Whether the highlighters can be made (the built-in syntaxes are
+    /// loaded, where a side needs them).
+    fn ready(&self) -> bool {
+        self.syntax.ready() && files::ready(&self.old.segments) && files::ready(&self.new.segments)
+    }
+
     fn make_highlighters(&mut self) {
-        let loaded = Highlighter::ready();
-        let ready = loaded && !self.hint.is_empty();
+        let ready = self.syntax.ready();
         for side in [&mut self.old, &mut self.new] {
             if side.segments.is_empty() {
-                side.highlighter = ready.then(|| Highlighter::new(self.hint)).flatten();
+                side.highlighter = ready.then(|| Highlighter::with(&self.syntax)).flatten();
             } else {
                 side.highlighter = None;
-                files::make_highlighters(&mut side.segments, loaded);
+                files::make_highlighters(&mut side.segments);
             }
         }
     }
@@ -690,6 +697,8 @@ pub(crate) struct Dv {
     pub(crate) hscroll_x: Rc<Cell<Points>>,
     /// The last navigation, while the view stays where it went.
     pub(crate) nav: Rc<Cell<Option<super::review::Nav>>>,
+    /// The rows made last.
+    rows_window: crate::window::RowWindow,
 }
 
 impl Dv {
@@ -719,6 +728,7 @@ impl Dv {
             hscroll: [element_ref(), element_ref()],
             hscroll_x: Rc::default(),
             nav: Rc::default(),
+            rows_window: Default::default(),
         };
         dv.follow_props();
         dv
@@ -763,12 +773,12 @@ impl Dv {
                     (None, None, Some(text)) => {
                         let joined = files::join(&text, language.as_ref().map(|l| l.as_str()));
                         let name = language.map(|l| l.to_string()).or(joined.path.clone());
-                        st.hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
+                        st.syntax = languages::resolve(name.as_deref().unwrap_or("")).1;
                         st.set_patch(joined);
                     }
                     (old, new, _) => {
                         let name = language.map(|l| l.to_string());
-                        st.hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
+                        st.syntax = languages::resolve(name.as_deref().unwrap_or("")).1;
                         st.set_texts(
                             old.map(|s| s.to_string()).unwrap_or_default(),
                             new.map(|s| s.to_string()).unwrap_or_default(),
@@ -813,7 +823,8 @@ impl Dv {
         let lh = st.font.line_height.max(px(1.0));
         let y = self.scroll_y.get().max(Points::ZERO);
         let height = self.viewport.get().height.max(lh * 40.0);
-        st.geometry.range(y, height, OVERSCAN)
+        let visible = st.geometry.range(y, height, 0);
+        self.rows_window.rows(visible, st.geometry.rows())
     }
 
     // The ref.
@@ -986,7 +997,7 @@ impl Dv {
         if !self.st.borrow().highlighted() {
             return;
         }
-        if Highlighter::ready() {
+        if self.st.borrow().ready() {
             self.st.borrow_mut().make_highlighters();
             self.schedule_highlight();
             return;
@@ -1057,7 +1068,7 @@ impl Dv {
                         let start = first.saturating_sub(GUESS_CONTEXT);
                         let start_offset = side.starts.get(start).copied().unwrap_or(0);
                         if let Some(h) = &mut side.highlighter {
-                            let guess = (first > h.frontier() + GUESS_DISTANCE)
+                            let guess = (first > h.frontier().saturating_add(GUESS_DISTANCE))
                                 .then(|| h.guess(&side.rope, start, start_offset, last))
                                 .flatten();
                             let job = h.job(&side.rope, last + LOOKAHEAD, SLICE);

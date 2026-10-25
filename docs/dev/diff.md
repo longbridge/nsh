@@ -92,9 +92,10 @@ one file's syntax state never runs into the next; a frame's budget is shared amo
 
 The view is a vertical `Scroll` over a box of every row's height. In it sit the sides (two side by side for `split`,
 one for `unified`), each a gutter of line numbers (two columns in `unified`: old and new) beside a horizontal
-`Scroll` of the text, and over them the separators and the app's hunk actions. Only the rows in view are made, plus 8
-on each side (`OVERSCAN`), with at least 40 rows' height before the viewport is known; `each` keeps the rows that stay
-in view. A row's text is one `Text` of spans per wrapped line: runs of one syntax token and one inline state
+`Scroll` of the text, and over them the separators and the app's hunk actions. Only the rows in view are made, plus half
+a viewport (at least 16 rows) on each side, with at least 40 rows' height before the viewport is known, in a window
+that stays put while it covers the rows in view (`RowWindow`, as the `Editor`'s); `each` keeps the rows that stay in
+it. A row's text is one `Text` of spans per wrapped line: runs of one syntax token and one inline state
 (`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns); the split sides are as wide as the
 wider side's widest line and scroll sideways together (each side's `onScroll` scrolls the other, a move of under half a
 point ending the echo).
@@ -133,8 +134,9 @@ Promises in JS, as every component method with a result does (`docs/dev/componen
 
 ## Highlighting
 
-Each side has its own `editor::highlight::Highlighter` over a rope of its text, the `Editor`'s incremental syntect
-highlighter (`docs/dev/editor.md` "Highlighting"), with the language found by `editor::language::language`. The
+Each side has its own `editor::highlight::Highlighter` over a rope of its text, the `Editor`'s highlighting pipeline
+(`docs/dev/editor.md` "Highlighting"), with the language and its `Syntax` found by `editor::languages::resolve`: the
+engine's registered languages and highlighters first, then the built-in ones. The
 controller hands both sides' jobs (and guesses, for lines far past the parse) to one blocking thread at a time, up to
 1000 lines past each side's last line in view, as the `Editor` does; the syntaxes load on a blocking thread the first
 time (after a frame on WebAssembly). A patch's files each have a highlighter per side, in their own language

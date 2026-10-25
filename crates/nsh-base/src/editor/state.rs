@@ -9,16 +9,16 @@ use std::{ops::Range, rc::Rc};
 use nsh_core::geometry::{Bounds, Point as Pt, Points, Size, px};
 
 use super::{
-    EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorPosition, EditorSearch,
-    EditorSearchResult, EditorSelection, app_highlight,
+    EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorDiagnosticTag,
+    EditorPosition, EditorSearch, EditorSearchResult, EditorSelection, app_highlight,
     buffer::{Buffer, Change},
     commands::{EditOptions, Editing},
     diagnostics::{self, Mark},
     display::DisplayMap,
     fold::{self, FoldRange},
     fold_set,
-    highlight::Highlighter,
-    language::{self, LanguageConfig},
+    highlight::{Highlighter, LineEdit, Syntax},
+    language::LanguageConfig,
     movement, search,
     types::{RowLayout, Selection, Selections},
 };
@@ -59,6 +59,40 @@ pub(crate) struct Span {
     pub(crate) token: Option<Token>,
     /// The decorations over it (indexes into the editor's decorations).
     pub(crate) decorations: Vec<usize>,
+    /// The tags of the diagnostics over it (faded, struck through).
+    pub(crate) tags: SpanTags,
+}
+
+/// The tags of the diagnostics over a span: how its text is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct SpanTags {
+    /// Under an `unnecessary` diagnostic: faded.
+    pub(crate) unnecessary: bool,
+    /// Under a `deprecated` diagnostic: struck through.
+    pub(crate) deprecated: bool,
+}
+
+impl SpanTags {
+    /// The tags of `diagnostic`.
+    fn of(diagnostic: &EditorDiagnostic) -> SpanTags {
+        SpanTags {
+            unnecessary: diagnostic.tags.contains(&EditorDiagnosticTag::Unnecessary),
+            deprecated: diagnostic.tags.contains(&EditorDiagnosticTag::Deprecated),
+        }
+    }
+
+    /// Neither tag.
+    pub(crate) fn is_empty(self) -> bool {
+        !self.unnecessary && !self.deprecated
+    }
+
+    /// Both spans' tags.
+    fn union(self, other: SpanTags) -> SpanTags {
+        SpanTags {
+            unnecessary: self.unnecessary || other.unnecessary,
+            deprecated: self.deprecated || other.deprecated,
+        }
+    }
 }
 
 /// What one display row shows: its spans, whether a fold ends it (the
@@ -94,10 +128,16 @@ pub(crate) struct State {
     pub(crate) selections: Selections,
     pub(crate) display: DisplayMap,
     pub(crate) highlighter: Option<Highlighter>,
+    /// What highlights the language: the built-in highlighter, or the
+    /// app's (`register_highlighter`).
+    pub(crate) syntax: Syntax,
     pub(crate) language: &'static LanguageConfig,
     pub(crate) options: EditOptions,
     pub(crate) font: Font,
     pub(crate) diagnostics: Vec<Mark<EditorDiagnostic>>,
+    /// The longest tagged diagnostic's bytes: a row looks for the tags
+    /// over it among the diagnostics starting this far before it.
+    tag_reach: usize,
     /// The decorations' ranges, each carrying its index in `decoration_items`.
     pub(crate) decorations: Vec<Mark<usize>>,
     /// The decorations as the app gave them (classes and styles by index).
@@ -156,10 +196,12 @@ impl State {
             } else {
                 None
             },
+            syntax: Syntax::builtin(language.syntax_hint),
             language,
             options,
             font,
             diagnostics: Vec::new(),
+            tag_reach: 0,
             decorations: Vec::new(),
             decoration_items: Vec::new(),
             decoration_reach: 0,
@@ -213,7 +255,25 @@ impl State {
             Some(span) => {
                 self.display.edited(&self.buffer, span);
                 if let Some(h) = &mut self.highlighter {
-                    h.edited(span.first, span.old_count, span.new_count);
+                    let edit = match changes {
+                        [change] => {
+                            let line_start = self.buffer.line_start(span.first);
+                            let last = span.first + span.new_count - 1;
+                            let end = change.range.start + change.new_len;
+                            let tail = end - self.buffer.line_start(last);
+                            let rest = self.buffer.line_len(last).saturating_sub(tail);
+                            let start = change.range.start - line_start;
+                            Some(LineEdit {
+                                start,
+                                tail,
+                                rest,
+                                old_len: (span.old_count == 1)
+                                    .then(|| start + change.range.len() + rest),
+                            })
+                        }
+                        _ => None,
+                    };
+                    h.edited(&self.buffer, span, changes, edit);
                 }
                 self.folds_edited(span.first, span.old_count, span.new_count);
             }
@@ -225,6 +285,7 @@ impl State {
             diagnostics::adjust(scope, changes);
         }
         self.decoration_reach = app_highlight::reach(&self.decorations);
+        self.tag_reach = diagnostics::tag_reach(&self.diagnostics);
         self.fold_candidates = None;
         self.find();
         let len = self.buffer.len();
@@ -245,23 +306,24 @@ impl State {
         }
         self.display.rebuild(&self.buffer);
         if let Some(h) = &mut self.highlighter {
-            let lines = self.buffer.line_count();
-            h.edited(0, lines, lines);
+            h.reset(&self.buffer);
         }
         self.fold_candidates = None;
     }
 
-    pub(crate) fn set_language(&mut self, language: &'static LanguageConfig) {
-        if std::ptr::eq(self.language, language) {
+    /// The language and what highlights it (`syntax`: the built-in
+    /// highlighter's, or the app's for the language).
+    pub(crate) fn set_language(&mut self, language: &'static LanguageConfig, syntax: Syntax) {
+        if std::ptr::eq(self.language, language) && self.syntax.same(&syntax) {
             return;
         }
         self.language = language;
-        self.highlighter = (self.highlighting && Highlighter::ready())
-            .then(|| Highlighter::new(language.syntax_hint))
+        self.syntax = syntax;
+        self.highlighter = (self.highlighting && self.syntax.ready())
+            .then(|| Highlighter::with(&self.syntax))
             .flatten();
         if let Some(h) = &mut self.highlighter {
-            let lines = self.buffer.line_count();
-            h.edited(0, lines, lines);
+            h.reset(&self.buffer);
         }
     }
 
@@ -655,6 +717,21 @@ impl State {
             cuts.push(r.start);
             cuts.push(r.end);
         }
+        let tagged: Vec<(SpanTags, Range<usize>)> = app_highlight::near(
+            &self.diagnostics,
+            self.tag_reach,
+            info.range.start,
+            info.range.end,
+        )
+        .map(|(_, m)| (SpanTags::of(&m.item), m.range.clone()))
+        .filter(|(tags, r)| {
+            !tags.is_empty() && r.start < info.range.end && r.end > info.range.start
+        })
+        .collect();
+        for (_, r) in &tagged {
+            cuts.push(r.start);
+            cuts.push(r.end);
+        }
         cuts.retain(|c| *c >= info.range.start && *c <= info.range.end);
         cuts.sort_unstable();
         cuts.dedup();
@@ -686,14 +763,23 @@ impl State {
                 .filter(|(_, r)| r.start <= start && r.end >= end)
                 .map(|(i, _)| self.decorations[*i].item)
                 .collect();
+            let tags = tagged
+                .iter()
+                .filter(|(_, r)| r.start <= start && r.end >= end)
+                .fold(SpanTags::default(), |all, (t, _)| all.union(*t));
             match spans.last_mut() {
-                Some(last) if last.token == token && last.decorations == decorations => {
+                Some(last)
+                    if last.token == token
+                        && last.decorations == decorations
+                        && last.tags == tags =>
+                {
                     last.text.push_str(&text);
                 }
                 _ => spans.push(Span {
                     text,
                     token,
                     decorations,
+                    tags,
                 }),
             }
         }
@@ -727,6 +813,12 @@ impl State {
             folded,
             line_decorations,
         }
+    }
+
+    /// Sets the diagnostics, resolved.
+    pub(crate) fn set_diagnostics(&mut self, marks: Vec<Mark<EditorDiagnostic>>) {
+        self.tag_reach = diagnostics::tag_reach(&marks);
+        self.diagnostics = marks;
     }
 
     /// Sets the decorations, resolved (`marks`) and as the app gave them.
@@ -907,6 +999,11 @@ impl State {
             if mark.range.end < start || mark.range.start > end {
                 continue;
             }
+            // A tagged hint shows in its text alone (faded, struck
+            // through), as language clients draw it.
+            if mark.item.severity == EditorDiagnosticSeverity::Hint && !mark.item.tags.is_empty() {
+                continue;
+            }
             let mut range = mark.range.clone();
             if range.is_empty() {
                 // The char after it, or the end of its line.
@@ -1053,9 +1150,11 @@ impl State {
         self.selections.primary().head
     }
 
-    /// The language a name or path names.
+    /// The built-in language a name or path names (the controller also
+    /// finds the engine's own: `languages::resolve`).
+    #[cfg(test)]
     pub(crate) fn language_for(name: Option<&str>) -> &'static LanguageConfig {
-        language::language(name.unwrap_or(""))
+        super::language::language(name.unwrap_or(""))
     }
 
     /// The marks of the whitespace on `rows` (`showWhitespaces`): where
@@ -1087,7 +1186,8 @@ impl State {
     }
 }
 
-#[cfg(test)]
+// It times syntect too.
+#[cfg(all(test, feature = "highlight"))]
 mod bench {
     use std::time::{Duration, Instant};
 
@@ -1241,7 +1341,7 @@ mod tests {
             Rc::new(|text: &str| px(text.chars().count() as f32 * 8.0));
         State::new(
             text,
-            &language::PLAIN_TEXT,
+            &crate::editor::language::PLAIN_TEXT,
             EditOptions::default(),
             font,
             measure,
@@ -1524,5 +1624,85 @@ mod tests {
         // Edits keep the window right: a line inserted above shifts all.
         insert(&mut st, 0, "\n");
         assert_eq!(spans(&st, 1201)[0], ("line".to_owned(), None, 1));
+    }
+
+    fn diagnose(st: &mut State, items: Vec<EditorDiagnostic>) {
+        let marks = diagnostics::resolve(&st.buffer, &items, |d| d.range);
+        st.set_diagnostics(marks);
+    }
+
+    fn tagged_diagnostic(
+        from: (u32, u32),
+        to: (u32, u32),
+        severity: EditorDiagnosticSeverity,
+        tags: Vec<EditorDiagnosticTag>,
+    ) -> EditorDiagnostic {
+        EditorDiagnostic {
+            range: crate::editor::EditorRange::new(
+                EditorPosition::new(from.0, from.1),
+                EditorPosition::new(to.0, to.1),
+            ),
+            severity,
+            tags,
+            ..Default::default()
+        }
+    }
+
+    fn tag_spans(st: &State, line: usize) -> Vec<(String, bool, bool)> {
+        st.row_content(st.display.line_row(line))
+            .spans
+            .into_iter()
+            .map(|span| (span.text, span.tags.unnecessary, span.tags.deprecated))
+            .collect()
+    }
+
+    #[test]
+    fn tagged_diagnostics_fade_and_strike_their_text() {
+        use EditorDiagnosticSeverity::*;
+        use EditorDiagnosticTag::*;
+        let mut st = state("let unused = old();\nkeep\nfirst\nsecond\nthird\n");
+        diagnose(
+            &mut st,
+            vec![
+                tagged_diagnostic((0, 4), (0, 10), Hint, vec![Unnecessary]),
+                tagged_diagnostic((0, 13), (0, 16), Warning, vec![Deprecated]),
+                // Both tags over one span; an untagged diagnostic cuts
+                // nothing.
+                tagged_diagnostic((0, 4), (0, 6), Info, vec![Deprecated]),
+                tagged_diagnostic((1, 0), (1, 4), Error, vec![]),
+                // A long one, from line 2 into line 4.
+                tagged_diagnostic((2, 2), (4, 2), Hint, vec![Unnecessary]),
+            ],
+        );
+        assert_eq!(
+            tag_spans(&st, 0),
+            vec![
+                ("let ".to_owned(), false, false),
+                ("un".to_owned(), true, true),
+                ("used".to_owned(), true, false),
+                (" = ".to_owned(), false, false),
+                ("old".to_owned(), false, true),
+                ("();".to_owned(), false, false),
+            ]
+        );
+        assert_eq!(tag_spans(&st, 1), vec![("keep".to_owned(), false, false)]);
+        assert_eq!(tag_spans(&st, 3), vec![("second".to_owned(), true, false)]);
+        assert_eq!(
+            tag_spans(&st, 4),
+            vec![
+                ("th".to_owned(), true, false),
+                ("ird".to_owned(), false, false)
+            ]
+        );
+        // Carried through an edit above it.
+        insert(&mut st, 0, "\n");
+        assert_eq!(tag_spans(&st, 4), vec![("second".to_owned(), true, false)]);
+        // Tagged hints draw no mark under their text; the others do.
+        let severities: Vec<_> = st
+            .diagnostic_rects(0..st.display.row_count())
+            .into_iter()
+            .map(|(_, s)| s)
+            .collect();
+        assert_eq!(severities, vec![Info, Warning, Error]);
     }
 }

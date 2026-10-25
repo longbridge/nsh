@@ -11,11 +11,13 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | File | What |
 |---|---|
 | `mod.rs` | The component: `EditorProps`, `EditorEvent`, `EditorContextMenuEvent`, `EditorCommand` (what `run` takes), `EditorApi` (the ref's methods) |
-| `data.rs` | The values the editor and the app pass each other: `EditorPosition` (line, UTF-16 column), `EditorRange`, `EditorSelection`, `EditorSearch`, `EditorSearchResult`, `EditorDiagnostic` / `EditorDiagnosticSeverity`, `EditorDecoration` |
+| `data.rs` | The values the editor and the app pass each other: `EditorPosition` (line, UTF-16 column), `EditorRange`, `EditorSelection`, `EditorSearch`, `EditorSearchResult`, `EditorDiagnostic` / `EditorDiagnosticSeverity` / `EditorDiagnosticTag` / `EditorDiagnosticCodeDescription` / `EditorDiagnosticRelatedInformation` / `EditorLocation`, `EditorDecoration` |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `EditorClasses`, `EditorStyles` (each a `PartStyle`, as `TextView`'s) and `EditorPart` |
 | `controller.rs` | `Ed`: the state, the revisions bindings subscribe to, and what props, keys, typing, presses, the clipboard and the ref do to them; scrolling the caret into view; scheduling the highlighter |
 | `state.rs` | `State`: what the editor holds between frames, outside the reactive graph (buffer, selections, display map, highlighter, marks, matches); what the view draws of each row (`row_content`, `gutter_row`, the rectangles of selections, matches, brackets, diagnostics, indent guides) |
 | `view.rs` | The view: the scroll views, the gutter, the rows' box and its layers, the sink |
+| `completion.rs` | Completion: the session (requests, the query, what ends it), filtering and ranking, the list's keys, accepting, inline completion, and the list's overlay and ghost text |
+| `definition.rs` | Go to definition and code actions: `onDefinitionRequest` (Mod over a word, Mod-click, F12), the link the app's answer underlines (`presentDefinitionLink`) and what hides it, `onCodeActionRequest` (Mod+.) |
 | `hooks.rs` | What language features are built on: hovers (`onHover` / `onHoverEnd`), `onTextPress`, the ref's geometry and scrolling (`caretBounds`, `rangeBounds`, `revealPosition`, `goToLine`, ...), where the editor is in the root view |
 | `layout.rs` | Sizing and scrolling: `EditorScrollBeyond`, the height of an editor growing with its text, the margin around the caret, scrolling while a drag is past the edges |
 | `touch.rs` | Touch selection: taps, double taps and long presses, the range a touch made, its handles and their drags, the edit menu's `onContextMenu` (`EditorRect`) |
@@ -31,7 +33,9 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `fold_set.rs` | Folds as sets of ranges: the app's `foldRanges` normalized and carried through edits, the folded set after an edit, levels, nesting, the outermost folds |
 | `search.rs` | Find and replace on `regex`: matches, replacements with groups, the next and previous match |
 | `diagnostics.rs` | `Mark<T>`: the app's ranges resolved to byte ranges once and carried through edits |
-| `highlight.rs` | `Highlighter`: incremental syntect highlighting, line by line (feature `highlight`) |
+| `highlight.rs` | `Highlighter`: the highlighting pipeline (tokens by line, jobs off the engine thread, guesses, edits), `Syntax` (what highlights a language), the built-in highlighter on syntect (feature `highlight`) |
+| `highlighter.rs` | `EditorHighlighter`, the trait of the app's highlighters, and what crosses it: `EditorText`, `EditorTextEdit`, `EditorTokens`; `EditorToken::from_scope` |
+| `languages.rs` | The engine's own languages and highlighters: `EditorLanguage`, `register_language`, `register_highlighter`, and `resolve` (registered first, then built in) |
 | `app_highlight.rs` | The app's highlighting: decorations' `token`s over the highlighter's tokens; a row's decorations found by binary search |
 | `../syntax.rs` | What `TextView`'s code blocks and the editor share: `Token`, Allsum's palette, the syntaxes and the scope → token mapping |
 
@@ -65,7 +69,8 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
   `onChange` just reported is recognized and costs nothing. `defaultValue` is the first text of an uncontrolled
   editor.
 - **The language** (`language.rs`, static data) is found by name, alias, extension or file name, case-insensitive
-  (`"rust"`, `"rs"`, `"main.rs"`, `"tsx"`, `"Dockerfile"`); anything else is plain text. It decides the comment
+  (`"rust"`, `"rs"`, `"main.rs"`, `"tsx"`, `"Dockerfile"`), among the engine's registered languages first
+  (`languages.rs`, see "Highlighting"); anything else is plain text. It decides the comment
   tokens, brackets, auto-close pairs, extra word characters (`$` in JS), whether lines indent after (an opening
   bracket at the end, Python's `:`, Ruby's `do`) and outdent (a closing bracket, `end`), and the default tab size and
   hard tabs (`tabSize` and `hardTabs` override them).
@@ -85,13 +90,20 @@ hides as none. An edit lays out only the lines of its `LineSpan` and shifts the 
 ### Rendering and virtualization
 
 The view is a vertical `Scroll` of a row of the gutter and the text area (a horizontal `Scroll` without soft wrap).
-Only the rows in view are made, plus 8 on each side (`OVERSCAN`), and at least 40 rows' height before the viewport is
-known: the row list is a memo of the visible range, and `each` keeps the views of rows that stay in view, so
-scrolling makes only the rows that come in. Each row is an absolutely placed view holding one `Text` whose spans are
+The scroll views hold only the hit layer: empty boxes of the rows' size that take the wheel, the scroll bars, touches,
+presses and the pointer's cursor. What shows is the paint layer, drawn over the scroll views (`pointer_events(None)`)
+and moved by the offsets they report (`top(-scroll_y)`, `left(-scroll_x)`): the rows the offset needs and the offset
+itself come in the same commit, so a scroll bar dragged across a long file or a paste of many lines never shows a
+frame where the platform moved the content before the rows it needs were made. The paint layer's views keep the hit
+layer's handlers, so tests that press a row's text reach the same code. Only the rows in view are made, plus a
+viewport and a half (at least 16 rows) ahead in the way they scroll and half a viewport behind, and at least 40 rows'
+height before the viewport is known. That window (`window.rs`'s `RowWindow`, which the `DiffView` shares) stays put
+while it covers the rows in view with half a viewport to spare, so most scroll frames change no rows and commit
+nothing; the row list is a memo of the window, and `each` keeps the views of rows that stay in it. Each row is an absolutely placed view holding one `Text` whose spans are
 the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws, from back to
 front: the active lines' backgrounds, the rulers, indent guides, search matches, selections, the matching brackets,
-the rows, the whitespace marks, diagnostics' marks, the placeholder, the carets, the composition and the sink. Each
-layer is a `dynamic` over the revisions it depends on.
+the rows, the whitespace marks, diagnostics' marks, the placeholder, the carets and the composition. Each layer is a
+`dynamic` over the revisions it depends on.
 
 `showWhitespaces` draws a `·` per space and a `→` per tab over the rows in view: one `Text` per run of spaces and per
 tab, placed and sized by the display map (`DisplayMap::whitespace`), so the row's own text and its measuring stay as
@@ -118,7 +130,10 @@ itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 ### Typed text and input methods
 
 A native `Input` (the sink), invisible, 1 point wide and a row tall, is kept at the primary caret, so input methods
-open their candidate windows there and soft keyboards show. It holds only what was just typed: each `onChange` is
+open their candidate windows there and soft keyboards show. It lies over the scroll views, not in them, placed in the
+editor's box (`Ed::in_editor`) and held inside it: the platforms scroll the scroll views around a focused field to
+show it, which the editor does itself for its caret, and doing it again moved the text under the caret by a margin,
+animated, when the editor took the focus. It holds only what was just typed: each `onChange` is
 compared with what it held, and the difference becomes Backspaces and typed text at every selection (`sink_changed`),
 which is how autocorrection and input methods that replace their text work. While an input method composes, its text
 is drawn at the caret over the text (the `composition` part, underlined) and the carets hide; the commit arrives as
@@ -135,7 +150,8 @@ others theirs (Control by words, Home / End, Control+Home / End), on a common VS
 controller runs itself (find next / previous, folding, `findWithSelection`, the selection history, expanding) are bound
 from `editor_bindings(apple)`, as the `EditorCommand`s `run` takes: VS Code's keys (`cmd+g` / `cmd+shift+g` on Apple
 platforms and `f3` / `shift+f3` everywhere, `cmd+alt+[` / `]` or `ctrl+shift+[` / `]` to fold, `cmd+e`, `cmd+u` or
-`ctrl+u`, `ctrl+shift+cmd+right` / `left` or `shift+alt+right` / `left`). Copy and cut (`mod+c`, `mod+x`) are the
+`ctrl+u`, `ctrl+shift+cmd+right` / `left` or `shift+alt+right` / `left`, `f12` to go to a definition and `mod+.` for
+code actions). Copy and cut (`mod+c`, `mod+x`) are the
 controller's, through the clipboard. `run(command)` runs the same commands from the app, plus those that have no
 default keys (fold all, sorting lines, changing case, trimming trailing whitespace, paragraph moves, paste from the
 clipboard), for the app's own bindings and menus.
@@ -162,16 +178,68 @@ the text and the point in the root view, for the app's `Menu.popup`. A press on 
 
 ### Language features
 
-The editor draws no completion menu, hover card or code action list: it gives the app what gpui-base's `lsp` hooks
-use, and the app shows its own popups (`hooks.rs`). The mouse resting 150 ms (`HOVER_DELAY`) over a character reports
+Completion, go to definition and the request for code actions are built in (`completion.rs`, with `completion`;
+`definition.rs`); hover cards and code action menus are the app's, built on what gpui-base's `lsp` hooks use
+(`hooks.rs`). Completion is the editor's because a view's key bindings win over the
+app's (`Core::keymap`): while the editor has the focus Up, Down, Enter, Tab and Escape are its own, so only it can
+give them to a list. Typing a word character at a word's end asks the app (`onCompletionRequest`, trigger `typing`,
+the query the word before the caret), as does one of `completionTriggerCharacters` (`character`, an empty query after
+it) and `showCompletions` / `run("showCompletions")` (`invoked`, no default keys). Requests count up (`id`); the
+app answers with `presentCompletions(id, items, incomplete)`. A session keeps where its query starts: typing on in the
+word filters the answer in Rust without asking again (unless it was `incomplete`), and it ends when the caret leaves
+the word (left of the query's start, across a character that is not a word's, to another line), the selection grows,
+an edit lands before the query, a character that is neither a word's nor a trigger is typed, a word typed back to its
+start, the focus goes, the caret scrolls out of view, a press lands outside the list, or on Escape and accepting. An
+answer to an older request or a session that ended is dropped, and so is one arriving after an edit the session did not
+see (the app's `value`). Filtering is a subsequence match in any case over `filterText ?? label`, the most compact one
+per item: prefix matches first, then the fewest characters between the matched ones, then `sortText ?? label` (in any
+case first); the matched characters of the label are the `completionMatch` part. While the list shows, `up` / `down`
+(and `ctrl+p` / `ctrl+n` everywhere) move around its ends, `pageup` / `pagedown` move a page, `enter` and `tab` accept,
+`escape` closes: bound in an effect while it shows, after the editor's own, so they win. The pointer over an item marks
+it and a press accepts it (on the desktops at the press down, before anything could take the focus; on touch screens
+at the tap). Accepting replaces the item's `range` (default from the query's start to the caret) with
+`insertText ?? label` as one undo step, at the primary caret and at every other caret preceded by the same text (as VS
+Code does; the others stay), without asking again, then reports `onCompletionAccept`; snippets go in as plain text.
+The list is an overlay (`<Overlay>`, which never takes the focus) anchored to a 1 point view at the query's start on
+the caret's row, in the rows' box, so the core places it below (above without room) and follows the scrolling; it
+makes only the rows in view of its own scroll view (ten at most show), sized to the widest label and detail in the
+editor's monospaced font; the selected item's `documentation` shows beside it. Inline completion: after an edit that
+typed text, once typing pauses `inlineCompletionDelay` (one task waits, whatever the number of keystrokes) with no list
+showing, `onInlineCompletionRequest` asks; `presentInlineCompletion(id, text)` shows it at the caret in the
+`inlineCompletion` part (over the text after the caret, on the editor's background, mid-line; its further lines on the
+rows below), Tab inserts it as one undo step, Escape, any edit, any move and the list opening clear it. Without
+`completion` nothing of this runs on a keystroke.
+
+The mouse resting 150 ms (`HOVER_DELAY`) over a character reports
 `onHover`: the character's position and UTF-16 offset, its word's range, the pointer and the word's box in the root
 view, the modifiers and the diagnostics there. While a hover is shown, moving inside its word reports nothing and
 moving to another word reports the next one at once; leaving the text, an edit, a new layout or scrolling reports
 `onHoverEnd`. One task waits for the pointer to rest, whatever the number of moves. A press on a character reports
-`onTextPress` (position, word, modifiers, clicks) after the editor placed its caret: Mod-click is the app's go to
-definition. The ref places popups and moves: `caretBounds()` and `rangeBounds(range)` give boxes in the editor (its
+`onTextPress` (position, word, modifiers, clicks) after the editor placed its caret. The ref places popups and moves: `caretBounds()` and `rangeBounds(range)` give boxes in the editor (its
 scrolling applied) and in the root view, `visibleRange()` what the viewport shows, `revealPosition` / `goToLine`
-scroll (centered on request), `offsetToPosition` / `positionToOffset` convert UTF-16 offsets of `value()`.
+scroll (centered on request), `offsetToPosition` / `positionToOffset` convert UTF-16 offsets of `value()`. `edit`
+applies a language server's `TextEdit`s (code actions, formatting): the ranges sorted, overlapping ones after the first
+dropped, all replaced in one `Editing::replace` between two `break_undo_group`s (`replace_in_one_step`, which
+accepting a completion uses too), the selections carried as through any edit.
+
+Go to definition takes the shape of completion: the editor asks, the app answers later through the ref, the main
+thread never waits for JS. Mod held (Command on Apple platforms, Control elsewhere, as `bind_keys` decides `apple`;
+Alt not held, which adds carets) with the pointer over a word asks at once (`onDefinitionRequest`, trigger `hover`:
+`id`, the character's position and UTF-16 offset, the word's range), unless the pointer is inside the word asked about
+or the link shown; blanks and punctuation ask nothing. `presentDefinitionLink(id, range)` answers the last hover
+request: the range is underlined (the `definitionLink` part, a view per row it covers in the rows' box, under the
+glyphs) and the hit layer's cursor turns into a hand (`style_when` over the link signal), until Mod is released, the
+pointer leaves the range or the editor, or the text, its layout or the scrolling changes (`follow_definition`), or
+`hideDefinitionLink()`; each of these also drops the request out, so an answer to any but the last request, or one
+arriving after an edit, is ignored. The platforms report a modifier key pressed or released under a still mouse as a
+hover move where it is (`elements.md`), so pressing Mod over a word asks without moving the mouse; `hover_move` then
+also reports `onHover` again for the word shown, with the new modifiers. A Mod-click on a word asks with trigger
+`press` after `onTextPress`: on the link the caret stays where it is (as GPUI Kit's editor does), elsewhere the press
+places it first. `goToDefinition` (F12) asks with trigger `key` at the primary caret, for the word there (the word
+before it at a word's end). Answers to `press` and `key` are the app's to act on (`revealPosition`, `setSelections`,
+opening another file). `showCodeActions` (Mod+.) reports `onCodeActionRequest`: the primary selection, start first,
+the caret, and the caret's box (`caretBounds`), where the app opens its menu of the language server's actions, whose
+edits `edit` applies.
 
 Where the text is in the root view: the editor and its rows' box are measured (`ElementRef::measure`) after their
 layouts and when the gutter changes width, and every pointer event over the rows tells where they are then (its
@@ -181,20 +249,45 @@ is placed right again on the next pointer event or layout.
 
 ### Highlighting
 
-`highlight.rs` parses with syntect (the syntaxes and scope mapping of `crate::syntax`, shared with `TextView`), line by
-line. The tokens stay on the engine thread; the parser's state is kept every 16 lines (and on lines that kept one
-before an edit). An edit marks the lines from its first one dirty; parsing starts at the nearest state kept before it
-and stops as soon as a line ends in the state the next line started with before, so typing in a function costs a few
-lines. Only an edit that changes what follows (opening a block comment or a string) parses on. Parsing runs off the
-engine thread: the controller hands a `Job` (a snapshot of the rope, the state to start from, 25 ms of work) to a
-blocking thread, applies what it returns and hands the next, up to 1000 lines past the last one in view. Edits made
-while a job is out are kept and replayed on its result, which is dropped from the first edited line on. When the lines
-in view are more than 500 lines past the parse (a jump to the end of a long file), a `Guess` parses them from a fresh
-state, starting 40 lines before them, and shows that until the parse from the top reaches them. Lines not parsed again
-yet keep the tokens they had, so colors do not flicker. The syntaxes load on a blocking thread the first time a
-language needs them. On WebAssembly there are no threads: jobs run in place, 4 ms per frame. Without feature
-`highlight`, the text is plain. `highlighting={false}` drops the highlighter (and never loads the syntaxes for it)
-while the language keeps deciding comments, brackets and indentation.
+`highlight.rs` is one pipeline for every highlighter: the built-in one, syntect line by line (the syntaxes and scope
+mapping of `crate::syntax`, shared with `TextView`), and the app's (`EditorHighlighter`, below). The tokens stay on
+the engine thread, by line; the highlighter goes off it. The controller hands a `Job` (the highlighter, a snapshot of
+the rope, 25 ms of work) to a blocking thread, shows the lines it gave tokens and hands the next, up to 1000 lines past
+the last one in view, until the highlighter says those lines are current. Edits made while a job is out are kept and
+given to the highlighter when it comes back; the lines it highlighted from the text before them move with them (those
+the edits replaced are dropped). When the lines in view are more than 500 lines past the highlighter's frontier (a jump
+to the end of a long file), a `Guess` highlights them with a highlighter made for it, starting 40 lines before them,
+and shows that until the highlighting from the top reaches them; a highlighter that does not guess is not asked
+again. Lines in view with no tokens at all (a jump, a scroll faster than the guess) are guessed at once, in the commit
+that shows them (`highlight_shown_now`), so no frame shows them plain. An edit shifts the tokens of the lines it
+touches with the text (`LineEdit`): typed text takes the color of the token it extends and the rest of the line keeps
+its colors until the highlighter gives the line new ones, so colors do not flicker. Lines not highlighted again keep
+the tokens they had. On WebAssembly there are no threads: jobs run in place, 4 ms per frame. `highlighting={false}`
+drops the highlighter (and never loads the syntaxes for it) while the language keeps deciding comments, brackets and
+indentation.
+
+The built-in highlighter keeps syntect's state every 16 lines (and on lines that kept one before an edit). An edit
+marks the lines from its first one dirty; parsing starts at the nearest state kept before it and stops as soon as a
+line ends in the state the next line started with before, so typing in a function costs a few lines. Only an edit that
+changes what follows (opening a block comment or a string) parses on. The syntaxes load on a blocking thread the
+first time a language needs them. Without feature `highlight` the built-in languages are plain; the app's
+highlighters still run.
+
+The app's highlighters and languages (`highlighter.rs`, `languages.rs`) are kept per engine, in a value of the
+surface (`nsh_core::ui::global`), never process-wide. `register_language` adds an `EditorLanguage` (a
+`LanguageConfig` built with `const` methods, so a `static`); `register_highlighter` binds a factory of
+`EditorHighlighter`s to a language name (resolved when registered: `"rs"` binds Rust). `languages::resolve` finds a
+name among the registered languages (latest first: name, alias, extension, then as a path) before the built-in table,
+and the language's `Syntax`: the app's factory, else the built-in hint. The editor's language effect and the
+`DiffView`'s texts effect read the registrations tracked, so a registration since finds them again. A Rust app
+registers in its root before it mounts its editors; a UI set (an app's crate, `#[native_module]`) does in
+`Registry::setup`, which the core runs in its runtime when it takes the sets (`Core::set_components`), before the app's
+first op. An `EditorHighlighter` is `Send` and runs where the jobs run. It hears every edit as an `EditorTextEdit`: the
+lines (what a line-by-line highlighter reads) and the bytes and places of tree-sitter's `InputEdit` (one change as it
+is, several as one over the lines they touched; a new text as every line changed). The places cost a scan of the
+edited line, so only the app's highlighters get them. It gives tokens per line through `EditorTokens::line`, which
+sorts out overlaps and joins touching tokens of one kind; `EditorToken::from_scope` maps tree-sitter captures and
+TextMate scopes onto the kinds. A registered highlighter for a built-in language replaces syntect for it.
 
 `onChange` carries the text as a `SharedString`, built once per version of the buffer: the same text is not built
 again for the echo of a controlled `value`. Building it is the one cost of an edit that grows with the text.
@@ -222,6 +315,16 @@ range marks the character after it. A decoration's `class` / `style` style its t
 bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A row looks for its decorations by two
 binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
 (`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
+
+A diagnostic is LSP's `Diagnostic` with names for its enums: `codeDescription` and `relatedInformation` are data the
+hover hands back (related ranges as the app gave them, as they may be in other documents), and `tags` style its text.
+A tagged diagnostic's text is cut into spans as a decoration's is, in the same pass of `State::row_content`: the row
+finds the tagged diagnostics over it by the same two binary searches (`app_highlight::near`, with `tag_reach`, the
+longest tagged diagnostic's length, kept with the marks), and each span carries the union of their tags
+(`SpanTags`). The view gives an `unnecessary` span `muted-foreground` and a `deprecated` one a line through, then the
+`unnecessaryText` / `deprecatedText` parts' classes and styles and the span's decorations' over them: one text run
+per span, no view per diagnostic. A hint with a tag draws no mark under it, as language clients show such hints in
+their text alone.
 
 A decoration's `token` (`EditorToken`: the built-in kinds of `crate::syntax`) is the app's highlighting: its text takes
 that token's colors in place of the built-in highlighter's there (the innermost decoration's token wins), its `class` /
@@ -275,9 +378,19 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `foldPlaceholder` | ` ⋯ ` after a folded line, `muted-foreground` |
 | `placeholder` | `muted-foreground` |
 | `diagnosticError` / `Warning` / `Info` / `Hint` | A 2 point line: `destructive` / amber / blue / `muted-foreground` |
+| `unnecessaryText` / `deprecatedText` | The text of tagged diagnostics: `muted-foreground` / struck through |
 | `whitespace` | `·` per space, `→` per tab, `muted-foreground` at 60 %, while `showWhitespaces` |
 | `ruler` | A 1 point line of `border` at each of `rulers`' columns |
 | `selectionHandle` / `selectionHandleStart` / `selectionHandleEnd` | A 10 point dot of `primary`, centered in the knob's 16 point room |
+| `completionMenu` | `popover` with `popover-foreground` text, a 1 point `border`, radius `radius - 2`, `shadow-md`; as wide as the widest label and detail (160 to 480 points), ten rows tall at most |
+| `completionItem` | A row's height, 8 points of padding, the kind, label and detail 6 points apart |
+| `selectedCompletionItem` | `accent` behind, `accent-foreground` text |
+| `completionMatch` | Semibold, `primary` |
+| `completionDetail` | Right-aligned after the label, one line, `muted-foreground` |
+| `completionKind` | A short name (`fn`, `var`, `cls`, ...) five characters wide, `muted-foreground` |
+| `completionDocumentation` | As `completionMenu`, at most 320 points wide, 8 / 6 points of padding |
+| `inlineCompletion` | `muted-foreground`; on `background` mid-line |
+| `definitionLink` | A 1 point line of `primary` under the link's text, on each row it covers |
 
 Syntax colors are `crate::syntax`'s `Token` styles, Allsum's palette in light and dark (the table in `text-view.md`
 "Syntax highlighting"). The font is a prop, not a class: the editor measures its text in it.
@@ -296,7 +409,10 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 | `DisplayMap` (wrap, folds), the highlighter's fold candidates | `display.rs` on measured char widths; folds by indentation or the app's `foldRanges`, nested folds kept |
 | Search panel | `search` prop, `onSearchChange`, `findNext` / `replace` / `replaceAll`: the find bar is the app's |
 | Diagnostics with hover popovers | `diagnostics` marked and carried through edits; `onHover` carries those under the mouse, the app shows them |
-| `lsp` providers (hover, completion, definition, code actions) | `onHover` / `onHoverEnd`, `onTextPress`, `caretBounds` / `rangeBounds`: the app asks its language server and draws the popups |
+| `CompletionProvider` (`completions`, `is_completion_trigger`, `inline_completion`), `ShowCompletions` | `completion`, `onCompletionRequest` / `presentCompletions`, `completionTriggerCharacters`, `onInlineCompletionRequest` / `presentInlineCompletion`, `inlineCompletionDelay`, `showCompletions`: the editor draws the list and the ghost text, the app asks its language server |
+| `CompletionHighlighter` (`highlight_prefix`, `highlight_characters`, ...) | One subsequence match, in Rust, highlighted as `completionMatch` |
+| `lsp` providers (hover, definition, code actions) | `onHover` / `onHoverEnd`, `onTextPress`, `caretBounds` / `rangeBounds`: the app asks its language server and draws the popups |
+| `DefinitionProvider`, `HoverDefinition` (the Cmd-hover underline), `GoToDefinition`, `ToggleCodeActions` | `onDefinitionRequest` (`hover`, `press`, `key`) / `presentDefinitionLink` / `hideDefinitionLink`, the `definitionLink` part, `goToDefinition` (F12), `showCodeActions` (Mod+.) / `onCodeActionRequest`: the editor underlines, the app finds the definitions and shows the actions |
 | Key bindings as GPUI actions | `keymap.rs` data on `nsh/keymap`, bound while focused; `run(command)` |
 | `show_whitespaces`, `auto_grow(min, max)`, `scroll_beyond_last_line(rows)`, `cursor_surrounding_lines`, `AutoScroll` | `showWhitespaces`, `minRows` / `maxRows`, `scrollBeyondLastLine` (also `true` / `false`), `cursorSurroundingLines`; dragging scrolls past the edges the same way (`layout.rs`) |
 

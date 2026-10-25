@@ -10,7 +10,7 @@ use std::fmt;
 
 /// A language's indentation rule: `raw` is the whole line, `code` the line
 /// without its trailing comment, trimmed at both ends.
-type Rule = fn(raw: &str, code: &str) -> bool;
+pub(crate) type Rule = fn(raw: &str, code: &str) -> bool;
 
 /// What editing a language's text needs to know.
 pub(crate) struct LanguageConfig {
@@ -43,9 +43,9 @@ pub(crate) struct LanguageConfig {
     /// (Rust leaves `'` out: lifetimes).
     pub(crate) string_quotes: &'static str,
     /// What indents the next line besides an opening bracket at the end.
-    indent_rule: Option<Rule>,
+    pub(crate) indent_rule: Option<Rule>,
     /// What outdents a line besides a closing bracket at its start.
-    outdent_rule: Option<Rule>,
+    pub(crate) outdent_rule: Option<Rule>,
 }
 
 impl fmt::Debug for LanguageConfig {

@@ -40,6 +40,7 @@ pub mod text_view;
 mod theme;
 mod toast;
 mod tooltip;
+mod window;
 
 use std::sync::Arc;
 
@@ -62,10 +63,12 @@ pub use crate::{
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     editor::{
         Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
-        EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorElement, EditorEvent,
-        EditorFoldRange, EditorHoverEvent, EditorPart, EditorPosition, EditorProps, EditorRange,
-        EditorRect, EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection,
-        EditorStyles, EditorTextPressEvent, EditorToken, editor,
+        EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
+        EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
+        EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
+        EditorPosition, EditorProps, EditorRange, EditorRect, EditorScrollBeyond, EditorSearch,
+        EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, EditorToken,
+        editor,
     },
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,

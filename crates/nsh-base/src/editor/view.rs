@@ -7,7 +7,11 @@
 
 use nsh_core::ui::{ContextMenuEvent, Cursor, EventKind, EventPayload, Style, prelude::*};
 
-use super::{EditorDiagnosticSeverity, EditorPart, EditorProps, controller::Ed, state::RowContent};
+use super::{
+    EditorDiagnosticSeverity, EditorPart, EditorProps,
+    controller::Ed,
+    state::{RowContent, SpanTags},
+};
 use crate::theme;
 
 /// The width of a caret.
@@ -23,7 +27,7 @@ const WARNING: AdaptiveColor = AdaptiveColor::rgb(0xd97706, 0xfbbf24);
 const INFO: AdaptiveColor = AdaptiveColor::rgb(0x2563eb, 0x60a5fa);
 
 /// `el` with part `part`'s classes and style, which follow the props.
-fn part<E: Element>(el: E, props: EditorProps, part: EditorPart) -> E {
+pub(crate) fn part<E: Element>(el: E, props: EditorProps, part: EditorPart) -> E {
     el.app_class(move || props.classes.with(|c| c.get(part).cloned()))
         .inline_style(move || {
             props
@@ -77,6 +81,21 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
     let place_ed = ed.clone();
     let grow_ed = ed.clone();
     let content_ed = ed.clone();
+    let paint_ed = ed.clone();
+    let pointer = GutterPointer {
+        hover: signal(None),
+        pressed: signal(None),
+    };
+    // Lines scrolled into view with no colors yet get them in the same
+    // commit (a jump, or a scroll faster than the parse and the guesses
+    // ahead of it).
+    let shown_ed = ed.clone();
+    effect(move || {
+        shown_ed.scroll_y.get();
+        shown_ed.viewport.get();
+        shown_ed.text_rev.get();
+        untracked(|| shown_ed.highlight_shown_now());
+    });
     view()
         .element_ref(&ed.hooks.outer)
         .on_layout(move |_: &Bounds<Points>| place_ed.measure_place())
@@ -109,14 +128,59 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
                         .on_layout(move |b: &Bounds<Points>| {
                             content_ed.content_height.set(b.size.height)
                         })
-                        .child(gutter(ed.clone()))
-                        .child(text_area(ed.clone(), lh)),
+                        .child(gutter(ed.clone(), Layer::Hit, pointer))
+                        .child(text_area(ed.clone(), lh.clone(), Layer::Hit)),
                 ),
         )
+        // What the scroll views show, drawn over them where the editor last
+        // scrolled to: the platforms move a scroll view's content at once,
+        // the rows a move needs come with the editor's next commit, which
+        // moves this layer with them, so no frame shows the content without
+        // its rows.
+        .child(
+            view()
+                .absolute()
+                .inset_0()
+                .overflow_hidden()
+                .pointer_events(PointerEvents::None)
+                .child(
+                    view()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(move || Length::from(-paint_ed.scroll_y.get()))
+                        .flex_row()
+                        .items_stretch()
+                        .child(gutter(ed.clone(), Layer::Paint, pointer))
+                        .child(text_area(ed.clone(), lh.clone(), Layer::Paint)),
+                ),
+        )
+        .child(super::completion::menu(ed.clone()))
+        .child(sink(ed, lh))
+}
+
+/// Which of the editor's two trees a part is made for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layer {
+    /// In the scroll views, empty: what the pointer, the wheel, the scroll
+    /// bars and touches reach (the platforms scroll it).
+    Hit,
+    /// Over the scroll views, receiving no pointer: what shows, placed
+    /// where the editor scrolled to. Its views keep their handlers for the
+    /// tests that press them by what they show.
+    Paint,
+}
+
+/// The fold marker the pointer is over and the one pressed (display rows):
+/// the hit tree's markers take the pointer, the painted ones show it.
+#[derive(Clone, Copy)]
+struct GutterPointer {
+    hover: Signal<Option<usize>>,
+    pressed: Signal<Option<usize>>,
 }
 
 /// The gutter: line numbers and fold markers of the rows in view.
-fn gutter(ed: Ed) -> impl IntoElement {
+fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
     let props = ed.props;
     let shown = move || props.line_numbers.get() || props.folding.get();
     let number_width = {
@@ -153,31 +217,129 @@ fn gutter(ed: Ed) -> impl IntoElement {
         let (number_width, fold_width) = (number_width.clone(), fold_width.clone());
         let height = height.clone();
         let row_ed = ed.clone();
+        let press_ed = ed.clone();
+        let hit_nw = nw.clone();
+        let inner = view()
+            .relative()
+            .mt(move || Length::from(top.get()))
+            .w(move || Length::from(nw() + fw()))
+            .h(move || Length::from(height()));
+        let inner = match layer {
+            Layer::Paint => inner.child(each(
+                rows,
+                |row: &usize| *row,
+                move |row, _| {
+                    gutter_row(
+                        row_ed.clone(),
+                        row.get_untracked(),
+                        number_width.clone(),
+                        fold_width.clone(),
+                        pointer,
+                    )
+                },
+            )),
+            // A press on a number reports its line; the markers take
+            // presses of their own.
+            Layer::Hit => inner
+                .on(EventKind::Press, move |p: &EventPayload| {
+                    let EventPayload::Press(e) = p else { return };
+                    if !props.line_numbers.get_untracked() || e.position.x >= hit_nw() {
+                        return;
+                    }
+                    let row = {
+                        let st = press_ed.st.borrow();
+                        let row = (e.position.y / st.line_height()).floor().max(0.0) as usize;
+                        (row < st.display.row_count()).then_some(row)
+                    };
+                    if let Some(row) = row {
+                        press_ed.line_number_press(row);
+                    }
+                })
+                .child(each(
+                    rows,
+                    |row: &usize| *row,
+                    move |row, _| {
+                        fold_hit(
+                            row_ed.clone(),
+                            row.get_untracked(),
+                            number_width.clone(),
+                            fold_width.clone(),
+                            pointer,
+                        )
+                    },
+                )),
+        };
         part(
             view().flex_none().pl(px(12.0)).pr(px(4.0)),
             props,
             EditorPart::Gutter,
         )
-        .child(
-            view()
-                .relative()
-                .mt(move || Length::from(top.get()))
-                .w(move || Length::from(nw() + fw()))
-                .h(move || Length::from(height()))
-                .child(each(
-                    rows,
-                    |row: &usize| *row,
-                    move |row, _| {
-                        gutter_row(
-                            row_ed.clone(),
-                            row.get_untracked(),
-                            number_width.clone(),
-                            fold_width.clone(),
-                        )
-                    },
-                )),
-        )
+        .child(inner)
     })
+}
+
+/// What takes the pointer for the fold marker of display row `row`, when
+/// it has one: a clear box over the painted marker.
+fn fold_hit(
+    ed: Ed,
+    row: usize,
+    number_width: impl Fn() -> Points + Clone + 'static,
+    fold_width: impl Fn() -> Points + Clone + 'static,
+    pointer: GutterPointer,
+) -> impl IntoElement {
+    let props = ed.props;
+    let folds = {
+        let ed = ed.clone();
+        computed(move || {
+            ed.text_rev.get();
+            ed.marks_rev.get();
+            props.folding.get() && ed.st.borrow_mut().gutter_row(row).fold.is_some()
+        })
+    };
+    when(
+        move || folds.get(),
+        move || {
+            let ed = ed.clone();
+            let (number_width, fold_width) = (number_width.clone(), fold_width.clone());
+            let lh = {
+                let ed = ed.clone();
+                move || {
+                    ed.text_rev.get();
+                    ed.st.borrow().line_height()
+                }
+            };
+            let lh2 = lh.clone();
+            view()
+                .absolute()
+                .left(move || {
+                    Length::from(if props.line_numbers.get() {
+                        number_width()
+                    } else {
+                        px(0.0)
+                    })
+                })
+                .top(move || Length::from(lh() * row as f32))
+                .w(move || Length::from(fold_width()))
+                .h(move || Length::from(lh2()))
+                .cursor_pointer()
+                .on_hover_in(move || pointer.hover.set(Some(row)))
+                .on_hover_out(move || {
+                    if pointer.hover.get_untracked() == Some(row) {
+                        pointer.hover.set(None);
+                    }
+                })
+                .on(EventKind::PressDown, move |_: &EventPayload| {
+                    pointer.pressed.set(Some(row))
+                })
+                .on(EventKind::PressUp, move |_: &EventPayload| {
+                    pointer.pressed.set(None)
+                })
+                .on_press(move || {
+                    let line = ed.st.borrow().display.row(row).line;
+                    ed.fold(line, None);
+                })
+        },
+    )
 }
 
 /// The gutter of display row `row`.
@@ -186,6 +348,7 @@ fn gutter_row(
     row: usize,
     number_width: impl Fn() -> Points + Clone + 'static,
     fold_width: impl Fn() -> Points + Clone + 'static,
+    pointer: GutterPointer,
 ) -> impl IntoElement {
     let props = ed.props;
     let info = {
@@ -277,9 +440,15 @@ fn gutter_row(
                                     .items_center()
                                     .justify_center()
                                     .rounded(px(3.0))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(hovered))
-                                    .active(|s| s.bg(pressed))
+                                    .bg(move || {
+                                        if pointer.pressed.get() == Some(row) {
+                                            pressed
+                                        } else if pointer.hover.get() == Some(row) {
+                                            hovered
+                                        } else {
+                                            AdaptiveColor::TRANSPARENT
+                                        }
+                                    })
                                     .on_press(move || {
                                         let line = ed.st.borrow().display.row(row).line;
                                         ed.fold(line, None);
@@ -365,7 +534,7 @@ fn grow_height(ed: &Ed) -> Option<Points> {
 
 /// The text area: the rows' box, in a horizontal scroll view unless lines
 /// wrap.
-fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
+fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> impl IntoElement {
     let props = ed.props;
     let wrap = move || props.soft_wrap.get();
     let a = ed.clone();
@@ -373,10 +542,37 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElem
     let c = lh.clone();
     when(wrap, move || {
         let ed = a.clone();
-        part(view().flex_1().pl(px(4.0)), props, EditorPart::Content).child(rows_box(ed, c.clone()))
+        part(view().flex_1().pl(px(4.0)), props, EditorPart::Content).child(rows_box(
+            ed,
+            c.clone(),
+            layer,
+        ))
     })
     .otherwise(move || {
         let ed = b.clone();
+        if layer == Layer::Paint {
+            // The horizontal scroll view's content, where it scrolled to.
+            let (x_ed, h_ed) = (ed.clone(), ed.clone());
+            return view()
+                .flex_1()
+                .relative()
+                .overflow_hidden()
+                .h(move || Length::from(rows_height(&h_ed)))
+                .child(
+                    part(
+                        view()
+                            .absolute()
+                            .top_0()
+                            .left(move || Length::from(-x_ed.scroll_x.get()))
+                            .min_w(relative(1.0))
+                            .pl(px(4.0)),
+                        props,
+                        EditorPart::Content,
+                    )
+                    .child(rows_box(ed, lh.clone(), layer)),
+                )
+                .into_element();
+        }
         let scroll_ed = ed.clone();
         let layout_ed = ed.clone();
         scroll()
@@ -391,13 +587,14 @@ fn text_area(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElem
                     props,
                     EditorPart::Content,
                 )
-                .child(rows_box(ed, lh.clone())),
+                .child(rows_box(ed, lh.clone(), layer)),
             )
+            .into_element()
     })
 }
 
 /// The box of the rows and everything drawn over and under them.
-fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
+fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> impl IntoElement {
     let props = ed.props;
     let width = {
         let ed = ed.clone();
@@ -426,23 +623,42 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
     let menu = ed.clone();
     let layout = ed.clone();
     let (hover, hover_end) = (ed.clone(), ed.clone());
-    let mut el = view()
-        .element_ref(&ed.hooks.rows)
-        .relative()
-        .cursor(Cursor::Text)
-        .h(move || Length::from(height()))
-        .on_layout(move |b: &Bounds<Points>| {
-            layout.rows_top.set(b.origin.y);
-            layout.rows_left.set(b.origin.x);
-            if props.soft_wrap.get_untracked() {
-                layout.text_width.set(b.size.width);
-            }
-            layout.measure_place();
-        })
+    let el = view().relative().h(move || Length::from(height()));
+    let el = match layer {
+        Layer::Hit => el
+            .element_ref(&ed.hooks.rows)
+            .cursor(Cursor::Text)
+            // A hand over the definition link (the pointer leaving it hides
+            // it).
+            .style_when(
+                {
+                    let link = ed.definition.link;
+                    move || link.get().is_some()
+                },
+                |s| s.cursor(Cursor::Pointer),
+            )
+            .on_layout(move |b: &Bounds<Points>| {
+                layout.rows_top.set(b.origin.y);
+                layout.rows_left.set(b.origin.x);
+                if props.soft_wrap.get_untracked() {
+                    layout.text_width.set(b.size.width);
+                }
+                layout.measure_place();
+            }),
+        Layer::Paint => el,
+    };
+    let mut el = el
         .on(EventKind::PressDown, move |p: &EventPayload| {
             if let (true, EventPayload::Press(e)) = (desktop, p) {
-                down.press(e.position, e.page_position, e.modifiers, e.clicks);
+                // A Mod-click on the definition link keeps the caret where
+                // it is.
+                if down.on_definition_link(e.position, e.modifiers, e.clicks) {
+                    down.focus();
+                } else {
+                    down.press(e.position, e.page_position, e.modifiers, e.clicks);
+                }
                 down.text_press(e.position, e.page_position, e.modifiers, e.clicks);
+                down.definition_press(e.position, e.modifiers, e.clicks);
             }
         })
         .on(EventKind::Press, move |p: &EventPayload| {
@@ -487,8 +703,12 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
         Some(w) => Length::from(w),
         None => Length::Auto,
     });
-    el.min_w(relative(1.0))
-        .child(active_lines(ed.clone(), lh.clone()))
+    let el = el.min_w(relative(1.0));
+    if layer == Layer::Hit {
+        // The selection's handles take touches of their own.
+        return el.child(super::touch::handles(ed)).into_element();
+    }
+    el.child(active_lines(ed.clone(), lh.clone()))
         .child(rulers(ed.clone()))
         .child(indent_guides(ed.clone(), lh.clone()))
         .child(match_rects(ed.clone()))
@@ -497,11 +717,12 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
         .child(rows(ed.clone(), lh.clone()))
         .child(whitespace_marks(ed.clone()))
         .child(diagnostic_marks(ed.clone()))
+        .child(super::definition::link_marks(ed.clone()))
         .child(placeholder(ed.clone()))
         .child(carets(ed.clone(), lh.clone()))
         .child(composition(ed.clone(), lh.clone()))
-        .child(super::touch::handles(ed.clone()))
-        .child(sink(ed, lh))
+        .child(super::completion::marks(ed))
+        .into_element()
 }
 
 /// A rectangle of the rows' box, absolutely placed.
@@ -750,26 +971,35 @@ fn spans(ed: Ed, row: usize, content: RowContent) -> Vec<AnyElement> {
             if let Some(token) = span.token {
                 *el.style() = token.style();
             }
-            if !span.decorations.is_empty() {
-                let classes: Vec<String> = span
-                    .decorations
-                    .iter()
-                    .filter_map(|i| st.decoration_items.get(*i).and_then(|d| d.class.clone()))
-                    .map(|c| c.to_string())
-                    .collect();
+            let tags = span.tags;
+            if tags.unnecessary {
+                el = el.text_color(move || theme().muted_foreground);
+            }
+            if tags.deprecated {
+                el = el.line_through();
+            }
+            let classes: Vec<String> = span
+                .decorations
+                .iter()
+                .filter_map(|i| st.decoration_items.get(*i).and_then(|d| d.class.clone()))
+                .map(|c| c.to_string())
+                .collect();
+            let styles: Vec<Style> = span
+                .decorations
+                .iter()
+                .filter_map(|i| st.decoration_items.get(*i).and_then(|d| d.style.clone()))
+                .collect();
+            if tags.is_empty() {
                 if !classes.is_empty() {
                     el = el.app_class(Some(SharedString::from(classes.join(" "))));
                 }
-                let styles: Vec<Style> = span
-                    .decorations
-                    .iter()
-                    .filter_map(|i| st.decoration_items.get(*i).and_then(|d| d.style.clone()))
-                    .collect();
                 if !styles.is_empty() {
                     el = el.inline_style(Style::from_decls(
                         styles.iter().flat_map(|s| s.decls().iter().cloned()),
                     ));
                 }
+            } else {
+                el = tagged(el, props, tags, classes, styles);
             }
             out.push(el.into_element());
         }
@@ -785,6 +1015,44 @@ fn spans(ed: Ed, row: usize, content: RowContent) -> Vec<AnyElement> {
         out.push(part(placeholder, props, EditorPart::FoldPlaceholder).into_element());
     }
     out
+}
+
+/// Span `el` under tagged diagnostics: the classes and styles of the
+/// tags' parts, then its decorations' (`classes`, `styles`), which are
+/// about this range alone.
+fn tagged(
+    el: Text,
+    props: EditorProps,
+    tags: SpanTags,
+    classes: Vec<String>,
+    styles: Vec<Style>,
+) -> Text {
+    let list: &'static [EditorPart] = match (tags.unnecessary, tags.deprecated) {
+        (true, true) => &[EditorPart::UnnecessaryText, EditorPart::DeprecatedText],
+        (true, false) => &[EditorPart::UnnecessaryText],
+        _ => &[EditorPart::DeprecatedText],
+    };
+    let classes = classes.join(" ");
+    el.app_class(move || {
+        props.classes.with(|c| {
+            let joined: Vec<&str> = list
+                .iter()
+                .filter_map(|p| c.get(*p).map(|s| s.as_str()))
+                .chain((!classes.is_empty()).then_some(classes.as_str()))
+                .collect();
+            (!joined.is_empty()).then(|| SharedString::from(joined.join(" ")))
+        })
+    })
+    .inline_style(move || {
+        props.styles.with(|s| {
+            Style::from_decls(
+                list.iter()
+                    .filter_map(|p| s.get(*p))
+                    .chain(styles.iter())
+                    .flat_map(|s| s.decls().iter().cloned()),
+            )
+        })
+    })
 }
 
 /// The diagnostics' marks in view.
@@ -913,14 +1181,26 @@ fn composition(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEl
 
 /// The native input that takes typed text and input methods, kept at the
 /// primary caret (where the input method's candidates open), invisible.
+/// It lies over the scroll views, not in them, and inside the editor's box:
+/// the platforms scroll a focused field into view, which the editor does
+/// itself for its caret, and would scroll the text from under it.
 fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
     let at = {
         let ed = ed.clone();
+        let lh = lh.clone();
         computed(move || {
             ed.text_rev.get();
             ed.sel_rev.get();
-            let st = ed.st.borrow();
-            st.caret_point(st.primary_head())
+            let caret = {
+                let st = ed.st.borrow();
+                st.caret_point(st.primary_head())
+            };
+            let at = ed.in_editor(caret);
+            let size = ed.viewport.get();
+            Point::new(
+                at.x.min(size.width - px(1.0)).max(px(0.0)),
+                at.y.min(size.height - lh()).max(px(0.0)),
+            )
         })
     };
     let props = ed.props;
@@ -1021,4 +1301,44 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
             })
             .collect::<Vec<_>>()
     })
+}
+
+impl Ed {
+    /// Guesses the colors of the lines in view that have none yet, here:
+    /// what the parse and the guesses off the engine thread bring a few
+    /// frames later.
+    fn highlight_shown_now(&self) {
+        let changed = {
+            let mut st = self.st.borrow_mut();
+            let st = &mut *st;
+            let count = st.display.row_count();
+            let lh = st.line_height().0.max(1.0);
+            let height = self.viewport.get_untracked().height.0;
+            if count == 0 || height <= 0.0 {
+                return;
+            }
+            let y = (self.scroll_y.get_untracked() - self.rows_top.get_untracked())
+                .0
+                .max(0.0);
+            let first_row = ((y / lh).floor() as usize).min(count - 1);
+            let last_row = (((y + height) / lh).ceil() as usize).clamp(first_row + 1, count) - 1;
+            let first = st.display.row(first_row).line;
+            let last = st.display.row(last_row).line;
+            let Some(h) = &mut st.highlighter else {
+                return;
+            };
+            if (first..=last).all(|line| h.tokens(line).is_some()) {
+                return;
+            }
+            let start = first.saturating_sub(super::highlight::GUESS_CONTEXT);
+            let offset = st.buffer.line_start(start);
+            match h.guess(st.buffer.rope(), start, offset, last) {
+                Some(guess) => !h.guessed(guess.run()).is_empty(),
+                None => false,
+            }
+        };
+        if changed {
+            self.hl_rev.update(|r| *r += 1);
+        }
+    }
 }

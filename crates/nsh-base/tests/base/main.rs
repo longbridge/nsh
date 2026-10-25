@@ -4,5 +4,9 @@
 mod diff;
 mod dock;
 mod editor;
+mod editor_completion;
+mod editor_definition;
+mod editor_diagnostics;
+mod editor_languages;
 mod resizable;
 mod sheet;

@@ -35,9 +35,10 @@ use super::{
 use crate::{
     editor::{
         highlight::{
-            Done, GUESS_CONTEXT, GUESS_DISTANCE, Guess, Guessed, Highlighter, Job, LOOKAHEAD, SLICE,
+            Done, GUESS_CONTEXT, GUESS_DISTANCE, Guess, Guessed, Highlighter, Job, LOOKAHEAD,
+            SLICE, Syntax,
         },
-        language,
+        languages,
     },
     syntax::Token,
     theme,
@@ -50,17 +51,18 @@ pub(crate) struct Segment {
     /// How many lines it has.
     lines: usize,
     rope: Rope,
-    hint: &'static str,
+    /// What highlights its file's language.
+    syntax: Syntax,
     highlighter: Option<Highlighter>,
 }
 
 impl Segment {
-    fn new(first: usize, text: &str, hint: &'static str) -> Segment {
+    fn new(first: usize, text: &str, syntax: Syntax) -> Segment {
         Segment {
             first,
             lines: model::line_starts(text).len(),
             rope: Rope::from_str(text),
-            hint,
+            syntax,
             highlighter: None,
         }
     }
@@ -68,14 +70,23 @@ impl Segment {
 
 /// Whether any of `segments` has a language to highlight.
 pub(crate) fn hinted(segments: &[Segment]) -> bool {
-    segments.iter().any(|s| !s.hint.is_empty())
+    segments.iter().any(|s| !s.syntax.is_plain())
 }
 
-/// Makes the segments' highlighters (none until the syntaxes are `ready`).
-pub(crate) fn make_highlighters(segments: &mut [Segment], ready: bool) {
+/// Whether the segments' highlighters can be made (the built-in
+/// syntaxes are loaded, where one needs them).
+pub(crate) fn ready(segments: &[Segment]) -> bool {
+    segments.iter().all(|s| s.syntax.ready())
+}
+
+/// Makes the segments' highlighters (none until their syntaxes are
+/// ready).
+pub(crate) fn make_highlighters(segments: &mut [Segment]) {
     for segment in segments {
-        segment.highlighter = (ready && !segment.hint.is_empty())
-            .then(|| Highlighter::new(segment.hint))
+        segment.highlighter = segment
+            .syntax
+            .ready()
+            .then(|| Highlighter::with(&segment.syntax))
             .flatten();
     }
 }
@@ -116,7 +127,7 @@ pub(crate) fn work(
         let last = (lines.end - 1 - segment.first).min(end);
         let first = lines.start.saturating_sub(segment.first).min(last);
         let start = first.saturating_sub(GUESS_CONTEXT);
-        let guess = (first > h.frontier() + GUESS_DISTANCE)
+        let guess = (first > h.frontier().saturating_add(GUESS_DISTANCE))
             .then(|| h.guess(&segment.rope, start, segment.rope.line_to_byte(start), last))
             .flatten();
         let job = h.job(&segment.rope, (last + LOOKAHEAD).min(end), SLICE);
@@ -213,12 +224,14 @@ pub(crate) fn join(text: &str, language: Option<&str>) -> Joined {
         }
         let path = file.new_path.clone().or_else(|| file.old_path.clone());
         let name = language.map(str::to_string).or_else(|| path.clone());
-        let hint = language::language(name.as_deref().unwrap_or("")).syntax_hint;
+        let (_, syntax) = languages::resolve(name.as_deref().unwrap_or(""));
         if !old.is_empty() {
-            out.segments.0.push(Segment::new(old_at, &old, hint));
+            out.segments
+                .0
+                .push(Segment::new(old_at, &old, syntax.clone()));
         }
         if !new.is_empty() {
-            out.segments.1.push(Segment::new(new_at, &new, hint));
+            out.segments.1.push(Segment::new(new_at, &new, syntax));
         }
         append(&mut out.old, &old);
         append(&mut out.new, &new);
@@ -695,7 +708,10 @@ Binary files a/logo.png and b/logo.png differ
 
     #[test]
     fn segments_find_their_lines() {
-        let segments = vec![Segment::new(0, "a\nb\n", "rs"), Segment::new(5, "c\n", "")];
+        let segments = vec![
+            Segment::new(0, "a\nb\n", Syntax::builtin("rs")),
+            Segment::new(5, "c\n", Syntax::Plain),
+        ];
         assert!(hinted(&segments));
         // Not highlighted yet: no tokens, and none past a segment's lines.
         assert!(tokens(&segments, 1).is_empty());

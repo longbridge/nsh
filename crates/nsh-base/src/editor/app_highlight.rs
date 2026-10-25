@@ -18,13 +18,13 @@ pub(crate) fn reach<T>(marks: &[Mark<T>]) -> usize {
 /// The decorations of `marks` (with their indexes) that can overlap bytes
 /// `low..=high`: those starting at most `reach` bytes before `low`, up to
 /// `high`. Marks are sorted by start, so this is two binary searches,
-/// however many there are.
-pub(crate) fn near(
-    marks: &[Mark<usize>],
+/// however many there are. Diagnostics are looked up alike (their tags).
+pub(crate) fn near<T>(
+    marks: &[Mark<T>],
     reach: usize,
     low: usize,
     high: usize,
-) -> impl Iterator<Item = (usize, &Mark<usize>)> {
+) -> impl Iterator<Item = (usize, &Mark<T>)> {
     let from = marks.partition_point(|m| m.range.start.saturating_add(reach) < low);
     let to = marks.partition_point(|m| m.range.start <= high).max(from);
     marks[from..to]

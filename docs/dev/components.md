@@ -36,6 +36,9 @@ come from two places:
   cards, list rows with its look), or a community library a third party publishes as a crate, built on `nsh-base`'s
   behavior and the primitives. `examples/gallery-rs` is one (`gallery/native`), and so is the crate
   `nsh init --template rust` / `mixed` writes (`app/native`).
+  What such a crate keeps per engine (the languages and highlighters its editors know,
+  `nsh_base::editor::register_language`; a value of `nsh_core::ui::global`) it sets up in `Registry::setup`, a
+  function each engine serving the set runs once in its runtime before the app's first op (`Core::set_components`).
 
 | Where | What |
 |---|---|

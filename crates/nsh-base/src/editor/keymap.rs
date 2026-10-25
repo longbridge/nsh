@@ -189,6 +189,8 @@ const EDITOR_COMMON: &[EditorBinding] = {
     &[
         run_repeat("f3", FindNext),
         run_repeat("shift+f3", FindPrevious),
+        run("f12", GoToDefinition),
+        run("mod+.", ShowCodeActions),
     ]
 };
 

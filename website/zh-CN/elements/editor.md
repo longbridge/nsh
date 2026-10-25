@@ -60,12 +60,42 @@ mount(App);
 
 ## 语言
 
-`language` 用名称、别名、扩展名或文件名指定语言，不区分大小写：`"rust"`、`"rs"`、`"typescript"`、`"tsx"`、`"main.go"`、`"Dockerfile"`、`"Makefile"`。它决定高亮、`mod+/` 切换的注释、可匹配并参与缩进的括号、输入时自动闭合的符号对、组成单词的字符，以及默认的缩进：四个空格，Web 语言（JavaScript、TypeScript、JSON、HTML、CSS、YAML 等）两个空格，Go 和 Makefile 用制表符。`tabSize` 和 `hardTabs` 为所有语言设置缩进。其他名称都是纯文本。
+`language` 用名称、别名、扩展名或文件名指定语言，不区分大小写：`"rust"`、`"rs"`、`"typescript"`、`"tsx"`、`"main.go"`、`"Dockerfile"`、`"Makefile"`。它决定高亮、`mod+/` 切换的注释、可匹配并参与缩进的括号、输入时自动闭合的符号对、组成单词的字符，以及默认的缩进：四个空格，Web 语言（JavaScript、TypeScript、JSON、HTML、CSS、YAML 等）两个空格，Go 和 Makefile 用制表符。`tabSize` 和 `hardTabs` 为所有语言设置缩进。其他名称都是纯文本，除非应用注册了它（[应用自己的语言](#your-own-languages)）。
 
 支持的语言：Rust、JavaScript、JSX、TypeScript、TSX、JSON、Python、Go、C、C++、C#、Java、Kotlin、Swift、Objective-C、Objective-C++、Ruby、PHP、Lua、Shell、Fish、PowerShell、SQL、HTML、XML、Vue、Svelte、CSS、SCSS、Sass、Less、Markdown、YAML、TOML、INI、Dockerfile、Makefile、CMake、Dart、Scala、Elixir、Erlang、Haskell、OCaml、F#、Clojure、Zig、Perl、R、Julia、Nix、Terraform、Protocol Buffers、GraphQL 和 Diff。
 
 ```tsx
 <Editor value={source()} onChange={(v) => source.set(v)} language={file().name} tabSize={2} softWrap class="flex-1" />
+```
+
+<a id="your-own-languages"></a>
+
+### 应用自己的语言
+
+Rust 代码可以让应用的编辑器认识更多语言，并用应用自己的高亮器（tree-sitter 语法、应用自己的解析器）高亮任何语言。`register_language` 注册一个 `EditorLanguage`：它的名称、别名、扩展名和文件名，以及编辑规则（注释、括号、输入时自动闭合的符号对、单词字符、缩进），`syntax` 指定用来高亮它的内置语法。`register_highlighter` 为一种语言（内置的或注册的）指定应用的高亮器：一个实现 `EditorHighlighter` 的类型，它收到每次编辑（行、字节和位置，与 tree-sitter 的编辑所需一致），在时间预算内、在 UI 线程之外给出每一行的记号（`EditorToken`，或经 `EditorToken::from_scope` 转换的 tree-sitter 捕获名或 TextMate 作用域）。编辑器保存这些记号，在编辑时让它们随文本移动，并为可见的行再次请求，与对内置高亮器的做法一样。`language` 先按名称、别名、扩展名或路径查找注册的语言，编辑器和差异视图都是如此。
+
+每个引擎保存各自的语言。Rust 应用在挂载编辑器之前在根组件中注册；应用的 crate 在其 UI 集的 setup 中为 TSX 应用注册，运行该应用的每个引擎都会先调用它。
+
+```rust
+use nsh_base::editor::{EditorLanguage, register_highlighter, register_language};
+use nsh_core::ui::prelude::*;
+
+static NIMBLE: EditorLanguage = EditorLanguage::new("Nimble")
+    .extensions(&["nb"])
+    .line_comment("#")
+    .tab_size(2);
+
+#[native_module("my-app/native")]
+fn native(registry: &mut Registry) {
+    registry.setup(|| {
+        register_language(&NIMBLE);
+        register_highlighter("nimble", || Box::new(NimbleHighlighter::default()));
+    });
+}
+```
+
+```tsx
+<Editor value={source()} onChange={(v) => source.set(v)} language="build.nb" class="flex-1" />
 ```
 
 <a id="editing"></a>
@@ -124,6 +154,8 @@ mount(App);
 | `cmd+g` / `cmd+shift+g`、`f3` / `shift+f3` | `f3` / `shift+f3` | 查找下一个 / 上一个匹配项 |
 | `cmd+e` | | 查找选中的文本（`onFindWithSelection`） |
 | `cmd+alt+[` / `cmd+alt+]` | `ctrl+shift+[` / `ctrl+shift+]` | 折叠 / 展开光标所在行 |
+| `f12` | `f12` | 跳转到光标处的定义（`onDefinitionRequest`） |
+| `cmd+.` | `ctrl+.` | 选区处的代码操作（`onCodeActionRequest`） |
 | `cmd+c` / `cmd+x` / `cmd+v` | `ctrl+c` / `ctrl+x` / `ctrl+v` | 复制 / 剪切 / 粘贴 |
 
 macOS 和 iOS 还有 Cocoa 的文本按键：`ctrl+b` / `ctrl+f` / `ctrl+p` / `ctrl+n` 移动，`ctrl+h` / `ctrl+d` 删除。
@@ -195,11 +227,14 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
 
 `diagnostics` 标记语言服务器或 linter 报告的问题：在每个范围下方画一条线，颜色由严重程度决定（`error`、`warning`、`info`、`hint`）。位置是从 0 开始的行和 UTF-16 列，与语言服务器相同，所以它的诊断可以原样传入。用户输入时这些标记留在它们的文本上，直到应用传入新的诊断；消息的显示（一个列表、行旁的悬浮卡片）由应用负责。
 
+诊断也带着语言服务器 `Diagnostic` 的其余字段。它的 `tags` 按语言客户端的方式绘制文本：`unnecessary` 的代码（未使用的变量、不可达的代码）淡化显示，`deprecated` 的代码加删除线，分别使用 `unnecessaryText` 和 `deprecatedText` 部件；带标签的提示只体现在它的文本上。`codeDescription.href` 是描述其代码的页面（一条 lint 规则的页面），`relatedInformation` 列出与它相关的其他位置（`{ location: { uri?, range }, message }`）：悬停把两者交给应用，由应用在悬浮卡片中显示并打开页面。语言服务器以数字（`1`、`2`）发送标签，编辑器接收它们的名称。
+
 ```tsx
 const problems = signal<EditorDiagnostic[]>([]);
 
 async function lint(text: string) {
-  problems.set(await check(text)); // [{ range, severity, message, source?, code? }]
+  // [{ range, severity, message, source?, code?, codeDescription?, tags?, relatedInformation? }]
+  problems.set(await check(text));
 }
 
 <Editor
@@ -210,7 +245,7 @@ async function lint(text: string) {
   }}
   language="ts"
   diagnostics={problems()}
-  classes={{ diagnosticWarning: "bg-orange-500" }}
+  classes={{ diagnosticWarning: "bg-orange-500", unnecessaryText: "text-zinc-400" }}
   class="flex-1"
 />
 ```
@@ -311,12 +346,48 @@ const breakpoints = signal<number[]>([]);
 
 ## 语言功能
 
-补全、悬停信息、跳转到定义和代码操作来自应用的语言服务器；编辑器告诉应用时机和位置，由应用画出自己的弹出层（锚定到 `pageBounds` 的 [`Overlay`](./overlay.md)）。
+建议、悬停信息、跳转到定义和代码操作来自应用的语言服务器。补全列表、行内补全和定义链接由编辑器自己绘制，并带有它们的按键；其余的，编辑器告诉应用时机和位置，由应用画出自己的弹出层（锚定到 `pageBounds` 的 [`Overlay`](./overlay.md)）。
+
+### 补全
+
+设置 `completion` 后，编辑器向应用请求建议，并把它们显示为正在输入的单词下方的列表（靠近窗口底部时显示在上方）：
+
+- 在单词末尾输入字母、数字或 `_` 时，以 `onCompletionRequest(event)` 请求，触发方式为 `"typing"`：`event` 包含它的 `id`、光标的 `offset` 和 `position`、`query`（目前输入的单词）以及查询开始处的偏移 `queryStart`。`completionTriggerCharacters` 中的每一项（`["."]`、`["::", "<"]`）在输入后以空查询请求，触发方式为 `"character"`（并带有 `character`）；`showCompletions()` 或 `run("showCompletions")` 在光标处请求，触发方式为 `"invoked"`。
+- 应用以 `presentCompletions(event.id, items)` 回应。每一项是语言服务器 `CompletionItem` 的形状：`label`，以及可选的 `kind`（`"function"`、`"variable"`、`"class"`……）、`detail`、`documentation`、`insertText`、`filterText`、`sortText` 和 `range`。显示的是对最新请求的回应；更早的回应，或光标已离开的单词的回应，会被搁置。
+- 继续输入时列表就地过滤：查询按顺序、不区分大小写地匹配每一项的 `filterText`（否则是它的标签），以查询开头的项在前，其次是最紧凑的匹配，再按 `sortText` 排序。匹配的字母会突出显示。传入 `incomplete: true`（`presentCompletions(id, items, true)`）时，编辑器随着继续输入再次请求。
+- 上下方向键（以及 Control+P / Control+N）在列表中移动，Page Up 和 Page Down 按页移动，Enter 和 Tab 接受，Escape 关闭。指针标记一项，点击（触摸屏上轻点）接受它。选中项的 `documentation` 显示在列表旁边。
+- 接受时，用该项的 `insertText`（否则是它的标签）替换它的 `range`（否则是查询），作为撤销一次撤回的一步，在光标处以及前面文本相同的其他每个光标处进行，并报告 `onCompletionAccept({ item })`。
+- 光标离开单词、输入空格或其他标点、编辑器失去焦点，以及光标滚出视野时，列表关闭。
+
+在没有列表显示时停止输入一段时间（`inlineCompletionDelay`，默认 300 毫秒），会请求行内补全：`onInlineCompletionRequest({ id, offset, position })`。`presentInlineCompletion(id, text)` 以淡色在光标处显示 `text`，Tab 插入它，Escape、编辑或移动清除它。
+
+```tsx
+let editor!: EditorRef;
+
+<Editor
+  ref={(r) => (editor = r)}
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  completion
+  completionTriggerCharacters={["."]}
+  onCompletionRequest={async (e) => {
+    const items = await server.completion(e.position);
+    editor.presentCompletions(e.id, items);
+  }}
+  onInlineCompletionRequest={async (e) => {
+    editor.presentInlineCompletion(e.id, await assistant.suggest(e.offset));
+  }}
+  class="flex-1"
+/>
+```
+
+### 悬停与点击
 
 - `onHover(event)`：鼠标停在一个字符上（桌面和 Web）。`event` 包含它的 `position`、UTF-16 的 `offset`、所在单词的 `range`、指针的 `pagePosition`、单词的 `pageBounds`、按住的 `modifiers`，以及那里的 `diagnostics`，应用显示它们的消息。移到另一个单词时立即报告下一次悬停。
 - `onHoverEnd()`：鼠标离开了单词或编辑器，或者它下面的文本改变或滚动了。
-- `onTextPress(event)`：一个字符被点击，在编辑器放好光标之后：`{ position, offset, range, pagePosition, modifiers, clicks }`。Mod 点击（Mac 上是 `modifiers.platform`，其他平台是 `modifiers.control`）用来跳转到定义。
-- `caretBounds()` 和 `rangeBounds(range)`：光标和一个范围的位置 `{ bounds, pageBounds }`（在编辑器中和在根视图中）：补全菜单在光标处打开。
+- `onTextPress(event)`：一个字符被点击，在编辑器放好光标之后：`{ position, offset, range, pagePosition, modifiers, clicks }`。
+- `caretBounds()` 和 `rangeBounds(range)`：光标和一个范围的位置 `{ bounds, pageBounds }`（在编辑器中和在根视图中）：应用的弹出层在那里打开。
 
 ```tsx
 const hover = signal<EditorHoverEvent | null>(null);
@@ -327,7 +398,6 @@ const hover = signal<EditorHoverEvent | null>(null);
   language="ts"
   onHover={(event) => hover.set(event)}
   onHoverEnd={() => hover.set(null)}
-  onTextPress={(event) => event.modifiers.platform && goToDefinition(event.position)}
   class="flex-1"
 />
 <If when={hover()}>
@@ -337,6 +407,39 @@ const hover = signal<EditorHoverEvent | null>(null);
     </Overlay>
   )}
 </If>
+```
+
+<a id="go-to-definition-and-code-actions"></a>
+
+### 跳转到定义与代码操作
+
+按住 Mod（macOS 和 iOS 上是 Command，其他平台是 Control）时，鼠标下的单词变成链接，与代码编辑器一样：
+
+- 在单词上按住 Mod（鼠标停在那里时按下，或按住时把鼠标移到那里），编辑器以 `onDefinitionRequest(event)` 请求，触发方式 `"hover"`：`event` 包含它的 `id`、字符的 `position` 和 `offset`，以及单词的 `range`。语言服务器找到定义时，以 `presentDefinitionLink(event.id, range)` 回应：这个范围加上下划线（`definitionLink` 部件），指针在它上面变成手形。松开 Mod、鼠标离开它、文本改变或滚动，或者调用 `hideDefinitionLink()` 时，链接消失。显示的是对最新请求的回应；更早的回应会被搁置。
+- 在单词上 Mod 点击，以触发方式 `"press"` 请求；在链接上点击时光标保持原位。F12（`goToDefinition`，`run("goToDefinition")`）请求光标处的单词，触发方式 `"key"`。由应用跳转到定义：同一文本中的定义用 `revealPosition` 和 `setSelections`，另一个文件中的用它自己的导航。
+- Mod+.（`showCodeActions`，`run("showCodeActions")`）报告 `onCodeActionRequest({ range, position, bounds })`：主选区（起点在前）、光标和它的方框。应用向语言服务器请求操作，在 `bounds.pageBounds` 处显示自己的菜单（[`Menu`](./menu.md) 或 `Overlay`），再用 `edit(edits)` 应用所选操作的编辑。
+
+```tsx
+let editor!: EditorRef;
+
+<Editor
+  ref={(r) => (editor = r)}
+  value={source()}
+  onChange={(v) => source.set(v)}
+  language="ts"
+  onDefinitionRequest={async (e) => {
+    const target = await server.definition(e.position);
+    if (!target) return;
+    if (e.trigger === "hover") editor.presentDefinitionLink(e.id, target.originRange ?? e.range);
+    else editor.revealPosition(target.range.start, true);
+  }}
+  onCodeActionRequest={async (e) => {
+    const actions = await server.codeActions(e.range);
+    const picked = await choose(actions, e.bounds?.pageBounds);
+    if (picked) editor.edit(picked.edits);
+  }}
+  class="flex-1"
+/>
 ```
 
 <a id="size-and-scrolling"></a>
@@ -370,6 +473,7 @@ const hover = signal<EditorHoverEvent | null>(null);
 | `value()` | `Promise<string>`：文本。 |
 | `setValue(value)` | 替换文本，作为一次可撤销的编辑。 |
 | `insert(text)` | 在每个选区处原样输入 `text`（括号不会自动闭合）。 |
+| `edit(edits)` | 应用一组 `{ range, text }` 替换（范围指当前文本；与前一个重叠的会被跳过），作为撤销一次撤回的一步；选区随周围的文本移动。代码操作和格式化的编辑由它完成。 |
 | `selections()` | `Promise<EditorSelection[]>`：每个选区 `{ anchor, head }`，主选区（最新的）在最后。 |
 | `setSelections(selections)` | 设置选区（最后一个为主选区），并把主选区滚动到视野中。 |
 | `run(command)` | 执行一个命令，与它的按键效果相同（[命令](#commands)）。 |
@@ -391,6 +495,11 @@ const hover = signal<EditorHoverEvent | null>(null);
 | `offsetToPosition(offset)`、`positionToOffset(position)` | `Promise<EditorPosition>`、`Promise<number>`：在 `value()` 的 UTF-16 偏移和位置之间转换。 |
 | `revealPosition(position, center)` | 把 `position` 滚动到视野中，并展开隐藏它的折叠；`center` 时滚动到中间。 |
 | `goToLine(line)` | 把光标放到第 `line` 行（从 0 开始）的开头，并把它滚动到中间。 |
+| `showCompletions()` | 在光标处请求补全，以光标前的单词为查询（[补全](#补全)）。 |
+| `presentCompletions(id, items, incomplete?)` | 回应补全请求 `id`：列表显示 `items`，按此后输入的内容过滤；设置 `incomplete` 时继续输入会再次请求。没有项时列表关闭。 |
+| `hideCompletions()` | 关闭补全列表。 |
+| `presentInlineCompletion(id, text)`、`hideInlineCompletion()` | 以 `text` 回应行内补全请求 `id`，显示在光标处；清除它。 |
+| `presentDefinitionLink(id, range)`、`hideDefinitionLink()` | 回应定义请求 `id`（触发方式 `"hover"`）：给 `range` 加上链接的下划线（[跳转到定义](#跳转到定义与代码操作)）；隐藏它。 |
 
 ```tsx
 let editor!: EditorRef;
@@ -435,6 +544,9 @@ let editor!: EditorRef;
 | `findNext`、`findPrevious` | 选中 `search` 的下一个或上一个匹配项。 |
 | `findWithSelection` | 为查找栏报告选中的文本（`onFindWithSelection`）。 |
 | `copy`、`cut`、`paste` | 剪贴板。 |
+| `showCompletions` | 在光标处请求补全（[补全](#补全)）。 |
+| `goToDefinition` | 请求光标处单词的定义（`onDefinitionRequest`，触发方式 `"key"`）。 |
+| `showCodeActions` | 请求选区处的代码操作（`onCodeActionRequest`）。 |
 
 <a id="styling-the-parts"></a>
 
@@ -483,10 +595,21 @@ let editor!: EditorRef;
 | `diagnosticWarning` | 警告下方的线 | 琥珀色 |
 | `diagnosticInfo` | 信息下方的线 | 蓝色 |
 | `diagnosticHint` | 提示下方的线 | `muted-foreground` |
+| `unnecessaryText` | `unnecessary` 诊断的文本 | `muted-foreground` |
+| `deprecatedText` | `deprecated` 诊断的文本 | 删除线 |
 | `whitespace` | 空格和制表符的标记（`showWhitespaces`） | `·` 和 `→`，`muted-foreground` 的 60 % |
 | `ruler` | `rulers` 的线 | 1 点宽的 `border` 线 |
 | `selectionHandle` | 触摸选区两端手柄的圆点 | 10pt 的 `primary` 圆点 |
 | `selectionHandleStart`、`selectionHandleEnd` | 起点的圆点（在其行上方）和终点的圆点（在其行下方），在 `selectionHandle` 之后 | |
+| `completionMenu` | 补全列表的框 | `popover`、1pt 的 `border`、圆角、阴影 |
+| `completionItem` | 列表的每一项 | 一行的高度，8pt 的内边距 |
+| `selectedCompletionItem` | 选中的项，在 `completionItem` 之后 | `accent` |
+| `completionMatch` | 标签中与查询匹配的字母 | 半粗体，`primary` |
+| `completionDetail` | 一项的详情，在标签之后 | 右对齐，`muted-foreground` |
+| `completionKind` | 一项的种类，在标签之前 | 简短的名称（`fn`、`var`、`cls`），`muted-foreground` |
+| `completionDocumentation` | 选中项的文档，在列表旁边 | 同 `completionMenu`，最宽 320pt |
+| `inlineCompletion` | 光标处的行内补全 | `muted-foreground` |
+| `definitionLink` | 定义链接的下划线 | 文本下方一条 1pt 的 `primary` 线 |
 
 <a id="props"></a>
 
@@ -526,6 +649,9 @@ let editor!: EditorRef;
 | `minRows` | `.min_rows(..)` | `number` | | 编辑器从这么多行起随文本增高（[尺寸与滚动](#size-and-scrolling)）。 |
 | `maxRows` | `.max_rows(..)` | `number` | | 编辑器随文本增高到这么多行，之后滚动。 |
 | `cursorSurroundingLines` | `.cursor_surrounding_lines(..)` | `number` | `1` | 光标上下保留在视野内的行数。 |
+| `completion` | `.completion(..)` | `boolean` | `false` | 编辑器请求建议并把它们显示为列表（[补全](#补全)）。 |
+| `completionTriggerCharacters` | `.completion_trigger_characters(..)` | `string[]` | `[]` | 输入时还会请求补全的字符。 |
+| `inlineCompletionDelay` | `.inline_completion_delay(..)` | `number` | `300` | 停止输入多少毫秒后请求行内补全。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 编辑器的盒子。 |
 
 <a id="events"></a>
@@ -545,6 +671,11 @@ let editor!: EditorRef;
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | 一个字符被点击：带有它的单词、修饰键和点击次数。 |
 | `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | 执行了 `findWithSelection`：作为查找栏查询内容的文本。 |
 | `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | 已折叠的范围改变了：每一个，包括嵌套的。 |
+| `onCompletionRequest` | `.on_completion_request(\|event: &EditorCompletionRequest\| ..)` | 编辑器请求补全：`{ id, offset, position, query, queryStart, trigger, character? }`（[补全](#补全)）。 |
+| `onCompletionAccept` | `.on_completion_accept(\|event: &EditorCompletionAcceptEvent\| ..)` | 一项被接受并插入：`{ item }`。 |
+| `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | 输入停顿了：`{ id, offset, position }`，用于行内补全。 |
+| `onDefinitionRequest` | `.on_definition_request(\|event: &EditorDefinitionRequest\| ..)` | 编辑器请求一个定义：`{ id, position, offset, range, trigger }`（[跳转到定义](#跳转到定义与代码操作)）。 |
+| `onCodeActionRequest` | `.on_code_action_request(\|event: &EditorCodeActionRequest\| ..)` | 用户请求代码操作：`{ range, position, bounds? }`。 |
 
 <a id="accessibility"></a>
 

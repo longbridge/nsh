@@ -447,11 +447,11 @@ fn a_long_text_makes_only_the_rows_in_view() {
     assert!(app.shows("changed 10000") && app.shows("changed 19900"));
     assert!(count_starting(&app, "line ") < 60);
     // Every line shown: still only the rows in view (400 points of 20-point
-    // rows and a few around them, on two sides).
+    // rows and a viewport and a half ahead, on two sides).
     app.press("id:expand-all").unwrap();
     see(&mut app, "line 1");
     let rows = count_starting(&app, "line ");
-    assert!((20..200).contains(&rows), "{rows} line texts made");
+    assert!((20..300).contains(&rows), "{rows} line texts made");
     assert!(!app.shows("changed 10000"));
     assert!(!app.shows("line 19999"));
     app.scroll("id:diff", px(1000.0)).unwrap();
@@ -459,7 +459,7 @@ fn a_long_text_makes_only_the_rows_in_view() {
     assert!(!app.shows("line 1"));
     let rows = count_starting(&app, "line ");
     assert!(
-        (20..200).contains(&rows),
+        (20..300).contains(&rows),
         "{rows} line texts made after scrolling"
     );
 }
@@ -468,12 +468,11 @@ fn a_long_text_makes_only_the_rows_in_view() {
 fn a_press_on_a_line_number_selects_its_line() {
     let mut app = start(one_change());
     see(&mut app, "line ten");
-    // A press on the left gutter (the harness presses its middle: the
-    // modified row, old line 10).
+    // A press on the left gutter's number 13: line 12.
     assert_eq!(count(&app, "13"), 2);
     app.press("text:13 >> nth=0").unwrap();
-    see(&mut app, "Selection Old 9-9");
-    see(&mut app, "Pressed Old 9");
+    see(&mut app, "Selection Old 12-12");
+    see(&mut app, "Pressed Old 12");
 }
 
 #[test]

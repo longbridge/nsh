@@ -102,6 +102,12 @@ parts! {
     diagnostic_info => DiagnosticInfo,
     /// The mark under a hint's range (dotted, muted).
     diagnostic_hint => DiagnosticHint,
+    /// The text of an `unnecessary` diagnostic (unused, unreachable code):
+    /// faded, in the theme's `muted-foreground`; a hint's mark is left
+    /// out under it.
+    unnecessary_text => UnnecessaryText,
+    /// The text of a `deprecated` diagnostic (struck through).
+    deprecated_text => DeprecatedText,
     /// The marks of spaces (`·`) and tabs (`→`) while `showWhitespaces`
     /// is set (muted, translucent).
     whitespace => Whitespace,
@@ -115,4 +121,30 @@ parts! {
     selection_handle_start => SelectionHandleStart,
     /// The end's knob, after `selectionHandle`.
     selection_handle_end => SelectionHandleEnd,
+    /// The completion list (`completion`): the box of its items, below the
+    /// query (above it without room), in the theme's `popover` with a
+    /// border, rounded and shadowed.
+    completion_menu => CompletionMenu,
+    /// Every item of the completion list (a row's height, its kind, label
+    /// and detail in a row).
+    completion_item => CompletionItem,
+    /// The selected item, after `completionItem` (the theme's `accent`).
+    selected_completion_item => SelectedCompletionItem,
+    /// The characters of an item's label the query matched (semibold, in
+    /// the theme's `primary`).
+    completion_match => CompletionMatch,
+    /// An item's detail, right-aligned after its label (muted).
+    completion_detail => CompletionDetail,
+    /// An item's kind, a short label before it (muted).
+    completion_kind => CompletionKind,
+    /// The selected item's documentation, beside the list (as the list's
+    /// box, at most 320 points wide).
+    completion_documentation => CompletionDocumentation,
+    /// The inline completion's text at the caret (muted; on the editor's
+    /// background over the text after the caret).
+    inline_completion => InlineCompletion,
+    /// The underline of the definition link, shown while Mod is held over
+    /// a word the app answered for (a 1 point line under the text, in the
+    /// theme's `primary`).
+    definition_link => DefinitionLink,
 }
