@@ -86,16 +86,6 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
         hover: signal(None),
         pressed: signal(None),
     };
-    // Lines scrolled into view with no colors yet get them in the same
-    // commit (a jump, or a scroll faster than the parse and the guesses
-    // ahead of it).
-    let shown_ed = ed.clone();
-    effect(move || {
-        shown_ed.scroll_y.get();
-        shown_ed.viewport.get();
-        shown_ed.text_rev.get();
-        untracked(|| shown_ed.highlight_shown_now());
-    });
     view()
         .element_ref(&ed.hooks.outer)
         .on_layout(move |_: &Bounds<Points>| place_ed.measure_place())
@@ -1321,44 +1311,4 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
             })
             .collect::<Vec<_>>()
     })
-}
-
-impl Ed {
-    /// Guesses the colors of the lines in view that have none yet, here:
-    /// what the parse and the guesses off the engine thread bring a few
-    /// frames later.
-    fn highlight_shown_now(&self) {
-        let changed = {
-            let mut st = self.st.borrow_mut();
-            let st = &mut *st;
-            let count = st.display.row_count();
-            let lh = st.line_height().0.max(1.0);
-            let height = self.viewport.get_untracked().height.0;
-            if count == 0 || height <= 0.0 {
-                return;
-            }
-            let y = (self.scroll_y.get_untracked() - self.rows_top.get_untracked())
-                .0
-                .max(0.0);
-            let first_row = ((y / lh).floor() as usize).min(count - 1);
-            let last_row = (((y + height) / lh).ceil() as usize).clamp(first_row + 1, count) - 1;
-            let first = st.display.row(first_row).line;
-            let last = st.display.row(last_row).line;
-            let Some(h) = &mut st.highlighter else {
-                return;
-            };
-            if (first..=last).all(|line| h.tokens(line).is_some()) {
-                return;
-            }
-            let start = first.saturating_sub(super::highlight::GUESS_CONTEXT);
-            let offset = st.buffer.line_start(start);
-            match h.guess(st.buffer.rope(), start, offset, last) {
-                Some(guess) => !h.guessed(guess.run()).is_empty(),
-                None => false,
-            }
-        };
-        if changed {
-            self.hl_rev.update(|r| *r += 1);
-        }
-    }
 }
