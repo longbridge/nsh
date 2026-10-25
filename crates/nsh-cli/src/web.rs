@@ -849,7 +849,11 @@ mod tests {
         );
         // The page's host is the app's (`with_page_host`).
         assert!(!page.replace("{{host}}", "").contains("{{"), "{page}");
-        assert!(page.contains("const UI_SETS = [\"nsh/base\"];"));
+        // `nsh/base` with its submodules, each a module the page serves.
+        assert!(
+            page.contains("const UI_SETS = [\"nsh/base\",\"nsh/base/plot\"];"),
+            "{page}"
+        );
         fs::write(&runtime.wasm, "two").unwrap();
         assert_ne!(version(&dev_host(&runtime, false).unwrap().1), first);
         assert!(

@@ -1045,6 +1045,49 @@ covers [nsh/base] TableHead
 covers [nsh/base] TableCell
 covers [nsh/base] TableCaption
 
+tap id:case-base-plot
+# One image for screen readers, with the app's label, at the app's size.
+expect hovered null
+prop id:plot role image
+prop id:plot accessibilityLabel Price
+frame id:plot 0 20 200 100
+# The rows' x on a linear scale of 0 to 40: at 0, 50 and 100 points. The
+# row nearest the pointer, reported when it changes, none once it leaves;
+# the app's value for screen readers and its tooltip follow.
+event id:plot onHoverMove position.x=45 position.y=10
+expect hovered 1
+expect tip 1
+prop id:plot accessibilityValue text=row1
+event id:plot onHoverMove position.x=90 position.y=10
+expect hovered 2
+prop id:plot accessibilityValue text=row2
+event id:plot onHoverOut
+expect hovered null
+# New rows: the plot reads them again.
+tap id:more
+expect rows 4
+event id:plot onHoverMove position.x=60 position.y=10
+expect hovered 1
+event id:plot onHoverOut
+expect hovered null
+# A sparkline follows no pointer: it reports nothing, even once a press
+# that comes after the pointer has been handled.
+prop id:spark accessibilityLabel Spark
+event id:spark onHoverMove position.x=90 position.y=10
+tap id:more
+expect rows 5
+expect hovered null
+covers [nsh/base/plot] Plot
+covers [nsh/base/plot] Line
+covers [nsh/base/plot] Area
+covers [nsh/base/plot] Grid
+covers [props] Plot.data
+covers [props] Plot.x
+covers [props] Plot.xScale
+covers [props] Plot.tooltipContent
+covers [props] Plot.interactive
+covers [events] Plot.onHoverChange
+
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
 expect token up #138a5aff
