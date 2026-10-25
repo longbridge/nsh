@@ -168,7 +168,9 @@ selected.
 
 ## Keyboard
 
-Pressing the table gives it the keyboard until another press or `blur()`; `focus()` gives it from the app.
+Pressing the table, or reaching it with Tab (macOS, the web), gives it the keyboard until another press, the focus
+moving elsewhere or `blur()`; `focus()` gives it from the app. The table is one stop of Tab: inside it Tab moves the
+selection, and Escape gives the keyboard back.
 
 | Keys | What they do |
 |---|---|

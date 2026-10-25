@@ -80,6 +80,13 @@ In a GTK window (`nsh test examples/gallery/App.tsx --target linux --fps`, relea
 rows and wheeling the horizontal bar hold 60 of 60 frames, ~2.8 ms a frame on average, none over budget; the live
 quotes redraw at their tick (30 frames a second at 33 ms) and at 60 while scrolling during ticks, ~3 ms a frame.
 
+## Keyboard focus
+
+The table is one stop of Tab, as gpui-component's (a `tab_stop` focus handle): its hit layer's content box, whose
+`onFocus` / `onBlur` set the table's focus (`Dt::set_focus`), which binds its keys; its rows, titles and sort buttons
+are `focusable(false)`. While it has the keyboard Tab moves the selection, as gpui-component's, and Escape gives it
+back. A press, `focus()` and `blur()` set the same flag. Tab stops at pressables on macOS and the web.
+
 ## Compared with gpui-component
 
 The API is gpui-component's `DataTable` / `TableState` / `TableDelegate` as data: the delegate's methods are props
@@ -102,5 +109,4 @@ methods the ref's. Deliberate differences:
   `rowClasses`, data beside `data`, is `render_tr`'s per-row look without a call into JS per row.
 - A fit measures the cells' texts natively; `fitPadding` adds what the app's drawing adds to them (gpui-component
   asks its delegate to measure).
-- Focus is the table's own flag (a press, `focus()` / `blur()`, Escape), not a Tab stop.
 
