@@ -10146,6 +10146,65 @@ mod views {
         );
     }
 
+    thread_local! {
+        static SHOWN: Cell<Option<Signal<u32>>> = const { Cell::new(None) };
+        static WHEN_ITEMS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct WhenRowsProps {}
+
+    /// Rows that are a `when` each: row `n` shows while `n` is at most
+    /// `SHOWN`.
+    struct WhenRows;
+
+    impl Component for WhenRows {
+        type Props = WhenRowsProps;
+        type Event = NoEvent;
+
+        fn view(_: WhenRowsProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let items = signal(vec![1, 2, 3]);
+            let shown = signal(1);
+            WHEN_ITEMS.with(|i| i.set(Some(items)));
+            SHOWN.with(|s| s.set(Some(shown)));
+            view().child(each(
+                items,
+                |n| *n,
+                move |item, _| {
+                    when(
+                        move || item.get() <= shown.get(),
+                        move || text(move || format!("row {}", item.get())),
+                    )
+                },
+            ))
+        }
+    }
+
+    #[test]
+    fn each_keeps_rows_that_are_regions_and_they_show_later() {
+        let mut c = core();
+        c.mount_root(&Root::new::<WhenRows>(|| WhenRowsProps {}));
+        let batch = c.commit().unwrap();
+        let list = root_host(&batch);
+        assert_eq!(order(&c, list), ["row 1"]);
+        let items = WHEN_ITEMS.with(Cell::get).unwrap();
+        let shown = SHOWN.with(Cell::get).unwrap();
+        // The rows stay (an empty `when` among them), one is added.
+        {
+            let _entered = c.components.runtime.enter();
+            items.set(vec![1, 2, 3, 4]);
+        }
+        c.commit();
+        assert_eq!(order(&c, list), ["row 1"]);
+        // A kept row that showed nothing shows, in its place.
+        {
+            let _entered = c.components.runtime.enter();
+            shown.set(3);
+        }
+        c.commit();
+        assert_eq!(order(&c, list), ["row 1", "row 2", "row 3"]);
+    }
+
     /// Made with `#[component]`: reads the appearance and a timer.
     #[component]
     fn Clock(_props: (), cx: Scope<NoEvent>) -> impl IntoElement {
