@@ -1489,3 +1489,36 @@ covers [props] DiffView.renderSeparator
 covers [props] DiffView.renderHunkActions
 covers [props] DiffView.renderFileHeader
 covers [events] DiffView.onFileToggle
+
+# base-data-table
+tap id:case-base-data-table
+# The app draws each cell: its row and the key of its column.
+expect Cell 0:name
+expect Cell 2:qty
+# The rows in view are reported.
+expect Visible: 0-3
+# A press on a row selects it, reported.
+tap text:Cell 1:name
+expect Selected: row 1
+# The ref sets the selection without reporting it, and reads it with the
+# rows in view.
+tap id:select
+expect Selected: row 1
+tap id:read
+expect Read: 2 0-3
+tap id:scroll
+# A sortable column's header reports the next sort, which the app sets.
+tap text:Name
+expect Sorted: name ascending
+covers [nsh/base] DataTable
+covers [props] DataTable.columns
+covers [props] DataTable.data
+covers [props] DataTable.rowCount
+covers [props] DataTable.dataStart
+covers [props] DataTable.rowHeight
+covers [props] DataTable.selectionMode
+covers [props] DataTable.sort
+covers [props] DataTable.renderCell
+covers [events] DataTable.onSortChange
+covers [events] DataTable.onSelectionChange
+covers [events] DataTable.onVisibleRowsChange

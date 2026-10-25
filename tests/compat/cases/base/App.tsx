@@ -10,6 +10,7 @@ import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
+import BaseDataTable from "./base-data-table";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseEditor from "./base-editor";
@@ -33,6 +34,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-button": BaseButton,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
+  "base-data-table": BaseDataTable,
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-editor": BaseEditor,

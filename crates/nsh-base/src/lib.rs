@@ -3,7 +3,7 @@
 //! controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`,
 //! `Tab` in `Tabs`), a progress bar (`Progress`), disclosure (`Collapsible`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
-//! (`Editor`), the changes between two texts (`DiffView`), toasts (`Toast`,
+//! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`), toasts (`Toast`,
 //! `ToastStack`, `ToastManager`), safe areas,
 //! selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
@@ -19,6 +19,7 @@ mod alert_dialog;
 mod button;
 mod checkbox;
 mod collapsible;
+mod data_table;
 mod diff;
 pub mod dock;
 pub mod editor;
@@ -54,6 +55,13 @@ pub use crate::{
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
+    data_table::{
+        DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
+        DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
+        DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTableProps,
+        DataTableRange, DataTableRows, DataTableSelection, DataTableSelectionMode, DataTableSort,
+        DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
+    },
     diff::{
         DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,
         DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide, DiffStats,
@@ -137,6 +145,7 @@ pub fn registry() -> Registry {
         .register::<SelectionArea>()
         .register::<Checkbox>()
         .register::<Collapsible>()
+        .register::<DataTable>()
         .register::<DockArea>()
         .register::<DiffView>()
         .register::<Editor>()
@@ -185,6 +194,7 @@ mod tests {
                 "Checkbox",
                 "Collapsible",
                 "ContextMenu",
+                "DataTable",
                 "DiffView",
                 "DockArea",
                 "Editor",
