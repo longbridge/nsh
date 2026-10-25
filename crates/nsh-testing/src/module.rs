@@ -277,6 +277,7 @@ impl Testing {
             clipboard: options.clipboard,
             color_scheme: options.color_scheme,
             locale: options.locale,
+            time_zone: options.time_zone,
             reduced_motion: options.reduced_motion,
             platform: options.platform,
             clock: options
@@ -405,6 +406,9 @@ pub struct OpenOptions {
     pub color_scheme: Option<ColorScheme>,
     /// The device's locale, a BCP 47 tag (`"en-US"`).
     pub locale: Option<String>,
+    /// The device's time zone, an IANA name (`"UTC"`). It names the zone;
+    /// `Date`'s local times stay the machine's.
+    pub time_zone: Option<String>,
     /// The user asked for less motion (false).
     pub reduced_motion: Option<bool>,
     /// The platform the app believes it runs on headless (`"ios"`; a
@@ -1131,6 +1135,7 @@ pub(crate) struct Launch {
     pub(crate) clipboard: Option<String>,
     pub(crate) color_scheme: Option<ColorScheme>,
     pub(crate) locale: Option<String>,
+    pub(crate) time_zone: Option<String>,
     pub(crate) reduced_motion: Option<bool>,
     /// The platform `open` named (headless: iOS when it named none).
     pub(crate) platform: Option<Platform>,
@@ -2001,6 +2006,15 @@ impl App {
     /// and comes back (`"active"`); `lifecycle()` follows. Headless only.
     pub async fn set_lifecycle(this: Instance<Self>, state: Lifecycle) -> Result<(), JsError> {
         step(&this, move |app| app.set_lifecycle(state.into())).await
+    }
+
+    /// Moves the device to the time zone `name` (an IANA name,
+    /// `"Asia/Tokyo"`), as the system does when the user travels or changes
+    /// the setting; `timeZone()` follows. Headless only.
+    pub async fn set_time_zone(this: Instance<Self>, name: String) -> Result<(), JsError> {
+        let zone = nsh_core::platform::TimeZone::parse(&name)
+            .ok_or_else(|| JsError::Range(format!("setTimeZone: {name:?} is not a time zone")))?;
+        step(&this, move |app| app.set_time_zone(zone)).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.

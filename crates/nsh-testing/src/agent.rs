@@ -187,6 +187,10 @@ impl Model {
             .locale
             .as_deref()
             .and_then(nsh_core::platform::Locale::parse);
+        pins.time_zone = environment
+            .time_zone
+            .as_deref()
+            .and_then(nsh_core::platform::TimeZone::parse);
         pins.reduce_motion = environment.reduced_motion;
         pins.safe_area =
             environment

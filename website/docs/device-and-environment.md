@@ -21,6 +21,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `cx.insets()` | `safeAreaInsets()` (`nsh`) | The insets where the calling component renders (a page, a dialog). |
 | `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
+| `time_zone()` | `timeZone()` (`nsh`) | The device's time zone as the system names it (`"Europe/Berlin"`) ([Time zone](#time-zone)). |
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
@@ -246,6 +247,25 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
+
+## Time zone
+
+`time_zone()` (TSX: `timeZone()`) is the device's time zone as the system names it: an IANA name such as `Europe/Berlin` or `America/New_York`, `UTC`, or an offset zone where the system has one (`GMT+01:00` on Android). It changes when the user changes the setting or the device moves to another zone, and what read it updates: a clock that names its zone, a list of times in the user's zone, a date saved with the zone it was made in.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+text(move || format!("Times in {}", time_zone()))
+```
+
+```tsx tabs
+import { Text } from "nsh";
+import { timeZone } from "nsh";
+
+<Text>{`Times in ${timeZone()}`}</Text>
+```
+
+`Date`'s local times follow the system's zone, as they always have: `time_zone()` names it. In tests, `open`'s `timeZone` sets the name (`UTC` otherwise) and `app.setTimeZone("Asia/Tokyo")` moves the device to another zone ([Testing](./testing-and-trace.md#steps)); `Date`'s local times stay the machine's.
 
 ## In an embedding app
 

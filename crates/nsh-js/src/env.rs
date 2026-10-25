@@ -1,6 +1,6 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, lifecycle) written when the platform reports a
+//! reduced motion, pixel ratio, locale, time zone, lifecycle) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -44,9 +44,10 @@ enum Part {
     TitleBar,
     Locale,
     Lifecycle,
+    TimeZone,
 }
 
-const PARTS: usize = 11;
+const PARTS: usize = 12;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -368,6 +369,9 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
+    if changed(&|p| p.time_zone == next.time_zone) {
+        writes.push((Part::TimeZone, string(cx, next.time_zone.as_str())));
+    }
     if changed(&|p| p.screen_reader == next.screen_reader) {
         writes.push((Part::ScreenReader, boolean(next.screen_reader)));
     }
@@ -628,6 +632,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Export::Value(|cx| accessor(cx, Part::Locale)),
         Ts::value(
             "The user's locale as a BCP 47 tag (`\"en-US\"`, `\"zh-Hans-CN\"`), which\n`Intl` formats for by default (reactive): the system's, unless the\nembedding app set its own.",
+            "Accessor<string>",
+        ),
+    ),
+    (
+        "timeZone",
+        Export::Value(|cx| accessor(cx, Part::TimeZone)),
+        Ts::value(
+            "The device's time zone as the system names it (reactive): an IANA name\n(`\"Europe/Berlin\"`, `\"America/New_York\"`), `\"UTC\"`, or an offset zone\nwhere the system has one (`\"GMT+01:00\"` on Android). It changes with the\nsystem's setting, as the user travels. `\"UTC\"` in headless tests unless\n`open` sets one.",
             "Accessor<string>",
         ),
     ),

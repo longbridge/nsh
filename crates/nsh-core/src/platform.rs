@@ -240,6 +240,8 @@ pub struct Environment {
     pub ctrl_for_command: bool,
     /// The user's locale (number and date formats: `Intl`'s default).
     pub locale: Locale,
+    /// The device's time zone, as the system names it (`Europe/Berlin`).
+    pub time_zone: TimeZone,
     /// The app embedding NSH answers `nsh/host`'s calls
     /// ([`crate::Command::HostCall`]); without it, they reject at once.
     pub host: bool,
@@ -312,6 +314,7 @@ impl Default for Environment {
             apple_keyboard: false,
             ctrl_for_command: false,
             locale: Locale::EN_US,
+            time_zone: TimeZone::UTC,
             host: false,
             lifecycle: Lifecycle::Active,
             screen_color: false,
@@ -436,6 +439,86 @@ impl std::fmt::Debug for Locale {
 }
 
 impl std::fmt::Display for Locale {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A time zone's name as the system gives it: an IANA name
+/// (`Europe/Berlin`, `America/Argentina/Buenos_Aires`, `UTC`), or an offset
+/// zone where the system has one (Android's `GMT+01:00`). Held inline so
+/// that the environment stays `Copy`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TimeZone {
+    bytes: [u8; TimeZone::CAPACITY],
+    len: u8,
+}
+
+impl TimeZone {
+    /// Room for the longest IANA name
+    /// (`America/Argentina/ComodRivadavia`, 32 bytes) and then some.
+    const CAPACITY: usize = 39;
+
+    /// `UTC`, the default when a platform reports none (and headless).
+    pub const UTC: TimeZone = {
+        let mut bytes = [0u8; TimeZone::CAPACITY];
+        bytes[0] = b'U';
+        bytes[1] = b'T';
+        bytes[2] = b'C';
+        TimeZone { bytes, len: 3 }
+    };
+
+    /// The zone of a platform identifier: an IANA name (`Europe/Berlin`),
+    /// with POSIX `TZ`'s leading `:` (`:Europe/Berlin`), or as a path into
+    /// a zone database (`/usr/share/zoneinfo/Europe/Berlin`,
+    /// `/var/db/timezone/zoneinfo/Europe/Berlin`). `None` for what names no
+    /// zone: empty, longer than any zone's name, or with characters zone
+    /// names do not have.
+    pub fn parse(identifier: &str) -> Option<TimeZone> {
+        let identifier = identifier.trim();
+        let name = match identifier.rsplit_once("zoneinfo/") {
+            Some((_, name)) => name,
+            None => identifier.strip_prefix(':').unwrap_or(identifier),
+        };
+        let valid = !name.is_empty()
+            && name.len() <= Self::CAPACITY
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/_-+:".contains(&b))
+            && name
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != "..");
+        if !valid {
+            return None;
+        }
+        let mut bytes = [0u8; Self::CAPACITY];
+        bytes[..name.len()].copy_from_slice(name.as_bytes());
+        Some(TimeZone {
+            bytes,
+            len: name.len() as u8,
+        })
+    }
+
+    /// The name (`Europe/Berlin`).
+    pub fn as_str(&self) -> &str {
+        // ASCII, as parsed.
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("UTC")
+    }
+}
+
+impl Default for TimeZone {
+    fn default() -> Self {
+        Self::UTC
+    }
+}
+
+impl std::fmt::Debug for TimeZone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TimeZone({})", self.as_str())
+    }
+}
+
+impl std::fmt::Display for TimeZone {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
@@ -584,7 +667,7 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Environment, HostEnvironment, Idiom, Locale, Os};
+    use super::{Environment, HostEnvironment, Idiom, Locale, Os, TimeZone};
 
     #[test]
     fn desktop_is_a_desktop_os_or_a_desktop_browser() {
@@ -669,5 +752,32 @@ mod tests {
         assert_eq!(tag("en-US-u-hc-h23").as_deref(), Some("en-US"));
         assert_eq!(tag("C"), None);
         assert_eq!(Locale::default().as_str(), "en-US");
+    }
+
+    #[test]
+    fn time_zones_parse_platform_identifiers() {
+        let zone = |s: &str| TimeZone::parse(s).map(|z| z.as_str().to_owned());
+        assert_eq!(zone("Europe/Berlin").as_deref(), Some("Europe/Berlin"));
+        assert_eq!(zone(":Asia/Tokyo").as_deref(), Some("Asia/Tokyo"));
+        assert_eq!(
+            zone("/var/db/timezone/zoneinfo/America/Argentina/Buenos_Aires").as_deref(),
+            Some("America/Argentina/Buenos_Aires")
+        );
+        assert_eq!(
+            zone("/usr/share/zoneinfo/Etc/GMT+5").as_deref(),
+            Some("Etc/GMT+5")
+        );
+        assert_eq!(zone("GMT+01:00").as_deref(), Some("GMT+01:00"));
+        assert_eq!(
+            zone("America/Argentina/ComodRivadavia").as_deref(),
+            Some("America/Argentina/ComodRivadavia")
+        );
+        assert_eq!(zone(""), None);
+        assert_eq!(zone("Europe//Berlin"), None);
+        assert_eq!(zone("../etc/passwd"), None);
+        assert_eq!(zone("Central European Standard Time"), None);
+        assert_eq!(zone(&"A".repeat(40)), None);
+        assert_eq!(TimeZone::default().as_str(), "UTC");
+        assert_eq!(Environment::default().time_zone, TimeZone::UTC);
     }
 }

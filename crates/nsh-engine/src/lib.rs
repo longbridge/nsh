@@ -59,7 +59,7 @@ pub use nsh_core::{
     js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
-        HttpRequest, Idiom, Lifecycle, Locale, Os,
+        HttpRequest, Idiom, Lifecycle, Locale, Os, TimeZone,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -829,6 +829,8 @@ pub struct EngineConfig {
 pub struct EnvironmentPins {
     /// The locale (`Environment::locale`).
     pub locale: Option<nsh_core::platform::Locale>,
+    /// The time zone (`Environment::time_zone`).
+    pub time_zone: Option<nsh_core::platform::TimeZone>,
     /// Whether the user asked for less motion
     /// (`Environment::reduce_motion`).
     pub reduce_motion: Option<bool>,
@@ -841,6 +843,9 @@ impl EnvironmentPins {
     pub fn apply(&self, environment: &mut Environment) {
         if let Some(locale) = self.locale {
             environment.locale = locale;
+        }
+        if let Some(time_zone) = self.time_zone {
+            environment.time_zone = time_zone;
         }
         if let Some(reduce_motion) = self.reduce_motion {
             environment.reduce_motion = reduce_motion;
@@ -2936,6 +2941,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         os_version: env.os_version,
         idiom: env.idiom,
         locale: env.locale,
+        time_zone: env.time_zone,
         apple_keyboard: env.apple_keyboard,
         ctrl_for_command: env.ctrl_for_command,
         host: env.host,

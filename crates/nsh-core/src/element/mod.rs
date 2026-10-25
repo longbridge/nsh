@@ -219,7 +219,9 @@ pub use crate::{
         transparent_black, transparent_white, white, yellow,
     },
     overlay::{Align, Placement},
-    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Lifecycle, Locale, Os},
+    platform::{
+        Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Lifecycle, Locale, Os, TimeZone,
+    },
     style::Color,
 };
 

@@ -20,7 +20,7 @@ use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
     element::{AssetFile, AssetKind, Registry, Root},
-    platform::{Idiom, Lifecycle, Locale, Os},
+    platform::{Idiom, Lifecycle, Locale, Os, TimeZone},
     prelude::*,
 };
 use nsh_engine::{App, Assets, Engine, EngineConfig, Environment, MountSink};
@@ -373,6 +373,40 @@ fn components_follow_whether_the_app_is_in_use() {
         texts.iter().all(|t| t == "active after 4 runs"),
         "{texts:?}"
     );
+}
+
+/// Shows the time zone and counts its effect's runs, as a clock that
+/// shows times in it does.
+#[component]
+fn Zoned() -> impl IntoElement {
+    let runs = signal(0);
+    effect(move || {
+        let _ = time_zone();
+        runs.update(|r| *r += 1);
+    });
+    view().child(text(move || {
+        format!("{} after {} runs", time_zone(), runs.get())
+    }))
+}
+
+#[test]
+fn components_follow_the_time_zone() {
+    let (engine, rx, _) = start::<Zoned>(Environment::default());
+    until(&rx, "UTC after 1 runs");
+    for (zone, shown) in [
+        ("Europe/Berlin", "Europe/Berlin after 2 runs"),
+        (
+            "America/Argentina/Buenos_Aires",
+            "America/Argentina/Buenos_Aires after 3 runs",
+        ),
+    ] {
+        engine.control().set_environment(Environment {
+            time_zone: TimeZone::parse(zone).unwrap(),
+            ..Environment::default()
+        });
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
 }
 
 /// Speaks, moves the screen reader and opens a dialog

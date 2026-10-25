@@ -305,7 +305,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   offset logic stays left to right.
 - **Environment** (reactive accessors; `nsh` (`safeArea()`, `safeAreaInsets()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
-  `colorScheme()`, `fontScale()`, `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
+  `colorScheme()`, `fontScale()`, `timeZone()` (`Environment::time_zone`, `TimeZone`: the zone's name as the system
+  gives it, an IANA name or an offset zone, `UTC` headless; the platforms write the system's, the web the browser's,
+  read again when the page shows or gets the focus), `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
   `background`, React Native's states; the platforms write it as the system reports the app's, the web from the
   page's `visibilityState` and focus, iOS from the notifications of the scene of the surface's window
   (`UIScene`'s `didActivate` / `willDeactivate` / `didEnterBackground` / `willEnterForeground`, filtered by the view's

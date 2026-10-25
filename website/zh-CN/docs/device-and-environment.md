@@ -21,6 +21,7 @@ demo: guide-device
 | `cx.insets()` | `safeAreaInsets()`（`nsh`） | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh`） | 软键盘的高度和动画时长。 |
 | `locale()` | `locale()`（`nsh`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
+| `time_zone()` | `timeZone()`（`nsh`） | 设备的时区，即系统给它的名称（`"Europe/Berlin"`）（[时区](#时区)）。 |
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
 
@@ -246,6 +247,25 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
+
+## 时区
+
+`time_zone()`（TSX：`timeZone()`）是设备的时区，即系统给它的名称：`Europe/Berlin`、`America/New_York` 这样的 IANA 名称、`UTC`，或系统使用偏移量时区时的名称（Android 上的 `GMT+01:00`）。用户修改设置或设备到了另一个时区时它会变化，读取它的地方随之更新：标出时区的时钟、按用户时区显示的时间列表、和创建时所在时区一起保存的日期。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+text(move || format!("Times in {}", time_zone()))
+```
+
+```tsx tabs
+import { Text } from "nsh";
+import { timeZone } from "nsh";
+
+<Text>{`Times in ${timeZone()}`}</Text>
+```
+
+`Date` 的本地时间一如既往地跟随系统时区：`time_zone()` 给出它的名称。测试中，`open` 的 `timeZone` 设置这个名称（否则是 `UTC`），`app.setTimeZone("Asia/Tokyo")` 把设备移到另一个时区（[测试](./testing-and-trace.md#操作步骤)）；`Date` 的本地时间仍是这台机器的。
 
 ## 在嵌入它的应用中
 
