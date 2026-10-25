@@ -17,7 +17,9 @@ use super::{
     commands::{Case, Command, EditOptions, Outcome},
     diagnostics,
     highlight::{GUESS_CONTEXT, GUESS_DISTANCE, Highlighter, LOOKAHEAD, SLICE, off_thread},
-    keymap, search,
+    keymap,
+    layout::{self, AutoScroll},
+    search,
     select::{ExpandStack, SelectionHistory},
     state::{Font, State},
     types::{Selection, Selections},
@@ -108,6 +110,13 @@ pub(crate) struct Ed {
     pub(crate) sel_history: Rc<RefCell<SelectionHistory>>,
     /// What `expandSelection` grew from, for `shrinkSelection`.
     pub(crate) expansions: Rc<RefCell<ExpandStack>>,
+    /// Where the rows' box starts in the text area (the content's padding):
+    /// what turns an x of the rows into the horizontal scroll view's.
+    pub(crate) rows_left: Signal<Points>,
+    /// The height of the vertical scroll view's content.
+    pub(crate) content_height: Signal<Points>,
+    /// Scrolling while a drag selects past the viewport's edge.
+    autoscroll: Rc<RefCell<AutoScroll>>,
 }
 
 impl Ed {
@@ -155,6 +164,9 @@ impl Ed {
             hooks: super::hooks::Hooks::new(),
             sel_history: Rc::new(RefCell::new(sel_history)),
             expansions: Rc::default(),
+            rows_left: signal(px(0.0)),
+            content_height: signal(px(0.0)),
+            autoscroll: Rc::default(),
         };
         ed.follow_props();
         ed.follow_hooks();
@@ -853,11 +865,14 @@ impl Ed {
         }
         self.bump_selection();
         self.report_selections();
-        self.show_caret();
+        // Past the viewport's edge the view scrolls on its own, rather than
+        // jumping to the caret.
+        self.follow_drag_edge(page);
     }
 
     /// The press ended.
     pub(crate) fn release(&self) {
+        self.autoscroll.borrow_mut().stop();
         if self.drag.take().is_some() {
             // What the drag selected is a step `undoSelection` goes back from.
             let st = self.st.borrow();
@@ -1134,7 +1149,11 @@ impl Ed {
         }
         let top = self.rows_top.get_untracked() + point.y;
         let y = self.scroll_y.get_untracked();
-        let margin = lh.min(viewport.height / 4.0);
+        let margin = layout::surrounding_margin(
+            self.props.cursor_surrounding_lines.get_untracked(),
+            viewport.height,
+            lh,
+        );
         let target_y = if top - margin < y {
             Some((top - margin).max(px(0.0)))
         } else if top + lh + margin > y + viewport.height {
@@ -1309,6 +1328,81 @@ impl Ed {
             }
             ed.highlighting.set(false);
         });
+    }
+
+    // Scrolling while dragging.
+
+    /// Starts, changes or stops scrolling on its own as a drag at `page`
+    /// (in the root view) nears or leaves the viewport's edges.
+    fn follow_drag_edge(&self, page: Point<Points>) {
+        let Some(drag) = self.drag.get() else {
+            self.autoscroll.borrow_mut().stop();
+            return;
+        };
+        let at = page + drag.shift + (self.scroll_offset() - drag.scroll);
+        let viewport = self.viewport.get_untracked();
+        let y = at.y + self.rows_top.get_untracked() - self.scroll_y.get_untracked();
+        let dy = layout::edge_speed(y, viewport.height, layout::AUTOSCROLL_INNER_ZONE);
+        // Sideways only past the text area's edges: the gutter is left of
+        // it, and the pointer often rests near its right edge.
+        let dx = if self.props.soft_wrap.get_untracked() {
+            px(0.0)
+        } else {
+            let x = at.x + self.rows_left.get_untracked() - self.scroll_x.get_untracked();
+            layout::edge_speed(x, self.text_width.get_untracked(), px(0.0))
+        };
+        let mut auto = self.autoscroll.borrow_mut();
+        auto.page = page;
+        if dx.0 == 0.0 && dy.0 == 0.0 {
+            auto.stop();
+            return;
+        }
+        auto.speed = Point::new(dx, dy);
+        if auto.task.is_none() {
+            let ed = self.clone();
+            let period = Duration::from_millis(layout::AUTOSCROLL_PERIOD_MS);
+            auto.task = Some(set_interval(period, move || ed.autoscroll_tick()));
+        }
+    }
+
+    /// A period of scrolling while dragging: the scroll views move by the
+    /// speed (within their content) and the selection follows the pointer.
+    fn autoscroll_tick(&self) {
+        if self.drag.get().is_none() {
+            self.autoscroll.borrow_mut().stop();
+            return;
+        }
+        let (page, speed) = {
+            let auto = self.autoscroll.borrow();
+            (auto.page, auto.speed)
+        };
+        let viewport = self.viewport.get_untracked();
+        let mut moved = false;
+        if speed.y.0 != 0.0 {
+            let max = (self.content_height.get_untracked() - viewport.height).max(px(0.0));
+            let from = self.scroll_y.get_untracked();
+            let to = (from + speed.y).min(max).max(px(0.0));
+            if to != from {
+                self.scroll_y.set(to);
+                self.vscroll.scroll_to(Point::new(px(0.0), to), false);
+                moved = true;
+            }
+        }
+        if speed.x.0 != 0.0 {
+            let width = self.st.borrow().content_size().width;
+            let max = (self.rows_left.get_untracked() + width - self.text_width.get_untracked())
+                .max(px(0.0));
+            let from = self.scroll_x.get_untracked();
+            let to = (from + speed.x).min(max).max(px(0.0));
+            if to != from {
+                self.scroll_x.set(to);
+                self.hscroll.scroll_to(Point::new(to, px(0.0)), false);
+                moved = true;
+            }
+        }
+        if moved {
+            self.drag_to(page);
+        }
     }
 }
 

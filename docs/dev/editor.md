@@ -17,6 +17,7 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 | `state.rs` | `State`: what the editor holds between frames, outside the reactive graph (buffer, selections, display map, highlighter, marks, matches); what the view draws of each row (`row_content`, `gutter_row`, the rectangles of selections, matches, brackets, diagnostics, indent guides) |
 | `view.rs` | The view: the scroll views, the gutter, the rows' box and its layers, the sink |
 | `hooks.rs` | What language features are built on: hovers (`onHover` / `onHoverEnd`), `onTextPress`, the ref's geometry and scrolling (`caretBounds`, `rangeBounds`, `revealPosition`, `goToLine`, ...), where the editor is in the root view |
+| `layout.rs` | Sizing and scrolling: `EditorScrollBeyond`, the height of an editor growing with its text, the margin around the caret, scrolling while a drag is past the edges |
 | `buffer.rs` | The text: a `ropey::Rope`, edits as change lists, undo / redo with grouping, UTF-16 positions, the lines each change touched (`LineSpan`) |
 | `types.rs` | `Point`, `Selection`, `Selections` (the primary one, the newest, kept apart), the trait `RowLayout` the moves use |
 | `movement.rs` | Graphemes, words and their parts (camelCase, snake_case), paragraphs, smart Home / End, vertical moves keeping their x, matching and enclosing brackets |
@@ -85,9 +86,27 @@ Only the rows in view are made, plus 8 on each side (`OVERSCAN`), and at least 4
 known: the row list is a memo of the visible range, and `each` keeps the views of rows that stay in view, so
 scrolling makes only the rows that come in. Each row is an absolutely placed view holding one `Text` whose spans are
 the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws, from back to
-front: the active lines' backgrounds, indent guides, search matches, selections, the matching brackets, the rows,
-diagnostics' marks, the placeholder, the carets, the composition and the sink. Each layer is a `dynamic` over the
-revisions it depends on.
+front: the active lines' backgrounds, the rulers, indent guides, search matches, selections, the matching brackets,
+the rows, the whitespace marks, diagnostics' marks, the placeholder, the carets, the composition and the sink. Each
+layer is a `dynamic` over the revisions it depends on.
+
+`showWhitespaces` draws a `·` per space and a `→` per tab over the rows in view: one `Text` per run of spaces and per
+tab, placed and sized by the display map (`DisplayMap::whitespace`), so the row's own text and its measuring stay as
+they are. `rulers` are 1 point lines at columns a space wide (`State::ruler_xs`), the rows' box's height.
+
+### Sizing and scrolling
+
+`layout.rs` holds the arithmetic. `scrollBeyondLastLine` (`EditorScrollBeyond`: `true`, `false` or a number of rows)
+is the room the rows' box has past its last row. With `minRows` and / or `maxRows` the editor grows with its text: the
+root's height is its display rows within those bounds plus the padding its parts take around the rows (the vertical
+scroll view's content as last laid out, less the rows' box), and there is no room past the last line; past `maxRows`
+the text scrolls. Moving the caret keeps `cursorSurroundingLines` rows around it (a row by default, at most a quarter
+of the viewport; never more than half of what the caret's row leaves).
+
+A drag that selects (`drag_to`) never jumps to the caret: while the pointer is near or past the viewport's top or
+bottom edge (from 16 points inside), or past the text area's left or right edge without soft wrap, a 16 ms
+`set_interval` scrolls by 12 to 64 points a tick, faster the farther out (`edge_speed`), within the content, and
+extends the selection to the pointer again; it stops when the pointer comes back, on release, and when the drag ends.
 
 Revisions (`Signal<u64>` in `Ed`) keep a change to the parts that depend on it: `text_rev` (the text or its layout),
 `hl_rev` (highlighting progressed), `sel_rev` (selections), `marks_rev` (diagnostics, decorations, matches). The state
@@ -220,6 +239,8 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `foldPlaceholder` | ` ⋯ ` after a folded line, `muted-foreground` |
 | `placeholder` | `muted-foreground` |
 | `diagnosticError` / `Warning` / `Info` / `Hint` | A 2 point line: `destructive` / amber / blue / `muted-foreground` |
+| `whitespace` | `·` per space, `→` per tab, `muted-foreground` at 60 %, while `showWhitespaces` |
+| `ruler` | A 1 point line of `border` at each of `rulers`' columns |
 
 Syntax colors are `crate::syntax`'s `Token` styles, Allsum's palette in light and dark (the table in `text-view.md`
 "Syntax highlighting"). The font is a prop, not a class: the editor measures its text in it.
@@ -239,6 +260,7 @@ The sink carries `accessibilityLabel`; the rows are real texts, read in order.
 | Diagnostics with hover popovers | `diagnostics` marked and carried through edits; `onHover` carries those under the mouse, the app shows them |
 | `lsp` providers (hover, completion, definition, code actions) | `onHover` / `onHoverEnd`, `onTextPress`, `caretBounds` / `rangeBounds`: the app asks its language server and draws the popups |
 | Key bindings as GPUI actions | `keymap.rs` data on `nsh/keymap`, bound while focused; `run(command)` |
+| `show_whitespaces`, `auto_grow(min, max)`, `scroll_beyond_last_line(rows)`, `cursor_surrounding_lines`, `AutoScroll` | `showWhitespaces`, `minRows` / `maxRows`, `scrollBeyondLastLine` (also `true` / `false`), `cursorSurroundingLines`; dragging scrolls past the edges the same way (`layout.rs`) |
 
 ## Limits
 

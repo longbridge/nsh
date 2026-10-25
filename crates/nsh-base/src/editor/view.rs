@@ -75,11 +75,17 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
     let vscroll_ed = ed.clone();
     let layout_ed = ed.clone();
     let place_ed = ed.clone();
+    let grow_ed = ed.clone();
+    let content_ed = ed.clone();
     view()
         .element_ref(&ed.hooks.outer)
         .on_layout(move |_: &Bounds<Points>| place_ed.measure_place())
         .relative()
         .overflow_hidden()
+        .h(move || match grow_height(&grow_ed) {
+            Some(height) => Length::from(height),
+            None => Length::Auto,
+        })
         .text_color(move || theme().foreground)
         .font_family(move || font_a().family)
         .text_size(move || Length::from(font_b().size))
@@ -100,6 +106,9 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
                     view()
                         .flex_row()
                         .items_stretch()
+                        .on_layout(move |b: &Bounds<Points>| {
+                            content_ed.content_height.set(b.size.height)
+                        })
                         .child(gutter(ed.clone()))
                         .child(text_area(ed.clone(), lh)),
                 ),
@@ -287,12 +296,35 @@ fn rows_height(ed: &Ed) -> Points {
         let st = ed.st.borrow();
         (st.content_size().height, st.line_height())
     };
-    let beyond = if ed.props.scroll_beyond_last_line.get() {
-        (ed.viewport.get().height - lh).max(px(0.0))
-    } else {
+    // An editor growing with its text has no room past it.
+    let grows = ed.props.min_rows.get().is_some() || ed.props.max_rows.get().is_some();
+    let beyond = if grows {
         px(0.0)
+    } else {
+        let beyond = ed.props.scroll_beyond_last_line.get();
+        beyond.room(ed.viewport.get().height, lh)
     };
     content.max(lh) + beyond
+}
+
+/// The height of an editor growing with its text (`minRows` /
+/// `maxRows`): its rows within their bounds, and the room its parts' padding
+/// takes around them; `None` when the app sizes it.
+fn grow_height(ed: &Ed) -> Option<Points> {
+    let (min, max) = (ed.props.min_rows.get(), ed.props.max_rows.get());
+    if min.is_none() && max.is_none() {
+        return None;
+    }
+    ed.text_rev.get();
+    let (rows, lh) = {
+        let st = ed.st.borrow();
+        (st.display.row_count(), st.line_height())
+    };
+    let rows_h = super::layout::grow_height(rows, lh, min, max)?;
+    // What the content holds besides the rows (the parts' padding), as
+    // last laid out.
+    let padding = (ed.content_height.get() - rows_height(ed)).max(px(0.0));
+    Some(rows_h + padding)
 }
 
 /// The text area: the rows' box, in a horizontal scroll view unless lines
@@ -364,6 +396,7 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
         .h(move || Length::from(height()))
         .on_layout(move |b: &Bounds<Points>| {
             layout.rows_top.set(b.origin.y);
+            layout.rows_left.set(b.origin.x);
             if props.soft_wrap.get_untracked() {
                 layout.text_width.set(b.size.width);
             }
@@ -405,11 +438,13 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoEleme
     });
     el.min_w(relative(1.0))
         .child(active_lines(ed.clone(), lh.clone()))
+        .child(rulers(ed.clone()))
         .child(indent_guides(ed.clone(), lh.clone()))
         .child(match_rects(ed.clone()))
         .child(selection_rects(ed.clone()))
         .child(bracket_rects(ed.clone()))
         .child(rows(ed.clone(), lh.clone()))
+        .child(whitespace_marks(ed.clone()))
         .child(diagnostic_marks(ed.clone()))
         .child(placeholder(ed.clone()))
         .child(carets(ed.clone(), lh.clone()))
@@ -872,4 +907,66 @@ fn sink(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement {
         .on_paste(move |p: &PasteEvent| paste.paste(&p.text))
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))
+}
+
+/// The lines of `rulers`, the rows' box's height.
+fn rulers(ed: Ed) -> impl IntoElement {
+    let props = ed.props;
+    dynamic(move || {
+        let columns = props.rulers.get();
+        if columns.is_empty() {
+            return Vec::new();
+        }
+        ed.text_rev.get();
+        let xs = ed.st.borrow().ruler_xs(&columns);
+        xs.into_iter()
+            .map(|x| {
+                part(
+                    view()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(Length::from(x))
+                        .w(px(1.0))
+                        .pointer_events(PointerEvents::None)
+                        .bg(move || theme().border),
+                    props,
+                    EditorPart::Ruler,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+/// The marks of the spaces and tabs in view, while `showWhitespaces` is
+/// set.
+fn whitespace_marks(ed: Ed) -> impl IntoElement {
+    let props = ed.props;
+    dynamic(move || {
+        if !props.show_whitespaces.get() {
+            return Vec::new();
+        }
+        ed.text_rev.get();
+        let rows = ed.visible_rows();
+        let marks = ed.st.borrow().whitespace_marks(rows);
+        marks
+            .into_iter()
+            .map(|(b, mark)| {
+                part(
+                    text(mark)
+                        .absolute()
+                        .left(Length::from(b.origin.x))
+                        .top(Length::from(b.origin.y))
+                        .w(Length::from(b.size.width))
+                        .h(Length::from(b.size.height))
+                        .number_of_lines(1)
+                        .overflow_hidden()
+                        .pointer_events(PointerEvents::None)
+                        .text_color(move || theme().muted_foreground.opacity(0.6)),
+                    props,
+                    EditorPart::Whitespace,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
 }

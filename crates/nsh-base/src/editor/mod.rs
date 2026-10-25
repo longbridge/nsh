@@ -21,6 +21,7 @@ pub(crate) mod highlight;
 mod hooks;
 mod keymap;
 pub(crate) mod language;
+mod layout;
 mod movement;
 mod parts;
 mod search;
@@ -33,6 +34,7 @@ pub use data::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticSeverity, EditorPosition, EditorRange,
     EditorSearch, EditorSearchResult, EditorSelection,
 };
+pub use layout::EditorScrollBeyond;
 use nsh_core::ui::prelude::*;
 pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
@@ -96,10 +98,10 @@ pub struct EditorProps {
     /// The guides of indentation (default true).
     #[prop(default = true)]
     pub indent_guides: Prop<bool>,
-    /// The text scrolls on past its last line, up to a screen (default
-    /// true).
-    #[prop(default = true)]
-    pub scroll_beyond_last_line: Prop<bool>,
+    /// How far the text scrolls on past its last line: `true` up to a
+    /// screen (the default), `false` not at all, a number that many rows.
+    #[prop(default)]
+    pub scroll_beyond_last_line: Prop<EditorScrollBeyond>,
     /// The font family (default the theme's `font-mono`, else the
     /// system's monospaced font). The editor measures its text in it, so
     /// set the font here rather than with classes.
@@ -129,6 +131,24 @@ pub struct EditorProps {
     pub styles: Prop<EditorStyles>,
     /// What screen readers call the editor.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// Spaces and tabs show, as `·` and `→` (the `whitespace` part).
+    #[prop(default)]
+    pub show_whitespaces: Prop<bool>,
+    /// Columns to draw a vertical line at (the `ruler` part), as guides of
+    /// a line's length (`[80, 120]`).
+    #[prop(default)]
+    pub rulers: Prop<Vec<u32>>,
+    /// The editor grows with its text from this many rows (with or without
+    /// `maxRows`): its height follows the rows rather than the app's
+    /// layout, and the text does not scroll past its last line.
+    pub min_rows: Prop<Option<u32>>,
+    /// The editor grows with its text up to this many rows, then scrolls
+    /// (with or without `minRows`, which is 1 then).
+    pub max_rows: Prop<Option<u32>>,
+    /// The rows kept in view above and below the caret as it moves (default
+    /// one, at most a quarter of the editor's height; never more than
+    /// half of what the caret's row leaves).
+    pub cursor_surrounding_lines: Prop<Option<u32>>,
 }
 
 /// The events of an [`Editor`].

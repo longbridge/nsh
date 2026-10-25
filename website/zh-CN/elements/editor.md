@@ -288,6 +288,25 @@ const hover = signal<EditorHoverEvent | null>(null);
 </If>
 ```
 
+<a id="size-and-scrolling"></a>
+
+## 尺寸与滚动
+
+设置 `minRows` 和 / 或 `maxRows` 时，编辑器随文本增高：它和文本的行一样高，至少 `minRows` 行，到 `maxRows` 行起文本滚动，就像消息输入框或笔记本的单元格。否则由应用决定它的尺寸，`scrollBeyondLastLine` 让文本滚动到最后一行之后：最多一屏（`true`，默认）、完全不（`false`）或若干行。光标移动时，它上下各保留 `cursorSurroundingLines` 行在视野内。拖动选择越过编辑器的边缘时会继续滚动，指针越远滚得越快。
+
+`showWhitespaces` 把每个空格显示为 `·`、每个制表符显示为 `→`（`whitespace` 部件），`rulers` 在它的每一列画一条线（`ruler` 部件），作为行长度的参考线。
+
+```tsx
+<Editor
+  defaultValue={message()}
+  language="markdown"
+  minRows={2}
+  maxRows={8}
+  rulers={[72]}
+  showWhitespaces
+/>
+```
+
 <a id="methods"></a>
 
 ## 方法
@@ -406,6 +425,8 @@ let editor!: EditorRef;
 | `diagnosticWarning` | 警告下方的线 | 琥珀色 |
 | `diagnosticInfo` | 信息下方的线 | 蓝色 |
 | `diagnosticHint` | 提示下方的线 | `muted-foreground` |
+| `whitespace` | 空格和制表符的标记（`showWhitespaces`） | `·` 和 `→`，`muted-foreground` 的 60 % |
+| `ruler` | `rulers` 的线 | 1 点宽的 `border` 线 |
 
 <a id="props"></a>
 
@@ -428,7 +449,7 @@ let editor!: EditorRef;
 | `autoIndent` | `.auto_indent(..)` | `boolean` | `true` | 新行保持缩进，并在左括号之后增加缩进。 |
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | 高亮有光标的行。 |
 | `indentGuides` | `.indent_guides(..)` | `boolean` | `true` | 缩进参考线。 |
-| `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean` | `true` | 文本可以滚动到最后一行之后，最多一屏。 |
+| `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean \| number` | `true` | 文本可以滚动到最后一行之后：最多一屏（`true`）、完全不（`false`）或若干行。 |
 | `fontFamily` | `.font_family(..)` | `string` | 主题的 `font-mono` | 绘制和测量文本所用的字体。 |
 | `fontSize` | `.font_size(..)` | `number` | `13` | 字号，单位为点。 |
 | `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点。 |
@@ -438,6 +459,11 @@ let editor!: EditorRef;
 | `classes` | `.classes(..)` | `EditorClasses` | `{}` | 按部件的 Tailwind 类。 |
 | `styles` | `.styles(..)` | `EditorStyles` | `{}` | 按部件的内联样式，优先于类。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | | 读屏软件对编辑器的称呼。 |
+| `showWhitespaces` | `.show_whitespaces(..)` | `boolean` | `false` | 空格和制表符显示为 `·` 和 `→`。 |
+| `rulers` | `.rulers(..)` | `number[]` | `[]` | 要画竖线的列。 |
+| `minRows` | `.min_rows(..)` | `number` | | 编辑器从这么多行起随文本增高（[尺寸与滚动](#size-and-scrolling)）。 |
+| `maxRows` | `.max_rows(..)` | `number` | | 编辑器随文本增高到这么多行，之后滚动。 |
+| `cursorSurroundingLines` | `.cursor_surrounding_lines(..)` | `number` | `1` | 光标上下保留在视野内的行数。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | | 编辑器的盒子。 |
 
 <a id="events"></a>

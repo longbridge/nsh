@@ -1296,12 +1296,23 @@ tap id:upper
 expect Value: LET y = 1; // ok
 tap id:ask
 expect Asked: LET
+# The second editor's tab shows as an arrow, and the editor is as tall
+# as its rows: one line takes the two rows of `minRows` (20 points
+# each), five lines the three of `maxRows`, past which they scroll.
+expect →
+frame id:grow 0 0 300 40
+tap id:grow-more
+wait 100
+frame id:grow 0 0 300 60
 covers [nsh/base] Editor
 covers [events] Editor.onHover
 covers [events] Editor.onHoverEnd
 covers [props] Editor.search
 covers [events] Editor.onSearchChange
 covers [events] Editor.onFindWithSelection
+covers [props] Editor.minRows
+covers [props] Editor.maxRows
+covers [props] Editor.showWhitespaces
 
 # base-diff
 tap id:case-base-diff

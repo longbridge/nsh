@@ -102,4 +102,9 @@ parts! {
     diagnostic_info => DiagnosticInfo,
     /// The mark under a hint's range (dotted, muted).
     diagnostic_hint => DiagnosticHint,
+    /// The marks of spaces (`·`) and tabs (`→`) while `showWhitespaces`
+    /// is set (muted, translucent).
+    whitespace => Whitespace,
+    /// The lines of `rulers` (a 1 point line in the theme's `border`).
+    ruler => Ruler,
 }

@@ -10,10 +10,11 @@
 // (`onHover`, `onHoverEnd`); the ref tells where the caret and the text
 // in view are (`caretBounds`, `visibleRange`, `scrollOffset`), converts
 // offsets (`positionToOffset`, `offsetToPosition`), reads the selected
-// text (`selectedText`) and goes to a line (`goToLine`).
-// (`onSearchChange`); a command changes the selection's case
-// (`run("transformToUppercase")`) and another reports the selection for a
-// find bar (`run("findWithSelection")`, `onFindWithSelection`).
+// text (`selectedText`) and goes to a line (`goToLine`). A command
+// changes the selection's case (`run("transformToUppercase")`) and another
+// reports the selection for a find bar (`run("findWithSelection")`,
+// `onFindWithSelection`). A second editor grows with its text between
+// `minRows` and `maxRows` and shows its whitespace (`showWhitespaces`).
 import { Text, View, signal } from "nsh";
 import { Editor, type EditorRef } from "nsh/base";
 
@@ -27,6 +28,7 @@ export default function BaseEditor() {
   const hovered = signal("none");
   const asked = signal("none");
   let editor!: EditorRef;
+  let grown!: EditorRef;
   const track = async () => history.set(`Undo ${await editor.canUndo()} Redo ${await editor.canRedo()}`);
   return (
     <View style={{ paddingTop: 20 }}>
@@ -119,6 +121,7 @@ export default function BaseEditor() {
         }}
       />
       <View testID="go-to-line" style={{ height: 20 }} onPress={() => editor.goToLine(0)} />
+      <View
         testID="upper"
         style={{ height: 20 }}
         onPress={() => {
@@ -127,6 +130,12 @@ export default function BaseEditor() {
         }}
       />
       <View testID="ask" style={{ height: 20 }} onPress={() => editor.run("findWithSelection")} />
+      <View style={{ width: 300 }}>
+        <View testID="grow">
+          <Editor ref={r => (grown = r)} defaultValue={"a\tb"} minRows={2} maxRows={3} showWhitespaces />
+        </View>
+      </View>
+      <View testID="grow-more" style={{ height: 20 }} onPress={() => grown.setValue("1\n2\n3\n4\n5")} />
     </View>
   );
 }

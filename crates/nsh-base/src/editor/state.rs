@@ -859,6 +859,34 @@ impl State {
     pub(crate) fn language_for(name: Option<&str>) -> &'static LanguageConfig {
         language::language(name.unwrap_or(""))
     }
+
+    /// The marks of the whitespace on `rows` (`showWhitespaces`): where
+    /// each run of spaces or tab is and what shows there, a `·` per space
+    /// and a `→` per tab.
+    pub(crate) fn whitespace_marks(&self, rows: Range<usize>) -> Vec<(Rect, String)> {
+        let lh = self.line_height();
+        let count = self.display.row_count();
+        let mut out = Vec::new();
+        for row in rows.start.min(count)..rows.end.min(count) {
+            for ws in self.display.whitespace(&self.buffer, row) {
+                let mark = if ws.tab {
+                    "→".to_owned()
+                } else {
+                    "·".repeat(ws.count)
+                };
+                let at = Pt::new(ws.x, lh * row as f32);
+                out.push((Bounds::new(at, Size::new(ws.width, lh)), mark));
+            }
+        }
+        out
+    }
+
+    /// The x of each ruler at `columns` in the rows' box (a column is a
+    /// space wide).
+    pub(crate) fn ruler_xs(&self, columns: &[u32]) -> Vec<Points> {
+        let space = self.display.space_width();
+        columns.iter().map(|c| space * *c as f32).collect()
+    }
 }
 
 #[cfg(test)]

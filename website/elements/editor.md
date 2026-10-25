@@ -330,6 +330,28 @@ const hover = signal<EditorHoverEvent | null>(null);
 </If>
 ```
 
+## Size and scrolling
+
+With `minRows` and / or `maxRows` the editor grows with its text: it is as tall as its rows, at least `minRows`
+of them, and from `maxRows` on its text scrolls, as a message box or a cell of a notebook does. Otherwise the
+app sizes it, and `scrollBeyondLastLine` lets the text scroll on past its last line: up to a screen (`true`, the
+default), not at all (`false`) or a number of rows. As the caret moves, `cursorSurroundingLines` rows stay in view
+around it. Dragging a selection past the editor's edges scrolls on, faster the farther out the pointer goes.
+
+`showWhitespaces` shows a `·` for each space and a `→` for each tab (the `whitespace` part), and `rulers` draws a
+line at each of its columns (the `ruler` part), as guides of a line's length.
+
+```tsx
+<Editor
+  defaultValue={message()}
+  language="markdown"
+  minRows={2}
+  maxRows={8}
+  rulers={[72]}
+  showWhitespaces
+/>
+```
+
 ## Methods
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
@@ -446,6 +468,8 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `diagnosticWarning` | The line under a warning | Amber |
 | `diagnosticInfo` | The line under an information | Blue |
 | `diagnosticHint` | The line under a hint | `muted-foreground` |
+| `whitespace` | The marks of spaces and tabs (`showWhitespaces`) | `·` and `→`, `muted-foreground` at 60 % |
+| `ruler` | The lines of `rulers` | A 1 point line of `border` |
 
 ## Props
 
@@ -466,7 +490,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `autoIndent` | `.auto_indent(..)` | `boolean` | `true` | A new line keeps the indentation and indents after an opening bracket. |
 | `activeLine` | `.active_line(..)` | `boolean` | `true` | The rows of the lines with a caret are highlighted. |
 | `indentGuides` | `.indent_guides(..)` | `boolean` | `true` | The guides of indentation. |
-| `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean` | `true` | The text scrolls on past its last line, up to a screen. |
+| `scrollBeyondLastLine` | `.scroll_beyond_last_line(..)` | `boolean \| number` | `true` | The text scrolls on past its last line: up to a screen (`true`), not at all (`false`) or that many rows. |
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-mono` | The font the text is drawn and measured in. |
 | `fontSize` | `.font_size(..)` | `number` | `13` | The font size, in points. |
 | `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points. |
@@ -476,6 +500,11 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 | `classes` | `.classes(..)` | `EditorClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `EditorStyles` | `{}` | Inline styles by part, over the classes. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | | What screen readers call the editor. |
+| `showWhitespaces` | `.show_whitespaces(..)` | `boolean` | `false` | Spaces and tabs show as `·` and `→`. |
+| `rulers` | `.rulers(..)` | `number[]` | `[]` | Columns to draw a vertical line at. |
+| `minRows` | `.min_rows(..)` | `number` | | The editor grows with its text from this many rows ([Size and scrolling](#size-and-scrolling)). |
+| `maxRows` | `.max_rows(..)` | `number` | | The editor grows with its text up to this many rows, then scrolls. |
+| `cursorSurroundingLines` | `.cursor_surrounding_lines(..)` | `number` | `1` | The rows kept in view above and below the caret. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The editor's box. |
 
 ## Events

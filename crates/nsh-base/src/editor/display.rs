@@ -457,6 +457,58 @@ impl DisplayMap {
         let text = slice_text(rope, start..end);
         Points(row.indent.0 + self.metrics.run_width(&text))
     }
+
+    /// The whitespace display row `row` shows (`showWhitespaces`): each run
+    /// of spaces and each tab, where it starts (the row's indent included)
+    /// and how wide it is.
+    pub(crate) fn whitespace(&self, buffer: &Buffer, row: usize) -> Vec<Whitespace> {
+        let info = self.row(row);
+        let text = slice_text(buffer.rope(), info.range.clone());
+        let mut out: Vec<Whitespace> = Vec::new();
+        let mut x = 0.0;
+        // The previous grapheme was a space: a space extends its run.
+        let mut after_space = false;
+        for (_, grapheme) in graphemes(&text) {
+            let width = self.metrics.advance(grapheme, x);
+            match grapheme {
+                " " => match out.last_mut() {
+                    Some(run) if after_space => {
+                        run.width = Points(run.width.0 + width);
+                        run.count += 1;
+                    }
+                    _ => out.push(Whitespace {
+                        x: Points(info.indent.0 + x),
+                        width: Points(width),
+                        count: 1,
+                        tab: false,
+                    }),
+                },
+                "\t" => out.push(Whitespace {
+                    x: Points(info.indent.0 + x),
+                    width: Points(width),
+                    count: 1,
+                    tab: true,
+                }),
+                _ => {}
+            }
+            after_space = grapheme == " ";
+            x += width;
+        }
+        out
+    }
+}
+
+/// A run of spaces or a tab of a row ([`DisplayMap::whitespace`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Whitespace {
+    /// Where it starts, from the text's left edge.
+    pub(crate) x: Points,
+    /// How wide it is.
+    pub(crate) width: Points,
+    /// How many spaces (1 for a tab).
+    pub(crate) count: usize,
+    /// It is a tab.
+    pub(crate) tab: bool,
 }
 
 /// A row's text as shown, and how its offsets map to the buffer's.
@@ -1264,5 +1316,29 @@ mod tests {
             map.row(100_000).range,
             buffer.line_start(100_000)..buffer.len()
         );
+    }
+
+    #[test]
+    fn whitespace_is_runs_of_spaces_and_tabs() {
+        let buffer = Buffer::new("a  b\t c\n  x\nnone");
+        let map = map(&buffer, None, vec![]);
+        let ws = |x: f32, width: f32, count: usize, tab: bool| Whitespace {
+            x: px(x),
+            width: px(width),
+            count,
+            tab,
+        };
+        // Two spaces in one run; the tab advances to its stop (40 → 80),
+        // and the space after it starts a run of its own.
+        assert_eq!(
+            map.whitespace(&buffer, 0),
+            vec![
+                ws(10.0, 20.0, 2, false),
+                ws(40.0, 40.0, 1, true),
+                ws(80.0, 10.0, 1, false),
+            ]
+        );
+        assert_eq!(map.whitespace(&buffer, 1), vec![ws(0.0, 20.0, 2, false)]);
+        assert!(map.whitespace(&buffer, 2).is_empty());
     }
 }
