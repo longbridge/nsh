@@ -80,7 +80,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input
 
 ## Primitives
 
-Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::components`).
+Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::elements`).
 
 | Element | Rust | Native view (iOS / Android) | Page |
 |---|---|---|---|
@@ -107,7 +107,7 @@ and take their look from the app.
 | Component | Rust | What it does | Page |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
-| `<Input>` | `input()` (`nsh_core::ui::prelude`) | The native text input (UITextField or UITextView / EditText) | [Input](./input.md) |
+| `<Input>` | `nsh_base::input()` | The native text input (UITextField or UITextView / EditText) | [Input](./input.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Radio>`, `<RadioGroup>` | `nsh_base::radio()`, `radio_group()` | One option of a set the user picks one of, and the set | [Radio](./radio.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |

@@ -14,7 +14,7 @@ Dialog 负责行为，外观交给应用：它的样式设定弹出层（包含�
 
 ```rust tabs
 use nsh_base::{button, dialog};
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// 白色文字的蓝色按钮。

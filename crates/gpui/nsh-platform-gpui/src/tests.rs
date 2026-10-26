@@ -2,6 +2,7 @@
 //! `shot`, which turns on GPUI's test support): a surface drawn by GPUI
 //! and given GPUI's input, with the engine running on its own thread.
 
+use nsh_base::input;
 use std::{
     rc::Rc,
     time::{Duration, Instant},

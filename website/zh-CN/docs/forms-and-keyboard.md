@@ -593,10 +593,10 @@ scroll()
 
 ### 滚动视图之外的内容：KeyboardAvoidingView
 
-固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::components::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
+固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::elements::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
 
 ```rust tabs
-use nsh_core::components::keyboard_avoiding_view;
+use nsh_core::elements::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {

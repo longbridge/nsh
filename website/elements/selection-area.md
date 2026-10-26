@@ -12,11 +12,11 @@ demo: el-selection-area
 text to a place in another, across views, [`Text`](./text.md) elements and [`TextView`](./text-view.md)s, in reading
 order. Wrap a chat transcript in it and a selection can start in one message and end in the next; Copy puts the
 selected text on the clipboard, with texts side by side joined by a tab and the others by a line break. Rust makes one
-with `nsh_core::components::selection_area()`, TSX with `<SelectionArea>` from `nsh`.
+with `nsh_core::elements::selection_area()`, TSX with `<SelectionArea>` from `nsh`.
 
 ```rust tabs
 use nsh_base::text_view;
-use nsh_core::components::selection_area;
+use nsh_core::elements::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn release_notes(notes: &'static str) -> impl IntoElement {
@@ -53,7 +53,7 @@ function ReleaseNotes(props: { notes: string }) {
 }
 ```
 
-`SelectionArea` comes from [`nsh`](../modules/nsh.md#selectionarea), `nsh_core::components` in Rust. It is a view: its
+`SelectionArea` comes from [`nsh`](../modules/nsh.md#selectionarea), `nsh_core::elements` in Rust. It is a view: its
 layout and look are the app's styles, and its content is its children. The selection itself is the platform's: the
 area draws nothing of its own.
 
@@ -64,7 +64,7 @@ of every message in between.
 
 ```rust tabs
 use nsh_base::text_view;
-use nsh_core::components::selection_area;
+use nsh_core::elements::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {

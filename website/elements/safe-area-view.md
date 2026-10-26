@@ -14,7 +14,7 @@ navigation header and the Mac Catalyst title bar. It pads itself by the insets *
 insets, and elsewhere the surface's safe area. It has no look of its own; its background and padding are the app's.
 
 ```rust tabs
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 fn app() -> impl IntoElement {
@@ -57,7 +57,7 @@ By default all four edges are padded. Pass `edges` to pad only some of them, for
 bar of your own handles the bottom inset:
 
 ```rust tabs
-use nsh_core::components::{Edge, safe_area_view};
+use nsh_core::elements::{Edge, safe_area_view};
 
 safe_area_view()
     .edges(vec![Edge::Top, Edge::Left, Edge::Right])

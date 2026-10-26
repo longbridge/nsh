@@ -149,7 +149,7 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 | [`DiffView`](../elements/diff-view.md) | `diff_view()` | 两段文本之间或一个补丁中的改动，并排或合并显示，带针对每处改动的操作。 |
 | [`Table`、`TableHeader`、`TableBody`、`TableFooter`、`TableRow`、`TableHead`、`TableCell`、`TableCaption`](../elements/table.md) | `table()`、`table_row()` 等 | 由应用写出行和单元格的表格，为屏幕阅读器提供表格的角色。 |
 | [`DataTable`](../elements/data-table.md) | `data_table()` | 行列数量不限的表格：选择、排序，列可固定、调整宽度和移动，行由应用分页提供。 |
-| [`Input`](../elements/input.md) | `input()`（在 `nsh_core::ui::prelude` 中） | 平台原生的文本输入框，单行或多行。 |
+| [`Input`](../elements/input.md) | `nsh_base::input()` | 平台原生的文本输入框，单行或多行。 |
 | [`Popover`](../elements/popover.md) | `popover()` | 锚定在触发元素上、显示在一切之上的内容。 |
 | [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet。 |
 | [`Tooltip`](../elements/tooltip.md) | `tooltip()` | 显示在触发元素旁的提示。 |

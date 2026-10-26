@@ -10,9 +10,10 @@ demo: el-input
 
 `Input` is a native text field: a UITextField (single line) or UITextView (multiline) on iOS and Mac Catalyst, an
 EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own. Rust makes one
-with `input()`, TSX with `<Input>` from `nsh/base`.
+with `nsh_base::input()`, TSX with `<Input>` from `nsh/base`.
 
 ```rust tabs
+use nsh_base::input;
 use nsh_core::ui::prelude::*;
 
 fn name_field() -> impl IntoElement {

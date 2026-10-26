@@ -13,6 +13,7 @@
 //! `even:` / `last:` are plain Rust from the row's index, `sm:` reads the
 //! window.
 
+use nsh_base::input;
 use nsh_core::ui::{
     AnyElement, BlendMode, BoxShadow, Image,
     palette::{

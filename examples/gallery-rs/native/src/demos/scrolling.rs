@@ -3,6 +3,7 @@
 //! behavior, prepending and taps with the keyboard up (as the TSX
 //! gallery's `demos/Scrolling.tsx`).
 
+use nsh_base::input;
 use nsh_core::{
     Bounds, Points,
     ui::{View, prelude::*},

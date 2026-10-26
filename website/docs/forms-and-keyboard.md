@@ -612,10 +612,10 @@ The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none,
 
 ### Content outside scroll views: KeyboardAvoidingView
 
-A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh` (Rust: `nsh_core::components::keyboard_avoiding_view()`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
+A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh` (Rust: `nsh_core::elements::keyboard_avoiding_view()`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
 
 ```rust tabs
-use nsh_core::components::keyboard_avoiding_view;
+use nsh_core::elements::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {

@@ -77,7 +77,7 @@ The two templates make the same app, a counter:
 ```rust tabs
 // src/lib.rs
 use nsh_base::theme;
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// The crate's UI set: what a TSX entry may import from `my-app/native`.
@@ -149,7 +149,7 @@ mount(App);
 In Rust:
 
 - **`use nsh_core::ui::prelude::*`** brings the primitives (`view()`, `text()`, `scroll()`, `input()`, `image()`, ...),
-  [signals](./reactivity.md) and the typed style methods; **`nsh_core::components`** has `safe_area_view()`; **`nsh_base`** has the unstyled base components
+  [signals](./reactivity.md) and the typed style methods; **`nsh_core::elements`** has `safe_area_view()`; **`nsh_base`** has the unstyled base components
   (`button()`, the keyboard, dialogs) and `theme()`, the colors and
   radii the app's components draw with ([Theme](./rust.md#theme)).
 - **`#[component] pub fn App()`** is a component: a function that runs **once** and returns its elements.

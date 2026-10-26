@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nsh_base::input;
 use nsh_core::{
     ApproxTextEngine, Core, EventKind, EventPayload, MountItem, ROOT_ID, Size,
     ui::{Root, create_root, prelude::*},

@@ -18,7 +18,7 @@ children), and in TSX `backdropClass` / `backdropStyle` add a backdrop behind it
 
 ```rust tabs
 use nsh_base::{button, dialog};
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// A blue button with a white label.

@@ -70,7 +70,7 @@ TSX 应用是一个或多个带入口的 `.tsx` 文件：它是 `nsh run` 运行
 ```rust tabs
 // src/lib.rs
 use nsh_base::theme;
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// crate 的 UI 集合：TSX 入口可以从 `my-app/native` 导入的内容。
@@ -142,7 +142,7 @@ mount(App);
 Rust 版：
 
 - **`use nsh_core::ui::prelude::*`** 引入基本元素（`view()`、`text()`、`scroll()`、`input()`、`image()` 等）、[signal](./reactivity.md)
-  和带类型的样式方法；**`nsh_core::components`** 提供 `safe_area_view()`；**`nsh_base`** 提供无样式的基础组件（`button()`、键盘、对话框）以及
+  和带类型的样式方法；**`nsh_core::elements`** 提供 `safe_area_view()`；**`nsh_base`** 提供无样式的基础组件（`button()`、键盘、对话框）以及
   `theme()`，即应用组件绘制时使用的颜色和圆角（[主题](./rust.md#主题)）。
 - **`#[component] pub fn App()`** 是一个组件：只运行**一次**、返回自己元素的函数。`nsh.json` 中的 `"root": "App"` 指向它，`nsh run`
   挂载它。`signal(0_u32)` 创建一个会随时间变化的值。

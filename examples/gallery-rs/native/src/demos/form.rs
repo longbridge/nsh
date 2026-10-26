@@ -5,7 +5,7 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
-use nsh_base::dialog;
+use nsh_base::{dialog, input};
 use nsh_core::{
     Points, Size,
     components::{keyboard_avoiding_view, safe_area_view},

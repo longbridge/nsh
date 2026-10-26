@@ -3,7 +3,7 @@
 
 use nsh_core::ui::prelude::*;
 use nsh_base::theme;
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 
 /// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
 /// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").

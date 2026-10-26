@@ -5,7 +5,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{dialog, theme};
+use nsh_base::{dialog, input, theme};
 use nsh_core::ui::{Registry, prelude::*};
 
 /// The module the tests' apps import these components from.

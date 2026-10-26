@@ -257,10 +257,10 @@ Notches, the home indicator, the status bar, Android's navigation bar and the Ma
 
 - `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
 - A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
-- `nsh_core::components::safe_area_view()` (TSX: `SafeAreaView` from `nsh`) is a view padded by those insets (all edges by default, or `.edges(vec![Edge::Top, Edge::Bottom])`, `edges={["top", "bottom"]}`), on top of its own padding.
+- `nsh_core::elements::safe_area_view()` (TSX: `SafeAreaView` from `nsh`) is a view padded by those insets (all edges by default, or `.edges(vec![Edge::Top, Edge::Bottom])`, `edges={["top", "bottom"]}`), on top of its own padding.
 
 ```rust tabs
-use nsh_core::components::{Edge, safe_area_view};
+use nsh_core::elements::{Edge, safe_area_view};
 use nsh_core::ui::prelude::*;
 
 fn screen() -> impl IntoElement {

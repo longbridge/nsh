@@ -8,11 +8,11 @@ demo: el-selection-area
 
 # SelectionArea
 
-`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，跨越视图、[`Text`](./text.md) 元素和 [`TextView`](./text-view.md)，按阅读顺序排列。把聊天记录包在它里面，选区就能从一条消息开始、在下一条消息结束；复制会把选中的文字放进剪贴板，并排的文字之间用制表符连接，其他文字之间用换行连接。Rust 用 `nsh_core::components::selection_area()` 创建它，TSX 用从 `nsh/base` 导入的 `<SelectionArea>`。
+`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，跨越视图、[`Text`](./text.md) 元素和 [`TextView`](./text-view.md)，按阅读顺序排列。把聊天记录包在它里面，选区就能从一条消息开始、在下一条消息结束；复制会把选中的文字放进剪贴板，并排的文字之间用制表符连接，其他文字之间用换行连接。Rust 用 `nsh_core::elements::selection_area()` 创建它，TSX 用从 `nsh/base` 导入的 `<SelectionArea>`。
 
 ```rust tabs
 use nsh_base::text_view;
-use nsh_core::components::selection_area;
+use nsh_core::elements::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn release_notes(notes: &'static str) -> impl IntoElement {
@@ -49,7 +49,7 @@ function ReleaseNotes(props: { notes: string }) {
 }
 ```
 
-`SelectionArea` 来自 [`nsh`](../modules/nsh.md#selectionarea)，在 Rust 中来自 `nsh_core::components`。它是一个视图：布局和外观是应用的样式，内容是它的子元素。选区本身是平台的：区域不绘制任何自己的东西。
+`SelectionArea` 来自 [`nsh`](../modules/nsh.md#selectionarea)，在 Rust 中来自 `nsh_core::elements`。它是一个视图：布局和外观是应用的样式，内容是它的子元素。选区本身是平台的：区域不绘制任何自己的东西。
 
 ## 聊天记录
 
@@ -57,7 +57,7 @@ function ReleaseNotes(props: { notes: string }) {
 
 ```rust tabs
 use nsh_base::text_view;
-use nsh_core::components::selection_area;
+use nsh_core::elements::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {

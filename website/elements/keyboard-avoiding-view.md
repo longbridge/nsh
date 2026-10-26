@@ -15,7 +15,7 @@ views, such as a message bar at the bottom of a chat screen; inputs inside a [sc
 the keyboard's height, for layouts of your own.
 
 ```rust tabs
-use nsh_core::components::keyboard_avoiding_view;
+use nsh_core::elements::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 fn chat() -> impl IntoElement {
@@ -93,7 +93,7 @@ add to it with a positive value.
 The padding or margin is added to what the view's own style sets, so your padding stays.
 
 ```rust tabs
-use nsh_core::components::{AvoidBehavior, keyboard_avoiding_view};
+use nsh_core::elements::{AvoidBehavior, keyboard_avoiding_view};
 use nsh_core::ui::prelude::*;
 
 fn sign_in() -> impl IntoElement {

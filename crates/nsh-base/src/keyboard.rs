@@ -1,5 +1,5 @@
 //! The software keyboard: `Keyboard` (`KeyboardAvoidingView` is a
-//! primitive of `nsh`, `nsh_core::components`).
+//! primitive of `nsh`, `nsh_core::elements`).
 
 use nsh_core::ui::prelude::*;
 

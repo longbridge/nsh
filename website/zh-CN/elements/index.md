@@ -66,7 +66,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input
 
 ## 原语
 
-TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::components`）。
+TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::elements`）。
 
 | 元素 | Rust | 原生视图（iOS / Android） | 页面 |
 |---|---|---|---|
@@ -92,7 +92,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | 组件 | Rust | 作用 | 页面 |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
-| `<Input>` | `input()`（`nsh_core::ui::prelude`） | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
+| `<Input>` | `nsh_base::input()` | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Radio>`、`<RadioGroup>` | `nsh_base::radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组 | [Radio](./radio.md) |
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |

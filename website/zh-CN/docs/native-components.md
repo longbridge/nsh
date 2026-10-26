@@ -34,7 +34,7 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 在 TSX 中，`nativeComponent()` 为这个名称声明一个组件，列出它用到的 props 和事件。
 
 ```rust tabs
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 use serde_json::json;
 

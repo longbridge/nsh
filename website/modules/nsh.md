@@ -287,20 +287,20 @@ page. Their props are documented under [Elements](../elements/index.md). The tex
 ## SafeAreaView
 
 `SafeAreaView` pads its content by the insets where it renders: the nearest page's (below its header), the nearest
-dialog's, or else the surface's safe area. Rust builds it with `nsh_core::components::safe_area_view()` (its edges an
+dialog's, or else the surface's safe area. Rust builds it with `nsh_core::elements::safe_area_view()` (its edges an
 `Edge`). The insets themselves, `safeArea()` and `safeAreaInsets()`, come from [`nsh/base`](./nsh-base.md#safe-areas).
 See [SafeAreaView](../elements/safe-area-view.md).
 
 ## KeyboardAvoidingView
 
 `KeyboardAvoidingView` keeps its content above the software keyboard, moving with it. Rust builds it with
-`nsh_core::components::keyboard_avoiding_view()` (its behavior an `AvoidBehavior`). `Keyboard` and `keyboardFrame()`
+`nsh_core::elements::keyboard_avoiding_view()` (its behavior an `AvoidBehavior`). `Keyboard` and `keyboardFrame()`
 come from [`nsh/base`](./nsh-base.md#keyboard). See [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md).
 
 ## SelectionArea
 
 `SelectionArea` makes the texts inside it select together, as a web page's do: one selection runs across views,
-`Text` elements and `TextView`s, in reading order. Rust builds it with `nsh_core::components::selection_area()`. See
+`Text` elements and `TextView`s, in reading order. Rust builds it with `nsh_core::elements::selection_area()`. See
 [SelectionArea](../elements/selection-area.md).
 
 ## Types

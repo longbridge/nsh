@@ -27,7 +27,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 crates/
   nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
-                       `nsh`'s primitives written as Rust components (`components/`: `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`);
+                       `nsh`'s primitives written as Rust components (`elements/`: `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
@@ -299,7 +299,13 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
   `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
-  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
+  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude` and `nsh_core::elements`.
+  Which side an element is on: `nsh-core` holds the foundational elements, what draws or lays out content and what
+  the surface reports (`View`, `Text`, `Scroll`, `List`, `Image`, `Canvas`, `Overlay`, `Video`, `WebView`,
+  `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`); `nsh-base` holds the functional components, controls a
+  user operates (`Button`, `Input`, `Checkbox`, `Switch`, `Slider`, `Editor`, ...), even when one is a native view the
+  core makes (`Input`: `nsh_base::input()`, TSX `nsh/base`). The Rust home and the TS home of an element are the
+  same layer.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
   button, a checkbox, radios, a switch, tabs, popovers, menus, tooltips and sheets, text input, safe area insets, system alerts and the keyboard today, with the status bar a
@@ -392,7 +398,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
   (`View`, `Text`, `Scroll`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`, `SafeAreaView`,
-  `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::ui::prelude` and `nsh_core::components` hold them, every base
+  `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::ui::prelude` and `nsh_core::elements` hold them, every base
   component from `nsh/base` (`Input`, `Dialog`, `Button`, `NavStack`, ...), and
   `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
   `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same

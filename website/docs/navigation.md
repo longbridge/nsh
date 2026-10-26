@@ -350,7 +350,7 @@ A page that shows no header still has the system bars around it; pad its content
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 
 nav_page()
     .header_visible(false)

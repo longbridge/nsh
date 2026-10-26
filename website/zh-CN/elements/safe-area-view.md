@@ -11,7 +11,7 @@ demo: el-safe-area-view
 `SafeAreaView` 让它的内容避开刘海或灵动岛、状态栏、主屏幕指示条、导航标题栏以及 Mac Catalyst 的窗口标题栏。它按**自己渲染位置**的边距为自己添加内边距：在 [NavPage](./nav-stack.md) 中是页面标题栏下方的边距，在 [Dialog](./dialog.md) 中是对话框的边距，其他地方是界面的安全区。它没有自己的外观；背景和内边距由应用决定。
 
 ```rust tabs
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 fn app() -> impl IntoElement {
@@ -56,7 +56,7 @@ mount(App);
 默认四条边都添加内边距。传入 `edges` 只为其中一部分添加，比如由标签栏或你自己的底栏处理底部边距时：
 
 ```rust tabs
-use nsh_core::components::{Edge, safe_area_view};
+use nsh_core::elements::{Edge, safe_area_view};
 
 safe_area_view()
     .edges(vec![Edge::Top, Edge::Left, Edge::Right])

@@ -4,7 +4,7 @@
 
 use std::hash::{BuildHasher, RandomState};
 
-use nsh_base::dialog;
+use nsh_base::{dialog, input};
 use nsh_core::{
     components::{AvoidBehavior, keyboard_avoiding_view, safe_area_view},
     ui::{

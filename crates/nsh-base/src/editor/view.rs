@@ -12,7 +12,7 @@ use super::{
     controller::Ed,
     state::{RowContent, SpanTags},
 };
-use crate::theme;
+use crate::{input, theme};
 
 /// The width of a caret.
 pub(crate) const CARET_WIDTH: f32 = 2.0;

@@ -41,7 +41,7 @@ closure of one, sent again when it changes), `.on_native_event(..)` hears its ev
 for the name with the props and events it uses.
 
 ```rust tabs
-use nsh_core::components::safe_area_view;
+use nsh_core::elements::safe_area_view;
 use nsh_core::ui::prelude::*;
 use serde_json::json;
 

@@ -60,9 +60,9 @@ pub fn registries() -> &'static [Registry] {
         desktop.module::<desktop::Window>();
         // `nsh`'s primitives written in Rust; the rest of `nsh` is `nsh-js`'s.
         let mut nsh = Registry::runtime("nsh");
-        nsh.register::<crate::components::SafeAreaView>()
-            .register::<crate::components::KeyboardAvoidingView>()
-            .register::<crate::components::SelectionArea>();
+        nsh.register::<crate::elements::SafeAreaView>()
+            .register::<crate::elements::KeyboardAvoidingView>()
+            .register::<crate::elements::SelectionArea>();
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile.register::<crate::mobile::TabBar>();
         let mut os = Registry::runtime("os");

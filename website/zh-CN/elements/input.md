@@ -8,9 +8,10 @@ demo: el-input
 
 # Input
 
-`Input` 是原生文本输入框：iOS 和 Mac Catalyst 上是 UITextField（单行）或 UITextView（多行），Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理。Rust 用 `input()` 创建，TSX 用从 `nsh/base` 导入的 `<Input>`。
+`Input` 是原生文本输入框：iOS 和 Mac Catalyst 上是 UITextField（单行）或 UITextView（多行），Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理。Rust 用 `nsh_base::input()` 创建，TSX 用从 `nsh/base` 导入的 `<Input>`。
 
 ```rust tabs
+use nsh_base::input;
 use nsh_core::ui::prelude::*;
 
 fn name_field() -> impl IntoElement {

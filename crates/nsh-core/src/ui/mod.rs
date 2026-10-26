@@ -398,7 +398,6 @@ pub mod prelude {
         hsl,
         hsla,
         image,
-        input,
         input_accessory_view,
         methods,
         module,
