@@ -511,7 +511,10 @@ function ChatComposer() {
             backgroundColor: colors.field,
           }}
         >
-          <Icon name="at-sign" size={16} tint={colors.faint} />
+          {/* As tall as the send button: centered on the last line as it is. */}
+          <View style={{ height: 32, justifyContent: "center" }}>
+            <Icon name="at-sign" size={16} tint={colors.faint} />
+          </View>
           <View testID="chat-editor" style={{ flex: 1, minHeight: 32, maxHeight: 140, justifyContent: "center", paddingVertical: 6 }}>
             <RichEditor editor={editor} placeholder="Message" style={{ flex: 1 }} classes={chatClasses} />
           </View>

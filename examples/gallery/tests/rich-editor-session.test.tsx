@@ -1,4 +1,4 @@
-// The Rich editor demo's Markdown editor as a user types in it: these
+// The Rich Editor demo's Markdown editor as a user types in it: these
 // tests name only the editor's own text and use the keyboard, so they
 // hold whatever the toolbar and the rest of the demo look like.
 import { type App, expect, open, test } from "nsh/test";
@@ -7,7 +7,7 @@ const PARAGRAPH = "text:/^Type Markdown as you go/";
 
 async function openDemo() {
   const app = await open("../App.tsx");
-  await app.press("role:button[Rich editor]");
+  await app.press("role:button[Rich Editor]");
   await app.waitFor("Tab indents an item, Shift-Tab outdents it");
   return app;
 }

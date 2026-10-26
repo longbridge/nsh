@@ -1,10 +1,10 @@
-// The Rich editor demo: `nsh/base`'s `RichEditor` with the starter keymap
+// The Rich Editor demo: `nsh/base`'s `RichEditor` with the starter keymap
 // and a toolbar whose buttons run commands on the session the editor shows.
 import { expect, open, test } from "nsh/test";
 
 test("Tab and Shift-Tab indent list items, and the toolbar edits the shown editor", async () => {
   const app = await open("../App.tsx");
-  await app.press("role:button[Rich editor]");
+  await app.press("role:button[Rich Editor]");
   await app.waitFor("Tab indents an item, Shift-Tab outdents it");
   // The caret in the second item: Tab nests it under the first.
   await app.press("Tab indents an item, Shift-Tab outdents it");
