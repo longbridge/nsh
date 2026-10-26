@@ -5041,7 +5041,9 @@ class Player {
     if (this.pointers.size === 2) this.startTwoFinger();
     if (p.press) this.pressIn(p);
     for (const v of p.states) this.setState(v, PRESSED, true);
-    if (p.scroll || p.pan) e.preventDefault();
+    // A field in a draggable view still takes focus: preventing the default
+    // keeps the browser from focusing it.
+    if ((p.scroll || p.pan) && !isField) e.preventDefault();
   }
 
   pressIn(p) {
