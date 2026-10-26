@@ -4,7 +4,7 @@
 // a section, collapsible sections whose content is kept while collapsed,
 // progress bars of a transfer the app drives and of one of unknown size,
 // sliders of a level and of a price range, number inputs of seats and a
-// price.
+// price, a one-time code typed or pasted into its cells.
 // Every row is the control, its label included; on a desktop the plans
 // and the tabs are one stop of Tab each, moved through with the arrow
 // keys. Also the
@@ -185,6 +185,28 @@ test("a number input steps with the keys, holds a typed number to its range, and
   await app.press("Unlock seats");
   await app.waitFor("Seats: unlocked");
   expect(app.enabled("label:Seats")).toBe(true);
+});
+
+test("a one-time code takes digits up to its length, and a pasted code fills it", async () => {
+  const code = "label:Verification code, 6 digits";
+  expect(app.texts()).toContain("The code is 246810");
+  expect(app.enabled("Clear")).toBe(false);
+  // Digits only, one cell each.
+  await app.type(code, "13a5");
+  await app.waitFor("Code: 135");
+  expect(app.texts()).toContain("5");
+  expect(app.texts()).not.toContain("a");
+  await app.press("Clear");
+  await app.waitFor("Code: cleared");
+  // A pasted code replaces the code; the app checks it once it is full.
+  await app.paste(code, { text: "246 810" });
+  await app.waitFor("Code complete: 246810");
+  expect(app.texts()).toContain("Verified");
+  // Full: another digit changes nothing.
+  await app.type(code, "9");
+  await app.wait(50);
+  expect(app.texts()).toContain("Code complete: 246810");
+  expect(app.texts()).not.toContain("9");
 });
 
 test("the gallery's segmented control is a tab list", async () => {
