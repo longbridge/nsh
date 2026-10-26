@@ -42,10 +42,8 @@ export function CollapsingHeader() {
             right: 0,
             height: OPEN,
             transformOrigin: "center bottom",
-            transform: [
-              { translateY: scroll.interpolate({ inputRange: [0, RANGE], outputRange: [0, RANGE / 2] }) },
-              { scale: scroll.interpolate({ inputRange: [-OPEN, 0], outputRange: [2, 1] }) },
-            ],
+            translate: [0, scroll.interpolate({ inputRange: [0, RANGE], outputRange: [0, RANGE / 2] })],
+            scale: scroll.interpolate({ inputRange: [-OPEN, 0], outputRange: [2, 1] }),
           }}
         >
           <View style={{ position: "absolute", top: 24, left: 36, width: 120, height: 120, borderRadius: 60, backgroundColor: colors.onAccent, opacity: 0.14 }} />
@@ -75,7 +73,7 @@ export function CollapsingHeader() {
               fontSize: 30,
               fontWeight: "700",
               transformOrigin: "left center",
-              transform: [{ scale: collapsed.interpolate({ inputRange: [0, 1], outputRange: [1, 0.62] }) }],
+              scale: collapsed.interpolate({ inputRange: [0, 1], outputRange: [1, 0.62] }),
             }}
           >
             Recent
@@ -94,7 +92,7 @@ export function CollapsingHeader() {
                   height: 52,
                   flexDirection: "row",
                   alignItems: "center",
-                  paddingHorizontal: 16,
+                  paddingInline: 16,
                   borderBottomWidth: 1,
                   borderBottomColor: colors.line,
                 }}
@@ -104,13 +102,13 @@ export function CollapsingHeader() {
               </View>
             }
           >
-            <View style={{ height: 34, justifyContent: "center", paddingHorizontal: 16, backgroundColor: colors.inset }}>
+            <View style={{ height: 34, justifyContent: "center", paddingInline: 16, backgroundColor: colors.inset }}>
               <Text style={{ fontSize: 13, fontWeight: "700", color: colors.accent }}>Week {(row() as { week: number }).week}</Text>
             </View>
           </If>
         )}
       </List>
-      <View testID="footer" style={{ alignItems: "center", gap: 6, paddingTop: 32, paddingBottom: 48, paddingHorizontal: 16 }}>
+      <View testID="footer" style={{ alignItems: "center", gap: 6, paddingTop: 32, paddingBottom: 48, paddingInline: 16 }}>
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>That's all 160 entries</Text>
         <Text style={{ fontSize: 13, color: colors.muted, textAlign: "center" }}>
           A footer after the list: the list keeps only the rows near the screen, at its full length in the page.

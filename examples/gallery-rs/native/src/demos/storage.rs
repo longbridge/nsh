@@ -96,6 +96,7 @@ fn note_card(
                         .on_change(move |text: &str| write(text))
                         .placeholder("Write something, then come back to it")
                         .placeholder_color(|| color(colors::FAINT))
+                        .caret_color(|| color(colors::ACCENT))
                         .selection_color(|| color(colors::ACCENT))
                         .label("Note")
                         .h(px(120.0))
@@ -150,7 +151,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
             Row::new(i.get_untracked() == 0)
                 .child(
                     text(entry.with_untracked(|e| e.0.clone()))
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .flex_1()
                         .text_size(px(14.0))
                         .text_color(colors::TEXT)

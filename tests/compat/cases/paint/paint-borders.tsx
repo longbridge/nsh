@@ -1,8 +1,9 @@
 // A case of the API's test suite (docs/dev/compatibility.md): the border
 // keys as the platform receives them: widths and colors per side and all
 // at once, colors in every notation, border styles, corner radii (each
-// corner, the shorthand under them) and the curve, and the logical start /
-// end keys left to right and right to left.
+// corner, the shorthand under them) and the curve, the logical inline
+// start / end keys left to right and right to left, and the left / right
+// keys, which keep their sides right to left, as in CSS.
 import { Text, View } from "nsh";
 
 function App() {
@@ -56,14 +57,14 @@ function App() {
           testID="ltr"
           style={{
             height: 8,
-            borderStartWidth: 3,
-            borderEndWidth: 5,
-            borderStartColor: "#112233",
-            borderEndColor: "#445566",
-            borderTopStartRadius: 1,
-            borderTopEndRadius: 2,
-            borderBottomEndRadius: 3,
-            borderBottomStartRadius: 4,
+            borderInlineStartWidth: 3,
+            borderInlineEndWidth: 5,
+            borderInlineStartColor: "#112233",
+            borderInlineEndColor: "#445566",
+            borderStartStartRadius: 1,
+            borderStartEndRadius: 2,
+            borderEndEndRadius: 3,
+            borderEndStartRadius: 4,
           }}
         />
       </View>
@@ -72,14 +73,14 @@ function App() {
           testID="rtl"
           style={{
             height: 8,
-            borderStartWidth: 3,
-            borderEndWidth: 5,
-            borderStartColor: "#112233",
-            borderEndColor: "#445566",
-            borderTopStartRadius: 1,
-            borderTopEndRadius: 2,
-            borderBottomEndRadius: 3,
-            borderBottomStartRadius: 4,
+            borderInlineStartWidth: 3,
+            borderInlineEndWidth: 5,
+            borderInlineStartColor: "#112233",
+            borderInlineEndColor: "#445566",
+            borderStartStartRadius: 1,
+            borderStartEndRadius: 2,
+            borderEndEndRadius: 3,
+            borderEndStartRadius: 4,
           }}
         />
         <View

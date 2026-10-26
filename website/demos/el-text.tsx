@@ -32,7 +32,7 @@ function App() {
 
         <View style={{ height: 1, backgroundColor: ui().line }} />
 
-        <Text numberOfLines={lines()} style={{ fontSize: 15, color: ui().text }}>
+        <Text style={{ lineClamp: lines(), fontSize: 15, color: ui().text }}>
           {LONG}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
@@ -44,7 +44,7 @@ function App() {
           </View>
         </View>
 
-        <Text numberOfLines={1} ellipsizeMode="middle" style={{ fontSize: 15, color: ui().muted }}>
+        <Text style={{ lineClamp: 1, textOverflow: "ellipsis-middle", fontSize: 15, color: ui().muted }}>
           {LONG}
         </Text>
 
@@ -60,11 +60,9 @@ function App() {
             fontWeight: "800",
             color: ui().onAccent,
             backgroundColor: "#c8f26d",
-            paddingHorizontal: 10,
+            paddingInline: 10,
             borderRadius: 8,
-            textShadowColor: "rgba(255,255,255,0.55)",
-            textShadowOffset: { width: 2, height: 2 },
-            textShadowRadius: 4,
+            textShadow: "2px 2px 4px rgba(255,255,255,0.55)",
           }}
         >
           Text shadow

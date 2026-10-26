@@ -312,7 +312,7 @@ export function Press(props: {
       accessibilityLabel={props.accessibilityLabel}
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
-      style={[props.style ?? null, { transform: [{ scale: s }], opacity: props.disabled ? 0.4 : 1 }]}
+      style={[props.style ?? null, { scale: s, opacity: props.disabled ? 0.4 : 1 }]}
     >
       {props.children}
     </View>
@@ -327,7 +327,7 @@ export function Appear(props: { index?: number; flex?: boolean; children: JSX.El
   const t = createAnimatedValue(0);
   t.timing(1, { ...motion.enter, delay: Math.min(8, props.index ?? 0) * 40 });
   return (
-    <View style={{ flex: props.flex ? 1 : undefined, opacity: t, transform: [{ translateY: t.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }}>
+    <View style={{ flex: props.flex ? 1 : undefined, opacity: t, translate: [0, t.interpolate({ inputRange: [0, 1], outputRange: [14, 0] })] }}>
       {props.children}
     </View>
   );
@@ -386,14 +386,14 @@ export function Card(props: {
       ]}
     >
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 11, paddingTop: 11, paddingBottom: 12 }}>
           <If when={props.icon}>
             <IconTile name={props.icon!} />
           </If>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text numberOfLines={2} style={{ fontSize: 13, color: colors.muted }}>
+              <Text style={{ lineClamp: 2, fontSize: 13, color: colors.muted }}>
                 {props.subtitle}
               </Text>
             </If>
@@ -461,7 +461,7 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   return (
     <View
       style={{
-        paddingHorizontal: 10,
+        paddingInline: 10,
         height: 26,
         borderRadius: 13,
         justifyContent: "center",
@@ -479,7 +479,7 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
 /** A label above a value, for grids of figures. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
   return (
-    <View style={{ width: props.width, gap: 3, paddingVertical: 4 }}>
+    <View style={{ width: props.width, gap: 3, paddingBlock: 4 }}>
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
       <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
         {props.value}
@@ -548,7 +548,7 @@ export function Button(props: {
       <View
         style={{
           height: 44,
-          paddingHorizontal: 18,
+          paddingInline: 18,
           borderRadius: radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
@@ -625,7 +625,7 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
         props.style ?? null,
       ]}
     >
-      <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", paddingInline: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
         <If when={props.note}>
           <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
@@ -671,7 +671,7 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
           // A drop of glass: a specular top over the knob's color.
           backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
           boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
-          transform: [{ translateX: t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }) }],
+          translate: [t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }), 0],
         }}
       />
     </View>
@@ -718,8 +718,8 @@ export function Segmented<T extends string>(props: {
       }}
     >
       <View
-        pointerEvents="none"
         style={{
+          pointerEvents: "none",
           position: "absolute",
           top: 3,
           left: 3,
@@ -728,7 +728,7 @@ export function Segmented<T extends string>(props: {
           borderRadius: (height - 6) / 2,
           ...finish.pill,
           borderWidth: 1,
-          transform: [{ translateX: x }],
+          translate: [x, 0],
         }}
       />
       <Each of={props.options}>
@@ -740,8 +740,8 @@ export function Segmented<T extends string>(props: {
             style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 }}
           >
             <Text
-              numberOfLines={1}
               style={{
+                lineClamp: 1,
                 fontSize: props.size === "small" ? 13 : 14,
                 fontWeight: "500",
                 color: props.value === option().value ? colors.text : colors.muted,

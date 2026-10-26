@@ -1092,6 +1092,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         })
                         .placeholder(move || format!("Message {}", model.get().name()))
                         .placeholder_color(|| color(colors::FAINT))
+                        .caret_color(|| color(colors::ACCENT))
                         .selection_color(|| color(colors::ACCENT))
                         .on_focus(move || menu.set(false))
                         .on_content_size_change(move |size: &Size<Points>| {
@@ -1235,14 +1236,14 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             .cursor_pointer()
             .child(
                 text(label)
-                    .number_of_lines(1)
+                    .line_clamp(1)
                     .text_size(px(14.0))
                     .style_when(selected, |s| s.font_weight(FontWeight::SEMIBOLD))
                     .text_color(colors::TEXT),
             )
             .child(
                 text(prompt)
-                    .number_of_lines(1)
+                    .line_clamp(1)
                     .text_size(px(12.0))
                     .text_color(colors::MUTED),
             )
@@ -1721,7 +1722,7 @@ fn user_row(item: Item) -> View {
                     .border_color(colors::BORDER)
                     .child(
                         text(move || body.get())
-                            .selectable(true)
+                            .select_text()
                             .text_size(px(15.0))
                             .line_height(px(21.0))
                             .text_color(colors::TEXT),
@@ -1814,7 +1815,7 @@ fn reasoning_text(reasoning: impl Fn() -> String + 'static) -> View {
         .child(view().w(px(2.0)).rounded(px(1.0)).bg(colors::BORDER))
         .child(
             text(reasoning)
-                .selectable(true)
+                .select_text()
                 .flex_1()
                 .text_size(px(14.0))
                 .line_height(px(20.0))

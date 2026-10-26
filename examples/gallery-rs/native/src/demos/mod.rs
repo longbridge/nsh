@@ -256,7 +256,7 @@ fn demo_row(demo: &'static Demo, first: bool) -> AnyElement {
                         )
                         .child(
                             text(demo.detail)
-                                .number_of_lines(2)
+                                .line_clamp(2)
                                 .text_size(px(13.0))
                                 .line_height(px(18.0))
                                 .text_color(colors::MUTED),

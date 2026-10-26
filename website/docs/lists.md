@@ -41,7 +41,7 @@ function App() {
   return (
     <List each={items} estimatedItemSize={52} style={{ flex: 1, backgroundColor: "#ffffff" }}>
       {(item) => (
-        <View style={{ paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#eaeef2" }}>
+        <View style={{ paddingInline: 16, paddingBlock: 16, borderBottomWidth: 1, borderBottomColor: "#eaeef2" }}>
           <Text style={{ fontSize: 16 }}>{item().title}</Text>
         </View>
       )}
@@ -303,7 +303,7 @@ const shown = hidden.mul(-1).add(56);
 
 <View style={{ flex: 1, overflow: "hidden" }}>
   <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, hidden.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -435,8 +435,8 @@ function Chat() {
             style={{
               alignSelf: m().mine ? "flex-end" : "flex-start",
               maxWidth: "75%",
-              paddingHorizontal: 12,
-              paddingVertical: 8,
+              paddingInline: 12,
+              paddingBlock: 8,
               borderRadius: 14,
               backgroundColor: m().mine ? "#0969da" : "#eaeef2",
             }}
@@ -454,7 +454,7 @@ function Chat() {
           submitBehavior="submit"
           returnKeyType="send"
           placeholder="Message"
-          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
+          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingInline: 12, paddingBlock: 8 }}
         />
       </View>
     </View>
@@ -516,7 +516,7 @@ virtual_list(count, move |at| {
   decelerationRate="fast"
   scrollbar={false}
   style={{ height: 140 }}
-  contentStyle={{ paddingHorizontal: 16, gap: 12 }}
+  contentStyle={{ paddingInline: 16, gap: 12 }}
 >
   {(card) => <View style={{ width: 220, height: 140, borderRadius: 14, backgroundColor: card().color }} />}
 </List>

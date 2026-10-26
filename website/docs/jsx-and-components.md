@@ -36,7 +36,7 @@ import { Image, mount, Text, View } from "nsh";
 
 In Rust, styles are typed methods named as Tailwind's utilities are (`.px_4()`, `.rounded_lg()`, `.bg(..)`), and
 listeners are methods too (`.on_press(..)`); platform-only settings have methods of their own. In TSX, props keep
-their camelCase names (`onPress`, `numberOfLines`, `backgroundColor`); every element accepts `style`, `class` /
+their camelCase names (`onPress`, `allowFontScaling`, `backgroundColor`); every element accepts `style`, `class` /
 `classList` ([Tailwind](./tailwind.md)), `ref`, touch handlers, accessibility props and `testID`, and platform-only
 props go in `ios={{…}}` and `android={{…}}`, where only the current platform's object is sent:
 
@@ -100,7 +100,7 @@ badge()
 ```tsx tabs
 function Badge(props: { label: string; color?: string }) {
   return (
-    <View style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: props.color ?? "#ddf4ff" }}>
+    <View style={{ borderRadius: 999, paddingInline: 10, paddingBlock: 4, backgroundColor: props.color ?? "#ddf4ff" }}>
       <Text style={{ fontSize: 13, fontWeight: "600" }}>{props.label}</Text>
     </View>
   );

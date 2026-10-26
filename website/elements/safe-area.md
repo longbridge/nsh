@@ -63,7 +63,7 @@ it. The values follow the insets: on rotation, in another page or dialog, the pa
 | `calc(env(name) + <length>)` | `calc(env(safe-area-inset-bottom) + 16px)` | The inset plus a length, for content that keeps its own spacing. |
 | `calc(<length> + env(name))` | `calc(16px + env(safe-area-inset-left))` | The same. |
 
-They apply to `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`,
+They apply to `padding`, `paddingInline`, `paddingBlock`, `paddingTop`, `paddingRight`, `paddingBottom`,
 `paddingLeft` and the same `margin` keys. In Tailwind they are arbitrary values of `p`, `px`, `py`, `pt`, `pr`, `pb`,
 `pl` and the `m` utilities (spaces may be left out): `pt-[env(safe-area-inset-top)]`,
 `pb-[calc(env(safe-area-inset-bottom)+16px)]`. The TypeScript type of these values is `EnvValue`. See

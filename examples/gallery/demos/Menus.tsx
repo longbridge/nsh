@@ -23,7 +23,7 @@ const surface = () =>
         backgroundColor: colors.surface,
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        paddingHorizontal: 10,
+        paddingInline: 10,
         paddingTop: 10,
         paddingBottom: 34,
       };
@@ -61,7 +61,7 @@ function Item(props: {
       hoverStyle={hovered()}
       activeStyle={pressed()}
       disabledStyle={{ opacity: 0.35 }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingInline: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}
     >
       <Text style={{ flex: 1, fontSize: 14, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
       <If when={props.shortcut ?? props.note}>
@@ -92,14 +92,14 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
         <View
           hoverStyle={hovered()}
           activeStyle={pressed()}
-          style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent", opacity: props.disabled ? 0.35 : 1 }}
+          style={{ flexDirection: "row", alignItems: "center", height, paddingInline: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent", opacity: props.disabled ? 0.35 : 1 }}
         >
           <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
           <Icon name="chevron" size={14} tint={colors.faint} />
         </View>
       }
       back={
-        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}>
+        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingInline: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}>
           <Icon name="back" size={14} tint={colors.accent} />
           <Text style={{ fontSize: 14, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
         </View>
@@ -113,14 +113,14 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
 /** A group's title: not an item, nothing to press. */
 function Label(props: { text: string }) {
   return (
-    <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4 }}>
+    <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingInline: 8, paddingTop: 8, paddingBottom: 4 }}>
       {props.text.toUpperCase()}
     </Text>
   );
 }
 
 function Separator() {
-  return <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 4, backgroundColor: colors.line }} />;
+  return <MenuSeparator style={{ height: 1, marginBlock: 4, marginInline: 4, backgroundColor: colors.line }} />;
 }
 
 /** A chip that opens a menu. */
@@ -129,7 +129,7 @@ function Chip(props: { label: string; icon?: "plus" | "search" | "star" }) {
     <View
       activeStyle={{ backgroundColor: colors.border }}
       hoverStyle={{ backgroundColor: colors.border }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 12, height: 34, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.raised, ...finish.raised }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingInline: 12, height: 34, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.raised, ...finish.raised }}
     >
       <If when={props.icon}>
         <Icon name={props.icon!} size={14} tint={colors.muted} />
@@ -287,9 +287,9 @@ export function Menus() {
                 <ContextMenu margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed(file().name)} trigger={
                   <Row first={i() === 0}>
                     <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
-                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
+                    <Text style={{ lineClamp: 1, flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
                     <Menu align="end" offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} trigger={
-                      <View accessibilityLabel={`Actions for ${file().name}`} tooltip={<Tip label="More actions" />} hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingHorizontal: 8, height: 28, justifyContent: "center" }}>
+                      <View accessibilityLabel={`Actions for ${file().name}`} tooltip={<Tip label="More actions" />} hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingInline: 8, height: 28, justifyContent: "center" }}>
                         <Text style={{ fontSize: 18, color: colors.muted }}>⋯</Text>
                       </View>
                     }>
@@ -324,7 +324,7 @@ export function Menus() {
           value={align()}
           onChange={(v) => align.set(v)}
         />
-        <View style={{ alignItems: "center", paddingVertical: 24 }}>
+        <View style={{ alignItems: "center", paddingBlock: 24 }}>
           <Menu placement={placement()} align={align()} offset={6} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Placed")} trigger={<Chip label={`${placement()} · ${align()}`} />}>
             <Item label="One" onSelect={() => log("chose One")} />
             <Item label="Two" onSelect={() => log("chose Two")} />

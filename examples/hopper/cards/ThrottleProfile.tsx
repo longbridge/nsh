@@ -165,8 +165,8 @@ function Timeline() {
               style={{ position: "absolute", top: 0, bottom: 0, left: left(), width: label }}
             >
               <View
-                pointerEvents="none"
                 style={{
+                  pointerEvents: "none",
                   position: "absolute",
                   top: on() ? 24 : 27,
                   left: x(phase().at) - left() - (on() ? 8 : 5),
@@ -179,9 +179,9 @@ function Timeline() {
                 }}
               />
               <Text
-                pointerEvents="none"
-                numberOfLines={1}
                 style={{
+                  pointerEvents: "none",
+                  lineClamp: 1,
                   position: "absolute",
                   left: 0,
                   right: 0,
@@ -211,15 +211,12 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
         right: 0,
         top: 48,
         width: 210,
-        paddingVertical: 6,
+        paddingBlock: 6,
         borderRadius: radius.control,
         borderWidth: 1,
         borderColor: color.lineStrong,
         backgroundColor: color.raised,
-        shadowColor: "#000",
-        shadowOpacity: 0.5,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 6 },
+        boxShadow: "0px 6px 16px rgb(0 0 0 / 0.5)",
       }}
     >
       <Each of={easings}>
@@ -229,7 +226,7 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
             activeStyle={{ backgroundColor: color.lineStrong }}
             role="menuitem"
             accessibilityState={{ checked: props.value === option().name }}
-            style={{ flexDirection: "row", alignItems: "center", height: 40, paddingHorizontal: 14, gap: 8 }}
+            style={{ flexDirection: "row", alignItems: "center", height: 40, paddingInline: 14, gap: 8 }}
           >
             <Text style={{ flex: 1, fontSize: 14, color: props.value === option().name ? color.accent : color.text }}>
               {option().label}

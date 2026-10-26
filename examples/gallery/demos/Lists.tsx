@@ -16,7 +16,7 @@ function Action(props: { label: string; icon?: IconName; onPress: () => void }) 
       <View
         style={{
           height: 36,
-          paddingHorizontal: 14,
+          paddingInline: 14,
           borderRadius: 18,
           flexDirection: "row",
           alignItems: "center",
@@ -196,7 +196,7 @@ function Contacts() {
                   <Text style={{ fontSize: 15, color: colors.text }}>
                     {person().first} <Text style={{ fontWeight: "600" }}>{person().last}</Text>
                   </Text>
-                  <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+                  <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
                     {person().note}
                   </Text>
                 </View>
@@ -208,7 +208,7 @@ function Contacts() {
                 flexDirection: "row",
                 alignItems: "center",
                 height: 34,
-                paddingHorizontal: 16,
+                paddingInline: 16,
                 gap: 10,
                 // Opaque: rows scroll under it while it sticks.
                 backgroundColor: colors.background,
@@ -261,7 +261,7 @@ function Chat() {
   };
   return (
     <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingInline: 16, paddingBottom: 8 }}>
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.up }} />
         <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>Release room</Text>
         <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>
@@ -273,7 +273,7 @@ function Chat() {
         inverted
         estimatedItemSize={52}
         style={{ flex: 1 }}
-        contentStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}
+        contentStyle={{ paddingInline: 16, paddingBlock: 12, gap: 6 }}
         keyboardDismissMode="interactive"
         onLoadMore={loadOlder}
         loadMoreThreshold={0.5}
@@ -282,8 +282,8 @@ function Chat() {
           <View style={{ alignSelf: m().mine ? "flex-end" : "flex-start", maxWidth: "78%", gap: 3, alignItems: m().mine ? "flex-end" : "flex-start" }}>
             <View
               style={{
-                paddingHorizontal: 14,
-                paddingVertical: 9,
+                paddingInline: 14,
+                paddingBlock: 9,
                 borderRadius: 18,
                 borderCurve: "continuous",
                 borderBottomRightRadius: m().mine ? 6 : 18,
@@ -296,7 +296,7 @@ function Chat() {
             >
               <Text style={{ color: m().mine ? colors.onAccent : colors.text, fontSize: 15 }}>{m().text}</Text>
             </View>
-            <Text style={{ fontSize: 11, color: colors.faint, fontVariant: ["tabular-nums"], paddingHorizontal: 4 }}>{m().time}</Text>
+            <Text style={{ fontSize: 11, color: colors.faint, fontVariant: ["tabular-nums"], paddingInline: 4 }}>{m().time}</Text>
           </View>
         )}
       </List>
@@ -305,7 +305,7 @@ function Chat() {
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          paddingHorizontal: 16,
+          paddingInline: 16,
           paddingTop: 8,
           paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom),
           backgroundColor: colors.surface,
@@ -322,6 +322,7 @@ function Chat() {
           returnKeyType="send"
           style={{
             placeholderColor: colors.faint,
+            caretColor: colors.accent,
             selectionColor: colors.accent,
             flex: 1,
             height: 44,
@@ -332,7 +333,7 @@ function Chat() {
             borderWidth: 1,
             borderColor: colors.fieldBorder,
             borderRadius: 22,
-            paddingHorizontal: 16,
+            paddingInline: 16,
           }}
         />
         <RoundButton icon="arrow-up" label="Send" onPress={send} />
@@ -371,8 +372,7 @@ function CustomIndicator(props: { pull: AnimatedNode; refreshing: boolean }) {
   const pull = props.pull;
   return (
     <View
-      pointerEvents="none"
-      style={{ position: "absolute", top: 0, left: 0, right: 0, height: INDICATOR, alignItems: "center", justifyContent: "center" }}
+      style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, height: INDICATOR, alignItems: "center", justifyContent: "center" }}
     >
       <View
         style={{
@@ -459,10 +459,10 @@ function More() {
             flexDirection: "row",
             alignItems: "baseline",
             gap: 8,
-            marginHorizontal: -16,
+            marginInline: -16,
             marginTop: -8,
-            paddingHorizontal: 16,
-            paddingVertical: 8,
+            paddingInline: 16,
+            paddingBlock: 8,
             backgroundColor: colors.background,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
@@ -491,16 +491,16 @@ function More() {
         </Section>
 
         <Section title="Horizontal scroll view" note={range()}>
-          <View style={{ marginHorizontal: -14 }}>
+          <View style={{ marginInline: -14 }}>
             <Scroll horizontal scrollbar={false}>
-              <Tabs style={{ flexDirection: "row", gap: 8, paddingHorizontal: 14 }}>
+              <Tabs style={{ flexDirection: "row", gap: 8, paddingInline: 14 }}>
                 <Each of={ranges}>
                   {(label) => (
                     <Tab selected={range() === label()} onPress={() => range.set(label())} style={tabPress.style} activeStyle={tabPress.activeStyle}>
                       <View
                         style={{
                           height: 36,
-                          paddingHorizontal: 14,
+                          paddingInline: 14,
                           borderRadius: 18,
                           justifyContent: "center",
                           backgroundColor: range() === label() ? colors.light : colors.raised,
@@ -520,8 +520,8 @@ function More() {
         </Section>
 
         <Section title="Horizontal list" note="1,000 recycled cards">
-          <View style={{ marginHorizontal: -14 }}>
-            <List each={cards} horizontal estimatedItemSize={130} scrollbar={false} style={{ height: 124 }} contentStyle={{ paddingHorizontal: 14, gap: 10 }}>
+          <View style={{ marginInline: -14 }}>
+            <List each={cards} horizontal estimatedItemSize={130} scrollbar={false} style={{ height: 124 }} contentStyle={{ paddingInline: 14, gap: 10 }}>
               {(i) => {
                 const tone = () => tones[i() % (tones.length - 1)];
                 const load = () => ((i() * 37) % 100) / 100;
@@ -580,7 +580,7 @@ function More() {
             separator={() => <View style={{ height: 1, marginLeft: 14, backgroundColor: colors.line }} />}
           >
             {(item) => (
-              <View style={{ height: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14 }}>
+              <View style={{ height: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 14 }}>
                 <View style={{ width: 8, height: 8, borderRadius: 2.5, backgroundColor: toneColor(item().tone) }} />
                 <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>Item {item().n}</Text>
                 <Badge label={item().tone} tone={item().tone} />
@@ -620,7 +620,7 @@ function EntryRow(props: { entry: Entry; label: string }) {
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
-        paddingHorizontal: 14,
+        paddingInline: 14,
         borderRadius: radius.inset,
         borderCurve: "continuous",
         backgroundColor: colors.raised,
@@ -648,7 +648,7 @@ function WeekHeading(props: { week: number }) {
         flexDirection: "row",
         alignItems: "center",
         gap: 10,
-        paddingHorizontal: 4,
+        paddingInline: 4,
         // Opaque: rows scroll under it while it sticks.
         backgroundColor: colors.background,
       }}
@@ -686,7 +686,7 @@ function Page() {
     if (archive().length < 500) archive.update((a) => [...a, ...entries(a.length, 100)]);
   };
   const heading = (title: string, note: string) => (
-    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingInline: 4, paddingTop: 8 }}>
       <Text style={{ flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>{title}</Text>
       <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{note}</Text>
     </View>
@@ -748,11 +748,11 @@ function Page() {
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          paddingHorizontal: 20,
+          paddingInline: 20,
           backgroundColor: colors.background,
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
-          transform: [{ translateY: hidden.mul(-1) }],
+          translate: [0, hidden.mul(-1)],
         }}
       >
         <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>Recent and archived</Text>
@@ -776,7 +776,7 @@ export function Lists() {
   const tab = signal<ListTab>("grid");
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={desktop() ? { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 4, width: "100%", maxWidth: 600 } : { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 }}>
+      <View style={desktop() ? { paddingInline: 24, paddingTop: 16, paddingBottom: 4, width: "100%", maxWidth: 600 } : { paddingInline: 16, paddingTop: 8, paddingBottom: 8 }}>
         <Segmented options={tabs} value={tab()} onChange={(v) => tab.set(v)} />
       </View>
       {(() => {

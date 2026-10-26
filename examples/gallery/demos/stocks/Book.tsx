@@ -174,7 +174,7 @@ export function OrderBook(props: { market: Market; stock: Stock }) {
       title="Order book"
       right={
         <Press onPress={toggle} hitSlop={8} accessibilityLabel={depth() === 5 ? "Show ten levels" : "Show five levels"}>
-          <View style={{ height: 30, paddingHorizontal: 12, borderRadius: radius.control, justifyContent: "center", backgroundColor: colors.raised }}>
+          <View style={{ height: 30, paddingInline: 12, borderRadius: radius.control, justifyContent: "center", backgroundColor: colors.raised }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>{depth() === 5 ? "5 → 10" : "10 → 5"}</Text>
           </View>
         </Press>
@@ -203,7 +203,7 @@ export function OrderBook(props: { market: Market; stock: Stock }) {
             return <LevelRow stock={props.stock} level={() => book().asks[k()]} total={() => sums().asks[k()] ?? 0} side="ask" n={depth() - i()} max={max} />;
           }}
         </Each>
-        <View style={{ height: 1, marginVertical: 3, backgroundColor: colors.border }} />
+        <View style={{ height: 1, marginBlock: 3, backgroundColor: colors.border }} />
         <Each of={shown()}>
           {(i) => <LevelRow stock={props.stock} level={() => book().bids[i()]} total={() => sums().bids[i()] ?? 0} side="bid" n={i() + 1} max={max} />}
         </Each>

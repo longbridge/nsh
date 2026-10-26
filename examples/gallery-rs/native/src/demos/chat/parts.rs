@@ -137,7 +137,7 @@ pub(crate) fn file_chip(file: &FileRef, on_remove: Option<Listener<()>>) -> View
                 .gap(px(1.0))
                 .child(
                     text(file.name)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(14.0))
                         .text_color(colors::TEXT)
                         .max_w(px(170.0)),
@@ -255,7 +255,7 @@ pub(crate) fn tool_card(tool: ReadSignal<Tool>) -> View {
                         )
                         .child(
                             text(move || head.with(|h| h.2.clone()))
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                         ),
@@ -378,7 +378,7 @@ fn tool_body(kind: &ToolKind, done: bool) -> Option<View> {
                 .child(
                     view().p_3().bg(colors::INSET).child(
                         text(*code)
-                            .selectable(true)
+                            .select_text()
                             .font_family(MONO)
                             .text_size(px(12.0))
                             .line_height(px(18.0))
@@ -398,7 +398,7 @@ fn tool_body(kind: &ToolKind, done: bool) -> Option<View> {
                             .child(text("Output").text_size(px(13.0)).text_color(colors::MUTED))
                             .child(
                                 text(*output)
-                                    .selectable(true)
+                                    .select_text()
                                     .flex_1()
                                     .font_family(MONO)
                                     .text_size(px(14.0))
@@ -443,7 +443,7 @@ fn source_row(source: &Source, index: usize) -> View {
                 .gap(px(1.0))
                 .child(
                     text(source.title)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(14.0))
                         .text_color(colors::TEXT),
                 )

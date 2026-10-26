@@ -253,7 +253,7 @@ pub(crate) fn Physics() -> impl IntoElement {
                                     "Tap to pulse, long press to reset",
                                     "Click to pulse, press and hold to reset",
                                 ))
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                             ),

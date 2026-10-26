@@ -221,7 +221,7 @@ fn sidebar_row(demo: &'static Demo) -> AnyElement {
         }))
         .child(
             text(demo.name)
-                .number_of_lines(1)
+                .line_clamp(1)
                 .flex_1()
                 .text_size(px(14.0))
                 .style_when(active, |s| s.font_weight(FontWeight::SEMIBOLD))
@@ -337,14 +337,14 @@ fn demo_pane() -> AnyElement {
                         .gap(px(2.0))
                         .child(
                             text(move || demo().name)
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(18.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors::TEXT),
                         )
                         .child(
                             text(move || demo().detail)
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                         ),

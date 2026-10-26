@@ -744,7 +744,7 @@ fn Network() -> impl IntoElement {
                         )
                         .child(
                             text(move || post.with(|(_, (_, title))| title.clone()))
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .flex_1()
                                 .text_size(px(15.0))
                                 .text_color(colors::TEXT),
@@ -767,7 +767,7 @@ fn Network() -> impl IntoElement {
                 )
                 .child(
                     text(status.text)
-                        .number_of_lines(2)
+                        .line_clamp(2)
                         .flex_1()
                         .text_size(px(13.0))
                         .text_color(status.tone.color())

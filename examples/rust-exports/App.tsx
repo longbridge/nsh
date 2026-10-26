@@ -24,7 +24,7 @@ function Button(props: { title: string; variant?: "primary" | "secondary" | "dan
   return (
     <BaseButton
       onPress={props.onPress}
-      style={{ backgroundColor: colors[variant()], borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
+      style={{ backgroundColor: colors[variant()], borderRadius: 8, paddingInline: 14, paddingBlock: 8 }}
       activeStyle={{ opacity: 0.7 }}
     >
       <Text style={{ fontSize: 15, fontWeight: "600", color: variant() === "secondary" ? "#111827" : "#ffffff" }}>

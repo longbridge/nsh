@@ -83,19 +83,16 @@ export function Panel(props: {
         borderWidth: 1,
         borderColor: color.line,
         padding: 5,
-        shadowColor: "#000",
-        shadowOpacity: 0.35,
-        shadowRadius: 18,
-        shadowOffset: { width: 0, height: 8 },
+        boxShadow: "0px 8px 18px rgb(0 0 0 / 0.35)",
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 13 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 11, paddingTop: 11, paddingBottom: 13 }}>
         <View style={tile}>
           <Icon name={props.icon} size={19} tint={color.accent} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: color.text, fontSize: 17, fontWeight: "600", letterSpacing: -0.2 }}>{props.title}</Text>
-          <Text style={{ color: color.muted, fontSize: 13 }} numberOfLines={1}>
+          <Text style={{ lineClamp: 1, color: color.muted, fontSize: 13 }}>
             {props.status}
           </Text>
         </View>
@@ -159,8 +156,8 @@ export function Pill(props: { label: string; tone?: "neutral" | "accent" | "caut
         textTransform: "uppercase",
         textAlign: "center",
         width: props.width,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        paddingInline: 8,
+        paddingBlock: 4,
         borderRadius: 7,
         borderWidth: 1,
         borderColor: tone() === "neutral" ? color.lineStrong : ink(),
@@ -201,7 +198,7 @@ export function Gauge(props: { value: number; warnAbove?: number }) {
           borderRadius: 4,
           backgroundColor: props.value > (props.warnAbove ?? 2) ? color.caution : color.accent,
           transformOrigin: "left",
-          transform: [{ scaleX: fill }],
+          scale: [fill, 1],
         }}
       />
     </View>
@@ -236,8 +233,8 @@ export function Line(props: { first?: boolean; selected?: boolean; children: JSX
         alignItems: "center",
         gap: 12,
         minHeight: 50,
-        paddingHorizontal: 8,
-        marginHorizontal: -8,
+        paddingInline: 8,
+        marginInline: -8,
         borderRadius: 10,
         borderTopWidth: props.first ? 0 : 1,
         borderTopColor: color.line,
@@ -280,7 +277,7 @@ export function Switch(props: { value: boolean; onChange: (v: boolean) => void; 
           borderWidth: 3,
           borderColor: on.interpolate({ inputRange: [0, 1], outputRange: [color.muted, color.ink] }),
           backgroundColor: color.ink,
-          transform: [{ translateX: on.interpolate({ inputRange: [0, 1], outputRange: [0, 18] }) }],
+          translate: [on.interpolate({ inputRange: [0, 1], outputRange: [0, 18] }), 0],
         }}
       />
     </View>

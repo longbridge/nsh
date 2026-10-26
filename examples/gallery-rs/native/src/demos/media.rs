@@ -131,8 +131,8 @@ fn Site() -> impl IntoElement {
                 }))
                 .child(
                     text(move || state.with(|s| host(s.as_ref())))
-                        .number_of_lines(1)
-                        .ellipsize_mode(nsh_core::EllipsizeMode::Middle)
+                        .line_clamp(1)
+                        .text_overflow(nsh_core::EllipsizeMode::Middle)
                         .flex_1()
                         .text_size(px(15.0))
                         .text_color(colors::MUTED),

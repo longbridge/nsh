@@ -57,8 +57,7 @@ export function LucideIcon(props: { name: LucideIconName; size?: number; tint: s
   const size = props.size ?? 20;
   return (
     <Canvas
-      pointerEvents="none"
-      style={{ width: size, height: size }}
+      style={{ pointerEvents: "none", width: size, height: size }}
       draw={(cx, { width }) => {
         cx.scale(width / 24, width / 24);
         cx.strokeStyle = props.tint;
@@ -145,5 +144,5 @@ export function IconButton(props: { icon: LucideIconName; label: string; disable
 
 /** A thin vertical line between a toolbar's groups. */
 export function ToolbarSeparator() {
-  return <View style={{ width: 1, height: 20, marginHorizontal: 4, backgroundColor: colors.border }} />;
+  return <View style={{ width: 1, height: 20, marginInline: 4, backgroundColor: colors.border }} />;
 }

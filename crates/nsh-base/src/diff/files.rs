@@ -519,7 +519,7 @@ fn header(dv: Dv, row: usize, file: DiffFile) -> AnyElement {
             )
             .child(
                 text(name)
-                    .number_of_lines(1)
+                    .line_clamp(1)
                     .flex_1()
                     .ml(px(PAD))
                     .font_weight(FontWeight::MEDIUM),

@@ -264,7 +264,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                 )
                 .child(
                     text(move || message.with(|m| m.1.clone()))
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(13.0))
                         .text_color(AdaptiveColor::new(rgb(0xa4a8ae), rgb(0x4a4e55))),
                 ),
@@ -404,7 +404,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                 .gap_2()
                 .child(
                     text(name)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .flex_1()
                         .text_size(px(15.0))
                         .text_color(colors::MUTED),

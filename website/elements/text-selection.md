@@ -46,7 +46,7 @@ function ReleaseNotes(props: { notes: string }) {
       <Text class="font-semibold">Release notes</Text>
       <TextView markdown={props.notes} />
       <View class="flex-row gap-2">
-        <Text selectable={false} class="text-neutral-500">Updated</Text>
+        <Text style={{ userSelect: "none" }} class="text-neutral-500">Updated</Text>
         <Text>October 21</Text>
       </View>
     </View>

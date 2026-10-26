@@ -35,8 +35,7 @@ const options = <T extends string>(values: readonly T[]) => values.map((value) =
 function Backdrop(props: { tone: Tone; seed: number }) {
   return (
     <Canvas
-      pointerEvents="none"
-      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+      style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       draw={(cx, { width, height }) => {
         const color = toneColor(props.tone);
         cx.fillStyle = colors.border;
@@ -113,7 +112,7 @@ function Pager() {
                       gap: 4,
                       // The text lags behind the page and fades at the edges.
                       opacity: x.interpolate({ inputRange: range(), outputRange: [0.1, 1, 0.1] }),
-                      transform: [{ translateX: x.interpolate({ inputRange: range(), outputRange: [-width() * 0.35, 0, width() * 0.35] }) }],
+                      translate: [x.interpolate({ inputRange: range(), outputRange: [-width() * 0.35, 0, width() * 0.35] }), 0],
                     }}
                   >
                     <Text style={{ fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"] }}>
@@ -138,7 +137,7 @@ function Pager() {
               height: 8,
               borderRadius: 4,
               backgroundColor: colors.accent,
-              transform: [{ translateX: x.interpolate({ inputRange: [0, (pages.length - 1) * width()], outputRange: [0, (pages.length - 1) * step] }) }],
+              translate: [x.interpolate({ inputRange: [0, (pages.length - 1) * width()], outputRange: [0, (pages.length - 1) * step] }), 0],
             }}
           />
         </View>
@@ -156,7 +155,7 @@ function Cards() {
   const align = signal<"start" | "center" | "end">("center");
   return (
     <View style={{ gap: 12 }}>
-      <View style={{ marginHorizontal: -14 }}>
+      <View style={{ marginInline: -14 }}>
         <List
           each={Array.from({ length: 20 }, (_, i) => i)}
           horizontal
@@ -167,7 +166,7 @@ function Cards() {
           disableIntervalMomentum={oneStep()}
           scrollbar={false}
           style={{ height: 128 }}
-          contentStyle={{ gap, paddingHorizontal: 14 }}
+          contentStyle={{ gap, paddingInline: 14 }}
         >
           {(i) => {
             const tone = () => tones[i() % tones.length];
@@ -244,10 +243,10 @@ function Events() {
         onMomentumStart={note("momentum begin", "info")}
         onMomentumEnd={note("momentum end", "up")}
       >
-        <View style={{ paddingVertical: 6 }}>
+        <View style={{ paddingBlock: 6 }}>
           <Each of={Array.from({ length: 30 }, (_, i) => i + 1)}>
             {(i) => (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 32, paddingHorizontal: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 32, paddingInline: 12 }}>
                 <Text style={{ width: 24, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"], textAlign: "right" }}>{i()}</Text>
                 <View style={{ height: 4, borderRadius: 2, width: `${20 + ((i() * 37) % 70)}%`, backgroundColor: colors.raised }} />
               </View>
@@ -371,7 +370,7 @@ function Feed() {
         style={{ height: 240, borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
       >
         {(p) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, height: 48, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.line }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, height: 48, paddingInline: 14, borderBottomWidth: 1, borderBottomColor: colors.line }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: p().fresh ? colors.accent : colors.raised }} />
             <Text style={{ flex: 1, fontSize: 15, color: p().fresh ? colors.text : colors.muted }}>{p().label}</Text>
             {p().fresh ? <Badge label="new" tone="accent" /> : <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>#{p().id}</Text>}
@@ -439,6 +438,7 @@ export function Scrolling() {
               placeholder={hint("Type here, then tap the button", "Type here, then click the button")}
               style={{
                 placeholderColor: colors.faint,
+                caretColor: colors.accent,
                 selectionColor: colors.accent,
                 height: 44,
                 fontSize: 15,
@@ -448,7 +448,7 @@ export function Scrolling() {
                 borderWidth: 1,
                 borderColor: colors.fieldBorder,
                 borderRadius: radius.control,
-                paddingHorizontal: 14,
+                paddingInline: 14,
               }}
             />
             <Press onPress={() => presses.set(presses() + 1)} accessibilityLabel="Count a tap">

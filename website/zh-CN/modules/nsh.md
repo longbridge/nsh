@@ -976,7 +976,12 @@ use nsh_core::platform::Os;
 
 let card = view().p_4();
 let card = match os() {
-    Os::Ios => card.shadow_color(black()).shadow_opacity(0.15).shadow_radius(px(8.0)),
+    Os::Ios => card.shadow([BoxShadow {
+        offset_y: px(2.0),
+        blur: px(8.0),
+        color: rgba(0x00000026).into(),
+        ..BoxShadow::default()
+    }]),
     Os::Android => card.elevation(px(4.0)),
     _ => card,
 };
@@ -984,7 +989,7 @@ let card = match os() {
 
 ```tsx tabs
 const shadow = platform.select({
-  ios: { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8 },
+  ios: { boxShadow: "0px 2px 8px rgb(0 0 0 / 0.15)" },
   android: { elevation: 4 },
 });
 ```
@@ -2473,7 +2478,7 @@ function Saved() {
 | `JSX` | JSX 命名空间（`JSX.Element`） |
 | `YNode` | `ref` 拿到的对象：聚焦、滚动等命令。见[元素](../elements/index.md) |
 | `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
-| `ViewStyle`、`TextStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
+| `ViewStyle`、`TextStyle`、`InputStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
 | `GestureResponderEvent`、`HoverEvent`、`ContextMenuEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
 | `Point`、`Size`、`Bounds`、`Edges`、`Modifiers` | 事件数据和属性所用的形状，字段与 GPUI 相同（`nsh_core::geometry`） |

@@ -29,7 +29,7 @@ function Header(props: { title: string; right?: JSX.Element }) {
           </View>
         </If>
       </View>
-      <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: "600", color: ui().text }} class="flex-1 text-center">
+      <Text style={{ lineClamp: 1, fontSize: 17, fontWeight: "600", color: ui().text }} class="flex-1 text-center">
         {props.title}
       </Text>
       <View class="w-20 flex-row justify-end px-2">{props.right}</View>
@@ -113,7 +113,7 @@ function Inbox() {
                 hoverStyle={selected() === id() ? undefined : hoverFill()}
                 style={{
                   height: size.row + 12,
-                  paddingHorizontal: 12,
+                  paddingInline: 12,
                   borderRadius: 8,
                   justifyContent: "center",
                   gap: 2,
@@ -126,7 +126,7 @@ function Inbox() {
                   <Text style={{ flex: 1, fontSize: size.label, fontWeight: "600", color: ui().text }}>{`Message ${id()}`}</Text>
                   <Text style={{ fontSize: 12, color: ui().accent }}>{starred().includes(id()) ? "★" : ""}</Text>
                 </View>
-                <Text numberOfLines={1} style={{ fontSize: 12, color: ui().muted }}>{`The body of message ${id()}.`}</Text>
+                <Text style={{ lineClamp: 1, fontSize: 12, color: ui().muted }}>{`The body of message ${id()}.`}</Text>
               </View>
             )}
           </Each>

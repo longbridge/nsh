@@ -134,8 +134,7 @@ function App() {
                   the hole opening and closing. */}
               <View
                 class="transition-opacity duration-300 motion-reduce:transition-none"
-                pointerEvents="none"
-                style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 4, opacity: donut() ? 1 : 0 }}
+                style={{ pointerEvents: "none", position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 4, opacity: donut() ? 1 : 0 }}
               >
                 <Text style={{ fontSize: size.detail, color: ui().muted }}>{shown()?.name ?? "Total"}</Text>
                 <Text style={{ fontSize: 22, fontWeight: "600", color: ui().text, ...num, textAlign: "center" }}>
@@ -150,7 +149,7 @@ function App() {
             {/* The legend: a key in each slice's color, the value and the
                 share at the trailing edge; the hovered part's row stands out. */}
             <View style={{ alignSelf: "stretch", flex: wide() ? 1 : undefined, gap: 2 }}>
-              <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingBottom: 4 }}>
+              <View style={{ flexDirection: "row", gap: 12, paddingInline: 8, paddingBottom: 4 }}>
                 <View style={{ width: 8 }} />
                 <Text style={{ flex: 1, fontSize: 11, color: ui().faint }}>{breakdown() === "Channel" ? "Channel" : "Region"}</Text>
                 <Text style={{ fontSize: 11, color: ui().faint, ...num }}>Revenue</Text>
@@ -164,14 +163,14 @@ function App() {
                     alignItems: "center",
                     gap: 12,
                     height: size.rowSm,
-                    paddingHorizontal: 8,
+                    paddingInline: 8,
                     borderRadius: 6,
                     backgroundColor: hovered() === i ? tint(ui().text, 0.05) : undefined,
                     opacity: hovered() == null || hovered() === i ? 1 : 0.45,
                   }}
                 >
                   <View class={KEYS[i % KEYS.length]} style={{ width: 8, height: 8, borderRadius: 2 }} />
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: size.label - 1, color: ui().text }}>{p.name}</Text>
+                  <Text style={{ lineClamp: 1, flex: 1, fontSize: size.label - 1, color: ui().text }}>{p.name}</Text>
                   <Text style={{ fontSize: size.label - 1, color: ui().text, ...num }}>{money(p.revenue)}</Text>
                   <Text style={{ width: 52, fontSize: size.label - 1, color: ui().muted, ...num }}>{percent(share(p))}</Text>
                 </View>

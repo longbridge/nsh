@@ -71,7 +71,7 @@ export function button(kind: ButtonKind = "secondary", o?: ButtonOptions) {
       return {
         ...fill,
         height: desktop ? (compact ? size.controlSm : size.control) : size.control,
-        paddingHorizontal: desktop ? (compact ? 10 : 12) : 16,
+        paddingInline: desktop ? (compact ? 10 : 12) : 16,
         borderRadius: desktop ? 8 : 12,
         alignItems: "center" as const,
         justifyContent: "center" as const,
@@ -125,8 +125,8 @@ export function field(o?: FieldOptions) {
         color: ui().text,
         placeholderColor: ui().faint,
         borderRadius: desktop ? 8 : 12,
-        paddingHorizontal: desktop ? 10 : 12,
-        paddingVertical: desktop ? 7 : 10,
+        paddingInline: desktop ? 10 : 12,
+        paddingBlock: desktop ? 7 : 10,
         ...(__read<boolean | undefined>(o?.invalid) ? { borderColor: ui().down } : {}),
         ...(__read<object | undefined>(o?.style) ?? {}),
       };

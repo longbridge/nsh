@@ -43,7 +43,7 @@ fn frame(image: Image) -> Image {
 /// A quiet label under a tile (`code` for API values).
 fn note(content: impl Into<SharedString>, code: bool) -> AnyElement {
     text(content.into())
-        .number_of_lines(1)
+        .line_clamp(1)
         .text_size(px(13.0))
         .text_color(colors::MUTED)
         .when(code, |t| t.font_family(MONO))
@@ -92,7 +92,7 @@ fn resize_modes() -> AnyElement {
             view()
                 .flex_1()
                 .gap_2()
-                .child(frame(image(WIDE).resize_mode(mode)).h(px(140.0)))
+                .child(frame(image(WIDE).object_fit(mode)).h(px(140.0)))
                 .child(note(name, true))
         }))
     });
@@ -199,7 +199,7 @@ fn placeholders(seed: Signal<u32>) -> AnyElement {
                     })
                     .placeholder(LOGO)
                     .fade_duration(ms as f32)
-                    .resize_mode(ResizeMode::Cover),
+                    .object_fit(ResizeMode::Cover),
                 )
                 .h(px(100.0)),
             )
@@ -444,7 +444,7 @@ fn events() -> AnyElement {
                 .child(label(
                     "example.invalid",
                     text(failed)
-                        .number_of_lines(3)
+                        .line_clamp(3)
                         .text_size(px(13.0))
                         .text_color(colors::DANGER)
                         .into_element(),

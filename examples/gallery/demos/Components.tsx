@@ -23,9 +23,10 @@ function Field(props: InputProps) {
       {...props}
       style={{
         placeholderColor: colors.faint,
+        caretColor: colors.accent,
         selectionColor: colors.accent,
         height: 48,
-        paddingHorizontal: 14,
+        paddingInline: 14,
         fontSize: 15,
         color: colors.text,
         backgroundColor: colors.field,
@@ -47,11 +48,11 @@ function Cell(props: { children: JSX.Element }) {
 function LinkRow(props: { icon: IconName; title: string; note: string; onPress: () => void }) {
   return (
     <Press onPress={props.onPress} scale={0.98} accessibilityLabel={props.title}>
-      <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 10, paddingVertical: 8 }}>
+      <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 10, paddingBlock: 8 }}>
         <IconTile name={props.icon} size={34} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
-          <Text numberOfLines={1} style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>
+          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.note}
           </Text>
         </View>
@@ -153,7 +154,7 @@ function PressableSheet() {
 /** A tile to press, with the prop it shows. */
 function Tile(props: { title: string; note: string; children?: JSX.Element }) {
   return (
-    <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 8 }}>
+    <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 12, paddingBlock: 8 }}>
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 15, color: colors.text }}>{props.title}</Text>
         <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.note}</Text>
@@ -221,8 +222,8 @@ function Accessory() {
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            paddingHorizontal: 16,
-            paddingVertical: 8,
+            paddingInline: 16,
+            paddingBlock: 8,
             borderTopWidth: hairline(),
             borderTopColor: colors.border,
           }}
@@ -346,10 +347,10 @@ function PlatformInfo() {
         <Each of={rows()}>
           {(row, i) => (
             <Row first={i() === 0}>
-              <Text numberOfLines={1} style={{ flex: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
+              <Text style={{ lineClamp: 1, flex: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
                 {row()[0]}
               </Text>
-              <Text numberOfLines={1} style={{ fontSize: 14, color: colors.text, fontVariant: ["tabular-nums"] }}>
+              <Text style={{ lineClamp: 1, fontSize: 14, color: colors.text, fontVariant: ["tabular-nums"] }}>
                 {row()[1]}
               </Text>
             </Row>

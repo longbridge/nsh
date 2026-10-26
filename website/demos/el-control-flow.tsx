@@ -44,7 +44,7 @@ function App() {
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 12,
-                ...(wide() ? { borderRadius: 8, height: size.row, paddingHorizontal: 12 } : { borderRadius: 12, padding: 12 }),
+                ...(wide() ? { borderRadius: 8, height: size.row, paddingInline: 12 } : { borderRadius: 12, padding: 12 }),
               }}
             >
               <View

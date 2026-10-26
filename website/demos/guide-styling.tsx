@@ -41,7 +41,7 @@ function App() {
       <Tile label="radial" ink="#0c0d0f" style={{ backgroundImage: "radial-gradient(circle, #ffd99a, #ff8a7a)" }} />
       <Tile label="corners" style={{ borderTopLeftRadius: 40, borderBottomRightRadius: 40, backgroundColor: tint(ui().up, 0.3) }} />
       <Tile label="continuous" ink={ui().page} style={{ borderRadius: 28, borderCurve: "continuous", backgroundColor: ui().up }} />
-      <Tile label="rotate + scale" style={{ backgroundColor: tint(ui().info, 0.3), transform: [{ rotate: "-8deg" }, { scale: 0.9 }] }} />
+      <Tile label="rotate + scale" style={{ backgroundColor: tint(ui().info, 0.3), rotate: "-8deg", scale: 0.9 }} />
       <Tile label="outline" style={{ outlineWidth: 2, outlineColor: ui().accent, outlineOffset: 3 }} />
       <Tile label="opacity 0.5" ink={ui().page} style={{ backgroundColor: ui().text, opacity: 0.5 }} />
     </View>
@@ -56,7 +56,7 @@ function App() {
               onPress={() => picked.set(picked() === i() ? -1 : i())}
               style={[
                 desktop
-                  ? { height: size.control + 6, justifyContent: "center", paddingHorizontal: 14, borderRadius: 8, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" }
+                  ? { height: size.control + 6, justifyContent: "center", paddingInline: 14, borderRadius: 8, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" }
                   : { flex: 1, padding: 12, borderRadius: 10, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" },
                 picked() === i() && styles().selected,
               ]}
@@ -80,7 +80,7 @@ function App() {
           height: 72,
           borderRadius: on() ? 36 : 12,
           backgroundColor: on() ? ui().accent : ui().info,
-          transform: [{ translateX: on() ? 120 : 0 }],
+          translate: on() ? 120 : 0,
           width: 150,
           alignItems: "center",
           justifyContent: "center",

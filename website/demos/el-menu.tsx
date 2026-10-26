@@ -6,11 +6,11 @@ import { button, buttonText, desktop, Inspector, Panel, Stage, tint, ui, wide } 
 const surface = () =>
   desktop
     ? { ...ui().card, borderRadius: 12, padding: 5, minWidth: 210 }
-    : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30 };
+    : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingInline: 10, paddingTop: 10, paddingBottom: 30 };
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 const rowHeight = () => (desktop ? 32 : 46);
-const row = () => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 8, height: rowHeight(), paddingHorizontal: 10, borderRadius: 8 });
+const row = () => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 8, height: rowHeight(), paddingInline: 10, borderRadius: 8 });
 
 function Item(props: { label: string; onSelect?: () => void; checked?: boolean; disabled?: boolean; keepOpen?: boolean; danger?: boolean }) {
   return (
@@ -33,7 +33,7 @@ function Item(props: { label: string; onSelect?: () => void; checked?: boolean; 
 }
 
 function Separator() {
-  return <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 6, backgroundColor: ui().border }} />;
+  return <MenuSeparator style={{ height: 1, marginBlock: 4, marginInline: 6, backgroundColor: ui().border }} />;
 }
 
 function Share(props: { onSelect: (what: string) => void }) {

@@ -141,6 +141,7 @@ impl Field {
         let on_blur = self.on_blur;
         let base = nsh_core::element::input()
             .placeholder_color(|| color(colors::FAINT))
+            .caret_color(|| color(colors::ACCENT))
             .selection_color(|| color(colors::ACCENT))
             .return_key_type(ReturnKeyType::Done)
             .multiline(self.multiline)
@@ -320,7 +321,7 @@ fn link_row(
                     )
                     .child(
                         text(note)
-                            .number_of_lines(1)
+                            .line_clamp(1)
                             .text_size(px(12.0))
                             .text_color(colors::FAINT)
                             .font_family(MONO),
@@ -715,6 +716,7 @@ pub(crate) fn Form() -> impl IntoElement {
                         chained(13, i)
                             .placeholder("A blue placeholder, an amber selection")
                             .placeholder_color(|| color(colors::INFO))
+                            .caret_color(|| color(colors::WARN))
                             .selection_color(|| color(colors::WARN))
                     }),
             )
@@ -1195,6 +1197,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
                             .submit_behavior(SubmitBehavior::Submit)
                             .placeholder("Message")
                             .placeholder_color(|| color(colors::FAINT))
+                            .caret_color(|| color(colors::ACCENT))
                             .selection_color(|| color(colors::ACCENT))
                             .return_key_type(ReturnKeyType::Send)
                             .flex_1()

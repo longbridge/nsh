@@ -82,9 +82,9 @@ scroll().horizontal().scrollbar(false).child(
 
 ```tsx tabs
 <Scroll horizontal scrollbar={false}>
-  <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
+  <View style={{ flexDirection: "row", gap: 8, paddingInline: 16 }}>
     <Each of={["Today", "This week", "This month", "This year"]}>
-      {(label) => <Text style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
+      {(label) => <Text style={{ paddingInline: 14, paddingBlock: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
     </Each>
   </View>
 </Scroll>
@@ -228,7 +228,7 @@ scroll()
   disableIntervalMomentum
   scrollbar={false}
 >
-  <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 16 }}>…</View>
+  <View style={{ flexDirection: "row", gap: 12, paddingInline: 16 }}>…</View>
 </Scroll>
 ```
 
@@ -316,7 +316,7 @@ function App() {
         style={{
           height: 56,
           justifyContent: "center",
-          paddingHorizontal: 16,
+          paddingInline: 16,
           // Transparent at the top, white after 80 points.
           backgroundColor: offset.interpolate({ inputRange: [0, 80], outputRange: ["rgba(255,255,255,0)", "#ffffff"] }),
         }}
@@ -326,7 +326,7 @@ function App() {
             fontSize: 22,
             fontWeight: "700",
             transformOrigin: "left center",
-            transform: [{ scale: offset.interpolate({ inputRange: [0, 80], outputRange: [1, 0.8] }) }],
+            scale: offset.interpolate({ inputRange: [0, 80], outputRange: [1, 0.8] }),
           }}
         >
           Inbox
@@ -362,7 +362,7 @@ const header = offset.diffClamp(0, 56);
   <Scroll style={{ flex: 1 }} scrollValue={offset}>
     <View style={{ paddingTop: 56 }}>…</View>
   </Scroll>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: header.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, header.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -451,8 +451,8 @@ const pull = createAnimatedValue(0);
     …
   </Scroll>
   <View
-    pointerEvents="none"
     style={{
+      pointerEvents: "none",
       position: "absolute",
       top: 0,
       left: 0,

@@ -101,7 +101,7 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
         .text_color(move || theme().foreground)
         .font_family(move || font_a().family)
         .text_size(move || Length::from(font_b().size))
-        .line_height(move || Length::from(font_c().line_height))
+        .line_height(move || nsh_core::LineHeight::from(font_c().line_height))
         .child(
             scroll()
                 .element_ref(&ed.vscroll)
@@ -1314,7 +1314,7 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
                         .top(Length::from(b.origin.y))
                         .w(Length::from(b.size.width))
                         .h(Length::from(b.size.height))
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .overflow_hidden()
                         .pointer_events(PointerEvents::None)
                         .text_color(move || theme().muted_foreground.opacity(0.6)),

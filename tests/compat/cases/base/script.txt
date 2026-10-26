@@ -98,7 +98,7 @@ covers [events] onPressDown
 covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
-covers [props] Button.selectedStyle
+covers [props] selectedStyle
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the
@@ -489,11 +489,11 @@ expect Math block: x^2
 expect Image Logo: https://example.com/logo.png
 tap label:Logo
 expect Image pressed: Logo
-# Parts styled by `classes` and `styles`; `selectable`.
+# Parts styled by `classes` and `styles`; `selectable` (its texts' `userSelect`).
 style text:"Classed heading" color #ff0000ff
 style text:"Classed heading" fontWeight 600
 style text:"Styled paragraph." color #00ff00ff
-prop text:"Styled paragraph." selectable true
+style text:"Styled paragraph." userSelect text
 # The static functions.
 expect Plain: a b
 expect Parsed: 1 paragraph
@@ -507,7 +507,7 @@ covers [props] TextView.options
 covers [props] TextView.extensions
 covers [props] TextView.classes
 covers [props] TextView.styles
-covers [props] selectable
+covers [props] TextView.selectable
 covers [props] TextView.codeBlockScrollbar
 covers [props] TextView.tableScrollbar
 covers [props] TextView.streamingCaret
@@ -536,13 +536,13 @@ prop id:area selectableView true
 prop id:inner selectableView true
 prop id:own selectableView true
 noprop id:area-doc selectableView
-# Texts join the area unless they say `selectable={false}`.
-noprop text:"Area first text" selectable
-noprop text:"Area item" selectable
-prop text:"Area label" selectable false
-noprop text:"Inner text" selectable
-prop text:"Own selection" selectable true
-noprop text:"Outside text" selectable
+# Texts join the area unless they say `userSelect: "none"`.
+nostyle text:"Area first text" userSelect
+nostyle text:"Area item" userSelect
+style text:"Area label" userSelect none
+nostyle text:"Inner text" userSelect
+style text:"Own selection" userSelect text
+nostyle text:"Outside text" userSelect
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
@@ -953,7 +953,6 @@ covers [nsh/base] Tab
 covers [nsh/base] Tabs
 covers [props] Tab.selected
 covers [props] disabled
-covers [props] Tab.selectedStyle
 covers [props] accessibilityLabel
 covers [events] onPress
 

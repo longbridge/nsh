@@ -238,13 +238,13 @@ export function RichEditorDemo() {
         overflow: "hidden",
       }}
     >
-      <View style={{ paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.inset }}>
+      <View style={{ paddingInline: 8, paddingBlock: 6, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.inset }}>
         <Toolbar editor={editor} revision={revision()} link={link} zoomed={zoomed()} onZoom={() => zoomed.set(!zoomed())} />
       </View>
       <If
         when={mode() === "edit"}
         else={
-          <View style={{ flex: 1, paddingHorizontal: 24, paddingVertical: 20 }}>
+          <View style={{ flex: 1, paddingInline: 24, paddingBlock: 20 }}>
             <Text testID="markdown-source" style={{ fontFamily: mono, fontSize: 13, lineHeight: 20, color: colors.text }}>
               {source()}
             </Text>
@@ -267,8 +267,8 @@ export function RichEditorDemo() {
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingHorizontal: 12,
-          paddingVertical: 8,
+          paddingInline: 12,
+          paddingBlock: 8,
           borderTopWidth: 1,
           borderColor: colors.border,
         }}

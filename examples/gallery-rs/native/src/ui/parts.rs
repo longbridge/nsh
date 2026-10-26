@@ -196,7 +196,7 @@ impl IntoElement for PageHeader {
             (Some(element), _) => view().flex_1().flex_row().child(element).into_element(),
             (None, Some(title)) => text(title)
                 .flex_1()
-                .number_of_lines(1)
+                .line_clamp(1)
                 .text_size(px(17.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(self.text_color)
@@ -375,7 +375,7 @@ impl IntoElement for Card {
                         )
                         .children(self.subtitle.map(|subtitle| {
                             text(subtitle)
-                                .number_of_lines(2)
+                                .line_clamp(2)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED)
                         })),

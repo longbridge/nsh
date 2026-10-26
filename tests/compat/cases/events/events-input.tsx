@@ -82,10 +82,10 @@ function App() {
         masked
         placeholder="Password"
         selectedRange={{ start: 0, end: 2 }}
-        style={{ width: 300, height: 40, placeholderColor: "#888888", selectionColor: "#ff6600" }}
+        style={{ width: 300, height: 40, placeholderColor: "#888888", caretColor: "#0066ff", selectionColor: "#ff6600" }}
       />
       <Input testID="fixed" readonly defaultValue="Fixed" style={{ width: 300, height: 40 }} />
-      <Text testID="pick" selectable style={{ selectionColor: "#00aa00" }}>
+      <Text testID="pick" style={{ userSelect: "text", selectionColor: "#00aa00" }}>
         Selectable
       </Text>
     </View>

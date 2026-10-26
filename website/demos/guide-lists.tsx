@@ -51,7 +51,7 @@ function Feed() {
         <View
           style={
             wide()
-              ? { flexDirection: "row", alignItems: "center", gap: 12, height: size.rowSm, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: ui().line, backgroundColor: ui().inset.backgroundColor }
+              ? { flexDirection: "row", alignItems: "center", gap: 12, height: size.rowSm, paddingInline: 12, borderBottomWidth: 1, borderBottomColor: ui().line, backgroundColor: ui().inset.backgroundColor }
               : { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 4 }
           }
         >
@@ -71,7 +71,7 @@ function Feed() {
         <View
           style={
             wide()
-              ? { height: size.row, paddingHorizontal: 12, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: ui().line }
+              ? { height: size.row, paddingInline: 12, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: ui().line }
               : { ...ui().row, padding: 16, borderRadius: 12 }
           }
         >
@@ -131,15 +131,15 @@ function Contacts() {
             <View
               style={
                 wide()
-                  ? { height: size.rowSm, paddingHorizontal: 12, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: ui().line }
-                  : { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: ui().line }
+                  ? { height: size.rowSm, paddingInline: 12, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: ui().line }
+                  : { paddingInline: 16, paddingBlock: 12, borderBottomWidth: 1, borderBottomColor: ui().line }
               }
             >
               <Text style={{ fontSize: wide() ? size.label : 16, color: ui().text }}>{(row() as { name: string }).name}</Text>
             </View>
           }
         >
-          <View style={{ backgroundColor: ui().inset.backgroundColor, paddingHorizontal: wide() ? 12 : 16, paddingVertical: wide() ? 4 : 6 }}>
+          <View style={{ backgroundColor: ui().inset.backgroundColor, paddingInline: wide() ? 12 : 16, paddingBlock: wide() ? 4 : 6 }}>
             <Text style={{ fontWeight: "700", fontSize: wide() ? 12 : undefined, color: ui().muted }}>{(row() as { header: string }).header}</Text>
           </View>
         </If>
@@ -158,7 +158,7 @@ function App() {
       style={{
         flex: 1,
         textAlign: "center",
-        paddingVertical: wide() ? 4 : 6,
+        paddingBlock: wide() ? 4 : 6,
         fontSize: wide() ? 13 : undefined,
         borderRadius: 8,
         overflow: "hidden",
@@ -179,15 +179,15 @@ function App() {
     <View
       style={
         wide()
-          ? { flex: 1, backgroundColor: ui().page, paddingTop: 24, paddingHorizontal: Math.max(0, (windowSize().width - REGION) / 2) }
+          ? { flex: 1, backgroundColor: ui().page, paddingTop: 24, paddingInline: Math.max(0, (windowSize().width - REGION) / 2) }
           : { flex: 1, backgroundColor: ui().page, paddingTop: 24 }
       }
     >
       <View
         style={
           wide()
-            ? { ...ui().inset, flexDirection: "row", alignSelf: "flex-start", width: 320, marginHorizontal: 20, padding: 3, borderRadius: 10 }
-            : { ...ui().inset, flexDirection: "row", marginHorizontal: 12, padding: 3, borderRadius: 10 }
+            ? { ...ui().inset, flexDirection: "row", alignSelf: "flex-start", width: 320, marginInline: 20, padding: 3, borderRadius: 10 }
+            : { ...ui().inset, flexDirection: "row", marginInline: 12, padding: 3, borderRadius: 10 }
         }
       >
         {button("feed", "Feed")}

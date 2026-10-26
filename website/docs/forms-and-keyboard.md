@@ -207,8 +207,8 @@ Events:
 | `onCompositionChange` | `{ composing, text }` | An input method's composition started, changed or ended (see [Input methods](#input-methods)). |
 
 An input is styled like text: `fontSize`, `color`, `fontFamily`, `textAlign`, `letterSpacing` and the rest of [text styles](./text.md), plus borders, padding and backgrounds. The focus style (`.focus(|s| ..)` in Rust, the `focus:` Tailwind variant or `focusStyle` in TSX) applies while the input has focus. The placeholder's color is `.placeholder_color(..)` (the
-`placeholderColor` style key, `placeholder:text-*`), and the caret and selection's color is `.selection_color(..)` (`selectionColor`,
-`selection:text-*`):
+`placeholderColor` style key, `placeholder:text-*`), the caret's is `.caret_color(..)` (`caretColor`, `caret-*`), and the selection highlight's is `.selection_color(..)`
+(`selectionColor`, `selection:text-*`); UIKit tints the caret and the selection with one color, the caret's when set:
 
 ```rust tabs
 input()

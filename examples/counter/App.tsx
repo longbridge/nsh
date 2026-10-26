@@ -7,8 +7,8 @@ function Button(props: { label: string; color: string; onPress: () => void }) {
       style={{
         backgroundColor: props.color,
         borderRadius: 12,
-        paddingVertical: 12,
-        paddingHorizontal: 24,
+        paddingBlock: 12,
+        paddingInline: 24,
         alignItems: "center",
       }}
     >

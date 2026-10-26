@@ -123,7 +123,7 @@ pub(super) struct Instance {
     pub(super) class_list: Vec<Box<str>>,
     /// The app's classes, or the styles the view this one is in gives it:
     /// applied after the root's own.
-    pub(super) user: Option<Arc<ClassList>>,
+    pub(super) user: Option<std::rc::Rc<ClassList>>,
     /// Events JS listens to on the host.
     js_events: EventMask,
     /// The view, expanded (its root is the host); a list cell's row as
@@ -182,7 +182,7 @@ pub(super) struct Instance {
 /// and the views that place them ([`Core::root_context`]).
 pub(super) struct RootContext {
     /// Their styles, after the root's (the outer last).
-    pub(super) user: Option<Arc<ClassList>>,
+    pub(super) user: Option<std::rc::Rc<ClassList>>,
     /// Whether `app` is what goes after the root's inline style (else the
     /// component's own app style is).
     pub(super) combined: bool,
@@ -306,10 +306,17 @@ pub(super) enum Part {
 
 /// A node's app classes ([`Components::app_classes`]): its own rules, the
 /// classes, and what goes after them.
-pub(super) type AppClass = (Option<Arc<ClassList>>, SharedString, Option<Arc<ClassList>>);
+pub(super) type AppClass = (
+    Option<std::rc::Rc<ClassList>>,
+    SharedString,
+    Option<std::rc::Rc<ClassList>>,
+);
 
 /// The node's classes: its styles lowered, and what was merged after them.
-pub(super) type Classes = (Option<Arc<ClassList>>, Option<Arc<ClassList>>);
+pub(super) type Classes = (
+    Option<std::rc::Rc<ClassList>>,
+    Option<std::rc::Rc<ClassList>>,
+);
 
 /// An element of a view, as it was applied.
 pub(super) struct Expanded {
@@ -452,10 +459,10 @@ pub(super) struct Components {
     pub(super) slot_targets: FxHashMap<NodeId, super::slots::SlotTarget>,
     /// The app's elements a slot's props go to -> their slot node.
     pub(super) adopted: FxHashMap<NodeId, NodeId>,
-    styles: FxHashMap<StyleRefinement, Arc<ClassList>>,
+    styles: FxHashMap<StyleRefinement, std::rc::Rc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).
-    merges: FxHashMap<(usize, usize), [Arc<ClassList>; 3]>,
+    merges: FxHashMap<(usize, usize), [std::rc::Rc<ClassList>; 3]>,
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
@@ -653,7 +660,7 @@ impl Components {
 
     /// `style` as rules, shared between the elements that have it (its
     /// static declarations: bound parts are applied by bindings).
-    pub(super) fn lowered(&mut self, style: &StyleRefinement) -> Arc<ClassList> {
+    pub(super) fn lowered(&mut self, style: &StyleRefinement) -> std::rc::Rc<ClassList> {
         if style.is_bound() {
             return self.lowered(&style.static_part());
         }
@@ -663,7 +670,7 @@ impl Components {
         if self.styles.len() >= STYLE_CACHE {
             self.styles.clear();
         }
-        let list = Arc::new(style.lower());
+        let list = std::rc::Rc::new(style.lower());
         self.styles.insert(style.clone(), list.clone());
         list
     }
@@ -691,9 +698,9 @@ fn inline_style(
     Op::SetStyle { id, style, patch }
 }
 
-fn same(a: &Option<Arc<ClassList>>, b: &Option<Arc<ClassList>>) -> bool {
+fn same(a: &Option<std::rc::Rc<ClassList>>, b: &Option<std::rc::Rc<ClassList>>) -> bool {
     match (a, b) {
-        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (Some(a), Some(b)) => std::rc::Rc::ptr_eq(a, b),
         (None, None) => true,
         _ => false,
     }
@@ -1393,7 +1400,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// What goes after `host`'s own styles.
-    pub(super) fn set_user(&mut self, host: NodeId, user: Option<Arc<ClassList>>) {
+    pub(super) fn set_user(&mut self, host: NodeId, user: Option<std::rc::Rc<ClassList>>) {
         let inst = self.components.instances.get_mut(&host).expect("host");
         if !same(&inst.user, &user) {
             inst.user = user;
@@ -2265,19 +2272,22 @@ impl<M: TextEngine> Core<M> {
     /// `inner`'s rules, then `outer`'s (one list per pair, kept).
     pub(super) fn merge_user(
         &mut self,
-        inner: Option<Arc<ClassList>>,
-        outer: Option<Arc<ClassList>>,
-    ) -> Option<Arc<ClassList>> {
+        inner: Option<std::rc::Rc<ClassList>>,
+        outer: Option<std::rc::Rc<ClassList>>,
+    ) -> Option<std::rc::Rc<ClassList>> {
         match (inner, outer) {
             (Some(a), Some(b)) => {
-                let key = (Arc::as_ptr(&a) as usize, Arc::as_ptr(&b) as usize);
+                let key = (
+                    std::rc::Rc::as_ptr(&a) as usize,
+                    std::rc::Rc::as_ptr(&b) as usize,
+                );
                 if let Some([_, _, merged]) = self.components.merges.get(&key) {
                     return Some(merged.clone());
                 }
                 if self.components.merges.len() >= STYLE_CACHE {
                     self.components.merges.clear();
                 }
-                let merged = Arc::new(a.merged(&b));
+                let merged = std::rc::Rc::new(a.merged(&b));
                 self.components.merges.insert(key, [a, b, merged.clone()]);
                 Some(merged)
             }
@@ -2405,7 +2415,7 @@ impl<M: TextEngine> Core<M> {
         style: &StyleRefinement,
         old_style: &StyleRefinement,
         old: Classes,
-        user: Option<Arc<ClassList>>,
+        user: Option<std::rc::Rc<ClassList>>,
     ) -> Classes {
         let own = if style == old_style {
             old.0.clone()
@@ -2416,7 +2426,7 @@ impl<M: TextEngine> Core<M> {
         };
         if !same(&own, &old.0) || !same(&user, &old.1) {
             let list = match (&own, &user) {
-                (Some(a), Some(b)) => Some(Arc::new(a.merged(b))),
+                (Some(a), Some(b)) => Some(std::rc::Rc::new(a.merged(b))),
                 (Some(a), None) => Some(a.clone()),
                 (None, Some(b)) => Some(b.clone()),
                 (None, None) => None,
@@ -2439,7 +2449,7 @@ impl<M: TextEngine> Core<M> {
         old_style: &StyleRefinement,
         old: Classes,
         class: Option<&SharedString>,
-        outer: Option<Arc<ClassList>>,
+        outer: Option<std::rc::Rc<ClassList>>,
     ) -> Classes {
         let Some(class) = class.filter(|c| !c.trim().is_empty()) else {
             if !self.components.app_classes.is_empty() {
@@ -2458,7 +2468,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The rules of the app's classes `class` (the unknown ones warned of
     /// once, as a host's).
-    pub(super) fn app_class_list(&mut self, class: &str) -> Arc<ClassList> {
+    pub(super) fn app_class_list(&mut self, class: &str) -> std::rc::Rc<ClassList> {
         let (list, fresh) = self.tailwind.get(class);
         if fresh && !list.unknown().is_empty() {
             log::warn!(

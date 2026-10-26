@@ -1980,7 +1980,7 @@ class Player {
   // Images
 
   /**
-   * `src`, `resizeMode`, `placeholder` (shown until the image loads,
+   * `src`, `objectFit`, `placeholder` (shown until the image loads,
    * then faded out over `fadeDuration`), `blurRadius` (a CSS blur) and
    * `objectPosition` (CSS's, empty for the center).
    * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and

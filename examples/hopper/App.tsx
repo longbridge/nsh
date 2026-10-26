@@ -35,7 +35,7 @@ function Header(props: { title: string; back?: boolean }) {
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        paddingHorizontal: 12,
+        paddingInline: 12,
         backgroundColor: color.page,
         borderBottomWidth: 1,
         borderBottomColor: color.line,
@@ -54,7 +54,7 @@ function Header(props: { title: string; back?: boolean }) {
           <Text style={{ fontSize: 15, color: color.accent }}>Back</Text>
         </View>
       </If>
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 17, fontWeight: "600", color: color.text }}>
+      <Text style={{ lineClamp: 1, flex: 1, fontSize: 17, fontWeight: "600", color: color.text }}>
         {props.title}
       </Text>
     </View>
@@ -66,7 +66,7 @@ function Header(props: { title: string; back?: boolean }) {
 function Section(props: { visible: boolean; children: JSX.Element }) {
   return (
     <Scroll
-      style={{ flex: 1, backgroundColor: color.page, display: props.visible ? "flex" : "none" }}
+      style={{ flex: 1, backgroundColor: color.page, flexDirection: "column", display: props.visible ? "flex" : "none" }}
       keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled"
     >

@@ -166,7 +166,7 @@ export function Charts() {
             dotClass="size-2.5 rounded-full border-2"
             tooltipOffset={4}
             tooltipContent={
-              <View style={{ ...finish.menu, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
+              <View style={{ ...finish.menu, flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
                 <TipValue value={count(rows()[tip()].visitors)} />
                 <TipValue value={count(other()[tip()].visitors)} dashed />
               </View>
@@ -253,8 +253,7 @@ export function Charts() {
             {/* The total in the hole fades as it opens and closes. */}
             <View
               class="transition-opacity duration-300 motion-reduce:transition-none"
-              pointerEvents="none"
-              style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, opacity: donut() ? 1 : 0 }}
+              style={{ pointerEvents: "none", position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, opacity: donut() ? 1 : 0 }}
             >
               <Text style={{ fontSize: size.detail, color: colors.muted }}>{shown()?.name ?? "Total"}</Text>
               <Text style={{ fontSize: 20, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
@@ -273,14 +272,14 @@ export function Charts() {
                   alignItems: "center",
                   gap: 10,
                   height: pointer ? 30 : 36,
-                  paddingHorizontal: 8,
+                  paddingInline: 8,
                   borderRadius: 6,
                   backgroundColor: hover() === i ? alpha(colors.text, 0.05) : undefined,
                   opacity: hover() == null || hover() === i ? 1 : 0.45,
                 }}
               >
                 <View class={KEYS[i]} style={{ width: 8, height: 8, borderRadius: 2 }} />
-                <Text numberOfLines={1} style={{ flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
+                <Text style={{ lineClamp: 1, flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
                 <Text style={{ fontSize: size.detail + 1, color: colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>{money(r.revenue)}</Text>
                 <Text style={{ width: 48, fontSize: size.detail + 1, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{share(r.revenue)}</Text>
               </View>

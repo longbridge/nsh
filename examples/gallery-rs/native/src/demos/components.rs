@@ -30,6 +30,7 @@ fn hairline() -> f32 {
 fn field(focused: Signal<bool>) -> Input {
     input()
         .placeholder_color(|| color(colors::FAINT))
+        .caret_color(|| color(colors::ACCENT))
         .selection_color(|| color(colors::ACCENT))
         .h(px(48.0))
         .px(px(14.0))
@@ -653,7 +654,7 @@ fn PlatformInfo() -> impl IntoElement {
         Row::new(i == 0)
             .child(
                 text(name)
-                    .number_of_lines(1)
+                    .line_clamp(1)
                     .flex_1()
                     .text_size(px(12.0))
                     .text_color(colors::MUTED)
@@ -661,7 +662,7 @@ fn PlatformInfo() -> impl IntoElement {
             )
             .child(
                 text(value)
-                    .number_of_lines(1)
+                    .line_clamp(1)
                     .text_size(px(14.0))
                     .text_color(colors::TEXT)
                     .tabular_nums(),
@@ -736,7 +737,7 @@ fn link_row(
                     )
                     .child(
                         text(prop)
-                            .number_of_lines(1)
+                            .line_clamp(1)
                             .text_size(px(12.0))
                             .text_color(colors::FAINT)
                             .font_family(MONO),

@@ -387,13 +387,13 @@ fn MarketStrip() -> impl IntoElement {
                         .h(px(56.0))
                         .child(
                             text("Composite")
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                         )
                         .child(
                             text(move || grouped(composite.get(), 2))
-                                .number_of_lines(1)
+                                .line_clamp(1)
                                 .text_size(px(15.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors::TEXT)
@@ -520,7 +520,7 @@ fn sector_bar(label: &'static str, change: Memo<f64>, scale: Memo<f64>) -> View 
         .h(px(22.0))
         .child(
             text(label)
-                .number_of_lines(1)
+                .line_clamp(1)
                 .w(px(84.0))
                 .text_size(px(13.0))
                 .text_color(colors::MUTED),
@@ -817,14 +817,14 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
                 .gap(px(3.0))
                 .child(
                     text(code)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(colors::TEXT),
                 )
                 .child(
                     text(name)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(13.0))
                         .text_color(colors::MUTED),
                 ),
@@ -846,7 +846,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
                 .gap(px(3.0))
                 .child(
                     text(move || price(quote.get().last, decimals))
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(colors::TEXT)
@@ -854,7 +854,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
                 )
                 .child(
                     text(move || format!("{}%", signed(change.get(), 2)))
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(13.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(move || tone_of(change.get()))

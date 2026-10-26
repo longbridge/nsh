@@ -406,7 +406,7 @@ fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
                 )
                 .child(
                     text(move || person().note)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .text_size(px(13.0))
                         .text_color(colors::MUTED),
                 ),
@@ -612,6 +612,7 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 .submit_behavior(SubmitBehavior::Submit)
                 .placeholder("Message")
                 .placeholder_color(|| color(colors::FAINT))
+                .caret_color(|| color(colors::ACCENT))
                 .selection_color(|| color(colors::ACCENT))
                 .return_key_type(ReturnKeyType::Send)
                 .flex_1()

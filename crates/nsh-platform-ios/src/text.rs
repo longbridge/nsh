@@ -1013,7 +1013,7 @@ impl Prepared {
     }
 
     /// `line` (starting at `start`) cut to `width` with an ellipsis, as
-    /// `ellipsizeMode` says, standing for the rest of the text.
+    /// `textOverflow` says, standing for the rest of the text.
     fn truncate(&self, start: CFIndex, width: f64) -> Option<CFRetained<CTLine>> {
         let kind = match self.ellipsize {
             EllipsizeMode::Tail => CTLineTruncationType::End,
@@ -1189,7 +1189,7 @@ impl TextEngine for CoreTextEngine {
         if prepared.max_lines > 0 {
             lines.truncate(prepared.max_lines as usize);
         }
-        // Text left over (cut by `numberOfLines` or the box): ellipsize the
+        // Text left over (cut by `lineClamp` or the box): ellipsize the
         // last line.
         if let Some(last) = lines.last_mut() {
             // SAFETY: a valid line.

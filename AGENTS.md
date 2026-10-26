@@ -25,7 +25,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 
 ```
 crates/
-  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
+  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (CSS semantics, React Native's defaults for what nothing sets), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        CSS environment variables in padding and margin (`env(safe-area-inset-*)`, `env(keyboard-inset-height)`: `Core::sync_env`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
@@ -361,11 +361,19 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `active:`), no built-in strings (every label comes from the app); system UI keeps the platform's look (iOS / Android
   headers; `AlertDialog`, drawn in the platform's dialog style where the system has no dialog to show). React Native and
   UIKit are references for which capabilities exist, not APIs to be compatible with.
-- **CSS and Tailwind as in a browser.** CSS values (colors, lengths, gradients, filters, shadows, transforms,
-  alignment keywords, ...) and Tailwind utilities and variants mean exactly what they mean in a browser and in
-  Tailwind CSS (v4); Tailwind's generated CSS is the reference for each utility. What NSH cannot support is
-  unsupported (an unknown class, a rejected value with a warning), never given a different meaning: nothing
-  NSH-specific, so there are no traps (`docs/dev/styles.md`).
+- **Styles: native first, in the forms people write.** One set of properties written three ways (Rust `Styled`,
+  `style` keys, Tailwind classes) means the same in each; the names are CSS's. Each key takes the form most used and
+  easiest to write, CSS's by default: where common use and CSS differ, the common form wins (a `lineHeight` number is
+  points) and `docs/dev/styles.md` lists it. React Native is a reference for what is common, not an API to match: no
+  names or aliases for its sake. Tailwind (v4) utilities mean what Tailwind's generated CSS does. What NSH cannot
+  support is unsupported (an unknown class, a rejected value with a warning), never given another meaning. Past
+  that the design serves the native platforms and performance, not compatibility with the web: lengths are points,
+  unset properties take React Native's / Yoga's defaults, values that change take numbers and structured forms (JS
+  builds no strings), and what the platforms do that CSS cannot say is a registered extension key or class, named
+  apart from CSS's. Below TSX, values are typed: Rust's `Styled` and Tailwind classes lower to typed values (a core
+  type of their own where one is needed, as `LineHeight`), never to strings the core parses again; only a TSX
+  `style`'s values are parsed from strings. Frozen with the first recorded release as `docs/dev/styles.md` writes it ("Principles",
+  "Extensions").
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`

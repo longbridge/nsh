@@ -92,7 +92,7 @@ function App() {
                 accessibilityLabel="Find"
                 autoCapitalize="none"
                 autoCorrect={false}
-                {...field({ style: { height: size.controlSm, paddingVertical: 0 } })}
+                {...field({ style: { height: size.controlSm, paddingBlock: 0 } })}
               />
               <Text style={{ fontSize: 13, fontVariant: ["tabular-nums"], color: ui().text }}>
                 {query() ? (found().error ?? `${found().current == null ? "–" : found().current! + 1} of ${found().count}`) : "–"}

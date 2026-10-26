@@ -74,7 +74,7 @@ function App() {
                   {(a, i) => (
                     <>
                       {i() > 0 ? <View style={{ height: 1, marginLeft: 12, backgroundColor: ui().line }} /> : null}
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: size.row + 4, paddingHorizontal: 12 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: size.row + 4, paddingInline: 12 }}>
                         <Text style={{ flex: 1, fontSize: 13, color: ui().muted }}>{a().detail}</Text>
                         <Button onPress={() => show(a().options)} {...button()}>
                           <Text style={{ ...buttonText(), color: a().danger ? ui().down : ui().text }}>{a().label}</Text>

@@ -54,7 +54,7 @@ function Apogees() {
         }}
       />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ flex: 1, fontSize: 13, color: color.muted }} numberOfLines={1}>
+        <Text style={{ lineClamp: 1, flex: 1, fontSize: 13, color: color.muted }}>
           Hop {hop().id} · <Text style={{ fontFamily: mono, color: color.text }}>{Math.round(hop().apogee)} m</Text> · {hop().note}
         </Text>
         <If when={picked() !== null}>
@@ -169,7 +169,7 @@ export function HopLog(props: { onOpen?: () => void; rows?: number }) {
         <Each of={recent()} key={(h) => h.id}>
           {(hop, i) => (
             <Line first={i() === 0}>
-              <View style={{ flex: 1, gap: 2, paddingVertical: 8 }}>
+              <View style={{ flex: 1, gap: 2, paddingBlock: 8 }}>
                 <Text style={{ fontSize: 15, color: color.text }}>Hop {hop().id}</Text>
                 <Text style={{ fontSize: 13, color: color.muted }}>
                   {hop().note} · {ago(hop().at, now())}

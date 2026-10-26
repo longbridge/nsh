@@ -159,7 +159,11 @@ only hears about it afterwards. Only the innermost pressable view responds; insi
 | `onPressUp` | `.on_press_up(..)` | `() => void` | | The finger lifted or left. |
 | `delayLongPress` | `.long_press_delay(ms)` | `number` | `500` | Milliseconds before a press becomes a long press. |
 | `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| Partial<Edges>` | | Extends the touch area beyond the bounds, in points. |
-| `pointerEvents` | `.pointer_events(PointerEvents::BoxNone)` | `"auto" \| "none" \| "box-none" \| "box-only"` | `"auto"` | Which touches the view and its children receive: `"none"` neither, `"box-none"` only the children, `"box-only"` only the view itself. |
+
+The style key `pointerEvents` (`.pointer_events(PointerEvents::BoxNone)` in Rust, the classes `pointer-events-*`)
+decides which touches the view and the views in it receive: `"none"` neither (a view inside that sets `"auto"` takes
+them again), `"box-none"` only the views in it, `"box-only"` only the view itself
+([touch and gestures](../docs/touch-and-gestures.md#pointerevents)).
 
 The press feedback is the app's: `activeStyle` (or `active:` classes, `.active(..)` in Rust) applies while the view is
 pressed, natively, with no round trip to the app's code (below).
@@ -168,7 +172,8 @@ pressed, natively, with no round trip to the app's code (below).
 
 Styles that apply while the view is in a state, over its own styles, natively. Each is the object form of a Tailwind
 variant. Later states win (selected, checked and indeterminate, then hover, focus, active); `disabledStyle` wins over all, and the others do not
-apply while the view is disabled.
+apply while the view is disabled. Each takes the element's own style: a `TextStyle` on a `<Text>`, an `InputStyle` on
+an `<Input>`, an `ImageStyle` on an `<Image>`, a `ViewStyle` elsewhere.
 
 | Prop | Rust | Class variant | Applies |
 |---|---|---|---|
@@ -178,7 +183,7 @@ apply while the view is disabled.
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | While `disabled`. |
 | `checkedStyle` | `.checked(\|s\| ..)`, `.checked_style(style)` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`, `.indeterminate_style(style)` | `indeterminate:` | While `accessibilityState.checked` is `"mixed"` (a checkbox that is neither checked nor unchecked). |
-| | `.selected(\|s\| ..)` | `selected:` | While `accessibilityState.selected` is `true` (a selected `Button`, a tab). |
+| `selectedStyle` | `.selected(\|s\| ..)` | `selected:` | While `accessibilityState.selected` is `true` (a selected `Button`, a tab). |
 
 ```rust tabs
 view()
@@ -531,5 +536,5 @@ let input!: YNode;
 
 The main thread never waits for the app's code. When the system needs an answer on the spot (may this text change, may
 the back button pop, may this sheet close), NSH answers it natively from props set beforehand (`maxLength`,
-`popOnBack`, `closeOnSwipe`, `pointerEvents`, …), and the event reaches the app afterwards. This is why such behavior
+`popOnBack`, `closeOnSwipe`, …), and the event reaches the app afterwards. This is why such behavior
 is a prop, not a return value of a handler.

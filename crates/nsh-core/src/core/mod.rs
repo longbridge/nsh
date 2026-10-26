@@ -37,7 +37,7 @@ use crate::{
         ROOT_ID, ResizeMode, ScreenAnimation, ScreenProp, ScrollProp, Tag,
     },
     props::{AccessibilityProp, EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
-    style::{Color, EllipsizeMode, PaintStyle, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
+    style::{Color, PaintStyle, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
     tailwind::{ClassEnvironment, ClassList, ClassProps, Tailwind},
     text::{AttributedText, MeasureCache, ResolvedTextStyle, TextEngine, TextLayout},
 };
@@ -127,18 +127,10 @@ struct RootState {
 /// Paragraph settings of a text block (or input).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Paragraph {
-    /// `numberOfLines`; 0 means no limit.
-    lines: u32,
-    /// `ellipsizeMode`.
-    ellipsize: EllipsizeMode,
     /// `allowFontScaling`.
     allow_font_scaling: bool,
     /// `maxFontSizeMultiplier`; 0 means no limit.
     max_font_multiplier: f32,
-    /// `ellipsizeMode` was set (it then wins over classes).
-    ellipsize_set: bool,
-    /// `selectable` as set (it wins over `select-*` classes).
-    selectable: Option<bool>,
     /// `selectionColor` of selectable text.
     selection_color: Option<crate::Color>,
     /// `adjustsFontSizeToFit`.
@@ -150,12 +142,8 @@ struct Paragraph {
 impl Default for Paragraph {
     fn default() -> Self {
         Self {
-            lines: 0,
-            ellipsize: EllipsizeMode::Tail,
             allow_font_scaling: true,
             max_font_multiplier: 0.0,
-            ellipsize_set: false,
-            selectable: None,
             selection_color: None,
             fit: false,
             min_font_scale: 0.0,
@@ -400,7 +388,6 @@ struct InputState {
 #[derive(Debug, Default)]
 struct ImageState {
     source: Option<ImageSource>,
-    resize_mode: ResizeMode,
     options: crate::mount::ImageOptions,
 }
 
@@ -429,7 +416,7 @@ struct Node {
     /// `class` / `classList` as set.
     class_names: Option<Box<classes::ClassNames>>,
     /// Their parsed form.
-    classes: Option<Arc<ClassList>>,
+    classes: Option<std::rc::Rc<ClassList>>,
     /// Node props the classes set.
     class_props: Option<Box<ClassProps>>,
     /// Interaction states (`tailwind::state` bits).
@@ -472,6 +459,9 @@ struct Node {
     /// `position: sticky`: its insets, where it sticks in the viewport of
     /// the scroll view around it ([`Core::update_sticky_views`]).
     sticky: Option<Box<taffy::Rect<taffy::LengthPercentageAuto>>>,
+    /// `objectFit` (and the `object-*` classes): how its image or video
+    /// fits its box.
+    object_fit: Option<ResizeMode>,
     /// The inset padding and margin components set: added to the style's.
     insets: Option<Box<[EdgeInsets; 2]>>,
     /// Its padding's and margin's `env()` terms and the insets they came
@@ -667,6 +657,7 @@ impl Node {
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
             sticky: None,
+            object_fit: None,
             insets: None,
             env: None,
             events: EventMask::default(),
@@ -2143,10 +2134,13 @@ impl<M: TextEngine> Core<M> {
         let key = self.key(id)?;
         let node = &mut self.nodes[key as usize];
         node.inline_style = patch;
-        if node.classes.is_some() || node.spaced {
+        if node.classes.is_some() || node.spaced || node.inline_style.reads_current_color() {
             self.restyle(key);
             return Ok(());
         }
+        let mut props = node.class_props.as_deref().cloned().unwrap_or_default();
+        style.node_props(&mut props);
+        self.set_class_props(key, props);
         self.set_style(id, *style)
     }
 
@@ -2207,6 +2201,18 @@ impl<M: TextEngine> Core<M> {
             }
         }
         let node = &mut self.nodes[key as usize];
+        if node.object_fit != pending.object_fit {
+            node.object_fit = pending.object_fit;
+            if node.image.is_some() {
+                self.mark(key, dirty::IMAGE);
+            } else if let Some(control) = node.control.as_mut() {
+                // A video is contained by default.
+                let fit = pending.object_fit.unwrap_or(ResizeMode::Contain);
+                apply_native(control, NativeProp::VideoResizeMode(fit));
+                self.mark(key, dirty::NATIVE);
+            }
+        }
+        let node = &mut self.nodes[key as usize];
         if node.wants_fixed != pending.fixed_position {
             // Made an overlay, or a view again: at once while it is in no
             // parent (classes are set before the node is inserted), else as
@@ -2219,12 +2225,9 @@ impl<M: TextEngine> Core<M> {
                 self.fixed_changed.push((key, id));
             }
         }
-        // `env()`'s terms, on the edges their declarations went to.
-        let env = if rtl {
-            pending.env.swapped()
-        } else {
-            pending.env
-        };
+        // `env()`'s terms, on the edges their declarations name (left and
+        // right are physical, right to left too).
+        let env = pending.env;
         let env = (!env.is_empty()).then(|| (env, self.env_insets(key, &env)));
         let node = &mut self.nodes[key as usize];
         let id = node.id;
@@ -2473,8 +2476,9 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Lays `key` out in the other direction: its left and right properties
-    /// trade places (their start / end ones with them).
+    /// Lays `key` out in the other direction. Its left and right properties
+    /// keep their sides, as in CSS; its start / end ones move with the
+    /// direction, so it is styled again when it has some.
     fn flip_direction(&mut self, key: Key, rtl: bool) {
         let direction = if rtl {
             taffy::Direction::Rtl
@@ -2483,23 +2487,24 @@ impl<M: TextEngine> Core<M> {
         };
         let node = &mut self.nodes[key as usize];
         node.rtl = rtl;
-        let mut view = node.view_style.clone();
+        if let Some(list) = node.list.as_mut() {
+            let mirrored = rtl && list.horizontal;
+            list.set_mirrored(mirrored);
+        }
+        // A spaced child's margin is on its end side.
+        let logical = node.logical.is_some() || node.spaced;
         let kind = node.kind;
         if let Some(base) = node.base_layout.as_deref_mut() {
-            crate::style::swap_sides(base, &mut view);
             base.direction = direction;
-            node.view_style = view;
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
             let mut layout = self.layout.style(l).clone();
-            crate::style::swap_sides(&mut layout, &mut view);
             layout.direction = direction;
-            self.nodes[key as usize].view_style = view;
             self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         self.mark(key, dirty::VIEW);
-        if self.reads_direction(key) {
+        if logical || self.reads_direction(key) {
             self.restyle(key);
         }
         let node = &mut self.nodes[key as usize];
@@ -2708,22 +2713,15 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::IMAGE;
                 }
             }
-            Prop::ResizeMode(mode) => {
-                if let Some(image) = node.image.as_mut() {
-                    image.resize_mode = mode;
-                    flags |= dirty::IMAGE;
-                } else if let Some(control) = node.control.as_mut() {
-                    apply_native(control, NativeProp::VideoResizeMode(mode));
-                    flags |= dirty::NATIVE;
-                }
-            }
             Prop::Horizontal(horizontal) => {
                 if let Some(scroll) = node.scroll.as_mut()
                     && scroll.horizontal != horizontal
                 {
                     scroll.horizontal = horizontal;
                     flags |= dirty::SCROLL;
+                    let rtl = node.rtl;
                     if let Some(list) = node.list.as_mut() {
+                        list.set_mirrored(horizontal && rtl);
                         list.set_horizontal(horizontal);
                     }
                     let children = node.children.clone();
@@ -2947,29 +2945,10 @@ impl<M: TextEngine> Core<M> {
                 node.gestures.rotation = value;
                 flags |= dirty::PAN;
             }
-            Prop::NumberOfLines(lines) => {
-                if node.paragraph.lines != lines {
-                    node.paragraph.lines = lines;
-                    self.mark_text_block(key);
-                }
-            }
-            Prop::EllipsizeMode(mode) => {
-                node.paragraph.ellipsize_set = true;
-                if node.paragraph.ellipsize != mode {
-                    node.paragraph.ellipsize = mode;
-                    self.mark_text_block(key);
-                }
-            }
             Prop::AllowFontScaling(allow) => {
                 if node.paragraph.allow_font_scaling != allow {
                     node.paragraph.allow_font_scaling = allow;
                     self.font_settings_changed(key);
-                }
-            }
-            Prop::Selectable(on) => {
-                if node.paragraph.selectable != on {
-                    node.paragraph.selectable = on;
-                    self.mark_text_block(key);
                 }
             }
             Prop::SelectionColor(color) if node.input.is_none() => {
@@ -3520,6 +3499,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::SelectionColor(color) => {
                         c.selection_color = color;
+                        false
+                    }
+                    Prop::CaretColor(color) => {
+                        c.caret_color = color;
                         false
                     }
                     Prop::AutoFill(fill) => {
@@ -4211,11 +4194,9 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::IMAGE != 0
                 && let Some(image) = &node.image
             {
-                // An explicit `resizeMode` wins over `object-*` classes.
-                let resize_mode = match node.class_props.as_ref().and_then(|c| c.resize_mode) {
-                    Some(m) if image.resize_mode == ResizeMode::default() => m,
-                    _ => image.resize_mode,
-                };
+                // The style's `objectFit`; an image covers its box by
+                // default.
+                let resize_mode = node.object_fit.unwrap_or_default();
                 // Bundled assets with variants: the one for the screen.
                 let ratio = self.components.environment.pixel_ratio;
                 self.mount.push(MountItem::Image {
@@ -4420,9 +4401,11 @@ impl<M: TextEngine> Core<M> {
                     if let Some(c) = class {
                         config.placeholder_color = config.placeholder_color.or(c.placeholder_color);
                     }
-                    config.selection_color = config
-                        .selection_color
-                        .or(self.inherited_text_props(key).2)
+                    config.selection_color =
+                        config.selection_color.or(self.inherited_text_props(key).2);
+                    config.caret_color = config
+                        .caret_color
+                        .or(node.text_style.caret_color)
                         .or(class.and_then(|c| c.caret_color));
                     config.style = scaled(
                         self.inherited_text_style(key).inherit(&node.text_style),
@@ -4599,17 +4582,10 @@ impl<M: TextEngine> Core<M> {
     /// color change keeps both and just needs a new final layout.
     fn rebuild_text(&mut self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
+        // Its own style's and classes' (`lineClamp`, `textOverflow`).
         let class = node.class_props.as_deref();
-        // Explicit props win over classes (`numberOfLines` over
-        // `line-clamp-*`).
-        let max_lines = match (node.paragraph.lines, class.and_then(|c| c.number_of_lines)) {
-            (0, Some(n)) => n,
-            (n, _) => n,
-        };
-        let ellipsize = match class.and_then(|c| c.ellipsize) {
-            Some(m) if !node.paragraph.ellipsize_set => m,
-            _ => node.paragraph.ellipsize,
-        };
+        let max_lines = class.and_then(|c| c.number_of_lines).unwrap_or(0);
+        let ellipsize = class.and_then(|c| c.ellipsize).unwrap_or_default();
         let inherited = self.inherited_text_style(key);
         let (no_wrap, selectable, highlight) = self.inherited_text_props(key);
         let (align, physical) = node
@@ -4628,7 +4604,7 @@ impl<M: TextEngine> Core<M> {
             // must ellipsize at the box (`truncate`).
             no_wrap: max_lines == 0 && no_wrap.unwrap_or(false),
             shadow: node.text_style.shadow(),
-            selectable: node.paragraph.selectable.or(selectable),
+            selectable,
             selection_color: node
                 .paragraph
                 .selection_color

@@ -156,14 +156,14 @@ export function Card(props: {
       ]}
     >
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 11, paddingTop: 11, paddingBottom: 12 }}>
           <If when={props.icon}>
             <IconTile name={props.icon!} />
           </If>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text numberOfLines={2} style={{ fontSize: 13, color: colors.muted }}>
+              <Text style={{ lineClamp: 2, fontSize: 13, color: colors.muted }}>
                 {props.subtitle}
               </Text>
             </If>
@@ -231,7 +231,7 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   return (
     <View
       style={{
-        paddingHorizontal: 10,
+        paddingInline: 10,
         height: 26,
         borderRadius: 13,
         justifyContent: "center",
@@ -249,7 +249,7 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
 /** A label above a value, for grids of figures. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
   return (
-    <View style={{ width: props.width, gap: 3, paddingVertical: 4 }}>
+    <View style={{ width: props.width, gap: 3, paddingBlock: 4 }}>
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
       <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
         {props.value}
@@ -333,7 +333,7 @@ export function Button(props: {
       <View
         style={{
           height: small() ? 32 : 44,
-          paddingHorizontal: small() ? 12 : 18,
+          paddingInline: small() ? 12 : 18,
           borderRadius: small() ? 8 : radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
@@ -409,7 +409,7 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
         props.style ?? null,
       ]}
     >
-      <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", paddingInline: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
         <If when={props.note}>
           <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
@@ -523,7 +523,7 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
       popupStyle={{
         gap: 12,
         paddingTop: 8,
-        paddingHorizontal: 16,
+        paddingInline: 16,
         paddingBottom: safeArea().bottom + 16,
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,

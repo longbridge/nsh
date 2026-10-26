@@ -27,7 +27,7 @@ const row = (first: boolean) => ({
   flexDirection: "row" as const,
   alignItems: "center" as const,
   gap: size.gap,
-  paddingVertical: size.padding,
+  paddingBlock: size.padding,
   borderTopWidth: first ? 0 : 1,
   borderTopColor: colors.line,
 });
@@ -43,9 +43,9 @@ const BLEED = 8;
  */
 const hoverRow = (first: boolean, start = 0) => ({
   ...row(true),
-  marginHorizontal: -BLEED,
-  paddingStart: BLEED + start,
-  paddingEnd: BLEED,
+  marginInline: -BLEED,
+  paddingInlineStart: BLEED + start,
+  paddingInlineEnd: BLEED,
   paddingTop: size.padding + (first ? 0 : 1),
   borderRadius: BLEED,
 });
@@ -360,7 +360,7 @@ export function Controls() {
                 focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
-                <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
+                <Text style={{ lineClamp: 1, fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
                   {s().name}
                 </Text>
               </Tab>
@@ -370,7 +370,7 @@ export function Controls() {
         <View>
           <Each of={shown().rows}>
             {(r, i) => (
-              <View style={{ ...row(i() === 0), minHeight: size.line, paddingVertical: 0 }}>
+              <View style={{ ...row(i() === 0), minHeight: size.line, paddingBlock: 0 }}>
                 <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{r()[0]}</Text>
                 <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"] }}>{r()[1]}</Text>
               </View>
@@ -407,7 +407,7 @@ export function Controls() {
           {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
           <View
             class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
+            style={{ width: size.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
           >
             <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>
@@ -420,7 +420,7 @@ export function Controls() {
           <Collapsible
             open={storage()}
             content={
-              <View style={{ paddingStart: size.gap, paddingBottom: size.padding }}>
+              <View style={{ paddingInlineStart: size.gap, paddingBottom: size.padding }}>
                 <Each of={USAGE}>
                   {(u) => (
                     <View style={{ flexDirection: "row", alignItems: "center", minHeight: size.line }}>

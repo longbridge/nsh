@@ -25,7 +25,7 @@ function SectorBar(props: { label: string; change: () => number; scale: () => nu
   const share = () => Math.min(1, Math.abs(props.change()) / props.scale());
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 10, height: 22 }}>
-      <Text numberOfLines={1} style={{ width: 84, fontSize: 13, color: colors.muted }}>
+      <Text style={{ lineClamp: 1, width: 84, fontSize: 13, color: colors.muted }}>
         {props.label}
       </Text>
       <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
@@ -57,7 +57,7 @@ function Breadth(props: { market: Market }) {
   });
   const scale = () => Math.max(0.5, ...means().map(Math.abs)) * 1.1;
   return (
-    <View style={{ paddingHorizontal: 16, paddingBottom: 14, gap: 10 }}>
+    <View style={{ paddingInline: 16, paddingBottom: 14, gap: 10 }}>
       <View style={{ gap: 6 }}>
         <View style={{ flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", gap: 2 }}>
           <View style={{ flex: b().up, backgroundColor: colors.up }} />
@@ -97,21 +97,21 @@ function MarketStrip(props: { market: Market }) {
   };
   return (
     <View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 56 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, height: 56 }}>
         <View
           onPress={toggle}
           role="button"
           accessibilityLabel={opened() ? "Hide breadth" : "Show breadth"}
           style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, height: 56 }}
         >
-          <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+          <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
             Composite
           </Text>
-          <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
+          <Text style={{ lineClamp: 1, fontSize: 15, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
             {grouped(level())}
           </Text>
           <Text style={{ fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>{signed(change())}%</Text>
-          <View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["90deg", "-90deg"] }) }] }}>
+          <View style={{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["90deg", "-90deg"] }) }}>
             <Icon name="chevron" size={12} tint={colors.faint} />
           </View>
         </View>
@@ -171,8 +171,7 @@ function Sparkline(props: { stock: Stock }) {
   const ys: number[] = [];
   return (
     <Canvas
-      pointerEvents="none"
-      style={{ width: SPARK_W + RING * 2, height: SPARK_H + RING * 2, margin: -RING }}
+      style={{ pointerEvents: "none", width: SPARK_W + RING * 2, height: SPARK_H + RING * 2, margin: -RING }}
       draw={(cx, { width, height }) => {
         const minutes = props.stock.minutes();
         const q = props.stock.quote();
@@ -285,7 +284,7 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
       accessibilityLabel={props.stock.name}
       accessibilityState={props.wide ? { selected: !!props.active } : undefined}
       class={props.wide ? (props.active ? "bg-accent" : "hover:bg-card") : undefined}
-      style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, cursor: props.wide ? "pointer" : undefined }}
+      style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, cursor: props.wide ? "pointer" : undefined }}
     >
       <If when={props.active}>
         <View style={{ position: "absolute", top: 14, bottom: 14, left: 0, width: 3, borderRadius: 1.5, backgroundColor: colors.accent }} />
@@ -294,19 +293,19 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
         <View style={{ position: "absolute", top: 0, left: 16, right: 0, height: 1, backgroundColor: colors.line }} />
       </If>
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>
+        <Text style={{ lineClamp: 1, fontSize: 16, fontWeight: "600", color: colors.text }}>
           {props.stock.code}
         </Text>
-        <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+        <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
           {props.stock.name}
         </Text>
       </View>
       <Sparkline stock={props.stock} />
       <View style={{ width: 84, alignItems: "flex-end", gap: 3 }}>
-        <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ lineClamp: 1, fontSize: 16, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
           {price(q().last, props.stock)}
         </Text>
-        <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>
+        <Text style={{ lineClamp: 1, fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>
           {signed(change())}%
         </Text>
       </View>
@@ -382,7 +381,7 @@ export function Stocks() {
   const watchlist = (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <MarketStrip market={market} />
-      <View style={{ paddingHorizontal: 16, paddingBottom: 6 }}>
+      <View style={{ paddingInline: 16, paddingBottom: 6 }}>
         <Segmented options={options} value={filter()} onChange={(f) => filter.set(f)} size="small" />
       </View>
       <Scroll style={{ flex: 1 }}>
@@ -400,10 +399,10 @@ export function Stocks() {
             )}
           </Each>
           <If when={!rows().length}>
-            <Text style={{ paddingVertical: 32, textAlign: "center", fontSize: 14, color: colors.muted }}>Nothing here right now</Text>
+            <Text style={{ paddingBlock: 32, textAlign: "center", fontSize: 14, color: colors.muted }}>Nothing here right now</Text>
           </If>
         </View>
-        <Text style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ paddingInline: 16, paddingTop: 16, paddingBottom: 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
           Simulated, fictional companies · tick 50 ms · {stats().ms.toFixed(2)} ms JS/tick · {stats().updates} quotes/s
         </Text>
       </Scroll>

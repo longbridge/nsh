@@ -467,7 +467,7 @@ fn EasingRace() -> impl IntoElement {
                 .gap(px(10.0))
                 .child(
                     text(*name)
-                        .number_of_lines(1)
+                        .line_clamp(1)
                         .w(px(84.0))
                         .text_size(px(13.0))
                         .text_color(colors::MUTED),

@@ -38,7 +38,7 @@ export function Rows(props: { Button: Component<BenchButtonProps> }) {
   return (
     <List each={items} estimatedItemSize={64} style={{ flex: 1 }}>
       {(i) => (
-        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8, gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", paddingInline: 16, paddingBlock: 8, gap: 12 }}>
           <Text style={{ flex: 1 }}>{`Item ${i()}`}</Text>
           <Button title={`Open ${i()}`} variant={i() % 2 === 0 ? "primary" : "secondary"} />
         </View>

@@ -21,7 +21,7 @@ function App() {
         onPress={call}
         accessibilityLabel="call"
         role="button"
-        style={{ backgroundColor: "#1f883d", borderRadius: 12, paddingVertical: 12, alignItems: "center" }}
+        style={{ backgroundColor: "#1f883d", borderRadius: 12, paddingBlock: 12, alignItems: "center" }}
       >
         <Text style={{ color: "#ffffff", fontSize: 18, fontWeight: "bold" }}>call</Text>
       </View>

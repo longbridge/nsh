@@ -32,7 +32,7 @@ function Trigger(props: { label: string }) {
   return (
     <View
       activeStyle={{ backgroundColor: colors.border }}
-      style={{ alignSelf: "flex-start", paddingHorizontal: 14, height: 36, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.raised, ...finish.raised }}
+      style={{ alignSelf: "flex-start", paddingInline: 14, height: 36, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.raised, ...finish.raised }}
     >
       <Text style={{ fontSize: 14, fontWeight: "500", color: colors.text }}>{props.label}</Text>
     </View>
@@ -53,7 +53,7 @@ export function Overlays() {
     let anchor: YNode | undefined;
     return (
       <Card icon="components" title="Overlay" subtitle="A box that clips its content, with an overlay anchored inside it" right={<Badge label="nsh" />}>
-        <View style={{ height: 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingHorizontal: 12 }}>
+        <View style={{ height: 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingInline: 12 }}>
           <View ref={anchor} onPress={() => open.set(!open())} style={{ alignSelf: "flex-start" }}>
             <Trigger label={open() ? "Close" : "Open the overlay"} />
           </View>
@@ -118,7 +118,7 @@ export function Overlays() {
                 }}
                 placement="bottom"
                 delay={300}
-                style={{ backgroundColor: colors.text, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
+                style={{ backgroundColor: colors.text, borderRadius: 6, paddingInline: 8, paddingBlock: 4 }}
               >
                 <Text style={{ fontSize: 12, color: colors.background }}>Shown while pinned or hovered</Text>
               </Tooltip>

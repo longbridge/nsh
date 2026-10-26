@@ -125,7 +125,7 @@ pub fn browser() -> impl IntoElement {
                     None => String::new(),
                 })
             })
-            .number_of_lines(1)
+            .line_clamp(1)
             .px(px(12.0))
             .text_color(rgb(0x57606a)),
         )
@@ -160,7 +160,7 @@ function Browser() {
   );
   return (
     <View style={{ flex: 1, paddingTop: 50 }}>
-      <Text numberOfLines={1} style={{ paddingHorizontal: 12, color: "#57606a" }}>
+      <Text style={{ lineClamp: 1, paddingInline: 12, color: "#57606a" }}>
         {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
       </Text>
       <WebView
@@ -261,7 +261,7 @@ function App() {
       <Text onPress={() => web.postMessage("hi from nsh")} style={{ padding: 16, color: "#0969da" }}>
         Post to the page
       </Text>
-      <Text style={{ paddingHorizontal: 16 }}>Last message: {last()}</Text>
+      <Text style={{ paddingInline: 16 }}>Last message: {last()}</Text>
     </View>
   );
 }
@@ -321,7 +321,7 @@ pub fn player() -> impl IntoElement {
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
-                .resize_mode(ResizeMode::Contain)
+                .object_fit(ResizeMode::Contain)
                 .h(px(220.0))
                 .rounded(px(12.0))
                 .overflow_hidden()
@@ -362,7 +362,6 @@ function Player() {
         src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
         paused={paused()}
         repeat
-        resizeMode="contain"
         style={{ height: 220, borderRadius: 12, overflow: "hidden", backgroundColor: "#000000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
         onEnd={() => paused.set(true)}
@@ -385,7 +384,7 @@ mount(Player);
 
 Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
 
-In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `resize_mode(ResizeMode::Contain)`, `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
+In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -395,7 +394,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 | `volume` | `number` | `1` | 0..1. |
 | `rate` | `number` | `1` | The playback speed. |
 | `repeat` | `boolean` | `false` | Plays again from the start at the end. |
-| `resizeMode` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the picture fits the view. |
+| `objectFit` (style), `object-*` classes | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | How the picture fits the view, as CSS's `object-fit` (`class="object-cover"`). |
 | `controls` | `boolean` | `false` | The platform's playback controls. |
 | `progressUpdateInterval` | `number` | `250` | Milliseconds between `onProgress` events. |
 

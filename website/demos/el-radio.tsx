@@ -34,7 +34,7 @@ function App() {
                 }}
                 style={
                   desktop
-                    ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                    ? { height: 26, paddingInline: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                     : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                 }
                 class="active:opacity-70"

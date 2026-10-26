@@ -121,7 +121,7 @@ function App() {
                   opened.set(label);
                   Menu.popup(menu().submenu, { x: buttons[label]?.x ?? 0, y: barHeight() }).then(() => opened.set(null));
                 }}
-                style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}
+                style={{ paddingInline: 10, paddingBlock: 4, borderRadius: 6 }}
                 class="hover:bg-black/10 active:bg-black/15 dark:hover:bg-white/10 dark:active:bg-white/15"
                 classList={{ "bg-black/15 dark:bg-white/15": opened() === menu().label }}
               >
@@ -136,7 +136,7 @@ function App() {
           style={{
             width: 180,
             height: 26,
-            paddingHorizontal: 8,
+            paddingInline: 8,
             borderRadius: 6,
             fontSize: 13,
             backgroundColor: dark() ? "#111318" : "#ffffff",
@@ -164,13 +164,13 @@ function App() {
                 { label: "Word Wrap", checked: wrap(), onSelect: () => wrap.update((w) => !w) },
               ])
             }
-            style={{ backgroundColor: "#4f46e5", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}
+            style={{ backgroundColor: "#4f46e5", paddingInline: 14, paddingBlock: 8, borderRadius: 8 }}
           >
             <Text style={{ color: "#ffffff", fontSize: 14 }}>Context menu</Text>
           </View>
           <View
             onPress={() => hidden.update((h) => !h)}
-            style={{ backgroundColor: "#0f766e", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}
+            style={{ backgroundColor: "#0f766e", paddingInline: 14, paddingBlock: 8, borderRadius: 8 }}
           >
             <Text style={{ color: "#ffffff", fontSize: 14 }}>Toggle title bar</Text>
           </View>

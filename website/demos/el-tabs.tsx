@@ -64,7 +64,7 @@ function App() {
                 }}
                 style={
                   desktop
-                    ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                    ? { height: 26, paddingInline: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                     : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
                 }
                 class="active:opacity-70"
@@ -89,8 +89,8 @@ function App() {
                 <View
                   style={
                     desktop
-                      ? { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, height: size.row }
-                      : { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 }
+                      ? { flexDirection: "row", alignItems: "center", paddingInline: 12, height: size.row }
+                      : { flexDirection: "row", alignItems: "center", paddingInline: 16, paddingBlock: 12 }
                   }
                 >
                   <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>{row()[0]}</Text>
@@ -115,7 +115,7 @@ function App() {
                 class="active:opacity-70 disabled:opacity-40"
                 hoverStyle={f().locked || folder() === f().id ? undefined : hoverFill()}
                 focusStyle={focusRing()}
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, height: desktop ? size.controlSm : 30, paddingHorizontal: desktop ? 10 : 12, borderRadius: 8 }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6, height: desktop ? size.controlSm : 30, paddingInline: desktop ? 10 : 12, borderRadius: 8 }}
                 selectedStyle={{ backgroundColor: tint(ui().accent, 0.16) }}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: folder() === f().id ? ui().accent : ui().muted }}>

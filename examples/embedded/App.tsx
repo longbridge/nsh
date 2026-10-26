@@ -65,7 +65,7 @@ function App() {
       <View
         onPress={ask}
         role="button"
-        style={{ alignSelf: "flex-start", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: "#0969da" }}
+        style={{ alignSelf: "flex-start", paddingInline: 14, paddingBlock: 8, borderRadius: 8, backgroundColor: "#0969da" }}
         activeStyle={{ opacity: 0.7 }}
       >
         <Text style={{ color: "#ffffff", fontWeight: "600" }}>Ask the host for the time</Text>

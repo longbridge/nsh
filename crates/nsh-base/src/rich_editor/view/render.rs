@@ -13,7 +13,7 @@
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
 use nsh_core::{
-    PatchValue, StyleDecl, StyleKey,
+    PropertyValue, StyleDecl, StyleKey,
     element::{EventKind, EventPayload, Style},
     prelude::*,
 };
@@ -143,7 +143,10 @@ fn bubble_menu(rv: Rv) -> [AnyElement; 2] {
         rv.layout_rev.get();
         rv.doc_rev.get();
         let b = rv.selection_box().unwrap_or_default();
-        let at = |key, value: Points| (key, PatchValue::Number(value.0));
+        let at = |key: StyleKey, value: Points| {
+            let value = key.number_value(value.0);
+            (key, value.unwrap_or(PropertyValue::Default))
+        };
         Style::from_decls(
             [
                 at(StyleKey::Left, b.origin.x),

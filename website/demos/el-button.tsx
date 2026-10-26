@@ -47,7 +47,7 @@ function App() {
       selected={on()}
       onPress={flip}
       accessibilityLabel={name}
-      {...button("secondary", { align: "flex-start", style: { width: size.control, paddingHorizontal: 0 } })}
+      {...button("secondary", { align: "flex-start", style: { width: size.control, paddingInline: 0 } })}
       selectedStyle={{ backgroundColor: tint(ui().accent, 0.25), backgroundImage: "none", borderColor: ui().accent }}
     >
       <Text style={text()}>{glyph}</Text>

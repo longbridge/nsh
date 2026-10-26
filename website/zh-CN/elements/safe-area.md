@@ -56,7 +56,7 @@ mount(App);
 | `calc(env(name) + <length>)` | `calc(env(safe-area-inset-bottom) + 16px)` | 边距加上一个长度，用于保留自身间距的内容。 |
 | `calc(<length> + env(name))` | `calc(16px + env(safe-area-inset-left))` | 同上。 |
 
-它们适用于 `padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft` 以及对应的 `margin` 键。在 Tailwind 中，它们是 `p`、`px`、`py`、`pt`、`pr`、`pb`、`pl` 和 `m` 系列工具类的任意值（可以省略空格）：`pt-[env(safe-area-inset-top)]`、`pb-[calc(env(safe-area-inset-bottom)+16px)]`。这些值的 TypeScript 类型是 `EnvValue`。参见[样式参考](../modules/style-reference.md)。
+它们适用于 `padding`、`paddingInline`、`paddingBlock`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft` 以及对应的 `margin` 键。在 Tailwind 中，它们是 `p`、`px`、`py`、`pt`、`pr`、`pb`、`pl` 和 `m` 系列工具类的任意值（可以省略空格）：`pt-[env(safe-area-inset-top)]`、`pb-[calc(env(safe-area-inset-bottom)+16px)]`。这些值的 TypeScript 类型是 `EnvValue`。参见[样式参考](../modules/style-reference.md)。
 
 在 Rust 中由 `Styled` 方法设置：`.p_safe_area()`、`.px_safe_area()`、`.py_safe_area()`、`.pt_safe_area()`、`.pr_safe_area()`、`.pb_safe_area()`、`.pl_safe_area()`、对应的 `m` 方法，以及表示边距加长度的 `.pt_safe_area_plus(px(16.0))`（还有 `pr`、`pb`、`pl`、`mt`、`mr`、`mb`、`ml`）。
 

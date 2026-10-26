@@ -50,7 +50,7 @@ export function Tape(props: { market: Market; stock: Stock }) {
         <Legend color={colors.down} label="At bid" value={compact(stats().sells)} />
         <Legend color={colors.accent} label="Blocks" value={`${stats().blocks}`} />
       </View>
-      <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 8 }}>
+      <View style={{ flexDirection: "row", gap: 10, paddingInline: 8 }}>
         <Head label="TIME" width={80} />
         <Head label="PRICE" flex={1} />
         <Head label="SIZE" align="right" />
@@ -126,7 +126,7 @@ function FlowRow(props: { label: string; note: string; buy: () => number; sell: 
         <View style={{ flex: 1 }}>
           <SpringBar share={() => props.sell() / props.max()} color={colors.down} from="right" height={10} radius={3} />
         </View>
-        <View style={{ width: 2, height: 18, marginHorizontal: 2, borderRadius: 1, backgroundColor: colors.border }} />
+        <View style={{ width: 2, height: 18, marginInline: 2, borderRadius: 1, backgroundColor: colors.border }} />
         <View style={{ flex: 1 }}>
           <SpringBar share={() => props.buy() / props.max()} color={colors.up} height={10} radius={3} />
         </View>

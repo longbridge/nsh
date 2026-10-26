@@ -306,7 +306,7 @@ export function Chat(props: { autoplay?: string } = {}) {
   const canSend = () => !!draft().trim() || !!attachment();
 
   const userRow = (m: () => User) => (
-    <View style={{ alignItems: "flex-end", paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}>
+    <View style={{ alignItems: "flex-end", paddingInline: 16, paddingBlock: 8, gap: 8 }}>
       <If when={m().image}>
         <Photo src={m().image!} width={220} height={165} />
       </If>
@@ -317,8 +317,8 @@ export function Chat(props: { autoplay?: string } = {}) {
         <View
           style={{
             maxWidth: "82%",
-            paddingHorizontal: 14,
-            paddingVertical: 10,
+            paddingInline: 14,
+            paddingBlock: 10,
             borderRadius: 20,
             borderBottomRightRadius: 6,
             borderCurve: "continuous",
@@ -328,7 +328,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             borderColor: colors.border,
           }}
         >
-          <Text selectable style={{ fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
+          <Text style={{ userSelect: "text", fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
         </View>
       </If>
       <If when={m().waiting}>
@@ -355,7 +355,7 @@ export function Chat(props: { autoplay?: string } = {}) {
     const md = () => (live() ? liveMd() : m().md);
     const waitingForWords = () => live() && !liveMd() && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
     return (
-      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
+      <View style={{ paddingInline: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 26 }}>
           <Avatar />
           <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().model}</Text>
@@ -370,7 +370,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             content={
               <View style={{ flexDirection: "row", gap: 12, paddingLeft: 7 }}>
                 <View style={{ width: 2, borderRadius: 1, backgroundColor: colors.border }} />
-                <Text selectable style={{ flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
+                <Text style={{ userSelect: "text", flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
               </View>
             }
           >
@@ -391,7 +391,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                 <Text style={{ fontSize: 14, color: colors.muted, fontVariant: ["tabular-nums"] }}>{thinkingLabel()}</Text>
                 <View
                   style={{
-                    transform: [{ rotate: reasoning()?.open ? "0deg" : "-90deg" }],
+                    transform: reasoning()?.open ? "rotate(0deg)" : "rotate(-90deg)",
                     transitionProperty: "transform",
                     transitionDuration: 220,
                     transitionTimingFunction: "ease-out",
@@ -445,7 +445,7 @@ export function Chat(props: { autoplay?: string } = {}) {
   };
 
   const empty = (
-    <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
+    <View style={{ flex: 1, justifyContent: "center", paddingInline: 16, paddingBlock: 24, gap: 24 }}>
         <Appear>
           <View style={{ alignItems: "center", gap: 12 }}>
             <IconTile name="spark" tint={colors.accent} size={56} />
@@ -551,13 +551,13 @@ export function Chat(props: { autoplay?: string } = {}) {
 
           {/* Jump to the latest message: shown while scrolled up. */}
           <View
-            pointerEvents={following() ? "none" : "auto"}
             style={{
+              pointerEvents: following() ? "none" : "auto",
               position: "absolute",
               right: 16,
               bottom: 12,
               opacity: jump,
-              transform: [{ scale: jump.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+              scale: jump.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }),
             }}
           >
             <RoundButton icon="arrow-down" label="Jump to the latest message" variant="secondary" onPress={jumpToLatest} />
@@ -568,14 +568,14 @@ export function Chat(props: { autoplay?: string } = {}) {
 
           {/* Connection banner. */}
           <View
-            pointerEvents="none"
             style={{
+              pointerEvents: "none",
               position: "absolute",
               top: 8,
               left: 16,
               right: 16,
               opacity: bannerValue,
-              transform: [{ translateY: bannerValue.interpolate({ inputRange: [0, 1], outputRange: [-64, 0] }) }],
+              translate: [0, bannerValue.interpolate({ inputRange: [0, 1], outputRange: [-64, 0] })],
             }}
           >
             <View
@@ -584,7 +584,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                 alignItems: "center",
                 gap: 12,
                 minHeight: 48,
-                paddingHorizontal: 14,
+                paddingInline: 14,
                 borderRadius: radius.inset,
                 borderCurve: "continuous",
                 ...finish.menu,
@@ -615,22 +615,19 @@ export function Chat(props: { autoplay?: string } = {}) {
 
           {/* The "+" menu: attachments and the scenarios, to replay them. */}
           <View
-            pointerEvents={menu() ? "auto" : "none"}
             onPress={() => menu.set(false)}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", opacity: menuValue }}
+            style={{ pointerEvents: menu() ? "auto" : "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", opacity: menuValue }}
           />
           <View
-            pointerEvents={menu() ? "auto" : "none"}
             style={{
+              pointerEvents: menu() ? "auto" : "none",
               position: "absolute",
               left: 16,
               right: 16,
               bottom: 8,
               opacity: menuValue,
-              transform: [
-                { translateY: menuValue.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
-                { scale: menuValue.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
-              ],
+              translate: [0, menuValue.interpolate({ inputRange: [0, 1], outputRange: [24, 0] })],
+              scale: menuValue.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }),
             }}
           >
             <View
@@ -639,12 +636,12 @@ export function Chat(props: { autoplay?: string } = {}) {
                 borderCurve: "continuous",
                 ...finish.menu,
                 borderWidth: 1,
-                paddingVertical: 6,
+                paddingBlock: 6,
                 maxHeight: 460,
                 overflow: "hidden",
               }}
             >
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.faint, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>ADD AND REPLAY</Text>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.faint, paddingInline: 16, paddingTop: 8, paddingBottom: 4 }}>ADD AND REPLAY</Text>
               <Scroll style={{ flexGrow: 0 }}>
                 <Each of={menuRows}>
                   {(row, i) => (
@@ -657,7 +654,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                       activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
                       role="button"
                       accessibilityLabel={row().label}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingInline: 16 }}
                     >
                       <Glyph name={row().glyph} size={16} tint={i() === 0 ? colors.accent : colors.muted} />
                       <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{row().label}</Text>
@@ -672,14 +669,14 @@ export function Chat(props: { autoplay?: string } = {}) {
         {/* Suggestions while the conversation is empty. */}
         <If when={!messages().length}>
           <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
-            <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
+            <View style={{ flexDirection: "row", gap: 8, paddingInline: 16, paddingBlock: 8 }}>
               <Each of={chips}>
                 {(chip) => (
                   <Press onPress={() => play(chip().id)} hitSlop={4} accessibilityLabel={chip().label}>
                     <View
                       style={{
                         height: 36,
-                        paddingHorizontal: 14,
+                        paddingInline: 14,
                         borderRadius: 18,
                         justifyContent: "center",
                         ...finish.pill,
@@ -696,7 +693,7 @@ export function Chat(props: { autoplay?: string } = {}) {
         </If>
 
         {/* The composer. */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
+        <View style={{ paddingInline: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
           <If when={attachment()}>
             <Appear>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -726,12 +723,12 @@ export function Chat(props: { autoplay?: string } = {}) {
               placeholder={`Message ${model()}`}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, paddingHorizontal: 10, paddingVertical: 10 }}
+              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, paddingInline: 10, paddingBlock: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View
                 style={{
-                  transform: [{ rotate: menu() ? "45deg" : "0deg" }],
+                  transform: menu() ? "rotate(45deg)" : "rotate(0deg)",
                   transitionProperty: "transform",
                   transitionDuration: 200,
                   transitionTimingFunction: "ease-out",
@@ -745,7 +742,7 @@ export function Chat(props: { autoplay?: string } = {}) {
               <If
                 when={streaming()}
                 else={
-                  <View style={{ opacity: canSend() ? 1 : 0.35 }} pointerEvents={canSend() ? "auto" : "none"}>
+                  <View style={{ pointerEvents: canSend() ? "auto" : "none", opacity: canSend() ? 1 : 0.35 }}>
                     <RoundButton icon="arrow-up" label="Send" onPress={send} />
                   </View>
                 }

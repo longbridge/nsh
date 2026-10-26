@@ -88,7 +88,7 @@ export function Physics() {
           <IconTile name="physics" tint={colors.accent} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>Drag and release</Text>
-            <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+            <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
               {hint("Tap to pulse, long press to reset", "Click to pulse, press and hold to reset")}
             </Text>
           </View>
@@ -112,8 +112,7 @@ export function Physics() {
         }}
       >
         <Canvas
-          pointerEvents="none"
-          style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
+          style={{ pointerEvents: "none", position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
           draw={(cx, { width, height }) => {
             const centerX = width / 2;
             const cy = height / 2;
@@ -155,15 +154,16 @@ export function Physics() {
           }}
         />
         <View
-          pointerEvents="none"
           style={{
+            pointerEvents: "none",
             position: "absolute",
             width: CARD,
             height: CARD,
             borderRadius: 30,
             backgroundColor: tints.accent,
             opacity: lift,
-            transform: [...follow, { scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.32] }) }],
+            translate: [x, y],
+            scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.32] }),
           }}
         />
         <View
@@ -228,12 +228,12 @@ export function Physics() {
           value={feel()}
           onChange={(f) => feel.set(f)}
         />
-        <View style={{ flexDirection: "row", paddingHorizontal: 4 }}>
+        <View style={{ flexDirection: "row", paddingInline: 4 }}>
           <Stat width="30%" label="Releases" value={String(releases())} />
           <Stat width="34%" label="Speed" value={`${speed()} pt/s`} tone={speed() > 1500 ? "warn" : undefined} />
           <Stat width="36%" label={mode() === "snap" ? "Corner" : "Spring"} value={mode() === "snap" ? corner() : `${feels[feel()].stiffness} / ${feels[feel()].damping}`} />
         </View>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingInline: 4 }}>
           <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>
             {mode() === "spring" ? "Springs home with the release velocity" : mode() === "coast" ? "Coasts to a stop, then springs home" : "Springs to the corner the fling points at"}
           </Text>

@@ -20,7 +20,7 @@ function App() {
         testID="list"
         each={items()}
         style={{ height: 300 }}
-        contentStyle={{ paddingHorizontal: 10 }}
+        contentStyle={{ paddingInline: 10 }}
         header={<Text>Fruits</Text>}
         footer={() => <Text>End of fruits</Text>}
         separator={() => <View testID="sep" style={{ height: 2 }} />}

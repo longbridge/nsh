@@ -283,7 +283,8 @@ and `Input`'s React Native names follow the rules as well.
 | **Input** | | | |
 | `blurOnSubmit` | (dropped) | | `submitBehavior` covers it |
 | `placeholderTextColor` | style key `placeholderColor`, class `placeholder:text-*` | *guides* `value` vs `presentation`; CSS `::placeholder` | |
-| `selectionColor` (Input, Text) | style key `selectionColor`, class `selection:text-*` | CSS `::selection` | |
+| `selectionColor` (Input, Text) | style key `selectionColor` (the highlight), class `selection:text-*` | CSS `::selection` | |
+| `cursorColor` (Input) | style key `caretColor`, class `caret-*` | CSS `caret-color` | |
 | `editable` | `readonly` (`editable={false}` = `readonly`) | *guides* "readonly"; `gpui-component` `Input::readonly` | `disabled` (no focus, `disabled:` classes) stays separate |
 | `onChangeText(text)` | `onChange(text)` | `InputEvent::Change`; `on_change` observes (*guides*) | |
 | `onSubmitEditing` | `onSubmit` | `InputEvent::PressEnter` (not followed) | The return key, whatever `returnKeyType` shows: on a phone it says Done / Search / Go, not Enter; HTML's `submit` |
