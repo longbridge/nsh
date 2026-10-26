@@ -3,6 +3,7 @@ import { Text as __Text, View as __View } from "nsh";
 import { platform as __platform, windowSize as __windowSize } from "nsh/device";
 import { Segmented as GallerySegmented } from "./segmented";
 import { ui, tint } from "./palette";
+import { focusRing } from "./theme";
 export { ui, tint } from "./palette";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
