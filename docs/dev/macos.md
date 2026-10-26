@@ -310,34 +310,41 @@ state and transfers, repeated reopen without duplicate windows, Quit while
 hidden, a test's quit, and cleanup after run_app returns. Source implementation
 and CI compilation alone do not prove those runtime behaviors.
 
-## Keyboard focus for pressable views
+## Keyboard focus for views
 
-A mounted non-input view listening to `onPress` participates in AppKit's key
-view loop alongside native text inputs. Disabled accessibility state, removed
-press listeners, `focusable={false}` (a backdrop that closes an overlay),
-hidden views and views leaving the tree exclude a control (a focused one gives
+A mounted non-input view that is a focus stop participates in AppKit's key
+view loop alongside native text inputs (`input::is_key_stop`, from
+`ViewProps::focus_stop`): one listening to `onPress`, or any
+`focusable={true}` one, which needs no press listener (a chart in a pressable
+card). Disabled accessibility state, removed press listeners (of a view not
+`focusable={true}`), `focusable={false}` (a backdrop that closes an overlay),
+hidden views and views leaving the tree exclude a stop (a focused one gives
 the focus to the root).
 Tab/Shift+Tab stay within the newest modal and advance from the currently
-focused control. The root and passive layout views stay outside that loop. A
-modal remembers the input or pressable view that had the focus when it was
+focused stop. The root and passive layout views stay outside that loop. A
+modal remembers the input or Tab stop that had the focus when it was
 presented (`ModalNav::focus_before`, held weakly) and gives it back when it
 closes, if the focus fell to the root or the window meanwhile: Escape on a
 popover returns to its trigger. A field edits in the window's shared field
 editor, which leaves the tree when editing ends, so the input that owns the
 editor is what is remembered; it comes back through `focus()`, with the caret
 at the end and its text not selected. A view that can no longer take the focus
-(disabled, without press listeners, `pointerEvents` none, hidden, detached)
+(disabled, no longer a stop, `pointerEvents` none, hidden, detached)
 is skipped, and so is one a newer modal still covers: nothing under the
 newest modal is focused. When a lower modal closes under a newer one, the
 newer one that remembered a view of it remembers the lower one's instead, so
 closing it later returns to the view that opened the stack.
 
-Focused controls update the existing `focus:` interaction state. Unmodified
-Return, keypad Enter and Space emit PressIn/PressOut/Press once on key-down;
-auto-repeat and key-up are consumed without another activation. App keymap
-monitors let those activation keys reach the control instead of triggering a
-global Enter/Space binding. Modifier shortcuts keep their existing priority.
-Accessibility focus also moves keyboard focus for pressable views.
+Focused stops update the existing `focus:` interaction state and report
+`onFocus` / `onBlur`. On a stop that takes presses (`input::is_key_control`),
+unmodified Return, keypad Enter and Space emit PressIn/PressOut/Press once on
+key-down; auto-repeat and key-up are consumed without another activation. App
+keymap monitors let those activation keys reach the control instead of
+triggering a global Enter/Space binding. A stop that takes no presses is not
+activated: its keys, Return and Space too, go to the app's keymap (the
+component binds them while focused), then to keyboard scrolling. Modifier
+shortcuts keep their existing priority. Accessibility focus also moves
+keyboard focus to Tab stops.
 
 Only root views retain a surface reference. A focused child's keyboard callbacks
 resolve its surface through ancestors; pointer and drawing callbacks keep their

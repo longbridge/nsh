@@ -9820,6 +9820,114 @@ fn focusable_is_a_view_prop() {
     );
 }
 
+/// The keyboard focus's stops, decided from what is mounted: views that
+/// take presses, unless `focusable={false}`, and any view that is
+/// `focusable={true}`, without taking presses (a chart in a pressable
+/// card); never a disabled one. Tab goes through them in tree order.
+#[test]
+fn focusable_views_are_stops_without_taking_presses() {
+    let mut c = core();
+    let view = |id: NodeId, parent: NodeId| {
+        [
+            Op::Create { id, tag: Tag::View },
+            Op::Insert {
+                parent,
+                child: id,
+                before: None,
+            },
+        ]
+    };
+    let listen = |id: NodeId, event: EventKind| Op::Listen {
+        id,
+        event,
+        enabled: true,
+    };
+    let focusable = |id: NodeId, on: bool| Op::SetProp {
+        id,
+        prop: Prop::Focusable(Some(on)),
+    };
+    let (card, chart, plain, backdrop, button, off) = (2, 4, 6, 8, 10, 12);
+    let mut ops = Vec::new();
+    ops.extend(view(card, crate::ROOT_ID));
+    ops.push(listen(card, EventKind::Press));
+    ops.extend(view(chart, card));
+    ops.push(focusable(chart, true));
+    ops.push(listen(chart, EventKind::Focus));
+    ops.push(listen(chart, EventKind::Blur));
+    ops.extend(view(plain, crate::ROOT_ID));
+    ops.extend(view(backdrop, crate::ROOT_ID));
+    ops.push(listen(backdrop, EventKind::Press));
+    ops.push(focusable(backdrop, false));
+    ops.extend(view(button, crate::ROOT_ID));
+    ops.push(listen(button, EventKind::Press));
+    ops.extend(view(off, crate::ROOT_ID));
+    ops.push(focusable(off, true));
+    ops.push(Op::SetProp {
+        id: off,
+        prop: Prop::Native(NativeProp::Disabled(true)),
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let props = |id: NodeId| {
+        batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id: i, props } if *i == id => Some(props.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let events = |id: NodeId| {
+        batch
+            .items
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                MountItem::Events { id: i, events } if *i == id => Some(*events),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    // Focusable takes no presses: the card around it keeps them.
+    assert!(!events(chart).contains(EventKind::Press));
+    assert!(events(chart).contains(EventKind::Focus));
+    let order = [card, chart, plain, backdrop, button, off];
+    let stops: Vec<NodeId> = order
+        .into_iter()
+        .filter(|&id| props(id).focus_stop(events(id).contains(EventKind::Press)))
+        .collect();
+    assert_eq!(stops, [card, chart, button]);
+    // Tab from nowhere, then on and around.
+    let mut at = None;
+    let mut visited = Vec::new();
+    for _ in 0..4 {
+        at = crate::input::tab_stop(at, stops.len(), false, true);
+        visited.push(stops[at.unwrap()]);
+    }
+    assert_eq!(visited, [card, chart, button, card]);
+    // Unset again: the chart takes no presses, so it is no stop.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: chart,
+            prop: Prop::Focusable(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let props = batch
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == chart => Some(props.clone()),
+            _ => None,
+        })
+        .expect("the chart's props, sent again");
+    assert!(!props.focus_stop(false));
+    assert!(props.focus_stop(true));
+}
+
 /// Components that run once: their views mounted with bindings.
 mod views {
     use std::{cell::Cell, rc::Rc};

@@ -398,6 +398,7 @@ noprop id:plain delayLongPress
 prop id:pan panActivation activeOffsetX=20 failOffsetY=10
 noprop id:plain panActivation
 prop id:unfocusable focusable false
+prop id:stop focusable true
 noprop id:plain focusable
 covers [props] pointerEvents
 covers [props] hitSlop

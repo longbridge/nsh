@@ -295,9 +295,10 @@ report it:
   environment's OS; on every environment (a hardware keyboard: phones and tablets have one too) the root's keymap
   (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
   root hears `KeyCommand`; else, on macOS and the web, Tab / Shift+Tab move the keyboard focus between the stops
-  (`Screen::tab_stops`: editable inputs and pressables not `focusable={false}`, in tree order, around), telling the
-  views `Blur` / `Focus` and the pressable its `FOCUSED` state, and Return or Space presses the pressable it is on (a
-  press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
+  (`Screen::tab_stops`: editable inputs and the views `ViewProps::focus_stop` takes, pressables not
+  `focusable={false}` and `focusable={true}` views that take no presses, in tree order, around), telling the
+  views `Blur` / `Focus` and the view its `FOCUSED` state, and Return or Space presses the view it is on when it takes
+  presses (a press of the pointer takes it off); else the focused input takes a character, Backspace or the return key, else
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
