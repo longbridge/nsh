@@ -190,8 +190,9 @@ fn a_listener_of_a_disposed_owner_does_not_run() {
     let _entered = runtime.enter();
     let runs = Rc::new(RefCell::new(0));
     let r = runs.clone();
-    let (owner, listener) =
-        create_root(move || crate::ui::Listener::<()>::from(move |_: &()| *r.borrow_mut() += 1));
+    let (owner, listener) = create_root(move || {
+        crate::element::Listener::<()>::from(move |_: &()| *r.borrow_mut() += 1)
+    });
     listener.call(&());
     assert_eq!(*runs.borrow(), 1);
     owner.dispose();

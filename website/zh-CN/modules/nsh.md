@@ -280,19 +280,19 @@ function Overlay(props: OverlayProps): YNode;
 
 ## SafeAreaView
 
-`SafeAreaView` 按自己渲染位置的边距为内容添加内边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。Rust 用 `nsh_core::elements::safe_area_view()` 创建（边用 `Edge` 表示）。边距本身 `safeArea()` 和 `safeAreaInsets()` 来自 [`nsh/base`](./nsh-base.md#safe-areas)。见 [SafeAreaView](../elements/safe-area-view.md)。
+`SafeAreaView` 按自己渲染位置的边距为内容添加内边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。Rust 用 `nsh_core::element::safe_area_view()` 创建（边用 `Edge` 表示）。边距本身 `safeArea()` 和 `safeAreaInsets()` 来自 [`nsh/base`](./nsh-base.md#safe-areas)。见 [SafeAreaView](../elements/safe-area-view.md)。
 
 <a id="keyboardavoidingview"></a>
 
 ## KeyboardAvoidingView
 
-`KeyboardAvoidingView` 让它的内容保持在软键盘上方，并随键盘移动。Rust 用 `nsh_core::elements::keyboard_avoiding_view()` 创建（行为用 `AvoidBehavior` 表示）。`Keyboard` 和 `keyboardFrame()` 来自 [`nsh/base`](./nsh-base.md#keyboard)。见 [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)。
+`KeyboardAvoidingView` 让它的内容保持在软键盘上方，并随键盘移动。Rust 用 `nsh_core::element::keyboard_avoiding_view()` 创建（行为用 `AvoidBehavior` 表示）。`Keyboard` 和 `keyboardFrame()` 来自 [`nsh/base`](./nsh-base.md#keyboard)。见 [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)。
 
 <a id="selectionarea"></a>
 
 ## SelectionArea
 
-`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区按阅读顺序跨越视图、`Text` 元素和 `TextView`。Rust 用 `nsh_core::elements::selection_area()` 创建。见 [SelectionArea](../elements/selection-area.md)。
+`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区按阅读顺序跨越视图、`Text` 元素和 `TextView`。Rust 用 `nsh_core::element::selection_area()` 创建。见 [SelectionArea](../elements/selection-area.md)。
 
 ## 类型
 

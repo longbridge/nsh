@@ -757,7 +757,7 @@ and is invisible to touch, keyboard-only, and many assistive technology workflow
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, theme};
-use nsh_core::{color::black, ui::StyleRefinement};
+use nsh_core::{color::black, element::StyleRefinement};
 
 /// The app's popup surface, shared by its menus, popovers and tooltips.
 fn popup(s: StyleRefinement) -> StyleRefinement {

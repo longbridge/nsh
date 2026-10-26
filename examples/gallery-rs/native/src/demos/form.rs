@@ -8,10 +8,9 @@
 use nsh_base::{dialog, input};
 use nsh_core::{
     Points, Size,
-    components::{keyboard_avoiding_view, safe_area_view},
-    ui::{
+    element::{
         AutoCapitalize, AutoFill, KeyboardDismissMode, LayoutAnimation, ReturnKeyType,
-        SubmitBehavior, View, prelude::*,
+        SubmitBehavior, View, keyboard_avoiding_view, prelude::*, safe_area_view,
     },
 };
 
@@ -139,7 +138,7 @@ impl Field {
     fn render(self, input: impl FnOnce(Input) -> Input) -> View {
         let focus = self.fx.focus;
         let on_blur = self.on_blur;
-        let base = nsh_core::ui::input()
+        let base = nsh_core::element::input()
             .placeholder_color(|| color(colors::FAINT))
             .selection_color(|| color(colors::ACCENT))
             .return_key_type(ReturnKeyType::Done)

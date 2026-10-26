@@ -14,8 +14,8 @@ navigation header and the Mac Catalyst title bar. It pads itself by the insets *
 insets, and elsewhere the surface's safe area. It has no look of its own; its background and padding are the app's.
 
 ```rust tabs
-use nsh_core::elements::safe_area_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::safe_area_view;
+use nsh_core::element::prelude::*;
 
 fn app() -> impl IntoElement {
     safe_area_view()
@@ -57,7 +57,7 @@ By default all four edges are padded. Pass `edges` to pad only some of them, for
 bar of your own handles the bottom inset:
 
 ```rust tabs
-use nsh_core::elements::{Edge, safe_area_view};
+use nsh_core::element::{Edge, safe_area_view};
 
 safe_area_view()
     .edges(vec![Edge::Top, Edge::Left, Edge::Right])
@@ -91,7 +91,7 @@ change, for example on rotation.
 | `safeAreaInsets()` | `safe_area_view()`, `cx.insets()` | The insets where the component renders: the nearest page's (below its header), the nearest dialog's, or else the surface's safe area. These are the insets SafeAreaView uses. In TSX, call it in a component; it returns an accessor. In Rust, `safe_area_view()` applies them to its content and a component of your crate reads them with `cx.insets()`. |
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn bottom_bar() -> impl IntoElement {
     view()

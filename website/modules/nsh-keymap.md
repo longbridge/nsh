@@ -6,10 +6,10 @@ order: 8.7
 
 # nsh/keymap
 
-The keymap binds the app's keyboard shortcuts: a keystroke such as `"mod+k"` and the function it runs. Rust code calls `on_key`, `on_key_with` and `key_label` from `nsh_core::ui::prelude`; TSX imports `keymap` from `nsh/keymap`. Both take the same keystrokes and follow the same rules.
+The keymap binds the app's keyboard shortcuts: a keystroke such as `"mod+k"` and the function it runs. Rust code calls `on_key`, `on_key_with` and `key_label` from `nsh_core::element::prelude`; TSX imports `keymap` from `nsh/keymap`. Both take the same keystrokes and follow the same rules.
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // on_key, on_key_with, KeyOptions, key_label
+use nsh_core::element::prelude::*; // on_key, on_key_with, KeyOptions, key_label
 ```
 
 ```tsx tabs
@@ -49,7 +49,7 @@ bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindi
 Runs `handler` when `keystroke` is pressed and returns a function that removes the binding. The handler gets the keystroke as you wrote it, in its case. Rust: `on_key(keystroke, handler)`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {

@@ -1,7 +1,7 @@
 //! `AlertDialog`: the platform's alert or action sheet (UIAlertController,
 //! AlertDialog, a list dialog on Android).
 
-use nsh_core::ui::{Dialog, DialogButton, DialogButtonStyle, prelude::*};
+use nsh_core::element::{Dialog, DialogButton, DialogButtonStyle, prelude::*};
 
 /// The system's alert dialog (UIAlertController, AlertDialog).
 #[module]

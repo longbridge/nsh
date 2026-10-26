@@ -59,11 +59,11 @@ fn bind_keys(cx: &mut GpuiApp) {
     ]);
 }
 
-static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
+static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
 /// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
-pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
+pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
 }
 
@@ -88,7 +88,7 @@ pub(crate) fn root() -> Option<Root> {
 }
 
 /// The UI sets engines serve.
-pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
+pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
@@ -151,7 +151,7 @@ pub struct AppOptions {
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
     /// What the embedding app gives the engines of the views made with
     /// these options ([`nsh_engine::EngineConfig::context`]): its UI sets'
-    /// functions read it with `nsh_core::ui::engine_context`, so each view
+    /// functions read it with `nsh_core::element::engine_context`, so each view
     /// reaches its own part of the embedding app.
     pub context: nsh_engine::EngineContext,
     /// The embedding app's channel with the apps the view runs

@@ -8,8 +8,8 @@ use nsh_base::{
 };
 use nsh_core::{
     Bounds, Size,
+    element::{Root, prelude::*},
     geometry::{Along, Axis, point},
-    ui::{Root, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

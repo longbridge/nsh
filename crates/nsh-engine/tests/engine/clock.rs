@@ -7,8 +7,8 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem,
+    element::{Root, prelude::*},
     time::Clock,
-    ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Bundle, Engine, EngineConfig};
 

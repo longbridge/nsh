@@ -725,7 +725,7 @@ x.timing(1, { easing: [0.2, 0.8, 0.2, 1] });
 `Easing.sample(easing, count)` (`sample_easing` in Rust) returns the curve at `count` evenly spaced points from 0 to 1, and `Animated.sampleSpring(config, fps?)` / `Animated.sampleDecay(config, fps?)` (`sample_spring`, `sample_decay`) the values a spring or decay moves through, one per frame (60 per second by default) from `config.from` (0) until it ends. They are computed by the same native code the animations run, so a chart of a curve shows exactly what the animation does:
 
 ```rust tabs
-use nsh_core::ui::{sample_easing, sample_spring};
+use nsh_core::element::{sample_easing, sample_spring};
 
 let curve = sample_easing(Easing::Curve(Curve::Back(1.70158), EaseMode::Out), 50); // 50 progress values
 let spring = sample_spring(0.0, 1.0, Spring { stiffness: 180.0, damping: 8.0, ..Spring::default() }, 60.0);
@@ -741,7 +741,7 @@ const spring = Animated.sampleSpring({ toValue: 1, stiffness: 180, damping: 8 })
 A layout animation animates the frame changes of the **next** update natively: views that move or resize glide to their new frames, new views fade (or scale) in, removed views fade out. Call it right before the state change: `animate_layout(..)` in Rust, `LayoutAnimation.configureNext(config)` in TSX.
 
 ```rust tabs
-use nsh_core::ui::LayoutAnimation;
+use nsh_core::element::LayoutAnimation;
 
 let items = signal(vec![1, 2, 3]);
 let next = stored(4);
@@ -790,7 +790,7 @@ const remove = () => {
 A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"` or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::Spring { damping }`) sets the spring's overshoot.
 
 ```rust tabs
-use nsh_core::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
+use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
 
 animate_layout(LayoutAnimation {
     create: Some(LayoutTransition::new(LayoutCurve::EaseOut, 300.0)),

@@ -6,10 +6,10 @@ order: 10
 
 # nsh/accessibility
 
-The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()` and `announce_for_accessibility()` from `nsh_core::ui::prelude` and moves the focus with an `ElementRef`; TSX imports `screenReaderEnabled()`, `reduceMotion()`, `announce()` and `setAccessibilityFocus()` from `nsh/accessibility`. The settings are reactive: read them in a binding, `computed` or `effect`, and what reads them updates when the user changes them. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
+The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()` and `announce_for_accessibility()` from `nsh_core::element::prelude` and moves the focus with an `ElementRef`; TSX imports `screenReaderEnabled()`, `reduceMotion()`, `announce()` and `setAccessibilityFocus()` from `nsh/accessibility`. The settings are reactive: read them in a binding, `computed` or `effect`, and what reads them updates when the user changes them. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // screen_reader, reduce_motion, announce_for_accessibility, element_ref
+use nsh_core::element::prelude::*; // screen_reader, reduce_motion, announce_for_accessibility, element_ref
 ```
 
 ```tsx tabs
@@ -77,7 +77,7 @@ function setAccessibilityFocus(node: YNode): void;
 Moves the screen reader's focus to `node` (an element's `ref`). Rust: `ElementRef::set_accessibility_focus()`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn Saved() -> impl IntoElement {

@@ -11,7 +11,7 @@ demo: el-scroll
 `Scroll` 是原生滚动视图（iOS 和 Mac Catalyst 上是 UIScrollView，Android 上是 ScrollView）。它把所有子元素作为内容进行布局，并在原生侧滚动：滚动、惯性滑动、回弹和吸附都由平台以屏幕刷新率完成。Rust 用 `scroll()` 创建，TSX 用从 `nsh` 导入的 `<Scroll>`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 scroll().flex_1().child(
     view().p_4().gap_2().child(each(

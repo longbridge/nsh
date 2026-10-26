@@ -44,10 +44,10 @@ mod window;
 
 use std::sync::Arc;
 
-use nsh_core::ui::{ComponentSpec, Registry};
+use nsh_core::element::{ComponentSpec, Registry};
 /// `Input`, the native text input (UITextField / UITextView, EditText):
 /// TSX's `Input` of `nsh/base`, a host element the core makes.
-pub use nsh_core::ui::{Input, input};
+pub use nsh_core::element::{Input, input};
 
 pub use crate::{
     alert_dialog::{

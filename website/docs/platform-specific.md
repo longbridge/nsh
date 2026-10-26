@@ -12,7 +12,7 @@ One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Cataly
 | Rust | TSX | For |
 |---|---|---|
 | [Builder methods (`.ripple(..)`, `.input_accessory(..)`)](#platform-only-props) | [`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`](#platform-only-props) | Props only one platform has. |
-| [`toast`, `on_back_press`, `nsh_core::ui::desktop`](#platform-modules) | [`nsh/ios`, `nsh/android`, `nsh/desktop`](#platform-modules) | APIs only one platform has. |
+| [`toast`, `on_back_press`, `nsh_core::element::desktop`](#platform-modules) | [`nsh/ios`, `nsh/android`, `nsh/desktop`](#platform-modules) | APIs only one platform has. |
 | [`os()`, `idiom()`, `is_desktop()`](#platformos-and-platformselect) | [`platform.os`, `platform.select`](#platformos-and-platformselect) | Choosing values or code per platform. |
 | [`.when(os() == Os::Ios, ..)`](#platform-variants-in-tailwind) | [`ios:` / `android:` / `web:` classes](#platform-variants-in-tailwind) | Styles per platform. |
 
@@ -24,7 +24,7 @@ In Rust, a prop one platform has is a builder method like any other (`.ripple(..
 use nsh_base::dialog;
 use nsh_core::{
     Ripple,
-    ui::{AutoFill, Orientation, prelude::*},
+    element::{AutoFill, Orientation, prelude::*},
 };
 
 view()
@@ -94,7 +94,7 @@ Something two or more platforms do is a top-level prop (in Rust a method of the 
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::ui::prelude` (`toast`, `on_back_press`, `input_accessory_view`) and of `nsh_core::ui::desktop` (`set_title_bar`, `title_bar`, `close_window`); elsewhere they do nothing. In TSX, `nsh/ios` and `nsh/android` hold the APIs only one platform has, `nsh/desktop` those only desktops have. All can be imported on every platform, so one bundle runs everywhere: elsewhere their functions do nothing and their components render nothing. Each exports `isAvailable`, which is `true` only on its own platforms.
+In Rust, the APIs only one platform has are functions of `nsh_core::element::prelude` (`toast`, `on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (`set_title_bar`, `title_bar`, `close_window`); elsewhere they do nothing. In TSX, `nsh/ios` and `nsh/android` hold the APIs only one platform has, `nsh/desktop` those only desktops have. All can be imported on every platform, so one bundle runs everywhere: elsewhere their functions do nothing and their components render nothing. Each exports `isAvailable`, which is `true` only on its own platforms.
 
 ### nsh/android
 
@@ -107,7 +107,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::ui::prelude`
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::ui::{Os, prelude::*};
+use nsh_core::element::{Os, prelude::*};
 
 fn saved() {
     if os() == Os::Android {
@@ -167,7 +167,7 @@ See [Forms and the keyboard](./forms-and-keyboard.md#a-bar-over-the-keyboard-ios
 
 ### nsh/desktop
 
-Rust apps draw their own title bars with `nsh_core::ui::desktop` ([Building with Rust](./rust.md#desktop-title-bars)). TSX's module:
+Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building with Rust](./rust.md#desktop-title-bars)). TSX's module:
 
 | Export | Description |
 |---|---|
@@ -184,7 +184,7 @@ On both platforms the status bar belongs to the page or dialog on top, as in UIK
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn photo_viewer() -> impl IntoElement {
     nav_page()
@@ -214,7 +214,7 @@ In an app embedded in a native one, the host app's view controller decides the s
 `os()` in Rust and the `platform` constant from `nsh/device` in TSX tell you where the app runs: `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web`, and `platform.os` `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `platform.catalyst`; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when the idiom is `"desktop"`). See [Device and environment](./device-and-environment.md#the-platform) for the version, the idiom and the rest.
 
 ```rust tabs
-use nsh_core::ui::{Os, prelude::*};
+use nsh_core::element::{Os, prelude::*};
 
 if os() == Os::Android {
     // …
@@ -234,7 +234,7 @@ if (platform.os === "android") {
 In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops. In TSX, `platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `mobile` (iOS, Android, phone and tablet browsers) or `desktop` (macOS, Windows, Linux, desktop browsers), then `native` (every platform but the web), then `default`:
 
 ```rust tabs
-use nsh_core::ui::{Os, prelude::*};
+use nsh_core::element::{Os, prelude::*};
 
 fn card() -> View {
     let card = view().rounded(px(12.0)).bg(white());

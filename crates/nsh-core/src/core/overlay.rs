@@ -35,6 +35,7 @@ use super::{Core, Key, Kind, NO_KEY, definite};
 use crate::{
     EventKind, EventPayload, NodeId, PayloadValue, Prop, ROOT_ID, Tag, TextEngine, TouchEvent,
     TouchPhase,
+    element::task::{Action, Task, act_after},
     geometry::{Bounds, Point, Points, Size, px, rect},
     keymap::{KeyBinding, Keystroke, When},
     mount::MountItem,
@@ -43,7 +44,6 @@ use crate::{
         HINT_DELAY, OverlayAnchor, OverlayConfig, Placed, Placement, TooltipContent, inset, place,
     },
     props::PointerEvents,
-    ui::task::{Action, Task, act_after},
 };
 
 /// What the overlays have a node listen to (`Node::overlay_watched`).
@@ -85,7 +85,7 @@ pub(super) struct CoreTooltip {
 }
 
 /// The binding id of Escape while an overlay listens to `onCancel`: above
-/// any JS gives and any view's ([`crate::ui::keys::FIRST_ID`] counts up).
+/// any JS gives and any view's ([`crate::element::keys::FIRST_ID`] counts up).
 pub(super) const ESCAPE_BINDING: u32 = u32::MAX;
 
 /// An overlay's own state.
@@ -635,8 +635,11 @@ impl<M: TextEngine> Core<M> {
             EventKind::Dismiss
         };
         if node.events.contains(kind) {
-            self.events
-                .push(crate::ui::JsEvent::Event(node.id, kind, EventPayload::None));
+            self.events.push(crate::element::JsEvent::Event(
+                node.id,
+                kind,
+                EventPayload::None,
+            ));
         }
     }
 
@@ -908,7 +911,7 @@ impl<M: TextEngine> Core<M> {
             return false;
         };
         let id = self.nodes[key as usize].id;
-        self.events.push(crate::ui::JsEvent::Event(
+        self.events.push(crate::element::JsEvent::Event(
             id,
             EventKind::Cancel,
             EventPayload::None,
@@ -950,7 +953,7 @@ impl<M: TextEngine> Core<M> {
                 if inside {
                     continue;
                 }
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::PressOutside,
                     EventPayload::Map(vec![("pagePosition", PayloadValue::Point(point.page))]),
@@ -1060,7 +1063,7 @@ impl<M: TextEngine> Core<M> {
         if state.placed != Some((placed, bounds)) {
             state.placed = Some((placed, bounds));
             if listens {
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::Position,
                     EventPayload::Map(vec![

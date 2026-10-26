@@ -1576,7 +1576,7 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ui::{Root, input, prelude::*};
+    use nsh_core::element::{Root, input, prelude::*};
 
     use super::*;
 

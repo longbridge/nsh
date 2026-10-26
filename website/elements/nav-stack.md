@@ -18,7 +18,7 @@ covered); the pages' content and the desktop header are the app's own.
 
 ```rust tabs
 use nsh_base::{button, nav_page, nav_stack};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// A button with the app's look.
 fn action(title: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
@@ -252,7 +252,7 @@ go into the system header on iOS and Android.
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn profile(edit: impl Fn() + 'static) -> Screen {
     nav_page()
@@ -304,7 +304,7 @@ back is off and the back buttons and keys call `onBackPress` without popping. As
 
 ```rust tabs
 use nsh_base::{alert_dialog, nav_page};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn edit_note(routes: Signal<Vec<u32>>) -> Screen {
     let note = signal(String::new());

@@ -7,10 +7,10 @@ demo: mod-animated
 
 # nsh/animated
 
-The animation API animates on the UI thread. You create an **animated value**, bind it (or values derived from it) to a style property, and start an animation; from then on every frame is computed natively, without running the app's code. A busy engine or JS thread cannot make the animation stutter, and an animation costs the app no work per frame. Rust code uses `animated_value()`, `motion()`, `Animation`, `Spring`, `Timing`, `KeyframeTiming`, `MotionPreset` and `Easing` from `nsh_core::ui::prelude` and binds values with the `.bind_*` methods of elements; TSX imports `nsh/animated`.
+The animation API animates on the UI thread. You create an **animated value**, bind it (or values derived from it) to a style property, and start an animation; from then on every frame is computed natively, without running the app's code. A busy engine or JS thread cannot make the animation stutter, and an animation costs the app no work per frame. Rust code uses `animated_value()`, `motion()`, `Animation`, `Spring`, `Timing`, `KeyframeTiming`, `MotionPreset` and `Easing` from `nsh_core::element::prelude` and binds values with the `.bind_*` methods of elements; TSX imports `nsh/animated`.
 
 ```rust tabs
-use nsh_core::ui::{LayoutAnimation, prelude::*}; // animated_value, motion, Animation, Spring, Timing, Keyframe, KeyframeTiming, MotionPreset, MotionSpec, Easing, animate_layout
+use nsh_core::element::{LayoutAnimation, prelude::*}; // animated_value, motion, Animation, Spring, Timing, Keyframe, KeyframeTiming, MotionPreset, MotionSpec, Easing, animate_layout
 ```
 
 ```tsx tabs
@@ -44,7 +44,7 @@ function createAnimatedValue(value?: number): AnimatedValue;
 Creates an animated value starting at `value` (default `0`). Rust: `animated_value(value)`, a `Copy` handle kept by the component that made it.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -369,7 +369,7 @@ interface CompositeAnimation {
 | `delay(ms)` | `Animation::delay(ms)` | Waits; useful inside `sequence`. |
 | `loop(animation, { iterations, resetBeforeIteration })` | `animation.looped(iterations).reset_before_iteration(…)` | Repeats `animation` `iterations` times (forever by default), putting its values back before each run unless `resetBeforeIteration` is `false`. |
 | `add`, `subtract`, `multiply`, `divide`, `modulo`, `diffClamp` | the node methods | The same as the [`AnimatedNode`](#animatednode) methods, as functions. |
-| `sampleSpring`, `sampleDecay` | `nsh_core::ui::sample_spring`, `sample_decay` | A spring's or decay's values one per frame (see [Easing](#easing)). |
+| `sampleSpring`, `sampleDecay` | `nsh_core::element::sample_spring`, `sample_decay` | A spring's or decay's values one per frame (see [Easing](#easing)). |
 
 `CompositeAnimation`:
 
@@ -438,7 +438,7 @@ const Easing: {
 };
 ```
 
-An easing is data, not a function of the app's: the runtime evaluates it natively. In Rust it is the enum `Easing`: `Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `Bezier(x1, y1, x2, y2)`, `Steps(count, StepPosition)` and `Curve(curve, mode)`, with a `Curve` (`Quad`, `Cubic`, `Poly(n)`, `Sin`, `Circle`, `Exp`, `Elastic(bounciness)`, `Back(s)`, `Bounce`) and an `EaseMode` (`In`, `Out`, `InOut`). To draw one, `Easing.sample(easing, count)` (Rust: `nsh_core::ui::sample_easing`) gives its values at `count` evenly spaced points from 0 to 1; `Animated.sampleSpring` and `Animated.sampleDecay` (`sample_spring`, `sample_decay`) give a spring's or decay's values one per frame (at `fps`, 60 by default) from `from` (0) until it ends. All three come from the native code the animations run. Wherever an `Easing` is accepted in TSX you can pass a name (`"easeOut"`), a cubic Bézier as four numbers, or a curve from the `Easing` object.
+An easing is data, not a function of the app's: the runtime evaluates it natively. In Rust it is the enum `Easing`: `Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `Bezier(x1, y1, x2, y2)`, `Steps(count, StepPosition)` and `Curve(curve, mode)`, with a `Curve` (`Quad`, `Cubic`, `Poly(n)`, `Sin`, `Circle`, `Exp`, `Elastic(bounciness)`, `Back(s)`, `Bounce`) and an `EaseMode` (`In`, `Out`, `InOut`). To draw one, `Easing.sample(easing, count)` (Rust: `nsh_core::element::sample_easing`) gives its values at `count` evenly spaced points from 0 to 1; `Animated.sampleSpring` and `Animated.sampleDecay` (`sample_spring`, `sample_decay`) give a spring's or decay's values one per frame (at `fps`, 60 by default) from `from` (0) until it ends. All three come from the native code the animations run. Wherever an `Easing` is accepted in TSX you can pass a name (`"easeOut"`), a cubic Bézier as four numbers, or a curve from the `Easing` object.
 
 | Curve | Rust | Shape |
 |---|---|---|
@@ -498,7 +498,7 @@ interface LayoutAnimationAnimation {
 }
 ```
 
-`LayoutAnimation.configureNext(config)` animates the layout changes of the next commit natively: views that move or resize glide to their new frames, new views appear (fading or scaling in, by `property`) and removed views disappear. Call it right before the state change that changes the layout. Rust: `animate_layout(LayoutAnimation)`, with `nsh_core::ui::LayoutAnimation`'s presets or its `create`, `update` and `delete` transitions.
+`LayoutAnimation.configureNext(config)` animates the layout changes of the next commit natively: views that move or resize glide to their new frames, new views appear (fading or scaling in, by `property`) and removed views disappear. Call it right before the state change that changes the layout. Rust: `animate_layout(LayoutAnimation)`, with `nsh_core::element::LayoutAnimation`'s presets or its `create`, `update` and `delete` transitions.
 
 | Member | Rust | Description |
 |---|---|---|

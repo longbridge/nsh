@@ -17,7 +17,7 @@ NSH 的触摸处理分三个层次。**按压**（Rust 中的 `.on_press`、TSX 
 所有元素都接受按压事件，不需要单独的 "touchable" 组件。把 `.on_press` / `onPress` 加在视图、文本、图片或任何其他元素上即可。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -96,7 +96,7 @@ mount(App);
 状态样式叠加在视图自身的样式之上。后面的状态优先（hover、focus、active），禁用样式优先于所有状态，视图禁用时其他状态样式不生效。
 
 ```rust tabs
-use nsh_core::{Ripple, ui::prelude::*};
+use nsh_core::{Ripple, element::prelude::*};
 
 view().on_press(open).active(|s| s.opacity(0.5))
 
@@ -237,7 +237,7 @@ Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 设置的是同一�
 要让拖动、捏合和旋转移动屏幕上的东西，就把[动画值](./animation.md#动画值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动；你的代码只在手势开始和结束时得到通知。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -360,7 +360,7 @@ view()
 | `stopPropagation()` | 外层视图不再收到这次触摸事件。 |
 
 ```rust tabs
-use nsh_core::{TouchPhase, ui::{TouchEvent, prelude::*}};
+use nsh_core::{TouchPhase, element::{TouchEvent, prelude::*}};
 
 view().on_touch(|e: &TouchEvent| {
     let Some(p) = e.points.iter().find(|p| p.changed) else { return };
@@ -451,7 +451,7 @@ Rust 组件的响应者从成为响应者起一直保持按下状态，直到它
 Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`，以及自成为响应者以来的手势 `gesture`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn sketch() -> impl IntoElement {
     let strokes = signal(Vec::<Vec<Point<Points>>>::new());
@@ -525,7 +525,7 @@ mount(Sketch);
 在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh/gesture` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn ball() -> impl IntoElement {
     let pos = signal((0.0_f32, 0.0_f32));

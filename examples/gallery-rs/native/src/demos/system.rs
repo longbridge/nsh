@@ -7,9 +7,9 @@ use std::time::Duration;
 use nsh_base::{AlertDialogOptions, alert_dialog, dialog};
 use nsh_core::{
     animation::{Curve, EaseMode},
+    element::{AnyElement, prelude::*},
     keymap::When,
     time::Instant,
-    ui::{AnyElement, prelude::*},
 };
 
 use crate::ui::{

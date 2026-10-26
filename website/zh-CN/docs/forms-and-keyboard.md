@@ -13,7 +13,7 @@ demo: guide-forms
 输入框和其他视图一样接受样式（Rust 中是类型化的样式方法，TSX 中是样式和 Tailwind 类），所以表单里的输入框是应用自己的外观。带标签的输入框就是一个简短的自定义组件：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoElement {
     let focused = signal(false);
@@ -65,7 +65,7 @@ function Field(props: { label: string; value: string; onChange: (text: string) =
 传入值时（`.value(..)`，TSX 的 `value`）输入框是**受控**的：它显示 signal 中的内容，由你在变化事件（`.on_change(..)`，TSX 的 `onChange`）中更新 signal。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -249,7 +249,7 @@ input()
 自动填充（`.auto_fill(AutoFill::Email)`，TSX 的 `autoComplete`）告诉系统字段里装的是什么，系统就能提供已保存的姓名、地址、密码以及短信中的验证码。Rust 的 `AutoFill` 每种内容一个变体（`Name`、`GivenName`、`FamilyName`、`Email`、`Tel`、`Username`、`Password`、`NewPassword`、`OneTimeCode`、`StreetAddress`、`PostalCode`、`Country`、`CreditCardNumber`、`Url`、`Birthdate` 等，以及 `Off`）。TSX 接受以下取值：`"name"`、`"given-name"`、`"family-name"`、`"email"`、`"tel"`、`"username"`、`"current-password"`、`"new-password"`、`"one-time-code"`、`"street-address"`、`"postal-code"`、`"country"`、`"cc-number"`、`"cc-exp"`、`"cc-csc"`、`"url"`、`"birthdate-full"` 等，或 `"off"`。iOS 自己的名字（`"emailAddress"`、`"oneTimeCode"` 等）也可以用在 `autoComplete` 或 `ios={{ textContentType }}` 中。
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input()
     .keyboard_type(KeyboardType::Email)
@@ -286,7 +286,7 @@ input()
 要切换到下一个字段，保存输入框的 ref（Rust 中是 `element_ref()` 和 `.element_ref(&r)`，TSX 中是 `ref`）并调用 `focus()`：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn sign_in() -> impl IntoElement {
     let email = signal(String::new());
@@ -593,11 +593,11 @@ scroll()
 
 ### 滚动视图之外的内容：KeyboardAvoidingView
 
-固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::elements::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
+固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::element::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
 
 ```rust tabs
-use nsh_core::elements::keyboard_avoiding_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::keyboard_avoiding_view;
+use nsh_core::element::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
     let draft = signal(String::new());
@@ -710,7 +710,7 @@ import { keyboardFrame } from "nsh/base";
 Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/ios` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间；输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn note() -> impl IntoElement {
     let content = signal(String::new());

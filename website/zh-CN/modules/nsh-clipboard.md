@@ -6,11 +6,11 @@ order: 8.5
 
 # nsh/clipboard
 
-剪贴板 API 读写系统剪贴板：各平台都能读写文本（iOS 上是 `UIPasteboard`，Android 上是 `ClipboardManager`，桌面上是 `NSPasteboard`、GDK 和 Win32 剪贴板，Web 上是 `navigator.clipboard`）；iOS、桌面和 Web 还能读写图片，桌面和 Mac Catalyst 还能读到在文件管理器里复制的文件。Rust 代码调用 `nsh_core::ui::prelude` 中的函数（`set_clipboard`、`clipboard_string` 等）；TSX 从 `nsh/clipboard` 导入 `Clipboard`。
+剪贴板 API 读写系统剪贴板：各平台都能读写文本（iOS 上是 `UIPasteboard`，Android 上是 `ClipboardManager`，桌面上是 `NSPasteboard`、GDK 和 Win32 剪贴板，Web 上是 `navigator.clipboard`）；iOS、桌面和 Web 还能读写图片，桌面和 Mac Catalyst 还能读到在文件管理器里复制的文件。Rust 代码调用 `nsh_core::element::prelude` 中的函数（`set_clipboard`、`clipboard_string` 等）；TSX 从 `nsh/clipboard` 导入 `Clipboard`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // set_clipboard、clipboard_string、clipboard_image……
-use nsh_core::ui::ClipboardImage;
+use nsh_core::element::prelude::*; // set_clipboard、clipboard_string、clipboard_image……
+use nsh_core::element::ClipboardImage;
 ```
 
 ```tsx tabs
@@ -34,7 +34,7 @@ interface ClipboardImage {
 }
 ```
 
-| TS | Rust（`nsh_core::ui::prelude`） |
+| TS | Rust（`nsh_core::element::prelude`） |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
@@ -44,7 +44,7 @@ interface ClipboardImage {
 | `await Clipboard.hasImage()` | `clipboard_has_image().await -> bool` |
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
-Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::ui::ClipboardImage`，含 `url` 和 `size`（一个 `Size<DevicePixels>`）。
+Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::element::ClipboardImage`，含 `url` 和 `size`（一个 `Size<DevicePixels>`）。
 
 用户也可以自己从[可选文本](../elements/text.md)中复制；剪贴板 API 用于在代码中复制，比如“复制”按钮。
 
@@ -57,7 +57,7 @@ writeText(text: string): Promise<void>;
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn copy_button(code: Signal<String>) -> impl IntoElement {
     let copied = signal(false);
@@ -137,7 +137,7 @@ readImage(): Promise<ClipboardImage | null>;
 
 ```rust tabs
 use base64::Engine as _;
-use nsh_core::ui::{ClipboardImage, prelude::*};
+use nsh_core::element::{ClipboardImage, prelude::*};
 
 fn attachments() -> impl IntoElement {
     let attachments = signal(Vec::<ClipboardImage>::new());

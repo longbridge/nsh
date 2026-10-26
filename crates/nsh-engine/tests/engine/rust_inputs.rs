@@ -9,7 +9,7 @@ use nsh_base::input;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue,
     ViewKind,
-    ui::{Root, Selection, prelude::*},
+    element::{Root, Selection, prelude::*},
 };
 use nsh_engine::{Engine, EngineConfig};
 

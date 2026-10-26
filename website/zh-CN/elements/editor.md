@@ -14,7 +14,7 @@ demo: el-editor
 
 ```rust tabs
 use nsh_base::editor;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 const MAIN: &str = "fn main() {\n    println!(\"Hello, world!\");\n}\n";
 
@@ -78,7 +78,7 @@ Rust 代码可以让应用的编辑器认识更多语言，并用应用自己的
 
 ```rust
 use nsh_base::editor::{EditorLanguage, register_highlighter, register_language};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 static NIMBLE: EditorLanguage = EditorLanguage::new("Nimble")
     .extensions(&["nb"])

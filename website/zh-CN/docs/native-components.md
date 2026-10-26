@@ -8,7 +8,7 @@ group: platforms
 # 原生组件
 
 原生组件是由**嵌入方应用**按名称注册的视图：地图、相机预览、图表库，或者 iOS 上任意的 `UIView`、Android 上任意的
-`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用像使用其他元素一样使用它：Rust 应用用 `nsh_core::ui::prelude` 的 `native(name)` 创建它，TSX 应用用 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它。NSH
+`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用像使用其他元素一样使用它：Rust 应用用 `nsh_core::element::prelude` 的 `native(name)` 创建它，TSX 应用用 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它。NSH
 会把它和应用的其余部分一起布局，向它发送 props，把它的事件交给对应的处理函数，并转发通过 `ref` 发出的命令。
 
 NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里多出来的一个子视图：不存在层级叠放问题，它会像 `<View>`
@@ -34,8 +34,8 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 在 TSX 中，`nativeComponent()` 为这个名称声明一个组件，列出它用到的 props 和事件。
 
 ```rust tabs
-use nsh_core::elements::safe_area_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::safe_area_view;
+use nsh_core::element::prelude::*;
 use serde_json::json;
 
 const COLORS: [&str; 4] = ["#8250df", "#0969da", "#1a7f37", "#cf222e"];

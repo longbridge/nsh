@@ -11,11 +11,11 @@ iOS (`PHPickerViewController`), the Photo Picker on Android, an open panel or fi
 input in a browser. On iOS and Android the picker runs outside the app and hands over only what the user picks, so it
 needs no photo library permission. Each picked image arrives as a `File` (TSX) or a `PickedFile` (Rust) whose bytes stay
 native: show it with `URL.createObjectURL(file)` in an [`Image`](../elements/image.md), upload it with `fetch` and
-`FormData`. Rust code calls `pick_images` of `nsh_core::ui::prelude`; TSX imports `Picker` from `nsh/picker`.
+`FormData`. Rust code calls `pick_images` of `nsh_core::element::prelude`; TSX imports `Picker` from `nsh/picker`.
 
 ```rust tabs
 use nsh_core::picker::{PickRequest, PickedFile};
-use nsh_core::ui::prelude::*; // pick_images
+use nsh_core::element::prelude::*; // pick_images
 ```
 
 ```tsx tabs
@@ -79,7 +79,7 @@ A chat composer attaches a photo, shows it while the message is written, and upl
 ```rust tabs
 use nsh_core::geometry::{DevicePixels, Percentage};
 use nsh_core::picker::{PickRequest, PickedFile};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn attach_button(attached: Signal<Option<PickedFile>>) -> impl IntoElement {
     view()

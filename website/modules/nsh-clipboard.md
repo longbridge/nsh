@@ -6,11 +6,11 @@ order: 8.5
 
 # nsh/clipboard
 
-The clipboard API reads and writes the system clipboard: text everywhere (`UIPasteboard` on iOS, `ClipboardManager` on Android, `NSPasteboard`, GDK and the Win32 clipboard on desktops, `navigator.clipboard` on the web), images on iOS, the desktops and the web, and the files copied in a file manager on the desktops and Mac Catalyst. Rust code calls the functions of `nsh_core::ui::prelude` (`set_clipboard`, `clipboard_string`, ...); TSX imports `Clipboard` from `nsh/clipboard`.
+The clipboard API reads and writes the system clipboard: text everywhere (`UIPasteboard` on iOS, `ClipboardManager` on Android, `NSPasteboard`, GDK and the Win32 clipboard on desktops, `navigator.clipboard` on the web), images on iOS, the desktops and the web, and the files copied in a file manager on the desktops and Mac Catalyst. Rust code calls the functions of `nsh_core::element::prelude` (`set_clipboard`, `clipboard_string`, ...); TSX imports `Clipboard` from `nsh/clipboard`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // set_clipboard, clipboard_string, clipboard_image, ...
-use nsh_core::ui::ClipboardImage;
+use nsh_core::element::prelude::*; // set_clipboard, clipboard_string, clipboard_image, ...
+use nsh_core::element::ClipboardImage;
 ```
 
 ```tsx tabs
@@ -34,7 +34,7 @@ interface ClipboardImage {
 }
 ```
 
-| TS | Rust (`nsh_core::ui::prelude`) |
+| TS | Rust (`nsh_core::element::prelude`) |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
@@ -44,7 +44,7 @@ interface ClipboardImage {
 | `await Clipboard.hasImage()` | `clipboard_has_image().await -> bool` |
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
-The Rust reads return answers to await in a task (`spawn`, or an `async` module function); `ClipboardImage` is `nsh_core::ui::ClipboardImage`, with `url` and `size` (a `Size<DevicePixels>`).
+The Rust reads return answers to await in a task (`spawn`, or an `async` module function); `ClipboardImage` is `nsh_core::element::ClipboardImage`, with `url` and `size` (a `Size<DevicePixels>`).
 
 The user can also copy from a [selectable text](../elements/text.md) themselves; the clipboard API is for copying from code, such as a Copy button.
 
@@ -57,7 +57,7 @@ writeText(text: string): Promise<void>;
 Puts `text` on the clipboard, replacing what was there. Rust: `set_clipboard(text)`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn copy_button(code: Signal<String>) -> impl IntoElement {
     let copied = signal(false);
@@ -142,7 +142,7 @@ read, so the `data:` URL fits in the app's memory; for a larger one `readImage` 
 
 ```rust tabs
 use base64::Engine as _;
-use nsh_core::ui::{ClipboardImage, prelude::*};
+use nsh_core::element::{ClipboardImage, prelude::*};
 
 fn attachments() -> impl IntoElement {
     let attachments = signal(Vec::<ClipboardImage>::new());

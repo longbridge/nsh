@@ -1435,7 +1435,7 @@ impl<'a> crate::js::host::HostInput for JsonInput<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::reactive::{Runtime, create_root};
+    use crate::element::reactive::{Runtime, create_root};
 
     fn released(executor: &Executor) -> usize {
         executor

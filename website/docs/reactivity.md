@@ -13,7 +13,7 @@ NSH updates the UI with **signals**: values that know who reads them. When a sig
 Rust components take everything on this page from the prelude; TSX imports it from `nsh`:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
+use nsh_core::element::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
 ```
 
 ```tsx tabs

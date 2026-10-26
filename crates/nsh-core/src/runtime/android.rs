@@ -2,7 +2,7 @@
 
 use crate::{
     Command, ROOT_ID,
-    ui::{ModuleCx, ToastDuration, module, task::Action},
+    element::{ModuleCx, ToastDuration, module, task::Action},
 };
 
 /// Short messages at the bottom of the screen (Android's toasts).

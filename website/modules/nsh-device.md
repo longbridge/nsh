@@ -6,12 +6,12 @@ order: 6
 
 # nsh/device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::ui::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports `nsh/device`. The window size, the color scheme, the font scale, the pixel ratio and the locale are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::element::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports `nsh/device`. The window size, the color scheme, the font scale, the pixel ratio and the locale are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density).
 
 ```rust tabs
 use nsh_core::{
     platform::{Appearance, Idiom, Os},
-    ui::prelude::*, // window, dark, font_scale, locale, os, idiom, pixel_ratio, set_color_scheme, ...
+    element::prelude::*, // window, dark, font_scale, locale, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
@@ -177,7 +177,7 @@ const hairline = () => 1 / pixelRatio();
 function openUrl(url: string): Promise<boolean>;
 ```
 
-Opens `url` outside the app: a web page in the browser, a `mailto:` link in the mail app, a `tel:` link in the phone app, and any scheme another app registered (`maps:`, a host app's own `lb://` links). It resolves to whether something opened it: `false` when no app handles the scheme. Rust: `open_url(url)` of `nsh_core::ui::prelude`, an answer to await in a task (or to drop).
+Opens `url` outside the app: a web page in the browser, a `mailto:` link in the mail app, a `tel:` link in the phone app, and any scheme another app registered (`maps:`, a host app's own `lb://` links). It resolves to whether something opened it: `false` when no app handles the scheme. Rust: `open_url(url)` of `nsh_core::element::prelude`, an answer to await in a task (or to drop).
 
 ```rust tabs
 button()

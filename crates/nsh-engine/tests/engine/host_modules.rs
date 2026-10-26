@@ -8,7 +8,7 @@ use std::{sync::LazyLock, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, MountBatch, Size,
-    ui::{Registry, prelude::*},
+    element::{Registry, prelude::*},
 };
 use nsh_engine::{Bundle, Engine, EngineConfig, EngineContext, Environment};
 use tokio::sync::watch;

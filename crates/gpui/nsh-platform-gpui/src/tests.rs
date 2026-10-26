@@ -414,10 +414,10 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
 struct Desk(&'static str);
 
 /// Which desk the engine running the call was given.
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 struct Whose;
 
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 impl Whose {
     /// In the JS call.
     pub(crate) fn now() -> String {
@@ -426,13 +426,13 @@ impl Whose {
 
     /// As a task, after it waited.
     pub(crate) async fn later() -> String {
-        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        nsh_core::element::prelude::timer(Duration::from_millis(5)).await;
         desk()
     }
 }
 
 fn desk() -> String {
-    nsh_core::ui::engine_context::<Desk>()
+    nsh_core::element::engine_context::<Desk>()
         .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
 }
 
@@ -478,7 +478,7 @@ impl gpui::Render for Pair {
 }
 
 fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
-    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    let mut context = nsh_core::element::Registry::ui_set("test/context");
     context.module::<Whose>();
     crate::set_ui_sets(vec![nsh_base::registry(), context]);
     let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
@@ -508,7 +508,7 @@ fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut T
 
 /// A Rust view (`test/keys`) that binds a keystroke of its own.
 mod rust_keys {
-    use nsh_core::ui::{Registry, prelude::*};
+    use nsh_core::element::{Registry, prelude::*};
 
     /// The set the app imports `Shortcut` from.
     pub(super) fn registry() -> Registry {
@@ -620,7 +620,7 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// A pad inside 8 points of padding. A press writes where it was in the
 /// pad and in the window.
 mod press_point {
-    use nsh_core::ui::prelude::*;
+    use nsh_core::element::prelude::*;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {

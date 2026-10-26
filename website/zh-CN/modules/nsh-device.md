@@ -6,12 +6,12 @@ order: 6
 
 # nsh/device
 
-设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::ui::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 导入 `nsh/device`。窗口尺寸、配色方案、字体缩放、像素密度和区域设置是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一种像素密度的屏幕）时，读取它们的地方会随之更新。
+设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::element::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 导入 `nsh/device`。窗口尺寸、配色方案、字体缩放、像素密度和区域设置是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一种像素密度的屏幕）时，读取它们的地方会随之更新。
 
 ```rust tabs
 use nsh_core::{
     platform::{Appearance, Idiom, Os},
-    ui::prelude::*, // window、dark、font_scale、locale、os、idiom、pixel_ratio、set_color_scheme……
+    element::prelude::*, // window、dark、font_scale、locale、os、idiom、pixel_ratio、set_color_scheme……
 };
 ```
 
@@ -177,7 +177,7 @@ const hairline = () => 1 / pixelRatio();
 function openUrl(url: string): Promise<boolean>;
 ```
 
-在应用之外打开 `url`：网页在浏览器中打开，`mailto:` 链接在邮件应用中打开，`tel:` 链接在电话应用中打开，其他应用注册的 scheme（`maps:`、宿主应用自己的 `lb://` 链接）交给对应的应用。结果表示是否有应用打开了它：没有应用处理该 scheme 时为 `false`。Rust：`nsh_core::ui::prelude` 的 `open_url(url)`，返回可在任务中等待（或直接丢弃）的回答。
+在应用之外打开 `url`：网页在浏览器中打开，`mailto:` 链接在邮件应用中打开，`tel:` 链接在电话应用中打开，其他应用注册的 scheme（`maps:`、宿主应用自己的 `lb://` 链接）交给对应的应用。结果表示是否有应用打开了它：没有应用处理该 scheme 时为 `false`。Rust：`nsh_core::element::prelude` 的 `open_url(url)`，返回可在任务中等待（或直接丢弃）的回答。
 
 ```rust tabs
 button()

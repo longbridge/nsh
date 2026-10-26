@@ -39,7 +39,7 @@ pub use types::{TSCONFIG, TSCONFIG_BASE, tokens_declaration, type_definitions};
 pub fn compile_module(
     name: &str,
     source: &str,
-    ui_sets: &[nsh_core::ui::description::SetDescription],
+    ui_sets: &[nsh_core::element::description::SetDescription],
 ) -> Result<String, String> {
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;

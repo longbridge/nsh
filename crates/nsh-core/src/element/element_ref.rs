@@ -324,8 +324,8 @@ impl<C: Component> fmt::Debug for ComponentRef<C> {
 mod tests {
     use super::*;
     use crate::{
+        element::reactive::{Runtime, create_root},
         geometry::{point, px},
-        ui::reactive::{Runtime, create_root},
     };
 
     fn commands(executor: &Executor) -> Vec<(NodeId, Command)> {

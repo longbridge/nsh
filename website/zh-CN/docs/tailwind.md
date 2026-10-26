@@ -11,7 +11,7 @@ demo: guide-tailwind
 NSH 的样式遵循 Tailwind CSS 4。在 Rust 中，Tailwind 的工具类是名称和取值都相同的类型化样式方法（`.p_4()` 即 `p-4`，`.rounded_2xl()` 即 `rounded-2xl`，`ZINC.shade(900)` 即 `zinc-900`）；在 TSX 中，每个元素都可以直接在 `class` 中写这些类，它们会以 Tailwind 4 的默认主题为准，在原生层解析。下面每个示例先给出类型化方法，再给出类名：
 
 ```rust tabs
-use nsh_core::ui::palette::ZINC;
+use nsh_core::element::palette::ZINC;
 
 view()
     .flex_row()

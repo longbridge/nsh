@@ -118,7 +118,7 @@
     directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
-    opens (`openUrl` of `nsh/device`, `nsh_core::ui::open_url`, a `TextView` with `links="open"`;
+    opens (`openUrl` of `nsh/device`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;
     `nsh_core::open_url`) reach it before the platform, so a host routes its own links through its router. It is a
     typed hook of the channel, not a named message: the channel is already the view's one object for the host's side,
     threaded to every engine and through both SDKs' main-thread glue, and a hook of its own takes only what passed
@@ -138,7 +138,7 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
-- **Each engine's own part of the host** (`nsh_core::ui::EngineContext`): a host serving several engines (windows,
+- **Each engine's own part of the host** (`nsh_core::element::EngineContext`): a host serving several engines (windows,
   panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
   `EngineContext::default().with(MyLink { .. })`, at most one value per type, `Send + Sync`. The set's Rust code
   reads the context of the engine running it with `engine_context::<MyLink>()` (`Option<Arc<MyLink>>`): plain

@@ -15,7 +15,7 @@ these elements and styled by the app, so the app's look is entirely its own.
 Every example on these pages comes in Rust and TSX: pick a tab, and every example on the page follows.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn app() -> impl IntoElement {
     let count = signal(0_u32);
@@ -56,7 +56,7 @@ function App() {
 mount(App);
 ```
 
-In Rust, the primitives are functions of `nsh_core::ui::prelude` (`view()`, `text(..)`, `image(..)`) and the base
+In Rust, the primitives are functions of `nsh_core::element::prelude` (`view()`, `text(..)`, `image(..)`) and the base
 components come from the `nsh_base` crate. Styles are typed methods (`.flex_1()`, `.gap_3()`, `.px(px(20.0))`,
 `.bg(..)`), state styles take a closure (`.active(|s| s.opacity(0.6))`), listeners are closures of their event
 (`.on_press(move || ..)`, `.on_change(move |text: &str| ..)`) and `.child(..)` adds children. A piece of UI is a plain function returning
@@ -80,7 +80,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input
 
 ## Primitives
 
-Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::elements`).
+Imported from `nsh` in TSX, from `nsh_core::element::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::element`).
 
 | Element | Rust | Native view (iOS / Android) | Page |
 |---|---|---|---|

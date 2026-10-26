@@ -36,7 +36,7 @@ const isAvailable: boolean;
 ```rust tabs
 use nsh_core::{
     mobile::{TabBarItem, tab_bar},
-    ui::prelude::*,
+    element::prelude::*,
 };
 
 fn sections() -> impl IntoElement {

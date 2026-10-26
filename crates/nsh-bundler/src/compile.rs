@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use nsh_core::ui::description::{ExportKind, SetDescription};
+use nsh_core::element::description::{ExportKind, SetDescription};
 use oxc::{
     allocator::Allocator,
     codegen::{Codegen, CodegenOptions},

@@ -32,8 +32,8 @@
 use std::rc::Rc;
 
 use nsh_core::{
+    element::prelude::*,
     geometry::{Bounds, Points},
-    ui::prelude::*,
 };
 
 use super::{

@@ -5,8 +5,8 @@
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
+    element::{ElementRef, Os, prelude::*},
     keymap::{Modifiers, When},
-    ui::{ElementRef, Os, prelude::*},
 };
 
 use super::{

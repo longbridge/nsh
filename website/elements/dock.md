@@ -20,7 +20,7 @@ use nsh_base::{
     dock::{DockAreaLayout, DockLayout, DockPanel, DockPlacement, DockRegion, DockTab},
     dock_area, theme,
 };
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn workspace() -> impl IntoElement {
     let layout = signal(

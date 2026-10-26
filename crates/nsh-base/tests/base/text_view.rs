@@ -3,7 +3,7 @@
 use nsh_base::{TextViewClasses, TextViewPart, TextViewParts, TextViewStyles, text_view};
 use nsh_core::{
     PatchValue, StyleKey,
-    ui::{Root, Style, prelude::*},
+    element::{Root, Style, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

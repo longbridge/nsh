@@ -5,8 +5,8 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
+    element::{Renderer, Style, StyleRefinement, prelude::*},
     geometry::{DefiniteLength, Length},
-    ui::{Renderer, Style, StyleRefinement, prelude::*},
 };
 
 use super::{
@@ -117,7 +117,7 @@ pub enum TextViewLinks {
     Report,
     /// It is reported, then a URL of another app or site (with a scheme:
     /// `https:`, `mailto:`, ...) opens outside the app
-    /// ([`nsh_core::ui::open_url`]); an anchor in the document (`#…`) is
+    /// ([`nsh_core::element::open_url`]); an anchor in the document (`#…`) is
     /// only reported.
     Open,
 }
@@ -1391,7 +1391,7 @@ impl Cx {
                 .filter(|s| s.width > px(0.0) && s.height > px(0.0))
                 .map(|s| s.width / s.height)
         };
-        let el = nsh_core::ui::image(image.src.clone())
+        let el = nsh_core::element::image(image.src.clone())
             .resize_mode(ResizeMode::Contain)
             .label(SharedString::from(image.alt.clone()))
             .when_some(image.title.clone(), |el, title| el.hint(title));

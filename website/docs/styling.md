@@ -120,7 +120,7 @@ New views carry no style at all until you give them one, so unstyled wrappers co
 
 ## Colors
 
-In Rust, colors are typed values: `rgb(0x0099ff)`, `rgba(0x0099ffcc)`, `hsla(..)`, `white()`, `black()`, and Tailwind's palette as `nsh_core::ui::palette` (`BLUE.shade(500)`). Color methods take an `AdaptiveColor`, a light and a dark value: `AdaptiveColor::rgb(0xffffff, 0x0d1117)` switches with the system appearance natively, with no render. Colors from the app's theme (`theme().primary` from `nsh_base`) are adaptive too ([Rust](./rust.md#theme)).
+In Rust, colors are typed values: `rgb(0x0099ff)`, `rgba(0x0099ffcc)`, `hsla(..)`, `white()`, `black()`, and Tailwind's palette as `nsh_core::element::palette` (`BLUE.shade(500)`). Color methods take an `AdaptiveColor`, a light and a dark value: `AdaptiveColor::rgb(0xffffff, 0x0d1117)` switches with the system appearance natively, with no render. Colors from the app's theme (`theme().primary` from `nsh_base`) are adaptive too ([Rust](./rust.md#theme)).
 
 In TSX, color properties accept CSS color strings:
 

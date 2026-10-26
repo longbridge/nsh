@@ -2,7 +2,7 @@
 
 use nsh_core::{
     AccessibilityState,
-    ui::{Style, prelude::*},
+    element::{Style, prelude::*},
 };
 
 /// The props of [`Button`].

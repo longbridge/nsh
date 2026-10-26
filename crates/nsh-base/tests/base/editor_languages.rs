@@ -16,8 +16,8 @@ use nsh_base::{
 };
 use nsh_core::{
     Size,
+    element::{Registry, Root, prelude::*},
     platform::{Idiom, Os},
-    ui::{Registry, Root, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

@@ -10,7 +10,7 @@ demo: guide-device
 
 应用运行时，所处的环境会不断变化：窗口改变尺寸（旋转、分屏、Mac 窗口），用户切换到深色模式或更大的字号，键盘出现又消失。NSH 把这些都以**响应式访问器**的形式提供：像 signal 一样调用它，读取了它的东西（样式、文本、计算值）就会在它变化时更新。不需要添加或移除监听器。
 
-在 Rust 中，访问器是 `nsh_core::ui::prelude` 中的函数；在 TSX 中，它们来自表中列出的模块。
+在 Rust 中，访问器是 `nsh_core::element::prelude` 中的函数；在 TSX 中，它们来自表中列出的模块。
 
 | Rust | TSX | 值 |
 |---|---|---|
@@ -24,7 +24,7 @@ demo: guide-device
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh/accessibility`） | 见[无障碍](./accessibility.md)。 |
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -72,7 +72,7 @@ mount(App);
 `window()`（TSX：`windowSize()`）是 NSH 渲染目标 surface 的尺寸：手机上是屏幕，iPad 分屏或 Mac 上是窗口，嵌入时是宿主视图。用它来改变布局，而不只是改变尺寸：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn gallery() -> impl IntoElement {
     let columns = || {
@@ -130,7 +130,7 @@ view()
 其他情况下，在闭包或计算值中读取 `dark()`（TSX：`colorScheme()`）；在 TSX 中颜色较多时，先统一派生出一套调色板：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 // `dark()` 是响应式的：外观变化时闭包重新运行。
 view()
@@ -167,7 +167,7 @@ Rust 组件也从主题中取色，主题为每种颜色提供浅色和深色两
 `set_color_scheme(Appearance::Dark)`（TSX：`nsh/device` 中的 `setColorScheme`）在运行时修改它，用于应用内的外观设置；`Appearance::System`（`"system"`）恢复跟随系统：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 view()
     .on_press(move || {
@@ -225,7 +225,7 @@ text("Today")
 `locale()` 是用户的区域设置，形式为 BCP 47 标签（Rust 中为 `locale().as_str()`）。在 TSX 中，`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取 `locale()` 来选择你自己的翻译文案：读取它的文字会在它变化时更新。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn greeting() -> &'static str {
     match locale().as_str().split('-').next() {
@@ -257,11 +257,11 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 - `safe_area()`（TSX：`safeArea()`）给出整个 surface 的 inset。
 - 组件的 `cx.insets()`（TSX：`safeAreaInsets()`）给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[对话框](../elements/dialog.md)中是对话框自己的。可能出现在多个地方的组件应该优先用它。
-- `nsh_core::elements::safe_area_view()`（TSX：`nsh` 的 `SafeAreaView`）是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `.edges(vec![Edge::Top, Edge::Bottom])`、`edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
+- `nsh_core::element::safe_area_view()`（TSX：`nsh` 的 `SafeAreaView`）是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `.edges(vec![Edge::Top, Edge::Bottom])`、`edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
 
 ```rust tabs
-use nsh_core::elements::{Edge, safe_area_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::{Edge, safe_area_view};
+use nsh_core::element::prelude::*;
 
 fn screen() -> impl IntoElement {
     safe_area_view()
@@ -326,7 +326,7 @@ TSX 的 `platform` 完整成员：
 | `platform.select(spec)` | 当前平台对应的值；见[平台特定代码](./platform-specific.md#platformselect)。 |
 
 ```rust tabs
-use nsh_core::ui::{Os, prelude::*};
+use nsh_core::element::{Os, prelude::*};
 
 let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().0 >= 30);
 ```

@@ -19,7 +19,7 @@ Toast 是在应用上方显示一段时间的简短消息："已复制"、"草�
 ```rust tabs
 use std::time::Duration;
 
-use nsh_core::{time::now, ui::prelude::*};
+use nsh_core::{time::now, element::prelude::*};
 
 use nsh_base::{
     Anchor, ToastManager, ToastMotion, ToastOptions, ToastStackState, theme, toast, toast_stack,

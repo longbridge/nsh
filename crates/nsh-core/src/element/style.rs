@@ -3466,9 +3466,9 @@ mod tests {
     use crate::{
         Style,
         color::{rgb, rgba},
+        element::palette::{EMERALD, PINK, RED, SKY, VIOLET},
         geometry::point,
         tailwind::{ClassEnvironment, ClassProps, Context},
-        ui::palette::{EMERALD, PINK, RED, SKY, VIOLET},
     };
 
     /// What `list` resolves to in `dark` appearance, in [`state`] `states`,

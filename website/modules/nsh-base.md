@@ -328,7 +328,7 @@ The status bar belongs to what is on screen, as in UIKit, where each view contro
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn photo_viewer() -> Screen {
     nav_page().header_visible(false).status_bar(

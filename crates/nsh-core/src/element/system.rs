@@ -531,7 +531,7 @@ impl IntoThrown for JsError {
 mod tests {
     use crate::{
         JsonValue,
-        ui::{JsValue, Registry, declarations, json_host, prelude::*},
+        element::{JsValue, Registry, declarations, json_host, prelude::*},
     };
 
     #[module]
@@ -613,12 +613,12 @@ mod tests {
     fn bytes_convert_from_and_to_js() {
         let host = json_host::JsonHost::default();
         let raw = host.value(serde_json::json!([0, 7, 255]));
-        let bytes = <Vec<u8>>::from_js(crate::ui::JsIn::new(&host, raw)).unwrap();
+        let bytes = <Vec<u8>>::from_js(crate::element::JsIn::new(&host, raw)).unwrap();
         assert_eq!(bytes, [0, 7, 255]);
         let out = bytes.to_js(&host).unwrap();
         assert_eq!(host.read(out), Some(serde_json::json!([0, 7, 255])));
         let bad = host.value(JsonValue::from("x"));
-        assert!(<Vec<u8>>::from_js(crate::ui::JsIn::new(&host, bad)).is_err());
+        assert!(<Vec<u8>>::from_js(crate::element::JsIn::new(&host, bad)).is_err());
     }
 
     #[derive(Debug, JsObject)]
@@ -636,7 +636,7 @@ mod tests {
         let out = time.to_js(&host).unwrap();
         assert_eq!(host.read(out), Some(serde_json::json!({ "$date": 1500.0 })));
         let date = host.value(serde_json::json!({ "$date": -250.0 }));
-        let back = std::time::SystemTime::from_js(crate::ui::JsIn::new(&host, date)).unwrap();
+        let back = std::time::SystemTime::from_js(crate::element::JsIn::new(&host, date)).unwrap();
         assert_eq!(
             std::time::UNIX_EPOCH
                 .duration_since(back)
@@ -645,7 +645,7 @@ mod tests {
             250
         );
         let options = host.value(serde_json::json!({ "recursive": true }));
-        let options = Options::from_js(crate::ui::JsIn::new(&host, options)).unwrap();
+        let options = Options::from_js(crate::element::JsIn::new(&host, options)).unwrap();
         assert_eq!(options.recursive, Some(true));
         let shown = Options {
             recursive: None,
@@ -658,14 +658,14 @@ mod tests {
             Some(serde_json::json!({ "recursive": null }))
         );
         let typo = host.value(serde_json::json!({ "recursive": true, "typo": 1 }));
-        let error = Options::from_js(crate::ui::JsIn::new(&host, typo)).unwrap_err();
+        let error = Options::from_js(crate::element::JsIn::new(&host, typo)).unwrap_err();
         assert_eq!(error.0, "unknown field `typo`");
     }
 
     #[test]
     fn errors_carry_node_s_codes_thrown_and_rejected() {
         use super::{ErrorClass, JsError, io_code};
-        use crate::ui::{IntoThrown, Thrown};
+        use crate::element::{IntoThrown, Thrown};
         let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
         assert_eq!(io_code(&missing), Some("ENOENT"));
         #[cfg(unix)]

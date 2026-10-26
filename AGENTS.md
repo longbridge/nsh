@@ -27,7 +27,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 crates/
   nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
-                       `nsh`'s primitives written as Rust components (`elements/`: `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`);
+                       `nsh`'s primitives written as Rust components (`element/`: `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
@@ -39,10 +39,10 @@ crates/
                        navigation decisions (`navigation.rs`: stacks' screens, transitions' timing and motion, what going back
                        acts on), one view's transitions, layout animations and keyframes (`transition.rs`: curves,
                        interpolation, timing), scroll views' state and physics (`scroll.rs`);
-                       Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
-                       `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
-                       Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
-                       toolchain (`ui/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
+                       Rust components that run once (`element/`: signals, elements, bindings, typed styles, design tokens;
+                       `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`element/class.rs`), JS's calls into
+                       Rust and what comes back, typed (`element/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
+                       toolchain (`element/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
                        modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs),
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
@@ -168,7 +168,7 @@ Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-pa
 `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-bundler`'s feature `bundle` depends on `nsh-js` (to check
 imports against the names native modules export); `nsh-base` depends on `nsh-core` only and is used by the bundler
 (declarations), the platforms and the CLI (registry). An app's own crates (its UI sets) depend on `nsh-core` only and
-are never linked into the CLI: it reads their UI sets as data (`nsh_core::ui::description`); the hosts and runners
+are never linked into the CLI: it reads their UI sets as data (`nsh_core::element::description`); the hosts and runners
 `rust_app.rs` generates link them. `nsh-core` must not depend on any platform or JS crate.
 
 ## Documentation
@@ -299,7 +299,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
   `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
-  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude` and `nsh_core::elements`.
+  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::element` (and its `prelude`).
   Which side an element is on: `nsh-core` holds the foundational elements, what draws or lays out content and what
   the surface reports (`View`, `Text`, `Scroll`, `List`, `Image`, `Canvas`, `Overlay`, `Video`, `WebView`,
   `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`); `nsh-base` holds the functional components, controls a
@@ -360,7 +360,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`
-  `components.rs`) and their TypeScript declarations generated from them (`nsh_core::ui::declarations`), never
+  `components.rs`) and their TypeScript declarations generated from them (`nsh_core::element::declarations`), never
   hand-written per component. JS allocates even node ids, the core odd ones for what components expand
   (`docs/dev/components.md`).
 - **The main thread never waits for JS.** Callbacks the system wants answered on the spot (may this text change, may
@@ -398,7 +398,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
   (`View`, `Text`, `Scroll`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`, `SafeAreaView`,
-  `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::ui::prelude` and `nsh_core::elements` hold them, every base
+  `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::element` holds them, every base
   component from `nsh/base` (`Input`, `Dialog`, `Button`, `NavStack`, ...), and
   `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
   `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same

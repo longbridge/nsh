@@ -6,10 +6,10 @@ order: 12
 
 # nsh/android
 
-`nsh/android` holds APIs that only Android has. Rust code calls their counterparts in `nsh_core::ui::prelude` (`toast`, `on_back_press`) and checks `os() == Os::Android`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its functions do nothing, and `isAvailable` tells you whether you are on Android.
+`nsh/android` holds APIs that only Android has. Rust code calls their counterparts in `nsh_core::element::prelude` (`toast`, `on_back_press`) and checks `os() == Os::Android`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its functions do nothing, and `isAvailable` tells you whether you are on Android.
 
 ```rust tabs
-use nsh_core::{platform::Os, ui::prelude::*}; // os, toast, ToastDuration, on_back_press
+use nsh_core::{platform::Os, element::prelude::*}; // os, toast, ToastDuration, on_back_press
 ```
 
 ```tsx tabs
@@ -38,7 +38,7 @@ Shows a short message at the bottom of the screen (Android's toast). `duration` 
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::{platform::Os, ui::prelude::*};
+use nsh_core::{platform::Os, element::prelude::*};
 
 fn notify(message: &str) {
     if os() == Os::Android {
@@ -81,7 +81,7 @@ The system back button and back gesture. Dialogs handle the back press first (a 
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn Editor() -> impl IntoElement {

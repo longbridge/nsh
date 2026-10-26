@@ -14,7 +14,7 @@ with `nsh_base::input()`, TSX with `<Input>` from `nsh/base`.
 
 ```rust tabs
 use nsh_base::input;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn name_field() -> impl IntoElement {
     let name = signal(String::new());
@@ -134,7 +134,7 @@ input()
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | The keyboard's look; `"default"` follows the system's appearance. Android's keyboards follow the system's theme. |
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 ```
@@ -192,7 +192,7 @@ const height = signal(40);
 Moving focus to the next field on return:
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 let password = element_ref();
 

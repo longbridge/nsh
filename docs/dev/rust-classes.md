@@ -1,6 +1,6 @@
 # Classes and functions from Rust
 
-Status: implemented (`nsh_core::ui` `class.rs`, `callback.rs`, `call.rs`, `js.rs`; `nsh-macros` `class.rs`;
+Status: implemented (`nsh_core::element` `class.rs`, `callback.rs`, `call.rs`, `js.rs`; `nsh-macros` `class.rs`;
 `nsh-js` `classes.rs`, `components.rs`); "Implementation notes" at the end says where it differs from the
 proposal.
 
@@ -328,7 +328,7 @@ impl Downloader {
 
 ## How calls cross
 
-Nothing crosses between JS and the core as JSON for a Rust component, module or class (`nsh_core::ui::call`):
+Nothing crosses between JS and the core as JSON for a Rust component, module or class (`nsh_core::element::call`):
 
 - **Arguments are converted in the JS call** by the generated decoders (`JsValue::from_js`), for every kind of
   call: a synchronous member or function runs on them; a function with `cx`, an `async` function or member and a
@@ -380,10 +380,10 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   code fences): what follows `# Rust` (or rustdoc's `# Panics`, `# Examples`) is for Rust callers only, the place
   for notes about `&self`, `cx` or how a call crosses. `Registry::undocumented` lists the exports TS sees without a doc comment;
   the command line warns of an app's when it writes `.nsh/types`, and nsh's own sets are tested to have none.
-  It implements `ui::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
+  It implements `element::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
   `MemberCall`), as `#[module]` implements `Module`; on the struct it implements `Trace` (the callbacks the fields
   keep) and `Ret` (a value of the struct is a new instance).
-- **`nsh-core`:** `ui::Class`, `ClassSpec` (for the declarations), `Instance<T>`, `Callback<A, R>`, `Posts`,
+- **`nsh-core`:** `element::Class`, `ClassSpec` (for the declarations), `Instance<T>`, `Callback<A, R>`, `Posts`,
   `Registry::class::<C>()`; the direct conversions (`JsHost`, `JsIn`, `JsOwned`; `JsValue`'s `from_js` /
   `to_js`); the typed calls (`call.rs`: `RustOp`, `RustCall`, `JsEvent`, `AnyValue`, `ToJs`); the core runs
   them in order with the ops (`Core::run_rust`).
@@ -392,7 +392,7 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   `JsHost`); calls that become ops convert their values and push the op (`classes::send`), returning the promise
   `components.rs` settles when the core's events bring the result (`components::deliver`); the object is the web
   classes' (`web/mod.rs`), its slot holding the instance, and its mark hook reports the instance's callbacks.
-- **Declarations:** `nsh_core::ui::declarations` writes `export declare class` for each, with the types the members
+- **Declarations:** `nsh_core::element::declarations` writes `export declare class` for each, with the types the members
   use, next to the set's components and modules; the declarations test checks that what exists is declared.
 - **The CLI** needs no change: classes are part of the app's set like its modules.
 

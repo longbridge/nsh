@@ -1,6 +1,6 @@
 //! `KeyboardAvoidingView`: content kept above the software keyboard.
 
-use crate::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, prelude::*};
+use crate::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, prelude::*};
 
 /// The props of [`KeyboardAvoidingView`].
 #[derive(Debug, Clone, PartialEq, Props)]

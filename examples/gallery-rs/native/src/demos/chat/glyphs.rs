@@ -6,8 +6,8 @@ use std::f32::consts::PI;
 
 use nsh_core::{
     canvas::{LineCap, LineJoin},
+    element::{PropEnum, prelude::*},
     geometry::size,
-    ui::{PropEnum, prelude::*},
 };
 
 use crate::ui::{Tint, pt};

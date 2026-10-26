@@ -10,7 +10,7 @@ group: platforms
 NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 macOS 上，
 `os()` 为 `Os::MacOs`（TSX 中 `platform.os` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
-菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
+菜单栏和右键菜单在 Rust 中由 `nsh_core::element::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可调整大小的窗口，覆盖窗口的对话框和菜单栏。
@@ -149,7 +149,7 @@ view.load(Bundle::source(code).into());
 设置 `AppOptions { keep_alive_on_close: true, ..Default::default() }` 可以在关闭窗口后保留独立应用的会话。
 关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
 `nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
-`nsh_core::ui::desktop::close_window()` 遵循所选的窗口关闭策略。
+`nsh_core::element::desktop::close_window()` 遵循所选的窗口关闭策略。
 
 ## macOS 上的差异
 

@@ -618,7 +618,7 @@ pub(crate) mod __private {
     /// `T`'s TypeScript type as a parameter, or nothing in builds without
     /// declarations.
     pub const fn arg_ts<T: Arg>() -> TsType {
-        if crate::ui::DECLARATIONS {
+        if crate::element::DECLARATIONS {
             T::ts_type
         } else {
             |_| String::new()
@@ -628,11 +628,11 @@ pub(crate) mod __private {
     /// The TypeScript type of `T`, a callback parameter whose function's
     /// arguments `#[args(..)]` names `names`; nothing in builds without
     /// declarations.
-    pub fn named_arg_ts<T: crate::ui::callback::NamedArgs>(
+    pub fn named_arg_ts<T: crate::element::callback::NamedArgs>(
         types: &mut TsTypes,
         names: &[&str],
     ) -> String {
-        if crate::ui::DECLARATIONS {
+        if crate::element::DECLARATIONS {
             T::ts_named(types, names)
         } else {
             String::new()
@@ -641,7 +641,7 @@ pub(crate) mod __private {
 
     /// `T`'s TypeScript type as a result.
     pub const fn ret_ts<T: Ret>() -> TsType {
-        if crate::ui::DECLARATIONS {
+        if crate::element::DECLARATIONS {
             T::ts_type
         } else {
             |_| String::new()
@@ -741,8 +741,8 @@ pub(crate) mod __private {
     }
 
     /// [`ret`] of a `Result`: an `Err` throws an `Error` with its message
-    /// (a [`crate::ui::JsError`] its class).
-    pub fn ret_result<T: Ret, E: crate::ui::IntoThrown>(
+    /// (a [`crate::element::JsError`] its class).
+    pub fn ret_result<T: Ret, E: crate::element::IntoThrown>(
         host: &dyn JsHost,
         value: Result<T, E>,
     ) -> Result<JsRaw, Thrown> {
@@ -752,25 +752,25 @@ pub(crate) mod __private {
         }
     }
 
-    /// The task a synchronous call returned ([`crate::ui::Later`]).
-    pub fn start<T: Ret + 'static>(value: crate::ui::Later<T>) -> Result<TaskStart, Thrown> {
+    /// The task a synchronous call returned ([`crate::element::Later`]).
+    pub fn start<T: Ret + 'static>(value: crate::element::Later<T>) -> Result<TaskStart, Thrown> {
         Ok(Box::new(move || value.into_future()))
     }
 
     /// [`start`] of a `Result`: an `Err` throws in the call.
-    pub fn start_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
-        value: Result<crate::ui::Later<T>, E>,
+    pub fn start_result<T: Ret + 'static, E: crate::element::IntoThrown>(
+        value: Result<crate::element::Later<T>, E>,
     ) -> Result<TaskStart, Thrown> {
         value.map_err(E::into_thrown).and_then(start)
     }
 
     /// What the call can do beyond computing (a `cx: CallCx` parameter).
-    pub fn call_cx(host: &dyn JsHost) -> crate::ui::CallCx<'_> {
-        crate::ui::CallCx::new(host)
+    pub fn call_cx(host: &dyn JsHost) -> crate::element::CallCx<'_> {
+        crate::element::CallCx::new(host)
     }
 
     /// The VM the call comes from (a `sys: System` parameter).
-    pub fn system(host: &dyn JsHost) -> crate::ui::System {
+    pub fn system(host: &dyn JsHost) -> crate::element::System {
         host.system()
     }
 
@@ -781,7 +781,7 @@ pub(crate) mod __private {
     }
 
     /// [`construct`] of a `Result`.
-    pub fn construct_result<C: Class, E: crate::ui::IntoThrown>(
+    pub fn construct_result<C: Class, E: crate::element::IntoThrown>(
         host: &dyn JsHost,
         value: Result<C, E>,
     ) -> Result<JsRaw, Thrown> {
@@ -796,9 +796,9 @@ pub(crate) mod __private {
         Ok(Box::new(value))
     }
 
-    /// [`boxed`] of a `Result`: an `Err` rejects (a [`crate::ui::JsError`]
+    /// [`boxed`] of a `Result`: an `Err` rejects (a [`crate::element::JsError`]
     /// with its class and properties, any other error with its message).
-    pub fn boxed_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
+    pub fn boxed_result<T: Ret + 'static, E: crate::element::IntoThrown>(
         value: Result<T, E>,
     ) -> JsResult {
         match value {
@@ -871,7 +871,7 @@ pub(crate) mod __private {
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::{Registry, declarations, prelude::*};
+    use crate::element::{Registry, declarations, prelude::*};
 
     /// A function the generated code must not call for `core::mem::drop`.
     #[allow(dead_code)]
@@ -1021,7 +1021,7 @@ mod tests {
         registry.class::<Tally>().class::<Token>();
         // Helpers without `pub` stay Rust's: neither declared nor members.
         assert!(
-            !<Tally as crate::ui::Class>::DEF
+            !<Tally as crate::element::Class>::DEF
                 .members
                 .iter()
                 .any(|m| m.name == "bump" || m.name == "privateLater")
@@ -1135,7 +1135,7 @@ export declare class Token {
         let mut registry = Registry::ui_set("test/ui");
         registry.module::<Tools>();
         assert!(
-            !<Tools as crate::ui::Module>::FUNCTIONS
+            !<Tools as crate::element::Module>::FUNCTIONS
                 .iter()
                 .any(|f| f.name == "helper")
         );
@@ -1180,7 +1180,7 @@ export declare const Tools: ToolsModule;
 
     /// A component exported as `Tally`.
     mod view {
-        use crate::ui::prelude::*;
+        use crate::element::prelude::*;
 
         pub(super) struct Tally;
 

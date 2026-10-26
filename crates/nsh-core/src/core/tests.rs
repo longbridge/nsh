@@ -4,8 +4,8 @@ use super::*;
 use crate::{
     Color, EventKind, IMAGE_SCALES, ImageScales, StyleValue,
     animation::{AnimationOp, AnimationProp},
+    element::input,
     geometry::{point, px},
-    ui::input,
 };
 
 /// 8pt per char, 16pt per line, wraps at `max_width`. Counts calls.
@@ -72,7 +72,7 @@ impl TextEngine for FakeEngine {
 /// calls' results as the native events JS once heard (`$children`,
 /// `$return` with `{ c, v }` or `{ c, e }`), their data as JSON.
 fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPayload)> {
-    use crate::ui::{JsEvent, json_host};
+    use crate::element::{JsEvent, json_host};
     let mut events = Vec::new();
     c.take_events(&mut events);
     let native = |id, name: &str, data| {
@@ -130,8 +130,11 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
 
 /// Prop `name` of a Rust component of props `P`, from JS value `value`
 /// (converted as JS's assignment does).
-fn rust_prop<P: crate::ui::Props>(name: &'static str, value: Option<crate::JsonValue>) -> Prop {
-    let specs = P::spec(&mut crate::ui::TsTypes::default());
+fn rust_prop<P: crate::element::Props>(
+    name: &'static str,
+    value: Option<crate::JsonValue>,
+) -> Prop {
+    let specs = P::spec(&mut crate::element::TsTypes::default());
     let decode = specs
         .iter()
         .find(|p| p.name == name)
@@ -139,13 +142,13 @@ fn rust_prop<P: crate::ui::Props>(name: &'static str, value: Option<crate::JsonV
         .expect("a value prop");
     Prop::RustProp(
         name,
-        value.map(|v| crate::ui::json_host::decode(decode, v).expect("the value converts")),
+        value.map(|v| crate::element::json_host::decode(decode, v).expect("the value converts")),
     )
 }
 
 #[test]
 fn calls_into_rust_settle_their_promises_whatever_happens() {
-    use crate::ui::{RustCall, RustOp, ToJs};
+    use crate::element::{RustCall, RustOp, ToJs};
     let op = |call, run| Op::Rust(RustOp { call, run });
     let mut c = core();
     // Run: its value.
@@ -200,7 +203,7 @@ fn calls_into_rust_settle_their_promises_whatever_happens() {
 
 #[test]
 fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
-    use crate::ui::{JsHost, JsOwned, JsValue, PropError, RustCall, RustOp, ToJs, TsTypes};
+    use crate::element::{JsHost, JsOwned, JsValue, PropError, RustCall, RustOp, ToJs, TsTypes};
     /// Panics as it drops.
     struct Grenade;
     impl Drop for Grenade {
@@ -212,7 +215,7 @@ fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
         fn ts_type(_: &mut TsTypes) -> String {
             "null".into()
         }
-        fn from_js(_: crate::ui::JsIn<'_>) -> Result<Self, PropError> {
+        fn from_js(_: crate::element::JsIn<'_>) -> Result<Self, PropError> {
             Ok(Grenade)
         }
         fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
@@ -253,7 +256,7 @@ fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
 
 fn core() -> Core<FakeEngine> {
     let mut c = Core::new(FakeEngine::default(), size_pt(320.0, 480.0));
-    c.set_tokens(crate::ui::tokens::sample());
+    c.set_tokens(crate::element::tokens::sample());
     c
 }
 
@@ -318,8 +321,8 @@ fn pan_permission_filters_native_values_and_events_without_losing_them() {
 /// The tokens of a theme file of the tests' own format, `{ "key":
 /// "#rrggbb", … }` over the sample's (`None`: the sample's): the core reads
 /// `uiTheme` with what a UI set brings.
-fn test_tokens(json: Option<&str>) -> Result<crate::ui::Tokens, String> {
-    let mut tokens = crate::ui::tokens::sample();
+fn test_tokens(json: Option<&str>) -> Result<crate::element::Tokens, String> {
+    let mut tokens = crate::element::tokens::sample();
     let Some(json) = json else {
         return Ok(tokens);
     };
@@ -332,8 +335,8 @@ fn test_tokens(json: Option<&str>) -> Result<crate::ui::Tokens, String> {
 }
 
 /// Tokens with just `colors`.
-fn tokens_with(colors: &[(&str, crate::ui::AdaptiveColor)]) -> crate::ui::Tokens {
-    let mut tokens = crate::ui::Tokens::default();
+fn tokens_with(colors: &[(&str, crate::element::AdaptiveColor)]) -> crate::element::Tokens {
+    let mut tokens = crate::element::Tokens::default();
     for (key, color) in colors {
         tokens.set_color(key, *color);
     }
@@ -341,8 +344,8 @@ fn tokens_with(colors: &[(&str, crate::ui::AdaptiveColor)]) -> crate::ui::Tokens
 }
 
 /// Color token `key` of the tokens apps have.
-fn token(key: &str) -> crate::ui::AdaptiveColor {
-    crate::ui::tokens::sample().color(key).unwrap()
+fn token(key: &str) -> crate::element::AdaptiveColor {
+    crate::element::tokens::sample().color(key).unwrap()
 }
 
 fn style(props: &[(&str, StyleValue<'_>)]) -> Box<Style> {
@@ -5598,14 +5601,14 @@ mod components {
     use super::*;
     use crate::{
         Prop,
-        ui::{Children, Event, Props, Registry, Slot, prelude::*},
+        element::{Children, Event, Props, Registry, Slot, prelude::*},
     };
 
     /// Counts taps; shows `label` and the count; holds its JSX children.
     #[derive(Clone, PartialEq, Props)]
     struct TallyProps {
         #[prop(default = "Taps".into())]
-        label: crate::ui::Prop<SharedString>,
+        label: crate::element::Prop<SharedString>,
         children: Children,
     }
 
@@ -5651,10 +5654,10 @@ mod components {
 
     #[derive(Clone, Copy)]
     struct KnobApi {
-        at: crate::ui::Signal<i32>,
+        at: crate::element::Signal<i32>,
     }
 
-    #[crate::ui::methods]
+    #[crate::element::methods]
     impl KnobApi {
         /// Turns it by `by`; where it is.
         pub(crate) fn turn(&self, by: i32) -> i32 {
@@ -5670,10 +5673,10 @@ mod components {
 
     impl Component for Knob {
         type Props = KnobProps;
-        type Event = crate::ui::NoEvent;
-        const METHODS: crate::ui::Methods = crate::ui::Methods::of::<KnobApi>();
+        type Event = crate::element::NoEvent;
+        const METHODS: crate::element::Methods = crate::element::Methods::of::<KnobApi>();
 
-        fn view(_: KnobProps, cx: Scope<crate::ui::NoEvent>) -> impl IntoElement {
+        fn view(_: KnobProps, cx: Scope<crate::element::NoEvent>) -> impl IntoElement {
             let at = signal(0);
             cx.methods(KnobApi { at });
             text(move || format!("at {}", at.get()))
@@ -5682,7 +5685,7 @@ mod components {
 
     #[test]
     fn methods_take_their_arguments_typed_and_answer_in_the_events() {
-        use crate::ui::{RustCall, RustOp, json_host::JsonHost};
+        use crate::element::{RustCall, RustOp, json_host::JsonHost};
         let mut c = core();
         let mut registry = Registry::new();
         registry.register::<Knob>();
@@ -5706,7 +5709,7 @@ mod components {
             ],
         );
         assert_eq!(texts(&c.commit().unwrap()), ["at 0"]);
-        let methods = <KnobApi as crate::ui::Api>::METHODS;
+        let methods = <KnobApi as crate::element::Api>::METHODS;
         // Converted in the JS call: a value of another type fails there.
         let call = |method: usize, args| {
             let host = JsonHost::with_args(args);
@@ -5760,14 +5763,14 @@ mod components {
     #[derive(Clone, PartialEq, Props)]
     struct EchoProps {
         #[prop(default)]
-        label: crate::ui::Prop<SharedString>,
+        label: crate::element::Prop<SharedString>,
     }
 
     impl Component for Echo {
         type Props = EchoProps;
-        type Event = crate::ui::NoEvent;
+        type Event = crate::element::NoEvent;
 
-        fn view(props: EchoProps, _: Scope<crate::ui::NoEvent>) -> impl IntoElement {
+        fn view(props: EchoProps, _: Scope<crate::element::NoEvent>) -> impl IntoElement {
             text(move || {
                 ECHOES.with(|e| e.set(e.get() + 1));
                 props.label.get()
@@ -5827,7 +5830,7 @@ mod components {
     #[test]
     fn a_rust_root_mounts_renders_and_handles_events() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Tally>(|| TallyProps {
+        c.mount_root(&crate::element::Root::new::<Tally>(|| TallyProps {
             label: "Root".into(),
             children: Children::default(),
         }));
@@ -5945,19 +5948,19 @@ mod components {
         // A value of the wrong type does not convert (JS warns and sends
         // nothing); one decoded for another type is refused (and logged),
         // nothing changes.
-        let specs = <TallyProps as Props>::spec(&mut crate::ui::TsTypes::default());
+        let specs = <TallyProps as Props>::spec(&mut crate::element::TsTypes::default());
         let decode = specs
             .iter()
             .find(|p| p.name == "label")
             .unwrap()
             .decode
             .unwrap();
-        assert!(crate::ui::json_host::decode(decode, json!(3)).is_err());
+        assert!(crate::element::json_host::decode(decode, json!(3)).is_err());
         apply(
             &mut c,
             vec![Op::SetProp {
                 id: 2,
-                prop: Prop::RustProp("label", Some(crate::ui::AnyValue::new(3.0f64))),
+                prop: Prop::RustProp("label", Some(crate::element::AnyValue::new(3.0f64))),
             }],
         );
         assert!(c.commit().is_none());
@@ -5993,7 +5996,7 @@ mod components {
     /// A header slot above its children.
     #[derive(Clone, Copy, PartialEq, Props)]
     struct CardProps {
-        header: crate::ui::Prop<Option<Slot>>,
+        header: crate::element::Prop<Option<Slot>>,
         children: Children,
     }
 
@@ -6011,7 +6014,7 @@ mod components {
     /// Children above a footer slot.
     #[derive(Clone, Copy, PartialEq, Props)]
     struct PanelProps {
-        footer: crate::ui::Prop<Option<Slot>>,
+        footer: crate::element::Prop<Option<Slot>>,
         children: Children,
     }
 
@@ -6611,9 +6614,9 @@ mod components {
     #[derive(Clone, PartialEq, Props)]
     struct PillProps {
         #[prop(default)]
-        selected: crate::ui::Prop<bool>,
+        selected: crate::element::Prop<bool>,
         #[prop(default)]
-        selected_style: crate::ui::Prop<crate::ui::Style>,
+        selected_style: crate::element::Prop<crate::element::Style>,
     }
 
     #[component]
@@ -6848,7 +6851,7 @@ mod components {
             }],
         );
         view_with_classes(&mut c, 2, "w-10 h-10 bg-chart-up");
-        c.set_host_tokens(Some(crate::ui::tokens::sample()));
+        c.set_host_tokens(Some(crate::element::tokens::sample()));
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
@@ -7008,7 +7011,7 @@ mod components {
     #[derive(Clone, Copy, PartialEq, Props)]
     struct ClockProps {
         #[prop(default)]
-        start: crate::ui::Prop<u32>,
+        start: crate::element::Prop<u32>,
     }
 
     #[derive(Event)]
@@ -7076,7 +7079,7 @@ mod components {
         let id = signal(Some(1u32));
         let profile = resource(
             move || id.get(),
-            |id, info: crate::ui::ResourceInfo| async move {
+            |id, info: crate::element::ResourceInfo| async move {
                 // The first load is slow: the second overtakes it.
                 let ms = if id == 1 { 80 } else { 5 };
                 timer(std::time::Duration::from_millis(ms)).await;
@@ -7240,11 +7243,11 @@ mod components {
 
         // What a binding read of the environment updates it; the rest does
         // not.
-        let env = crate::ui::Environment {
+        let env = crate::element::Environment {
             window: size_pt(390.0, 844.0),
             ..Default::default()
         };
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             keyboard_height: px(300.0),
             ..env
         });
@@ -7726,7 +7729,7 @@ mod components {
     #[component]
     fn Outlived() -> impl IntoElement {
         let (owner, (fade, field)) =
-            crate::ui::create_root(|| (animated_value(1.0), element_ref()));
+            crate::element::create_root(|| (animated_value(1.0), element_ref()));
         let _ = fade.timing(0.0, 300.0, Easing::Linear);
         let shown = signal(String::new());
         view()
@@ -8081,7 +8084,7 @@ mod components {
     #[test]
     fn virtual_lists_drop_rows_that_are_gone() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Clearable>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Clearable>(|| ()));
         let batch = c.commit().unwrap();
         assert!(
             texts(&batch).contains(&"row 2".to_owned()),
@@ -8139,7 +8142,7 @@ mod components {
     #[test]
     fn virtual_lists_follow_their_end() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Chat>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Chat>(|| ()));
         let batch = c.commit().unwrap();
         let created = |kind: ViewKind| {
             batch.items.iter().find_map(|i| match i {
@@ -8190,7 +8193,7 @@ mod components {
     #[derive(Clone, Copy, PartialEq, Props)]
     struct DrawerProps {
         #[prop(default)]
-        open: crate::ui::Prop<bool>,
+        open: crate::element::Prop<bool>,
         #[prop(lazy)]
         children: Children,
     }
@@ -8226,7 +8229,7 @@ mod components {
     #[test]
     fn lazy_children_a_component_passes_are_made_while_placed() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Shelf>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Shelf>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8274,7 +8277,7 @@ mod components {
     #[test]
     fn components_read_the_clipboard() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Paster>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Paster>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8320,7 +8323,7 @@ mod components {
         let clipboard = std::sync::Arc::new(MemoryClipboard::new(Some("hello".into())));
         let mut c = core();
         c.set_clipboard(Some(clipboard.clone()));
-        c.mount_root(&crate::ui::Root::new::<Paster>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Paster>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8372,7 +8375,7 @@ mod components {
     #[test]
     fn components_read_images_and_files_from_the_clipboard() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<ImagePaster>(|| ()));
+        c.mount_root(&crate::element::Root::new::<ImagePaster>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8445,7 +8448,7 @@ mod components {
             declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
             granted: None,
         }));
-        c.mount_root(&crate::ui::Root::new::<ImagePaster>(|| ()));
+        c.mount_root(&crate::element::Root::new::<ImagePaster>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8502,7 +8505,7 @@ mod components {
     }
 
     fn press_picker(c: &mut Core<FakeEngine>) -> Vec<MountItem> {
-        c.mount_root(&crate::ui::Root::new::<PhotoPicker>(|| ()));
+        c.mount_root(&crate::element::Root::new::<PhotoPicker>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
             .items
@@ -8601,7 +8604,7 @@ mod components {
     /// again.
     #[component]
     fn Boundary(props: WithChildren) -> impl IntoElement {
-        let retry = stored(None::<crate::ui::Reset>);
+        let retry = stored(None::<crate::element::Reset>);
         view()
             .on_press(move |_: &()| {
                 if let Some(reset) = retry.replace(None) {
@@ -8621,7 +8624,7 @@ mod components {
     #[derive(Clone, Copy, PartialEq, Props)]
     struct FaultyProps {
         #[prop(default)]
-        explode: crate::ui::Prop<bool>,
+        explode: crate::element::Prop<bool>,
     }
 
     #[component]
@@ -8717,7 +8720,7 @@ mod components {
     #[test]
     fn rust_texts_nest_spans_links_and_inline_views() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Sentence>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Sentence>(|| ()));
         let batch = c.commit().unwrap();
         let text = |batch: &MountBatch| {
             batch.items.iter().find_map(|i| match i {
@@ -8751,7 +8754,7 @@ mod touch {
     use super::*;
     use crate::{
         TouchEvent, TouchPhase, TouchPoint,
-        ui::{ClaimRequest, ResponderEvent, TouchClaim, prelude::*},
+        element::{ClaimRequest, ResponderEvent, TouchClaim, prelude::*},
     };
 
     #[derive(Clone, PartialEq, Props)]
@@ -8837,7 +8840,7 @@ mod touch {
     /// listen to touches).
     fn mount_pad(keep: bool) -> (Core<FakeEngine>, NodeId, NodeId) {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Pad>(move || PadProps { keep }));
+        c.mount_root(&crate::element::Root::new::<Pad>(move || PadProps { keep }));
         let batch = c.commit().unwrap();
         let listening: Vec<NodeId> = batch
             .items
@@ -9011,7 +9014,7 @@ mod touch {
     #[test]
     fn a_pan_claim_waits_for_the_platform_to_activate_it() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Scrub>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Scrub>(|| ()));
         let batch = c.commit().unwrap();
         let (id, activation) = batch
             .items
@@ -9063,7 +9066,7 @@ mod touch {
     #[test]
     fn the_responder_stays_pressed_until_its_touches_end() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Band>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Band>(|| ()));
         let batch = c.commit().unwrap();
         let id = batch
             .items
@@ -9119,7 +9122,7 @@ mod touch {
     #[test]
     fn pinches_and_rotations_drive_animated_values() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Card>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Card>(|| ()));
         let batch = c.commit().unwrap();
         let values = batch
             .items
@@ -9147,8 +9150,8 @@ mod painter {
     use super::*;
     use crate::{
         canvas::{CanvasGradient, CanvasOp, FillRule, GradientShape, Num, Paint, svg_path},
+        element::prelude::*,
         geometry::{bounds, percentage, point, px, radians, size},
-        ui::prelude::*,
     };
 
     #[test]
@@ -9198,11 +9201,11 @@ mod painter {
             .line_dash_from_view()
             .fill_rect(0.0, 0.0, 10.0, 10.0);
         view()
-            .inline_style(crate::ui::Style::from_decls([set(
+            .inline_style(crate::element::Style::from_decls([set(
                 StyleKey::Color,
                 "#00ff00",
             )]))
-            .child(canvas(p).inline_style(crate::ui::Style::from_decls([
+            .child(canvas(p).inline_style(crate::element::Style::from_decls([
                 set(StyleKey::Stroke, "#ff0000"),
                 set(StyleKey::StrokeWidth, "3"),
                 set(StyleKey::StrokeDasharray, "2 1"),
@@ -9219,7 +9222,7 @@ mod painter {
     #[test]
     fn drawings_paint_with_their_views_style() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<ViewPainted>(|| ()));
+        c.mount_root(&crate::element::Root::new::<ViewPainted>(|| ()));
         let batch = c.commit().unwrap();
         let drawings: Vec<_> = batch
             .items
@@ -9263,7 +9266,7 @@ mod painter {
     #[test]
     fn an_empty_first_drawing_sends_nothing() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<EmptyAndDrawn>(|| ()));
+        c.mount_root(&crate::element::Root::new::<EmptyAndDrawn>(|| ()));
         let batch = c.commit().unwrap();
         let drawings: Vec<_> = batch
             .items
@@ -9282,7 +9285,7 @@ mod painter {
     #[component]
     fn Label() -> impl IntoElement {
         let offset = animated_value(3.0);
-        let width = crate::ui::prelude::measure_text("600 20px system-ui", "100%");
+        let width = crate::element::prelude::measure_text("600 20px system-ui", "100%");
         let mut p = Painter::new()
             .stroke_style(
                 CanvasGradient::conic(radians(0.0), point(px(50.0), px(50.0)))
@@ -9306,7 +9309,7 @@ mod painter {
     #[test]
     fn rust_drawings_measure_text_and_use_every_paint() {
         let mut c = core();
-        c.mount_root(&crate::ui::Root::new::<Label>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Label>(|| ()));
         let batch = c.commit().unwrap();
         let drawing = batch
             .items
@@ -9752,7 +9755,7 @@ mod views {
     use super::*;
     use crate::{
         Prop,
-        ui::{Component, Props, Registry, Root, Scope, prelude::*},
+        element::{Component, Props, Registry, Root, Scope, prelude::*},
     };
 
     fn texts(batch: &MountBatch) -> Vec<String> {
@@ -9807,7 +9810,7 @@ mod views {
     #[derive(Clone, PartialEq, Props)]
     struct CounterProps {
         #[prop(default = "Taps".into())]
-        label: crate::ui::Prop<SharedString>,
+        label: crate::element::Prop<SharedString>,
     }
 
     #[derive(Event)]
@@ -10261,7 +10264,7 @@ mod views {
         let batch = c.commit().unwrap();
         let shown = texts(&batch);
         assert!(shown[0].starts_with("light 0 "), "{shown:?}");
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             dark: true,
             ..Default::default()
         });
@@ -10399,7 +10402,7 @@ mod views {
                 0xeeeeeeff, 0x00ff00ff
             ]))
         );
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             dark: true,
             ..Default::default()
         });
@@ -10459,7 +10462,7 @@ mod views {
         let mut c = core();
         c.mount_root(&Root::new::<SharedLight>(|| ()));
         assert_eq!(outputs(&c.commit().unwrap()), vec![colors(0x000000ff); 3]);
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             dark: true,
             ..Default::default()
         });
@@ -10521,7 +10524,7 @@ mod views {
     #[derive(Clone, PartialEq, Props)]
     struct MailboxProps {
         #[prop(default)]
-        rows: crate::ui::Prop<u32>,
+        rows: crate::element::Prop<u32>,
     }
 
     impl Component for Mailbox {
@@ -10756,7 +10759,7 @@ mod views {
     #[derive(Clone, PartialEq, Props)]
     struct PocketProps {
         #[prop(default)]
-        open: crate::ui::Prop<bool>,
+        open: crate::element::Prop<bool>,
         #[prop(lazy)]
         children: Children,
     }
@@ -11126,7 +11129,7 @@ mod views {
 
     #[derive(Clone, PartialEq, Props)]
     struct ShyProps {
-        children: crate::ui::Prop<Children>,
+        children: crate::element::Prop<Children>,
     }
 
     impl Component for Shy {
@@ -11281,7 +11284,7 @@ mod views {
     #[derive(Clone, PartialEq, Props)]
     struct KeyProps {
         #[prop(default)]
-        selected: crate::ui::Prop<bool>,
+        selected: crate::element::Prop<bool>,
     }
 
     impl Component for Key {
@@ -11501,7 +11504,7 @@ mod views {
         type Event = NoEvent;
 
         fn view(_: NativeHostProps, _: Scope<NoEvent>) -> impl IntoElement {
-            crate::ui::native("test.native")
+            crate::element::native("test.native")
                 .prop("items", serde_json::json!([1]))
                 .flex_1()
         }
@@ -11679,7 +11682,7 @@ mod views {
     struct CornerProps {
         #[prop(default)]
         framed: bool,
-        corner: crate::ui::Prop<Option<Slot>>,
+        corner: crate::element::Prop<Option<Slot>>,
     }
 
     impl Component for Corner {
@@ -11797,7 +11800,7 @@ mod views {
 
     #[derive(Clone, PartialEq, Props)]
     struct MidProps {
-        corner: crate::ui::Prop<Option<Slot>>,
+        corner: crate::element::Prop<Option<Slot>>,
     }
 
     /// Passes its corner slot on to a corner's.
@@ -12008,7 +12011,7 @@ mod views {
         fn view(_: LightingProps, _: Scope<NoEvent>) -> impl IntoElement {
             let v = animated_value(0.5);
             let wide = signal(false);
-            let red = crate::ui::Style::default().with(
+            let red = crate::element::Style::default().with(
                 crate::StyleKey::BackgroundColor,
                 crate::PatchValue::Str("#ff0000".into()),
             );
@@ -12073,10 +12076,10 @@ mod views {
 
     #[derive(Clone, Copy)]
     struct DialApi {
-        at: crate::ui::Signal<i32>,
+        at: crate::element::Signal<i32>,
     }
 
-    #[crate::ui::methods]
+    #[crate::element::methods]
     impl DialApi {
         /// Where it is.
         pub(crate) fn at(&self) -> i32 {
@@ -12087,7 +12090,7 @@ mod views {
     impl Component for Dial {
         type Props = ();
         type Event = NoEvent;
-        const METHODS: crate::ui::Methods = crate::ui::Methods::of::<DialApi>();
+        const METHODS: crate::element::Methods = crate::element::Methods::of::<DialApi>();
 
         fn view(_: (), cx: Scope<NoEvent>) -> impl IntoElement {
             let at = signal(7);
@@ -12097,7 +12100,7 @@ mod views {
     }
 
     thread_local! {
-        static DIAL: Cell<Option<crate::ui::ComponentRef<Dial>>> = const { Cell::new(None) };
+        static DIAL: Cell<Option<crate::element::ComponentRef<Dial>>> = const { Cell::new(None) };
     }
 
     #[derive(Clone, PartialEq, Props)]
@@ -12569,7 +12572,7 @@ mod views {
 
     #[derive(Clone, Copy, PartialEq, Props)]
     struct ShownProps {
-        value: crate::ui::Prop<SharedString>,
+        value: crate::element::Prop<SharedString>,
     }
 
     /// Shows its prop.
@@ -12592,10 +12595,10 @@ mod views {
                 n.update(|n| *n += 1);
             })
             .child(dynamic(move || {
-                let value: crate::ui::Prop<SharedString> = if fixed.get() {
+                let value: crate::element::Prop<SharedString> = if fixed.get() {
                     "fixed".into()
                 } else {
-                    crate::ui::Prop::bind(move || format!("n {}", n.get()).into())
+                    crate::element::Prop::bind(move || format!("n {}", n.get()).into())
                 };
                 shown().value(value)
             }))
@@ -12654,7 +12657,7 @@ mod views {
             panic!("{table:?}");
         };
         let ours = *ours;
-        assert!(ours >= crate::ui::keys::FIRST_ID);
+        assert!(ours >= crate::element::keys::FIRST_ID);
         // JS's table joins it: JS's first, then the views'.
         let js = KeyBinding::new(
             1,
@@ -12728,7 +12731,7 @@ mod views {
             panic!("{table:?}");
         };
         assert_eq!(*js, 1);
-        assert!(*ours >= crate::ui::keys::FIRST_ID);
+        assert!(*ours >= crate::element::keys::FIRST_ID);
         assert!(listening(&c));
         // The view's binding goes; JS's stays, still listened to.
         assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
@@ -12858,12 +12861,12 @@ mod rust_desktop {
     use super::*;
     use crate::{
         desktop::{DesktopCommand, TitleBarStyle},
-        geometry::{Edges, Points},
-        ui::{
+        element::{
             Root,
             desktop::{close_window, set_title_bar, title_bar},
             prelude::*,
         },
+        geometry::{Edges, Points},
     };
 
     thread_local! {
@@ -12894,7 +12897,7 @@ mod rust_desktop {
     fn rust_title_bar_commands_and_reactive_drag_props_reach_the_platform() {
         let mut c = core();
         READS.set(0);
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             title_bar: Edges {
                 top: Points(42.0),
                 left: Points(78.0),
@@ -12942,7 +12945,7 @@ mod rust_desktop {
                 .any(|item| matches!(item, MountItem::Create { .. }))
         );
         let reads = READS.get();
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             dark: true,
             title_bar: Edges {
                 top: Points(42.0),
@@ -12958,7 +12961,7 @@ mod rust_desktop {
             reads,
             "other environment changes do not rerun title_bar readers"
         );
-        c.set_environment(crate::ui::Environment {
+        c.set_environment(crate::element::Environment {
             title_bar: Edges {
                 top: Points(42.0),
                 left: Points(0.0),
@@ -12974,7 +12977,7 @@ mod rust_desktop {
                 .iter()
                 .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "42 0 138"))
         );
-        c.set_environment(crate::ui::Environment::default());
+        c.set_environment(crate::element::Environment::default());
         let batch = c.commit().unwrap();
         assert!(
             batch
@@ -12990,7 +12993,7 @@ mod rust_desktop {
 
 #[test]
 fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
-    use crate::ui::prelude::*;
+    use crate::element::prelude::*;
     #[component]
     fn DropView() -> impl IntoElement {
         let received = signal(String::new());
@@ -13000,13 +13003,13 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
             .on_press(move |_: &()| disabled.set(true))
             .on_file_drag_enter(|_: &()| {})
             .on_file_drag_leave(|_: &()| {})
-            .on_file_drop(move |event: &crate::ui::FileDropEvent| {
+            .on_file_drop(move |event: &crate::element::FileDropEvent| {
                 received.set(event.uris.join("\n"))
             })
             .child(text(move || received.get()))
     }
     let mut c = core();
-    c.mount_root(&crate::ui::Root::of::<DropView>());
+    c.mount_root(&crate::element::Root::of::<DropView>());
     let batch = c.commit().unwrap();
     let host = batch
         .items
@@ -13049,7 +13052,7 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
 
 #[test]
 fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
-    use crate::ui::prelude::*;
+    use crate::element::prelude::*;
     #[component]
     fn Crosshair() -> impl IntoElement {
         let at = signal(String::new());
@@ -13067,7 +13070,7 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
             .child(text(move || at.get()))
     }
     let mut c = core();
-    c.mount_root(&crate::ui::Root::of::<Crosshair>());
+    c.mount_root(&crate::element::Root::of::<Crosshair>());
     let batch = c.commit().unwrap();
     let host = batch
         .items
@@ -13099,7 +13102,7 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
 
 #[test]
 fn context_menus_reach_rust_listeners_with_their_positions() {
-    use crate::ui::prelude::*;
+    use crate::element::prelude::*;
     #[component]
     fn Row() -> impl IntoElement {
         let at = signal(String::new());
@@ -13113,7 +13116,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
             .child(text(move || at.get()))
     }
     let mut c = core();
-    c.mount_root(&crate::ui::Root::of::<Row>());
+    c.mount_root(&crate::element::Root::of::<Row>());
     let batch = c.commit().unwrap();
     let host = batch
         .items
@@ -13399,7 +13402,7 @@ fn start_and_end_follow_the_writing_direction() {
 /// `Option`, a `Vec`, an array or an iterator.
 mod builders {
     use super::*;
-    use crate::ui::{Listener, Root, prelude::*};
+    use crate::element::{Listener, Root, prelude::*};
 
     /// The mount items of `C`'s first frame and of the frames after a press
     /// on each text of `taps`, in order.
@@ -13594,7 +13597,7 @@ mod renders {
     use super::*;
     use crate::{
         Prop,
-        ui::{AnyValue, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
+        element::{AnyValue, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
     };
 
     /// Renders each item (`key:label`) with the app's function, keyed by
@@ -13602,10 +13605,10 @@ mod renders {
     #[derive(Clone, PartialEq, Props)]
     struct ShelfProps {
         #[prop(default)]
-        items: crate::ui::Prop<Vec<String>>,
+        items: crate::element::Prop<Vec<String>>,
         #[prop(default)]
         inline: bool,
-        render_item: crate::ui::Prop<Option<Renderer<String>>>,
+        render_item: crate::element::Prop<Option<Renderer<String>>>,
     }
 
     fn split(item: &str) -> (String, String) {
@@ -13881,14 +13884,14 @@ mod renders {
     #[derive(Clone, PartialEq, Props)]
     struct CardProps {
         #[prop(default)]
-        heading_class: crate::ui::Prop<Option<SharedString>>,
+        heading_class: crate::element::Prop<Option<SharedString>>,
     }
 
     #[component]
     fn Card(props: CardProps) -> impl IntoElement {
         view().child(
             view()
-                .bg(crate::ui::palette::RED.shade(500))
+                .bg(crate::element::palette::RED.shade(500))
                 .border_2()
                 .app_class(props.heading_class),
         )
@@ -13973,7 +13976,7 @@ mod renders {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, id).unwrap().background_color,
-            Color::from(crate::ui::palette::RED.shade(500))
+            Color::from(crate::element::palette::RED.shade(500))
         );
     }
 }
@@ -13982,7 +13985,7 @@ mod rust_selection_area {
     use std::cell::Cell;
 
     use super::*;
-    use crate::ui::{Root, prelude::*};
+    use crate::element::{Root, prelude::*};
 
     thread_local! {
         static AREA: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
@@ -14790,10 +14793,10 @@ fn tooltips_show_after_the_pointer_rests_and_hide_when_it_leaves_or_presses() {
     let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
     let _clock = clock.enter();
     let mut c = core();
-    c.set_environment(crate::ui::Environment {
+    c.set_environment(crate::element::Environment {
         os: crate::platform::Os::Linux,
         idiom: crate::platform::Idiom::Desktop,
-        ..crate::ui::Environment::default()
+        ..crate::element::Environment::default()
     });
     add(
         &mut c,
@@ -15051,7 +15054,7 @@ fn image_uris(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<
 }
 
 fn at_ratio(c: &mut Core<FakeEngine>, pixel_ratio: f32) {
-    c.set_environment(crate::ui::Environment {
+    c.set_environment(crate::element::Environment {
         pixel_ratio,
         ..Default::default()
     });
@@ -15319,7 +15322,7 @@ fn image_scales_change_nothing_without_scales() {
 /// is picked as an imported one.
 mod asset_variants {
     use super::*;
-    use crate::ui::{ImageAsset, prelude::*};
+    use crate::element::{ImageAsset, prelude::*};
 
     const FLAG: ImageAsset = ImageAsset {
         url: "asset:/@demo/flag.png",
@@ -15343,7 +15346,7 @@ mod asset_variants {
     fn shown(pixel_ratio: f32) -> Vec<(Option<String>, Option<String>)> {
         let mut c = core();
         at_ratio(&mut c, pixel_ratio);
-        c.mount_root(&crate::ui::Root::new::<Flags>(|| ()));
+        c.mount_root(&crate::element::Root::new::<Flags>(|| ()));
         let batch = c.commit().unwrap();
         batch
             .items
@@ -15395,9 +15398,9 @@ mod asset_variants {
                 )
             ]
         );
-        let src: crate::ui::ImageSrc = PLAIN.into();
+        let src: crate::element::ImageSrc = PLAIN.into();
         assert!(src.scales.is_empty());
-        let src: crate::ui::ImageSrc = FLAG.into();
+        let src: crate::element::ImageSrc = FLAG.into();
         assert_eq!(src.scales.iter().collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
         assert_eq!(src.size, Some((17.0, 12.0)));
     }
@@ -15405,7 +15408,7 @@ mod asset_variants {
 
 mod rust_lazy_context {
     use super::*;
-    use crate::ui::{Root, prelude::*};
+    use crate::element::{Root, prelude::*};
 
     #[derive(Clone, PartialEq, Props)]
     struct ProviderProps {
@@ -15490,8 +15493,8 @@ fn text_takes_the_tokens_sans_font() {
     );
     let text = text_item(&c.commit().unwrap()).unwrap();
     assert_eq!(text.spans[0].style.font_family, None);
-    let mut tokens = crate::ui::tokens::sample();
-    tokens.set_font(crate::ui::FONT_SANS, "Inter");
+    let mut tokens = crate::element::tokens::sample();
+    tokens.set_font(crate::element::FONT_SANS, "Inter");
     c.set_tokens(tokens);
     let text = text_item(&c.commit().unwrap()).unwrap();
     assert_eq!(

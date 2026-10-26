@@ -13,7 +13,7 @@ Text entry is the input element, `input()` in Rust and `<Input>` in TSX: a UITex
 An input takes styles like any view (typed style methods in Rust, styles and Tailwind classes in TSX), so the fields of a form have your app's own look. A labeled field is a short component of your own:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoElement {
     let focused = signal(false);
@@ -65,7 +65,7 @@ function Field(props: { label: string; value: string; onChange: (text: string) =
 An input is **controlled** when you pass its value (`.value(..)`, TSX `value`): it shows what your signal holds, and you update the signal from the change event (`.on_change(..)`, TSX `onChange`).
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -251,7 +251,7 @@ On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAp
 Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`; iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input()
     .keyboard_type(KeyboardType::Email)
@@ -288,7 +288,7 @@ A multiline input with `"submit"` or `"blurAndSubmit"` sends on return, as chat 
 To move to the next field, keep refs to the inputs (`element_ref()` and `.element_ref(&r)` in Rust, `ref` in TSX) and call `focus()`:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn sign_in() -> impl IntoElement {
     let email = signal(String::new());
@@ -612,11 +612,11 @@ The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none,
 
 ### Content outside scroll views: KeyboardAvoidingView
 
-A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh` (Rust: `nsh_core::elements::keyboard_avoiding_view()`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
+A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh` (Rust: `nsh_core::element::keyboard_avoiding_view()`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
 
 ```rust tabs
-use nsh_core::elements::keyboard_avoiding_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::keyboard_avoiding_view;
+use nsh_core::element::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
     let draft = signal(String::new());
@@ -729,7 +729,7 @@ import { keyboardFrame } from "nsh/base";
 `input_accessory_view(id)` in Rust and `InputAccessoryView` from `nsh/ios` in TSX show a bar attached to the top of the keyboard while an input that names it has focus: iOS's `inputAccessoryView`. It moves with the keyboard natively, including during interactive dismissal. It takes no room where it is placed in the tree; inputs refer to it by its id (`.input_accessory(id)`, TSX `ios={{ inputAccessoryViewID }}` and `nativeID`):
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn note() -> impl IntoElement {
     let content = signal(String::new());

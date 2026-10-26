@@ -20,7 +20,7 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use nsh_core::ui::{EventKind, EventPayload, Style, prelude::*};
+use nsh_core::element::{EventKind, EventPayload, Style, prelude::*};
 
 use super::{
     DataTableAlign, DataTableCell, DataTableHeaderCell, DataTablePart, DataTableProps,

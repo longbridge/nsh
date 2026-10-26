@@ -13,7 +13,7 @@ A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -312,7 +312,7 @@ const shown = hidden.mul(-1).add(56);
 `inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
 
 ```rust tabs
-use nsh_core::elements::keyboard_avoiding_view;
+use nsh_core::element::keyboard_avoiding_view;
 
 #[derive(Clone, PartialEq)]
 struct Message {
@@ -769,7 +769,7 @@ The look of a list is the app's own: the list places and recycles the rows, and 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::{palette::NEUTRAL, prelude::*};
+use nsh_core::element::{palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,

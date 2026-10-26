@@ -116,7 +116,7 @@ Removes every key of the app, such as when the user signs out. Rust: `Storage::c
 Read the stored value when the app starts, then write it back whenever the signal changes:
 
 ```rust tabs
-use nsh_core::{storage::Storage, ui::prelude::*};
+use nsh_core::{storage::Storage, element::prelude::*};
 
 #[component]
 pub fn App() -> impl IntoElement {

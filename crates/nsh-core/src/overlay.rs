@@ -1,4 +1,4 @@
-//! Overlays (`<Overlay>` of `nsh`, [`crate::ui::overlay`]): views shown on
+//! Overlays (`<Overlay>` of `nsh`, [`crate::element::overlay`]): views shown on
 //! top of the root view they are in (the surface, or the dialog around
 //! them), outside their parent's layout and clipping, while staying where
 //! the app put them for everything else (reactive context, events,

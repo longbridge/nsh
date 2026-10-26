@@ -1,6 +1,6 @@
 //! `SelectionArea`: texts that select together, across views.
 
-use crate::ui::prelude::*;
+use crate::element::prelude::*;
 
 /// The props of [`SelectionArea`].
 #[derive(Debug, Clone, PartialEq, Props)]

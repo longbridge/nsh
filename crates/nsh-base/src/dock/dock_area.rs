@@ -85,8 +85,8 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use nsh_core::{
+    element::{Renderer, Style, prelude::*},
     geometry::{Axis, Bounds, Point, Points, Size},
-    ui::{Renderer, Style, prelude::*},
 };
 
 use super::{

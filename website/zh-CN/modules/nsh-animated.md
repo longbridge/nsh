@@ -7,10 +7,10 @@ demo: mod-animated
 
 # nsh/animated
 
-动画 API 在 UI 线程上执行动画。你创建一个**动画值**（animated value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行应用的代码。引擎线程或 JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗应用任何开销。Rust 代码使用 `nsh_core::ui::prelude` 中的 `animated_value()`、`motion()`、`Animation`、`Spring`、`Timing`、`KeyframeTiming`、`MotionPreset` 和 `Easing`，用元素的 `.bind_*` 方法绑定动画值；TSX 导入 `nsh/animated`。
+动画 API 在 UI 线程上执行动画。你创建一个**动画值**（animated value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行应用的代码。引擎线程或 JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗应用任何开销。Rust 代码使用 `nsh_core::element::prelude` 中的 `animated_value()`、`motion()`、`Animation`、`Spring`、`Timing`、`KeyframeTiming`、`MotionPreset` 和 `Easing`，用元素的 `.bind_*` 方法绑定动画值；TSX 导入 `nsh/animated`。
 
 ```rust tabs
-use nsh_core::ui::{LayoutAnimation, prelude::*}; // animated_value、motion、Animation、Spring、Timing、Keyframe、KeyframeTiming、MotionPreset、MotionSpec、Easing、animate_layout
+use nsh_core::element::{LayoutAnimation, prelude::*}; // animated_value、motion、Animation、Spring、Timing、Keyframe、KeyframeTiming、MotionPreset、MotionSpec、Easing、animate_layout
 ```
 
 ```tsx tabs
@@ -44,7 +44,7 @@ function createAnimatedValue(value?: number): AnimatedValue;
 创建一个初始值为 `value`（默认 `0`）的动画值。Rust：`animated_value(value)`，一个由创建它的组件持有的 `Copy` 句柄。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -369,7 +369,7 @@ interface CompositeAnimation {
 | `delay(ms)` | `Animation::delay(ms)` | 等待；常用于 `sequence` 中。 |
 | `loop(animation, { iterations, resetBeforeIteration })` | `animation.looped(iterations).reset_before_iteration(…)` | 重复 `animation` `iterations` 次（默认无限次），每次运行前把值恢复到起点，除非 `resetBeforeIteration` 为 `false`。 |
 | `add`、`subtract`、`multiply`、`divide`、`modulo`、`diffClamp` | 节点的方法 | 与 [`AnimatedNode`](#animatednode) 的对应方法相同，只是写成函数形式。 |
-| `sampleSpring`、`sampleDecay` | `nsh_core::ui::sample_spring`、`sample_decay` | 弹簧或衰减动画逐帧的值（见 [Easing](#easing)）。 |
+| `sampleSpring`、`sampleDecay` | `nsh_core::element::sample_spring`、`sample_decay` | 弹簧或衰减动画逐帧的值（见 [Easing](#easing)）。 |
 
 `CompositeAnimation`：
 
@@ -438,7 +438,7 @@ const Easing: {
 };
 ```
 
-缓动是数据而不是应用的函数：运行时在原生侧对它求值。在 Rust 中它是枚举 `Easing`：`Linear`、`EaseIn`、`EaseOut`、`EaseInOut`、`Bezier(x1, y1, x2, y2)`、`Steps(count, StepPosition)` 和 `Curve(curve, mode)`，其中 `Curve` 为 `Quad`、`Cubic`、`Poly(n)`、`Sin`、`Circle`、`Exp`、`Elastic(bounciness)`、`Back(s)`、`Bounce`，`EaseMode` 为 `In`、`Out`、`InOut`。要绘制一条缓动曲线，`Easing.sample(easing, count)`（Rust：`nsh_core::ui::sample_easing`）给出它在 0 到 1 之间 `count` 个等距点上的值；`Animated.sampleSpring` 和 `Animated.sampleDecay`（`sample_spring`、`sample_decay`）从 `from`（0）开始逐帧给出弹簧或衰减动画的值（按 `fps`，默认 60），直到结束。三者都来自动画实际运行的原生代码。在 TSX 中凡是接受 `Easing` 的地方，都可以传入名称（`"easeOut"`）、由四个数字表示的三次贝塞尔曲线，或 `Easing` 对象中的曲线。
+缓动是数据而不是应用的函数：运行时在原生侧对它求值。在 Rust 中它是枚举 `Easing`：`Linear`、`EaseIn`、`EaseOut`、`EaseInOut`、`Bezier(x1, y1, x2, y2)`、`Steps(count, StepPosition)` 和 `Curve(curve, mode)`，其中 `Curve` 为 `Quad`、`Cubic`、`Poly(n)`、`Sin`、`Circle`、`Exp`、`Elastic(bounciness)`、`Back(s)`、`Bounce`，`EaseMode` 为 `In`、`Out`、`InOut`。要绘制一条缓动曲线，`Easing.sample(easing, count)`（Rust：`nsh_core::element::sample_easing`）给出它在 0 到 1 之间 `count` 个等距点上的值；`Animated.sampleSpring` 和 `Animated.sampleDecay`（`sample_spring`、`sample_decay`）从 `from`（0）开始逐帧给出弹簧或衰减动画的值（按 `fps`，默认 60），直到结束。三者都来自动画实际运行的原生代码。在 TSX 中凡是接受 `Easing` 的地方，都可以传入名称（`"easeOut"`）、由四个数字表示的三次贝塞尔曲线，或 `Easing` 对象中的曲线。
 
 | 曲线 | Rust | 形状 |
 |---|---|---|
@@ -498,7 +498,7 @@ interface LayoutAnimationAnimation {
 }
 ```
 
-`LayoutAnimation.configureNext(config)` 在原生侧为下一次提交中的布局变化添加动画：移动或改变尺寸的视图平滑过渡到新位置，新视图出现（按 `property` 淡入或缩放进入），被移除的视图消失。在会改变布局的状态变化之前调用它。Rust：`animate_layout(LayoutAnimation)`，使用 `nsh_core::ui::LayoutAnimation` 的预设或它的 `create`、`update`、`delete` 过渡。
+`LayoutAnimation.configureNext(config)` 在原生侧为下一次提交中的布局变化添加动画：移动或改变尺寸的视图平滑过渡到新位置，新视图出现（按 `property` 淡入或缩放进入），被移除的视图消失。在会改变布局的状态变化之前调用它。Rust：`animate_layout(LayoutAnimation)`，使用 `nsh_core::element::LayoutAnimation` 的预设或它的 `create`、`update`、`delete` 过渡。
 
 | 成员 | Rust | 说明 |
 |---|---|---|

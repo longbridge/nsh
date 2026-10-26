@@ -11,7 +11,7 @@ NSH apps also run on Windows. The Windows backend draws them in Win32 windows wi
 DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the native modules are the same
 as on iOS and Android, so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`platform.os` is `"windows"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
-context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+context menus come from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements

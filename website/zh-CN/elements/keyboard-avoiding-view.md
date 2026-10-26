@@ -11,8 +11,8 @@ demo: el-keyboard-avoiding-view
 `KeyboardAvoidingView` 让它的内容保持在软键盘上方。键盘显示或隐藏时，视图按键盘的高度让出空间，变化在原生侧随键盘一起以动画呈现。它用于滚动视图之外的内容，比如聊天界面底部的消息栏；[滚动视图](./scroll.md)或 [List](./list.md) 中的输入框会在原生侧被滚动到可见位置。与它一起的还有隐藏键盘的 `Keyboard.dismiss()`，以及供你自己布局使用的键盘高度。
 
 ```rust tabs
-use nsh_core::elements::keyboard_avoiding_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::keyboard_avoiding_view;
+use nsh_core::element::prelude::*;
 
 fn chat() -> impl IntoElement {
     let draft = signal(String::new());
@@ -91,8 +91,8 @@ mount(App);
 内边距或外边距会加到视图自己的样式上，所以你的内边距保持不变。
 
 ```rust tabs
-use nsh_core::elements::{AvoidBehavior, keyboard_avoiding_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::{AvoidBehavior, keyboard_avoiding_view};
+use nsh_core::element::prelude::*;
 
 fn sign_in() -> impl IntoElement {
     keyboard_avoiding_view()
@@ -121,7 +121,7 @@ fn sign_in() -> impl IntoElement {
 
 ```rust tabs
 use nsh_base::button;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn done() -> impl IntoElement {
     button()
@@ -161,7 +161,7 @@ function Done() {
 两者都是响应式的：读取它们的 effect、JSX 表达式或样式闭包会在键盘显示、隐藏或改变高度时重新运行。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn message_bar() -> impl IntoElement {
     view()

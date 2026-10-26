@@ -118,7 +118,7 @@ struct RootState {
     status_bar: Option<crate::StatusBarSetting>,
     /// Its entry in the surface's status bars, while the node is in the
     /// tree ([`Core::sync_status_bars`]).
-    status_bar_entry: Option<crate::ui::status_bar::StatusBarEntry>,
+    status_bar_entry: Option<crate::element::status_bar::StatusBarEntry>,
     /// Placement and root view (overlays).
     overlay: Option<Box<overlay::OverlayState>>,
 }
@@ -851,7 +851,7 @@ pub struct Core<M: TextEngine> {
     paced_scratch: Vec<(u32, u32)>,
     /// The events for JS, in order (the platform's and the core's events,
     /// Rust components' events, calls' results).
-    events: Vec<crate::ui::JsEvent>,
+    events: Vec<crate::element::JsEvent>,
     /// Reused buffer of `(item index, cell)` for list updates.
     cells_scratch: Vec<(u32, Key)>,
     root: Key,
@@ -1302,7 +1302,7 @@ impl<M: TextEngine> Core<M> {
     /// Moves what the core hands JS (events it raised, such as
     /// `onLoadMore` and `onLayout`, Rust components' events, calls'
     /// results) into `out`, in order.
-    pub fn take_events(&mut self, out: &mut Vec<crate::ui::JsEvent>) {
+    pub fn take_events(&mut self, out: &mut Vec<crate::element::JsEvent>) {
         out.append(&mut self.events);
     }
 
@@ -1428,7 +1428,7 @@ impl<M: TextEngine> Core<M> {
                 if event == EventKind::Layout && enabled && !before.contains(event) {
                     let f = node.frame;
                     if !f.origin.x.0.is_nan() {
-                        self.events.push(crate::ui::JsEvent::Event(
+                        self.events.push(crate::element::JsEvent::Event(
                             id,
                             event,
                             EventPayload::Layout(f),
@@ -2463,7 +2463,7 @@ impl<M: TextEngine> Core<M> {
         // source (JS finds the handler when the event is delivered).
         let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
             let message = not_granted(what, uri, capability);
-            core.events.push(crate::ui::JsEvent::Event(
+            core.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::Error,
                 EventPayload::Error {
@@ -4350,7 +4350,7 @@ impl<M: TextEngine> Core<M> {
         }
         input.content_size = Some(size);
         let id = node.id;
-        self.events.push(crate::ui::JsEvent::Event(
+        self.events.push(crate::element::JsEvent::Event(
             id,
             EventKind::ContentSizeChange,
             EventPayload::Map(vec![
@@ -5322,7 +5322,7 @@ impl<M: TextEngine> Core<M> {
                 });
                 cx.metadata_changed = false;
                 if report_lines {
-                    self.events.push(crate::ui::JsEvent::Event(
+                    self.events.push(crate::element::JsEvent::Event(
                         id,
                         EventKind::TextLayout,
                         text_lines(engine, &text, &text_layout),
@@ -5349,7 +5349,7 @@ impl<M: TextEngine> Core<M> {
                         .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
                     let layout = engine.layout(prepared, size);
                     if report_lines {
-                        self.events.push(crate::ui::JsEvent::Event(
+                        self.events.push(crate::element::JsEvent::Event(
                             id,
                             EventKind::TextLayout,
                             text_lines(engine, &cx.text, &layout),
@@ -5537,7 +5537,7 @@ impl<M: TextEngine> Core<M> {
             node.frame = frame;
             let (id, is_text) = (node.id, node.kind == Kind::Text);
             if node.events.contains(EventKind::Layout) {
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::Layout,
                     EventPayload::Layout(frame),
@@ -5871,14 +5871,14 @@ impl<M: TextEngine> Core<M> {
         let mut binds = Vec::new();
         let edges = list.update_window(&mut binds);
         if edges.end {
-            self.events.push(crate::ui::JsEvent::Event(
+            self.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::LoadMore,
                 EventPayload::None,
             ));
         }
         if edges.start && events.contains(EventKind::LoadMoreAtStart) {
-            self.events.push(crate::ui::JsEvent::Event(
+            self.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::LoadMoreAtStart,
                 EventPayload::None,
@@ -5895,7 +5895,7 @@ impl<M: TextEngine> Core<M> {
             if viewable != list.viewable {
                 list.viewable = viewable;
                 let (first, last) = viewable.map_or((-1.0, -1.0), |(f, l)| (f as f64, l as f64));
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::ViewableItemsChange,
                     EventPayload::Map(vec![

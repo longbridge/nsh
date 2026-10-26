@@ -32,7 +32,7 @@ tooltip itself is the bubble: style it with `class` / `style`, and its children 
 
 ```rust tabs
 use nsh_base::tooltip;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn save_button(on_save: impl Fn() + 'static) -> impl IntoElement {
     view()

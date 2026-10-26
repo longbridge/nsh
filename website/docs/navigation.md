@@ -13,7 +13,7 @@ In Rust, import the builders by name next to the prelude (`use nsh_base::{dialog
 
 ```rust tabs
 use nsh_base::{nav_page, nav_stack};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Route {
@@ -173,7 +173,7 @@ A route carries what the page needs. The gallery apps push routes that hold what
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// A pushed page: its key (unique in the stack) and what makes it.
 #[derive(Clone)]
@@ -350,7 +350,7 @@ A page that shows no header still has the system bars around it; pad its content
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::elements::safe_area_view;
+use nsh_core::element::safe_area_view;
 
 nav_page()
     .header_visible(false)
@@ -373,7 +373,7 @@ To ask before discarding unsaved changes, set `pop_on_back` (TSX `popOnBack`) to
 
 ```rust tabs
 use nsh_base::{alert_dialog, nav_page};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
     let draft = signal(String::new());
@@ -447,7 +447,7 @@ A dialog (`dialog()` of `nsh_base` in Rust, `Dialog` in TSX) presents content ov
 
 ```rust tabs
 use nsh_base::dialog;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn files() -> impl IntoElement {
     let open = signal(false);
@@ -536,7 +536,7 @@ Android's back gesture does not preview the pop (the app answers only once the g
 while they may take the press:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 pub fn editor() -> impl IntoElement {
     let selecting = signal(false);

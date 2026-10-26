@@ -12,7 +12,7 @@ use std::{
 use nsh_core::{
     Bounds, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineJoin},
-    ui::{
+    element::{
         Animation, LayoutAnimation, LayoutCurve, LayoutTransition, prelude::*, sample_easing,
         sample_spring,
     },

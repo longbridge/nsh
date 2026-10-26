@@ -5,8 +5,8 @@ use std::f32::consts::{PI, TAU};
 
 use nsh_core::{
     canvas::{LineCap, LineJoin},
+    element::{JsObject, PropEnum, prelude::*},
     geometry::size,
-    ui::{JsObject, PropEnum, prelude::*},
 };
 
 use super::{lengths, pt};

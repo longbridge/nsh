@@ -20,7 +20,7 @@ by the secondary button (a right click) at the pointer, or by a finger held on i
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
     menu_item()

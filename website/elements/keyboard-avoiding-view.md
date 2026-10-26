@@ -15,8 +15,8 @@ views, such as a message bar at the bottom of a chat screen; inputs inside a [sc
 the keyboard's height, for layouts of your own.
 
 ```rust tabs
-use nsh_core::elements::keyboard_avoiding_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::keyboard_avoiding_view;
+use nsh_core::element::prelude::*;
 
 fn chat() -> impl IntoElement {
     let draft = signal(String::new());
@@ -93,8 +93,8 @@ add to it with a positive value.
 The padding or margin is added to what the view's own style sets, so your padding stays.
 
 ```rust tabs
-use nsh_core::elements::{AvoidBehavior, keyboard_avoiding_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::{AvoidBehavior, keyboard_avoiding_view};
+use nsh_core::element::prelude::*;
 
 fn sign_in() -> impl IntoElement {
     keyboard_avoiding_view()
@@ -122,7 +122,7 @@ everything as it is. Rust components call `dismiss_keyboard()`.
 
 ```rust tabs
 use nsh_base::button;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn done() -> impl IntoElement {
     button()
@@ -162,7 +162,7 @@ Both are reactive: an effect, a JSX expression or a style closure that reads the
 hides or changes height.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn message_bar() -> impl IntoElement {
     view()

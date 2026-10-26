@@ -6,7 +6,7 @@
 use nsh_base::input;
 use nsh_core::{
     Bounds, Points,
-    ui::{View, prelude::*},
+    element::{View, prelude::*},
 };
 
 use crate::ui::{

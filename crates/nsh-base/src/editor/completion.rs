@@ -31,10 +31,10 @@
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
+    element::{EventKind, EventPayload, prelude::*},
     keymap::When,
     overlay::{Align, Placement},
     time::{Instant, now},
-    ui::{EventKind, EventPayload, prelude::*},
 };
 
 use super::{

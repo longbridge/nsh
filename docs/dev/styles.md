@@ -36,10 +36,10 @@
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown
-  keys are build errors). Rust components do not use classes: their typed styles (`ui/style.rs`, every utility group has its
+  keys are build errors). Rust components do not use classes: their typed styles (`element/style.rs`, every utility group has its
   methods, tested against the classes) lower into the same rules and their
   colors come from `nsh/base`'s theme, `nsh.json` `"theme"` (`docs/dev/components.md`); the Tailwind theme only
-  shapes the app's own classes. The app's classes name the design tokens (`ui::Tokens`: shadcn/ui's and the app's
+  shapes the app's own classes. The app's classes name the design tokens (`element::Tokens`: shadcn/ui's and the app's
   own, `nsh.json` `"theme"`, by the names of `tailwind/theme.rs` `ClassTokens`) as Tailwind 4 names the variables of
   `@theme`: a color is a color utility's name (`bg-primary`, `text-muted-foreground/70`, `bg-up/30`) when the
   Tailwind palette has no color of that name (a palette color of the same name wins), and every token is a variable

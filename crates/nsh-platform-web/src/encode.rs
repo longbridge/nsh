@@ -16,8 +16,8 @@ use nsh_core::{
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
     ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
     TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
+    element::PropEnum,
     geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
-    ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
 

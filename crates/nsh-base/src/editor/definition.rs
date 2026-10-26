@@ -20,8 +20,8 @@
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use nsh_core::{
+    element::{Os, prelude::*},
     keymap::Modifiers,
-    ui::{Os, prelude::*},
 };
 
 use super::{

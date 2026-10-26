@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use crate::{
+    element::PropEnum,
     geometry::{Edges, Points, px},
     js::host::HostProps,
-    ui::PropEnum,
 };
 
 /// Edge insets in points.

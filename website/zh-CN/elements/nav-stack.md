@@ -14,7 +14,7 @@ demo: ui-navigation
 
 ```rust tabs
 use nsh_base::{button, nav_page, nav_stack};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// A button with the app's look.
 fn action(title: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
@@ -243,7 +243,7 @@ TSX 的子函数接收路由值本身，以及一个表示它在栈中位置的 
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn profile(edit: impl Fn() + 'static) -> Screen {
     nav_page()
@@ -293,7 +293,7 @@ nav_page()
 
 ```rust tabs
 use nsh_base::{alert_dialog, nav_page};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn edit_note(routes: Signal<Vec<u32>>) -> Screen {
     let note = signal(String::new());

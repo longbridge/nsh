@@ -15,7 +15,7 @@ use std::{
 use nsh_core::{
     AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
     MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
-    ui::PropEnum,
+    element::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};

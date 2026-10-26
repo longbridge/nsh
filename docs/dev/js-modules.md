@@ -19,7 +19,7 @@ NSH's and no internal module apps could reach.
 
 Declarations: each export of a module of NSH's own carries its TypeScript declaration in its table (`modules::Item`:
 `signal`'s signatures next to `reactive::signal`), each module its own interfaces (`types`); a registry's components
-and modules are declared from their specs (`nsh_core::ui::declarations`, `docs/dev/components.md`), the styles, the
+and modules are declared from their specs (`nsh_core::element::declarations`, `docs/dev/components.md`), the styles, the
 host elements' props and events, the easings and the canvas methods from the core's tables. `nsh-js`'s
 `declarations.rs` assembles one file per module (`nsh/list.d.ts`, `nsh/base.d.ts`), `nsh/types.d.ts` (the
 element and JSX types `nsh` exports), `nsh/jsx-runtime.d.ts` and `nsh/globals.d.ts`, and tests check every module's
@@ -27,7 +27,7 @@ exports against its declarations; the CLI writes them into `.nsh/types` (`toolin
 `nsh` itself only has the reactive API, `mount`, the primitives every UI is made of (`View`, `Text`, `Scroll`,
 `Input`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`) and the types; there is no catch-all module.
 TSX imports mirror the Rust crates' layers: the primitives from `nsh`, as Rust takes them from
-`nsh_core::ui::prelude`, the base components from `nsh/base` (`nsh-base`). A released API that moves keeps its old
+`nsh_core::element::prelude`, the base components from `nsh/base` (`nsh-base`). A released API that moves keeps its old
 place as a deprecated alias (`compatibility.md`), so apps built before keep running: `nsh/image`, `nsh/list`,
 `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, export them still, the same values
 (`NativeModule::also` / `moved_to`: `nsh` serves those modules' exports, made once per VM whichever is imported
@@ -37,7 +37,7 @@ re-exported by `nsh`). Apps import a primitive's tag from `nsh` (`native-pipelin
 
 | Module | Exports | Implemented in (`crates/nsh-js/src`) |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary` (`dom.rs`: a memo of the children or the fallback, `native-pipeline.md`), `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll` (host elements as components: `dom::host_component`); `SafeAreaView` (with `Edge`), `KeyboardAvoidingView` (with `AvoidBehavior`), `SelectionArea` (Rust components of `nsh-core`, `elements/`, registered by `nsh_core::runtime::registries`); `Image`, `List`, `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`, `WebView`, `Video` (the modules' below, the same values); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs`, `modules.rs` |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary` (`dom.rs`: a memo of the children or the fallback, `native-pipeline.md`), `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll` (host elements as components: `dom::host_component`); `SafeAreaView` (with `Edge`), `KeyboardAvoidingView` (with `AvoidBehavior`), `SelectionArea` (Rust components of `nsh-core`, `element/`, registered by `nsh_core::runtime::registries`); `Image`, `List`, `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`, `WebView`, `Video` (the modules' below, the same values); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs`, `modules.rs` |
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |

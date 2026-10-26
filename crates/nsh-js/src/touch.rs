@@ -16,7 +16,9 @@ use std::{
     ffi::{CStr, c_int},
 };
 
-use nsh_core::{Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, decl, ui::PanGesture};
+use nsh_core::{
+    Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, decl, element::PanGesture,
+};
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 

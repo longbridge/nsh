@@ -15,8 +15,8 @@ use std::{
 };
 
 use nsh_core::{
+    element::{ThemeTokens, Token, Tokens},
     platform::{Appearance, ColorScheme, Environment, Idiom, Os},
-    ui::{ThemeTokens, Token, Tokens},
 };
 use rquickjs::qjs;
 

@@ -2,7 +2,7 @@
 
 use nsh_core::{
     AccessibilityState, Checked,
-    ui::{Style, prelude::*},
+    element::{Style, prelude::*},
 };
 
 /// The props of [`Switch`].

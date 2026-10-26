@@ -366,7 +366,7 @@ impl ModuleCx {
     }
 
     /// Shows the surface in `appearance` whatever the system's (TS:
-    /// `setColorScheme`): [`crate::ui::prelude::dark`] (the theme's mode),
+    /// `setColorScheme`): [`crate::element::prelude::dark`] (the theme's mode),
     /// `dark:` classes and the platform's controls follow it;
     /// [`crate::platform::Appearance::System`] follows the system again.
     pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {

@@ -1,10 +1,10 @@
 //! `Tooltip`: the hint an element's `tooltip` shows, as GPUI's
-//! `.tooltip(..)`: a hint overlay of the core (`nsh_core::ui::Overlay::hint`)
+//! `.tooltip(..)`: a hint overlay of the core (`nsh_core::element::Overlay::hint`)
 //! with the app's look, placement, delay and events.
 
 use std::time::Duration;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 use crate::popup::{OpenChangeReason, OpenState, lifecycle};
 
@@ -100,7 +100,7 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
 
 /// As an element's `tooltip`, it is the hint overlay itself.
 impl IntoTooltip for TooltipElement {
-    fn apply_tooltip(self, node: &mut nsh_core::ui::ElNode) {
-        nsh_core::ui::__hint_tooltip(node, self.into_element());
+    fn apply_tooltip(self, node: &mut nsh_core::element::ElNode) {
+        nsh_core::element::__hint_tooltip(node, self.into_element());
     }
 }

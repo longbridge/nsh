@@ -13,7 +13,7 @@ children as its content and scrolls them natively: scrolling, flinging, bouncing
 the display's rate. Rust makes one with `scroll()`, TSX with `<Scroll>` from `nsh`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 scroll().flex_1().child(
     view().p_4().gap_2().child(each(

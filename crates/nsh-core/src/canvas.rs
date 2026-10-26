@@ -15,6 +15,7 @@ pub use self::{
     hit::{point_in_path, point_in_stroke},
 };
 use crate::{
+    element::{PropEnum, TsTypes},
     geometry::{Bounds, Corners, Percentage, Point, Points, Radians, ScaledPixels, Size, px},
     js::{
         canvas::*,
@@ -22,7 +23,6 @@ use crate::{
         ops::{JsOps, OpArg, OpReader, OpsError},
     },
     style::{Color, FontVariant},
-    ui::{PropEnum, TsTypes},
 };
 
 /// A number of a drawing: a constant or the value of animated value slot

@@ -14,8 +14,8 @@ Dialog 负责行为，外观交给应用：它的样式设定弹出层（包含�
 
 ```rust tabs
 use nsh_base::{button, dialog};
-use nsh_core::elements::safe_area_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::safe_area_view;
+use nsh_core::element::prelude::*;
 
 /// 白色文字的蓝色按钮。
 fn primary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
@@ -81,7 +81,7 @@ function Example() {
 
 在 TSX 中，`open` 不为 `false` 时显示，变为 `false` 时关闭。在 Rust 中，它在视图中时呈现，离开视图时消失，所以由 `when` 持有它。无论哪种方式，它都会给内容提供 dialog 的安全区域 inset，供其内部的 [`SafeAreaView`](./safe-area-view.md) 和 `safeAreaInsets()`（Rust 组件中为 `cx.insets()`）读取。[`Button`](./button.md) 同样来自 `nsh/base`，是由应用设定样式的按压目标。
 
-`nsh_core::ui::prelude` 中也有一个较旧的、已弃用的 `dialog` 函数：像上面那样按名称导入 `nsh_base::dialog`，显式导入会取代它。如果需要系统提示框或操作表，请使用 [`AlertDialog`](./alert-dialog.md)。
+`nsh_core::element::prelude` 中也有一个较旧的、已弃用的 `dialog` 函数：像上面那样按名称导入 `nsh_base::dialog`，显式导入会取代它。如果需要系统提示框或操作表，请使用 [`AlertDialog`](./alert-dialog.md)。
 
 ## 属性
 

@@ -18,8 +18,8 @@ use nsh_base::dialog;
 use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
+    element::{AssetFile, AssetKind, Registry, Root, prelude::*},
     platform::{Idiom, Locale, Os},
-    ui::{AssetFile, AssetKind, Registry, Root, prelude::*},
 };
 use nsh_engine::{App, Assets, Engine, EngineConfig, Environment, MountSink};
 

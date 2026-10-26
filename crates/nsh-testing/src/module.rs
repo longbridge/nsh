@@ -16,7 +16,9 @@ use std::{
 
 use nsh_core::{
     JsonValue,
-    ui::{Arg, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry, TsTypes, prelude::*},
+    element::{
+        Arg, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry, TsTypes, prelude::*,
+    },
 };
 use nsh_engine::{HostCall, HostChannel, HttpBody, HttpRequest};
 

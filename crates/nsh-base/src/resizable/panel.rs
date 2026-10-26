@@ -6,8 +6,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use nsh_core::{
     AccessibilityActionDef, AccessibilityValue,
+    element::{Style, StyleRefinement, prelude::*},
     geometry::{Along, Axis, Bounds},
-    ui::{Style, StyleRefinement, prelude::*},
 };
 
 use super::{

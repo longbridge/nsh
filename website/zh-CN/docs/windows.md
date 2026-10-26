@@ -10,7 +10,7 @@ group: platforms
 NSH 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Windows 上，
 `os()` 为 `Os::Windows`（TSX 中 `platform.os` 为 `"windows"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
-菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
+菜单栏和右键菜单在 Rust 中由 `nsh_core::element::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 ## 环境要求

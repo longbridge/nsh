@@ -12,7 +12,7 @@ demo: el-input
 
 ```rust tabs
 use nsh_base::input;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn name_field() -> impl IntoElement {
     let name = signal(String::new());
@@ -125,7 +125,7 @@ input()
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | 键盘的外观；`"default"` 跟随系统外观。Android 的键盘跟随系统主题。 |
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 ```
@@ -183,7 +183,7 @@ const height = signal(40);
 按回车把焦点移到下一个输入框：
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 let password = element_ref();
 

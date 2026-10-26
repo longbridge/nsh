@@ -15,7 +15,7 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_core::{
     ContextMenuEvent, TouchEvent, TouchPhase,
-    ui::{Style, prelude::*},
+    element::{Style, prelude::*},
 };
 
 use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};

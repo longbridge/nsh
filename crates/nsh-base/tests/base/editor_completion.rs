@@ -13,8 +13,8 @@ use nsh_base::editor::{
 };
 use nsh_core::{
     Size,
+    element::{Root, prelude::*},
     platform::{Idiom, Os},
-    ui::{Root, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

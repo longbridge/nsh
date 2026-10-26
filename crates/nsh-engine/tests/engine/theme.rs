@@ -8,7 +8,7 @@ use crossbeam_channel::Receiver;
 use nsh_base::{Theme, theme};
 use nsh_core::{
     ApproxTextEngine, Color, MountBatch, MountItem, Size,
-    ui::{Root, prelude::*},
+    element::{Root, prelude::*},
 };
 use nsh_engine::{App, ColorScheme, Engine, EngineConfig, Environment};
 
@@ -305,7 +305,10 @@ fn last_text(rx: &Receiver<MountBatch>) -> Option<String> {
 /// A TSX app whose theme (`nsh.json`) adds a token, `brand`, which it reads
 /// once as its entry evaluates and again where it renders, started with
 /// the embedding app's tokens `host` sent before the start.
-fn start_branded(name: &str, host: Option<nsh_core::ui::Tokens>) -> (Engine, Receiver<MountBatch>) {
+fn start_branded(
+    name: &str,
+    host: Option<nsh_core::element::Tokens>,
+) -> (Engine, Receiver<MountBatch>) {
     let dir = crate::temporary_root().join(format!("nsh-theme-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(

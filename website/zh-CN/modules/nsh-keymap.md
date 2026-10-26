@@ -6,10 +6,10 @@ order: 8.7
 
 # nsh/keymap
 
-快捷键 API 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。Rust 代码调用 `nsh_core::ui::prelude` 中的 `on_key`、`on_key_with` 和 `key_label`；TSX 从 `nsh/keymap` 导入 `keymap`。两者接受同样的按键组合，遵循同样的规则。
+快捷键 API 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。Rust 代码调用 `nsh_core::element::prelude` 中的 `on_key`、`on_key_with` 和 `key_label`；TSX 从 `nsh/keymap` 导入 `keymap`。两者接受同样的按键组合，遵循同样的规则。
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // on_key、on_key_with、KeyOptions、key_label
+use nsh_core::element::prelude::*; // on_key、on_key_with、KeyOptions、key_label
 ```
 
 ```tsx tabs
@@ -49,7 +49,7 @@ bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindi
 按下 `keystroke` 时运行 `handler`，并返回一个移除该绑定的函数。处理函数收到的是你写下的按键组合字符串，大小写保持原样。Rust：`on_key(keystroke, handler)`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {

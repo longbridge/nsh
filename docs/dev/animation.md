@@ -22,7 +22,7 @@
   composite (or the values it animates) alive: `nsh-js` remembers live composites by key (`Animations::composites`),
   not in the run's promise, so an endless `Animated.loop` whose values its component released stops with them (a step on
   a released value ends the run unfinished, rather than counting as done, which made loops spin). Rust components build
-  the same trees with `nsh_core::ui::Animation` (composite keys odd, JS's even).
+  the same trees with `nsh_core::element::Animation` (composite keys odd, JS's even).
   `decay` takes `clamp: [min, max]` and `bounce`: at a bound it stops, or a new segment of the closed form starts from the
   bound at the exact time it got there with `-bounce` of its speed (frame-rate independent, several per frame if need be).
   Values have an offset (`setOffset` / `flattenOffset` / `extractOffset`, React Native's): they evaluate to value +
@@ -31,7 +31,7 @@
   components: `AnimatedValue::value()`, its request id odd, answered in `Core::animations_finished`).
   `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_core::animation::sample_easing` /
   `sample_driver` (the drivers' own code, stepped like frames, at most `MAX_SAMPLES`), so drawn curves are what runs;
-  Rust components call `ui::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
+  Rust components call `element::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
   Bindable: `opacity`, `backgroundColor`, `borderColor` (all sides), a text's `color` (the whole text: iOS and Android draw
   it into a layer and paint over it in the color, `SourceIn` / `SRC_IN`), `shadowColor` / `shadowOpacity` /
   `shadowRadius`, the translate / scale / rotate parts of `transform`, and where views stick: a sticky view's `top` /

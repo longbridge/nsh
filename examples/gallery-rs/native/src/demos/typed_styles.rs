@@ -14,7 +14,7 @@
 //! window.
 
 use nsh_base::input;
-use nsh_core::ui::{
+use nsh_core::element::{
     AnyElement, BlendMode, BoxShadow, Image,
     palette::{
         AMBER, BLACK, BLUE, EMERALD, FUCHSIA, GREEN, Hue, INDIGO, ORANGE, PINK, RED, ROSE, SKY,

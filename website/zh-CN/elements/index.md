@@ -11,7 +11,7 @@ Native Shell 用一小组元素构建每个界面：`View`、`Text`、`Image` �
 这些页面上的每个示例都同时给出 Rust 和 TSX：选择一个标签页，页面上的所有示例都会随之切换。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn app() -> impl IntoElement {
     let count = signal(0_u32);
@@ -52,7 +52,7 @@ function App() {
 mount(App);
 ```
 
-在 Rust 中，原语是 `nsh_core::ui::prelude` 中的函数（`view()`、`text(..)`、`image(..)`），基础组件来自 `nsh_base` crate。样式是有类型的方法（`.flex_1()`、`.gap_3()`、`.px(px(20.0))`、`.bg(..)`），状态样式接收一个闭包（`.active(|s| s.opacity(0.6))`），监听器是接收事件的闭包（`.on_press(move || ..)`、`.on_change(move |text: &str| ..)`），`.child(..)` 添加子元素。一段 UI 就是一个返回 `impl IntoElement` 的普通函数，只运行一次；它在闭包里读取的 signal（`text(move || ..)`、`.bg(move || ..)`）会更新所绑定的内容。参见[用 Rust 构建](../docs/rust.md)。
+在 Rust 中，原语是 `nsh_core::element::prelude` 中的函数（`view()`、`text(..)`、`image(..)`），基础组件来自 `nsh_base` crate。样式是有类型的方法（`.flex_1()`、`.gap_3()`、`.px(px(20.0))`、`.bg(..)`），状态样式接收一个闭包（`.active(|s| s.opacity(0.6))`），监听器是接收事件的闭包（`.on_press(move || ..)`、`.on_change(move |text: &str| ..)`），`.child(..)` 添加子元素。一段 UI 就是一个返回 `impl IntoElement` 的普通函数，只运行一次；它在闭包里读取的 signal（`text(move || ..)`、`.bg(move || ..)`）会更新所绑定的内容。参见[用 Rust 构建](../docs/rust.md)。
 
 在 TSX 中，每个标签都使用 PascalCase，并指向作用域中的绑定：原语从 `nsh` 导入，基础组件从 `nsh/base` 导入。只有 `<If>` 和 `<Each>` 是无需导入的全局组件。`<view>` 这样的小写标签会导致构建错误，因为 TypeScript 只能对照每个名称一个的全局类型来检查它，`List`、`Each` 这类泛型组件就无法推断条目类型。编译器通过导入识别这些元素并就地创建原生视图，所以导入它们在运行时没有任何开销。参见 [JSX 与组件](../docs/jsx-and-components.md)。
 
@@ -66,7 +66,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input
 
 ## 原语
 
-TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::elements`）。
+TSX 从 `nsh` 导入，Rust 从 `nsh_core::element::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::element`）。
 
 | 元素 | Rust | 原生视图（iOS / Android） | 页面 |
 |---|---|---|---|

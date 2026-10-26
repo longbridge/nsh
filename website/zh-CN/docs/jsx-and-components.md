@@ -27,7 +27,7 @@ NSH 应用用元素和组件描述界面，可以用 Rust，也可以用 TSX。R
 | `when(..)`、`each(..)` | `<If>`、`<Each>` | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
+use nsh_core::element::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
 ```
 
 ```tsx tabs

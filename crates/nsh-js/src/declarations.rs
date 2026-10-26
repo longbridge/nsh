@@ -2,7 +2,7 @@
 //! from what serves it: the declaration ([`Ts`]) next to each export of
 //! nsh's modules (`modules.rs` and the tables it lists), the modules' own
 //! types, the specs of the registries' components and modules
-//! (`nsh_core::ui::declarations`), and the core's tables (styles, host
+//! (`nsh_core::element::declarations`), and the core's tables (styles, host
 //! props and events, easings, canvas operations: `nsh_core::js`). Nothing
 //! is written twice: a test loads every module and checks that what it
 //! exports is what its declarations say.
@@ -12,7 +12,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use nsh_core::ui::{Registry, description::SetDescription};
+use nsh_core::element::{Registry, description::SetDescription};
 
 use crate::modules::{Item, MODULES, NativeModule, Ts};
 
@@ -289,7 +289,7 @@ fn generated(module: &str) -> String {
 /// declares.
 fn registry_part(out: &mut String, registry: &Registry, own: &[Item]) {
     let omit: Vec<&str> = own.iter().map(|(n, ..)| *n).collect();
-    out.push_str(&nsh_core::ui::declarations(registry, &omit));
+    out.push_str(&nsh_core::element::declarations(registry, &omit));
     let (values, types) = registry.reexports();
     reexports_part(out, values, types, registry.native_value_names());
 }
@@ -748,15 +748,15 @@ fn member_names(members: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    #[derive(Default, nsh_core::ui::JsObject)]
+    #[derive(Default, nsh_core::element::JsObject)]
     struct Pick {
         value: bool,
     }
 
-    #[nsh_core::ui::module]
+    #[nsh_core::element::module]
     struct PickerTypes;
 
-    #[nsh_core::ui::module]
+    #[nsh_core::element::module]
     impl PickerTypes {
         fn accept(_pick: Pick) {}
     }
@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn component_host_props_do_not_import_a_modules_pick_type() {
         PickerTypes::accept(Pick::default());
-        let mut registry = nsh_core::ui::Registry::ui_set("test/picker-types");
+        let mut registry = nsh_core::element::Registry::ui_set("test/picker-types");
         registry.module::<PickerTypes>();
         let files = type_definitions(&[registry.into()]);
         let (_, fixture) = files

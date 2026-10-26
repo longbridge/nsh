@@ -11,13 +11,13 @@ use crate::{
         BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
         KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
     },
+    element::PropEnum,
     geometry::{
         AbsoluteLength, Corners, DefiniteLength, Edges, Percentage, Point, Points, REM_SIZE, Size,
         percentage, point, px,
     },
     grid,
     transform::{Transform, TransformKind},
-    ui::PropEnum,
 };
 
 /// An sRGB color packed as `0xRRGGBBAA`.

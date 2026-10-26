@@ -2,7 +2,7 @@
 
 use nsh_core::{
     AccessibilityValue,
-    ui::{Style, prelude::*},
+    element::{Style, prelude::*},
 };
 
 /// The range of [`ProgressProps::value`], as `gpui-base`'s: a percentage.

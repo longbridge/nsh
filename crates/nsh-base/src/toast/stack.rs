@@ -3,7 +3,7 @@
 
 use nsh_core::{
     TouchEvent, TouchPhase, TransformKind,
-    ui::{Spring, prelude::*},
+    element::{Spring, prelude::*},
 };
 
 use super::ToastMotion;

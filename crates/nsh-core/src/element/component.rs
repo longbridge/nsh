@@ -1527,7 +1527,7 @@ fn handler_name(event: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::prelude::*;
+    use crate::element::prelude::*;
 
     #[derive(Default)]
     struct Stepper;
@@ -1677,10 +1677,10 @@ mod tests {
     }
 
     /// A class no set registers.
-    #[crate::ui::class]
+    #[crate::element::class]
     struct Lonely;
 
-    #[crate::ui::class]
+    #[crate::element::class]
     impl Lonely {
         pub(crate) fn new() -> Self {
             Lonely
@@ -1688,10 +1688,10 @@ mod tests {
     }
 
     /// Makes a `Lonely`.
-    #[crate::ui::module]
+    #[crate::element::module]
     struct Maker;
 
-    #[crate::ui::module]
+    #[crate::element::module]
     impl Maker {
         pub(crate) fn make() -> Instance<Lonely> {
             Instance::new(Lonely)
@@ -1716,10 +1716,10 @@ mod tests {
     }
 
     /// Checks.
-    #[crate::ui::module]
+    #[crate::element::module]
     struct Checks;
 
-    #[crate::ui::module(flat)]
+    #[crate::element::module(flat)]
     impl Checks {
         /// Declares a check.
         pub(crate) fn check(name: String) {
@@ -1728,10 +1728,10 @@ mod tests {
     }
 
     /// Unused: a module's doc when its functions are on `check`.
-    #[crate::ui::module]
+    #[crate::element::module]
     struct CheckVariants;
 
-    #[crate::ui::module(name = "check")]
+    #[crate::element::module(name = "check")]
     impl CheckVariants {
         /// How many variants there are.
         pub(crate) const COUNT: u32 = 2;
@@ -1747,10 +1747,10 @@ mod tests {
     }
 
     /// Named like no function of the set: an object of its own.
-    #[crate::ui::module]
+    #[crate::element::module]
     struct Loose;
 
-    #[crate::ui::module(name = "loose")]
+    #[crate::element::module(name = "loose")]
     impl Loose {
         /// Nothing.
         pub(crate) fn nothing() {}
@@ -1805,10 +1805,10 @@ mod tests {
 
     mod clash {
         /// Another class named `Lonely`.
-        #[crate::ui::class]
+        #[crate::element::class]
         pub(super) struct Lonely;
 
-        #[crate::ui::class]
+        #[crate::element::class]
         impl Lonely {
             pub(super) fn new() -> Self {
                 Lonely
@@ -1827,8 +1827,8 @@ mod tests {
         .unwrap_err();
         let message = failed.downcast_ref::<String>().unwrap();
         assert!(
-            message.contains("`nsh_core::ui::component::tests::clash::Lonely`")
-                && message.contains("`nsh_core::ui::component::tests::Lonely`"),
+            message.contains("`nsh_core::element::component::tests::clash::Lonely`")
+                && message.contains("`nsh_core::element::component::tests::Lonely`"),
             "{message}"
         );
     }
@@ -1838,14 +1838,17 @@ mod tests {
         let mut registry = Registry::ui_set("test/ui");
         registry.register::<Stepper>();
         let specs = registry.specs();
-        assert_eq!(specs[0].name, "nsh_core::ui::component::tests::Stepper");
+        assert_eq!(
+            specs[0].name,
+            "nsh_core::element::component::tests::Stepper"
+        );
         assert_eq!(specs[0].export, "Stepper");
         assert_eq!(export_name("app::picker::Picker<app::Fruit>"), "Picker");
         assert_eq!(export_name("Bare"), "Bare");
     }
 
     mod other {
-        use crate::ui::prelude::*;
+        use crate::element::prelude::*;
 
         /// Another component exported as `Stepper`.
         #[derive(Default)]
@@ -1855,7 +1858,7 @@ mod tests {
             type Props = ();
             type Event = NoEvent;
 
-            fn view(_: (), _: crate::ui::Scope<NoEvent>) -> impl IntoElement {
+            fn view(_: (), _: crate::element::Scope<NoEvent>) -> impl IntoElement {
                 view()
             }
         }
@@ -1863,7 +1866,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "components `nsh_core::ui::component::tests::Stepper` and `nsh_core::ui::component::tests::other::Stepper` are both exported as `Stepper` in `test/ui`"
+        expected = "components `nsh_core::element::component::tests::Stepper` and `nsh_core::element::component::tests::other::Stepper` are both exported as `Stepper` in `test/ui`"
     )]
     fn two_components_of_one_set_cannot_share_an_export() {
         Registry::ui_set("test/ui")
@@ -1873,7 +1876,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "component `nsh_core::ui::component::tests::Stepper` is registered twice"
+        expected = "component `nsh_core::element::component::tests::Stepper` is registered twice"
     )]
     fn a_component_is_registered_once() {
         Registry::new().register::<Stepper>().register::<Stepper>();
@@ -1911,7 +1914,7 @@ mod tests {
         let message = *twice.unwrap_err().downcast::<String>().unwrap();
         assert_eq!(
             message,
-            "component `nsh_core::ui::component::tests::Stepper` is registered twice, by two UI sets"
+            "component `nsh_core::element::component::tests::Stepper` is registered twice, by two UI sets"
         );
     }
 }

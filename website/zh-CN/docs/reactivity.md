@@ -13,7 +13,7 @@ NSH 用 **signal** 更新界面：signal 是知道谁在读取自己的值。sig
 Rust 组件从 prelude 中取得本页的所有内容；TSX 从 `nsh` 导入：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
+use nsh_core::element::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
 ```
 
 ```tsx tabs

@@ -61,7 +61,7 @@ loader). Where each one is implemented and declared: `js-modules.md`.
 QuickJS-NG resolves imports when it compiles a module, so the bytecode compiler installs the same loader
 (`compile_bytecode_with` with the app's UI sets); names are checked when the module links (evaluation). The exports are made
 on first import. The compiler only needs the names a module exports, so it takes the UI sets as data
-(`nsh_core::ui::description::SetDescription`: specifier, exports and their kinds, declarations, re-exports, files),
+(`nsh_core::element::description::SetDescription`: specifier, exports and their kinds, declarations, re-exports, files),
 as the bundler and `.nsh/types` do: `ModuleTable::compiling` serves nsh's own modules and the runtime's registries in
 full and the sets by name. That is how the prebuilt `nsh` compiles an app whose crates it does not link
 (`tooling.md`, "Apps with Rust components of their own").

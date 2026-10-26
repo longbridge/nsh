@@ -1079,9 +1079,9 @@ bound_handles!(Signal, Memo, ReadSignal);
 #[macro_export]
 macro_rules! static_reactive {
     ($target:ty: $($source:ty),* $(,)?) => {$(
-        impl $crate::ui::IntoReactive<$target> for $source {
-            fn into_reactive(self) -> $crate::ui::Reactive<$target> {
-                $crate::ui::Reactive::Static(<$target>::from(self))
+        impl $crate::element::IntoReactive<$target> for $source {
+            fn into_reactive(self) -> $crate::element::Reactive<$target> {
+                $crate::element::Reactive::Static(<$target>::from(self))
             }
         }
     )*};

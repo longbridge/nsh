@@ -27,7 +27,7 @@ The **host elements** are each backed by a native view. Rust makes them with the
 | `when(..)`, `each(..)` | `<If>`, `<Each>` | Control flow, no view of its own | [Control flow](../elements/control-flow.md) |
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
+use nsh_core::element::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
 ```
 
 ```tsx tabs

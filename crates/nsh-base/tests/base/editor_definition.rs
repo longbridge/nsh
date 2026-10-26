@@ -17,9 +17,9 @@ use nsh_base::editor::{
 };
 use nsh_core::{
     Cursor, EventKind, EventPayload, HoverEvent, MountItem, NodeId, PressEvent, Size,
+    element::{Root, prelude::*},
     keymap::Modifiers,
     platform::{Idiom, Os},
-    ui::{Root, prelude::*},
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

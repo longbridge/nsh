@@ -23,7 +23,7 @@ use std::{
 
 use nsh_core::{
     decl,
-    ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry, description::SetDescription},
+    element::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry, description::SetDescription},
 };
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
@@ -62,7 +62,7 @@ pub(crate) enum Ts {
 
 impl Ts {
     // Constructors for the tables: the text is left out of builds without
-    // declarations (`nsh_core::ui::DECLARATIONS`).
+    // declarations (`nsh_core::element::DECLARATIONS`).
 
     /// [`Ts::Function`].
     pub(crate) const fn function(doc: &'static str, signatures: &'static [&'static str]) -> Ts {
@@ -494,7 +494,7 @@ enum Made {
     /// The generated module object itself.
     Default(Arc<ModuleSpec>),
     /// A Rust class (`#[class]`).
-    Class(&'static nsh_core::ui::ClassDef),
+    Class(&'static nsh_core::element::ClassDef),
     /// A runtime value a registry exports as it is (`safeArea`).
     Reexport(&'static str),
 }

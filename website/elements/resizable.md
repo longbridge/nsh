@@ -17,7 +17,7 @@ indicator; the panels are the app's views.
 
 ```rust tabs
 use nsh_base::{h_resizable, resizable_panel, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn workspace() -> impl IntoElement {
     h_resizable()

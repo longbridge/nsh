@@ -54,7 +54,7 @@ Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` �
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -193,7 +193,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 
 ## 模块
 
-Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io；NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::ui::prelude::*`）和 `nsh-base`（基础组件和主题）。
+Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io；NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::element::prelude::*`）和 `nsh-base`（基础组件和主题）。
 
 在 TSX 中，可以把应用拆成任意多个 `.ts` 和 `.tsx` 模块，用相对路径导入；扩展名可以省略：
 
@@ -260,7 +260,7 @@ declare module "node-polyfill";
 图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布；TSX 像模块一样导入它们，打包器会记录每个被导入的文件（以及图片的像素密度变体）。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
 
 ```rust tabs
-use nsh_core::ui::{FontAsset, ImageAsset, asset};
+use nsh_core::element::{FontAsset, ImageAsset, asset};
 
 const LOGO: ImageAsset = asset!("logo@2x.png");      // its url, and its size: 64×64 points
 const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family: "Inter"

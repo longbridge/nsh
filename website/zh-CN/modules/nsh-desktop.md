@@ -6,12 +6,12 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码用 `nsh_core::ui::desktop`（`set_title_bar`、`title_bar`、`close_window`）绘制自己的标题栏、关闭窗口，并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`，其中还有窗口的其他函数和菜单。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否在桌面上。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码用 `nsh_core::element::desktop`（`set_title_bar`、`title_bar`、`close_window`）绘制自己的标题栏、关闭窗口，并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`，其中还有窗口的其他函数和菜单。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否在桌面上。
 
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    ui::{
+    element::{
         desktop::{close_window, set_title_bar, title_bar},
         prelude::*,
     },
@@ -52,7 +52,7 @@ const Window: {
 };
 ```
 
-Rust 列给出 `nsh_core::ui::desktop` 中的函数。
+Rust 列给出 `nsh_core::element::desktop` 中的函数。
 
 | 成员 | Rust | 说明 |
 |---|---|---|
@@ -78,7 +78,7 @@ Rust 列给出 `nsh_core::ui::desktop` 中的函数。
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    ui::{
+    element::{
         desktop::{set_title_bar, title_bar},
         prelude::*,
     },

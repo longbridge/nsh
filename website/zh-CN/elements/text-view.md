@@ -14,7 +14,7 @@ demo: text-view
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 const README: &str = "# Release notes
 
@@ -100,7 +100,7 @@ mount(App);
 ```rust tabs
 use nsh_base::text_view;
 use nsh_base::text_view::{Block, Document, Inline};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn shipping() -> impl IntoElement {
     text_view().html(r#"<h2>Shipping</h2><p>Orders ship in <b>2 days</b>. <a href="/faq">FAQ</a></p>"#)
@@ -135,7 +135,7 @@ fn total() -> impl IntoElement {
 
 ```rust tabs
 use nsh_base::{TextViewPart, TextViewParts, text_view, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
     provide_context(
@@ -247,7 +247,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 ```rust tabs
 use nsh_base::{MarkdownOptions, text_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// A reply the app appends to as chunks arrive, with `done` set at the end.
 fn reply(text: Signal<SharedString>, done: Signal<bool>) -> impl IntoElement {
@@ -292,7 +292,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn doc(markdown: &'static str) -> impl IntoElement {
     text_view().markdown(markdown).on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| {
@@ -347,7 +347,7 @@ text_view().markdown(doc).links(TextViewLinks::Open)
 
 ```rust tabs
 use nsh_base::{TextViewCodeAction, TextViewCodeActionEvent, text_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
     text_view()
@@ -386,7 +386,7 @@ import { TextView } from "nsh/base";
 use nsh_base::text_view;
 use nsh_base::text_view::{CodeBlock, Image};
 use nsh_base::TextViewMath;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
     text_view()
@@ -434,7 +434,7 @@ import { Image, View } from "nsh";
 ````rust tabs
 use nsh_base::text_view::{CustomNode, Document};
 use nsh_base::{MarkdownExtension, text_view};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 const MESSAGE: &str = r#"Thanks @ada! Here are the numbers:
 
@@ -606,7 +606,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 ```rust tabs
 use nsh_base::{TextView, button};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn copy_reply(reply: Signal<SharedString>) -> impl IntoElement {
     button()
@@ -642,7 +642,7 @@ Rust 视图从 `nsh-base` crate 使用同一个组件，上面的示例都有对
 use std::ops::Range;
 
 use nsh_base::{CodeHighlighter, text_view::CodeBlock};
-use nsh_core::ui::{StyleRefinement, prelude::*};
+use nsh_core::element::{StyleRefinement, prelude::*};
 
 /// The app's highlighter (here with syntect, set up once by the app).
 fn highlight(code: &CodeBlock) -> Vec<(Range<usize>, StyleRefinement)> {
@@ -670,7 +670,7 @@ fn chat() -> impl IntoElement {
 
 ```rust
 use nsh_base::{TextViewPart, TextViewParts, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn chat_parts() {
     provide_context(
@@ -690,7 +690,7 @@ fn chat_parts() {
 
 ```rust
 use nsh_base::text_view::{mdast, CustomNode, Inline, MarkdownPlugin, MarkdownPlugins, ParseContext};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 struct Tickers;
 

@@ -54,7 +54,7 @@ A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -194,7 +194,7 @@ An app made by an earlier `nsh init` gets the new `tsconfig.json` with its next 
 
 ## Modules
 
-A Rust app's code is its crate's modules (`mod screens;`), and its dependencies come from crates.io like any crate's; NSH's own crates are `nsh-core` (the primitives, signals and typed styles, `use nsh_core::ui::prelude::*`) and `nsh-base` (the base components and the theme).
+A Rust app's code is its crate's modules (`mod screens;`), and its dependencies come from crates.io like any crate's; NSH's own crates are `nsh-core` (the primitives, signals and typed styles, `use nsh_core::element::prelude::*`) and `nsh-base` (the base components and the theme).
 
 In TSX, split the app into as many `.ts` and `.tsx` modules as you like and import them with relative paths; the extension may be left out:
 
@@ -261,7 +261,7 @@ declare module "node-polyfill";
 Images and fonts ship with the app. A Rust crate reads each file of its `assets/` directory at compile time with `asset!`, and ships them all with `registry.assets(assets!())` in its `#[native_module]` function; TSX imports them like modules, and the bundler records each imported file (and an image's pixel-density variants). `nsh build` copies them to `.nsh/out/assets/`, `nsh package` puts them in the app, and during development they are served to the app.
 
 ```rust tabs
-use nsh_core::ui::{FontAsset, ImageAsset, asset};
+use nsh_core::element::{FontAsset, ImageAsset, asset};
 
 const LOGO: ImageAsset = asset!("logo@2x.png");      // its url, and its size: 64×64 points
 const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family: "Inter"

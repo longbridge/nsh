@@ -6,10 +6,10 @@ order: 11
 
 # nsh/ios
 
-`nsh/ios` 包含只有 iOS 才有的 API。Rust 代码用 `nsh_core::ui::prelude` 中的 `input_accessory_view()` 构建同样的工具栏，并用 `os() == Os::Ios` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的组件什么也不渲染，`isAvailable` 告诉你当前是否在 iOS 上。
+`nsh/ios` 包含只有 iOS 才有的 API。Rust 代码用 `nsh_core::element::prelude` 中的 `input_accessory_view()` 构建同样的工具栏，并用 `os() == Os::Ios` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的组件什么也不渲染，`isAvailable` 告诉你当前是否在 iOS 上。
 
 ```rust tabs
-use nsh_core::{platform::Os, ui::prelude::*}; // os、input_accessory_view
+use nsh_core::{platform::Os, element::prelude::*}; // os、input_accessory_view
 ```
 
 ```tsx tabs
@@ -51,7 +51,7 @@ interface InputAccessoryViewProps {
 它在树中所处的位置不渲染任何内容，在 Android 上则完全不渲染，因此可以把它放在所属输入框的旁边。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn Note() -> impl IntoElement {

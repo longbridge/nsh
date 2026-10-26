@@ -11,7 +11,7 @@ demo: guide-tailwind
 NSH's styles follow Tailwind CSS 4. In Rust, Tailwind's utilities are typed style methods with the same names and values (`.p_4()` is `p-4`, `.rounded_2xl()` is `rounded-2xl`, `ZINC.shade(900)` is `zinc-900`); in TSX, every element accepts the classes themselves in `class`, resolved natively against Tailwind 4's default theme. Each example below shows the typed methods first and the classes second:
 
 ```rust tabs
-use nsh_core::ui::palette::ZINC;
+use nsh_core::element::palette::ZINC;
 
 view()
     .flex_row()

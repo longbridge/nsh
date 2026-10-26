@@ -6,10 +6,10 @@ order: 12
 
 # nsh/android
 
-`nsh/android` 包含只有 Android 才有的 API。Rust 代码调用 `nsh_core::ui::prelude` 中对应的函数（`toast`、`on_back_press`），并用 `os() == Os::Android` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的函数什么也不做，`isAvailable` 告诉你当前是否在 Android 上。
+`nsh/android` 包含只有 Android 才有的 API。Rust 代码调用 `nsh_core::element::prelude` 中对应的函数（`toast`、`on_back_press`），并用 `os() == Os::Android` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的函数什么也不做，`isAvailable` 告诉你当前是否在 Android 上。
 
 ```rust tabs
-use nsh_core::{platform::Os, ui::prelude::*}; // os、toast、ToastDuration、on_back_press
+use nsh_core::{platform::Os, element::prelude::*}; // os、toast、ToastDuration、on_back_press
 ```
 
 ```tsx tabs
@@ -38,7 +38,7 @@ const Toast: {
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::{platform::Os, ui::prelude::*};
+use nsh_core::{platform::Os, element::prelude::*};
 
 fn notify(message: &str) {
     if os() == Os::Android {
@@ -81,7 +81,7 @@ const BackHandler: {
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 fn Editor() -> impl IntoElement {

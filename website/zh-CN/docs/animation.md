@@ -725,7 +725,7 @@ x.timing(1, { easing: [0.2, 0.8, 0.2, 1] });
 `Easing.sample(easing, count)`（Rust 中的 `sample_easing`）返回曲线在 0 到 1 之间 `count` 个等距点上的值，`Animated.sampleSpring(config, fps?)` / `Animated.sampleDecay(config, fps?)`（`sample_spring`、`sample_decay`）返回弹簧或衰减经过的值，每帧一个（默认每秒 60 帧），从 `config.from`（0）开始直到结束。它们由运行动画的同一套原生代码计算，所以画出的曲线与动画的实际运动完全一致：
 
 ```rust tabs
-use nsh_core::ui::{sample_easing, sample_spring};
+use nsh_core::element::{sample_easing, sample_spring};
 
 let curve = sample_easing(Easing::Curve(Curve::Back(1.70158), EaseMode::Out), 50); // 50 个进度值
 let spring = sample_spring(0.0, 1.0, Spring { stiffness: 180.0, damping: 8.0, ..Spring::default() }, 60.0);
@@ -741,7 +741,7 @@ const spring = Animated.sampleSpring({ toValue: 1, stiffness: 180, damping: 8 })
 布局动画以原生动画呈现**下一次**更新中的布局变化：移动或改变尺寸的视图平滑地到达新位置，新视图淡入（或缩放）出现，被删除的视图淡出。在改变状态之前调用它：Rust 中是 `animate_layout(..)`，TSX 中是 `LayoutAnimation.configureNext(config)`。
 
 ```rust tabs
-use nsh_core::ui::LayoutAnimation;
+use nsh_core::element::LayoutAnimation;
 
 let items = signal(vec![1, 2, 3]);
 let next = stored(4);
@@ -790,7 +790,7 @@ const remove = () => {
 配置为 `{ duration, create?, update?, delete? }`（Rust 中为 `LayoutAnimation { create, update, delete }`）：`create` 用于插入的视图，`update` 用于移动或改变尺寸的视图，`delete` 用于删除的视图。每个阶段为 `{ type?, property?, duration?, delay?, springDamping? }`（`LayoutTransition { curve, property, duration_ms, delay_ms }`），其中 `type` 为 `"easeInEaseOut"`、`"spring"`、`"linear"`、`"easeIn"`、`"easeOut"` 或 `"keyboard"`（软键盘自己的曲线，从键盘开始移动时算起，让为它让位的内容与它一起移动；`LayoutCurve::Keyboard`）；`property` 是出现和消失的视图做什么动画（`"opacity"`、`"scaleXY"`、`"scale"`）；`springDamping`（0..1，默认 0.7；`LayoutCurve::Spring { damping }`）决定弹簧的过冲程度。
 
 ```rust tabs
-use nsh_core::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
+use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
 
 animate_layout(LayoutAnimation {
     create: Some(LayoutTransition::new(LayoutCurve::EaseOut, 300.0)),

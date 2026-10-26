@@ -564,7 +564,7 @@ Hover 应克制，因为触摸、键盘和 accessibility 操作没有 hover。�
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, theme};
-use nsh_core::{color::black, ui::StyleRefinement};
+use nsh_core::{color::black, element::StyleRefinement};
 
 /// 应用的弹出层表面，菜单、弹出框和工具提示共用。
 fn popup(s: StyleRefinement) -> StyleRefinement {

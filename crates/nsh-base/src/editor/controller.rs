@@ -8,8 +8,8 @@ use std::{
 };
 
 use nsh_core::{
+    element::{Os, prelude::*},
     keymap::When,
-    ui::{Os, prelude::*},
 };
 
 use super::{

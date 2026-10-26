@@ -6,8 +6,7 @@
 use nsh_base::{alert_dialog, dialog, input, nav_page};
 use nsh_core::{
     ModalPresentation,
-    components::safe_area_view,
-    ui::{AnyElement, Os, Screen, prelude::*},
+    element::{AnyElement, Os, Screen, prelude::*, safe_area_view},
 };
 
 use crate::{

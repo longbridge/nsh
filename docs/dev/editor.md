@@ -276,7 +276,7 @@ first time a language needs them. Without feature `highlight` the built-in langu
 highlighters still run.
 
 The app's highlighters and languages (`highlighter.rs`, `languages.rs`) are kept per engine, in a value of the
-surface (`nsh_core::ui::global`), never process-wide. `register_language` adds an `EditorLanguage` (a
+surface (`nsh_core::element::global`), never process-wide. `register_language` adds an `EditorLanguage` (a
 `LanguageConfig` built with `const` methods, so a `static`); `register_highlighter` binds a factory of
 `EditorHighlighter`s to a language name (resolved when registered: `"rs"` binds Rust). `languages::resolve` finds a
 name among the registered languages (latest first: name, alias, extension, then as a path) before the built-in table,

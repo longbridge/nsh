@@ -6,12 +6,12 @@
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
 //! from their specs like a UI set's (`nsh-js` `components.rs`), and so are
-//! their declarations ([`crate::ui::declarations`]); `nsh-js` adds what has
+//! their declarations ([`crate::element::declarations`]); `nsh-js` adds what has
 //! to run in JS (the app's listeners, reactive accessors).
 
 use std::sync::OnceLock;
 
-use crate::ui::Registry;
+use crate::element::Registry;
 
 mod accessibility;
 mod android;
@@ -28,7 +28,7 @@ mod process;
 mod storage;
 mod websocket;
 
-/// The [`crate::ui::Quotas`] kind WebSockets count under: the `websocket`
+/// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
 /// module's connections and the global `WebSocket`'s (`nsh-js`) share
 /// [`MAX_WEBSOCKETS`] per VM.
 pub const WEBSOCKETS: &str = "websocket.connections";
@@ -60,9 +60,9 @@ pub fn registries() -> &'static [Registry] {
         desktop.module::<desktop::Window>();
         // `nsh`'s primitives written in Rust; the rest of `nsh` is `nsh-js`'s.
         let mut nsh = Registry::runtime("nsh");
-        nsh.register::<crate::elements::SafeAreaView>()
-            .register::<crate::elements::KeyboardAvoidingView>()
-            .register::<crate::elements::SelectionArea>();
+        nsh.register::<crate::element::SafeAreaView>()
+            .register::<crate::element::KeyboardAvoidingView>()
+            .register::<crate::element::SelectionArea>();
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile.register::<crate::mobile::TabBar>();
         let mut os = Registry::runtime("os");

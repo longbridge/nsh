@@ -5,11 +5,9 @@
 use std::hash::{BuildHasher, RandomState};
 
 use nsh_base::{dialog, input};
-use nsh_core::{
-    components::{AvoidBehavior, keyboard_avoiding_view, safe_area_view},
-    ui::{
-        AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
-    },
+use nsh_core::element::{
+    AnyElement, AvoidBehavior, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os,
+    keyboard_avoiding_view, prelude::*, safe_area_view,
 };
 
 use crate::{

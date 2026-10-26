@@ -29,7 +29,7 @@ pub struct BundleOptions {
     pub split: bool,
     /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
-    pub ui_sets: Vec<nsh_core::ui::description::SetDescription>,
+    pub ui_sets: Vec<nsh_core::element::description::SetDescription>,
 }
 
 /// A failed build, formatted for people.
@@ -256,7 +256,7 @@ impl ResolveSetup {
 
 /// The design tokens of the app in `dir`: its `nsh.json` `"theme"` over
 /// the default's (`nsh_base::Theme`), or the default's when it has none.
-pub fn theme_tokens(dir: &std::path::Path) -> Result<nsh_core::ui::Tokens, BundleError> {
+pub fn theme_tokens(dir: &std::path::Path) -> Result<nsh_core::element::Tokens, BundleError> {
     let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
         return Ok(nsh_base::Theme::default().into_tokens());
     };
@@ -631,7 +631,7 @@ fn append_module(
 /// the current thread (`ui_sets` as in [`BundleOptions::ui_sets`]).
 pub fn bundle_hot(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::description::SetDescription],
+    ui_sets: &[nsh_core::element::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
@@ -642,7 +642,7 @@ pub fn bundle_hot(
 /// Bundles an app for development with hot module replacement.
 pub async fn bundle_hot_async(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::description::SetDescription],
+    ui_sets: &[nsh_core::element::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     let start = Instant::now();
     let entry = dunce::canonicalize(entry)

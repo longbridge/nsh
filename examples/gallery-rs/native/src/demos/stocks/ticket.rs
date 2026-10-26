@@ -5,7 +5,7 @@
 
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    ui::{PropEnum, prelude::*},
+    element::{PropEnum, prelude::*},
 };
 
 use super::market::{grouped, price};

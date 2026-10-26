@@ -7,7 +7,7 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem, Size,
-    ui::{Registry, prelude::*},
+    element::{Registry, prelude::*},
 };
 use nsh_engine::{Bundle, Engine, EngineConfig, Environment};
 
@@ -105,7 +105,7 @@ impl Counter {
 
 /// Another set's class of the same name.
 mod other {
-    use nsh_core::ui::prelude::*;
+    use nsh_core::element::prelude::*;
 
     #[class]
     pub(crate) struct Counter;
@@ -259,7 +259,7 @@ pub(crate) struct Gauge;
 #[derive(Clone, PartialEq, Props)]
 pub(crate) struct GaugeProps {
     #[prop(default)]
-    level: nsh_core::ui::Prop<u32>,
+    level: nsh_core::element::Prop<u32>,
 }
 
 impl Component for Gauge {
@@ -276,19 +276,19 @@ impl Component for Gauge {
 pub(crate) struct Panicky;
 
 impl JsValue for Panicky {
-    fn ts_type(_types: &mut nsh_core::ui::TsTypes) -> String {
+    fn ts_type(_types: &mut nsh_core::element::TsTypes) -> String {
         "number".into()
     }
 
-    fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, nsh_core::ui::PropError> {
+    fn from_js(_value: nsh_core::element::JsIn<'_>) -> Result<Self, nsh_core::element::PropError> {
         panic!("panicky");
     }
 
     fn to_js<'a>(
         &self,
-        host: &'a dyn nsh_core::ui::JsHost,
-    ) -> Result<nsh_core::ui::JsOwned<'a>, nsh_core::ui::PropError> {
-        Ok(nsh_core::ui::JsOwned::new(host, host.undefined()))
+        host: &'a dyn nsh_core::element::JsHost,
+    ) -> Result<nsh_core::element::JsOwned<'a>, nsh_core::element::PropError> {
+        Ok(nsh_core::element::JsOwned::new(host, host.undefined()))
     }
 }
 
@@ -355,7 +355,7 @@ pub(crate) struct Framed;
 #[derive(Clone, PartialEq, Props)]
 pub(crate) struct FramedProps {
     #[prop(default)]
-    inner: nsh_core::ui::Prop<nsh_core::ui::Style>,
+    inner: nsh_core::element::Prop<nsh_core::element::Style>,
 }
 
 impl Component for Framed {

@@ -6,8 +6,8 @@
 
 use nsh_base::{alert_dialog, input};
 use nsh_core::{
+    element::{AnyElement, prelude::*},
     storage::Storage,
-    ui::{AnyElement, prelude::*},
 };
 
 use crate::ui::{

@@ -184,7 +184,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   views around stop taking the touches (UIKit: their pan recognizer is disabled; Android: `ScrollBox.jsBlocked`); a native
   scroll view that starts dragging first cancels the JS touches. The `…ShouldSetResponder` handlers also get a
   `gestureState` (`ResponderGestureState`: `dx`, `dy`, `vx`, `vy`, `moveX`, `moveY`, `x0`, `y0`, `numberActiveTouches`,
-  since the first finger went down; `nsh_core::ui::PanGesture`, the same the core gives Rust claims). Rust components'
+  since the first finger went down; `nsh_core::element::PanGesture`, the same the core gives Rust claims). Rust components'
   nodes on the path hear the same event first and negotiate their own responder in the core (`claim_touches`,
   `docs/dev/components.md`); the core sends both sides' blocks.
 - **Pans that coexist with scroll views** (`panActivation={{ activeOffsetX, activeOffsetY, failOffsetX, failOffsetY }}`,

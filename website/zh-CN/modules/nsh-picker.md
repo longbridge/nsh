@@ -10,11 +10,11 @@ order: 8.6
 上是 Photo Picker，桌面上是打开面板或文件对话框，浏览器里是文件输入框。iOS 和 Android 的选择器运行在应用之外，只交出用户
 选中的内容，所以不需要相册权限。每张选中的图片都是一个 `File`（TSX）或 `PickedFile`（Rust），它的字节留在原生侧：用
 `URL.createObjectURL(file)` 交给 [`Image`](../elements/image.md) 显示，用 `fetch` 和 `FormData` 上传。Rust 代码调用
-`nsh_core::ui::prelude` 的 `pick_images`；TSX 从 `nsh/picker` 导入 `Picker`。
+`nsh_core::element::prelude` 的 `pick_images`；TSX 从 `nsh/picker` 导入 `Picker`。
 
 ```rust tabs
 use nsh_core::picker::{PickRequest, PickedFile};
-use nsh_core::ui::prelude::*; // pick_images
+use nsh_core::element::prelude::*; // pick_images
 ```
 
 ```tsx tabs
@@ -78,7 +78,7 @@ pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
 ```rust tabs
 use nsh_core::geometry::{DevicePixels, Percentage};
 use nsh_core::picker::{PickRequest, PickedFile};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn attach_button(attached: Signal<Option<PickedFile>>) -> impl IntoElement {
     view()

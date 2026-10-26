@@ -6,12 +6,12 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code draws a title bar of its own and closes the window with `nsh_core::ui::desktop` (`set_title_bar`, `title_bar`, `close_window`) and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`, which holds the window's other functions and the menus too. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether you are on a desktop.
+`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code draws a title bar of its own and closes the window with `nsh_core::element::desktop` (`set_title_bar`, `title_bar`, `close_window`) and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`, which holds the window's other functions and the menus too. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether you are on a desktop.
 
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    ui::{
+    element::{
         desktop::{close_window, set_title_bar, title_bar},
         prelude::*,
     },
@@ -52,7 +52,7 @@ const Window: {
 };
 ```
 
-The Rust column names the functions of `nsh_core::ui::desktop`.
+The Rust column names the functions of `nsh_core::element::desktop`.
 
 | Member | Rust | Description |
 |---|---|---|
@@ -78,7 +78,7 @@ With the title bar hidden, the app draws its own bar and says which parts of it 
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    ui::{
+    element::{
         desktop::{set_title_bar, title_bar},
         prelude::*,
     },

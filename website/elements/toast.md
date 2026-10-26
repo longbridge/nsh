@@ -26,7 +26,7 @@ built on `gpui-base`'s toasts.
 ```rust tabs
 use std::time::Duration;
 
-use nsh_core::{time::now, ui::prelude::*};
+use nsh_core::{time::now, element::prelude::*};
 
 use nsh_base::{
     Anchor, ToastManager, ToastMotion, ToastOptions, ToastStackState, theme, toast, toast_stack,

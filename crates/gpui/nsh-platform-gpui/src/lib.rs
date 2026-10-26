@@ -66,7 +66,7 @@ pub use gpui;
 pub use nsh_base::{Theme, ThemeError};
 pub use nsh_core::{
     platform::{Appearance, Locale},
-    ui::{AdaptiveColor, Color, Hsla, Rgba},
+    element::{AdaptiveColor, Color, Hsla, Rgba},
 };
 pub use nsh_engine::{
     App, AppError, AppErrorKind, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy,

@@ -2282,7 +2282,7 @@ impl<C: Component> ComponentElement<C> {
 /// before [`Styled::size`]; call those as `Styled::selected(element, ..)`).
 ///
 /// ```
-/// use nsh_core::ui::prelude::*;
+/// use nsh_core::element::prelude::*;
 ///
 /// /// The props of [`Picker`].
 /// #[derive(Clone, PartialEq, Props)]

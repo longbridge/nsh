@@ -372,7 +372,7 @@ fn strings(object: &Map<String, Value>, key: &str, at: &str) -> Result<Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::prelude::*;
+    use crate::element::prelude::*;
 
     /// A component of the test set.
     #[component]
@@ -414,7 +414,10 @@ mod tests {
             set.exports_of(ExportKind::Component).collect::<Vec<_>>(),
             ["Badge"]
         );
-        assert_eq!(set.declarations, crate::ui::declarations(&self::set(), &[]));
+        assert_eq!(
+            set.declarations,
+            crate::element::declarations(&self::set(), &[])
+        );
         assert_eq!(set.reexported_values, ["safeArea"]);
         assert_eq!(set.reexported_types, ["Insets"]);
         assert_eq!(set.native_values, ["Stack"]);

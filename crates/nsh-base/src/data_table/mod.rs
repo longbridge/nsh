@@ -11,7 +11,7 @@ mod parts;
 mod selection;
 mod view;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 use self::controller::Dt;
 pub use self::{

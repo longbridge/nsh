@@ -6,10 +6,10 @@ order: 7
 
 # nsh/gesture
 
-Pan responders are drag gestures on top of the gesture responder system: the element claims the touches of a gesture, then hears them alone with the gesture state, which tracks the touches' centroid, the distance moved and the velocity for you. Rust code claims them with `.claim_touches(TouchClaim::…)` and hears them with `.on_responder_*` listeners whose `ResponderEvent` carries a `PanGesture`, all in `nsh_core::ui::prelude`; TSX imports `PanResponder` from `nsh/gesture`, whose `onPanResponder…` callbacks receive the touch event and the gesture state.
+Pan responders are drag gestures on top of the gesture responder system: the element claims the touches of a gesture, then hears them alone with the gesture state, which tracks the touches' centroid, the distance moved and the velocity for you. Rust code claims them with `.claim_touches(TouchClaim::…)` and hears them with `.on_responder_*` listeners whose `ResponderEvent` carries a `PanGesture`, all in `nsh_core::element::prelude`; TSX imports `PanResponder` from `nsh/gesture`, whose `onPanResponder…` callbacks receive the touch event and the gesture state.
 
 ```rust tabs
-use nsh_core::ui::prelude::*; // TouchClaim, ClaimRequest, ResponderEvent, PanGesture
+use nsh_core::element::prelude::*; // TouchClaim, ClaimRequest, ResponderEvent, PanGesture
 ```
 
 ```tsx tabs
@@ -32,7 +32,7 @@ interface PanResponderInstance {
 Creates a pan responder. Spread its `panHandlers` on the view that should receive the gesture. In Rust, the view claims the touches and listens itself:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {

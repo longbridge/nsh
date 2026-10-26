@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub use nsh_macros::HostProps;
 
-use crate::{EdgeInsets, EventKind, geometry::Points, style::Color, ui::TsTypes};
+use crate::{EdgeInsets, EventKind, element::TsTypes, geometry::Points, style::Color};
 
 /// A JS value as host props read it.
 pub trait HostInput: Sized {

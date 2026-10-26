@@ -189,7 +189,7 @@ server greets it; the dev session publishes no bundles (`DevSession::rust_root`)
 `nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
-(`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
+(`nsh_core::element::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
 prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5.26 MB (1.75 / 1.27 MB).
 
@@ -259,7 +259,7 @@ the end, so tasks woken only there (timers, fetch replies) request no pump of th
   `nsh_core::time::Instant` (std's elsewhere; `performance.now()` through the `nsh.now_ms` import there) and
   `nsh_core::time::unix_ms`. Rust components' `cx.timer()` returns `nsh_core::time::Sleep` there, whose wakers the
   driver fires (`next_timer`, `fire_timers`); `background` / `blocking` do not exist. Rust components' HTTP goes
-  through the engine (`nsh_core::ui::fetch`: `Action::Fetch`, `Core::take_fetches` / `fetch_event`, the engine's
+  through the engine (`nsh_core::element::fetch`: `Action::Fetch`, `Core::take_fetches` / `fetch_event`, the engine's
   `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
   under the same capability checks as JS's.
 - **QuickJS** uses rquickjs' pregenerated bindings (its bindgen run misses `JS_ToCStringLen2` for wasm32) and its

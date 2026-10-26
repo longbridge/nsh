@@ -7,12 +7,12 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
     StatusBarSetting, StatusBarStyle, Viewability,
+    element::TsTypes,
     geometry::{Bounds, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
-    ui::TsTypes,
 };
 
 fn number<I: HostInput>(input: &I, key: &str) -> Option<f32> {

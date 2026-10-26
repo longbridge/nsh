@@ -1,6 +1,8 @@
-//! Components written in Rust: those of the runtime (`SafeAreaView`, ...) and
-//! of apps' own crates (their UI sets),
-//! run by the core on the engine thread.
+//! Elements and the components written in Rust: `nsh`'s primitives (the host
+//! elements, and `SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea`,
+//! views that lay out by what the surface reports or tell the platform how
+//! their texts select) and the components of apps' own crates (their UI
+//! sets), run by the core on the engine thread.
 //!
 //! A [`Component`] is a function that runs once ([`Component::view`]) and
 //! makes a tree of elements ([`view`], [`text`], [`image`], other
@@ -50,6 +52,7 @@ pub(crate) mod host;
 mod js;
 #[cfg(test)]
 pub(crate) mod json_host;
+mod keyboard_avoiding;
 pub(crate) mod keys;
 pub(crate) mod module;
 mod once;
@@ -60,7 +63,9 @@ pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
 mod rows;
+mod safe_area;
 mod scrollable;
+mod selection_area;
 pub(crate) mod services;
 pub(crate) mod status_bar;
 mod style;
@@ -83,10 +88,10 @@ pub const DECLARATIONS: bool = !cfg!(target_arch = "wasm32");
 #[macro_export]
 macro_rules! decl {
     ([$($text:expr),* $(,)?]) => {
-        if $crate::ui::DECLARATIONS { &[$($text),*] as &[&'static str] } else { &[] }
+        if $crate::element::DECLARATIONS { &[$($text),*] as &[&'static str] } else { &[] }
     };
     ($text:expr) => {
-        if $crate::ui::DECLARATIONS { $text } else { "" }
+        if $crate::element::DECLARATIONS { $text } else { "" }
     };
 }
 
@@ -149,6 +154,10 @@ pub use self::{
         input_accessory_view, native, overlay, scroll, video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
+    keyboard_avoiding::{
+        AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewElement,
+        KeyboardAvoidingViewProps, keyboard_avoiding_view,
+    },
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,
         ModuleCx, ModuleFuture, ModuleParam, ModuleSpec, Overload, OverloadSpec, SyncCall,
@@ -164,7 +173,9 @@ pub use self::{
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     rows::{RowAccessor, RowRef, Rows},
+    safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     scrollable::Scrollable,
+    selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     style::{
         AdaptiveColor, BorderCurve, FontWeight, LayoutDirection, StyleRefinement, Styled,
@@ -209,7 +220,7 @@ pub use crate::{
     style::Color,
 };
 
-/// Everything a component's module needs: `use nsh_core::ui::prelude::*;`.
+/// Everything a component's module needs: `use nsh_core::element::prelude::*;`.
 pub mod prelude {
     // Components that run once: signals, bindings, control flow; what they
     // read of the surface and ask of the platform.
@@ -495,7 +506,7 @@ pub mod __private {
     #[diagnostic::on_unimplemented(
         message = "a crate of the app (nsh.json \"rust\") has no `#[native_module(\"…\")]` at its root",
         label = "the crate's UI set",
-        note = "add to the crate's lib.rs, with the specifier its TSX imports the set by: `#[native_module(\"my-app/native\")] fn native(registry: &mut Registry) {{ registry.register::<MyComponent>(); }}` (`use nsh_core::ui::prelude::*`)"
+        note = "add to the crate's lib.rs, with the specifier its TSX imports the set by: `#[native_module(\"my-app/native\")] fn native(registry: &mut Registry) {{ registry.register::<MyComponent>(); }}` (`use nsh_core::element::prelude::*`)"
     )]
     pub trait NoNativeModule {}
 

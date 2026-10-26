@@ -311,7 +311,7 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 fn photo_viewer() -> Screen {
     nav_page().header_visible(false).status_bar(

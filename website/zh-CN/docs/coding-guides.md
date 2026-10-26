@@ -291,7 +291,7 @@ switch()
 
 ```rust tabs
 use nsh_base::{button, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::element::prelude::*;
 
 /// The props of [`QuantityStepper`].
 #[derive(Debug, Clone, PartialEq, Props)]

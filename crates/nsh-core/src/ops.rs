@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     animation::AnimationOp,
+    element::PropEnum,
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement, TooltipContent},
     props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
     style::{Color, EllipsizeMode, Style, StylePatch},
-    ui::PropEnum,
 };
 
 /// Identifier of a node, assigned by the JS renderer.
@@ -1547,7 +1547,7 @@ pub enum Command {
     AccessibilityFocus,
     /// Measure the view with this commit's layout (`ref.measure()`):
     /// answered by the core in its events for promise `call`
-    /// ([`crate::ui::JsEvent::Reply`]: a [`crate::Measurement`], or null
+    /// ([`crate::element::JsEvent::Reply`]: a [`crate::Measurement`], or null
     /// when the view is not laid out); never mounted.
     Measure {
         /// The call to answer.
@@ -1807,9 +1807,9 @@ pub enum Prop {
     /// any JSON value, `None` to remove it.
     ComponentProp(Arc<str>, Option<crate::JsonValue>),
     /// A prop of a Rust component's host, decoded in the JS call into the
-    /// prop's Rust type ([`crate::ui::PropSpec::decode`]); `None` resets it
+    /// prop's Rust type ([`crate::element::PropSpec::decode`]); `None` resets it
     /// to its default.
-    RustProp(&'static str, Option<crate::ui::AnyValue>),
+    RustProp(&'static str, Option<crate::element::AnyValue>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
@@ -2371,7 +2371,7 @@ pub enum Op {
     /// A call JS made into Rust that runs in order with the UI's ops: a
     /// module function with a context, the start of an `async` function or
     /// member, a method of a component's ref, or the place of a JS call
-    /// posted during a synchronous call ([`crate::ui::RustCall`]). Never
+    /// posted during a synchronous call ([`crate::element::RustCall`]). Never
     /// reaches a platform.
-    Rust(crate::ui::RustOp),
+    Rust(crate::element::RustOp),
 }

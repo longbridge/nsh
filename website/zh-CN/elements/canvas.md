@@ -13,7 +13,7 @@ canvas 是一个由你自己用 2D 绘图 API（即 HTML Canvas 2D API）绘制�
 ```rust tabs
 use std::f32::consts::{FRAC_PI_2, TAU};
 
-use nsh_core::{canvas::LineCap, ui::prelude::*};
+use nsh_core::{canvas::LineCap, element::prelude::*};
 
 /// 一个进度圆环，120 点见方。
 fn ring(progress: f32) -> impl IntoElement {
