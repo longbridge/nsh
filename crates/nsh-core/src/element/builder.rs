@@ -964,6 +964,48 @@ impl JsValue for Style {
     }
 }
 
+/// The style of a component's part that shows or edits text (a number
+/// input's field): a [`Style`] whose TypeScript type takes the text styles
+/// too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`,
+/// `placeholderColor`), as the part is a text or an input. Its setter takes
+/// the typed styles' closure, as a `Style`'s does; the part applies it with
+/// [`Element::inline_style`] (it is `Into<Style>`).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TextPartStyle(pub Style);
+
+impl From<Style> for TextPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for TextPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<TextPartStyle> for Style {
+    fn from(style: TextPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for TextPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
 impl<T: Element> Styled for T {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.node().style

@@ -7429,6 +7429,60 @@ mod components {
         assert_eq!(styled(&batch), Some((Color::from(primary.dark), 0.5)));
     }
 
+    /// A part that shows text, styled by the app (as `nsh_base::NumberInput`'s
+    /// field).
+    #[derive(Clone, PartialEq, Props)]
+    struct CaptionProps {
+        #[prop(default)]
+        text_style: crate::element::Prop<crate::element::TextPartStyle>,
+    }
+
+    #[component]
+    fn Caption(props: CaptionProps) -> impl IntoElement {
+        view().child(text("Caption").inline_style(move || props.text_style.get()))
+    }
+
+    #[component]
+    fn Captioned() -> impl IntoElement {
+        caption().text_style(|s| s.opacity(0.5))
+    }
+
+    #[test]
+    fn a_text_parts_style_prop_takes_a_closure_and_reaches_the_part() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Captioned>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Captioned>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::ViewStyle { id, style } if *id != 2 && style.opacity == 0.5
+        )));
+        let mut types = crate::element::TsTypes::default();
+        assert_eq!(
+            <crate::element::TextPartStyle as crate::element::JsValue>::ts_type(&mut types),
+            "StyleProp<TextStyle>"
+        );
+    }
+
     #[test]
     fn the_host_theme_wins_over_the_apps_until_cleared() {
         let mut c = core();
