@@ -11,7 +11,6 @@ use gpui::{
     AnyElement, App as GpuiApp, Entity, Focusable, IntoElement, Styled, TestAppContext,
     VisualTestContext, Window, div,
 };
-use nsh_base::input;
 
 use crate::{App, AppOptions, AppView, Bundle, NativeComponent, Root};
 
@@ -621,6 +620,7 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// pad and in the window.
 mod press_point {
     use nsh_core::prelude::*;
+    use nsh_base::input;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {

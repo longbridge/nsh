@@ -3802,7 +3802,7 @@ mod tests {
                 &PRESETS,
                 &mut style,
                 &mut ClassProps::default(),
-                &|_: &mut Style| {},
+                |_: &mut Style| {},
             );
             style.pending.env
         };

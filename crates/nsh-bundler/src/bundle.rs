@@ -531,7 +531,7 @@ fn imports_host(code: &str) -> bool {
             .is_some_and(|names| {
                 names
                     .split(',')
-                    .any(|n| n.trim().split_whitespace().next() == Some("host"))
+                    .any(|n| n.split_whitespace().next() == Some("host"))
             })
     })
 }
