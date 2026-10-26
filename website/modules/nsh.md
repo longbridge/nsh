@@ -1118,6 +1118,14 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 - Safe area insets (Rust `safe_area()`; TSX `safeArea()`, `safeAreaInsets()`) and the software keyboard (Rust `keyboard_height()`; TSX `keyboardFrame()`) are in [Safe area and keyboard](#safe-area-and-keyboard).
 - Screen reader and reduced motion settings are in [Accessibility](#accessibility).
 
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<string>;
+```
+
+Registers a font while the app runs and resolves to its family name, for `fontFamily`: a font the app downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data, or the URL of one (a file of the app's, `asset:/...`, or one on the network, read as `fetch` reads it: the `network` capability applies). Text that names the family is laid out with it from then on, and text shown before again. Rejects with an `Error` when the URL does not load or the data is no font. Rust: `register_font(data) -> Answer<Result<String, String>>`, awaited in a task. Fonts the app ships are registered before the first frame instead ([Fonts](../docs/fonts.md#registering-a-font-while-the-app-runs)).
+
 ## PanResponder
 
 Pan responders are drag gestures on top of the gesture responder system: the element claims the touches of a gesture, then hears them alone with the gesture state, which tracks the touches' centroid, the distance moved and the velocity for you. Rust code claims them with `.claim_touches(TouchClaim::…)` and hears them with `.on_responder_*` listeners whose `ResponderEvent` carries a `PanGesture`, all in `nsh_core::prelude`; TSX imports `PanResponder` from `nsh`, whose `onPanResponder…` callbacks receive the touch event and the gesture state.

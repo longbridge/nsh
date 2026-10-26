@@ -79,6 +79,9 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Registers a font (TrueType, OpenType, WOFF or WOFF2 data); its family
+    /// name, or why it is no font, resolves the slot.
+    RegisterFont(Vec<u8>, AnswerSlot<Result<String, String>>),
     /// Shows the system's picker for images; the files picked (none when
     /// cancelled) resolve the slot.
     PickImages(

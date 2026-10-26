@@ -556,6 +556,17 @@ pub fn clipboard_files() -> Answer<Vec<String>> {
     answer
 }
 
+/// Registers a font while the app runs (TS: `registerFont`): one it
+/// downloaded or made, as TrueType, OpenType, WOFF or WOFF2 data. Resolves
+/// to its family name, for `font_family`, or why `data` is no font; to
+/// await in a task. Text that names the family is laid out with it from
+/// then on.
+pub fn register_font(data: impl Into<Vec<u8>>) -> Answer<Result<String, String>> {
+    let (answer, action) = super::services::register_font(data.into());
+    act(action);
+    answer
+}
+
 /// Shows the system's open dialog and gives the files (or folders,
 /// [`OpenDialog::folders`](crate::file_dialog::OpenDialog::folders)) the
 /// user picked, to await in a task: `None` when cancelled, the error when

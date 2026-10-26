@@ -147,6 +147,12 @@ pub(crate) fn clipboard_files() -> (Answer<Vec<String>>, Action) {
 }
 
 /// The images the user picks in the system's picker (none when cancelled).
+/// Registers the font in `data`.
+pub(crate) fn register_font(data: Vec<u8>) -> (Answer<Result<String, String>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::RegisterFont(data, slot))
+}
+
 pub(crate) fn pick_images(
     request: crate::picker::PickRequest,
 ) -> (Answer<Vec<crate::picker::PickedFile>>, Action) {

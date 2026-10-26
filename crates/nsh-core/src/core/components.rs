@@ -5131,6 +5131,12 @@ impl<M: TextEngine> Core<M> {
                 );
                 self.components.fetch_requests.push((id, *request));
             }
+            Action::RegisterFont(data, answer) => {
+                // The family is the answer: a font without one is refused.
+                let family = crate::text::font_family(&data)
+                    .and_then(|family| self.register_font(&data).map(|()| family));
+                answer.borrow_mut().deliver(family);
+            }
             Action::PickImages(request, answer) => {
                 if !self.access.allows_picker() {
                     answer.borrow_mut().deliver(Vec::new());

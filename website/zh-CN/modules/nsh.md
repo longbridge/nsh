@@ -1107,6 +1107,14 @@ view().direction(LayoutDirection::Rtl).flex_row().gap_2().child(text("First")).c
 - 安全区域（Rust 的 `safe_area()`；TSX 的 `safeArea()`、`safeAreaInsets()`）和软键盘（Rust 的 `keyboard_height()`；TSX 的 `keyboardFrame()`）见[安全区域与键盘](#safe-area-and-keyboard)。
 - 屏幕阅读器和减弱动态效果的设置在 [`nsh` 的无障碍 API](#accessibility) 中。
 
+## registerFont
+
+```ts
+function registerFont(source: string | Uint8Array): Promise<string>;
+```
+
+在应用运行时注册字体，并解析为它的字体族名，供 `fontFamily` 使用：应用下载或生成的字体，即 TrueType、OpenType、WOFF 或 WOFF2 数据，或者字体文件的 URL（应用自己的文件 `asset:/...`，或网络上的文件，按 `fetch` 的方式读取：适用 `network` 权限）。此后使用该字体族的文字都会用它排版，之前已显示的文字也会重新排版。URL 无法加载或数据不是字体时以 `Error` 拒绝。Rust：`register_font(data) -> Answer<Result<String, String>>`，在任务中等待。应用发布的字体则在第一帧之前注册（[字体](../docs/fonts.md#在应用运行时注册字体)）。
+
 ## PanResponder
 
 Pan responder 是构建在手势响应者系统之上的拖动手势：元素认领一次手势的触摸，然后独自接收这些触摸和手势状态，手势状态会帮你跟踪各触点的中心、移动距离和速度。Rust 代码用 `.claim_touches(TouchClaim::…)` 认领触摸，用 `.on_responder_*` 监听，其 `ResponderEvent` 带有 `PanGesture`，都在 `nsh_core::prelude` 中；TSX 从 `nsh` 导入 `PanResponder`，它的 `onPanResponder…` 回调接收触摸事件和手势状态。

@@ -18,6 +18,7 @@ mod android;
 mod clipboard;
 mod desktop;
 mod device;
+mod fonts;
 mod fs;
 mod host;
 mod image;
@@ -53,6 +54,7 @@ pub fn registries() -> &'static [Registry] {
         nsh.module::<crate::element::Keyboard>()
             .module::<image::Image>()
             .module::<device::Device>()
+            .module::<fonts::Fonts>()
             .module::<accessibility::Accessibility>()
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()

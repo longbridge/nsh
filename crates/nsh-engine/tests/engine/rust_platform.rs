@@ -375,6 +375,29 @@ fn components_follow_whether_the_app_is_in_use() {
     );
 }
 
+/// Registers a font it was given while the app runs and shows its family,
+/// as an app that downloads its fonts does.
+#[component]
+fn Downloaded() -> impl IntoElement {
+    let family = signal(String::from("none"));
+    spawn(async move {
+        let data =
+            include_bytes!("../../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2");
+        let shown = match register_font(data.to_vec()).await {
+            Ok(name) => name,
+            Err(e) => format!("failed: {e}"),
+        };
+        family.set(shown);
+    });
+    view().child(text(move || format!("Family: {}", family.get())))
+}
+
+#[test]
+fn a_component_registers_a_font_while_the_app_runs() {
+    let (_engine, rx, _) = start::<Downloaded>(Environment::default());
+    until(&rx, "Family: Pacifico");
+}
+
 /// Speaks, moves the screen reader and opens a dialog
 /// that sets the status bar.
 #[component]
