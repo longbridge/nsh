@@ -13977,6 +13977,126 @@ mod renders {
         assert!(frame_of(&batch, place).is_some(), "{:?}", batch.items);
     }
 
+    /// A popup's list: a scroll view as long as its rows (up to 300 pt),
+    /// the rows in its viewport, each drawn by the app's function.
+    #[derive(Clone, PartialEq, Props)]
+    struct PickerProps {
+        #[prop(default)]
+        items: crate::element::Prop<Vec<String>>,
+        render_item: crate::element::Prop<Option<Renderer<String>>>,
+    }
+
+    #[component]
+    fn Picker(props: PickerProps) -> impl IntoElement {
+        let (items, render) = (props.items, props.render_item);
+        view().max_h(px(300.0)).child(
+            scroll().flex_shrink(1.0).min_h(px(0.0)).child(
+                virtual_list(
+                    move || items.with(Vec::len),
+                    move |at| {
+                        view().child(dynamic(move || -> Option<Rendered> {
+                            let (key, label) = items.with(|i| split(&i[at.index()]));
+                            render.get().map(|r| r.render(key, label))
+                        }))
+                    },
+                )
+                .viewport(ListViewport::Parent),
+            ),
+        )
+    }
+
+    #[test]
+    fn a_lists_rows_drawn_by_js_are_measured_once_their_drawing_arrives() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Picker>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Picker>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::RustProp(
+                        "renderItem",
+                        Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                            "renderItem",
+                            2,
+                        )))),
+                    ),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: rust_prop::<PickerProps>("items", Some(json!(["a:Apple", "b:Banana"]))),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        // Asked in no particular order.
+        let mut renders = asked(&mut c);
+        renders.sort();
+        assert_eq!(renders, ["$render a Apple", "$render b Banana"]);
+        let scroll = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: crate::ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("the scroll view");
+        // The rows hold only their placeholders: they keep their estimates
+        // (50 pt) instead of measuring nothing, which would leave the
+        // scroll view no viewport to render them in.
+        let height = |batch: &MountBatch| frame_of(batch, scroll).map(|f| f.size.height.0);
+        assert_eq!(height(&batch), Some(100.0), "{:?}", batch.items);
+
+        // JS's drawings arrive: the rows are measured in this commit (16 pt
+        // each), the scroll view follows and the rows are placed.
+        apply(&mut c, holder(10, "a", "Apple"));
+        apply(&mut c, holder(20, "b", "Banana"));
+        let batch = c.commit().unwrap();
+        assert_eq!(height(&batch), Some(32.0), "{:?}", batch.items);
+        let cell = |holder: NodeId| {
+            let mut key = c.key(holder).unwrap();
+            loop {
+                let parent = c.nodes[key as usize].parent;
+                assert_ne!(parent, NO_KEY, "in a cell");
+                if c.nodes[parent as usize].list.is_some() {
+                    return c.nodes[key as usize].id;
+                }
+                key = parent;
+            }
+        };
+        let rows: Vec<(f32, f32)> = [10, 20]
+            .into_iter()
+            .map(|h| {
+                let frame = frame_of(&batch, cell(h)).expect("the row is placed");
+                (frame.origin.y.0, frame.size.height.0)
+            })
+            .collect();
+        assert_eq!(rows, [(0.0, 16.0), (16.0, 16.0)], "{:?}", batch.items);
+        // What JS drew is laid out in them.
+        for holder in [10, 20] {
+            let frame = frame_of(&batch, holder).expect("the holder is laid out");
+            assert_eq!(frame.size.height.0, 16.0);
+        }
+    }
+
     /// A Rust view passing a closure: rendered on the spot.
     #[derive(Clone, PartialEq, Props)]
     struct ShelvesProps {}

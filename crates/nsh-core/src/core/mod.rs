@@ -882,6 +882,9 @@ pub struct Core<M: TextEngine> {
     events: Vec<crate::element::JsEvent>,
     /// Reused buffer of `(item index, cell)` for list updates.
     cells_scratch: Vec<(u32, Key)>,
+    /// The list cells whose content waits for the app's render functions
+    /// this round (sorted; [`Core::cells_awaiting_renders`]): not measured.
+    awaiting_renders: Vec<Key>,
     root: Key,
     viewport: Size<Points>,
     mount: Vec<MountItem>,
@@ -1020,6 +1023,7 @@ impl<M: TextEngine> Core<M> {
             paced_scratch: Vec::new(),
             events: Vec::new(),
             cells_scratch: Vec::new(),
+            awaiting_renders: Vec::new(),
             root,
             viewport,
             mount: Vec::new(),
@@ -5772,6 +5776,11 @@ impl<M: TextEngine> Core<M> {
     /// Measures rendered cells, keeps the visible content anchored, picks
     /// the items to render and positions the cells of every list.
     fn update_lists(&mut self, relayout: bool) {
+        // A cell measured before JS's render of its content arrives would
+        // record the size of its empty placeholders.
+        let mut awaiting = std::mem::take(&mut self.awaiting_renders);
+        self.cells_awaiting_renders(&mut awaiting);
+        self.awaiting_renders = awaiting;
         for i in 0..self.lists.len() {
             let key = self.lists[i];
             // Lists in their parent's viewport come after, outer ones first.
@@ -5881,6 +5890,13 @@ impl<M: TextEngine> Core<M> {
             .loads_at_start = events.contains(EventKind::LoadMoreAtStart);
         let mut anchor = 0.0;
         for &(index, cell) in &ready {
+            // Waiting for JS's render: it keeps its estimate (or the size
+            // measured last) until the holder arrives and lays it out
+            // again. A list in a view sized by its content would otherwise
+            // shrink to nothing and leave no row in its window to render.
+            if self.awaiting_renders.binary_search(&cell).is_ok() {
+                continue;
+            }
             if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
                 let size = main_of(self.rounded_layout(cell_layout).size);
                 let list = self.nodes[key as usize].list.as_mut().expect("list");
@@ -5891,6 +5907,9 @@ impl<M: TextEngine> Core<M> {
             .into_iter()
             .zip(extras)
         {
+            if self.awaiting_renders.binary_search(&extra.cell).is_ok() {
+                continue;
+            }
             if let Some(cell_layout) = self.nodes.get(extra.cell as usize).and_then(|c| c.layout) {
                 let size = main_of(self.rounded_layout(cell_layout).size);
                 let list = self.nodes[key as usize].list.as_mut().expect("list");

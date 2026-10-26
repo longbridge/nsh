@@ -199,9 +199,13 @@ reasons: `reactive-components.md`.
     the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
     returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
     the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
-    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). The roots go with their
-    holder or with the component (`core/renders.rs`; `nsh-js` `components.rs`). The decoded prop names its host, so a
-    view may pass it on to a nested component's prop. Keys are unique among a component's renders of one prop.
+    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). Until its holder
+    arrives a placeholder is empty, so a list cell holding one is not measured (`Core::cells_awaiting_renders`): its
+    row keeps its estimate (or its last size) and stays in the window, and is measured in the commit the holder
+    comes in; measured empty, a list in a view sized by its content would shrink that view's viewport to nothing
+    and render no row. The roots go with their holder or with the component (`core/renders.rs`; `nsh-js`
+    `components.rs`). The decoded prop names its host, so a view may pass it on to a nested component's prop. Keys
+    are unique among a component's renders of one prop.
   - `data: Prop<Rows>`: rows of data the component reads by key, `data: T[]` in TS with `#[props(generic)]` on the
     props (the props generic over `T = any`, as a component with rows is, the default for a component given no rows
     of its own). `Rows` reads each row's number fields once, when JS sets the prop, into a column per key
