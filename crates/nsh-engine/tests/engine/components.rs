@@ -4222,3 +4222,304 @@ fn base_plot_pie_radii_move_with_the_update_motion() {
     let edges = inner_edges(&all[switched..]);
     assert!(edges.iter().all(|e| e.1.is_some()), "{edges:?}");
 }
+
+const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Bar, Plot } from "nsh/base/plot";
+
+type Row = { m: string; a: number; b: number; c: number | null };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const rows: Row[] = [
+    { m: "Jan", a: 10, b: 20, c: 5 },
+    { m: "Feb", a: 30, b: 10, c: null },
+    { m: "Mar", a: -10, b: 0, c: 15 },
+  ];
+  return (
+    <View>
+      <Plot
+        testID="bars"
+        data={rows}
+        xScale={{ type: "band", paddingInner: 0.25, paddingOuter: 0.125 }}
+        yScale={{ type: "linear", domain: [-20, 60] }}
+        crossLineClass="w-full bg-[#eeeeee]"
+        onHoverChange={(index) => hovered.set(index)}
+        style={{ width: 300, height: 80 }}
+      >
+        <Bar value="a" class="fill-[#ff0000]" cornerRadii={{ topLeft: 2, topRight: 2 }} inactiveOpacity={0.4} label="a" />
+        <Bar value="b" stack="s" class="fill-[#00ff00]" />
+        <Bar value="c" stack="s" label={(d: Row) => `${d.c}%`} />
+      </Plot>
+      {/* Bars across: bands down the y axis, values along x. */}
+      <Plot data={rows} yScale={{ type: "band" }} style={{ width: 100, height: 60 }}>
+        <Bar value="b" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The rectangles a drawing fills (its `rect` and `roundRect` subpaths
+/// with constant numbers).
+fn bar_rects(ops: &[nsh_core::canvas::CanvasOp]) -> Vec<[f32; 4]> {
+    use nsh_core::canvas::{CanvasOp, Num, PathOp};
+    ops.iter()
+        .filter_map(|op| match op {
+            CanvasOp::Path(PathOp::Rect(r) | PathOp::RoundRect(r, _)) => match r {
+                [Num::Const(x), Num::Const(y), Num::Const(w), Num::Const(h)] => {
+                    Some([*x, *y, *w, *h])
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// `nsh/base/plot`'s `Bar` (`gpui-base`'s `Bar` on a `ScaleBand`, its
+/// `Stack`): a bar per row in the row's band, bars outside a stack side by
+/// side, a stack's bars piled from its base (a missing value adding
+/// nothing), negatives growing down, the app's corners and paint; bars
+/// across on a band y scale; a label at each bar's end, from a field or
+/// the app's function; the hover finds the band under the pointer, the
+/// cross line as wide as the band, and draws no bar again.
+#[test]
+fn base_plot_bars_stand_in_bands_and_stack() {
+    use nsh_core::{
+        Color, HoverEvent,
+        canvas::{CanvasOp, Num, Paint, PathOp},
+    };
+    let (engine, rx) = start(BASE_PLOT_BARS);
+    let mut all = until_drawn(&rx, |d| {
+        bar_rects(&d.ops).contains(&[0.0, 20.0, 50.0, 20.0])
+    });
+    // The labels' function answers a turn later.
+    all.extend(until(&rx, |_| false));
+    assert_eq!(plot_bleeds(&all), [8.0; 4]);
+    let marks = plot_drawings(&all);
+    let [(_, a), (_, b), (_, c), (_, across)] = &marks[..] else {
+        panic!("four bars: {marks:?}")
+    };
+    // Three bands of 75, 100 apart (`paddingInner` 0.25 of a step, half
+    // that at each end), two places of 37.5 in each: `a`, and the stack
+    // `s`. The y scale: 60 - value.
+    assert_eq!(
+        a.ops[0],
+        CanvasOp::FillStyle(Paint::Color(Color(0xff00_00ff)))
+    );
+    assert_eq!(
+        bar_rects(&a.ops),
+        [
+            [12.5, 50.0, 37.5, 10.0],
+            [112.5, 30.0, 37.5, 30.0],
+            [212.5, 60.0, 37.5, 10.0]
+        ]
+    );
+    // Its corners, top left and top right; it fades with the hover.
+    let (two, none) = (Num::Const(2.0), Num::Const(0.0));
+    assert!(a.ops.contains(&CanvasOp::Path(PathOp::RoundRect(
+        [
+            Num::Const(12.5),
+            Num::Const(50.0),
+            Num::Const(37.5),
+            Num::Const(10.0)
+        ],
+        [two, two, none, none]
+    ))));
+    assert!(
+        a.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::GlobalAlpha(Num::Slot(_))))
+    );
+    // The stack: `b` from 0, `c` from where `b` ends; no bar where a value
+    // is 0 or missing. Square corners: plain rectangles.
+    assert_eq!(
+        bar_rects(&b.ops),
+        [[50.0, 40.0, 37.5, 20.0], [150.0, 50.0, 37.5, 10.0]]
+    );
+    assert!(b.ops.iter().all(|op| !matches!(
+        op,
+        CanvasOp::GlobalAlpha(_) | CanvasOp::Path(PathOp::RoundRect(..))
+    )));
+    assert_eq!(
+        bar_rects(&c.ops),
+        [[50.0, 35.0, 37.5, 5.0], [250.0, 45.0, 37.5, 15.0]]
+    );
+    // Across: bands of 20 down the plot, values along x (0 to 20 over 100).
+    assert_eq!(
+        bar_rects(&across.ops),
+        [[0.0, 0.0, 100.0, 20.0], [0.0, 20.0, 50.0, 20.0]]
+    );
+
+    // The labels: at each bar's end, centered on the bar; above an upright
+    // bar, below one growing down.
+    let parent_of = |all: &[MountBatch], child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let frame_of = |all: &[MountBatch], id: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Frame { id: f, frame } if *f == id => Some(*frame),
+                _ => None,
+            })
+            .next_back()
+            .unwrap()
+    };
+    let label_at = |text: &str| {
+        let id = all.iter().find_map(|b| text_ids(b, text)).expect(text);
+        let f = frame_of(&all, parent_of(&all, id));
+        (f.origin.x.0, f.origin.y.0)
+    };
+    // Layout rounds frames to whole points.
+    let near = |text: &str, (x, y): (f32, f32)| {
+        let (lx, ly) = label_at(text);
+        assert!(
+            (lx - x).abs() <= 0.5 && (ly - y).abs() <= 0.5,
+            "{text} at ({lx}, {ly}), not ({x}, {y})"
+        );
+    };
+    near("10", (31.25, 50.0));
+    near("30", (131.25, 30.0));
+    near("-10", (231.25, 70.0));
+    near("5%", (68.75, 35.0));
+    near("15%", (268.75, 45.0));
+    assert!(!all.iter().any(|b| shows(b, "null%")));
+
+    // The hover: the band under the pointer; the cross line as wide as it.
+    let plot = test_view(&all, "bars");
+    engine.control().dispatch_event(
+        plot,
+        EventKind::HoverMove,
+        EventPayload::Hover(HoverEvent {
+            position: nsh_core::geometry::point(px(160.0), px(10.0)),
+            ..Default::default()
+        }),
+    );
+    let hovered = until(&rx, |b| shows(b, "hover 1"));
+    assert!(plot_drawings(&hovered).is_empty());
+    all.extend(hovered);
+    all.extend(until(&rx, |_| false));
+    let line = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0xeeee_eeff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the cross line");
+    assert_eq!(frame_of(&all, parent_of(&all, line)).size.width.0, 75.0);
+}
+
+const BASE_PLOT_BAR_MOTION: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Bar, Plot } from "nsh/base/plot";
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={[{ v: 1 }, { v: 2 }, { v: 3 }]}
+        y="v"
+        xScale={{ type: "band" }}
+        appearGeneration={1}
+        motion={{ appear: { duration: 300, easing: "easeOut" }, enter: { duration: 120 }, pointer: { stiffness: 300, damping: 30 } }}
+        onHoverChange={(index) => hovered.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Bar stagger={0.5} inactiveOpacity={0.3} label="v" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Bar`'s motion, natively: with the plot's appear its bars grow out of
+/// their base, one after another (`stagger`, `gpui-base`'s
+/// `PlotAppear::staggered`), their ends values the platform's animator
+/// moves over a linear time each bar eases; the bars of other rows fade
+/// with the hover, and the pointer draws no bar again. With reduced
+/// motion they are whole at once.
+#[test]
+fn base_plot_bars_grow_and_fade_natively() {
+    use nsh_core::{
+        animation::{AnimationOp, Driver, Easing},
+        canvas::{CanvasOp, Num, PathOp},
+    };
+    let grows = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().any(|op| {
+            matches!(
+                op,
+                CanvasOp::Path(PathOp::Rect([
+                    Num::Const(_),
+                    Num::Slot(_),
+                    Num::Const(_),
+                    Num::Slot(_)
+                ]))
+            )
+        })
+    };
+    let (engine, rx) = start(BASE_PLOT_BAR_MOTION);
+    let mut batches = until_drawn(&rx, grows);
+    batches.extend(until(&rx, |_| false));
+    // The appear's time: linear over 300 ms, each bar easing its slice.
+    assert!(
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .any(|i| matches!(
+                i,
+                MountItem::Animation(AnimationOp::Start {
+                    driver: Driver::Timing {
+                        to,
+                        duration_ms,
+                        easing: Easing::Linear,
+                        ..
+                    },
+                    ..
+                }) if *to == 1.0 && *duration_ms == 300.0
+            ))
+    );
+    assert!(batches.iter().any(|b| shows(b, "3")));
+
+    let plot = test_view(&batches, "plot");
+    engine.control().dispatch_event(
+        plot,
+        EventKind::HoverMove,
+        EventPayload::Hover(nsh_core::HoverEvent {
+            position: nsh_core::geometry::point(px(150.0), px(10.0)),
+            ..Default::default()
+        }),
+    );
+    let entered = until(&rx, |b| shows(b, "hover 1"));
+    assert!(plot_drawings(&entered).is_empty());
+
+    // Reduced motion: whole at once.
+    let environment = Environment {
+        reduce_motion: true,
+        ..Environment::default()
+    };
+    let (_engine, rx) = start_in(BASE_PLOT_BAR_MOTION, environment);
+    let mut batches = until(&rx, |b| shows(b, "hover null"));
+    batches.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&batches);
+    assert!(drawings.iter().all(|(_, d)| !grows(d)));
+    assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
+}

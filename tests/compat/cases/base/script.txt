@@ -1144,6 +1144,44 @@ covers [props] Area.hoverDotClass
 covers [props] Area.hoverDotStyle
 covers [props] Plot.interactive
 covers [events] Plot.onHoverChange
+# Bars on a band scale laid out for 4 bands of 100 (`paddingInner` 0.2,
+# half that at each end), each at most 60 wide, in the middle of its
+# place: two places of 30 in each, the bar `v` and the stack `s`. The y
+# scale puts a value at 60 - value. Each label is a point at its bar's
+# value end, the text above it (the app's 30 by 14): `v` grows from its
+# base of -20, so even -10 stands up; `w` piles from 0 in its stack.
+expect bar null
+frame parent:text:10 35 50 0 0
+frame text:10 -15 -14 30 14
+frame parent:text:30 135 30 0 0
+frame parent:text:-10 235 70 0 0
+frame text:-10 -15 -14 30 14
+frame parent:text:w20 65 40 0 0
+frame text:w20 -15 -14 30 14
+frame parent:text:w10 165 50 0 0
+frame parent:text:w5 265 55 0 0
+# The hover finds the band under the pointer; the cross line is as wide
+# as the band and as tall as the plot (the sibling below the tooltip:
+# bars have no hover dots).
+event id:bars onHoverMove position.x=160 position.y=10
+expect bar 1
+frame below:parent:parent:parent:id:bar-tip 0 0 60 80
+event id:bars onHoverOut
+expect bar null
+# Bars across: bands of 20 down the plot, the values along x (0 to 20 over
+# 100), each label after its bar's end, centered on the bar.
+frame parent:text:x20 100 10 0 0
+frame parent:text:x10 50 30 0 0
+frame text:x10 0 -7 30 14
+frame parent:text:x5 25 50 0 0
+covers [nsh/base/plot] Bar
+covers [props] Plot.yScale
+covers [props] Plot.crossLineClass
+covers [props] Bar.base
+covers [props] Bar.stack
+covers [props] Bar.label
+covers [props] Bar.labelClass
+covers [props] Bar.labelStyle
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

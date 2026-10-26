@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), the parts charts are built from (`Plot` with `Line`, `Area`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -220,12 +220,14 @@ value, and no value while indeterminate, when the indicator's width and motion a
 
 ### Plot (`nsh/base/plot`)
 
-The parts charts are built from, as `gpui-base`'s `plot`, in a module of their own: `import { Plot, Line, Area, Grid }
-from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y` are checked
-keys or functions of a row), the `point` or `linear` scales of its axes, the row under the pointer (`onHoverChange`)
-and its motion (`motion`: the appear, the hover's fade and glide); its marks draw natively from the rows, with no JS
-per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none is set; an
-`Area` shows a background (a gradient, `bg-linear-*`) inside its shape. The hover's cross line, dots (each mark's own
+The parts charts are built from, as `gpui-base`'s `plot`, in a module of their own: `import { Plot, Line, Area, Bar,
+Grid, Pie, Arc } from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y`
+are checked keys or functions of a row), the `point`, `linear` or `band` scales of its axes, the row under the pointer
+(`onHoverChange`) and its motion (`motion`: the appear, the hover's fade and glide); its marks draw natively from the
+rows, with no JS per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none
+is set; an `Area` or a `Bar` shows a background (a gradient, `bg-linear-*`) inside its shapes. Bars stand in the
+bands of a `band` scale, side by side or piled in a `stack`, grow in as the plot appears and fade away from the row
+under the pointer, with a `label` part at each bar's end. The hover's cross line, dots (each mark's own
 with `hoverDotClass`) and tooltip (`tooltipPlacement`, kept inside the plot) are parts the app styles and fills, moved
 natively; axis labels are the app's own elements. A `Pie` splits the turn into a slice per row (a donut with an
 `innerRadius`), each painted with its own classes (`sliceClass`, a function of its row), and an `Arc` draws one sector
