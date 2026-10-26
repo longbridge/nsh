@@ -243,7 +243,8 @@ reasons: `reactive-components.md`.
   listener no longer runs (its view is gone), events already queued for its node included: a region that runs again
   disposes its last run's owner at once, while the core drops that run's handlers only when it reconciles the region,
   in the commit. A node made again that goes on listening to its layout reports its frame to the new run's listener,
-  as a listener added after layout learns it. When the owner is disposed while a listener or task runs under it (a
+  as a listener added after layout learns it. This initialization targets the new run's listeners alone; listeners
+  retained from outside the region and JS handlers keep receiving frame changes. When the owner is disposed while a listener or task runs under it (a
   press closing the view it is in, then going on), the graph's current owner becomes `reactive::DISPOSED` rather than
   the freed slot's id, and
   what is made from then on goes at once: signals and memos are disposed (using them panics, as with any disposed

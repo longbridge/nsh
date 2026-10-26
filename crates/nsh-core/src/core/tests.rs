@@ -86,43 +86,54 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
     };
     events
         .into_iter()
-        .map(|e| match e {
-            JsEvent::Event(id, kind, payload) => (id, kind, payload),
-            JsEvent::Component { host, event } => native(
-                host,
-                event.name(),
-                json_host::event_data(&*event).unwrap_or(crate::JsonValue::Null),
-            ),
-            JsEvent::Children { host, wanted } => {
-                native(host, "$children", crate::JsonValue::Bool(wanted))
-            }
-            JsEvent::Render {
-                host,
-                prop,
-                key,
-                value,
-            } => native(
-                host,
-                "$render",
-                serde_json::json!({
-                    "prop": prop,
-                    "key": key.as_str(),
-                    "value": json_host::render_value(&*value),
-                }),
-            ),
-            JsEvent::Unrender { host, prop, key } => native(
-                host,
-                "$unrender",
-                serde_json::json!({ "prop": prop, "key": key.as_str() }),
-            ),
-            JsEvent::Reply { call, result } => native(
-                ROOT_ID,
-                "$return",
-                match json_host::result(result) {
-                    Ok(v) => serde_json::json!({ "c": call, "v": v }),
-                    Err(e) => serde_json::json!({ "c": call, "e": e }),
-                },
-            ),
+        .filter_map(|e| {
+            Some(match e {
+                JsEvent::LayoutListener {
+                    host,
+                    id,
+                    listener,
+                    frame,
+                } => {
+                    c.component_layout(host, id, &listener, frame);
+                    return None;
+                }
+                JsEvent::Event(id, kind, payload) => (id, kind, payload),
+                JsEvent::Component { host, event } => native(
+                    host,
+                    event.name(),
+                    json_host::event_data(&*event).unwrap_or(crate::JsonValue::Null),
+                ),
+                JsEvent::Children { host, wanted } => {
+                    native(host, "$children", crate::JsonValue::Bool(wanted))
+                }
+                JsEvent::Render {
+                    host,
+                    prop,
+                    key,
+                    value,
+                } => native(
+                    host,
+                    "$render",
+                    serde_json::json!({
+                        "prop": prop,
+                        "key": key.as_str(),
+                        "value": json_host::render_value(&*value),
+                    }),
+                ),
+                JsEvent::Unrender { host, prop, key } => native(
+                    host,
+                    "$unrender",
+                    serde_json::json!({ "prop": prop, "key": key.as_str() }),
+                ),
+                JsEvent::Reply { call, result } => native(
+                    ROOT_ID,
+                    "$return",
+                    match json_host::result(result) {
+                        Ok(v) => serde_json::json!({ "c": call, "v": v }),
+                        Err(e) => serde_json::json!({ "c": call, "e": e }),
+                    },
+                ),
+            })
         })
         .collect()
 }
@@ -10088,6 +10099,46 @@ mod views {
         c.component_event(host, EventKind::Press, &EventPayload::None);
         let texts = c.commit().map(|batch| texts(&batch)).unwrap_or_default();
         assert!(!texts.iter().any(|t| t.starts_with("On")), "{texts:?}");
+    }
+
+    #[component]
+    fn RetainedLayoutListener() -> impl IntoElement {
+        let count = signal(0_u32);
+        let listener: Listener<Bounds<Points>> =
+            (move |_: &Bounds<Points>| count.update(|n| *n += 1)).into();
+        view().child(dynamic(move || {
+            let current = count.get();
+            let measured = signal(0.0_f32);
+            view()
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_layout(listener.clone())
+                .on_layout(move |frame: &Bounds<Points>| measured.set(frame.size.width.0))
+                .child(text(move || {
+                    format!("count {current} width {}", measured.get())
+                }))
+        }))
+    }
+
+    #[test]
+    fn a_retained_layout_listener_is_not_reinitialized_with_a_new_runs_listener() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RetainedLayoutListener>(|| ()));
+        c.commit().unwrap();
+        let mut shown = Vec::new();
+        // Bounded: a replay to the retained listener would keep increasing
+        // count and queueing another run, despite an unchanged frame.
+        for _ in 0..8 {
+            for (id, kind, payload) in js_events(&mut c) {
+                c.component_event(id, kind, &payload);
+            }
+            if let Some(batch) = c.commit() {
+                shown.extend(texts(&batch));
+            }
+        }
+        assert_eq!(last_with(&shown, "count"), "count 1 width 100");
+        assert!(js_events(&mut c).is_empty());
+        assert!(c.commit().is_none());
     }
 
     /// A box whose layout flips a region in it; the region's node writes a

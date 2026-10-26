@@ -1654,6 +1654,33 @@ mod tests {
         app.wait_for("seen: at 40 20 in 40 30").unwrap();
     }
 
+    #[component]
+    fn RetainedLayout() -> impl IntoElement {
+        let count = signal(0_u32);
+        let listener: nsh_core::ui::Listener<Bounds<Points>> =
+            (move |_: &Bounds<Points>| count.update(|n| *n += 1)).into();
+        view().child(dynamic(move || {
+            let current = count.get();
+            let width = signal(0.0_f32);
+            view()
+                .w(px(100.0))
+                .h(px(40.0))
+                .on_layout(listener.clone())
+                .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
+                .child(text(move || {
+                    format!("count {current} width {}", width.get())
+                }))
+        }))
+    }
+
+    #[test]
+    fn retained_layout_listeners_settle_while_new_runs_learn_the_frame() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<RetainedLayout>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("count 1 width 100").unwrap();
+        assert!(!app.shows("count 2 width 100"));
+    }
+
     /// A box whose layout flips a region in it, whose node keeps its width
     /// in a signal of the region's run (#448).
     #[component]

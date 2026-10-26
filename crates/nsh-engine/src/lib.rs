@@ -2224,6 +2224,14 @@ impl<M: TextEngine> State<M> {
                             script.dispatch_event(id, event, &payload);
                         }
                     }
+                    JsEvent::LayoutListener {
+                        host,
+                        id,
+                        listener,
+                        frame,
+                    } => {
+                        self.core.component_layout(host, id, &listener, frame);
+                    }
                     // Without JS nothing waits for them.
                     other => {
                         if let Some(script) = script {

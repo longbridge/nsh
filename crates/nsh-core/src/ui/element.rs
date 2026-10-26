@@ -40,6 +40,16 @@ impl<E: ?Sized + 'static> Listener<E> {
         }
     }
 
+    /// Whether both listeners belong to the same region run or component.
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        self.owner == other.owner
+    }
+
+    /// Whether this is the same installed callback (including its owner).
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        self.same_owner(other) && Rc::ptr_eq(&self.f, &other.f)
+    }
+
     /// Calls it with `event`, under its owner; not once that owner is
     /// disposed: the view it was made for is gone.
     pub(crate) fn call(&self, event: &E) {

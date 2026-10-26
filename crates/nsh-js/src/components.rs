@@ -174,7 +174,7 @@ pub(crate) fn measure(cx: *mut JsContext, id: u32) -> JsValue {
 /// or rejects the call's promise.
 pub(crate) fn deliver(cx: *mut JsContext, event: JsEvent) -> Result<(), JsValue> {
     match event {
-        JsEvent::Event(..) => Ok(()),
+        JsEvent::Event(..) | JsEvent::LayoutListener { .. } => Ok(()),
         JsEvent::Component { host, event } => {
             let host_js = crate::classes::host_outside_calls(cx);
             let name = event.name();
