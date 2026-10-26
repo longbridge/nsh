@@ -12,7 +12,10 @@ use super::{
     selection::Selection,
     transaction::Transaction,
 };
-use crate::rich_editor::model::{Attrs, Node, ResolvedPos, Slice};
+use crate::rich_editor::{
+    formats::DomParser,
+    model::{Attrs, Node, ResolvedPos, Slice},
+};
 
 /// A view's renderer of a node or mark type, opaque to the kernel: the view
 /// downcasts it to what it renders with.
@@ -350,6 +353,19 @@ pub trait PluginSpec: Send + Sync {
     fn transform_pasted_text(&self, state: &EditorState, text: String, plain: bool) -> String {
         let _ = (state, plain);
         text
+    }
+
+    /// Changes pasted HTML before it is parsed (each plugin's in turn).
+    fn transform_pasted_html(&self, state: &EditorState, html: String) -> String {
+        let _ = state;
+        html
+    }
+
+    /// The parser pasted HTML is read with, instead of the schema's
+    /// ([`DomParser::from_schema`]); the first plugin with one wins.
+    fn clipboard_parser(&self, state: &EditorState) -> Option<DomParser> {
+        let _ = state;
+        None
     }
 
     /// The plain text a copy of `slice` puts on the clipboard; the first

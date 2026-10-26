@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 mod content;
+mod dom;
 mod fragment;
 mod mark;
 mod node;
@@ -24,6 +25,7 @@ mod schema;
 mod slice;
 
 pub use content::ContentMatch;
+pub use dom::{ClearMark, DomElement, DomNode, GetAttrs, ParseRule, RuleInput, Whitespace};
 pub use fragment::Fragment;
 pub use mark::Mark;
 pub use node::{ChildInfo, Node, NodeVisitor, ReplaceError};

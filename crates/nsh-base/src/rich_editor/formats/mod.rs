@@ -1,6 +1,7 @@
 //! Adapters between documents and the formats apps store and exchange:
 //! ProseMirror JSON ([`JsonFormat`]), plain text ([`PlainTextFormat`]) and
-//! Markdown ([`MarkdownFormat`]), plus the clipboard's text helpers.
+//! Markdown ([`MarkdownFormat`]), HTML through parse rules ([`DomParser`]),
+//! plus the clipboard's text helpers.
 //!
 //! A format reads into the schema it is given and never assumes node
 //! names of its own: Markdown maps its constructs to names an app can
@@ -9,6 +10,7 @@
 //! tells whether a schema survives a round trip and
 //! [`MarkdownFormat::losses`] lists what a given document would lose.
 
+mod html;
 mod json;
 mod markdown;
 mod text;
@@ -16,6 +18,7 @@ mod text;
 use std::fmt;
 
 pub use self::{
+    html::{DomParser, ParseOptions},
     json::JsonFormat,
     markdown::{MarkdownFormat, MarkdownNames},
     text::{PlainTextFormat, slice_from_text, slice_to_text},

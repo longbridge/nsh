@@ -915,7 +915,7 @@ fn sink(rv: Rv) -> impl IntoElement {
             composition.composition_changed(c.composing, &c.text)
         })
         .on_key_press(move |k: &str| key.sink_key(k))
-        .on_paste(move |p: &PasteEvent| paste.paste(&p.text))
+        .on_paste(move |p: &PasteEvent| paste.paste(&p.text, &p.html))
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))
 }

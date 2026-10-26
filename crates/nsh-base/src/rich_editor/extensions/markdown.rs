@@ -380,12 +380,12 @@ fn re<'a>(cell: &'a OnceLock<Regex>, pattern: &str) -> &'a Regex {
 }
 
 /// Whether pasted text has Markdown syntax: block markers at a line's
-/// start, fences, or complete inline marks and links. Plain prose (even
+/// start, fences, a table's delimiter row (`|---|---|`), or complete inline marks and links. Plain prose (even
 /// with a lone `*` or `#`) does not.
 pub fn looks_like_markdown(text: &str) -> bool {
     re(
         &LOOKS_LIKE,
-        r"(?m)^(?:#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|---\s*$)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|~~[^~\n]+~~|\[[^\]\n]+\]\([^)\s]+\)|(?:^|\s)[*_][^*_\s][^*_\n]*[*_](?:\s|$)",
+        r"(?m)^(?:#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|---\s*$|\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|~~[^~\n]+~~|\[[^\]\n]+\]\([^)\s]+\)|(?:^|\s)[*_][^*_\s][^*_\n]*[*_](?:\s|$)",
     )
     .is_match(text)
 }

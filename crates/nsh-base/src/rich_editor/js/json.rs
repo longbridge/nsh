@@ -69,9 +69,9 @@ fn declare_all(types: &mut TsTypes) {
     types.declare("RichSchemaSpec", |_| {
         "/** A schema in ProseMirror's shape. `nodes` and `marks` are objects (in key order) or arrays of `[name, spec]` pairs; the first block type is the default one. */\n\
          export interface RichSchemaSpec {\n  \
-         /** The node types: `content` (a content expression such as `\"inline*\"`), `group`, `inline`, `atom`, `marks`, `attrs: { name: { default, validate } }`, `code`, `defining`, `isolating`, `selectable`, ... (more keys are kept as the type's extra data). */\n  \
+         /** The node types: `content` (a content expression such as `\"inline*\"`), `group`, `inline`, `atom`, `marks`, `attrs: { name: { default, validate } }`, `code`, `defining`, `isolating`, `selectable`, `parseDOM` (how pasted HTML becomes the node: an array of rules `{ tag?: string, style?: string, priority?: number, consuming?: boolean, context?: string, attrs?: object, getAttrs?: { [attr: string]: string } (each attribute read from the element attribute named), ignore?: boolean, skip?: boolean, closeParent?: boolean, preserveWhitespace?: boolean | \"full\", contentElement?: string }`), ... (more keys are kept as the type's extra data). */\n  \
          nodes: Record<string, Record<string, unknown>> | [string, Record<string, unknown>][];\n  \
-         /** The mark types: `attrs`, `inclusive`, `excludes`, `group`, `spanning`, ... */\n  \
+         /** The mark types: `attrs`, `inclusive`, `excludes`, `group`, `spanning`, `parseDOM` (as the nodes' rules; a `style` rule such as `\"font-weight=bold\"` matches inline styles), ... */\n  \
          marks?: Record<string, Record<string, unknown>> | [string, Record<string, unknown>][];\n  \
          /** The top node type's name (`\"doc\"` by default). */\n  topNode?: string;\n}"
             .into()

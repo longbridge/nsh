@@ -12,7 +12,7 @@ use std::{
 use serde_json::Value;
 
 use super::{
-    Attrs, Fragment, Mark, Node,
+    Attrs, Fragment, Mark, Node, ParseRule, Whitespace,
     content::{self, ContentMatch, MatchState},
 };
 
@@ -138,6 +138,9 @@ pub struct NodeSpec {
     /// Whether it is the inline leaf that stands for a line break when a
     /// textblock converts to code (at most one type per schema).
     pub linebreak_replacement: bool,
+    /// How HTML becomes nodes of this type
+    /// ([`DomParser`](crate::rich_editor::formats::DomParser)).
+    pub parse_dom: Vec<ParseRule>,
     /// Free-form metadata for frameworks built on the kernel (unknown keys
     /// of the JSON form land here).
     pub extra: Attrs,
@@ -162,6 +165,7 @@ impl Default for NodeSpec {
             defining_for_content: None,
             draggable: false,
             linebreak_replacement: false,
+            parse_dom: Vec::new(),
             extra: Attrs::new(),
         }
     }
@@ -182,6 +186,9 @@ pub struct MarkSpec {
     pub group: Option<String>,
     /// Whether it spans several nodes when serialized.
     pub spanning: bool,
+    /// How HTML elements and styles become marks of this type
+    /// ([`DomParser`](crate::rich_editor::formats::DomParser)).
+    pub parse_dom: Vec<ParseRule>,
     /// Free-form metadata for frameworks built on the kernel (unknown keys
     /// of the JSON form land here).
     pub extra: Attrs,
@@ -195,6 +202,7 @@ impl Default for MarkSpec {
             excludes: None,
             group: None,
             spanning: true,
+            parse_dom: Vec::new(),
             extra: Attrs::new(),
         }
     }
@@ -291,8 +299,90 @@ const NODE_KEYS: &[&str] = &[
     "definingForContent",
     "draggable",
     "linebreakReplacement",
+    "parseDOM",
 ];
-const MARK_KEYS: &[&str] = &["attrs", "inclusive", "excludes", "group", "spanning"];
+const MARK_KEYS: &[&str] = &[
+    "attrs",
+    "inclusive",
+    "excludes",
+    "group",
+    "spanning",
+    "parseDOM",
+];
+
+/// `parseDOM`: an array of rule objects (`tag`, `style`, `priority`,
+/// `consuming`, `context`, `node`, `mark`, `attrs`, `getAttrs` as
+/// `{attr: "dom-attribute"}`, `ignore`, `skip`, `closeParent`,
+/// `preserveWhitespace` (`true`, `false` or `"full"`), `contentElement`).
+fn parse_dom_from_json(spec: &Value) -> Result<Vec<ParseRule>, SchemaError> {
+    let rules = match spec.get("parseDOM") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(rules)) => rules,
+        Some(_) => return Err(json_err("parseDOM must be an array")),
+    };
+    rules
+        .iter()
+        .map(|r| {
+            if !r.is_object() {
+                return Err(json_err("parseDOM rules must be objects"));
+            }
+            let priority = match r.get("priority") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    v.as_i64()
+                        .and_then(|v| i32::try_from(v).ok())
+                        .ok_or_else(|| json_err("priority must be an integer"))?,
+                ),
+            };
+            let attrs = match r.get("attrs") {
+                None | Some(Value::Null) => None,
+                Some(Value::Object(o)) => {
+                    Some(o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                }
+                Some(_) => return Err(json_err("attrs must be an object")),
+            };
+            let attrs_from = match r.get("getAttrs") {
+                None | Some(Value::Null) => None,
+                Some(Value::Object(o)) => Some(
+                    o.iter()
+                        .map(|(k, v)| match v {
+                            Value::String(s) => Ok((k.clone(), s.clone())),
+                            _ => Err(json_err("getAttrs values must be attribute names")),
+                        })
+                        .collect::<Result<_, _>>()?,
+                ),
+                Some(_) => return Err(json_err("getAttrs must be an object")),
+            };
+            let preserve_whitespace = match r.get("preserveWhitespace") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(false)) => Some(Whitespace::Collapse),
+                Some(Value::Bool(true)) => Some(Whitespace::Preserve),
+                Some(Value::String(s)) if s == "full" => Some(Whitespace::Full),
+                Some(_) => {
+                    return Err(json_err("preserveWhitespace must be a boolean or \"full\""));
+                }
+            };
+            Ok(ParseRule {
+                tag: str_field(r, "tag")?,
+                style: str_field(r, "style")?,
+                priority,
+                consuming: opt_bool(r, "consuming")?,
+                context: str_field(r, "context")?,
+                node: str_field(r, "node")?,
+                mark: str_field(r, "mark")?,
+                attrs,
+                get_attrs: None,
+                attrs_from,
+                ignore: bool_field(r, "ignore", false)?,
+                skip: bool_field(r, "skip", false)?,
+                close_parent: bool_field(r, "closeParent", false)?,
+                preserve_whitespace,
+                content_element: str_field(r, "contentElement")?,
+                clear_mark: None,
+            })
+        })
+        .collect()
+}
 
 fn attrs_from_json(spec: &Value) -> Result<Vec<(String, AttrSpec)>, SchemaError> {
     entries(spec.get("attrs"))?
@@ -319,8 +409,9 @@ fn attrs_from_json(spec: &Value) -> Result<Vec<(String, AttrSpec)>, SchemaError>
 impl SchemaSpec {
     /// Reads a spec from ProseMirror's shape:
     /// `{"nodes": {name: {content, marks, group, inline, atom, selectable,
-    /// isolating, code, defining, attrs: {name: {default, validate}}}},
-    /// "marks": {name: {attrs, inclusive, excludes, group, spanning}},
+    /// isolating, code, defining, attrs: {name: {default, validate}},
+    /// parseDOM}}, "marks": {name: {attrs, inclusive, excludes, group,
+    /// spanning, parseDOM}},
     /// "topNode": name}`. `nodes` and `marks` may also be arrays of
     /// `[name, spec]` pairs, which keep their order whatever serde_json's
     /// features (objects are read in their iteration order).
@@ -355,6 +446,7 @@ impl SchemaSpec {
                     defining_for_content: opt_bool(n, "definingForContent")?,
                     draggable: bool_field(n, "draggable", false)?,
                     linebreak_replacement: bool_field(n, "linebreakReplacement", false)?,
+                    parse_dom: parse_dom_from_json(n)?,
                     extra: extra(n, NODE_KEYS),
                 },
             ));
@@ -368,6 +460,7 @@ impl SchemaSpec {
                     excludes: str_field(m, "excludes")?,
                     group: str_field(m, "group")?,
                     spanning: bool_field(m, "spanning", true)?,
+                    parse_dom: parse_dom_from_json(m)?,
                     extra: extra(m, MARK_KEYS),
                 },
             ));

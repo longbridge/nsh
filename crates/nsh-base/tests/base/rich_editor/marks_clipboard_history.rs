@@ -265,6 +265,66 @@ fn a_paste_into_a_code_block_keeps_the_raw_text() {
     see(&mut app, "Bold 0");
 }
 
+fn paste_html(app: &mut Headless, text: &str, html: &str) {
+    let mut paste = PasteEvent::default();
+    paste.text = text.into();
+    paste.html = html.into();
+    app.paste("id:editor", &paste).unwrap();
+}
+
+#[test]
+fn pasted_html_keeps_its_formatting() {
+    let mut app = start(paragraphs(&[""]));
+    paste_html(
+        &mut app,
+        "Title\nsome bold\nb",
+        "<meta charset=\"utf-8\"><h2>Title</h2><p>some <strong>bold</strong></p><ul><li>b</li></ul>",
+    );
+    tree(
+        &mut app,
+        r#"doc(heading("Title"), paragraph("some ", bold("bold")), bullet_list(list_item(paragraph("b"))))"#,
+    );
+}
+
+#[test]
+fn pasted_google_docs_html_reads_its_styles() {
+    let mut app = start(paragraphs(&[""]));
+    paste_html(
+        &mut app,
+        "bold plain",
+        "<b style=\"font-weight:normal;\" id=\"docs-internal-guid-1\"><span style=\"font-weight:700\">bold</span><span style=\"font-weight:400\"> plain</span></b>",
+    );
+    tree(&mut app, r#"doc(paragraph(bold("bold"), " plain"))"#);
+}
+
+#[test]
+fn pasted_inline_html_merges_into_the_paragraph() {
+    let mut app = start(paragraphs(&["ab"]));
+    focus(&mut app);
+    keys(&mut app, &["right"]);
+    see(&mut app, "Sel 2-2");
+    paste_html(&mut app, "x", "<p><em>x</em></p>");
+    tree(&mut app, r#"doc(paragraph("a", italic("x"), "b"))"#);
+    see(&mut app, "Sel 3-3");
+}
+
+#[test]
+fn html_pasted_into_a_code_block_is_its_text() {
+    let mut app = start(json!({"type": "doc", "content": [{"type": "code_block"}]}));
+    focus(&mut app);
+    paste_html(&mut app, "a *b*", "<p>a <b>b</b></p>");
+    tree(&mut app, r#"doc(code_block("a *b*"))"#);
+}
+
+#[test]
+fn pasted_inline_markdown_merges_into_the_paragraph() {
+    let mut app = start(paragraphs(&["ab"]));
+    focus(&mut app);
+    keys(&mut app, &["right"]);
+    paste(&mut app, "**x**");
+    tree(&mut app, r#"doc(paragraph("a", bold("x"), "b"))"#);
+}
+
 #[test]
 fn a_paste_replaces_the_selection() {
     let mut app = start(paragraphs(&["hello world"]));

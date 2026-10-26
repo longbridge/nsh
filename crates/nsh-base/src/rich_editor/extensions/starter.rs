@@ -25,7 +25,10 @@ use crate::rich_editor::{
         lift, lift_list_item, select_parent_node, set_block_type, sink_list_item, split_list_item,
         toggle_mark, wrap_in, wrap_in_list,
     },
-    model::{AttrSpec, Attrs, MarkSpec, NodeSpec, Schema, SchemaSpec},
+    model::{
+        AttrSpec, Attrs, ClearMark, DomElement, MarkSpec, NodeSpec, ParseRule, Schema, SchemaSpec,
+        Whitespace,
+    },
     state::{EditorState, Plugin},
 };
 
@@ -56,6 +59,7 @@ pub mod nodes {
         (
             "paragraph".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("p")],
                 content: Some("inline*".into()),
                 group: Some("block".into()),
                 ..Default::default()
@@ -68,6 +72,7 @@ pub mod nodes {
         (
             "blockquote".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("blockquote")],
                 content: Some("block+".into()),
                 group: Some("block".into()),
                 defining: true,
@@ -81,6 +86,7 @@ pub mod nodes {
         (
             "horizontal_rule".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("hr")],
                 group: Some("block".into()),
                 ..Default::default()
             },
@@ -92,6 +98,12 @@ pub mod nodes {
         (
             "heading".into(),
             NodeSpec {
+                parse_dom: (1..=6)
+                    .map(|level| {
+                        ParseRule::tag(format!("h{level}"))
+                            .with_attrs(attrs_of("level", Value::from(level)))
+                    })
+                    .collect(),
                 content: Some("inline*".into()),
                 group: Some("block".into()),
                 defining: true,
@@ -107,6 +119,19 @@ pub mod nodes {
         (
             "code_block".into(),
             NodeSpec {
+                parse_dom: vec![
+                    ParseRule {
+                        preserve_whitespace: Some(Whitespace::Full),
+                        ..ParseRule::tag("pre")
+                    }
+                    .with_get_attrs(|input| {
+                        let pre = input.element()?;
+                        Some(attrs_of(
+                            "language",
+                            code_language(pre).map_or(Value::Null, Value::from),
+                        ))
+                    }),
+                ],
                 content: Some("text*".into()),
                 marks: Some(String::new()),
                 group: Some("block".into()),
@@ -134,6 +159,15 @@ pub mod nodes {
         (
             "image".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("img[src]").with_get_attrs(|input| {
+                    let img = input.element()?;
+                    let mut attrs = Attrs::new();
+                    let get = |name: &str| img.attr(name).map_or(Value::Null, Value::from);
+                    attrs.insert("src".into(), get("src"));
+                    attrs.insert("alt".into(), get("alt"));
+                    attrs.insert("title".into(), get("title"));
+                    Some(attrs)
+                })],
                 inline: true,
                 group: Some("inline".into()),
                 draggable: true,
@@ -152,6 +186,7 @@ pub mod nodes {
         (
             "hard_break".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("br")],
                 inline: true,
                 group: Some("inline".into()),
                 selectable: false,
@@ -167,6 +202,14 @@ pub mod nodes {
         (
             "ordered_list".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("ol").with_get_attrs(|input| {
+                    let start = input
+                        .element()?
+                        .attr("start")
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .unwrap_or(1);
+                    Some(attrs_of("order", Value::from(start)))
+                })],
                 content: Some("list_item+".into()),
                 group: Some("block".into()),
                 attrs: vec![("order".into(), attr(Some(Value::from(1))))],
@@ -182,6 +225,7 @@ pub mod nodes {
         (
             "bullet_list".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("ul")],
                 content: Some("list_item+".into()),
                 group: Some("block".into()),
                 // The editor's view marks its items with bullets.
@@ -196,6 +240,7 @@ pub mod nodes {
         (
             "list_item".into(),
             NodeSpec {
+                parse_dom: vec![ParseRule::tag("li")],
                 content: Some("paragraph block*".into()),
                 defining: true,
                 ..Default::default()
@@ -214,6 +259,15 @@ pub mod marks {
         (
             "link".into(),
             MarkSpec {
+                parse_dom: vec![ParseRule::tag("a[href]").with_get_attrs(|input| {
+                    let a = input.element()?;
+                    let mut attrs = attrs_of("href", Value::from(a.attr("href")?));
+                    attrs.insert(
+                        "title".into(),
+                        a.attr("title").map_or(Value::Null, Value::from),
+                    );
+                    Some(attrs)
+                })],
                 attrs: vec![
                     ("href".into(), attr(None)),
                     ("title".into(), attr(Some(Value::Null))),
@@ -226,12 +280,51 @@ pub mod marks {
 
     /// Italic (emphasis).
     pub fn italic() -> (String, MarkSpec) {
-        ("italic".into(), MarkSpec::default())
+        (
+            "italic".into(),
+            MarkSpec {
+                parse_dom: vec![
+                    ParseRule::tag("i"),
+                    ParseRule::tag("em"),
+                    ParseRule::style("font-style=italic"),
+                    ParseRule {
+                        clear_mark: Some(ClearMark::named("italic")),
+                        ..ParseRule::style("font-style=normal")
+                    },
+                ],
+                ..Default::default()
+            },
+        )
     }
 
     /// Bold (strong emphasis).
     pub fn bold() -> (String, MarkSpec) {
-        ("bold".into(), MarkSpec::default())
+        (
+            "bold".into(),
+            MarkSpec {
+                parse_dom: vec![
+                    ParseRule::tag("strong"),
+                    // Google Docs wraps copied content in a `<b>` of normal
+                    // weight, which is not bold.
+                    ParseRule::tag("b").with_get_attrs(|input| {
+                        let b = input.element()?;
+                        (b.style("font-weight").as_deref() != Some("normal")).then(Attrs::new)
+                    }),
+                    ParseRule {
+                        clear_mark: Some(ClearMark::named("bold")),
+                        ..ParseRule::style("font-weight")
+                    }
+                    .with_get_attrs(|input| {
+                        let value = input.style_value()?;
+                        (!is_bold_weight(value)).then(Attrs::new)
+                    }),
+                    ParseRule::style("font-weight").with_get_attrs(|input| {
+                        is_bold_weight(input.style_value()?).then(Attrs::new)
+                    }),
+                ],
+                ..Default::default()
+            },
+        )
     }
 
     /// Inline code. Its spec's `extra` has `code: true`, which input rules
@@ -242,6 +335,7 @@ pub mod marks {
         (
             "code".into(),
             MarkSpec {
+                parse_dom: vec![ParseRule::tag("code")],
                 extra,
                 ..Default::default()
             },
@@ -250,12 +344,48 @@ pub mod marks {
 
     /// Strikethrough.
     pub fn strike() -> (String, MarkSpec) {
-        ("strike".into(), MarkSpec::default())
+        (
+            "strike".into(),
+            MarkSpec {
+                parse_dom: vec![
+                    ParseRule::tag("s"),
+                    ParseRule::tag("del"),
+                    ParseRule::tag("strike"),
+                    ParseRule::style("text-decoration").with_get_attrs(|input| {
+                        input
+                            .style_value()?
+                            .contains("line-through")
+                            .then(Attrs::new)
+                    }),
+                    ParseRule::style("text-decoration-line").with_get_attrs(|input| {
+                        input
+                            .style_value()?
+                            .contains("line-through")
+                            .then(Attrs::new)
+                    }),
+                ],
+                ..Default::default()
+            },
+        )
     }
 
     /// Underline.
     pub fn underline() -> (String, MarkSpec) {
-        ("underline".into(), MarkSpec::default())
+        (
+            "underline".into(),
+            MarkSpec {
+                parse_dom: vec![
+                    ParseRule::tag("u"),
+                    ParseRule::style("text-decoration").with_get_attrs(|input| {
+                        input.style_value()?.contains("underline").then(Attrs::new)
+                    }),
+                    ParseRule::style("text-decoration-line").with_get_attrs(|input| {
+                        input.style_value()?.contains("underline").then(Attrs::new)
+                    }),
+                ],
+                ..Default::default()
+            },
+        )
     }
 }
 
@@ -292,6 +422,31 @@ pub fn schema_spec() -> SchemaSpec {
 /// The starter schema (the paragraph is the default block).
 pub fn schema() -> Schema {
     Schema::new(schema_spec()).expect("the starter schema is valid")
+}
+
+/// Whether a CSS `font-weight` is bold: `bold`, `bolder` or 600 and up
+/// (ProseMirror's basic schema takes 700 to 900; 600 is semibold, which
+/// office suites write for bold too).
+fn is_bold_weight(value: &str) -> bool {
+    let value = value.trim();
+    matches!(value, "bold" | "bolder") || value.parse::<f32>().is_ok_and(|w| w >= 600.0)
+}
+
+/// The language of a `<pre>`: a `data-language` attribute, or a
+/// `language-*` / `lang-*` class of it or of its `<code>`.
+fn code_language(pre: &DomElement) -> Option<String> {
+    if let Some(lang) = pre.attr("data-language").filter(|l| !l.is_empty()) {
+        return Some(lang.to_owned());
+    }
+    let code = pre.query_selector("code");
+    [Some(pre), code].into_iter().flatten().find_map(|el| {
+        el.attr("class")?.split_ascii_whitespace().find_map(|c| {
+            c.strip_prefix("language-")
+                .or_else(|| c.strip_prefix("lang-"))
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+        })
+    })
 }
 
 fn attrs_of(key: &str, value: Value) -> Attrs {

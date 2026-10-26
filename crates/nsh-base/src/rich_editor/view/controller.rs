@@ -29,8 +29,8 @@ use super::{
 use crate::rich_editor::{
     commands::base_keymap,
     extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
-    formats::{slice_from_text, slice_to_text},
-    model::{Node, SchemaSpec},
+    formats::{DomParser, slice_from_text, slice_to_text},
+    model::{Node, SchemaSpec, Slice},
     state::{
         Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, KeyEvent, NodeSelection,
         Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
@@ -937,21 +937,47 @@ impl Rv {
         set_clipboard(text);
     }
 
-    /// A paste of `text`: the plugins change and parse it, then
-    /// `handle_paste` or a replace of the selection.
-    pub(crate) fn paste(&self, text: &str) {
-        if !self.editable() || text.is_empty() {
+    /// A paste of `text` and, when the clipboard had it, the same content as
+    /// `html` (ProseMirror's order): HTML goes through the plugins'
+    /// `transform_pasted_html` and the clipboard parser (the schema's parse
+    /// rules), plain text through `transform_pasted_text` and
+    /// `clipboard_text_parser`; then `transform_pasted`, and `handle_paste`
+    /// or a replace of the selection. Into code, the plain text is pasted
+    /// as it is; HTML that parses to nothing falls back to the text.
+    pub(crate) fn paste(&self, text: &str, html: &str) {
+        if !self.editable() || (text.is_empty() && html.is_empty()) {
             return;
         }
         let state = self.session.state();
-        let mut text = text.to_owned();
-        for plugin in state.plugins() {
-            text = plugin.transform_pasted_text(&state, text, false);
-        }
         let from = state.selection().resolved_from().clone();
-        let mut slice = state
-            .some_prop(|p| p.clipboard_text_parser(&state, &text, &from, false))
-            .unwrap_or_else(|| slice_from_text(state.schema(), &text, &from));
+        let in_code = from.parent().ty().spec().code;
+        let mut slice = None;
+        if !html.is_empty() && !in_code {
+            let mut html = html.to_owned();
+            for plugin in state.plugins() {
+                html = plugin.transform_pasted_html(&state, html);
+            }
+            let parser = state
+                .some_prop(|p| p.clipboard_parser(&state))
+                .unwrap_or_else(|| DomParser::from_schema(state.schema()));
+            slice = Some(parser.parse_with_context(&html, &from))
+                .filter(|s: &Slice| s.content.size() > 0);
+        }
+        let mut slice = match slice {
+            Some(slice) => slice,
+            None => {
+                if text.is_empty() {
+                    return;
+                }
+                let mut text = text.to_owned();
+                for plugin in state.plugins() {
+                    text = plugin.transform_pasted_text(&state, text, false);
+                }
+                state
+                    .some_prop(|p| p.clipboard_text_parser(&state, &text, &from, false))
+                    .unwrap_or_else(|| slice_from_text(state.schema(), &text, &from))
+            }
+        };
         for plugin in state.plugins() {
             slice = plugin.transform_pasted(&state, slice);
         }
