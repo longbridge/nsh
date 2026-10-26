@@ -169,15 +169,20 @@ fn specs_of<A: Api>(types: &mut TsTypes) -> Vec<MethodSpec> {
         .map(|m| MethodSpec {
             name: m.name,
             doc: m.doc,
-            params: m.params.iter().map(|(n, ts)| (*n, ts(types))).collect(),
+            params: m
+                .params
+                .iter()
+                .map(|(n, ts, optional)| (*n, ts(types), *optional))
+                .collect(),
             returns: m.returns.map(|ts| ts(types)),
             call: m.call,
         })
         .collect()
 }
 
-/// A method's parameter: its JS name, and its TypeScript type.
-pub type Param = (&'static str, TsType);
+/// A method's parameter: its JS name, its TypeScript type, and whether JS
+/// may leave it out (an `Option` after which every parameter is optional).
+pub type Param = (&'static str, TsType, bool);
 
 /// One method, for the glue and its declarations.
 #[derive(Debug, Clone)]
@@ -186,8 +191,9 @@ pub struct MethodSpec {
     pub name: &'static str,
     /// Documentation.
     pub doc: &'static str,
-    /// Its parameters: JS names and TypeScript types.
-    pub params: Vec<(&'static str, String)>,
+    /// Its parameters: JS names, TypeScript types, and whether each is
+    /// optional.
+    pub params: Vec<(&'static str, String, bool)>,
     /// The TypeScript type of its result; `None`: nothing (`void`).
     pub returns: Option<String>,
     /// Its call (the arguments converted in the JS call).
@@ -1260,7 +1266,9 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
                 let params = m
                     .params
                     .iter()
-                    .map(|(n, ts)| format!("{n}: {ts}"))
+                    .map(|(n, ts, optional)| {
+                        format!("{n}{}: {ts}", if *optional { "?" } else { "" })
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let returns = match &m.returns {
