@@ -149,7 +149,7 @@ impl Headless {
                 self.send(new, EventKind::Focus, EventPayload::None);
             }
         }
-        if !self.tabs_to_pressables() {
+        if !self.tabs_to_views() {
             return;
         }
         let mut key = self.screen.key_focus();
