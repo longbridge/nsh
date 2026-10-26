@@ -32,6 +32,7 @@ mod popup;
 mod progress;
 mod radio;
 mod resizable;
+pub mod rich_editor;
 mod safe_area;
 mod selection_area;
 mod sheet;
