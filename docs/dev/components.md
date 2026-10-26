@@ -26,8 +26,8 @@ come from two places:
   - it owns behavior, state, focus, keyboard handling and accessibility (roles, states, actions), or tells the
     platform (insets, the keyboard's height, the status bar's setting, a system dialog);
   - it has no look: no colors, paddings, radii, fonts or variants of its own; it takes the app's `class` / `style`
-    (and styles per state) and children (the exceptions are `TextView`'s default reading typography and the default looks of `Editor`, `DiffView` and `DataTable`, colored
-    with the theme's tokens and overridable part by part: `docs/dev/text-view.md`, `docs/dev/editor.md`, `docs/dev/diff.md`, `docs/dev/data-table.md`);
+    (and styles per state) and children (the exceptions are `TextView`'s default reading typography and the default looks of `Editor` and `DiffView`, colored
+    with the theme's tokens and overridable part by part: `docs/dev/text-view.md`, `docs/dev/editor.md`, `docs/dev/diff.md`);
   - its state is controlled: it reports changes (`onChange`, `onOpenChange`, ...), the app owns the value;
   - it exposes its parts (a trigger, a thumb, an item, as slots or child components) instead of fixed markup, so an
     app arranges and styles each.
@@ -39,6 +39,11 @@ come from two places:
   What such a crate keeps per engine (the languages and highlighters its editors know,
   `nsh_base::editor::register_language`; a value of `nsh_core::ui::global`) it sets up in `Registry::setup`, a
   function each engine serving the set runs once in its runtime before the app's first op (`Core::set_components`).
+
+The TSX gallery and website demos share the repository's internal `examples/nsh-gallery-ui` source layer: design
+tokens, finishes, buttons, cards, switches, segmented controls, icons and table part classes. The gallery's
+`ui.tsx` keeps navigation and shell state, and the website's `palette.ts` adapts the shared layer to demo layouts.
+Visual rules are changed in the shared layer; `nsh-base` supplies the components' structure and behavior.
 
 | Where | What |
 |---|---|

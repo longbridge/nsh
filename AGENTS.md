@@ -163,6 +163,10 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       register); bench: component benchmarks
 ```
 
+The TSX gallery and website demos share their internal styled UI in `examples/nsh-gallery-ui/`: components,
+icons, finishes, theme and table part classes. Change shared visual rules there. `examples/gallery/ui.tsx` keeps
+the gallery shell/navigation; `website/demos/palette.ts` is the documentation adapter. See that layer's README.
+
 Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ←
 `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-bundler`'s feature `bundle` depends on `nsh-js` (to check
 imports against the names native modules export); `nsh-base` depends on `nsh-core` only and is used by the bundler
@@ -337,7 +341,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   app's `classes` / `styles` / `TextViewParts`, and its built-in syntax highlighting colors, Allsum's code palette, which an app's
   `CodeHighlighter` or `renderCodeBlock` replaces, and the `Editor`'s default look, its colors the theme's shadcn tokens
   (search matches amber, warnings amber, information blue), its font the theme's `font-mono`, every part overridable by
-  the app's `classes` / `styles`, and the same built-in syntax highlighting colors, which the app's `decorations` style over, and `DiffView`'s and `DataTable`'s default looks: theme tokens, added green, deleted red, every part
+  the app's `classes` / `styles`, and the same built-in syntax highlighting colors, which the app's `decorations` style over, and `DiffView`'s default look: theme tokens, added green, deleted red, every part
   overridable by `classes` / `styles`); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
