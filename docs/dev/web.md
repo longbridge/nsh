@@ -231,16 +231,22 @@ its relative path, since both are served and published under the paths wasm-bind
 them by (`/snippets/…`; `dev.html`'s `GLUE`; all of them are part of `nsh.version`), and `nsh package --target web`
 (`web::publish_glue`) puts the snippets under one directory named by all of them and their paths
 (`snippets.<digest>/`, their paths under `snippets/` kept), points the glue at it (`bindgen::link_snippets`: the
-`./snippets/` prefix only), minifies the glue, names it by its content (`nsh-bindgen.<digest>.js`), preloads it
-(`<link rel="modulepreload">`) and passes it in `app.glue`. `createPlayer`'s option `glue` (a URL against the page)
+`./snippets/` prefix in ES module specifiers only), minifies the glue, names it by its content
+(`nsh-bindgen.<digest>.js`), preloads it (`<link rel="modulepreload">`) and passes it in `app.glue`.
+`createPlayer`'s option `glue` (a URL against the page)
 makes `Player.load` import it while the module compiles, check that it exports `__nsh_imports` and `__nsh_finalize`
 (wasm-bindgen's own output fails there, with its URL), merge `__nsh_imports()` into the import object (NSH's own
 `nsh` and `env` keys win), and call `__nsh_finalize(instance, module)` (its memory views, wasm-bindgen's externref
 table) right after instantiating, before `nsh_app_init`. The glue keeps its state at module level, so each player
 after the first imports it as `<url>?player=<n>` (`importGlue`): a module instance of its own, while the first keeps
-the URL the page preloads. `cargo test -p nsh-cli bindgen -- --ignored` runs the CLI on a real module
+the URL the page preloads. wasm-bindgen can import a snippet directly when its function needs no JS glue
+(numeric arguments and results, for example). Its `__wbg_get_imports` table then uses the snippet's original path
+as a module key, matching the Wasm binary. Publication keeps those keys unchanged while relocating the ES imports;
+separate `inline_js` blocks keep their own modules.
+`cargo test -p nsh-cli bindgen -- --ignored` runs the CLI on a real module
 (`wasm_bindgen_runs_on_a_real_module`: a crate built for `wasm32-unknown-unknown` with the CLI's wasm-bindgen; it
-needs the target, the CLI and the crates).
+needs the target, the CLI, the crates and Node.js). It instantiates the development and minified, relocated glue
+with the processed Wasm and calls both direct numeric imports and string-converting imports.
 
 The browser calls the glue's closures outside any `nsh_*` call (a WebSocket message), so a task they wake must make
 the page pump: `LocalEngine::set_wake` hooks the core's task notify and the posts' notify (each still sends
