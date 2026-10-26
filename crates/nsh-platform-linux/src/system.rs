@@ -19,6 +19,10 @@
 //! - the locale (`Intl`'s default): the POSIX locale of formats
 //!   (`LC_ALL`, `LC_TIME`, `LC_NUMERIC`, `LC_MESSAGES`, `LANG`, the first
 //!   set), else GLib's language names (`LANGUAGE` too), read once;
+//! - the preferred languages (`languages()`): GLib's language names, most
+//!   preferred first (`LANGUAGE`'s list, else `LC_ALL`, `LC_MESSAGES` and
+//!   `LANG`, each with its fallbacks: `de_DE.UTF-8` gives `de-DE`, then
+//!   `de`), read once, as the locale;
 //! - the font scale: `gtk-xft-dpi` over 96 dpi;
 //! - reduce motion: `gtk-enable-animations` off;
 //! - the pixel ratio: the root's surface scale (fractional scales too);
@@ -67,7 +71,7 @@ use nsh_core::{
     geometry::{Point, Size, px},
     platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
+use nsh_engine::{ColorScheme, Edges, Environment, Languages, Lifecycle, Locale, TimeZone};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -181,6 +185,11 @@ thread_local! {
             .map(|n| n.to_string())
             .collect()
     });
+    static LANGUAGES: Languages = {
+        let names: Vec<String> = glib::language_names().into_iter().map(|n| n.to_string()).collect();
+        Languages::parse(names.iter().map(String::as_str))
+            .unwrap_or_else(|| Languages::one(LOCALE.with(|l| *l)))
+    };
 }
 
 /// Follows the system appearance (dark mode, text scale, scale factor)
@@ -358,6 +367,7 @@ fn update(surface: &Surface, appearance: Appearance) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = LOCALE.with(|l| *l);
+    env.languages = LANGUAGES.with(|l| *l);
     env.font_scale = appearance.font_scale;
     env.reduce_motion = appearance.reduce_motion;
     env.rtl = appearance.rtl;
