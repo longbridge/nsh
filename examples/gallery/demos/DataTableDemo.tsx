@@ -189,7 +189,7 @@ function Tool(props: { label: string; name: string; onPress: () => void }) {
 }
 
 /**
- * Data table: a million stocks of sixty columns whose quotes in view tick
+ * DataTable: a million stocks of sixty columns whose quotes in view tick
  * every 33 ms, the ID and Symbol columns fixed at the left, the ID column
  * sortable, rows, cells or columns selected, columns resized and moved.
  */
