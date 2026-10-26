@@ -35,6 +35,31 @@ pub enum AnimationProp {
     StickyTop,
     /// `left`: the same in a horizontal scroll view.
     StickyLeft,
+    /// Animated prop slot `n` of a registered native component: the platform
+    /// hands the value to the component under the slot's name
+    /// ([`crate::mount::MountItem::ComponentBindings`]), a number or a color.
+    ComponentProp(u16),
+}
+
+/// The value of a native component's animated prop
+/// ([`AnimationProp::ComponentProp`]), as the platform hands it over.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ComponentValue {
+    /// A number.
+    Number(f64),
+    /// A color, `0xAARRGGBB` (Android's `Color` layout).
+    Color(u32),
+}
+
+impl From<super::AnimationValue> for ComponentValue {
+    fn from(value: super::AnimationValue) -> ComponentValue {
+        match value {
+            // The graph's colors are `0xRRGGBBAA`.
+            super::AnimationValue::Color(rgba) => ComponentValue::Color(rgba.rotate_right(8)),
+            other => ComponentValue::Number(f64::from(other.number())),
+        }
+    }
 }
 
 impl AnimationProp {

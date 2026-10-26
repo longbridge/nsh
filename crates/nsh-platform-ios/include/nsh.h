@@ -199,6 +199,21 @@ typedef struct {
 void nsh_app_register_component(NshApp *app, const char *name, void *_Nullable factory,
                                 const NshComponentCallbacks *callbacks);
 
+/// What nsh calls on a component when a prop bound to an animated value
+/// moves; every function gets the handle `create` returned. Main thread.
+typedef struct {
+    /// Prop `name` moved to number `value`.
+    void (*_Nonnull set_number)(void *component, const char *name, double value);
+    /// Prop `name` moved to color `argb` (0xAARRGGBB).
+    void (*_Nonnull set_color)(void *component, const char *name, uint32_t argb);
+} NshAnimatedComponentCallbacks;
+
+/// `nsh_app_register_component`, with what nsh calls when a prop bound to an
+/// animated value moves (otherwise those come as `set_prop` JSON).
+void nsh_app_register_component_animated(NshApp *app, const char *name, void *_Nullable factory,
+                                         const NshComponentCallbacks *callbacks,
+                                         const NshAnimatedComponentCallbacks *animated);
+
 /// Emits event `name` with `json` data (NULL: none). Any thread.
 void nsh_component_emit(const NshComponentContext *context, const char *name, const char *_Nullable json);
 

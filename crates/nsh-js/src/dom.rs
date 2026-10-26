@@ -107,7 +107,7 @@ struct NodeData {
     pan_gated: bool,
     /// Values of props that may hold native animation nodes (`style`,
     /// `pan`, ...), kept alive with the view (owned).
-    retained: Vec<(&'static str, JsValue)>,
+    retained: Vec<(std::borrow::Cow<'static, str>, JsValue)>,
     /// A `<Scroll>`'s content container (`contentStyle` /
     /// `contentClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
@@ -613,11 +613,16 @@ pub(crate) fn node_id(cx: *mut JsContext, v: JsValue) -> Option<NodeId> {
 pub(crate) fn retain(cx: *mut JsContext, node: JsValue, key: &'static str, value: JsValue) {
     let p = node_ptr(cx, node);
     if !p.is_null() {
-        retain_in(cx, p, key, value);
+        retain_in(cx, p, key.into(), value);
     }
 }
 
-fn retain_in(cx: *mut JsContext, p: *mut NodeData, key: &'static str, value: JsValue) {
+fn retain_in(
+    cx: *mut JsContext,
+    p: *mut NodeData,
+    key: std::borrow::Cow<'static, str>,
+    value: JsValue,
+) {
     // SAFETY: live node data; the node owns a dup; the old one is freed
     // after the borrow ends (its finalizer may run).
     let old = unsafe {
@@ -1279,11 +1284,16 @@ fn set_prop(
     .iter()
     .find(|k| **k == name)
     {
-        retain_in(cx, p, key, value);
+        retain_in(cx, p, key.into(), value);
+    }
+    // A native component's prop may be an animated value (an object): kept
+    // under its own name until the prop changes or the view goes.
+    if name.starts_with('$') {
+        retain_in(cx, p, name.to_owned().into(), value);
     }
     // SAFETY: a context reference for the decoder, which reads `value`.
     let js_cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
-    let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
+    let v = unsafe { Value::from_raw(js_cx.clone(), qjs::JS_DupValue(cx, value)) };
     // Decoding may run JS (getters): no borrow is held meanwhile.
     let mut warnings = crate::protocol::Warnings::deferred();
     // SAFETY: live node data.
@@ -1293,6 +1303,25 @@ fn set_prop(
     if let Ok(Some(Op::SetProp { prop, .. })) = &mut decoded {
         // A `blob:` URL's bytes are in this VM: they go with the source.
         crate::web::blob::resolve_image_source(cx, prop);
+    }
+    // A native component's prop that was an animated value and is not any
+    // more is unbound first (its new value is sent, not kept for later).
+    if let Ok(Some(Op::SetProp {
+        prop: nsh_core::Prop::ComponentProp(key, _),
+        ..
+    })) = &decoded
+    {
+        // SAFETY: a context reference for the reader, which reads `prev`.
+        let was = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, prev)) };
+        if crate::protocol::animated_value(&was).is_some() {
+            dom(cx).push(
+                cx,
+                Op::SetProp {
+                    id,
+                    prop: nsh_core::Prop::ComponentPropAnimated(key.clone(), None),
+                },
+            )?;
+        }
     }
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),
@@ -4147,6 +4176,56 @@ mod tests {
                 "Command { id: 4, command: Focus }",
                 "Command { id: 4, command: SetSelection { start: 2, end: 2 } }",
             ]
+        );
+    }
+
+    #[test]
+    fn component_prop_keeps_its_node() {
+        use nsh_core::animation::AnimationOp;
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { element, prop } from "nsh:rt";
+            import { AnimatedValue } from "nsh/animated";
+            globalThis.keep = (() => {
+                const n = element("native");
+                prop(n, "component", "com.example.thing");
+                prop(n, "$progress", new AnimatedValue(0).mul(2));
+                return n;
+            })();
+            "#,
+        )
+        .unwrap();
+        let mut first = Vec::new();
+        host.take_ops(&mut first);
+        assert!(
+            first.iter().any(|o| matches!(
+                o,
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentPropAnimated(name, Some(_)),
+                    ..
+                } if &**name == "progress"
+            )),
+            "{first:?}"
+        );
+        // Only the element holds the derived node (and, through it, its value).
+        host.collect_garbage();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(
+            !ops.iter()
+                .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
+            "{ops:?}"
+        );
+        // The element goes, and its nodes with it.
+        host.eval_script("drop.js", "keep = undefined").unwrap();
+        host.collect_garbage();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(
+            ops.iter()
+                .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
+            "{ops:?}"
         );
     }
 
