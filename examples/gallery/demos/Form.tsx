@@ -1,6 +1,7 @@
 import { effect, type InputProps, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
-import { Keyboard, keyboardFrame, Dialog, NavPage, safeAreaInsets, Input } from "nsh/base";
+import { Dialog, NavPage, Input } from "nsh/base";
+import { Keyboard, keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, tints, type Tone, toneColor } from "../ui";

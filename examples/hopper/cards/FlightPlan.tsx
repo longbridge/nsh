@@ -2,7 +2,7 @@ import { signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { ceiling, flyHop, flying, type Hop, hoverThrottle, plan, resetPlan, segments } from "../store";
 import { color, mono, radius } from "../theme";
-import { Action, Caption, Counter, Line, Panel, Slider, Switch, Tabs } from "../ui";
+import { Action, Caption, Counter, Line, Panel, Segmented, Slider, Switch } from "../ui";
 
 type Axis = "x" | "y" | "z";
 
@@ -76,7 +76,7 @@ export function FlightPlan() {
   };
   return (
     <Panel icon="plan" title="Flight plan" status="Hop profile · pad B">
-      <Tabs options={segments} value={plan.segment()} onChange={(s) => plan.segment.set(s)} />
+      <Segmented options={segments} value={plan.segment()} onChange={(s) => plan.segment.set(s)} />
 
       <View style={{ gap: 10 }}>
         <Caption

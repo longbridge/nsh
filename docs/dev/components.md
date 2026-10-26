@@ -16,7 +16,7 @@ come from two places:
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
   module `AlertDialog`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
-  (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
+  (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area` and `Grid` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{button, …}`, make navigation and
   dialogs with `nsh_base::{nav_stack, nav_page, dialog}` (on the core's `Stack`, `Screen` and `Modal` host
   elements, whose builders are hidden building blocks of these), and show system alerts with
@@ -24,8 +24,8 @@ come from two places:
   - it owns behavior, state, focus, keyboard handling and accessibility (roles, states, actions), or tells the
     platform (insets, the keyboard's height, the status bar's setting, a system dialog);
   - it has no look: no colors, paddings, radii, fonts or variants of its own; it takes the app's `class` / `style`
-    (and styles per state) and children (the exceptions are `TextView`'s default reading typography and the default looks of `Editor`, `DiffView` and `DataTable`, colored
-    with the theme's tokens and overridable part by part: `docs/dev/text-view.md`, `docs/dev/editor.md`, `docs/dev/diff.md`, `docs/dev/data-table.md`);
+    (and styles per state) and children (the exceptions are `TextView`'s default reading typography and the default looks of `Editor` and `DiffView`, colored
+    with the theme's tokens and overridable part by part: `docs/dev/text-view.md`, `docs/dev/editor.md`, `docs/dev/diff.md`);
   - its state is controlled: it reports changes (`onChange`, `onOpenChange`, ...), the app owns the value;
   - it exposes its parts (a trigger, a thumb, an item, as slots or child components) instead of fixed markup, so an
     app arranges and styles each.
@@ -37,6 +37,11 @@ come from two places:
   What such a crate keeps per engine (the languages and highlighters its editors know,
   `nsh_base::editor::register_language`; a value of `nsh_core::element::global`) it sets up in `Registry::setup`, a
   function each engine serving the set runs once in its runtime before the app's first op (`Core::set_components`).
+
+The TSX gallery and website demos share the repository's internal `examples/nsh-gallery-ui` source layer: design
+tokens, finishes, buttons, cards, switches, segmented controls, icons and table part classes. The gallery's
+`ui.tsx` keeps navigation and shell state, and the website's `palette.ts` adapts the shared layer to demo layouts.
+Visual rules are changed in the shared layer; `nsh-base` supplies the components' structure and behavior.
 
 | Where | What |
 |---|---|
@@ -265,7 +270,9 @@ reasons: `reactive-components.md`.
   `.line_width_from_view()` and `.line_dash_from_view()` paint with the canvas view's `fill` / `stroke` /
   `strokeWidth` / `strokeDasharray` (inherited as CSS inherits them, `currentColor` its text color), which the core
   sets before the platform gets the drawing (`Drawing::view_paints`), so a component's shapes take the app's
-  `fill-*` / `stroke-*` classes and follow them and the appearance without being drawn again; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
+  `fill-*` / `stroke-*` classes and follow them and the appearance without being drawn again;
+  `.fill_background_from_view(area)` fills the current path with the canvas view's background (`bg-*`,
+  `bg-linear-*`: a gradient under a chart's line), which the view then draws only there; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
   in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(point, rule)` /
   `.is_point_in_stroke(point)` and, with a `Path2D`, `.path_contains(&path, point, rule)` /
   `.stroke_contains(&path, point)`, on a painter made by a function the drawing and the press handler both call, to

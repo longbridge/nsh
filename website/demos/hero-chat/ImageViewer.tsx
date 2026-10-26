@@ -1,6 +1,7 @@
 import { effect, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
-import { Dialog, safeArea, type TextViewImage } from "nsh/base";
+import { Dialog, type TextViewImage } from "nsh/base";
+import { safeArea } from "nsh";
 import { Image } from "nsh";
 import { motion, Press } from "./ui";
 

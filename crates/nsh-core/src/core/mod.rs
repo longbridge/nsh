@@ -288,6 +288,23 @@ struct ComponentState {
     props: Vec<(Arc<str>, crate::JsonValue)>,
     /// Properties changed since the last commit.
     changed: Vec<Arc<str>>,
+    /// The names of its animated prop slots (`AnimationProp::ComponentSlot`):
+    /// a name keeps its slot once given one.
+    slots: Vec<Arc<str>>,
+    /// The bound slots and their animation nodes. A bound prop's value in
+    /// `props` is kept but not sent until it is unbound.
+    bound: Vec<(u16, crate::animation::NodeId)>,
+    /// `slots` changed since the platform was last told (a `Cell`: the
+    /// commit clears it while it reads the node).
+    slots_changed: std::cell::Cell<bool>,
+}
+
+impl ComponentState {
+    fn is_bound(&self, name: &str) -> bool {
+        self.bound
+            .iter()
+            .any(|(s, _)| &*self.slots[*s as usize] == name)
+    }
 }
 
 #[derive(Debug)]
@@ -576,6 +593,13 @@ impl Node {
         }
         if self.spare {
             style.hidden = true;
+        }
+        // A canvas whose drawing fills with its background shows it there
+        // only (`Painter::fill_background_from_view`).
+        if self.kind == Kind::Canvas && self.drawing.as_ref().is_some_and(|d| d.paints_background())
+        {
+            style.background_color = crate::style::Color::TRANSPARENT;
+            style.clear_background_images();
         }
         if style.transform.has_fractions() {
             let size = if self.frame.size.width.is_nan() {
@@ -1528,8 +1552,14 @@ impl<M: TextEngine> Core<M> {
                 if node.drawing.is_none() && drawing.ops.is_empty() && drawing.nodes.is_empty() {
                     return Ok(());
                 }
+                // Whether the view draws its background (it does not where
+                // the drawing fills with it).
+                let background_moved = node.drawing.as_ref().is_some_and(|d| d.paints_background())
+                    != drawing.paints_background();
                 node.drawing = Some(Arc::from(drawing));
-                let flags = dirty::CANVAS | if slots_changed { dirty::ANIMATION } else { 0 };
+                let flags = dirty::CANVAS
+                    | if slots_changed { dirty::ANIMATION } else { 0 }
+                    | if background_moved { dirty::VIEW } else { 0 };
                 self.mark(key, flags);
                 Ok(())
             }
@@ -2309,6 +2339,15 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         if view_changed {
             flags |= dirty::VIEW;
+            // A drawing filling with the view's background paints the new
+            // one.
+            if self.nodes[key as usize]
+                .drawing
+                .as_ref()
+                .is_some_and(|d| d.paints_background())
+            {
+                flags |= dirty::CANVAS;
+            }
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
@@ -3316,6 +3355,10 @@ impl<M: TextEngine> Core<M> {
                                 component.props.iter().map(|(k, _)| k.clone()).collect();
                             self.mount.push(MountItem::Component { id, name });
                             flags |= dirty::COMPONENT;
+                            if !component.slots.is_empty() {
+                                component.slots_changed.set(true);
+                                flags |= dirty::ANIMATION;
+                            }
                         }
                         None => component.name = Some(name),
                         Some(old) if *old != name => log::warn!(
@@ -3323,6 +3366,36 @@ impl<M: TextEngine> Core<M> {
                             "a native component cannot change from `{old}` to `{name}`; render a new element"
                         ),
                         Some(_) => {}
+                    }
+                }
+            }
+            Prop::ComponentPropBinding(name, value) => {
+                if let Some(component) = node.component.as_mut() {
+                    let slot = match component.slots.iter().position(|k| *k == name) {
+                        Some(s) => Some(s as u16),
+                        None if value.is_none() => None,
+                        None => {
+                            component.slots.push(name.clone());
+                            component.slots_changed.set(true);
+                            Some((component.slots.len() - 1) as u16)
+                        }
+                    };
+                    if let Some(slot) = slot {
+                        let at = component.bound.iter().position(|(s, _)| *s == slot);
+                        match (at, value) {
+                            (Some(i), Some(n)) => component.bound[i].1 = n,
+                            (None, Some(n)) => component.bound.push((slot, n)),
+                            (Some(i), None) => {
+                                component.bound.remove(i);
+                                // Its static value (or its removal) is sent again.
+                                if !component.changed.contains(&name) {
+                                    component.changed.push(name);
+                                }
+                                flags |= dirty::COMPONENT;
+                            }
+                            (None, None) => {}
+                        }
+                        flags |= dirty::ANIMATION;
                     }
                 }
             }
@@ -3981,7 +4054,10 @@ impl<M: TextEngine> Core<M> {
                 flags |= dirty::REFRESHING;
             }
         }
-        if !node.animated.is_empty() || node.drawing.as_ref().is_some_and(|d| !d.slots.is_empty()) {
+        if !node.animated.is_empty()
+            || node.drawing.as_ref().is_some_and(|d| !d.slots.is_empty())
+            || node.component.as_ref().is_some_and(|c| !c.slots.is_empty())
+        {
             flags |= dirty::ANIMATION;
         }
         if node.drawing.is_some() {
@@ -4028,8 +4104,9 @@ impl<M: TextEngine> Core<M> {
                     name: name.clone(),
                 });
             }
-            // The new component gets every property.
+            // The new component gets every property, and its slots' names.
             component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
+            component.slots_changed.set(!component.slots.is_empty());
             flags |= dirty::COMPONENT;
         }
         if let Some(item) = self.creation_tracking(key) {
@@ -4219,6 +4296,22 @@ impl<M: TextEngine> Core<M> {
                             .map(|(i, &n)| (AnimationProp::CanvasArg(i as u16), n)),
                     );
                 }
+                if let Some(component) = &node.component {
+                    bindings.extend(
+                        component
+                            .bound
+                            .iter()
+                            .map(|&(s, n)| (AnimationProp::ComponentSlot(s), n)),
+                    );
+                }
+                if let Some(component) = &node.component
+                    && component.slots_changed.replace(false)
+                {
+                    self.mount.push(MountItem::ComponentPropSlots {
+                        id,
+                        names: component.slots.clone(),
+                    });
+                }
                 self.mount
                     .push(MountItem::AnimationBindings { id, bindings });
             }
@@ -4229,7 +4322,12 @@ impl<M: TextEngine> Core<M> {
                     drawing.clone()
                 } else {
                     let (paint, current) = self.resolved_paint(key);
-                    Arc::new(drawing.painted(&paint, current))
+                    let style = &node.view_style;
+                    let images = style
+                        .effects
+                        .as_deref()
+                        .map_or(&[][..], |e| &e.background_images[..]);
+                    Arc::new(drawing.painted(&paint, current, style.background_color, images))
                 };
                 self.mount.push(MountItem::Canvas { id, drawing });
             }
@@ -4269,8 +4367,11 @@ impl<M: TextEngine> Core<M> {
                 && let Some(component) = self.nodes[key as usize].component.as_mut()
                 && !component.changed.is_empty()
             {
-                let props = std::mem::take(&mut component.changed)
+                let changed = std::mem::take(&mut component.changed);
+                let props: Vec<_> = changed
                     .into_iter()
+                    // A bound prop's value waits until it is unbound.
+                    .filter(|name| !component.is_bound(name))
                     .map(|name| {
                         let value = component
                             .props
@@ -4280,7 +4381,9 @@ impl<M: TextEngine> Core<M> {
                         (name, value)
                     })
                     .collect();
-                self.mount.push(MountItem::ComponentProps { id, props });
+                if !props.is_empty() {
+                    self.mount.push(MountItem::ComponentProps { id, props });
+                }
             }
             let node = &self.nodes[key as usize];
             if flags & dirty::NATIVE != 0

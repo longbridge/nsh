@@ -2,7 +2,8 @@ import { cleanup, computed, effect, List, Scroll, signal, Text, View, type YNode
 import { reduceMotion } from "nsh";
 import { Animated, type AnimatedNode, createAnimatedValue, Easing, LayoutAnimation } from "nsh";
 import { platform } from "nsh";
-import { keyboardFrame, safeAreaInsets, Tab, Tabs, Input } from "nsh/base";
+import { Tab, Tabs, Input } from "nsh/base";
+import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, type Tone, toneColor, toneTint } from "../ui";
 

@@ -6,6 +6,7 @@
 // each.
 import { Scroll, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { createAnimatedValue } from "nsh";
 import { PanResponder } from "nsh";
 import { Image } from "nsh";
 import { nativeComponent, nativeModule } from "nsh";
@@ -46,6 +47,8 @@ function App() {
       <Video testID="video" src="https://example.com/compat.mp4" paused style={{ width: 160, height: 90 }} />
       <WebView testID="web" html="<p>compat</p>" style={{ width: 180, height: 60 }} />
       <Map testID="map" zoom={3} style={{ width: 100, height: 50 }} />
+      {/* An own prop bound to an animated value: pushed natively, not sent as JSON. */}
+      <Map testID="map-animated" zoom={createAnimatedValue(2).interpolate({ inputRange: [0, 4], outputRange: [1, 5] })} style={{ width: 100, height: 50 }} />
       <View testID="pan" {...pan.panHandlers} style={{ width: 50, height: 50 }} />
       <Text>Missing module: {missingModule()}</Text>
       <Text>Base module: {typeof base === "object" && base !== null ? "object" : typeof base}</Text>

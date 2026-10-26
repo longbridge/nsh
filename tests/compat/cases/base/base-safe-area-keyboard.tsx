@@ -9,18 +9,8 @@
 // no keyboard shows, with an offset added only while one shows. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import {
-  Button,
-  Dialog,
-  type Edges,
-  Keyboard,
-  NavPage,
-  NavStack,
-  createNavStack,
-  keyboardFrame,
-  safeArea,
-  safeAreaInsets,
-} from "nsh/base";
+import { Button, Dialog, type Edges, NavPage, NavStack, createNavStack } from "nsh/base";
+import { Keyboard, keyboardFrame, safeArea, safeAreaInsets } from "nsh";
 
 // The keyboard's height plus `offset` while a keyboard shows, nothing
 // otherwise.

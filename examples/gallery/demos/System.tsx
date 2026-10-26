@@ -1,36 +1,13 @@
 import { cleanup, resource, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh";
-import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
+import { AlertDialog, Dialog, type StatusBarForeground } from "nsh/base";
+import { keyboardFrame, safeArea } from "nsh";
 import { Menu } from "nsh/desktop";
 import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { toast } from "../toast";
-import {
-  Appear,
-  Badge,
-  Button,
-  Caption,
-  Card,
-  colors,
-  DemoPage,
-  Figure,
-  finish,
-  IconTile,
-  isDark,
-  Inset,
-  Legend,
-  Meter,
-  mono,
-  Press,
-  Row,
-  Segmented,
-  Stat,
-  tints,
-  Toggle,
-  type Tone,
-  toneColor,
-} from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, IconTile, isDark, Inset, Legend, Meter, mono, Press, Row, Segmented, Stat, tints, Toggle, type Tone, toneColor } from "../ui";
 
 /** The window drawn to scale, with the safe area insets shaded. */
 function SafeAreaDiagram() {

@@ -1,22 +1,5 @@
 import { type Bounds, cleanup, computed, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
-import {
-  Button,
-  DockArea,
-  type DockAreaRef,
-  Editor,
-  type EditorDecoration,
-  type EditorDiagnostic,
-  type EditorPosition,
-  type EditorRange,
-  type EditorRef,
-  type EditorSearchResult,
-  type EditorSelection,
-  Menu,
-  MenuItem,
-  MenuSeparator,
-  TextView,
-  Input,
-} from "nsh/base";
+import { Button, DockArea, type DockAreaRef, Editor, type EditorDecoration, type EditorDiagnostic, type EditorPosition, type EditorRange, type EditorRef, type EditorSearchResult, type EditorSelection, Menu, MenuItem, MenuSeparator, TextView, Input } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
 import { openUrl, platform, windowSize } from "nsh";
 import { keymap } from "nsh";
