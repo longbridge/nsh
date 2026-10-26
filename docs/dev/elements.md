@@ -135,15 +135,24 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
   mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
   Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
-- **Keyboard focus**: on macOS and the web, views that take presses are stops of Tab (the keyboard focus) and Return /
-  Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
-  `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,
-  `ViewProps::focusable`; Rust `.focusable(false)`) keeps a pressable out of the stops: a backdrop that closes a
-  popover, rows a list moves between with the arrow keys. A pressable hears `onFocus` / `onBlur` (`EventKind::Focus` /
-  `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first responder, the browser's
-  `:focus-visible`; the headless driver's Tab moves it the same way there. Inputs are always stops; `focusable` changes only views
-  that take presses (unlike React Native's, `true` makes nothing focusable that is not). Windows, Linux and GPUI move the focus between fields and
-  native components only so far.
+- **Keyboard focus**: on macOS and the web, Tab (the keyboard focus) moves between stops, in tree order; a click
+  presses without focusing, so a stop's `FOCUSED` state (`focus:` classes, `.focus(..)`) is keyboard focus, and
+  `focus-visible:` is the same variant. Focus and presses are separate: `ViewProps::focus_stop` decides, from
+  `focusable` (`Prop::Focusable`, `ViewProps::focusable`; Rust `.focusable(..)`) and whether the view takes presses,
+  and every platform that moves the focus between views asks it (macOS `input::is_key_stop`, the web's
+  `updateFocusable`, the headless driver's `Screen::tab_stops`). Unset, the views that take presses are stops.
+  `focusable={true}` makes any view one, whether or not it takes presses: a component that takes keys while focused (a
+  chart, a slider, a list that moves its selection) sets it on a view that takes no presses, so a pressable around it
+  (a card that opens a page) keeps its presses; it must not listen to `onPress` just to be focusable, which would
+  swallow them. `focusable={false}` keeps a pressable out: a backdrop that closes a popover, rows a list moves between
+  with the arrow keys. A disabled view is never a stop; inputs that edit always are. A stop hears `onFocus` /
+  `onBlur` (`EventKind::Focus` / `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first
+  responder, the browser's `:focus-visible`; the headless driver's Tab moves it the same way there. Return and Space
+  press the focused stop only when it takes presses; a stop that takes none hears its keys through the keymap (`on_key`
+  / `on_key_with`, bound while it is focused, as `DataTable`'s controller does), Return and Space included.
+  (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
+  recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows, Linux and GPUI
+  move the focus between fields and native components only so far; iOS and Android move it between inputs.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also

@@ -7,6 +7,7 @@ mod overlay;
 mod parent_viewport;
 mod renders;
 mod services;
+mod slots;
 mod sticky;
 #[cfg(test)]
 mod tests;
