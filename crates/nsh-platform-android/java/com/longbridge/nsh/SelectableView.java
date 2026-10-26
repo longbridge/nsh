@@ -6,13 +6,13 @@ import android.view.View;
 import android.view.ViewGroup;
 
 /**
- * A selection area (`ViewProps.selection_area`): one selection across the
+ * A selectable view (`ViewProps.selectable_view`): one selection across the
  * texts of the view's subtree that are not `selectable={false}`, in
  * document order (an area inside another is part of the outer one).
  *
  * <p>The selection itself (which text, which offset, words, handles, what a
  * copy gives) is nsh-core's model, run in Rust on this thread through JNI
- * (`selection_area.rs`), so every backend selects alike; this class finds
+ * (`selectable_view.rs`), so every backend selects alike; this class finds
  * the texts, turns touches into its gestures and draws what it selected.
  * The texts' content goes over when it changes, their frames (area
  * coordinates, dp) with every gesture; the model hit-tests through
@@ -22,8 +22,8 @@ import android.view.ViewGroup;
  * selects all or shares; a touch elsewhere ends it. One selection per
  * surface: a text's own ({@link TextBox}) or an area's.
  */
-final class SelectionArea implements SelectionHandle.Owner {
-    // `nativeGesture`'s kinds (`selection_area.rs`).
+final class SelectableView implements SelectionHandle.Owner {
+    // `nativeGesture`'s kinds (`selectable_view.rs`).
     private static final int SELECT_WORD = 0;
     private static final int DRAG = 1;
     private static final int MOVE_START = 2;
@@ -34,15 +34,15 @@ final class SelectionArea implements SelectionHandle.Owner {
 
     private static native void nativeDestroy(long handle);
 
-    private static native boolean nativeSetTexts(long handle, SelectionArea area, String[] contents, int[] keys, float[] frames);
+    private static native boolean nativeSetTexts(long handle, SelectableView area, String[] contents, int[] keys, float[] frames);
 
-    private static native boolean nativeGesture(long handle, SelectionArea area, float[] frames, int kind, float x, float y);
+    private static native boolean nativeGesture(long handle, SelectableView area, float[] frames, int kind, float x, float y);
 
-    private static native int[] nativeRanges(long handle, SelectionArea area);
+    private static native int[] nativeRanges(long handle, SelectableView area);
 
     private static native int[] nativeBounds(long handle);
 
-    private static native String nativeText(long handle, SelectionArea area);
+    private static native String nativeText(long handle, SelectableView area);
 
     private final Mounter mounter;
     /** The area's view. */
@@ -75,7 +75,7 @@ final class SelectionArea implements SelectionHandle.Owner {
         return true;
     };
 
-    SelectionArea(Mounter mounter, View view) {
+    SelectableView(Mounter mounter, View view) {
         this.mounter = mounter;
         this.view = view;
     }
@@ -448,7 +448,7 @@ final class SelectionArea implements SelectionHandle.Owner {
                 if (handle == 0) return false;
                 int itemId = item.getItemId();
                 if (itemId == android.R.id.copy) {
-                    SystemUi.setClipboard(view.getContext(), nativeText(handle, SelectionArea.this));
+                    SystemUi.setClipboard(view.getContext(), nativeText(handle, SelectableView.this));
                     clear();
                     return true;
                 }
@@ -461,7 +461,7 @@ final class SelectionArea implements SelectionHandle.Owner {
                     android.content.Context context = view.getContext();
                     android.content.Intent send = new android.content.Intent(android.content.Intent.ACTION_SEND)
                             .setType("text/plain")
-                            .putExtra(android.content.Intent.EXTRA_TEXT, nativeText(handle, SelectionArea.this));
+                            .putExtra(android.content.Intent.EXTRA_TEXT, nativeText(handle, SelectableView.this));
                     android.content.Intent chooser = android.content.Intent.createChooser(send, null);
                     if (!(context instanceof android.app.Activity)) {
                         chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -493,7 +493,7 @@ final class SelectionArea implements SelectionHandle.Owner {
                 view.getLocationInWindow(at);
                 int ax = at[0], ay = at[1];
                 if (handle != 0) {
-                    int[] ranges = nativeRanges(handle, SelectionArea.this);
+                    int[] ranges = nativeRanges(handle, SelectableView.this);
                     for (int i = 0; ranges != null && i + 2 < ranges.length; i += 3) {
                         if (ranges[i] < 0 || ranges[i] >= texts.size()) continue;
                         TextBox t = texts.get(ranges[i]);

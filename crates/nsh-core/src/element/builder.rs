@@ -186,8 +186,8 @@ pub struct Attrs {
     /// Tailwind classes the app gave through a prop (a component's part),
     /// after the element's own styles.
     pub(crate) class: Option<SharedString>,
-    /// The view is a selection area ([`crate::selection`]).
-    pub(crate) selection_area: bool,
+    /// The view is a selectable view ([`crate::selection`]).
+    pub(crate) selectable_view: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u8,
@@ -245,8 +245,8 @@ impl Attrs {
         if self.inset_margin != old.inset_margin {
             out.push(Prop::InsetMargin(self.inset_margin.unwrap_or_default()));
         }
-        if self.selection_area != old.selection_area {
-            out.push(Prop::SelectionArea(self.selection_area));
+        if self.selectable_view != old.selectable_view {
+            out.push(Prop::SelectableView(self.selectable_view));
         }
         if self.projected_states != old.projected_states {
             out.push(Prop::ProjectedStates(self.projected_states));
@@ -846,7 +846,7 @@ pub trait Element: IntoElement + Sized {
     /// out of it ([`crate::selection`]).
     fn selectable(mut self, area: impl IntoReactive<bool>) -> Self {
         self.node()
-            .bind_attr(area, |a, area| a.selection_area = area);
+            .bind_attr(area, |a, area| a.selectable_view = area);
         self
     }
 

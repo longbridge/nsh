@@ -193,7 +193,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-desktop .nsh-press .nsh-autoselect, .nsh-desktop .nsh-press .nsh-autoselect *,
 .nsh-desktop .nsh-autoselect.nsh-press, .nsh-desktop .nsh-autoselect.nsh-press * { -webkit-user-select: none; user-select: none; }
 .nsh-autoselect ::selection { background: var(--nsh-selection, Highlight); }
-/* A selection area (nsh-area) is selectable as a whole, with every idiom
+/* A selectable view (nsh-area) is selectable as a whole, with every idiom
    and inside views that take presses too: one browser selection spans its
    texts, and a drag may start between them. Texts set off (nsh-noselect),
    images and videos are not. Repeated classes outweigh the rules above. */
@@ -1773,7 +1773,7 @@ class Player {
     const pe = props.pointerEvents;
     el.classList.toggle("nsh-inert", pe === "none");
     el.classList.toggle("nsh-box-none", pe === "box-none");
-    el.classList.toggle("nsh-area", !!props.selectionArea);
+    el.classList.toggle("nsh-area", !!props.selectableView);
     this.updateFocusable(el);
     this.updateTouchAction(el);
   }
@@ -4531,7 +4531,7 @@ class Player {
     return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video") || !!this.textAt(target) || this.areaGap(target);
   }
 
-  /** Whether `target` is in a selection area outside its texts, where a
+  /** Whether `target` is in a selectable view outside its texts, where a
    * drag starts a selection as between a web page's paragraphs: not in a
    * view inside the area that takes presses (they keep theirs) nor in a
    * text set off. */
@@ -4543,7 +4543,7 @@ class Player {
   }
 
   /** The text at `target` that is selectable by default: not set off, and
-   * in a selection area, or (desktop idiom) in nothing that takes presses
+   * in a selectable view, or (desktop idiom) in nothing that takes presses
    * or touches. */
   textAt(target) {
     const text = target?.closest?.(".nsh-autoselect");
@@ -4552,7 +4552,7 @@ class Player {
     return this.desktopUI && !text.closest(".nsh-press") ? text : null;
   }
 
-  /** The selection area `el` is in: the outermost, as an area inside
+  /** The selectable view `el` is in: the outermost, as an area inside
    * another is part of it. */
   areaOf(el) {
     let area = null;
@@ -4672,7 +4672,7 @@ class Player {
   /** What copying the selection in text gives: its runs in order, each
    * line's break after its last run (`_after`) and a newline between
    * texts; absolutely placed runs would each be a line of their own. In a
-   * selection area, texts on one row (their boxes overlap vertically: a
+   * selectable view, texts on one row (their boxes overlap vertically: a
    * table's cells) are joined by a tab instead, and attachments (U+FFFC)
    * are left out, as the native platforms copy. */
   copyText(e) {
@@ -4724,7 +4724,7 @@ class Player {
     if (!text) return false;
     if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
       e.preventDefault();
-      // In a selection area: all of its texts.
+      // In a selectable view: all of its texts.
       sel.selectAllChildren(this.areaOf(text) ?? text);
       return true;
     }

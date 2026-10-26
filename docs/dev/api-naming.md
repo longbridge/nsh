@@ -272,9 +272,6 @@ and `Input`'s React Native names follow the rules as well.
 | `hidden`, `animated` | fields of `StatusBar` | `NavMotion::Animated` (UIKit `animated:`) | `nsh.json` takes `foreground` and `hidden` |
 | `StatusBar.setBarStyle`, `StatusBar.setHidden`, `BarAnimation` | (dropped) | | The pages and dialogs are the API |
 | `android.backgroundColor`; Android's `setStatusBarBackgroundColor` | (dropped) | | Edge-to-edge (API 35) has no bar color |
-| **KeyboardAvoidingView**, **SafeAreaView** | | | |
-| `KeyboardAvoidingView` (`behavior="padding"` / `"height"`, `keyboardVerticalOffset`) | `padding-bottom` / `margin-bottom: env(keyboard-inset-height)`, `calc(env(..) + <length>)` | CSS `env()` and the VirtualKeyboard API's `keyboard-inset-height` | CSS as in a browser: a style, no wrapper component |
-| `SafeAreaView` (`edges`) | `padding: env(safe-area-inset-top)` and the other edges | CSS `env(safe-area-inset-*)` | The same |
 | **Keyboard** | | | |
 | `keyboard` (accessor) | `keyboardFrame` | none (UIKit's `keyboardFrameEndUserInfoKey` and animation duration arrive together) | Differed from `Keyboard` by case only; `Keyboard.dismiss()` unchanged |
 | **List, Scroll** | | | |

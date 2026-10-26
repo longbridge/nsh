@@ -2141,7 +2141,7 @@ pub enum Prop {
     /// `selectable={false}` stay out of it, a selectable view inside
     /// another is part of the outer one.
     #[prop(js = "selectable", on = VIEW, shared)]
-    SelectionArea(bool),
+    SelectableView(bool),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
     AllowFontScaling(bool),

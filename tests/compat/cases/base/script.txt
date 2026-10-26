@@ -521,8 +521,8 @@ covers [props] TextView.renderImage
 covers [events] TextView.onLinkPress
 covers [events] TextView.onCodeBlockAction
 covers [events] TextView.onImagePress
-# base-selection-area
-tap id:case-base-selection-area
+# base-selectable-view
+tap id:case-base-selectable-view
 # One area around a text, a TextView, a label kept out and an inner
 # area; a selectable TextView an area of its own; a text outside.
 expect Area first text
@@ -532,10 +532,10 @@ expect Area label
 expect Inner text
 expect Own selection
 expect Outside text
-prop id:area selectionArea true
-prop id:inner selectionArea true
-prop id:own selectionArea true
-noprop id:area-doc selectionArea
+prop id:area selectableView true
+prop id:inner selectableView true
+prop id:own selectableView true
+noprop id:area-doc selectableView
 # Texts join the area unless they say `selectable={false}`.
 noprop text:"Area first text" selectable
 noprop text:"Area item" selectable

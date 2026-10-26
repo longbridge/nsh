@@ -30,7 +30,7 @@ crates/
                        CSS environment variables in padding and margin (`env(safe-area-inset-*)`, `env(keyboard-inset-height)`: `Core::sync_env`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
-                       resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
+                       resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selectable view (`selection.rs`, the platforms run it);
                        overlays (`overlay.rs`: anchors and their placement; `core/overlay.rs`: shown in the root view, outside presses,
                        Escape / back; docs/dev/elements.md "Overlays"); the native animation graph (`animation/`: value / interpolate /
                        math nodes, timing / spring / decay drivers; the platforms evaluate it every frame; `Animator`: its

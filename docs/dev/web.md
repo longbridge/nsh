@@ -331,7 +331,7 @@ batch is being applied (a batch arrives inside a wasm call).
 A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, class,
 borderClass, tint]`, `["t", id, ...content, runs, styles, selectable, selectionClass]` (`styles`: a class per run
 style; `selectable` `null` when unset), `["vp", id, props]` (the view props as an object: `pointerEvents`, `hitSlop`,
-the accessibility props, `testID`, `focusable` when false, `selectionArea` when true), `["in", id, config, class]`, `["css", class, text]`, and so on; `nsh.js` has one `op_<name>` method per
+the accessibility props, `testID`, `focusable` when false, `selectableView` when true), `["in", id, config, class]`, `["css", class, text]`, and so on; `nsh.js` has one `op_<name>` method per
 item. Views are absolutely positioned at the core's frames; borders are an overlay element (as UIKit draws layer
 borders) so they never move the content the core placed. Native animation items stay in Rust (`src/animation.rs`, a port
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
@@ -494,7 +494,7 @@ browsers' touches into what phones report:
   the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
   modifiers, else the US layout's character of their `code`; `mod` was resolved by the browser's platform,
   `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
-  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selection area the whole area; Escape); a focused
+  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selectable view the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
@@ -502,7 +502,7 @@ browsers' touches into what phones report:
   `focusable={false}` (a focused one that stops being a stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
   draws a ring inside the view; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
-  text, selection areas and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
+  text, selectable views and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
   `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
@@ -534,8 +534,8 @@ browsers' touches into what phones report:
   DOM order, each followed by its line's break when its end is selected (`Run::after`, the run tuple's fifth element:
   a newline, or the spaces a wrap dropped) and a newline between texts: the browser would run the absolutely placed
   runs together.
-- **Selection areas** (`<View selectable>`, `ViewProps::selection_area`): `op_vp` marks a view whose props have
-  `selectionArea` `nsh-area`, and the browser's own selection spans its texts (handles and long presses on phones
+- **Selectable views** (`<View selectable>`, `ViewProps::selectable_view`): `op_vp` marks a view whose props have
+  `selectableView` `nsh-area`, and the browser's own selection spans its texts (handles and long presses on phones
   included). The area and everything in it is `user-select: text` in every idiom, inside views that take presses too,
   except texts set off (`selectable={false}`: `nsh-noselect`, set by `op_t`), images and videos; an area inside
   another is part of the outer one (`areaOf`). `textAt` takes the area's texts and `areaGap` its other places outside

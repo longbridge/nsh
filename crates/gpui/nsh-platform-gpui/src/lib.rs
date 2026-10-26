@@ -47,7 +47,7 @@ mod navigation;
 mod render;
 mod rt;
 mod scroll;
-mod selection_area;
+mod selectable_view;
 mod stats;
 mod surface;
 #[cfg(feature = "dev")]

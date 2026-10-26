@@ -1,5 +1,5 @@
-//! Selection areas (`ViewProps::selection_area`) on the UI thread: the
-//! shared model ([`nsh_core::selection`]) behind `SelectionArea.java`.
+//! Selectable views (`ViewProps::selectable_view`) on the UI thread: the
+//! shared model ([`nsh_core::selection`]) behind `SelectableView.java`.
 //!
 //! Java owns the views, the gestures and the drawing; the model (which
 //! text, which offset, words, handles, what a copy gives) is Rust's, as on
@@ -7,7 +7,7 @@
 //! holds one [`Area`] (a `long` handle in Java, from `nativeCreate` to
 //! `nativeDestroy`). Java hands over the texts' content when they change
 //! (`nativeSetTexts`) and their frames with every call (they move with
-//! scrolling); hit-testing calls back into Java (`SelectionArea.offsetAt`
+//! scrolling); hit-testing calls back into Java (`SelectableView.offsetAt`
 //! turns the point into the text's content box and asks
 //! `TextLayouts.hitTest`, which the engine thread's
 //! `TextEngine::hit_test` runs too), all on the UI thread within the native
@@ -38,7 +38,7 @@ struct Area {
 }
 
 /// The texts of an area for one native call: hit-tests ask the Java
-/// `SelectionArea` (`this`).
+/// `SelectableView` (`this`).
 struct Texts<'a, 'local> {
     contents: &'a [String],
     keys: &'a [u64],
@@ -145,7 +145,7 @@ fn with_texts<'local, R>(
 
 /// A new area without a selection.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeCreate(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeCreate(
     _: JNIEnv<'_>,
     _: JClass<'_>,
 ) -> jlong {
@@ -154,7 +154,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeCreate(
 
 /// Frees an area's handle.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeDestroy(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeDestroy(
     _: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
@@ -169,7 +169,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeDestroy(
 /// ids and frames): the selection follows (`texts_changed`). Returns whether it
 /// changed.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeSetTexts<'local>(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeSetTexts<'local>(
     mut env: JNIEnv<'local>,
     _: JClass<'local>,
     handle: jlong,
@@ -193,7 +193,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeSetTexts<'local>(
     match read {
         Ok(contents) => area.contents = contents,
         Err(err) => {
-            log::error!("cannot read the selection area's texts: {err}");
+            log::error!("cannot read the selectable view's texts: {err}");
             area.contents.clear();
         }
     }
@@ -225,7 +225,7 @@ const CLEAR: jint = 5;
 /// whether the selection changed.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeGesture<'local>(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeGesture<'local>(
     mut env: JNIEnv<'local>,
     _: JClass<'local>,
     handle: jlong,
@@ -253,7 +253,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeGesture<'local>(
 
 /// What each text has selected: (text, start, end) triples, UTF-16.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeRanges<'local>(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeRanges<'local>(
     mut env: JNIEnv<'local>,
     _: JClass<'local>,
     handle: jlong,
@@ -272,7 +272,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeRanges<'local>(
 /// The selection's start and end (text, offset, text, offset), or an
 /// empty array without one.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeBounds(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeBounds(
     env: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
@@ -293,7 +293,7 @@ extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeBounds(
 
 /// The selected text, as a copy gives it.
 #[unsafe(no_mangle)]
-extern "system" fn Java_com_longbridge_nsh_SelectionArea_nativeText<'local>(
+extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeText<'local>(
     mut env: JNIEnv<'local>,
     _: JClass<'local>,
     handle: jlong,

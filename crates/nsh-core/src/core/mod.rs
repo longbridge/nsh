@@ -3173,10 +3173,10 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
-            Prop::SelectionArea(value) => {
+            Prop::SelectableView(value) => {
                 let props = node.props.get_or_insert_default();
-                if props.selection_area != value {
-                    props.selection_area = value;
+                if props.selectable_view != value {
+                    props.selectable_view = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }

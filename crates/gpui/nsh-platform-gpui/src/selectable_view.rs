@@ -1,5 +1,5 @@
-//! Selection areas (`View`'s `selectable`: a view whose
-//! `ViewProps::selection_area` is set): one selection across the texts of
+//! Selectable views (`View`'s `selectable`: a view whose
+//! `ViewProps::selectable_view` is set): one selection across the texts of
 //! the view's subtree, from a point in one text to a point in another, as a
 //! browser selects across the elements of a page.
 //!
@@ -278,13 +278,13 @@ fn with_area<R>(surface: u64, area: &NshView, f: impl FnOnce(&mut Active) -> R) 
     })
 }
 
-/// The selection area `view` is in (the outermost, as an area inside
+/// The selectable view `view` is in (the outermost, as an area inside
 /// another is part of it), if any.
 pub(crate) fn area_of(view: &NshView) -> Option<NshView> {
     let mut area = None;
     let mut current = Some(view.clone());
     while let Some(v) = current {
-        if v.state().props.selection_area {
+        if v.state().props.selectable_view {
             area = Some(v.clone());
         }
         current = v.parent_view();
@@ -302,7 +302,7 @@ pub(crate) fn takes(view: &NshView) -> bool {
         .is_none_or(|t| t.text.selectable != Some(false))
 }
 
-/// Whether the text a view draws takes part in a selection area around it
+/// Whether the text a view draws takes part in a selectable view around it
 /// (the I-beam over it).
 pub(crate) fn selects(state: &crate::view::ViewState) -> bool {
     state
@@ -558,7 +558,7 @@ pub(crate) fn batch_applied(surface: &Surface) {
     let gone = ACTIVE.with_borrow_mut(|active| {
         let a = active.as_mut().filter(|a| a.surface == surface.key())?;
         let texts = match AreaTexts::of(&a.area) {
-            Some(texts) if a.area.state().props.selection_area => texts,
+            Some(texts) if a.area.state().props.selectable_view => texts,
             _ => return Some(()),
         };
         if !texts.same(&a.seen) {

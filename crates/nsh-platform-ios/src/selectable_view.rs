@@ -1,4 +1,4 @@
-//! Selection areas (`ViewProps::selection_area`, `View`'s
+//! Selectable views (`ViewProps::selectable_view`, `View`'s
 //! `selectable`): one selection across the texts of a view's subtree, from
 //! text to text, as `nsh_core::selection` models it.
 //!
@@ -21,7 +21,7 @@
 //! a gesture starts and, while something is selected, after every mount
 //! batch and scroll. Each draws its part of the highlight itself
 //! (`TextView::set_area_highlight`). Texts in an area have no selection
-//! of their own (`TextView::in_selection_area`). An area inside another
+//! of their own (`TextView::in_selectable_view`). An area inside another
 //! is part of the outer one: its own gestures never begin. Becoming first
 //! responder resigns any other selection, so a surface shows one.
 
@@ -523,7 +523,7 @@ define_class!(
 );
 
 impl AreaResponder {
-    /// Makes `area` a selection area.
+    /// Makes `area` a selectable view.
     pub(crate) fn attach(area: &UIView, mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(AreaIvars::default());
         // SAFETY: UIView's designated initializer.
@@ -643,7 +643,7 @@ impl AreaResponder {
         let mut view = self.superview().and_then(|a| a.superview());
         while let Some(v) = view {
             if v.downcast_ref::<NshView>()
-                .is_some_and(NshView::is_selection_area)
+                .is_some_and(NshView::is_selectable_view)
             {
                 return true;
             }

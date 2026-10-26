@@ -1,4 +1,4 @@
-//! Selection areas (`ViewProps::selection_area`: `View`'s
+//! Selectable views (`ViewProps::selectable_view`: `View`'s
 //! `selectable`, a selectable `TextView`): one selection across the texts of
 //! a view's subtree, from text to text, as a browser selects across a
 //! page. The selection itself is [`nsh_core::selection`]'s model; this
@@ -57,10 +57,10 @@ use crate::{
     view::NshView,
 };
 
-/// The selection areas of a surface and the mouse's gesture in one.
+/// The selectable views of a surface and the mouse's gesture in one.
 #[derive(Default)]
 pub(crate) struct State {
-    /// Every view with `selection_area`, by node id (nested ones too).
+    /// Every view with `selectable_view`, by node id (nested ones too).
     areas: RefCell<FxHashMap<NodeId, Area>>,
     /// The mouse is down in an area.
     drag: RefCell<Option<Drag>>,
@@ -68,7 +68,7 @@ pub(crate) struct State {
     click: Cell<Option<Click>>,
 }
 
-/// One selection area.
+/// One selectable view.
 struct Area {
     view: glib::WeakRef<NshView>,
     model: SelectionModel,
@@ -183,12 +183,12 @@ fn collect(area: &NshView) -> Texts {
     Texts { items }
 }
 
-/// The outermost selection area around `view` (itself included).
+/// The outermost selectable view around `view` (itself included).
 pub(crate) fn area_of(view: &NshView) -> Option<NshView> {
     let mut area = None;
     let mut current = Some(view.clone());
     while let Some(v) = current {
-        if v.state().props.selection_area {
+        if v.state().props.selectable_view {
             area = Some(v.clone());
         }
         current = v.parent_view();
@@ -227,9 +227,9 @@ fn view_of(surface: &Surface, id: NodeId) -> Option<NshView> {
 
 // --- Mounting -----------------------------------------------------------------------
 
-/// `view`'s props changed: it became a selection area or stopped being one.
+/// `view`'s props changed: it became a selectable view or stopped being one.
 pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
-    let on = view.state().props.selection_area;
+    let on = view.state().props.selectable_view;
     let id = view.id();
     let state = &surface.selection;
     let current = state

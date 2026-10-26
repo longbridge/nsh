@@ -1,5 +1,5 @@
-//! Selection areas (`View`'s `selectable`, a view whose
-//! `ViewProps::selection_area` is set): one selection across the texts of
+//! Selectable views (`View`'s `selectable`, a view whose
+//! `ViewProps::selectable_view` is set): one selection across the texts of
 //! the area's subtree, from text to text in document order, as a browser
 //! selects across the elements of a page. The model is
 //! [`nsh_core::selection`]; this module lists the texts of an area
@@ -160,7 +160,7 @@ pub(crate) fn area_of(view: &NshView) -> Option<NshView> {
     let mut area = None;
     let mut at = Some(view.clone());
     while let Some(v) = at {
-        if v.state().props.selection_area {
+        if v.state().props.selectable_view {
             area = Some(v.clone());
         }
         at = v.parent_view();
@@ -318,7 +318,7 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
         return;
     };
     DIRTY.set(false);
-    let gone = !current.area.attached() || !current.area.state().props.selection_area;
+    let gone = !current.area.attached() || !current.area.state().props.selectable_view;
     if gone {
         current.unhighlight();
         return;

@@ -14106,7 +14106,7 @@ mod renders {
     }
 }
 
-mod rust_selection_area {
+mod rust_selectable_view {
     use std::cell::Cell;
 
     use super::*;
@@ -14125,10 +14125,10 @@ mod rust_selection_area {
             .child(view().child(text("outside")))
     }
 
-    /// `Element::selection_area` reaches the platform in the view's props,
+    /// `Element::selectable_view` reaches the platform in the view's props,
     /// follows its signal, and views without it get no props for it.
     #[test]
-    fn a_selection_area_is_a_view_prop() {
+    fn a_selectable_view_is_a_view_prop() {
         let mut c = core();
         c.mount_root(&Root::of::<Area>());
         let batch = c.commit().unwrap();
@@ -14136,14 +14136,14 @@ mod rust_selection_area {
             .items
             .iter()
             .filter_map(|item| match item {
-                MountItem::ViewProps { id, props } if props.selection_area => Some(*id),
+                MountItem::ViewProps { id, props } if props.selectable_view => Some(*id),
                 _ => None,
             })
             .collect();
         assert_eq!(areas.len(), 1, "{:?}", batch.items);
         assert!(
             !batch.items.iter().any(
-                |item| matches!(item, MountItem::ViewProps { props, .. } if !props.selection_area)
+                |item| matches!(item, MountItem::ViewProps { props, .. } if !props.selectable_view)
             ),
             "views without the flag get no props: {:?}",
             batch.items
@@ -14154,7 +14154,7 @@ mod rust_selection_area {
         }
         let batch = c.commit().unwrap();
         assert!(batch.items.iter().any(
-            |item| matches!(item, MountItem::ViewProps { id, props } if *id == areas[0] && !props.selection_area)
+            |item| matches!(item, MountItem::ViewProps { id, props } if *id == areas[0] && !props.selectable_view)
         ));
     }
 }

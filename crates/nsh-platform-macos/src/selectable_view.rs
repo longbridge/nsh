@@ -1,4 +1,4 @@
-//! Selection areas (`ViewProps::selection_area`, `View`'s
+//! Selectable views (`ViewProps::selectable_view`, `View`'s
 //! `selectable`): one selection across the texts of a view's subtree, from a
 //! point in one text to a point in another, as a browser selects across a
 //! page. The texts that take part are those not `selectable={false}`, in
@@ -118,13 +118,13 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
     }
 }
 
-/// The selection area `view` is in: its outermost ancestor (or itself)
+/// The selectable view `view` is in: its outermost ancestor (or itself)
 /// that is one.
 fn area_of(view: &NshView) -> Option<NshView> {
     let mut found = None;
     let mut current = Some(view.clone());
     while let Some(v) = current {
-        if v.state().props.selection_area {
+        if v.state().props.selectable_view {
             found = Some(v.clone());
         }
         current = v.parent_view();
@@ -153,9 +153,9 @@ pub(crate) fn is_area_text(view: &NshView, state: &crate::view::ViewState) -> bo
         && area_of(view).is_some()
 }
 
-/// Whether `view` is a selection area (the pointer selects in it).
+/// Whether `view` is a selectable view (the pointer selects in it).
 pub(crate) fn is_area(view: &NshView) -> bool {
-    view.state().props.selection_area
+    view.state().props.selectable_view
 }
 
 /// The selection of the area last pressed.

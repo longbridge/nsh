@@ -90,7 +90,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). Safe areas and the keyboard are CSS environment variables in padding and margin
   (`env(safe-area-inset-top)`, `env(keyboard-inset-height)`, `docs/dev/styles.md` "Environment variables"); a view
-  with `selectable` makes its texts select together (`text.md` "Selection areas").
+  with `selectable` makes its texts select together (`text.md` "Selectable views").
 - **Platform modules**: `platform` (`nsh`'s environment, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
   `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
   Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`), `catalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); the `desktop` idiom, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
