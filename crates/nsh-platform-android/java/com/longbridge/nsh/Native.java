@@ -220,9 +220,11 @@ final class Native {
      * locale: the default locale's language tag (`Intl`'s default).
      * timeZone: the system's time zone's ID (`Europe/Berlin`).
      * languages: the preferred languages' tags, most preferred first, comma-separated.
+     * regional: the system's format locale's tag, with Android 14's regional
+     * preferences as its Unicode extension (`en-US-u-fw-mon-mu-celsius`).
      */
     static native void environment(long handle, float[] values, boolean dark, String locale, String timeZone,
-            String languages);
+            String languages, String regional);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
 
