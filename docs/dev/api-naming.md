@@ -296,6 +296,7 @@ and `Input`'s React Native names follow the rules as well.
 | `activeOpacity` | `activeStyle={{ opacity }}` or `active:opacity-*` | GPUI `InteractiveElement::active` | |
 | `underlayColor`, `underlayOpacity` | `activeStyle={{ backgroundColor }}`; children `group-active:opacity-*` | as above | Native while pressed, as today |
 | (new) | `hoverStyle`, `focusStyle`, `disabledStyle` | GPUI `hover` / `focus`; `ButtonStyles::disabled` | As the `<state>:` classes |
+| `focusable` | unchanged; Rust `.focusable(..)` | GPUI `FocusHandle::tab_stop`; the web's `tabIndex` | React Native's meaning: `true` makes any view a Tab stop, whether or not it takes presses (a chart in a pressable card), `false` keeps a pressable out; unset, the pressables are stops (`ViewProps::focus_stop`). No `tabStop` or `focusStop` beside it: one name for one concept |
 | **Button** (`nsh/base`) | | | |
 | `disabled`, `selected`, `accessibilityLabel` | unchanged | `button.rs` `Button::disabled`, `selected`, `accessibility_label` | Add `role` (`Button::role`) |
 | `onPress` | unchanged | `gpui-base`'s *press* (`DialogChangeReason::TriggerPress`, `close_on_backdrop_press`) over `Button::on_click` | Every view has them: one word for one concept across `nsh` and `nsh/base` (*guides*); touch, pen, mouse and keyboard activation are presses, *click* is a mouse's (*guides* "Use `on_click` only for a genuine click-level contract") |

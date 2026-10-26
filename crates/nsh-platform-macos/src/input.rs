@@ -331,7 +331,7 @@ pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
 }
 
 fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
-    if view.kind() == ViewKind::Input || is_key_control(view) {
+    if view.kind() == ViewKind::Input || is_key_stop(view) {
         return;
     }
     let Some(window) = view.ns().window() else {
@@ -738,15 +738,27 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     crate::scroll::key_scroll(surface, &hit.view, horizontal, m)
 }
 
-/// A mounted ordinary view that can be reached and activated by keyboard.
+/// A mounted ordinary view the keyboard focus stops at (Tab): one that
+/// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
+/// shown and reachable by the pointer.
+pub(crate) fn is_key_stop(view: &NshView) -> bool {
+    {
+        let state = view.state();
+        if state.kind == ViewKind::Input
+            || !state
+                .props
+                .focus_stop(state.events.contains(EventKind::Press))
+        {
+            return false;
+        }
+    }
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+}
+
+/// A stop that Return and Space press ([`is_key_stop`] taking presses): a
+/// stop that takes none hears its keys through the app's keymap.
 pub(crate) fn is_key_control(view: &NshView) -> bool {
-    let state = view.state();
-    state.kind != ViewKind::Input
-        && state.events.contains(EventKind::Press)
-        && state.props.focusable != Some(false)
-        && !state.props.accessibility.state.disabled
-        && view.can_target()
-        && !view.ns().isHiddenOrHasHiddenAncestor()
+    is_key_stop(view) && view.state().events.contains(EventKind::Press)
 }
 
 /// Enter or Space addressed to a focused control inside the current modal.
@@ -771,8 +783,8 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 }
 
 /// Tab / Shift+Tab (or with Control) with the root focused: moves into
-/// AppKit's key view loop (fields and pressable views), from the first or last, so
-/// focus never gets stuck on the root.
+/// AppKit's key view loop (fields and the views [`is_key_stop`] takes), from
+/// the first or last, so focus never gets stuck on the root.
 fn tab(surface: &Surface, event: &NSEvent) -> bool {
     const TAB: u16 = 48;
     let flags = event.modifierFlags();
@@ -790,7 +802,7 @@ fn tab(surface: &Surface, event: &NSEvent) -> bool {
     let from = responder
         .as_ref()
         .and_then(|responder| responder.downcast_ref::<objc2_app_kit::NSView>())
-        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_control(&view)))
+        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_stop(&view)))
         .unwrap_or(surface.root.ns());
     crate::text_input::tab(surface, from, flags.contains(NSEventModifierFlags::Shift));
     true
