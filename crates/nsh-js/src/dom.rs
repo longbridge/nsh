@@ -3011,6 +3011,15 @@ unsafe extern "C" fn setup(
             return e;
         }
     }
+    // The core makes the theme's tokens when the op above reaches it, after
+    // this turn; the first render, in this turn, reads them already.
+    let theme = arg(argc, argv, 1);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsString(theme) }
+        && let Some(json) = string_arg(cx, theme)
+    {
+        crate::env::take_theme(cx, &json);
+    }
     // Checked by the bundler; a hand-made bundle's wrong value is ignored.
     let status_bar = string_arg(cx, arg(argc, argv, 3))
         .and_then(|json| serde_json::from_str(&json).ok())

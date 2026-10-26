@@ -660,13 +660,14 @@ them (`bg-surface`, `bg-up/30`, `rounded-(--radius-card)`; `styles.md`) and TS r
 `interface Tokens`, which nsh writes per app into `.nsh/types/nsh/tokens.d.ts` from the theme
 (`nsh_bundler::tokens_declaration`). The bundler checks the
 theme; the entry hands the file to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any
-view is made; the core makes tokens of it with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s
-`tokens_of`, which also gives the defaults when the engine starts). A Rust app's root carries them
-(`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of the surface (`ui::ambient::tokens`): new
-tokens run again the bindings that read them. An embedding app can give a surface its own (`Core::set_host_tokens`,
-`EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they are in the first frame): they win over the
-app's until cleared, and the app's names they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
-and GPUI Kit apps").
+view is made and has `token()` read its tokens at once (`Core::theme_tokens`, given to JS before the bundle runs: the
+op reaches the core only after the turn of the first render, which reads them already); the core makes tokens of it
+with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s `tokens_of`, which also gives the defaults when the
+engine starts). A Rust app's root carries them (`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of
+the surface (`ui::ambient::tokens`): new tokens run again the bindings that read them. An embedding app can give a
+surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they
+are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack
+stay, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").
 
 ## The host node and ids
 
