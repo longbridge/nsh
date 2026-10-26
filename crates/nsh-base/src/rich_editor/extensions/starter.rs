@@ -6,32 +6,21 @@
 //! plugins for them. An app takes the pieces it wants and adds its own;
 //! the commands take any schema's types.
 
-use std::sync::Arc;
+use std::sync::OnceLock;
 
 use regex::Regex;
 use serde_json::Value;
 
 use super::{
-    clear_document::clear_document,
-    code_block::{CodeBlockOptions, code_block_keymap, fence_language},
-    core_keymap::core_keymap,
-    helpers::{set_hard_break, set_node, toggle_list, toggle_node, toggle_wrap, update_attribute},
-    history::{HistoryOptions, history, redo, undo},
-    input_rules::{
-        GetAttrs, InputMatch, InputRule, JoinPredicate, input_rules as input_rules_plugin,
-        mark_input_rule, node_input_rule, number, textblock_type_input_rule, wrapping_input_rule,
-    },
+    extension::{Extension, ExtensionManager},
+    input_rules::{InputMatch, InputRule, input_rules as input_rules_plugin},
     keymap::{keymap as keymap_plugin, normalize_key_name},
-    list_keymap::{ListKeymapOptions, list_keymap},
-    paste_rules::{PasteAction, PasteRule, paste_rules},
-    trailing_node::{TrailingNodeOptions, trailing_node},
+    kit,
+    paste_rules::{PasteRule, paste_rules},
     typography::{TypographyOptions, typography},
 };
 use crate::rich_editor::{
-    commands::{
-        BoxCommand, chain_commands, command, lift_list_item, sink_list_item, split_list_item,
-        toggle_mark,
-    },
+    commands::{BoxCommand, CommandRegistry, chain_commands},
     model::{
         AttrParse, AttrRender, AttrSpec, Attrs, ClearMark, DomElement, DomOutputSpec, MarkSpec,
         NodeSpec, ParseRule, Schema, SchemaSpec, TextRender, Whitespace,
@@ -51,7 +40,7 @@ fn attr(default: Option<Value>) -> AttrSpec {
 
 // A null-default attribute read from and written to the style property
 // `property` (Tiptap's text style and highlight attributes).
-fn styled_attr(property: &str) -> AttrSpec {
+pub(super) fn styled_attr(property: &str) -> AttrSpec {
     AttrSpec {
         default: Some(Value::Null),
         parse_html: Some(AttrParse::Style(property.into())),
@@ -621,44 +610,34 @@ pub mod marks {
 }
 
 /// The starter schema's spec: every node of [`nodes`] and mark of
-/// [`marks`], for an app to extend before making its schema.
+/// [`marks`], as the starter kit's extensions make them
+/// ([`kit::starter_kit`]), for an app to extend before making its schema.
 pub fn schema_spec() -> SchemaSpec {
-    SchemaSpec {
-        nodes: vec![
-            nodes::doc(),
-            nodes::paragraph(),
-            nodes::blockquote(),
-            nodes::horizontal_rule(),
-            nodes::heading(),
-            nodes::code_block(),
-            nodes::text(),
-            nodes::image(),
-            nodes::hard_break(),
-            nodes::ordered_list(),
-            nodes::bullet_list(),
-            nodes::list_item(),
-            nodes::task_list(),
-            nodes::task_item(),
-        ],
-        marks: vec![
-            marks::link(),
-            marks::italic(),
-            marks::bold(),
-            marks::code(),
-            marks::strike(),
-            marks::underline(),
-            marks::highlight(),
-            marks::subscript(),
-            marks::superscript(),
-            marks::text_style(),
-        ],
-        top_node: None,
-    }
+    ExtensionManager::schema_spec(starter_manager().extensions())
 }
 
 /// The starter schema (the paragraph is the default block).
 pub fn schema() -> Schema {
-    Schema::new(schema_spec()).expect("the starter schema is valid")
+    starter_manager().schema().clone()
+}
+
+// The core extensions and the starter kit, resolved once.
+fn starter_manager() -> &'static ExtensionManager {
+    static MANAGER: OnceLock<ExtensionManager> = OnceLock::new();
+    MANAGER.get_or_init(|| {
+        ExtensionManager::with_core(vec![kit::starter_kit()]).expect("the starter kit is valid")
+    })
+}
+
+// The starter kit's extensions in runtime order; their pieces are made
+// against the schema they are asked for (an app's may have more types or
+// fewer).
+fn for_schema(_schema: &Schema) -> Vec<&'static Extension> {
+    starter_manager().runtime_order()
+}
+
+fn commands() -> &'static CommandRegistry {
+    starter_manager().commands()
 }
 
 /// Whether a CSS `font-weight` is bold: `bold`, `bolder` or 600 and up
@@ -686,7 +665,7 @@ fn code_language(pre: &DomElement) -> Option<String> {
     })
 }
 
-fn attrs_of(key: &str, value: Value) -> Attrs {
+pub(super) fn attrs_of(key: &str, value: Value) -> Attrs {
     let mut attrs = Attrs::new();
     attrs.insert(key.into(), value);
     attrs
@@ -732,124 +711,75 @@ pub fn merge_keymaps(groups: Vec<Vec<(String, BoxCommand)>>) -> Vec<(String, Box
 /// `Mod-i`, `Mod-u`, `Mod-Shift-s` strike, `Mod-e` code, `Mod-Shift-h`
 /// highlight, `Mod-,` subscript, `Mod-.` superscript), blocks (`Mod-Alt-0`
 /// paragraph, `Mod-Alt-1`..`6` headings, `Mod-Shift-b` quote,
-/// `Mod-Shift-7` / `8` / `9` ordered, bullet and task lists, `Mod-Alt-c`
-/// code block), `Mod-Shift-l` / `e` / `r` / `j` text alignment,
-/// `Mod-Enter` / `Shift-Enter` hard breaks, and list items' Enter, Tab and
-/// Shift-Tab.
+/// `Mod-Shift-7` / `8` / `9` ordered, bullet and task lists), `Mod-Shift-l`
+/// / `e` / `r` / `j` text alignment, `Mod-Enter` / `Shift-Enter` hard
+/// breaks, and list items' Enter, Tab and Shift-Tab.
 pub fn extension_keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
-    let mut keys: Vec<(String, BoxCommand)> = vec![
-        ("Mod-z".into(), command(undo)),
-        ("Shift-Mod-z".into(), command(redo)),
-        ("Mod-y".into(), command(redo)),
-        ("Mod-я".into(), command(undo)),
-        ("Shift-Mod-я".into(), command(redo)),
-    ];
-    for (name, bindings) in [
-        ("bold", &["Mod-b", "Mod-B"][..]),
-        ("italic", &["Mod-i", "Mod-I"]),
-        ("underline", &["Mod-u", "Mod-U"]),
-        ("strike", &["Mod-Shift-s"]),
-        ("code", &["Mod-e"]),
-        ("highlight", &["Mod-Shift-h"]),
-        ("subscript", &["Mod-,"]),
-        ("superscript", &["Mod-."]),
+    let mut keys = kit::history_keys();
+    for name in [
+        "bold",
+        "italic",
+        "underline",
+        "strike",
+        "code",
+        "highlight",
+        "subscript",
+        "superscript",
     ] {
-        if let Some(ty) = schema.mark_type(name) {
-            for key in bindings {
-                keys.push(((*key).into(), toggle_mark(ty.clone(), None, true)));
-            }
-        }
+        keys.extend(kit::mark_keys(schema, name));
     }
-    let paragraph = schema.node_type("paragraph");
-    if let Some(ty) = &paragraph {
-        keys.push(("Mod-Alt-0".into(), set_node(ty.clone(), None)));
-    }
-    if let (Some(ty), Some(paragraph)) = (schema.node_type("heading"), &paragraph) {
-        for level in 1..=6 {
-            keys.push((
-                format!("Mod-Alt-{level}"),
-                toggle_node(
-                    ty.clone(),
-                    paragraph.clone(),
-                    Some(attrs_of("level", Value::from(level))),
-                ),
-            ));
-        }
-    }
-    if let Some(ty) = schema.node_type("blockquote") {
-        keys.push(("Mod-Shift-b".into(), toggle_wrap(ty, None)));
-    }
-    for (list, item, key) in [
-        ("orderedList", "listItem", "Mod-Shift-7"),
-        ("bulletList", "listItem", "Mod-Shift-8"),
-        ("taskList", "taskItem", "Mod-Shift-9"),
-    ] {
-        if let (Some(list), Some(item)) = (schema.node_type(list), schema.node_type(item)) {
-            keys.push((key.into(), toggle_list(list, item, None)));
-        }
-    }
-    let aligned: Vec<_> = ["paragraph", "heading"]
-        .iter()
-        .filter_map(|name| schema.node_type(name))
-        .collect();
-    for (key, align) in [
-        ("Mod-Shift-l", "left"),
-        ("Mod-Shift-e", "center"),
-        ("Mod-Shift-r", "right"),
-        ("Mod-Shift-j", "justify"),
-    ] {
-        keys.push((
-            key.into(),
-            update_attribute(aligned.clone(), "textAlign", Value::from(align)),
-        ));
-    }
-    if let Some(ty) = schema.node_type("hardBreak") {
-        let line_break = set_hard_break(ty, true);
-        keys.push(("Mod-Enter".into(), line_break.clone()));
-        keys.push(("Shift-Enter".into(), line_break));
-    }
-    if let Some(ty) = schema.node_type("listItem") {
-        keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
-        keys.push(("Tab".into(), sink_list_item(ty.clone())));
-        keys.push(("Shift-Tab".into(), lift_list_item(ty)));
-    }
-    if let Some(ty) = schema.node_type("taskItem") {
-        // Tiptap's task items are not nested by default: no Tab.
-        keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
-        keys.push(("Shift-Tab".into(), lift_list_item(ty)));
-    }
+    keys.extend(kit::paragraph_keys(schema));
+    keys.extend(kit::heading_keys(schema, &[1, 2, 3, 4, 5, 6]));
+    keys.extend(kit::blockquote_keys(schema));
+    keys.extend(kit::list_keys(
+        schema,
+        "orderedList",
+        "listItem",
+        "Mod-Shift-7",
+    ));
+    keys.extend(kit::list_keys(
+        schema,
+        "bulletList",
+        "listItem",
+        "Mod-Shift-8",
+    ));
+    keys.extend(kit::list_keys(
+        schema,
+        "taskList",
+        "taskItem",
+        "Mod-Shift-9",
+    ));
+    keys.extend(kit::text_align_keys(
+        schema,
+        &["paragraph".to_owned(), "heading".to_owned()],
+    ));
+    keys.extend(kit::hard_break_keys(schema, true));
+    keys.extend(kit::list_item_keys(schema));
+    keys.extend(kit::task_item_keys(schema, false));
     keys
 }
 
-/// All of the starter's key bindings for `schema`, Tiptap's StarterKit's
-/// with its task lists, highlight, sub- and superscript and text alignment,
-/// merged in Tiptap's order (later extensions first, the core last): the
-/// list keymap ([`list_keymap`]), the extensions' shortcuts
-/// ([`extension_keymap`]), the code block's ([`code_block_keymap`]), and
-/// the core's ([`core_keymap`]).
+/// All of the starter's key bindings for `schema`: the starter kit's
+/// extensions' and the core's ([`core_keymap`]), merged in Tiptap's order
+/// (later extensions first, the core last, with its
+/// `core_keymap`; [`ExtensionManager::keymap`]).
 pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
-    let mut groups = vec![
-        list_keymap(&ListKeymapOptions::default()),
-        extension_keymap(schema),
-    ];
-    if let Some(ty) = schema.node_type("codeBlock") {
-        groups.push(code_block_keymap(
-            &ty,
-            schema.node_type("paragraph"),
-            &CodeBlockOptions::default(),
-        ));
-    }
-    groups.push(core_keymap());
-    merge_keymaps(groups)
+    merge_keymaps(
+        for_schema(schema)
+            .into_iter()
+            .map(|e| e.keyboard_shortcuts(schema, commands()))
+            .filter(|g| !g.is_empty())
+            .collect(),
+    )
 }
 
-fn regex(pattern: &str) -> Regex {
+pub(super) fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid expression")
 }
 
 // Tiptap's expressions refuse delimiters around nothing but white space
 // (`(?!\s+\*\*)`), which the `regex` crate cannot say.
-fn not_blank(found: &InputMatch) -> bool {
+pub(super) fn not_blank(found: &InputMatch) -> bool {
     found
         .groups
         .last()
@@ -879,126 +809,25 @@ pub fn input_rule_list(schema: &Schema) -> Vec<InputRule> {
 /// The rules of [`input_rules`] without typography.
 pub fn type_rules(schema: &Schema) -> Vec<InputRule> {
     let mut rules = Vec::new();
-    if let Some(ty) = schema.node_type("blockquote") {
-        rules.push(wrapping_input_rule(regex(r"^\s*>\s$"), ty, None, None));
-    }
-    if let Some(ty) = schema.node_type("bulletList") {
-        rules.push(wrapping_input_rule(
-            regex(r"^\s*([-+*])\s$"),
-            ty,
-            None,
-            None,
-        ));
-    }
-    if let Some(ty) = schema.node_type("orderedList") {
-        let get_attrs: GetAttrs =
-            Arc::new(|found| found.group(1).map(|start| attrs_of("start", number(start))));
-        let join: JoinPredicate = Arc::new(|found, node| {
-            let wanted = found.group(1).and_then(|n| n.parse::<u64>().ok());
-            let start = node
-                .attrs()
-                .get("start")
-                .and_then(Value::as_u64)
-                .unwrap_or(1);
-            wanted == Some(node.child_count() as u64 + start)
-        });
-        rules.push(wrapping_input_rule(
-            regex(r"^(\d+)\.\s$"),
-            ty,
-            Some(get_attrs),
-            Some(join),
-        ));
-    }
-    if let Some(ty) = schema.node_type("taskItem") {
-        let get_attrs: GetAttrs = Arc::new(|found| {
-            let checked = found
-                .groups
-                .last()
-                .and_then(|g| g.as_ref())
-                .is_some_and(|(_, t)| t == "x");
-            Some(attrs_of("checked", Value::Bool(checked)))
-        });
-        rules.push(wrapping_input_rule(
-            regex(r"^\s*(\[([( |x])?\])\s$"),
-            ty,
-            Some(get_attrs),
-            None,
-        ));
-    }
-    if let Some(ty) = schema.node_type("codeBlock") {
-        for fence in ["```", "~~~"] {
-            let get_attrs: GetAttrs =
-                Arc::new(|found| Some(attrs_of("language", fence_language(found.group(1)))));
-            rules.push(textblock_type_input_rule(
-                regex(&format!(r"^{fence}([a-z]+)?[\s\n]$")),
-                ty.clone(),
-                Some(get_attrs),
-            ));
-        }
-    }
-    if let Some(ty) = schema.node_type("heading") {
-        for level in 1..=6 {
-            rules.push(textblock_type_input_rule(
-                regex(&format!(r"^(#{{1,{level}}})\s$")),
-                ty.clone(),
-                Some(Arc::new(move |_| {
-                    Some(attrs_of("level", Value::from(level)))
-                })),
-            ));
-        }
-    }
-    if let Some(ty) = schema.node_type("horizontalRule") {
-        rules.push(node_input_rule(
-            regex(r"^(?:---|\u{2014}-|___\s|\*\*\*\s)$"),
-            ty,
-            None,
-        ));
-    }
-    if let Some(ty) = schema.node_type("image") {
-        let get_attrs: GetAttrs = Arc::new(|found| {
-            let group = |i| found.group(i).map_or(Value::Null, Value::from);
-            let mut attrs = attrs_of("src", group(3));
-            attrs.insert("alt".into(), group(2));
-            attrs.insert("title".into(), group(4));
-            Some(attrs)
-        });
-        rules.push(node_input_rule(
-            regex(r#"(?:^|\s)(!\[(.+|:?)\]\((\S+)(?:(?:\s+)["'](\S+)["'])?\))$"#),
-            ty,
-            Some(get_attrs),
-        ));
-    }
-    let mut mark = |name: &str, pattern: &str| {
-        if let Some(ty) = schema.mark_type(name) {
-            rules.push(mark_input_rule(regex(pattern), ty, None).accepting(not_blank));
-        }
-    };
-    mark("bold", r"(?:^|\s)(\*\*([^*]+)\*\*)$");
-    mark("bold", r"(?:^|\s)(__([^_]+)__)$");
-    mark("italic", r"(?:^|\s)(\*([^*]+)\*)$");
-    mark("italic", r"(?:^|\s)(_([^_]+)_)$");
-    mark("strike", r"(?:^|\s)(~~([^~]+)~~)$");
-    mark("highlight", r"(?:^|\s)(==([^=]+)==)$");
-    if let Some(ty) = schema.mark_type("code") {
-        // Tiptap's finder: the backticks alone (the character before stays),
-        // not after another backtick.
-        rules.push(
-            mark_input_rule(regex("`([^`]+)`$"), ty, None).with_finder(|text| {
-                let captures = regex("`([^`]+)`$").captures(text)?;
-                let start = captures.get(0)?.start();
-                if text[..start].ends_with('`') {
-                    return None;
-                }
-                Some(InputMatch::from_captures(text, &captures))
-            }),
-        );
+    rules.extend(kit::blockquote_rules(schema));
+    rules.extend(kit::bullet_list_rules(schema));
+    rules.extend(kit::ordered_list_rules(schema));
+    rules.extend(kit::task_item_rules(schema));
+    rules.extend(kit::code_block_rules(schema));
+    rules.extend(kit::heading_rules(schema, &[1, 2, 3, 4, 5, 6]));
+    rules.extend(kit::horizontal_rule_rules(schema));
+    rules.extend(kit::image_rules(schema));
+    for name in ["bold", "italic", "strike", "highlight", "code"] {
+        rules.extend(kit::mark_rules(schema, name));
     }
     rules
 }
 
 // Tiptap's paste expressions refuse a match followed by white space and
 // the delimiter again (`(?!\s+\*\*)`).
-fn not_followed_by(delimiter: &'static str) -> impl Fn(&str, usize, &InputMatch) -> bool {
+pub(super) fn not_followed_by(
+    delimiter: &'static str,
+) -> impl Fn(&str, usize, &InputMatch) -> bool + Send + Sync + 'static {
     move |text, start, found| {
         let rest = &text[start + found.text.len()..];
         let trimmed = rest.trim_start();
@@ -1010,44 +839,37 @@ fn not_followed_by(delimiter: &'static str) -> impl Fn(&str, usize, &InputMatch)
 /// `**bold**` / `__bold__`, `*italic*` / `_italic_`, `~~strike~~`,
 /// `` `code` `` and `==highlight==` in pasted text.
 pub fn paste_rule_list(schema: &Schema) -> Vec<PasteRule> {
-    let mut rules = Vec::new();
-    let mut mark = |name: &str, pattern: &str, delimiter: &'static str| {
-        if let Some(ty) = schema.mark_type(name) {
-            rules.push(PasteRule::regex(
-                regex(pattern),
-                not_followed_by(delimiter),
-                PasteAction::Mark(ty, None),
-            ));
-        }
-    };
-    mark("bold", r"(?:^|\s)(\*\*([^*]+)\*\*)", "**");
-    mark("bold", r"(?:^|\s)(__([^_]+)__)", "__");
-    mark("italic", r"(?:^|\s)(\*([^*]+)\*)", "*");
-    mark("italic", r"(?:^|\s)(_([^_]+)_)", "_");
-    mark("strike", r"(?:^|\s)(~~([^~]+)~~)", "~~");
-    mark("highlight", r"(?:^|\s)(==([^=]+)==)", "==");
-    if let Some(ty) = schema.mark_type("code") {
-        rules.push(PasteRule::regex(
-            regex("`([^`]+)`"),
-            |text, start, found| {
-                !text[..start].ends_with('`') && !text[start + found.text.len()..].starts_with('`')
-            },
-            PasteAction::Mark(ty, None),
-        ));
-    }
-    rules
+    ["bold", "italic", "strike", "highlight", "code"]
+        .into_iter()
+        .flat_map(|name| kit::mark_paste_rules(schema, name))
+        .collect()
 }
 
-/// The starter's plugins for `schema`, in the order they run: its input
-/// rules, its paste rules, its keymap ([`keymap`]), Tiptap's
-/// `clearDocument` and `trailingNode` plugins and the history.
+/// The starter's plugins for `schema`, as the core extensions and the
+/// starter kit make them ([`ExtensionManager::plugins`]): the input rules'
+/// and paste rules' plugins, the keymap ([`keymap`]), then the
+/// extensions' plugins (the trailing node, the history, the core's
+/// `clearDocument`).
 pub fn plugins(schema: &Schema) -> Vec<Plugin> {
-    vec![
-        input_rules(schema),
-        paste_rules(paste_rule_list(schema)),
-        keymap_plugin(keymap(schema)),
-        clear_document(),
-        trailing_node(TrailingNodeOptions::default()),
-        history(HistoryOptions::default()),
-    ]
+    let extensions = for_schema(schema);
+    let mut plugins = Vec::new();
+    let input: Vec<InputRule> = extensions
+        .iter()
+        .flat_map(|e| e.input_rules(schema, commands()))
+        .collect();
+    if !input.is_empty() {
+        plugins.push(input_rules_plugin(input));
+    }
+    let paste: Vec<PasteRule> = extensions
+        .iter()
+        .flat_map(|e| e.paste_rules(schema, commands()))
+        .collect();
+    if !paste.is_empty() {
+        plugins.push(paste_rules(paste));
+    }
+    plugins.push(keymap_plugin(keymap(schema)));
+    for extension in extensions {
+        plugins.extend(extension.plugins(schema, commands()));
+    }
+    plugins
 }

@@ -1,20 +1,19 @@
 //! Tiptap's core commands the starter's key bindings, list keymap and code
-//! block bindings run (`clearNodes`, `setNode`, `toggleNode`, `toggleWrap`,
-//! `toggleList`, `deleteCurrentNode`, `joinItemForward`, `setHardBreak`,
+//! block bindings run as steps of a chain (`clearNodes`,
+//! `deleteCurrentNode`, `joinItemForward`, `setHardBreak`,
 //! `updateAttributes`, `insertDefaultBlock`), with the helpers they share
 //! (`findParentNode`, `isAtStartOfNode`, chains). Ported from
-//! `@tiptap/core`'s `commands/` and `helpers/`, for the starter's own use.
+//! `@tiptap/core`'s `commands/` and `helpers/`, for the starter's own use;
+//! `setNode`, `toggleNode`, `toggleWrap` and `toggleList` are
+//! `commands::tiptap`'s.
 
 use serde_json::Value;
 
 use crate::rich_editor::{
-    commands::{
-        BoxCommand, Dispatch, command, is_node_active, lift, lift_list_item, set_block_type,
-        wrap_in, wrap_in_list,
-    },
-    model::{Attrs, Fragment, Mark, Node, NodeType, ResolvedPos},
-    state::{EditorState, EditorStateConfig, Selection, TextSelection, Transaction},
-    transform::{can_join, join_point, lift_target},
+    commands::{BoxCommand, Dispatch, command},
+    model::{Mark, Node, NodeType, ResolvedPos},
+    state::{EditorState, EditorStateConfig, Selection},
+    transform::{join_point, lift_target},
 };
 
 /// A command function, as [`chain`] takes them.
@@ -79,9 +78,8 @@ pub(crate) fn chain(state: &EditorState, dispatch: Dispatch<'_>, steps: &[Step<'
 }
 
 /// The innermost ancestor of the selection's start (from the start's parent
-/// out) that `predicate` takes, as Tiptap's `findParentNode`: its node,
-/// the position before it (0 for the document), the start of its content
-/// and its depth.
+/// out) that `predicate` takes, as Tiptap's `findParentNode`: the position
+/// before it (0 for the document) and its depth.
 pub(crate) fn find_parent_node(
     from: &ResolvedPos,
     predicate: impl Fn(&Node) -> bool,
@@ -89,9 +87,7 @@ pub(crate) fn find_parent_node(
     (0..=from.depth).rev().find_map(|depth| {
         let node = from.node(depth);
         predicate(node).then(|| ParentNode {
-            node: node.clone(),
             pos: if depth > 0 { from.before(depth) } else { 0 },
-            start: from.start(depth),
             depth,
         })
     })
@@ -99,9 +95,7 @@ pub(crate) fn find_parent_node(
 
 /// An ancestor [`find_parent_node`] found.
 pub(crate) struct ParentNode {
-    pub(crate) node: Node,
     pub(crate) pos: usize,
-    pub(crate) start: usize,
     pub(crate) depth: usize,
 }
 
@@ -123,11 +117,6 @@ pub(crate) fn is_at_end_of_node(state: &EditorState, ty: &NodeType) -> bool {
         return false;
     };
     selection.anchor() + 1 == inside.end(inside.depth)
-}
-
-/// Whether a list type is one: in the `list` group (Tiptap's `isList`).
-pub(crate) fn is_list(ty: &NodeType) -> bool {
-    ty.is_in_group("list")
 }
 
 /// The marks typing at the selection would get: the stored ones, else the
@@ -192,234 +181,6 @@ pub(crate) fn clear_nodes(state: &EditorState, dispatch: Dispatch<'_>) -> bool {
     }
     dispatch(tr);
     true
-}
-
-/// Turns the selected textblocks into `ty` with `attrs` over the attributes
-/// of the cursor's block, clearing wrappers first when they do not allow it
-/// (Tiptap's `setNode`).
-pub(crate) fn set_node(ty: NodeType, attrs: Option<Attrs>) -> BoxCommand {
-    command(move |state, dispatch| {
-        if !ty.is_textblock() {
-            return false;
-        }
-        let attrs = merged_attrs(state, &ty, attrs.as_ref());
-        let set = set_block_type(ty.clone(), Some(attrs));
-        if set(state, None) {
-            return set(state, dispatch);
-        }
-        chain(state, dispatch, &[&clear_nodes, &*set])
-    })
-}
-
-// The attributes of the selection's block when anchor and head share it,
-// with `attrs` over them, for `ty` (Tiptap copies them on setNode).
-fn merged_attrs(state: &EditorState, ty: &NodeType, attrs: Option<&Attrs>) -> Attrs {
-    let selection = state.selection();
-    let anchor = selection.resolved_anchor();
-    let mut merged = Attrs::new();
-    if anchor.same_parent(selection.resolved_head()) {
-        for (key, value) in anchor.parent().attrs() {
-            if ty.spec().attrs.iter().any(|(name, _)| name == key) {
-                merged.insert(key.clone(), value.clone());
-            }
-        }
-    }
-    if let Some(attrs) = attrs {
-        merged.extend(attrs.iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
-    merged
-}
-
-/// Sets the selected textblocks to `ty` with `attrs`, or back to
-/// `toggle_ty` when they are that already (Tiptap's `toggleNode`).
-pub(crate) fn toggle_node(ty: NodeType, toggle_ty: NodeType, attrs: Option<Attrs>) -> BoxCommand {
-    command(move |state, dispatch| {
-        if is_node_active(state, &ty, attrs.as_ref()) {
-            set_node(toggle_ty.clone(), None)(state, dispatch)
-        } else {
-            set_node(ty.clone(), attrs.clone())(state, dispatch)
-        }
-    })
-}
-
-/// Lifts the selection out of a node of `ty` it is in, else wraps it in one
-/// (Tiptap's `toggleWrap`).
-pub(crate) fn toggle_wrap(ty: NodeType, attrs: Option<Attrs>) -> BoxCommand {
-    let wrap = wrap_in(ty.clone(), attrs.clone());
-    command(move |state, dispatch| {
-        if is_node_active(state, &ty, attrs.as_ref()) {
-            lift(state, dispatch)
-        } else {
-            wrap(state, dispatch)
-        }
-    })
-}
-
-/// Lifts the selection out of a list of `list_ty`, turns the list it is in
-/// into one, or wraps it in one, joining the list with lists of its type
-/// around it (Tiptap's `toggleList`, without keeping marks).
-pub(crate) fn toggle_list(
-    list_ty: NodeType,
-    item_ty: NodeType,
-    attrs: Option<Attrs>,
-) -> BoxCommand {
-    command(move |state, dispatch| {
-        let selection = state.selection();
-        let from = selection.resolved_from();
-        let Some(range) = from.block_range(selection.resolved_to(), None) else {
-            return false;
-        };
-        let parent_list = find_parent_node(from, |n| is_list(n.ty()));
-        let doc = state.doc();
-        let all = selection.from() == 0 && selection.to() == doc.content().size();
-        let all_list =
-            (all && doc.child_count() == 1 && is_list(doc.child(0).ty())).then(|| ParentNode {
-                node: doc.child(0).clone(),
-                pos: 0,
-                start: 1,
-                depth: 0,
-            });
-        let inside = parent_list
-            .as_ref()
-            .is_some_and(|list| range.depth >= 1 && range.depth <= list.depth + 1);
-        let current = if inside { parent_list } else { all_list };
-        if let Some(current) = current {
-            if current.node.ty() == &list_ty {
-                let lift = lift_list_item(item_ty.clone());
-                if all {
-                    let inner = |state: &EditorState, dispatch: Dispatch<'_>| {
-                        let doc = state.doc();
-                        let (Ok(start), Ok(end)) = (
-                            doc.resolve(1),
-                            doc.resolve(doc.child(0).node_size().saturating_sub(1)),
-                        ) else {
-                            return false;
-                        };
-                        if let Some(dispatch) = dispatch {
-                            let mut tr = state.tr();
-                            tr.set_selection(TextSelection::between(&start, &end, None));
-                            dispatch(tr);
-                        }
-                        true
-                    };
-                    return chain(state, dispatch, &[&inner, &*lift]);
-                }
-                return lift(state, dispatch);
-            }
-            let first_item = current.node.first_child().map(|n| n.ty().clone());
-            let converted = if list_ty.valid_content(current.node.content()) {
-                None
-            } else if first_item.as_ref().is_some_and(|ty| ty != &item_ty) {
-                let items: Option<Fragment> = current
-                    .node
-                    .content()
-                    .iter()
-                    .map(|item| {
-                        let ty = if item.ty() == first_item.as_ref().unwrap() {
-                            &item_ty
-                        } else {
-                            item.ty()
-                        };
-                        ty.create(None, item.content().clone(), item.marks().to_vec())
-                    })
-                    .collect::<Result<_, _>>()
-                    .ok()
-                    .filter(|items: &Vec<Node>| list_ty.valid_content(&items.clone().into()))
-                    .map(|items| items.into());
-                match items {
-                    Some(items) => Some(items),
-                    None => return false,
-                }
-            } else {
-                return false;
-            };
-            if let Some(dispatch) = dispatch {
-                let mut tr = state.tr();
-                match converted {
-                    None => {
-                        if tr
-                            .set_node_markup(current.pos, Some(list_ty.clone()), None, None)
-                            .is_err()
-                        {
-                            return false;
-                        }
-                    }
-                    Some(content) => {
-                        let Ok(list) = list_ty.create(attrs.clone(), content, vec![]) else {
-                            return false;
-                        };
-                        let size = current.node.node_size();
-                        if tr
-                            .replace_with(current.pos, current.pos + size, list.into())
-                            .is_err()
-                        {
-                            return false;
-                        }
-                        // Items of the same size: the selection stays where it was.
-                        let (anchor, head) = (selection.anchor(), selection.head());
-                        tr.set_selection(TextSelection::create(tr.doc(), anchor, Some(head)));
-                    }
-                }
-                join_lists(&mut tr, &list_ty);
-                tr.scroll_into_view();
-                dispatch(tr);
-            }
-            return true;
-        }
-        let wrap = wrap_in_list(list_ty.clone(), attrs.clone());
-        let joins = {
-            let list_ty = list_ty.clone();
-            move |state: &EditorState, dispatch: Dispatch<'_>| {
-                if let Some(dispatch) = dispatch {
-                    let mut tr = state.tr();
-                    join_lists(&mut tr, &list_ty);
-                    if tr.doc_changed() {
-                        dispatch(tr);
-                    }
-                }
-                true
-            }
-        };
-        if wrap(state, None) {
-            chain(state, dispatch, &[&*wrap, &joins])
-        } else {
-            chain(state, dispatch, &[&clear_nodes, &*wrap, &joins])
-        }
-    })
-}
-
-// Joins the list of `list_ty` the selection is in with one of its type
-// right before it, then right after it (Tiptap's `joinListBackwards` and
-// `joinListForwards`).
-fn join_lists(tr: &mut Transaction, list_ty: &NodeType) {
-    let selection = tr.selection();
-    if let Some(list) = find_parent_node(selection.resolved_from(), |n| n.ty() == list_ty)
-        && let Ok(at) = tr.doc().resolve(list.pos.saturating_sub(1))
-    {
-        let before = if list.depth <= at.depth && list.depth > 0 {
-            Some(at.before(list.depth))
-        } else if list.depth == at.depth + 1 {
-            Some(at.pos)
-        } else {
-            None
-        };
-        if let Some(before) = before
-            && tr.doc().node_at(before).is_some_and(|n| n.ty() == list_ty)
-            && can_join(tr.doc(), list.pos)
-        {
-            let _ = tr.join(list.pos, 1);
-        }
-    }
-    let selection = tr.selection();
-    if let Some(list) = find_parent_node(selection.resolved_from(), |n| n.ty() == list_ty)
-        && list.depth > 0
-        && let Ok(at) = tr.doc().resolve(list.start)
-    {
-        let after = at.after(list.depth);
-        if tr.doc().node_at(after).is_some_and(|n| n.ty() == list_ty) && can_join(tr.doc(), after) {
-            let _ = tr.join(after, 1);
-        }
-    }
 }
 
 /// Deletes the empty node the cursor is in (Tiptap's `deleteCurrentNode`).

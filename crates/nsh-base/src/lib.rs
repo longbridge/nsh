@@ -241,7 +241,15 @@ mod tests {
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
-        assert_eq!(modules, ["AlertDialog", "RichEditorApi", "TextView"]);
+        assert_eq!(
+            modules,
+            [
+                "AlertDialog",
+                "RichEditorApi",
+                "RichExtensionApi",
+                "TextView"
+            ]
+        );
         let sets: Vec<_> = registry.sets().iter().map(|s| s.specifier()).collect();
         assert_eq!(sets, [Some("nsh/base"), Some("nsh/base/plot")]);
         let plot: Vec<_> = super::plot::registry()

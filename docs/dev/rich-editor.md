@@ -180,42 +180,121 @@ editor.dispatchTransaction = (tr) => editor.applyTransaction(tr);
 - Methods that may run JS hooks (`run`, `dispatch`, `setContent`, ...) take `this: Instance<Self>` rather than a
   borrow, so a hook calling the editor again (`applyTransaction` from `dispatchTransaction`) is not re-entrant.
 
-## Extensions: the Tiptap layer (planned, in progress)
+## Extensions: the Tiptap layer
 
 The kernel is ProseMirror; the layer apps and third parties build with is Tiptap's: an **extension** contributes, in
 one unit, to the schema (node and mark types, attributes on other types), the commands, the keymap, input and paste
-rules, plugins, node views and Markdown, ordered by priority. NSH keeps Tiptap's names and semantics and changes one
-thing: logic is Rust, JS describes.
+rules and plugins, ordered by priority. NSH keeps Tiptap's names and semantics and changes one thing: logic is Rust,
+JS describes.
 
 - **`Extension`** (`extensions/extension.rs`): `name`, `kind` (`Extension`, `Node`, `Mark`), `priority` (100 by
-  default; higher first, as Tiptap's `sortExtensions`), `options` (JSON, merged by `configure`), child extensions
-  (`addExtensions`), and two stages, as Tiptap's `ExtensionManager`:
-  - the schema stage, from the options: its node or mark spec, `global_attributes` (`addGlobalAttributes`: attributes
-    with their parse and render forms added to other types), `extend_node_schema` extras;
-  - the runtime stage, from the options and the built `Schema`: named commands (`addCommands`), keyboard shortcuts,
-    input rules, paste rules, plugins, node views, Markdown parse and serialize forms, storage.
-  `configure(options)` and `extend(overrides)` return new extensions; both are data merges.
-- **`ExtensionManager`** resolves the list (flattened, sorted, duplicate names rejected), builds the schema from the
-  schema stage (the first `topNode` extension's node is the document; Tiptap's names: `doc`, `paragraph`, `text`,
-  `heading`, `blockquote`, `bulletList`, `orderedList` with `start`, `listItem`, `taskList`, `taskItem`,
-  `codeBlock`, `hardBreak`, `horizontalRule`, `image`, `bold`, `italic`, `strike`, `underline`, `code`, `link`,
-  `highlight`, `subscript`, `superscript`, `textStyle`), then the runtime parts in priority order: keymaps first
-  to last, rules, plugins, the command table.
+  default, `DEFAULT_PRIORITY`; higher first, as Tiptap's `sortExtensions`), `options` (JSON), `top_node`, and parts
+  that are functions of the options, set with builder methods named as Tiptap's hooks:
+  - the schema stage: the node or mark spec (`Extension::node` / `Extension::mark`, `with_node_spec`),
+    `add_global_attributes` (`GlobalAttributes`: attributes added to, or replacing those of, other types),
+    `add_extensions` (children);
+  - the runtime stage, from an `ExtensionContext` (name, options, the built `Schema`, the editor's
+    `CommandRegistry`): `add_keyboard_shortcuts`, `add_input_rules`, `add_paste_rules`, `add_plugins`
+    (`addProseMirrorPlugins`); and `add_commands` (name → `CommandFactory`), `add_storage`.
+  `configure(options)` deep-merges into the options (`merge_options`, Tiptap's `mergeDeep`); `with_options` gives
+  defaults under what was configured; `extend()` is a copy whose parts the builders replace (keep a clone to call the
+  parent's). Every part is an `Arc`'d `Send + Sync` function, so extensions are cheap to clone and share.
+- **`ExtensionManager`** resolves a list: `resolve` flattens each extension followed by its children, sorts stably by
+  priority and refuses duplicate names (`ExtensionError::DuplicateName`); `schema_spec` collects the nodes and marks
+  in that order (the first `top_node` names the document) and applies the global attributes; the commands are the
+  built-in registry's plus every extension's, later ones replacing earlier ones. The runtime order is Tiptap's
+  (`runtime_order`: the list reversed, then sorted by priority), so an app's extension listed after the starter kit
+  binds before it and the core runs last. `plugins()` is the input rules' plugin, the paste rules' plugin, **one**
+  keymap plugin merging every extension's bindings in runtime order (`merge_keymaps`: a key's commands run until one
+  applies), then each extension's plugins. One merged keymap rather than Tiptap's one plugin per extension: the
+  keymap tries a binding with Shift spelled out before the shifted character's, and that must hold across
+  extensions (`Mod-Shift-b`, the quote, over bold's `Mod-B`). `with_core` puts the core extensions first
+  (`core_extensions`: `keymap`, the core keymap and `clearDocument`).
+- **The built-in extensions** (`extensions/kit.rs`): `document` (`doc`), `paragraph`, `text`, `heading` (`levels`),
+  `blockquote`, `bullet_list`, `ordered_list`, `list_item`, `task_list`, `task_item` (`nested`), `code_block`
+  (Tiptap's code block options), `hard_break` (`keepMarks`), `horizontal_rule`, `image`, the marks `bold`, `italic`,
+  `strike`, `code`, `underline`, `link`, `highlight`, `subscript`, `superscript`, `text_style`, and `text_align`
+  (`types`, `alignments`, `defaultAlignment`: a global attribute), `history` (`depth`, `newGroupDelay`),
+  `trailing_node` (`node`, `notAfter`), `typography` (each replacement `false` or a string), `list_keymap`; each with
+  its Tiptap commands (`toggleBold`, `toggleHeading({ level })`, `toggleBulletList`, `setTextAlign`, ...).
+  `starter_kit()` brings them all, in the starter schema's order; an option named as one (`document` for `doc`,
+  `history` or `undoRedo`) set to `false` leaves it out, an object configures it. `builtin(name)` finds one. The
+  starter's plain functions (`starter::schema`, `schema_spec`, `keymap`, `plugins`, `input_rule_list`,
+  `paste_rule_list`) are made from the same pieces, the schema and plugins by a manager of the core and the kit.
+  Link's autolinking, CharacterCount and Suggestion are plugin factories with options structs (below); an extension
+  wraps one with `Extension::new("characterCount").with_options(...).add_plugins(|cx| ...)`, reading its options
+  struct from `cx.options`.
+- **By name**: `register_extension(name, make)` registers an extension on the engine (a `global`), and
+  `extension_named(name)` finds it, else a built-in one. An app's crate registers from its `#[native_module]`
+  function with `registry.rich_extension(name, make)` (`RichExtensionRegistry`, which runs `register_extension` in
+  the set's setup); JS gets it with `richExtension(name, options)`.
 - **Commands** are named (`toggleHeading`, `setLink`, ...) with JSON arguments: an extension's `commands` map a name
   to a Rust factory `fn(args) -> BoxCommand`. JS runs them as data, `command("toggleHeading", { level: 2 })` (or the
   typed helpers `nsh/base` exports), composes them with `chain` / `first`, and asks `can`. Commands never take a JS
   closure: one would run QuickJS on the input path. App crates add extensions, and so commands, plugins and node views
   in Rust, through their UI set (`#[native_module]`), which registers them by name for JS to use.
 - **Queries** are native: `isActive(name, attrs)`, `getAttributes`, `getMarkRange`, `findParentNode`, `coordsAtPos`,
-  `posAtCoords`, `selectionRect`; JS reads them on the revision it subscribes to.
+  `posAtCoords`, `selectionRect`; JS reads them on the revision it subscribes to. The three geometry queries answer
+  in points of the editor's content box (the box that scrolls, so its scroll offset is already in them) from the
+  last view that mounted the session (`ViewGeometry`, registered by the controller); with no view they answer
+  nothing. The view tells the session its focus (`isFocused`, `focus` / `blur` events) and honors `setEditable`.
 - **Events**: `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
   (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
-- **JS face**: `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } }), Link,
-  Mention.configure({ suggestion: { char: "@" } })], content })`. Built-in extensions are exported values carrying
-  their name and options; `defineExtension({...})` declares one as data (types, attributes, keymap bindings to
-  commands, rules). `schema` + `plugins` stay the kernel-level way to make an editor.
+- **JS face** (`js/extension_api.rs`): `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels:
+  [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
+  (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a
+  function's `name`). `RichExtension` (what they make) has `name`, `type`, `priority`, `options`, `configure` and
+  `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's) and `Text` is `richExtension("text")`.
+  `defineExtension({ name, priority, node | mark, topNode, addOptions, addKeyboardShortcuts, addCommands,
+  addInputRules, addPasteRules, addProseMirrorPlugins, addGlobalAttributes, addStorage })` declares the app's: its
+  functions run once, in `createRichEditor` (a synchronous call, where JS runs anyway), with the extension's options,
+  and return data (commands, rules and plugins as data, `RichEditorPlugin`s), which `to_extension` turns into a Rust
+  `Extension`. Errors found when the schema is known (an unknown type in a binding) collect in `Diagnostics` and
+  make `createRichEditor` throw. The session keeps the manager's `CommandRegistry`, so `command("toggleBold")` and
+  the extensions' commands resolve per editor. `schema` + `plugins` stay the kernel-level way to make an editor;
+  with `extensions`, `schema` is refused and `plugins` come after the extensions'.
+
+## Link, CharacterCount, Suggestion (`extensions/link.rs`, `character_count.rs`, `suggestion.rs`)
+
+Tiptap's three behaviors as plain plugin factories with an options struct (`LinkOptions`, `CharacterCountOptions`,
+`SuggestionOptions`, each with Tiptap's defaults), so an extension can wrap each as is. Their commands are named
+commands of the built-in registry (`register_commands` of each module): `setLink`, `toggleLink`, `unsetLink`,
+`setCharacterLimit`, `exitSuggestion`, `replaceSuggestion`, `insertMention`.
+
+- **Link** (`link(options) -> Vec<Plugin>`): a `link` plugin keeping the options in the state (the commands read
+  the allowed protocols there), `autolink` (`append_transaction`: the changed ranges of the transactions mapped to
+  the new document; a range ending in white space, or spanning two textblocks after Enter, has its last word checked
+  with `word_link`, linkify's `isValidLinkStructure`; history transactions, `preventAutolink` and code marks are
+  skipped), `handleClickLink` (`handle_click`: Mod or a read-only editor opens the link through `LinkOptions::open`,
+  NSH's `open_url` by default, so the embedding app's URL handler sees it first) and `handlePasteLink`
+  (`handle_paste`: a URL pasted over a selection links it; `transform_pasted`: URLs in pasted text are linked).
+  `find_links` is the detector: URLs with a protocol, host names whose top-level domain is a known one (every
+  two-letter country code and a list of generic ones), e-mail addresses; trailing punctuation and unbalanced
+  closing brackets stay outside, as linkify's. `is_allowed_uri` is Tiptap's expression; `should_auto_link` is
+  Tiptap's default (no IP addresses or dotless hosts without a protocol). The starter's link mark is not inclusive,
+  so the white space typed after a link never joins it.
+- **CharacterCount** (`character_count(options) -> Plugin`, key `characterCount`): its state holds the current
+  limit (the `characterCount` meta of `setCharacterLimit` changes it) and the options, which `characters(state,
+  mode)` / `words(state)` / `character_limit(state)` read. `filter_transaction` refuses a change that grows the
+  count past the limit (a document over it already may shrink). The kernel's filters see a transaction and do not
+  change it, so the paste trimming Tiptap does in its filter happens in `transform_pasted`: the longest start of
+  the pasted slice whose result fits (a binary search over the slice's positions, each candidate applied with
+  `Node::replace` and counted). The first transaction trims a first document over the limit (`auto_trim`).
+- **Suggestion** (`suggestion(options) -> Plugin`, keyed by `options.key`): `find_suggestion_match` is Tiptap's
+  (the look-ahead of `allowSpaces` scanned by hand, as Rust's `regex` has none); the state follows Tiptap's
+  `apply` (exit meta, dismissed range mapped and kept until white space is typed or the trigger moves, inactive
+  outside the range or with a selection). `handle_key_down` while active: Escape runs `on_key_down` and dispatches
+  the exit meta; then `on_key_down`; then `capture_keys` are taken and recorded in the state (`last_key`,
+  `key_count`, a meta-only transaction outside the history), which is how JS's list hears its keys without the
+  input path waiting for JS. `decorations` gives the active range the options' classes. `mention_node` /
+  `insert_mention` are Tiptap's Mention (the text `char + (label ?? id)`, a space after it, a space already there
+  taken in).
+
+The JS face (`js/extensions.rs`): `link`, `characterCount`, `suggestion` (plugin specs of the kinds `Link`,
+`CharacterCount`, `Suggestion` with typed option objects), `withMention`, the command helpers, and the session's
+`suggestion(key)`, `characters(mode)`, `words()` and `characterLimit`.
 
 ## Phases
 

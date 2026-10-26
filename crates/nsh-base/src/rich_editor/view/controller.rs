@@ -1165,6 +1165,7 @@ impl Rv {
             alt: modifiers.alt,
             shift: modifiers.shift,
             meta: modifiers.cmd,
+            read_only: !self.editable(),
         };
         let pos = match hit {
             Hit::Text(pos, _) | Hit::Node(pos) => pos,

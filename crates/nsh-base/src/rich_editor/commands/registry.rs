@@ -517,6 +517,9 @@ fn builtin_registry() -> CommandRegistry {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(chain(made))
     });
+    crate::rich_editor::extensions::link::register_commands(&mut r);
+    crate::rich_editor::extensions::character_count::register_commands(&mut r);
+    crate::rich_editor::extensions::suggestion::register_commands(&mut r);
     r
 }
 

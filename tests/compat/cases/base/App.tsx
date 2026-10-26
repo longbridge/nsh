@@ -22,6 +22,8 @@ import BaseProgress from "./base-progress";
 import BaseTable from "./base-table";
 import BaseRadio from "./base-radio";
 import BaseResizable from "./base-resizable";
+import BaseRichEditorExtensions from "./base-rich-editor-extensions";
+import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorSession from "./base-rich-editor-session";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseSelectableView from "./base-selectable-view";
@@ -51,6 +53,8 @@ const cases: Record<string, () => JSX.Element> = {
   "base-checkbox": BaseCheckbox,
   "base-radio": BaseRadio,
   "base-resizable": BaseResizable,
+  "base-rich-editor-extensions": BaseRichEditorExtensions,
+  "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-tabs": BaseTabs,
   "base-collapsible": BaseCollapsible,

@@ -12,6 +12,8 @@
 //! for when the app's hooks run.
 
 mod commands;
+mod extension_api;
+mod extensions;
 mod json;
 mod plugins;
 
@@ -28,7 +30,7 @@ pub(crate) use self::{
     plugins::{RichEditorPlugin, RichPluginSpec},
 };
 use self::{
-    commands::{doc_of, fragment_of, resolve},
+    commands::{doc_of, fragment_of, resolve_with},
     json::{
         AttrsJson, Content, NodeJson, SchemaSpecJson, SelectionJson, StateJson, TransactionJson,
     },
@@ -39,7 +41,8 @@ use self::{
     },
 };
 use super::{
-    extensions::{history, starter},
+    commands::CommandRegistry,
+    extensions::{ExtensionManager, history, starter},
     formats::{DocFormat, MarkdownFormat, MarkdownNames, PlainTextFormat},
     model::{Node, Schema, SchemaSpec},
     state::{EditorState, EditorStateConfig, PluginKey, Selection, Transaction, TransactionOrigin},
@@ -120,6 +123,7 @@ pub(crate) fn register(registry: &mut Registry) {
         .class::<RichEditorSession>()
         .class::<RichEditorPlugin>()
         .module::<RichEditorApi>();
+    extension_api::register(registry);
 }
 
 fn session_from_js(value: JsIn<'_>) -> Option<EditorSession> {
@@ -295,8 +299,15 @@ pub(crate) struct RichEditorOptions {
     /// The first selection (the start of the document by default).
     pub(crate) selection: Option<SelectionJson>,
     /// The plugins, in order (their order is their priority); the starter
-    /// kit (`starterKit()`) when left out, none when empty.
+    /// kit (`starterKit()`) when left out, none when empty. With
+    /// `extensions`, more plugins after the extensions'.
     pub(crate) plugins: Option<Vec<PluginEntry>>,
+    /// The extensions (Tiptap's): `[StarterKit.configure({...}), ...]`.
+    /// They make the schema (so `schema` is left out), the keymaps, rules,
+    /// plugins and named commands; the core keymap comes with them.
+    pub(crate) extensions: Option<Vec<extension_api::ExtensionEntry>>,
+    /// Whether the user may edit the document (true by default).
+    pub(crate) editable: Option<bool>,
 }
 
 /// What `history` keeps.
@@ -332,6 +343,9 @@ pub(crate) struct RichMarkdownOptions {
 pub(crate) struct RichEditorSession {
     session: EditorSession,
     schema: Schema,
+    /// The named commands `command(name)` runs: the built-in ones and the
+    /// editor's extensions'.
+    commands: Arc<CommandRegistry>,
     /// The app's `dispatchTransaction` and the subscribers' functions.
     hooks: Arc<HookRef>,
     /// Transactions handed to `dispatchTransaction`, by id, until applied.
@@ -358,6 +372,7 @@ impl RichEditorSession {
         Self {
             session,
             schema,
+            commands: CommandRegistry::builtin(),
             hooks: HookRef::new(),
             pending: Arc::default(),
             subscriptions: Vec::new(),
@@ -365,7 +380,7 @@ impl RichEditorSession {
     }
 
     fn command(&self, command: &RichCommand) -> Result<super::commands::BoxCommand, String> {
-        resolve(command, &self.schema)
+        resolve_with(command, &self.schema, &self.commands)
     }
 
     fn handles(this: &Instance<Self>) -> (EditorSession, Schema) {
@@ -548,14 +563,15 @@ impl RichEditorSession {
         }))
     }
 
-    /// The caret's box `{ x, y, width, height }` at `pos` in the view
-    /// showing the editor, or `null` when none does.
+    /// The caret's box `{ x, y, width, height }` at `pos`, in points of
+    /// the content box of the view showing the editor (its scrolling
+    /// included), or `null` when none does.
     pub(crate) fn coords_at_pos(&self, pos: usize) -> Option<JsonValue> {
         self.session.coords_at_pos(pos).map(|b| rect_json(&b))
     }
 
-    /// The document position at `{ x, y }` in the view showing the
-    /// editor, or `null`.
+    /// The document position at `{ x, y }` (points of the content box of
+    /// the view showing the editor), or `null`.
     pub(crate) fn pos_at_coords(&self, coords: JsonValue) -> Option<usize> {
         let x = coords.get("x")?.as_f64()? as f32;
         let y = coords.get("y")?.as_f64()? as f32;
@@ -563,8 +579,8 @@ impl RichEditorSession {
             .pos_at_coords(nsh_core::prelude::point(px(x), px(y)))
     }
 
-    /// The box around the selection in the view showing the editor, or
-    /// `null`.
+    /// The box around the selection, in points of the content box of the
+    /// view showing the editor, or `null`.
     pub(crate) fn selection_rect(&self) -> Option<JsonValue> {
         self.session.selection_rect().map(|b| rect_json(&b))
     }
@@ -821,6 +837,38 @@ impl RichEditorSession {
     pub(crate) fn blur(&self) {
         self.session.blur();
     }
+
+    /// The state of the `suggestion` plugin keyed `key` (`suggestion` by
+    /// default), `null` without one. Read it on `update` /
+    /// `selectionUpdate` / `transaction` to show the app's list.
+    pub(crate) fn suggestion(
+        &self,
+        key: Option<String>,
+    ) -> Option<extensions::RichSuggestionState> {
+        extensions::suggestion_of(&self.session.state(), key.as_deref())
+    }
+
+    /// The document's characters (Tiptap's `characters()`): in `mode`
+    /// (`"textSize"`, `"nodeSize"`), else the `characterCount` plugin's
+    /// mode, else `textSize`.
+    pub(crate) fn characters(&self, mode: Option<String>) -> Result<usize, String> {
+        let mode = mode.as_deref().map(extensions::mode_of).transpose()?;
+        Ok(super::extensions::character_count::characters(
+            &self.session.state(),
+            mode,
+        ))
+    }
+
+    /// The document's words (Unicode words).
+    pub(crate) fn words(&self) -> usize {
+        super::extensions::character_count::words(&self.session.state())
+    }
+
+    /// The `characterCount` plugin's limit now, `null` without one.
+    #[getter]
+    pub(crate) fn character_limit(&self) -> Option<usize> {
+        super::extensions::character_count::character_limit(&self.session.state())
+    }
 }
 
 fn named(name: &str, args: JsonValue) -> RichCommand {
@@ -862,18 +910,41 @@ impl RichEditorApi {
         options: Option<RichEditorOptions>,
     ) -> Result<RichEditorSession, String> {
         let options = options.unwrap_or_default();
-        let schema = match &options.schema {
-            Some(schema) => schema.schema()?,
-            None => starter::schema(),
+        let diagnostics = extension_api::Diagnostics::default();
+        let manager = match &options.extensions {
+            Some(entries) => {
+                if options.schema.is_some() {
+                    return Err(
+                        "an editor's schema comes from its `extensions` or its `schema`, not both"
+                            .into(),
+                    );
+                }
+                let extensions = extension_api::extensions_of(entries, &diagnostics)?;
+                Some(ExtensionManager::with_core(extensions).map_err(|e| e.to_string())?)
+            }
+            None => None,
+        };
+        let schema = match (&manager, &options.schema) {
+            (Some(manager), _) => manager.schema().clone(),
+            (None, Some(schema)) => schema.schema()?,
+            (None, None) => starter::schema(),
         };
         let doc = match (&options.doc, &options.content) {
             (Some(doc), _) => Some(doc_of(&schema, &Content::Json(doc.0.clone()), None)?),
             (None, Some(content)) => Some(doc_of(&schema, content, options.format)?),
             (None, None) => None,
         };
-        let plugins = match &options.plugins {
-            Some(entries) => resolve_plugins(entries, &schema)?,
-            None => starter::plugins(&schema),
+        let plugins = match (&manager, &options.plugins) {
+            (Some(manager), extra) => {
+                let mut plugins = manager.plugins();
+                extension_api::check(&diagnostics)?;
+                if let Some(entries) = extra {
+                    plugins.extend(resolve_plugins(entries, &schema)?);
+                }
+                plugins
+            }
+            (None, Some(entries)) => resolve_plugins(entries, &schema)?,
+            (None, None) => starter::plugins(&schema),
         };
         let mut config = EditorStateConfig::new(schema.clone()).plugins(plugins);
         if let Some(doc) = doc {
@@ -885,10 +956,15 @@ impl RichEditorApi {
             }
         }
         let state = EditorState::create(config).map_err(|e| e.to_string())?;
-        Ok(RichEditorSession::over(
-            EditorSession::new(state, NodeViews::new()),
-            schema,
-        ))
+        let mut editor =
+            RichEditorSession::over(EditorSession::new(state, NodeViews::new()), schema);
+        if let Some(manager) = &manager {
+            editor.commands = manager.commands().clone();
+        }
+        if options.editable == Some(false) {
+            editor.session.set_editable(false);
+        }
+        Ok(editor)
     }
 
     /// Adds the mark `name` (with `attrs`) to the selection, or removes it
@@ -1365,6 +1441,111 @@ impl RichEditorApi {
             rule: RichInputRuleKind::Starter,
             ..RichInputRule::default()
         }]
+    }
+
+    /// Tiptap's Link behavior for the `link` mark: URLs linked as they are
+    /// typed and pasted, a URL pasted over a selection links it, a press on
+    /// a link with Mod (or while the editor is not editable) opens it.
+    pub(crate) fn link(options: Option<extensions::RichLinkOptions>) -> RichPluginSpec {
+        RichPluginSpec {
+            plugin: RichPluginKind::Link,
+            link: Some(options.unwrap_or_default()),
+            ..RichPluginSpec::default()
+        }
+    }
+
+    /// Tiptap's CharacterCount: counts characters and words (the editor's
+    /// `characters()` / `words()`) and keeps the document within `limit`,
+    /// trimming pasted content to fit.
+    pub(crate) fn character_count(
+        options: Option<extensions::RichCharacterCountOptions>,
+    ) -> RichPluginSpec {
+        RichPluginSpec {
+            plugin: RichPluginKind::CharacterCount,
+            character_count: Some(options.unwrap_or_default()),
+            ..RichPluginSpec::default()
+        }
+    }
+
+    /// Tiptap's Suggestion: follows a trigger (`@`) typed before the cursor;
+    /// the editor's `suggestion(key)` gives its range and query for the
+    /// app's list, Escape dismisses it.
+    pub(crate) fn suggestion(options: Option<extensions::RichSuggestionOptions>) -> RichPluginSpec {
+        RichPluginSpec {
+            plugin: RichPluginKind::Suggestion,
+            suggestion: Some(options.unwrap_or_default()),
+            ..RichPluginSpec::default()
+        }
+    }
+
+    /// `schema` with Tiptap's mention node: an inline atom with `id`,
+    /// `label` and `mentionSuggestionChar`, its text `@label`.
+    pub(crate) fn with_mention(
+        schema: SchemaArg,
+        options: Option<extensions::RichMentionOptions>,
+    ) -> Result<RichSchema, String> {
+        Ok(RichSchema {
+            schema: extensions::with_mention(&schema.schema()?, &options.unwrap_or_default())?,
+        })
+    }
+
+    /// Links the selection (Tiptap's `setLink`); refused for a URI whose
+    /// protocol is not allowed (`javascript:`).
+    pub(crate) fn set_link(attrs: AttrsJson) -> RichCommand {
+        named("setLink", attrs.0)
+    }
+
+    /// Links the selection, or unlinks the link around it.
+    pub(crate) fn toggle_link(attrs: Option<AttrsJson>) -> RichCommand {
+        named("toggleLink", attrs_value(attrs))
+    }
+
+    /// Removes the link around the selection (the whole link at a cursor).
+    pub(crate) fn unset_link() -> RichCommand {
+        named("unsetLink", JsonValue::Null)
+    }
+
+    /// The `characterCount` plugin's limit from now on (`null` for none).
+    pub(crate) fn set_character_limit(limit: Option<usize>) -> RichCommand {
+        named("setCharacterLimit", serde_json::json!({ "limit": limit }))
+    }
+
+    /// Replaces the active suggestion (trigger and query) of the plugin
+    /// keyed `key` with `content` (text or JSON), the cursor after it.
+    pub(crate) fn replace_suggestion(content: Content, key: Option<String>) -> RichCommand {
+        let content = match content {
+            Content::Text(text) => JsonValue::String(text),
+            Content::Json(json) => json,
+        };
+        named(
+            "replaceSuggestion",
+            serde_json::json!({ "content": content, "key": key }),
+        )
+    }
+
+    /// Dismisses the active suggestion of the plugin keyed `key` (what
+    /// Escape does).
+    pub(crate) fn exit_suggestion(key: Option<String>) -> RichCommand {
+        named("exitSuggestion", serde_json::json!({ "key": key }))
+    }
+
+    /// Replaces `range` (a suggestion's) with a mention of `id` labeled
+    /// `label` and a space (Tiptap's Mention command).
+    pub(crate) fn insert_mention(
+        range: extensions::RichRange,
+        id: String,
+        label: Option<String>,
+        name: Option<String>,
+    ) -> RichCommand {
+        named(
+            "insertMention",
+            serde_json::json!({
+                "range": { "from": range.from, "to": range.to },
+                "id": id,
+                "label": label,
+                "name": name,
+            }),
+        )
     }
 }
 

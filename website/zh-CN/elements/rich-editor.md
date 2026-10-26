@@ -119,6 +119,67 @@ const canIndent = editor.can(sinkListItem("listItem"));
 
 `editor.dispatchTransaction = (tr) => { … }` 让应用自己提交每个事务：处理函数以 JSON 收到每个事务，用 `editor.applyTransaction(tr)` 提交，或者丢弃它。协作、日志和需要通过应用检查的事务会用到它；设为 `null` 把提交交还给编辑器。处理函数在 JS 的下一轮收到输入产生的事务，文档在它提交时改变。
 
+## 扩展
+
+扩展即 Tiptap 的扩展：每个扩展一并带来它的节点或标记类型、按键绑定、输入规则与粘贴规则、插件和具名命令；由扩展创建的编辑器从中得到 schema、键位、规则和命令表。内置扩展是与 Tiptap 同名的类，可直接使用，也可配置：
+
+```tsx
+import { RichEditor, StarterKit, Underline, command, createRichEditor } from "nsh/base";
+
+const editor = createRichEditor({
+  extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false })],
+  content: "Hello",
+  editable: true,
+});
+
+editor.run(command("toggleHeading", { level: 2 }));
+editor.run(command("toggleBold"));
+```
+
+`StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`Link`、`Highlight`、`Subscript`、`Superscript`、`TextStyle`、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
+
+每个扩展都加入 Tiptap 的命令，由 `command(name, args)` 运行：`toggleBold`、`setItalic`、`unsetStrike`、`toggleHeading({ level })`、`setParagraph`、`toggleBlockquote`、`toggleBulletList`、`toggleOrderedList`、`toggleTaskList`、`toggleCodeBlock({ language })`、`setHardBreak`、`setHorizontalRule`、`setImage({ src })`、`toggleHighlight({ color })`、`setTextAlign("center")`、`unsetTextAlign`，以及下文的链接、字数统计与建议命令。
+
+`extensions` 中的顺序是同优先级扩展之间的次序：排在后面的扩展先处理按键；其余情况由 `priority`（默认 100）排序。使用 `extensions` 时，编辑器的 `plugins` 排在扩展的插件之后。
+
+### 应用的扩展
+
+`defineExtension` 创建扩展。它的函数在用它创建编辑器时以扩展的选项运行一次，返回数据：即上文工厂函数生成的命令、规则与插件。
+
+```tsx
+import { StarterKit, command, createRichEditor, defineExtension, insertText, textRule } from "nsh/base";
+
+const Signature = defineExtension({
+  name: "signature",
+  priority: 200,
+  addOptions: () => ({ text: "— Sent from NSH" }),
+  addCommands: (options) => ({ insertSignature: insertText(options.text) }),
+  addKeyboardShortcuts: () => ({ "Mod-Alt-s": command("insertSignature") }),
+  addInputRules: () => [textRule("\\(sig\\)$", "✍")],
+});
+
+const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({ text: "Best, Ana" })] });
+```
+
+`node` 或 `mark`（`defineSchema` 的写法）使它成为节点或标记扩展；`addGlobalAttributes` 为其他类型添加属性；`addProseMirrorPlugins` 返回插件，包括 `RichEditorPlugin`；`addPasteRules` 返回作用于粘贴文本的 `textRule` 与 `markRule` 规则。内置类的 `extend({...})` 替换所给的部分：`Underline.extend({ addKeyboardShortcuts: () => ({ "Mod-Alt-u": toggleMark("underline") }) })`。
+
+应用的 crate 通过其 UI 集注册用 Rust 编写的扩展，JS 按名称取用：
+
+```rust
+use nsh_base::rich_editor::extensions::{Extension, RichExtensionRegistry};
+
+#[native_module("app/native")]
+fn native(registry: &mut Registry) {
+    registry.rich_extension("mention", || Extension::new("mention") /* .add_plugins(...) */);
+}
+```
+
+```tsx
+const editor = createRichEditor({ extensions: [StarterKit, richExtension("mention", { char: "@" })] });
+```
+
+`richExtension(name, options)` 也按名称找到每个内置扩展（`"text"`、`"bold"` 等）。
+
 ## 插件
 
 | 工厂函数 | 添加的内容 |
@@ -155,3 +216,37 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 - `captureKeys(keys, handler)`：`capturing` 为 true 时，编辑器消费这些按键，并随即告诉 `handler` 按下的是哪一个；键盘响应与没有插件时一样快。
 - `editor.setDecorations(key, decorations)`：视图绘制在文档之上、不改变文档的行内属性、节点属性和小部件。它们随每次修改移动，直到再次设置。
 - `filterTransaction(hook)` 和 `appendTransaction(hook)` 在应用自己的调用（`run`、`dispatch`、`setContent`……）中看到这些调用产生的事务：`filterTransaction` 可以丢弃一个事务，`appendTransaction` 可以返回一个与之一起应用的事务。`subscribe` 收到每次修改，包括输入。
+
+## 链接、字数统计与建议
+
+三个插件提供 Tiptap 的 Link、CharacterCount 和 Suggestion 行为，全部原生运行：
+
+```tsx
+import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+
+const editor = createRichEditor({
+  schema: withMention(starterSchema()),
+  plugins: [
+    starterKit(),
+    link({ defaultProtocol: "https" }),
+    characterCount({ limit: 280 }),
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
+  ],
+});
+
+editor.on("transaction", () => {
+  const s = editor.suggestion("mention");
+  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  setCount(`${editor.characters()} / ${editor.characterLimit}`);
+});
+
+// 列表选中了某人：
+editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
+```
+
+- `link(options?)`：在 URL 后输入空格或 Enter 时，URL 变为链接，粘贴文本中的 URL 也一样（`autolink`）；在选区上粘贴 URL 会给选区加上链接（`linkOnPaste`）；按住 Mod 点按链接，或在编辑器只读时点按，会通过应用的 URL 处理打开它（`openOnClick`）；`enableClickSelection` 点按时选中整个链接。带协议和不带协议的 URL（`nsh.dev`、`https://nsh.dev/docs`、电子邮件地址）都能识别，不带协议的主机名使用 `defaultProtocol`（`http`）。链接接受 `http`、`https`、`ftp`、`ftps`、`mailto`、`tel`、`callto`、`sms`、`cid`、`xmpp` 以及 `protocols` 中的协议，因此 `setLink({ href })`、`toggleLink(attrs?)` 和自动链接会把脚本（`javascript:`）和 data URL 挡在外面。`unsetLink()` 移除选区所在的链接。
+- `characterCount(options?)`：`editor.characters(mode?)` 统计文本的字符（`"textSize"`，与 JS 的 `length` 一样按 UTF-16 单元）或文档的位置数（`"nodeSize"`）；`editor.words()` 统计词数（Unicode 词边界）。设置 `limit` 后，会超出上限的修改被拒绝，粘贴的内容被截到放得下的长度；超出上限的初始文档会被截短（`autoTrim`）。`setCharacterLimit(limit)` 修改上限，`editor.characterLimit` 读取上限。
+- `suggestion(options?)`：跟踪光标前输入的触发字符（`char`，默认 `@`）。`allowSpaces` 让查询可以包含空格，`allowedPrefixes` 列出触发字符前可以出现的字符（默认一个空格；`anyPrefix` 接受任何字符），`startOfLine` 要求触发字符位于行首（`/` 命令菜单）。`editor.suggestion(key)` 给出 `{ active, range, query, text, lastKey, keyCount }`；活动范围带有应用的 `decorationClass`（查询为空时还有 `decorationEmptyClass`）。建议活动期间，`captureKeys` 中的按键归应用的列表：编辑器接收它们并把最后一个记录在状态中；Escape 关闭建议（`exitSuggestion(key)` 也可以）。`replaceSuggestion(content, key?)` 用文本或 JSON 内容替换触发字符和查询。
+- `withMention(schema, { name?, char? })` 添加 Tiptap 的提及节点：带 `id`、`label` 和触发字符的行内原子节点，在文本中写作 `@label`，在 HTML 中写作 `<span data-type="mention">`。`insertMention(range, id, label?)` 用一个提及和一个空格替换建议的范围。
+
+弹出层属于应用：它读取建议的状态，放在 `coordsAtPos(range.from)` 处，并以自己的方式绘制条目。

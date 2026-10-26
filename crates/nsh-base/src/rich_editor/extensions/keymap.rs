@@ -203,25 +203,26 @@ impl Keymap {
         };
         let is_char = name.chars().count() == 1 && name != " ";
         let bindings = self.for_event(event);
-        // A character's Shift is in its case already.
-        if let Some(command) = bindings.get(&modifiers(name, event, !is_char))
-            && command(state, Some(&mut *dispatch))
-        {
+        let mut run = |name: String| {
+            bindings
+                .get(&name)
+                .is_some_and(|command| command(state, Some(&mut *dispatch)))
+        };
+        // The name with Shift spelled out first, as `prosemirror-keymap`
+        // looks it up: `Mod-Shift-b` (a quote) must win over `Mod-B`
+        // (bold) when Shift is held.
+        if run(modifiers(name, event, true)) {
             return true;
         }
         if is_char && event.shift {
-            // Also the binding with Shift spelled out, and of the base key
-            // (`Shift-Mod-z` for a Z typed with Shift).
-            if let Some(command) = bindings.get(&modifiers(name, event, true))
-                && command(state, Some(&mut *dispatch))
-            {
+            // The base key with Shift spelled out (`Shift-Mod-z` for a Z
+            // typed with Shift), then the character alone, whose Shift is
+            // in its case already.
+            let lower = name.to_lowercase();
+            if lower != name && run(modifiers(&lower, event, true)) {
                 return true;
             }
-            let lower = name.to_lowercase();
-            if lower != name
-                && let Some(command) = bindings.get(&modifiers(&lower, event, true))
-                && command(state, Some(&mut *dispatch))
-            {
+            if run(modifiers(name, event, false)) {
                 return true;
             }
         }
@@ -350,5 +351,52 @@ mod tests {
         assert!(!keymap.handle(&state, &event("Enter", false, false), &mut dispatch));
         assert!(!keymap.handle(&state, &event("b", false, false), &mut dispatch));
         assert_eq!(hits.load(Ordering::Relaxed), 111);
+    }
+
+    #[test]
+    fn shift_spelled_bindings_win() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = |hits: &Arc<AtomicUsize>, n: usize| {
+            let hits = hits.clone();
+            command(move |_, _| {
+                hits.fetch_add(n, Ordering::Relaxed);
+                true
+            })
+        };
+        // Bold binds `Mod-b` and `Mod-B`, the quote `Mod-Shift-b`, as
+        // Tiptap's extensions do.
+        let keymap = Keymap::new(
+            vec![
+                ("Mod-b".into(), counter(&hits, 1)),
+                ("Mod-B".into(), counter(&hits, 1)),
+                ("Mod-Shift-b".into(), counter(&hits, 100)),
+            ],
+            &KeymapOptions { mac: Some(false) },
+        )
+        .unwrap();
+        let state = EditorState::create(EditorStateConfig::new(starter::schema())).unwrap();
+        let mut dispatch = |_| {};
+        let event = |key: &str, shift: bool| KeyEvent {
+            ctrl: true,
+            shift,
+            ..KeyEvent::new(key)
+        };
+        // Ctrl-Shift-B, as platforms report it (uppercase or not): the quote.
+        assert!(keymap.handle(&state, &event("B", true), &mut dispatch));
+        assert_eq!(hits.swap(0, Ordering::Relaxed), 100);
+        assert!(keymap.handle(&state, &event("b", true), &mut dispatch));
+        assert_eq!(hits.swap(0, Ordering::Relaxed), 100);
+        // Ctrl-B: bold.
+        assert!(keymap.handle(&state, &event("b", false), &mut dispatch));
+        assert_eq!(hits.swap(0, Ordering::Relaxed), 1);
+        // A Shift binding of its own missing, a shifted letter still finds
+        // the character's binding (`Mod-B`).
+        let bold_only = Keymap::new(
+            vec![("Mod-B".into(), counter(&hits, 1))],
+            &KeymapOptions { mac: Some(false) },
+        )
+        .unwrap();
+        assert!(bold_only.handle(&state, &event("B", true), &mut dispatch));
+        assert_eq!(hits.swap(0, Ordering::Relaxed), 1);
     }
 }

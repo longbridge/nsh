@@ -296,6 +296,13 @@ pub(crate) enum RichPluginKind {
     /// The starter set: its input rules and key bindings, the base key
     /// bindings and the history.
     StarterKit,
+    /// Tiptap's Link behavior: autolink, link on paste, open on click
+    /// (`link`).
+    Link,
+    /// Tiptap's CharacterCount (`characterCount`).
+    CharacterCount,
+    /// Tiptap's Suggestion (`suggestion`).
+    Suggestion,
 }
 
 /// A kernel plugin as data, made by `history()`, `keymap({...})`,
@@ -332,6 +339,15 @@ pub(crate) struct RichPluginSpec {
     /// by default).
     #[prop(skip_none)]
     pub(crate) copy_as_markdown: Option<bool>,
+    /// `link`: its options.
+    #[prop(skip_none)]
+    pub(crate) link: Option<super::extensions::RichLinkOptions>,
+    /// `characterCount`: its options.
+    #[prop(skip_none)]
+    pub(crate) character_count: Option<super::extensions::RichCharacterCountOptions>,
+    /// `suggestion`: its options.
+    #[prop(skip_none)]
+    pub(crate) suggestion: Option<super::extensions::RichSuggestionOptions>,
 }
 
 /// Commands by key name, in the object's order. TS: `Record<string,
@@ -421,6 +437,7 @@ pub(crate) struct RichInputRule {
 /// One entry of an editor's `plugins`: a kernel plugin as data or the
 /// app's `RichEditorPlugin`. TS: `RichPluginSpec | RichEditorPlugin`.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)] // a few per editor, made once
 pub(crate) enum PluginEntry {
     Spec(RichPluginSpec),
     Js(Instance<RichEditorPlugin>),
@@ -584,6 +601,15 @@ pub(crate) fn plugins_of(spec: &RichPluginSpec, schema: &Schema) -> Result<Vec<P
             ..MarkdownOptions::default()
         }),
         RichPluginKind::StarterKit => starter::plugins(schema),
+        RichPluginKind::Link => {
+            super::extensions::link_plugins(spec.link.as_ref().unwrap_or(&Default::default()))
+        }
+        RichPluginKind::CharacterCount => vec![super::extensions::character_count_plugin(
+            spec.character_count.as_ref().unwrap_or(&Default::default()),
+        )?],
+        RichPluginKind::Suggestion => vec![super::extensions::suggestion_plugin(
+            spec.suggestion.as_ref().unwrap_or(&Default::default()),
+        )],
     })
 }
 

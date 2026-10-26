@@ -1699,3 +1699,77 @@ covers [nsh/base] unsetMark
 covers [nsh/base] wrapIn
 covers [nsh/base] wrapInList
 covers [nsh/base] wrappingRule
+
+# base-rich-editor-extensions
+tap id:case-base-rich-editor-extensions
+tap text:RunExtensions
+expect Autolink: true https://nsh.dev
+expect SetLink: false true true
+expect UnsetLink: true false
+expect ToggleLink: true true
+expect Count: 11 2 12 15
+expect Limit: true Hello world!
+expect SetLimit: null Hello world!?
+expect Schema: true
+expect Suggest: true jo @jo 4-7 false
+expect Mention: Hi @Joan false
+expect Replace: true Hi @Joan done
+expect Exit: true false true
+covers [nsh/base] link
+covers [nsh/base] characterCount
+covers [nsh/base] suggestion
+covers [nsh/base] withMention
+covers [nsh/base] setLink
+covers [nsh/base] toggleLink
+covers [nsh/base] unsetLink
+covers [nsh/base] setCharacterLimit
+covers [nsh/base] replaceSuggestion
+covers [nsh/base] exitSuggestion
+covers [nsh/base] insertMention
+
+# base-rich-editor-kit
+tap id:case-base-rich-editor-kit
+tap text:RunKit
+expect Kit: true true true
+expect Configure: false true unknown
+expect Extension: bold mark 100
+expect Extend: 200 underline true
+expect Define: HEY extension xHI
+expect Named: text threw
+expect Editable: false
+expect Both: threw
+expect Duplicate: threw
+expect Classes: starterKit,doc,paragraph,heading,blockquote,bulletList,orderedList,listItem,taskList,taskItem,codeBlock,hardBreak,horizontalRule,image,bold,italic,strike,code,underline,link,highlight,subscript,superscript,textStyle,textAlign,history,trailingNode,typography,listKeymap
+covers [nsh/base] Blockquote
+covers [nsh/base] Bold
+covers [nsh/base] BulletList
+covers [nsh/base] Code
+covers [nsh/base] CodeBlock
+covers [nsh/base] Document
+covers [nsh/base] HardBreak
+covers [nsh/base] Heading
+covers [nsh/base] Highlight
+covers [nsh/base] History
+covers [nsh/base] HorizontalRule
+covers [nsh/base] Italic
+covers [nsh/base] Link
+covers [nsh/base] ListItem
+covers [nsh/base] ListKeymap
+covers [nsh/base] OrderedList
+covers [nsh/base] Paragraph
+covers [nsh/base] RichExtension
+covers [nsh/base] RichImage
+covers [nsh/base] StarterKit
+covers [nsh/base] Strike
+covers [nsh/base] Subscript
+covers [nsh/base] Superscript
+covers [nsh/base] TaskItem
+covers [nsh/base] TaskList
+covers [nsh/base] TextAlign
+covers [nsh/base] TextStyle
+covers [nsh/base] TrailingNode
+covers [nsh/base] Typography
+covers [nsh/base] Underline
+covers [nsh/base] createRichEditor
+covers [nsh/base] defineExtension
+covers [nsh/base] richExtension

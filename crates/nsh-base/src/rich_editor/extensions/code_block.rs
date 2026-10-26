@@ -7,9 +7,9 @@
 
 use serde_json::Value;
 
-use super::helpers::{Step, chain, clear_nodes, insert_default_block, toggle_node};
+use super::helpers::{Step, chain, clear_nodes, insert_default_block};
 use crate::rich_editor::{
-    commands::{BoxCommand, Dispatch, command, exit_code},
+    commands::{BoxCommand, Dispatch, command, exit_code, tiptap},
     model::NodeType,
     state::{EditorState, Selection, TextSelection},
 };
@@ -53,7 +53,10 @@ pub fn code_block_keymap(
 ) -> Vec<(String, BoxCommand)> {
     let mut keys = Vec::new();
     if let Some(paragraph) = paragraph {
-        keys.push(("Mod-Alt-c".into(), toggle_node(ty.clone(), paragraph, None)));
+        keys.push((
+            "Mod-Alt-c".into(),
+            tiptap::toggle_node(ty.clone(), paragraph, Default::default()),
+        ));
     }
     let t = ty.clone();
     keys.push((

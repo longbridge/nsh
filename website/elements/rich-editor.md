@@ -147,6 +147,86 @@ one as JSON and commits it with `editor.applyTransaction(tr)`, or drops it. Coll
 that must pass the app's checks use it; `null` hands committing back to the editor. The handler hears typing in JS's
 next turn, and the document changes when it commits.
 
+## Extensions
+
+Extensions are Tiptap's: each one brings, together, its node or mark type, its key bindings, input and paste rules,
+plugins and named commands, and an editor made from extensions gets its schema, keymap, rules and command table from
+them. The built-in ones are classes named as Tiptap's, used as they are or configured:
+
+```tsx
+import { RichEditor, StarterKit, Underline, command, createRichEditor } from "nsh/base";
+
+const editor = createRichEditor({
+  extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false })],
+  content: "Hello",
+  editable: true,
+});
+
+editor.run(command("toggleHeading", { level: 2 }));
+editor.run(command("toggleBold"));
+```
+
+`StarterKit` brings `Document`, `Paragraph`, the text node, `Heading`, `Blockquote`, `BulletList`, `OrderedList`,
+`ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
+`Bold`, `Italic`, `Strike`, `Code`, `Underline`, `Link`, `Highlight`, `Subscript`, `Superscript`, `TextStyle`,
+`TextAlign`, `History`, `TrailingNode`, `Typography` and `ListKeymap`. An option named as one set to `false` leaves
+it out, an object configures it (`heading: { levels }`, `history: { depth }`, `textAlign: { types }`,
+`codeBlock: { enableTabIndentation }`). Each class's `configure(options)` and `extend({...})` make a
+`RichExtension`, which has `name`, `type`, `priority` and `options`. Every editor also gets the core keymap (Enter,
+Backspace, Delete, select all).
+
+Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggleBold`, `setItalic`,
+`unsetStrike`, `toggleHeading({ level })`, `setParagraph`, `toggleBlockquote`, `toggleBulletList`,
+`toggleOrderedList`, `toggleTaskList`, `toggleCodeBlock({ language })`, `setHardBreak`, `setHorizontalRule`,
+`setImage({ src })`, `toggleHighlight({ color })`, `setTextAlign("center")`, `unsetTextAlign`, and the link,
+character count and suggestion commands below.
+
+The order of `extensions` is their priority among equals: an extension listed later binds its keys before the ones
+before it; `priority` (100 by default) ranks them otherwise. With `extensions`, an editor's `plugins` come after the
+extensions' plugins.
+
+### The app's extensions
+
+`defineExtension` makes one. Its functions run once, when an editor is made with it, with the extension's options,
+and return data: commands, rules and plugins as the factories above make them.
+
+```tsx
+import { StarterKit, command, createRichEditor, defineExtension, insertText, textRule } from "nsh/base";
+
+const Signature = defineExtension({
+  name: "signature",
+  priority: 200,
+  addOptions: () => ({ text: "— Sent from NSH" }),
+  addCommands: (options) => ({ insertSignature: insertText(options.text) }),
+  addKeyboardShortcuts: () => ({ "Mod-Alt-s": command("insertSignature") }),
+  addInputRules: () => [textRule("\\(sig\\)$", "✍")],
+});
+
+const editor = createRichEditor({ extensions: [StarterKit, Signature.configure({ text: "Best, Ana" })] });
+```
+
+`node` or `mark` (in `defineSchema`'s form) makes it a node or mark extension; `addGlobalAttributes` adds attributes
+to other types; `addProseMirrorPlugins` returns plugins, `RichEditorPlugin`s included; `addPasteRules` returns
+`textRule` and `markRule` rules for pasted text. A built-in class's `extend({...})` replaces the parts it gives:
+`Underline.extend({ addKeyboardShortcuts: () => ({ "Mod-Alt-u": toggleMark("underline") }) })`.
+
+An app's crate registers extensions written in Rust through its UI set, and JS takes them by name:
+
+```rust
+use nsh_base::rich_editor::extensions::{Extension, RichExtensionRegistry};
+
+#[native_module("app/native")]
+fn native(registry: &mut Registry) {
+    registry.rich_extension("mention", || Extension::new("mention") /* .add_plugins(...) */);
+}
+```
+
+```tsx
+const editor = createRichEditor({ extensions: [StarterKit, richExtension("mention", { char: "@" })] });
+```
+
+`richExtension(name, options)` also finds every built-in extension by its name (`"text"`, `"bold"`, ...).
+
 ## Plugins
 
 | Factory | What it adds |
@@ -191,3 +271,58 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
 - `filterTransaction(hook)` and `appendTransaction(hook)` see the transactions the app's own calls make (`run`,
   `dispatch`, `setContent`, …) in that call: `filterTransaction` may drop one, `appendTransaction` may return one
   more to apply with it. `subscribe` hears every change, typing included.
+
+## Links, character counts and suggestions
+
+Three plugins carry Tiptap's Link, CharacterCount and Suggestion behavior, all of it native:
+
+```tsx
+import { RichEditor, characterCount, createRichEditor, insertMention, link, starterKit, starterSchema, suggestion, withMention } from "nsh/base";
+
+const editor = createRichEditor({
+  schema: withMention(starterSchema()),
+  plugins: [
+    starterKit(),
+    link({ defaultProtocol: "https" }),
+    characterCount({ limit: 280 }),
+    suggestion({ key: "mention", char: "@", decorationClass: "text-primary", captureKeys: ["ArrowUp", "ArrowDown", "Enter"] }),
+  ],
+});
+
+editor.on("transaction", () => {
+  const s = editor.suggestion("mention");
+  if (s?.active) showPeople(s.query, editor.coordsAtPos(s.range.from), s.lastKey);
+  setCount(`${editor.characters()} / ${editor.characterLimit}`);
+});
+
+// The list picked someone:
+editor.run(insertMention(editor.suggestion("mention")!.range, "u1", "Joan"));
+```
+
+- `link(options?)`: a URL typed before a space or Enter becomes a link, as do the URLs in pasted text (`autolink`);
+  a URL pasted over a selection links the selection (`linkOnPaste`); a press on a link with Mod held, or while the
+  editor is read-only, opens it through the app's URL handling (`openOnClick`); `enableClickSelection` selects the
+  whole link on a press. URLs are found with or without a protocol (`nsh.dev`, `https://nsh.dev/docs`, e-mail
+  addresses), and the protocol a bare host gets is `defaultProtocol` (`http`). Links take the protocols `http`,
+  `https`, `ftp`, `ftps`, `mailto`, `tel`, `callto`, `sms`, `cid`, `xmpp` and those in `protocols`, so
+  `setLink({ href })`, `toggleLink(attrs?)` and autolinking keep scripts (`javascript:`) and data URLs out.
+  `unsetLink()` removes the link around the selection.
+- `characterCount(options?)`: `editor.characters(mode?)` counts the text's characters (`"textSize"`, UTF-16 units as
+  JS's `length`) or the document's positions (`"nodeSize"`); `editor.words()` counts its words (Unicode word
+  boundaries). With `limit`, changes that would go past it are refused and pasted content is trimmed to what fits;
+  a first document over the limit is trimmed (`autoTrim`). `setCharacterLimit(limit)` changes the limit and
+  `editor.characterLimit` reads it.
+- `suggestion(options?)`: follows a trigger (`char`, `@` by default) typed before the cursor. `allowSpaces` lets the
+  query hold spaces, `allowedPrefixes` lists what may precede the trigger (a space by default; `anyPrefix` takes
+  anything), `startOfLine` asks for it at the line's start (a `/` command menu). `editor.suggestion(key)` gives
+  `{ active, range, query, text, lastKey, keyCount }`; the active range carries the app's `decorationClass` (and
+  `decorationEmptyClass` while the query is empty). While a suggestion is active the keys in `captureKeys` belong
+  to the app's list: the editor takes them and records the last one in the state, and Escape dismisses the
+  suggestion (`exitSuggestion(key)` does too). `replaceSuggestion(content, key?)` replaces the trigger and the query
+  with text or JSON content.
+- `withMention(schema, { name?, char? })` adds Tiptap's mention node: an inline atom with `id`, `label` and its
+  trigger, written as `@label` in text and as `<span data-type="mention">` in HTML. `insertMention(range, id, label?)`
+  replaces a suggestion's range with a mention and a space.
+
+The popup is the app's: it reads the suggestion's state, places itself at `coordsAtPos(range.from)` and draws the
+items its own way.

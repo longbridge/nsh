@@ -5,6 +5,7 @@
 //! back, and lists' items show their markers.
 
 mod commands;
+mod extensions;
 mod marks_clipboard_history;
 mod selection;
 mod structure;
