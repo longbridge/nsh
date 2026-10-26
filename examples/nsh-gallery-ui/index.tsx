@@ -12,6 +12,7 @@ import { alpha, colors, finish, focusRing, isDark, mono, motion, radius, toneCol
 export * from "./theme";
 export { Segmented } from "./segmented";
 export * from "./data-table";
+export * from "./slider";
 
 /**
  * The thumb of a resize handle (`handleThumbClass`), as gpui-component

@@ -3,7 +3,7 @@ import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Slider, Switch, Tab
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, switchLook, toneColor } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -563,32 +563,20 @@ export function Controls() {
     const volume = signal(60);
     const price = signal<[number, number]>([100, 400]);
     const muted = signal(false);
-    // The parts in the theme's tokens: a rail in the track's color, the
-    // value's stretch in the accent, a knob that grows a ring under the
-    // pointer and while dragged (still with reduced motion), and the
-    // keyboard's focus ring; a disabled slider dims and drops its hover.
-    const thumb = (disabled: boolean) =>
-      [
-        pointer ? "size-4" : "size-6",
-        "rounded-full border border-border bg-knob shadow-sm transition-shadow duration-150 motion-reduce:transition-none",
-        "focus:outline-2 focus:outline-offset-2 focus:outline-info",
-        disabled ? "" : "hover:ring-4 hover:ring-brand/20 active:ring-4 active:ring-brand/35",
-      ].join(" ");
-    const parts = (disabled: boolean) => ({
-      disabled,
-      trackClass: pointer ? "h-5 justify-center" : "h-8 justify-center",
-      indicatorClass: "h-1.5 rounded-full bg-track",
-      rangeClass: "rounded-full bg-brand disabled:bg-faint",
-      thumbClass: thumb(disabled),
-      disabledStyle: dimmed,
-    });
-    /** A level: its label and value over the slider, the value tabular at the trailing edge. */
-    function Level(props: { label: string; detail: string; value: string; first?: boolean; children: JSX.Element }) {
+    // The shared slider look (`sliderLook` and `sliderFill`, BJORK UI's
+    // slider in the gallery's tones): an 8-point rail, a fill fading into a
+    // 16 × 8 pill thumb, the value in a column after the rail; muted, it
+    // fades to 35%. The spread holds only what never changes: a signal read
+    // in it would make the slider again as it changes, mid-drag.
+    /** A level: its label over the slider. */
+    function Level(props: { label: string; detail: string; value?: string; first?: boolean; children: JSX.Element }) {
       return (
         <View style={{ ...row(!!props.first), flexDirection: "column", alignItems: "stretch", gap: size.padding }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Label label={props.label} detail={props.detail} />
-            <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{props.value}</Text>
+            <If when={props.value}>
+              <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{props.value}</Text>
+            </If>
           </View>
           {props.children}
         </View>
@@ -597,15 +585,19 @@ export function Controls() {
     return (
       <Card icon="controls" title="Slider" subtitle="Levels and a range: the app owns the value">
         <View>
-          <Level first label="Volume" detail={muted() ? "Muted" : "Media and alerts"} value={muted() ? "—" : `${volume()}%`}>
+          <Level first label="Volume" detail={muted() ? "Muted" : "Media and alerts"}>
             <Slider
               value={volume()}
               step={5}
               accessibilityLabel="Volume"
               onChange={(next) => volume.set(next as number)}
               onChangeEnd={(next) => last.set(`Volume: ${next}`)}
-              {...parts(muted())}
-            />
+              disabled={muted()}
+              rangeStyle={sliderFill(0, volume() / 100)}
+              {...sliderLook({ value: true })}
+            >
+              <Text class={sliderValueClass} style={sliderValueStyle()}>{muted() ? "—" : `${volume()}%`}</Text>
+            </Slider>
           </Level>
           <Level label="Price" detail="Listings between the two" value={`$${price()[0]} – $${price()[1]}`}>
             <Slider
@@ -617,7 +609,8 @@ export function Controls() {
               accessibilityLabel="Maximum price"
               onChange={(next) => price.set(next as [number, number])}
               onChangeEnd={(next) => last.set(`Price: ${(next as [number, number]).join(" to ")}`)}
-              {...parts(false)}
+              rangeStyle={sliderFill(price()[0] / 500, price()[1] / 500)}
+              {...sliderLook()}
             />
           </Level>
         </View>

@@ -16,40 +16,67 @@ demo: el-slider
 use nsh_base::{SliderValue, slider, theme};
 use nsh_core::prelude::*;
 
-fn volume(level: Signal<SliderValue>) -> impl IntoElement {
+fn strength(level: Signal<SliderValue>) -> impl IntoElement {
+    let percent = move || format!("{}%", level.get().end());
     slider()
         .value(move || level.get())
-        .accessibility_label("音量")
+        .accessibility_label("选项强度")
         .on_change(move |next: &SliderValue| level.set(*next))
-        .track_style(|s| s.h(px(20.0)).justify_center())
-        .indicator_style(|s| s.h(px(6.0)).rounded_full().bg(move || theme().muted))
-        .range_style(|s| s.rounded_full().bg(move || theme().primary))
-        .thumb_style(|s| {
-            s.size(px(16.0))
+        // The value in a column after the rail.
+        .flex_row()
+        .items_center()
+        .gap_2()
+        // An 8-point rail; the thumbs travel inside it.
+        .track_style(|s| s.h(px(8.0)).flex_1().px(px(8.0)).rounded_full().bg(move || theme().muted))
+        .indicator_style(|s| s.h_full())
+        // The fill, from the rail's edge, fading into the thumb's tone.
+        .range_style(|s| {
+            s.ml(-px(8.0))
                 .rounded_full()
-                .border_2()
-                .border_color(move || theme().primary)
-                .bg(move || theme().background)
+                .bg_linear_to_r()
+                .gradient_from(move || theme().primary)
+                .gradient_to(move || theme().muted_foreground)
         })
+        // A 16 x 8 pill sitting in the rail.
+        .thumb_style(|s| {
+            s.w(px(16.0))
+                .h(px(8.0))
+                .rounded_full()
+                .bg(move || theme().muted_foreground)
+                .hover(|s| s.brightness(1.1))
+                .active(|s| s.brightness(1.25))
+        })
+        .child(
+            text(percent)
+                .w(px(42.0))
+                .text_right()
+                .text_xs()
+                .tabular_nums()
+                .text_color(move || theme().muted_foreground),
+        )
 }
 ```
 
 ```tsx tabs
-import { mount, signal } from "nsh";
+import { mount, signal, Text } from "nsh";
 import { Slider } from "nsh/base";
 
 function App() {
-  const volume = signal(40);
+  const strength = signal(64);
   return (
     <Slider
-      value={volume()}
-      onChange={(next) => volume.set(next as number)}
-      accessibilityLabel="音量"
-      trackClass="h-5 justify-center"
-      indicatorClass="h-1.5 rounded-full bg-muted"
-      rangeClass="rounded-full bg-primary"
-      thumbClass="size-4 rounded-full border-2 border-primary bg-background hover:ring-4 hover:ring-ring/30 active:ring-4 active:ring-ring/50 focus:ring-4 focus:ring-ring/50"
-    />
+      value={strength()}
+      onChange={(next) => strength.set(next as number)}
+      accessibilityLabel="选项强度"
+      class="flex-row items-center gap-2"
+      trackClass="h-2 flex-1 px-2 rounded-full bg-muted focus-within:ring-2 focus-within:ring-primary/36 focus-within:ring-offset-2 focus-within:ring-offset-background disabled:opacity-35"
+      indicatorClass="h-full"
+      rangeClass="-ml-2 rounded-full bg-linear-to-r from-primary via-primary to-muted-foreground"
+      thumbClass="h-2 w-4 rounded-full bg-muted-foreground transition hover:brightness-110 active:brightness-125 focus:outline-none disabled:brightness-100 motion-reduce:transition-none"
+      thumbStyle={{ boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.42)" }}
+    >
+      <Text class="w-[42px] text-right font-mono text-[11px] text-muted-foreground">{`${strength()}%`}</Text>
+    </Slider>
   );
 }
 
@@ -126,8 +153,10 @@ const price = signal<[number, number]>([200, 800]);
 | 滑块（范围时两个） | 指示条内，以它的值为中心 | `thumbClass`、`thumbStyle` |
 | 标签 | 滑块控件内，轨道之后 | 它自己的元素（`children`） |
 
-轨道接收按压和拖动：让它比指示条高，手指才容易按到（`h-6 justify-center`，垂直滑块用 `w-6 items-center`）。指示条是滑轨：它的长度就是数值范围，`min`
-在它的起始边（垂直时在底部）。滑块把范围和滑块放在指示条上；无论大小，滑块都以它的值为中心，所以可以超出指示条的两端。
+轨道接收按压和拖动。指示条的长度就是数值范围，`min` 在它的起始边（垂直时在底部）；滑块把范围和滑块放在指示条上，无论大小，滑块都以它的值为中心。有两种布局：
+
+- 轨道就是滑轨（上面的例子）：`h-2 px-2 rounded-full bg-muted`，指示条 `h-full`。内边距让滑块在两端都留在滑轨内，范围的 `-ml-2` 让填充从滑轨自己的边缘开始。
+- 轨道是包住滑轨的一条带，更高，在触摸屏上手指才容易按到：`h-8 justify-center`，指示条 `h-2 rounded-full`（垂直滑块用 `w-8 items-center` 和 `w-2 h-full`）。
 
 部件显示的状态：
 
@@ -135,8 +164,8 @@ const price = signal<[number, number]>([200, 800]);
 - 轨道：按压轨道并拖动时 `active:`；它是一个 `group`，所以指示条、范围和滑块可以用 `group-hover:` 和 `group-active:`。
 - 每个部件：滑块禁用时 `disabled:`。
 
-滑块随数值移动，拖动时立即跟随。滑块各状态的动效由应用决定（例如 `transition-[box-shadow,transform]` 让环在 `hover:` 和 `active:` 时变大），
-`motion-reduce:` 为要求减少动效的用户保持静止。
+滑块随数值移动，拖动时立即跟随。滑块各状态的动效由应用决定（例如 `transition` 让滑块在 `hover:` 和 `active:` 时变亮），
+`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上，滑块带有 `focus:` 类时会报告它：这时轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
 
 ## 键盘
 

@@ -19,40 +19,67 @@ indicator, then its children (a label, the value as text), and the app styles ea
 use nsh_base::{SliderValue, slider, theme};
 use nsh_core::prelude::*;
 
-fn volume(level: Signal<SliderValue>) -> impl IntoElement {
+fn strength(level: Signal<SliderValue>) -> impl IntoElement {
+    let percent = move || format!("{}%", level.get().end());
     slider()
         .value(move || level.get())
-        .accessibility_label("Volume")
+        .accessibility_label("Option strength")
         .on_change(move |next: &SliderValue| level.set(*next))
-        .track_style(|s| s.h(px(20.0)).justify_center())
-        .indicator_style(|s| s.h(px(6.0)).rounded_full().bg(move || theme().muted))
-        .range_style(|s| s.rounded_full().bg(move || theme().primary))
-        .thumb_style(|s| {
-            s.size(px(16.0))
+        // The value in a column after the rail.
+        .flex_row()
+        .items_center()
+        .gap_2()
+        // An 8-point rail; the thumbs travel inside it.
+        .track_style(|s| s.h(px(8.0)).flex_1().px(px(8.0)).rounded_full().bg(move || theme().muted))
+        .indicator_style(|s| s.h_full())
+        // The fill, from the rail's edge, fading into the thumb's tone.
+        .range_style(|s| {
+            s.ml(-px(8.0))
                 .rounded_full()
-                .border_2()
-                .border_color(move || theme().primary)
-                .bg(move || theme().background)
+                .bg_linear_to_r()
+                .gradient_from(move || theme().primary)
+                .gradient_to(move || theme().muted_foreground)
         })
+        // A 16 x 8 pill sitting in the rail.
+        .thumb_style(|s| {
+            s.w(px(16.0))
+                .h(px(8.0))
+                .rounded_full()
+                .bg(move || theme().muted_foreground)
+                .hover(|s| s.brightness(1.1))
+                .active(|s| s.brightness(1.25))
+        })
+        .child(
+            text(percent)
+                .w(px(42.0))
+                .text_right()
+                .text_xs()
+                .tabular_nums()
+                .text_color(move || theme().muted_foreground),
+        )
 }
 ```
 
 ```tsx tabs
-import { mount, signal } from "nsh";
+import { mount, signal, Text } from "nsh";
 import { Slider } from "nsh/base";
 
 function App() {
-  const volume = signal(40);
+  const strength = signal(64);
   return (
     <Slider
-      value={volume()}
-      onChange={(next) => volume.set(next as number)}
-      accessibilityLabel="Volume"
-      trackClass="h-5 justify-center"
-      indicatorClass="h-1.5 rounded-full bg-muted"
-      rangeClass="rounded-full bg-primary"
-      thumbClass="size-4 rounded-full border-2 border-primary bg-background hover:ring-4 hover:ring-ring/30 active:ring-4 active:ring-ring/50 focus:ring-4 focus:ring-ring/50"
-    />
+      value={strength()}
+      onChange={(next) => strength.set(next as number)}
+      accessibilityLabel="Option strength"
+      class="flex-row items-center gap-2"
+      trackClass="h-2 flex-1 px-2 rounded-full bg-muted focus-within:ring-2 focus-within:ring-primary/36 focus-within:ring-offset-2 focus-within:ring-offset-background disabled:opacity-35"
+      indicatorClass="h-full"
+      rangeClass="-ml-2 rounded-full bg-linear-to-r from-primary via-primary to-muted-foreground"
+      thumbClass="h-2 w-4 rounded-full bg-muted-foreground transition hover:brightness-110 active:brightness-125 focus:outline-none disabled:brightness-100 motion-reduce:transition-none"
+      thumbStyle={{ boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.42)" }}
+    >
+      <Text class="w-[42px] text-right font-mono text-[11px] text-muted-foreground">{`${strength()}%`}</Text>
+    </Slider>
   );
 }
 
@@ -136,10 +163,14 @@ const price = signal<[number, number]>([200, 800]);
 | A thumb (two on a range) | the indicator, centered on its value | `thumbClass`, `thumbStyle` |
 | The label | the slider, after the track | its own elements (`children`) |
 
-The track takes presses and drags: make it taller than the indicator so a finger finds it (`h-6 justify-center`, or
-`w-6 items-center` on a vertical slider). The indicator is the rail: its length is the range of values, from `min` at
-its leading edge (at its bottom when vertical). The slider places the range and the thumbs on it; a thumb is centered on
-its value whatever its size, so it may reach past the indicator's ends.
+The track takes presses and drags. The indicator's length is the range of values, from `min` at its leading edge (at
+its bottom when vertical); the slider places the range and the thumbs on it, a thumb centered on its value whatever its
+size. Two ways to lay them out:
+
+- The track is the rail (the example above): `h-2 px-2 rounded-full bg-muted` with an `h-full` indicator. The padding
+  keeps the thumbs inside the rail at both ends, and the range's `-ml-2` starts the fill at the rail's own edge.
+- The track is a band around the rail, taller so a finger finds it on a touch screen: `h-8 justify-center` with an
+  `h-2 rounded-full` indicator (`w-8 items-center` and `w-2 h-full` on a vertical slider).
 
 States the parts show:
 
@@ -149,8 +180,10 @@ States the parts show:
 - Every part: `disabled:` while the slider is.
 
 The thumbs move as the value changes, and follow a drag at once. Motion of the thumbs' states is the app's choice
-(`transition-[box-shadow,transform]` for a ring that grows on `hover:` and `active:`), and `motion-reduce:` keeps it still
-for people who ask for less motion.
+(`transition` for a thumb that brightens on `hover:` and `active:`), and `motion-reduce:` keeps it still for
+people who ask for less motion. The keyboard focus is a thumb's, which it reports while it has a `focus:` class:
+`focus-within:` on the track then rings the whole rail, and the thumb's `focus:outline-none` takes the place of the
+platform's own focus outline.
 
 ## Keyboard
 
