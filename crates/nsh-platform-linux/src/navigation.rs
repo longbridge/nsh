@@ -928,7 +928,7 @@ impl Nav {
 
     /// Keeps the keyboard focus inside the newest modal: Tab never reaches
     /// the views under it (`can-focus` off holds for a widget's descendants
-    /// too). Dialogs and toasts are not views, and keep theirs.
+    /// too). Dialogs are not views, and keep theirs.
     fn scope_focus(&self, surface: &Surface) {
         let top = self
             .order

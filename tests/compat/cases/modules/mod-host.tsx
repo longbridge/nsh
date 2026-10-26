@@ -3,7 +3,7 @@
 // false, a call rejects at once, and the root's host events reach
 // `host.on`'s listeners until they are removed. Its script checks each.
 import { Text, View, signal } from "nsh";
-import { host } from "nsh/host";
+import { host } from "nsh";
 
 function App() {
   const called = signal("not called");

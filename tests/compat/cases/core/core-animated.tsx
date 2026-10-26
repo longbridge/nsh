@@ -7,14 +7,7 @@
 // ends where its commit puts it. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import {
-  Animated,
-  AnimatedNode,
-  AnimatedValue,
-  Easing,
-  LayoutAnimation,
-  createAnimatedValue,
-} from "nsh/animated";
+import { Animated, AnimatedNode, AnimatedValue, Easing, LayoutAnimation, createAnimatedValue } from "nsh";
 
 const fixed = (values: number[]) => values.map((v) => v.toFixed(3)).join(" ");
 

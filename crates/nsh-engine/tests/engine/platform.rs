@@ -10,7 +10,7 @@ use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Idiom, Os};
 use crate::ChannelSink;
 
 const APP: &str = r#"import { mount, Text, View } from "nsh";
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 mount(
   () => (

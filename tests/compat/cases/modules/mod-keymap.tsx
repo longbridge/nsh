@@ -4,7 +4,7 @@
 // refuses. Its
 // script checks each.
 import { Text, View, signal } from "nsh";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 
 function refused(keystroke: string): string {
   try {

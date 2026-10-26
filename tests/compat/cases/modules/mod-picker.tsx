@@ -4,7 +4,7 @@
 // there; a picker the user cancels resolves it with no images). Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import { Picker, type PickedImage } from "nsh/picker";
+import { Picker, type PickedImage } from "nsh";
 
 function App() {
   const result = signal("not picked");

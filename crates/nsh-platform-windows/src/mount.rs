@@ -81,7 +81,7 @@ impl Mounter {
     /// The batch is applied.
     pub(crate) fn end_batch(&mut self, surface: &Rc<Surface>) {
         self.layout_animation = None;
-        crate::selection_area::end_batch(surface);
+        crate::selectable_view::end_batch(surface);
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
     }
@@ -103,7 +103,7 @@ impl Mounter {
                 | MountItem::Delete { .. }
                 | MountItem::ViewProps { .. }
         ) {
-            crate::selection_area::tree_changed();
+            crate::selectable_view::tree_changed();
         }
         match item {
             MountItem::Create { id, kind } => {
