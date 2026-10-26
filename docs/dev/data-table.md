@@ -32,6 +32,9 @@ The table is a hit layer, a body and a header (`view.rs`):
   columns (which move both ways). The cells a scroll needs come with the next commit, which moves the body with them;
 - the *header* above it is interactive: group labels, titles, resize handles and the drop line of a column being moved.
 
+The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
+remain visible at the fixed boundary.
+
 Rows come from `RowWindow` (`window.rs`, `reaching(margin, ahead)`), columns from the same with a reach of 1 and 3, so
 a scroll inside the window made commits a few mount items only.
 

@@ -58,7 +58,7 @@ function App() {
             columns={columns.map((column) => ({ ...column, fitPadding: dataTableFitPadding }))}
             classes={dataTableClasses}
             data={rows()}
-            rowHeader
+            rowHeader={false}
             stripe
             cellSelectable={mode() === "cell"}
             sort={sort()}

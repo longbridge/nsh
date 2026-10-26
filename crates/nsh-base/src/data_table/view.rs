@@ -494,13 +494,13 @@ fn body(dt: Dt, custom: bool) -> impl IntoElement {
         .overflow_hidden()
         .pointer_events(PointerEvents::None)
         .child(region(scroll_dt, Region::Scroll, w, custom))
+        .child(edge(dt.clone(), props, false))
         .child(region(fixed_dt, Region::Fixed, w, custom))
         .child(region(lead_dt, Region::Lead, w, custom))
-        .child(edge(dt.clone(), props))
 }
 
 /// The line at the fixed columns' trailing edge.
-fn edge(dt: Dt, props: DataTableProps) -> impl IntoElement {
+fn edge(dt: Dt, props: DataTableProps, in_row: bool) -> impl IntoElement {
     let left_dt = dt.clone();
     let shown = {
         let dt = dt.clone();
@@ -516,7 +516,11 @@ fn edge(dt: Dt, props: DataTableProps) -> impl IntoElement {
                 .w(px(1.0))
                 .left(move || {
                     let g = dt.geo();
-                    Length::from(px(g.lead + g.fixed - 1.0))
+                    Length::from(px(if in_row {
+                        g.fixed - 1.0
+                    } else {
+                        g.lead + g.fixed - 1.0
+                    }))
                 }),
             props,
             DataTablePart::FixedEdge,
@@ -760,6 +764,9 @@ fn body_row(
             .child(row_number(dt, row)),
         Region::Fixed => el
             .w(move || Length::from(px(width_dt.geo().fixed)))
+            // Above the row background, below the cells: a selected cell's
+            // trailing border must cover the fixed-column separator.
+            .child(edge(dt.clone(), props, true))
             .child(each(
                 w.fixed_cols,
                 |def: &usize| *def,

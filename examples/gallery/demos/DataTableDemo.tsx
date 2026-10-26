@@ -330,6 +330,7 @@ export function DataTableDemo() {
         rowHeight={28}
         fontSize={13}
         stripe={stripe()}
+        rowHeader={false}
         cellSelectable={mode() === "cell"}
         sort={sort()}
         onSortChange={(next) => {
