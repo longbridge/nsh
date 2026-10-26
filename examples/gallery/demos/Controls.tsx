@@ -1,5 +1,5 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, NumberInput, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
@@ -630,6 +630,109 @@ export function Controls() {
     );
   }
 
+  function Quantities() {
+    const seats = signal<number | null>(2);
+    const price = signal<number | null>(24.5);
+    const locked = signal(false);
+    // One recessed well per input: a stronger border under the pointer and
+    // the keyboard's focus ring while its field edits (`focus-within:`);
+    // the buttons light up under the pointer and while pressed (still with
+    // reduced motion) and fade where a step does nothing (at the minimum
+    // or maximum) or while the input is locked, without their hover.
+    const frame = [
+      pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+      "flex-row items-stretch overflow-hidden border border-input bg-field",
+      "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+    ].join(" ");
+    const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+    const field = () => ({
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 8,
+      fontSize: size.label,
+      color: colors.text,
+      placeholderColor: colors.faint,
+      fontVariant: ["tabular-nums" as const],
+    });
+    /** A step button's glyph: the gallery's icon, in the muted text color. */
+    function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+      return <Icon name={props.name} size={props.size} tint={colors.muted} />;
+    }
+    /** A quantity: its label and the input at the trailing edge. */
+    function Amount(props: { label: string; detail: string; first?: boolean; children: JSX.Element }) {
+      return (
+        <View style={row(!!props.first)}>
+          <Label label={props.label} detail={props.detail} />
+          <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+        </View>
+      );
+    }
+    const show = (v: number | null) => (v === null ? "none" : `${v}`);
+    return (
+      <Card icon="controls" title="Number input" subtitle="Typed or stepped: the app owns the value">
+        <View>
+          <Amount first label="Seats" detail="1 to 8 per booking">
+            <NumberInput
+              value={seats()}
+              min={1}
+              max={8}
+              disabled={locked()}
+              accessibilityLabel="Seats"
+              onChange={(next) => {
+                seats.set(next);
+                last.set(`Seats: ${show(next)}`);
+              }}
+              class={`${frame} disabled:opacity-50`}
+              inputStyle={{ ...field(), textAlign: "center" }}
+              decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
+              incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
+              decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
+              incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
+            />
+          </Amount>
+          <Amount label="Price" detail="Steps of 0.5">
+            <NumberInput
+              value={price()}
+              min={0}
+              step={0.5}
+              placeholder="Free"
+              accessibilityLabel="Price"
+              controlsRight
+              onChange={(next) => {
+                price.set(next);
+                last.set(`Price: ${show(next)}`);
+              }}
+              class={frame}
+              inputStyle={{ ...field(), paddingLeft: 4 }}
+              controlsClass={`${pointer ? "w-6" : "w-9"} border-l border-line`}
+              incrementButtonClass={`flex-1 ${press} border-b border-line`}
+              decrementButtonClass={`flex-1 ${press}`}
+              incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
+              decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
+              prefix={
+                <View style={{ height: "100%", justifyContent: "center", paddingLeft: 10 }}>
+                  <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>$</Text>
+                </View>
+              }
+            />
+          </Amount>
+        </View>
+        <View style={{ flexDirection: "row", gap: size.gap, marginTop: size.padding, alignSelf: pointer ? "flex-start" : "stretch" }}>
+          <Button
+            label={locked() ? "Unlock seats" : "Lock seats"}
+            variant="secondary"
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            onPress={() => {
+              locked.set(!locked());
+              last.set(locked() ? "Seats: locked" : "Seats: unlocked");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -638,5 +741,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Quantities, Last]} />;
 }

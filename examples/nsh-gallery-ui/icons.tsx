@@ -24,9 +24,12 @@ export type IconName =
   | "stocks"
   | "chat"
   | "chevron"
+  | "chevron-up"
+  | "chevron-down"
   | "back"
   | "check"
   | "plus"
+  | "minus"
   | "arrow-up"
   | "arrow-down"
   | "play"
@@ -190,12 +193,15 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [7, 10.5, 11, 10.5]);
   },
   chevron: (c) => line(c, [7.5, 5, 12.5, 10, 7.5, 15]),
+  "chevron-up": (c) => line(c, [5, 12.5, 10, 7.5, 15, 12.5]),
+  "chevron-down": (c) => line(c, [5, 7.5, 10, 12.5, 15, 7.5]),
   back: (c) => line(c, [12.5, 5, 7.5, 10, 12.5, 15]),
   check: (c) => line(c, [4.5, 10.5, 8.5, 14, 15.5, 6]),
   plus: (c) => {
     line(c, [10, 4, 10, 16]);
     line(c, [4, 10, 16, 10]);
   },
+  minus: (c) => line(c, [4, 10, 16, 10]),
   "arrow-up": (c) => {
     line(c, [10, 16, 10, 4]);
     line(c, [5, 9, 10, 4, 15, 9]);

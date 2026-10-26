@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Slider`,
-//! `Switch`, `Tab` in `Tabs`), a progress bar (`Progress`), disclosure (`Collapsible`),
+//! controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a
+//! `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`), a progress bar (`Progress`), disclosure (`Collapsible`),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -27,6 +27,7 @@ pub mod editor;
 mod keys;
 mod menu;
 mod navigation;
+mod number_input;
 mod numeric;
 pub mod plot;
 mod popover;
@@ -93,6 +94,9 @@ pub use crate::{
         context_menu, menu, menu_item, menu_separator, submenu,
     },
     navigation::{dialog, nav_page, nav_stack},
+    number_input::{
+        NumberInput, NumberInputElement, NumberInputEvent, NumberInputProps, number_input,
+    },
     popover::{Popover, PopoverElement, PopoverEvent, PopoverProps, popover},
     popup::OpenChangeReason,
     progress::{Progress, ProgressElement, ProgressProps, progress},
@@ -170,7 +174,7 @@ pub mod parts {
 
     use crate::{
         AlertDialog, Button, Checkbox, Collapsible, ContextMenu, DataTable, DiffView, DockArea,
-        Editor, Menu, MenuItem, MenuSeparator, Popover, Progress, Radio, RadioGroup,
+        Editor, Menu, MenuItem, MenuSeparator, NumberInput, Popover, Progress, Radio, RadioGroup,
         ResizablePanel, ResizablePanelGroup, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody,
         TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView,
         Toast, ToastStack, Tooltip, plot, rich_editor, toast,
@@ -194,7 +198,7 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// checkboxes, radios, switches, sliders, tabs, collapsibles, progress,
+    /// checkboxes, radios, switches, sliders, number inputs, tabs, collapsibles, progress,
     /// menus, popovers, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
@@ -209,6 +213,7 @@ pub mod parts {
             .register::<Tooltip>()
             .register::<Checkbox>()
             .register::<Collapsible>()
+            .register::<NumberInput>()
             .register::<Radio>()
             .register::<RadioGroup>()
             .register::<Slider>()
@@ -308,6 +313,7 @@ mod tests {
                 "Menu",
                 "MenuItem",
                 "MenuSeparator",
+                "NumberInput",
                 "Popover",
                 "Progress",
                 "Radio",

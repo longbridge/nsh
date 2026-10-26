@@ -1022,6 +1022,86 @@ covers [props] Progress.trackStyle
 covers [props] Progress.indicatorClass
 covers [props] Progress.indicatorStyle
 
+# base-number-input
+tap id:case-base-number-input
+# The field: a spin button with its label and its value between `min` and
+# `max`, between the decrement and the increment the app fills.
+expect Quantity 2
+prop label:Quantity role spinbutton
+prop label:Quantity accessibilityValue min=0 max=10 now=2 text=2
+prop label:Quantity value 2
+frame label:Quantity 30 0 100 30
+style label:Quantity backgroundColor #eeeeeeff
+frame parent:text:Less 0 0 30 30
+style parent:text:Less backgroundColor #ff0000ff
+frame parent:text:More 130 0 30 30
+style parent:text:More backgroundColor #00ff00ff
+# A screen reader's increment, then the buttons: a step of 0.5 each, which
+# the app passes back and the field shows.
+event label:Quantity onAccessibilityAction actionName=increment
+expect Quantity 2.5
+prop label:Quantity accessibilityValue min=0 max=10 now=2.5 text=2.5
+prop label:Quantity value 2.5
+tap text:More
+expect Quantity 3
+tap text:Less
+expect Quantity 2.5
+# Its own value: typing reports the number the field reads as, leaving
+# the field holds it to `max`, Enter submits it. The buttons on the right,
+# the increment over the decrement.
+prop label:Amount value 4
+prop label:Amount placeholder Amount
+# Its prefix and suffix around the field.
+expect about
+expect kg
+frame parent:text:Up 0 0 30 15
+frame parent:text:Down 0 15 30 15
+style parent:parent:text:Up backgroundColor #0000ffff
+event label:Amount onFocus
+type label:Amount 0
+expect Amount 40
+event label:Amount onBlur
+expect Amount 10
+prop label:Amount value 10
+expect Events focus blur
+event label:Amount onSubmit text=10
+expect Events focus blur submit 10
+tap text:Down
+expect Amount 9
+# `disabled`: dimmed for screen readers, `disabled:` on its buttons (20
+# wide). `readonly`: its field read-only.
+prop label:Locked accessibilityState disabled=true
+frame parent:text:"Locked less" 0 0 20 30
+frame parent:text:"Locked more" 120 0 20 30
+prop label:Fixed readonly true
+covers [nsh/base] NumberInput
+covers [props] value
+covers [props] NumberInput.defaultValue
+covers [props] NumberInput.min
+covers [props] NumberInput.max
+covers [props] NumberInput.step
+covers [props] disabled
+covers [props] readonly
+covers [props] placeholder
+covers [props] accessibilityLabel
+covers [props] NumberInput.controlsRight
+covers [props] NumberInput.inputClass
+covers [props] NumberInput.inputStyle
+covers [props] NumberInput.decrementButtonClass
+covers [props] NumberInput.decrementButtonStyle
+covers [props] NumberInput.incrementButtonClass
+covers [props] NumberInput.incrementButtonStyle
+covers [props] NumberInput.controlsClass
+covers [props] NumberInput.controlsStyle
+covers [props] NumberInput.decrementButton
+covers [props] NumberInput.incrementButton
+covers [props] NumberInput.prefix
+covers [props] NumberInput.suffix
+covers [events] onChange
+covers [events] onFocus
+covers [events] onBlur
+covers [events] onSubmit
+
 # base-slider
 tap id:case-base-slider
 # Each thumb an adjustable element with its label and value, placed by

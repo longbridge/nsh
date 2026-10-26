@@ -3352,6 +3352,145 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
     assert!(after.iter().any(|b| shows(b, "Price 21-75")));
 }
 
+const BASE_NUMBER_INPUT: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { NumberInput } from "nsh/base";
+
+function App() {
+  const quantity = signal<number | null>(2);
+  return (
+    <View>
+      <NumberInput
+        value={quantity()}
+        onChange={(next) => quantity.set(next)}
+        min={0}
+        max={10}
+        step={0.5}
+        accessibilityLabel="Quantity"
+        decrementButton={<Text>Less</Text>}
+        incrementButton={<Text>More</Text>}
+        class="flex-row"
+        inputClass="w-[100px] h-[30px]"
+        incrementButtonClass="size-[30px]"
+        decrementButtonClass="size-[30px]"
+      />
+      <Text>{`Quantity ${quantity()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `NumberInput` from TSX: its field is a spin button for
+/// screen readers with its label and value, whose increment steps it (the
+/// field's text follows the app's value); an edit that is no number goes
+/// back natively, one that is reaches the app; the step buttons, hidden
+/// from screen readers and no stops of Tab, step it too.
+#[test]
+fn a_base_number_input_steps_its_field_and_refuses_text_that_is_no_number() {
+    use nsh_core::{AccessibilityRole, AccessibilityValue};
+    let (engine, rx) = start(BASE_NUMBER_INPUT);
+    let first = until(&rx, |b| shows(b, "Quantity 2"));
+    let items = || first.iter().flat_map(|b| &b.items);
+    let field = items()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: nsh_core::ViewKind::Input,
+            } => Some(*id),
+            _ => None,
+        })
+        .expect("the field");
+    let props_of = |batches: &[MountBatch], view: u32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+                _ => None,
+            })
+    };
+    let props = props_of(&first, field).expect("the field's props");
+    assert_eq!(props.accessibility.role, AccessibilityRole::Spinbutton);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Quantity"));
+    let value = |now: f32| AccessibilityValue {
+        min: Some(0.0),
+        max: Some(10.0),
+        now: Some(now),
+        text: Some(format!("{now}").into()),
+    };
+    assert_eq!(props.accessibility.value, Some(value(2.0)));
+    let text_of = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|i| match i {
+                MountItem::InputValue { id, text, count } if *id == field => {
+                    Some((text.clone(), *count))
+                }
+                _ => None,
+            })
+            .next_back()
+    };
+    assert_eq!(text_of(&first).map(|(t, _)| t).as_deref(), Some("2"));
+    let control = engine.control();
+
+    // A screen reader's increment: a step, which the app takes.
+    control.dispatch_event(
+        field,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    let after = until(&rx, |b| shows(b, "Quantity 2.5"));
+    assert_eq!(text_of(&after).map(|(t, _)| t).as_deref(), Some("2.5"));
+    assert_eq!(
+        props_of(&after, field).and_then(|p| p.accessibility.value),
+        Some(value(2.5))
+    );
+
+    // A letter: the field goes back to its number, based on that edit.
+    control.dispatch_event(
+        field,
+        EventKind::ChangeText,
+        EventPayload::Text {
+            text: "2.5a".into(),
+            count: 1,
+        },
+    );
+    let after = until(&rx, |b| text_of(std::slice::from_ref(b)).is_some());
+    assert_eq!(text_of(&after), Some(("2.5".to_owned(), 1)));
+    // A number: the app hears it, and nothing goes back.
+    control.dispatch_event(
+        field,
+        EventKind::ChangeText,
+        EventPayload::Text {
+            text: "7".into(),
+            count: 2,
+        },
+    );
+    let after = until(&rx, |b| shows(b, "Quantity 7"));
+    assert_eq!(text_of(&after), None);
+
+    // The step buttons: hidden from screen readers, no Tab stops; the
+    // increment (after the field) steps.
+    let buttons: Vec<u32> = items()
+        .filter_map(|i| match i {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(buttons.len(), 2, "a button each way");
+    for &button in &buttons {
+        let props = props_of(&first, button).expect("the button's props");
+        assert!(props.accessibility.hidden);
+        assert_eq!(props.focusable, Some(false));
+    }
+    control.dispatch_event(buttons[1], EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| shows(b, "Quantity 7.5"));
+    assert_eq!(text_of(&after).map(|(t, _)| t).as_deref(), Some("7.5"));
+}
+
 const TAB_BAR: &str = r##"import { mount, signal } from "nsh";
 import { TabBar } from "nsh/mobile";
 

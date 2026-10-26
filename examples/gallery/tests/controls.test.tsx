@@ -3,7 +3,8 @@
 // selection, a plan picker of radios with a disabled plan, tabs that switch
 // a section, collapsible sections whose content is kept while collapsed,
 // progress bars of a transfer the app drives and of one of unknown size,
-// sliders of a level and of a price range.
+// sliders of a level and of a price range, number inputs of seats and a
+// price.
 // Every row is the control, its label included; on a desktop the plans
 // and the tabs are one stop of Tab each, moved through with the arrow
 // keys. Also the
@@ -157,6 +158,33 @@ test("a slider reports the value the app owns, a range's thumbs never cross, and
   await app.press("Unmute");
   await app.waitFor("Volume: unmuted");
   expect(app.texts()).toContain("100%");
+});
+
+test("a number input steps with the keys, holds a typed number to its range, and a locked one takes neither", async () => {
+  expect(app.count("role:spinbutton")).toBe(2);
+  await app.type("label:Seats", "");
+  await app.keyboard.press("up");
+  await app.waitFor("Seats: 3");
+  // Typed past the maximum: reported as typed, then held to it when the
+  // field is left for the price's (a phone's Tab moves nothing).
+  await app.type("label:Seats", "0");
+  await app.waitFor("Seats: 30");
+  await app.type("label:Price", "");
+  await app.waitFor("Seats: 8");
+  // A page down is ten steps, stopped at the minimum.
+  await app.type("label:Seats", "");
+  await app.keyboard.press("pagedown");
+  await app.waitFor("Seats: 1");
+  await app.type("label:Price", "");
+  await app.keyboard.press("down");
+  await app.waitFor("Price: 24");
+  // Locked: the seats' field takes nothing.
+  await app.press("Lock seats");
+  await app.waitFor("Seats: locked");
+  expect(app.enabled("label:Seats")).toBe(false);
+  await app.press("Unlock seats");
+  await app.waitFor("Seats: unlocked");
+  expect(app.enabled("label:Seats")).toBe(true);
 });
 
 test("the gallery's segmented control is a tab list", async () => {
