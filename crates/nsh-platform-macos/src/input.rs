@@ -473,6 +473,12 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     }
 }
 
+/// Where the mouse last was (root coordinates), while it is over the root:
+/// where the pointer events the root got put it, the test agent's too.
+pub(crate) fn pointer_location(surface: &Surface) -> Option<(f32, f32)> {
+    surface.input.last.get()
+}
+
 /// Sets the cursor again where the mouse is (what is under it changed).
 fn refresh_cursor(surface: &Surface) {
     if let Some((x, y)) = surface.input.last.get() {
@@ -557,6 +563,19 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let (x, y) = (p.x as f32, p.y as f32);
     let time = event.timestamp() * 1000.0;
     let input = &surface.input;
+    // Every button's press and release puts the mouse there, the secondary
+    // ones' too: a menu the app opens on a right click without a place
+    // (`Menu.popup()`) opens where that click was, not where an earlier
+    // press left it (`chrome::popup`).
+    if matches!(
+        ty,
+        NSEventType::RightMouseDown
+            | NSEventType::RightMouseUp
+            | NSEventType::OtherMouseDown
+            | NSEventType::OtherMouseUp
+    ) {
+        input.last.set(Some((x, y)));
+    }
     match ty {
         // Control-click is the secondary click on macOS.
         NSEventType::LeftMouseDown
@@ -564,6 +583,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 .modifierFlags()
                 .contains(NSEventModifierFlags::Control) =>
         {
+            input.last.set(Some((x, y)));
             context_menu(surface, x, y, event.modifierFlags());
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
