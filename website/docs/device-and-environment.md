@@ -22,6 +22,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
 | `languages()` | `languages()` (`nsh`) | The user's preferred languages, most preferred first (`["de-DE", "en-US"]`) ([Preferred languages](#preferred-languages)). |
+| `hour_cycle()`, `first_day_of_week()`, `measurement_system()`, `temperature_unit()` | `hourCycle()`, `firstDayOfWeek()`, `measurementSystem()`, `temperatureUnit()` (`nsh`) | 12- or 24-hour time, the day weeks start on, the units of measurements and of temperatures ([Regional preferences](#regional-preferences)). |
 | `time_zone()` | `timeZone()` (`nsh`) | The device's time zone as the system names it (`"Europe/Berlin"`) ([Time zone](#time-zone)). |
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
@@ -276,6 +277,51 @@ const textLanguage = () =>
 ```
 
 An app shown inside a native app that sets its own language has that language first. In tests, `open`'s `languages` sets the list (`[locale]` otherwise) and `app.setLanguages(["ja-JP", "en-US"])` changes it ([Testing](./testing-and-trace.md#steps)).
+
+## Regional preferences
+
+The systems keep a few settings of how the user reads times, weeks and measurements beside the language (Language & Region on iPhone and Mac, regional preferences on Android, Region on Windows), and the app reads them reactively:
+
+- `hour_cycle()` (TSX: `hourCycle()`): 12- or 24-hour time, as `Intl` names its hour cycles: `h12` (`12:30 PM`), `h23` (`00:30`), and the rarer `h11` (`0:30 PM`) and `h24` (`24:30`).
+- `first_day_of_week()` (TSX: `firstDayOfWeek()`): the day weeks start on, a calendar's first column; TSX numbers it as ISO 8601 does, 1 for Monday to 7 for Sunday.
+- `measurement_system()` (TSX: `measurementSystem()`): `metric`, `us` (feet, miles, pounds, gallons) or `uk` (metric, with miles and pints).
+- `temperature_unit()` (TSX: `temperatureUnit()`): `celsius` or `fahrenheit`.
+
+Each is the system's setting where the user made one, else the region's own (as the Unicode CLDR gives them: 12-hour time and weeks from Sunday in the US, 24-hour time and weeks from Monday in Germany). What read them updates when the user changes them.
+
+```rust tabs
+use nsh_core::{platform::TemperatureUnit, prelude::*};
+
+/// A temperature in degrees Celsius, in the user's unit.
+fn temperature(celsius: f32) -> String {
+    match temperature_unit() {
+        TemperatureUnit::Celsius => format!("{celsius:.0} °C"),
+        TemperatureUnit::Fahrenheit => format!("{:.0} °F", celsius * 9.0 / 5.0 + 32.0),
+    }
+}
+
+/// A calendar's columns from the user's first day: 1 for Monday to 7 for
+/// Sunday.
+fn week_columns() -> [u8; 7] {
+    let first = first_day_of_week().number();
+    std::array::from_fn(|i| (first - 1 + i as u8) % 7 + 1)
+}
+```
+
+```tsx tabs
+import { firstDayOfWeek, hourCycle, temperatureUnit } from "nsh";
+
+const time = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hourCycle() });
+
+const temperature = (celsius: number) =>
+  temperatureUnit() === "fahrenheit" ? `${Math.round((celsius * 9) / 5 + 32)} °F` : `${Math.round(celsius)} °C`;
+
+// A calendar's columns from the user's first day: 1 for Monday to 7 for Sunday.
+const weekColumns = () => Array.from({ length: 7 }, (_, i) => ((firstDayOfWeek() - 1 + i) % 7) + 1);
+```
+
+`Intl` writes times in the locale's own hour cycle: pass `hourCycle()` as its `hourCycle` option, as above, to write them as the user reads them. On the web, the browser tells no user settings of these: the hour cycle and the first day of the week are the browser's for its language, the units its region's. In tests, `open`'s `hourCycle`, `firstDayOfWeek`, `measurementSystem` and `temperatureUnit` set them (the locale's region's otherwise) and `app.setRegionalPreferences({ hourCycle: "h23" })` changes them ([Testing](./testing-and-trace.md#steps)).
 
 ## Time zone
 

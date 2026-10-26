@@ -23,7 +23,7 @@ use nsh_core::{
     ApproxTextEngine, MountBatch,
     element::{Callback, Registry, Root},
     geometry::{Points, Size},
-    platform::{Idiom, Languages, Locale, Os, TimeZone},
+    platform::{Idiom, Languages, Locale, Os, RegionalPreferences, TimeZone},
     prelude::timer,
 };
 use nsh_dev::protocol::TestIdiom;
@@ -513,6 +513,7 @@ impl Session {
             ),
             None => None,
         };
+        let regional = launch.regional.pins(&format!("open({entry:?})"))?;
         let storage = MemoryStorage::new(launch.storage.0);
         let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -528,7 +529,7 @@ impl Session {
             None => None,
         };
         let default = EngineConfig::new(app);
-        let config = EngineConfig {
+        let mut config = EngineConfig {
             viewport: nsh_core::Size::new(
                 launch.width.unwrap_or(default.viewport.width),
                 launch.height.unwrap_or(default.viewport.height),
@@ -550,6 +551,8 @@ impl Session {
                 // The device's language is its locale's unless the test
                 // lists others.
                 languages: languages.unwrap_or(Languages::one(locale.unwrap_or(Locale::EN_US))),
+                // The locale's region's, but for what the test sets.
+                regional: RegionalPreferences::of(locale.unwrap_or(Locale::EN_US)),
                 time_zone: time_zone.unwrap_or(TimeZone::UTC),
                 reduce_motion: launch.reduced_motion.unwrap_or(false),
                 os: match platform {
@@ -572,6 +575,7 @@ impl Session {
             host: launch.host,
             ..default
         };
+        regional.apply(&mut config.environment);
         let mut app = Headless::start(config)
             .map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
         if let Some(host) = page_host {
@@ -631,6 +635,7 @@ impl Session {
         {
             return Err(format!("open({entry:?}): {tags:?} names no language"));
         }
+        let regional = launch.regional.pins(&format!("open({entry:?})"))?;
         check_launch(entry, &launch, self.run.target.as_ref())?;
         // What the test gives is pinned, its defaults included; what it
         // leaves out is the platform's.
@@ -641,6 +646,10 @@ impl Session {
         environment.locale = launch.locale.clone();
         environment.time_zone = launch.time_zone.clone();
         environment.languages = launch.languages.clone();
+        environment.hour_cycle = regional.hour_cycle.map(|c| c.name().to_owned());
+        environment.first_day_of_week = regional.first_day_of_week.map(|d| d.number());
+        environment.measurement_system = regional.measurement_system.map(|s| s.name().to_owned());
+        environment.temperature_unit = regional.temperature_unit.map(|u| u.name().to_owned());
         environment.reduced_motion = launch.reduced_motion;
         environment.safe_area = launch.safe_area.map(|safe_area| {
             [
@@ -1165,6 +1174,7 @@ mod tests {
             locale: None,
             time_zone: None,
             languages: None,
+            regional: Default::default(),
             reduced_motion: None,
             platform: None,
             clock: None,

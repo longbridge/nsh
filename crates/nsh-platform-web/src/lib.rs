@@ -461,6 +461,29 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     {
         env.languages = languages;
     }
+    if let Some(regional) = value.get("regional") {
+        // The region's preferences, with the browser's hour cycle and first
+        // day of the week where it has them.
+        let locale = regional.get("locale").and_then(|v| v.as_str());
+        let mut preferences =
+            nsh_core::platform::RegionalPreferences::parse(locale.unwrap_or(env.locale.as_str()));
+        if let Some(cycle) = regional
+            .get("hourCycle")
+            .and_then(|v| v.as_str())
+            .and_then(nsh_core::platform::HourCycle::parse)
+        {
+            preferences.hour_cycle = cycle;
+        }
+        if let Some(day) = regional
+            .get("firstDay")
+            .and_then(|v| v.as_u64())
+            .and_then(|d| u8::try_from(d).ok())
+            .and_then(nsh_core::platform::Weekday::from_number)
+        {
+            preferences.first_day_of_week = day;
+        }
+        env.regional = preferences;
+    }
     if let Some(zone) = value
         .get("timeZone")
         .and_then(|v| v.as_str())
@@ -506,6 +529,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         let e = &mut app.environment;
         e.locale = env.locale;
         e.languages = env.languages;
+        e.regional = env.regional;
         e.time_zone = env.time_zone;
         e.rtl = env.rtl;
         e.apple_keyboard = env.apple_keyboard;

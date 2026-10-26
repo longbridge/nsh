@@ -243,6 +243,9 @@ pub struct Environment {
     /// The user's preferred languages, most preferred first (the system's
     /// list: the language apps show their text in, then its fallbacks).
     pub languages: Languages,
+    /// The user's regional preferences: 12- or 24-hour time, the first day
+    /// of the week, the measurement system and the temperature unit.
+    pub regional: RegionalPreferences,
     /// The device's time zone, as the system names it (`Europe/Berlin`).
     pub time_zone: TimeZone,
     /// The app embedding NSH answers `nsh/host`'s calls
@@ -318,6 +321,7 @@ impl Default for Environment {
             ctrl_for_command: false,
             locale: Locale::EN_US,
             languages: Languages::EN_US,
+            regional: RegionalPreferences::EN_US,
             time_zone: TimeZone::UTC,
             host: false,
             lifecycle: Lifecycle::Active,
@@ -428,6 +432,17 @@ impl Locale {
     pub fn as_str(&self) -> &str {
         // ASCII, as parsed.
         std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("en-US")
+    }
+
+    /// The language subtag (`en`).
+    pub fn language(&self) -> &str {
+        self.as_str().split('-').next().unwrap_or_default()
+    }
+
+    /// The region subtag (`US`, `419`), if the tag has one.
+    pub fn region(&self) -> Option<&str> {
+        // What follows the language is a script (4 letters) or a region.
+        self.as_str().split('-').skip(1).find(|s| s.len() != 4)
     }
 }
 
@@ -678,6 +693,390 @@ impl std::fmt::Display for TimeZone {
     }
 }
 
+/// How the user has times, weeks and measurements shown: the regional
+/// preferences the systems keep beside the language (Language & Region on
+/// Apple platforms, Android's regional preferences, Windows' region
+/// settings). Where the user set none, they are the region's
+/// ([`RegionalPreferences::of`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RegionalPreferences {
+    /// 12- or 24-hour time.
+    pub hour_cycle: HourCycle,
+    /// The day weeks start on: a calendar's first column.
+    pub first_day_of_week: Weekday,
+    /// The units of lengths, weights and volumes.
+    pub measurement_system: MeasurementSystem,
+    /// The unit of temperatures.
+    pub temperature_unit: TemperatureUnit,
+}
+
+impl RegionalPreferences {
+    /// `en-US`'s (12-hour time, weeks from Sunday, US units, Fahrenheit),
+    /// the default when a platform reports none.
+    pub const EN_US: RegionalPreferences = RegionalPreferences {
+        hour_cycle: HourCycle::H12,
+        first_day_of_week: Weekday::Sunday,
+        measurement_system: MeasurementSystem::Us,
+        temperature_unit: TemperatureUnit::Fahrenheit,
+    };
+
+    /// The preferences of `locale`'s region, as CLDR (48) gives them. A
+    /// locale without a region has the world's: 24-hour time, weeks from
+    /// Monday, metric units and Celsius.
+    pub fn of(locale: Locale) -> RegionalPreferences {
+        Self::of_region(locale.language(), locale.region().unwrap_or("001"))
+    }
+
+    /// The preferences a platform locale identifier names: its region's
+    /// ([`Self::of`]; the `rg` keyword's region in place of its own), with
+    /// what its Unicode extension keywords set: `hc` (the hour cycle), `fw`
+    /// (the first day of the week), `ms` (the measurement system) and `mu`
+    /// (the temperature unit), written as BCP 47 does
+    /// (`en-US-u-fw-mon-mu-celsius`, Android's regional preferences) or as
+    /// ICU does (`en_US@hours=h23;fw=mon;rg=gbzzzz`). Values it does not
+    /// know are left out.
+    pub fn parse(identifier: &str) -> RegionalPreferences {
+        let identifier = identifier.trim();
+        let (tag, icu) = identifier.split_once('@').unwrap_or((identifier, ""));
+        let mut keywords = Keywords::default();
+        // BCP 47's `-u-` extension: keys of two characters, each followed
+        // by its value.
+        let mut extension = false;
+        let mut key = "";
+        for subtag in tag.split('.').next().unwrap_or_default().split(['-', '_']) {
+            if subtag.len() == 1 {
+                extension = subtag.eq_ignore_ascii_case("u");
+                key = "";
+            } else if extension && subtag.len() == 2 {
+                key = subtag;
+            } else if extension && !key.is_empty() {
+                keywords.set(key, subtag);
+                key = "";
+            }
+        }
+        for keyword in icu.split(';') {
+            if let Some((key, value)) = keyword.split_once('=') {
+                keywords.set(key.trim(), value.trim());
+            }
+        }
+        let locale = Locale::parse(identifier);
+        let language = locale.as_ref().map_or("", Locale::language);
+        let region = match &keywords.region {
+            Some((bytes, len)) => std::str::from_utf8(&bytes[..*len]).unwrap_or("001"),
+            None => locale.as_ref().and_then(Locale::region).unwrap_or("001"),
+        };
+        let own = Self::of_region(language, region);
+        RegionalPreferences {
+            hour_cycle: keywords.hour_cycle.unwrap_or(own.hour_cycle),
+            first_day_of_week: keywords.first_day_of_week.unwrap_or(own.first_day_of_week),
+            measurement_system: keywords
+                .measurement_system
+                .unwrap_or(own.measurement_system),
+            temperature_unit: keywords.temperature_unit.unwrap_or(own.temperature_unit),
+        }
+    }
+
+    /// CLDR's preferences of `region` (`001`: the world's), for `language`.
+    fn of_region(language: &str, region: &str) -> RegionalPreferences {
+        let listed = |regions: &[&str]| regions.binary_search(&region).is_ok();
+        RegionalPreferences {
+            hour_cycle: match (language, region) {
+                // Where a language's differs from its region's.
+                ("fr", "CA") | ("ku", "SY") => HourCycle::H23,
+                ("ar" | "en", "001") => HourCycle::H12,
+                _ if listed(HOUR12_REGIONS) => HourCycle::H12,
+                _ => HourCycle::H23,
+            },
+            first_day_of_week: if listed(SUNDAY_REGIONS) {
+                Weekday::Sunday
+            } else if listed(SATURDAY_REGIONS) {
+                Weekday::Saturday
+            } else if listed(FRIDAY_REGIONS) {
+                Weekday::Friday
+            } else {
+                Weekday::Monday
+            },
+            measurement_system: match region {
+                "LR" | "US" => MeasurementSystem::Us,
+                "GB" | "MM" => MeasurementSystem::Uk,
+                _ => MeasurementSystem::Metric,
+            },
+            temperature_unit: match region {
+                "BS" | "BZ" | "KY" | "PR" | "PW" | "US" => TemperatureUnit::Fahrenheit,
+                _ => TemperatureUnit::Celsius,
+            },
+        }
+    }
+}
+
+impl Default for RegionalPreferences {
+    fn default() -> Self {
+        Self::EN_US
+    }
+}
+
+/// What a locale identifier's extension keywords set.
+#[derive(Default)]
+struct Keywords {
+    hour_cycle: Option<HourCycle>,
+    first_day_of_week: Option<Weekday>,
+    measurement_system: Option<MeasurementSystem>,
+    temperature_unit: Option<TemperatureUnit>,
+    /// `rg`'s region, upper-cased, and its length.
+    region: Option<([u8; 3], usize)>,
+}
+
+impl Keywords {
+    /// Reads `key`'s `value` (BCP 47's key or ICU's name for it).
+    fn set(&mut self, key: &str, value: &str) {
+        let is = |names: &[&str]| names.iter().any(|n| key.eq_ignore_ascii_case(n));
+        let value_is = |name: &str| value.eq_ignore_ascii_case(name);
+        if is(&["hc", "hours"]) {
+            self.hour_cycle = HourCycle::parse(value).or(self.hour_cycle);
+        } else if is(&["fw"]) {
+            self.first_day_of_week = Weekday::ALL
+                .into_iter()
+                .find(|d| value_is(d.code()))
+                .or(self.first_day_of_week);
+        } else if is(&["ms", "measure"]) {
+            self.measurement_system = match () {
+                _ if value_is("metric") => Some(MeasurementSystem::Metric),
+                _ if value_is("ussystem") => Some(MeasurementSystem::Us),
+                _ if value_is("uksystem") => Some(MeasurementSystem::Uk),
+                _ => self.measurement_system,
+            };
+        } else if is(&["mu"]) {
+            // BCP 47 values have at most 8 characters: `fahrenhe`.
+            let unit = match value_is("fahrenhe") {
+                true => Some(TemperatureUnit::Fahrenheit),
+                false => TemperatureUnit::parse(value),
+            };
+            self.temperature_unit = unit.or(self.temperature_unit);
+        } else if is(&["rg"]) {
+            // A subdivision: the region (`gb`, `419`), then `zzzz` for all
+            // of it.
+            let bytes = value.as_bytes();
+            let len = match bytes {
+                [a, b, c, ..] if [a, b, c].iter().all(|b| b.is_ascii_digit()) => 3,
+                [a, b, ..] if a.is_ascii_alphabetic() && b.is_ascii_alphabetic() => 2,
+                _ => return,
+            };
+            let mut region = [0u8; 3];
+            for (to, from) in region.iter_mut().zip(bytes) {
+                *to = from.to_ascii_uppercase();
+            }
+            self.region = Some((region, len));
+        }
+    }
+}
+
+/// The regions whose times are 12-hour (`timeData`'s preferred `h`).
+const HOUR12_REGIONS: &[&str] = &[
+    "419", "AE", "AG", "AL", "AR", "AS", "AU", "BB", "BD", "BH", "BM", "BN", "BO", "BS", "BT",
+    "CA", "CL", "CO", "CR", "CU", "CY", "DJ", "DM", "DO", "DZ", "EC", "EG", "EH", "ER", "ET", "FJ",
+    "FM", "GD", "GH", "GM", "GR", "GT", "GU", "GY", "HK", "HN", "IN", "IQ", "JM", "JO", "KH", "KI",
+    "KN", "KP", "KR", "KW", "KY", "LB", "LC", "LR", "LS", "LY", "MH", "MO", "MP", "MR", "MW", "MX",
+    "MY", "NA", "NI", "NZ", "OM", "PA", "PE", "PG", "PH", "PK", "PR", "PS", "PW", "PY", "QA", "SA",
+    "SB", "SD", "SG", "SL", "SO", "SS", "SV", "SY", "SZ", "TC", "TD", "TN", "TO", "TT", "TW", "UM",
+    "US", "UY", "VC", "VE", "VG", "VI", "VU", "WS", "YE", "ZM",
+];
+
+/// The regions whose weeks start on Sunday (`weekData`'s `firstDay`).
+const SUNDAY_REGIONS: &[&str] = &[
+    "AG", "AS", "BD", "BR", "BS", "BT", "BW", "BZ", "CA", "CO", "DM", "DO", "ET", "GT", "GU", "HK",
+    "HN", "ID", "IL", "IN", "IS", "JM", "JP", "KE", "KH", "KR", "LA", "MH", "MM", "MO", "MT", "MX",
+    "MZ", "NI", "NP", "PA", "PE", "PH", "PK", "PR", "PT", "PY", "SA", "SG", "SV", "TH", "TT", "TW",
+    "UM", "US", "VE", "VI", "WS", "YE", "ZA", "ZW",
+];
+
+/// The regions whose weeks start on Saturday.
+const SATURDAY_REGIONS: &[&str] = &[
+    "AF", "BH", "DJ", "DZ", "EG", "IQ", "IR", "JO", "KW", "LY", "OM", "QA", "SD", "SY",
+];
+
+/// The regions whose weeks start on Friday.
+const FRIDAY_REGIONS: &[&str] = &["MV"];
+
+/// How hours are counted, as `Intl`'s `hourCycle` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, crate::element::PropEnum)]
+pub enum HourCycle {
+    /// 12-hour time from 0 to 11 (`h11`: `0:30 PM`).
+    H11,
+    /// 12-hour time from 1 to 12 (`h12`: `12:30 PM`).
+    #[default]
+    H12,
+    /// 24-hour time from 0 to 23 (`h23`: `00:30`).
+    H23,
+    /// 24-hour time from 1 to 24 (`h24`: `24:30`).
+    H24,
+}
+
+impl HourCycle {
+    /// Its `Intl` name: `"h11"`, `"h12"`, `"h23"` or `"h24"`.
+    pub fn name(self) -> &'static str {
+        match self {
+            HourCycle::H11 => "h11",
+            HourCycle::H12 => "h12",
+            HourCycle::H23 => "h23",
+            HourCycle::H24 => "h24",
+        }
+    }
+
+    /// The cycle `Intl` names `name` (`"h23"`, in any case).
+    pub fn parse(name: &str) -> Option<HourCycle> {
+        [
+            HourCycle::H11,
+            HourCycle::H12,
+            HourCycle::H23,
+            HourCycle::H24,
+        ]
+        .into_iter()
+        .find(|c| name.eq_ignore_ascii_case(c.name()))
+    }
+
+    /// The cycle of a date pattern's hour field, in the letters of
+    /// Unicode's patterns (Apple's and ICU's date formats, Windows' time
+    /// formats): `h` (`h:mm a` is `h12`), `H` (`HH:mm` is `h23`), `K` and
+    /// `k`. Quoted text (`HH 'Uhr'`) is not read; `None` without an hour.
+    pub fn of_pattern(pattern: &str) -> Option<HourCycle> {
+        let mut quoted = false;
+        pattern.chars().find_map(|c| match c {
+            '\'' => {
+                quoted = !quoted;
+                None
+            }
+            _ if quoted => None,
+            'h' => Some(HourCycle::H12),
+            'H' => Some(HourCycle::H23),
+            'K' => Some(HourCycle::H11),
+            'k' => Some(HourCycle::H24),
+            _ => None,
+        })
+    }
+
+    /// 12-hour time: times have AM and PM.
+    pub fn twelve_hour(self) -> bool {
+        matches!(self, HourCycle::H11 | HourCycle::H12)
+    }
+}
+
+/// A day of the week.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Weekday {
+    /// Monday (1).
+    Monday = 1,
+    /// Tuesday (2).
+    Tuesday,
+    /// Wednesday (3).
+    Wednesday,
+    /// Thursday (4).
+    Thursday,
+    /// Friday (5).
+    Friday,
+    /// Saturday (6).
+    Saturday,
+    /// Sunday (7).
+    Sunday,
+}
+
+impl Weekday {
+    /// The days, from Monday.
+    const ALL: [Weekday; 7] = [
+        Weekday::Monday,
+        Weekday::Tuesday,
+        Weekday::Wednesday,
+        Weekday::Thursday,
+        Weekday::Friday,
+        Weekday::Saturday,
+        Weekday::Sunday,
+    ];
+
+    /// Its ISO 8601 number, TS's: 1 for Monday to 7 for Sunday (as
+    /// `Intl.Locale`'s `firstDay` and Temporal's `dayOfWeek` count).
+    pub fn number(self) -> u8 {
+        self as u8
+    }
+
+    /// The day of an ISO 8601 number (1 for Monday to 7 for Sunday).
+    pub fn from_number(number: u8) -> Option<Weekday> {
+        Self::ALL.get(usize::from(number).checked_sub(1)?).copied()
+    }
+
+    /// Unicode's code for it (`mon`), as the `fw` keyword writes it.
+    fn code(self) -> &'static str {
+        match self {
+            Weekday::Monday => "mon",
+            Weekday::Tuesday => "tue",
+            Weekday::Wednesday => "wed",
+            Weekday::Thursday => "thu",
+            Weekday::Friday => "fri",
+            Weekday::Saturday => "sat",
+            Weekday::Sunday => "sun",
+        }
+    }
+}
+
+/// The units of lengths, weights and volumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, crate::element::PropEnum)]
+pub enum MeasurementSystem {
+    /// Metres, kilograms and litres (`metric`).
+    #[default]
+    Metric,
+    /// The US customary units: feet, miles, pounds and gallons (`us`).
+    Us,
+    /// The UK's: metric, with miles for distances and pints (`uk`).
+    Uk,
+}
+
+impl MeasurementSystem {
+    /// Its TS name: `"metric"`, `"us"` or `"uk"`.
+    pub fn name(self) -> &'static str {
+        match self {
+            MeasurementSystem::Metric => "metric",
+            MeasurementSystem::Us => "us",
+            MeasurementSystem::Uk => "uk",
+        }
+    }
+
+    /// The system TS names `name` (`"metric"`, in any case).
+    pub fn parse(name: &str) -> Option<MeasurementSystem> {
+        [
+            MeasurementSystem::Metric,
+            MeasurementSystem::Us,
+            MeasurementSystem::Uk,
+        ]
+        .into_iter()
+        .find(|s| name.eq_ignore_ascii_case(s.name()))
+    }
+}
+
+/// The unit of temperatures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, crate::element::PropEnum)]
+pub enum TemperatureUnit {
+    /// Degrees Celsius (`celsius`).
+    #[default]
+    Celsius,
+    /// Degrees Fahrenheit (`fahrenheit`).
+    Fahrenheit,
+}
+
+impl TemperatureUnit {
+    /// Its TS name: `"celsius"` or `"fahrenheit"`.
+    pub fn name(self) -> &'static str {
+        match self {
+            TemperatureUnit::Celsius => "celsius",
+            TemperatureUnit::Fahrenheit => "fahrenheit",
+        }
+    }
+
+    /// The unit TS names `name` (`"celsius"`, in any case).
+    pub fn parse(name: &str) -> Option<TemperatureUnit> {
+        [TemperatureUnit::Celsius, TemperatureUnit::Fahrenheit]
+            .into_iter()
+            .find(|u| name.eq_ignore_ascii_case(u.name()))
+    }
+}
+
 /// An HTTP request for the platform's network stack (made by JS `fetch`
 /// and by Rust components' [`crate::element::fetch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -821,7 +1220,10 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Environment, HostEnvironment, Idiom, Languages, Locale, Os, TimeZone};
+    use super::{
+        Environment, HostEnvironment, HourCycle, Idiom, Languages, Locale, MeasurementSystem, Os,
+        RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
+    };
 
     #[test]
     fn desktop_is_a_desktop_os_or_a_desktop_browser() {
@@ -939,6 +1341,81 @@ mod tests {
         assert_eq!(tag("en-US-u-hc-h23").as_deref(), Some("en-US"));
         assert_eq!(tag("C"), None);
         assert_eq!(Locale::default().as_str(), "en-US");
+        let zh = Locale::parse("zh-Hans-CN").unwrap();
+        assert_eq!((zh.language(), zh.region()), ("zh", Some("CN")));
+        assert_eq!(Locale::parse("zh-Hans").unwrap().region(), None);
+        assert_eq!(Locale::parse("es-419").unwrap().region(), Some("419"));
+    }
+
+    #[test]
+    fn regional_preferences_are_the_regions_unless_the_locale_sets_others() {
+        let of = |tag: &str| RegionalPreferences::of(Locale::parse(tag).unwrap());
+        let world = RegionalPreferences {
+            hour_cycle: HourCycle::H23,
+            first_day_of_week: Weekday::Monday,
+            measurement_system: MeasurementSystem::Metric,
+            temperature_unit: TemperatureUnit::Celsius,
+        };
+        assert_eq!(of("en-US"), RegionalPreferences::EN_US);
+        assert_eq!(RegionalPreferences::default(), RegionalPreferences::EN_US);
+        assert_eq!(of("de-DE"), world);
+        // Without a region: the world's.
+        assert_eq!(of("ja"), world);
+        assert_eq!(of("en-CA").hour_cycle, HourCycle::H12);
+        // Where the language's differs from the region's.
+        assert_eq!(of("fr-CA").hour_cycle, HourCycle::H23);
+        assert_eq!(of("fr-CA").first_day_of_week, Weekday::Sunday);
+        assert_eq!(of("en-001").hour_cycle, HourCycle::H12);
+        assert_eq!(of("es-419").hour_cycle, HourCycle::H12);
+        assert_eq!(of("ar-EG").first_day_of_week, Weekday::Saturday);
+        assert_eq!(of("dv-MV").first_day_of_week, Weekday::Friday);
+        let gb = of("en-GB");
+        assert_eq!(gb.measurement_system, MeasurementSystem::Uk);
+        assert_eq!(gb.temperature_unit, TemperatureUnit::Celsius);
+        assert_eq!(of("en-LR").temperature_unit, TemperatureUnit::Celsius);
+        assert_eq!(of("es-PR").temperature_unit, TemperatureUnit::Fahrenheit);
+
+        let parse = RegionalPreferences::parse;
+        assert_eq!(
+            parse("en-US-u-fw-mon-mu-celsius"),
+            RegionalPreferences {
+                first_day_of_week: Weekday::Monday,
+                temperature_unit: TemperatureUnit::Celsius,
+                ..RegionalPreferences::EN_US
+            }
+        );
+        assert_eq!(
+            parse("en_US@hours=h23;measure=metric"),
+            RegionalPreferences {
+                hour_cycle: HourCycle::H23,
+                measurement_system: MeasurementSystem::Metric,
+                ..RegionalPreferences::EN_US
+            }
+        );
+        assert_eq!(parse("en_US@rg=gbzzzz"), gb);
+        assert_eq!(
+            parse("ar-u-ca-islamic-umalqura-hc-h11-rg-uszzzz"),
+            RegionalPreferences {
+                hour_cycle: HourCycle::H11,
+                ..RegionalPreferences::EN_US
+            }
+        );
+        assert_eq!(
+            parse("en-GB-u-ms-ussystem-mu-fahrenhe").measurement_system,
+            MeasurementSystem::Us
+        );
+        // What it does not know is left out.
+        assert_eq!(parse("de_DE.UTF-8@fw=xyz;hours=h99;rg=1"), world);
+        assert_eq!(parse("en-US-x-hc-h23"), RegionalPreferences::EN_US);
+        assert_eq!(parse("C"), world);
+        assert_eq!(Weekday::from_number(7), Some(Weekday::Sunday));
+        assert_eq!(Weekday::from_number(0), None);
+        assert_eq!(Weekday::Monday.number(), 1);
+        assert!(HourCycle::H11.twelve_hour() && !HourCycle::H24.twelve_hour());
+        assert_eq!(HourCycle::of_pattern("h:mm a"), Some(HourCycle::H12));
+        assert_eq!(HourCycle::of_pattern("HH 'Uhr'"), Some(HourCycle::H23));
+        assert_eq!(HourCycle::of_pattern("'h' K:mm"), Some(HourCycle::H11));
+        assert_eq!(HourCycle::of_pattern("mm:ss"), None);
     }
 
     #[test]

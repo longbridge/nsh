@@ -220,8 +220,8 @@ pub use crate::{
     },
     overlay::{Align, Placement},
     platform::{
-        Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, Os,
-        TimeZone,
+        Appearance, HourCycle, HttpBody, HttpHead, HttpRequest, Idiom, Languages, Lifecycle,
+        Locale, MeasurementSystem, Os, RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
     },
     style::Color,
 };

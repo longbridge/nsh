@@ -316,7 +316,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
   `colorScheme()`, `fontScale()`, `languages()` (`Environment::languages`, `Languages`: the system's preferred languages,
   most preferred first, at most 8, never empty, an embedding app's own language first; `[en-US]` headless unless a test
-  sets them; the web the browser's), `timeZone()` (`Environment::time_zone`, `TimeZone`: the zone's name as the system
+  sets them; the web the browser's), `hourCycle()`, `firstDayOfWeek()`, `measurementSystem()`, `temperatureUnit()`
+  (`Environment::regional`, `RegionalPreferences`: the system's settings, else the region's, CLDR 48's
+  (`RegionalPreferences::of`); `RegionalPreferences::parse` reads a platform identifier's region and its `-u-` / `@`
+  keywords (`hc`, `fw`, `ms`, `mu`, `rg`); a memo per value, so a change reruns only its readers; the locale's region's
+  headless unless a test sets them; the web the browser's hour cycle and first day for its language, its likely
+  region's units), `timeZone()` (`Environment::time_zone`, `TimeZone`: the zone's name as the system
   gives it, an IANA name or an offset zone, `UTC` headless; the platforms write the system's, the web the browser's,
   read again when the page shows or gets the focus), `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
   `background`, React Native's states; the platforms write it as the system reports the app's, the web from the

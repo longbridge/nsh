@@ -195,6 +195,21 @@ impl Model {
             .languages
             .as_ref()
             .and_then(|tags| nsh_core::platform::Languages::parse(tags.iter().map(String::as_str)));
+        pins.hour_cycle = environment
+            .hour_cycle
+            .as_deref()
+            .and_then(nsh_core::platform::HourCycle::parse);
+        pins.first_day_of_week = environment
+            .first_day_of_week
+            .and_then(nsh_core::platform::Weekday::from_number);
+        pins.measurement_system = environment
+            .measurement_system
+            .as_deref()
+            .and_then(nsh_core::platform::MeasurementSystem::parse);
+        pins.temperature_unit = environment
+            .temperature_unit
+            .as_deref()
+            .and_then(nsh_core::platform::TemperatureUnit::parse);
         pins.reduce_motion = environment.reduced_motion;
         pins.safe_area =
             environment

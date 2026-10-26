@@ -20,7 +20,9 @@ use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
     element::{AssetFile, AssetKind, Registry, Root},
-    platform::{Idiom, Languages, Lifecycle, Locale, Os, TimeZone},
+    platform::{
+        Idiom, Languages, Lifecycle, Locale, Os, RegionalPreferences, TemperatureUnit, TimeZone,
+    },
     prelude::*,
 };
 use nsh_engine::{App, Assets, Engine, EngineConfig, Environment, MountSink};
@@ -402,6 +404,61 @@ fn components_follow_the_preferred_languages() {
     ] {
         engine.control().set_environment(Environment {
             languages: Languages::parse(tags.iter().copied()).unwrap(),
+            ..Environment::default()
+        });
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
+}
+
+/// Shows a time, a temperature and the week as the user reads them, and
+/// counts the runs of an effect that reads the hour cycle alone, as a
+/// clock's does.
+#[component]
+fn Forecast() -> impl IntoElement {
+    let clock_runs = signal(0);
+    effect(move || {
+        let _ = hour_cycle();
+        clock_runs.update(|r| *r += 1);
+    });
+    view().child(text(move || {
+        let time = if hour_cycle().twelve_hour() {
+            "3 PM"
+        } else {
+            "15:00"
+        };
+        let temperature = match temperature_unit() {
+            TemperatureUnit::Celsius => "20 °C",
+            TemperatureUnit::Fahrenheit => "68 °F",
+        };
+        format!(
+            "{time}, {temperature}, weeks from {}, {} units, clock ran {}",
+            first_day_of_week().number(),
+            measurement_system().name(),
+            clock_runs.get()
+        )
+    }))
+}
+
+#[test]
+fn components_follow_the_regional_preferences() {
+    let (engine, rx, _) = start::<Forecast>(Environment::default());
+    until(&rx, "3 PM, 68 °F, weeks from 7, us units, clock ran 1");
+    let celsius = RegionalPreferences {
+        temperature_unit: TemperatureUnit::Celsius,
+        ..RegionalPreferences::EN_US
+    };
+    let germany = RegionalPreferences::of(Locale::parse("de-DE").unwrap());
+    for (regional, shown) in [
+        // Only the unit changes: the clock's effect does not run again.
+        (celsius, "3 PM, 20 °C, weeks from 7, us units, clock ran 1"),
+        (
+            germany,
+            "15:00, 20 °C, weeks from 1, metric units, clock ran 2",
+        ),
+    ] {
+        engine.control().set_environment(Environment {
+            regional,
             ..Environment::default()
         });
         let (texts, ..) = until(&rx, shown);

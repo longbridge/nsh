@@ -22,6 +22,7 @@ demo: guide-device
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh`） | 软键盘的高度和动画时长。 |
 | `locale()` | `locale()`（`nsh`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
 | `languages()` | `languages()`（`nsh`） | 用户的偏好语言，按偏好从高到低排列（`["de-DE", "en-US"]`）（[偏好语言](#偏好语言)）。 |
+| `hour_cycle()`、`first_day_of_week()`、`measurement_system()`、`temperature_unit()` | `hourCycle()`、`firstDayOfWeek()`、`measurementSystem()`、`temperatureUnit()`（`nsh`） | 12 小时制或 24 小时制、每周的第一天、度量单位和温度单位（[地区偏好](#地区偏好)）。 |
 | `time_zone()` | `timeZone()`（`nsh`） | 设备的时区，即系统给它的名称（`"Europe/Berlin"`）（[时区](#时区)）。 |
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
@@ -276,6 +277,50 @@ const textLanguage = () =>
 ```
 
 显示在原生应用中、且该应用设置了自己语言的应用，会把那个语言排在最前。测试中，`open` 的 `languages` 设置这个列表（否则是 `[locale]`），`app.setLanguages(["ja-JP", "en-US"])` 修改它（[测试](./testing-and-trace.md#操作步骤)）。
+
+## 地区偏好
+
+除了语言，系统还保存几项用户如何读时间、星期和度量的设置（iPhone 和 Mac 上的“语言与地区”、Android 的地区偏好、Windows 的“区域”），应用以响应式的方式读取它们：
+
+- `hour_cycle()`（TSX：`hourCycle()`）：12 小时制或 24 小时制，用 `Intl` 对小时周期的命名：`h12`（`12:30 PM`）、`h23`（`00:30`），以及较少见的 `h11`（`0:30 PM`）和 `h24`（`24:30`）。
+- `first_day_of_week()`（TSX：`firstDayOfWeek()`）：每周从哪一天开始，即日历的第一列；TSX 按 ISO 8601 编号，1 是星期一，7 是星期日。
+- `measurement_system()`（TSX：`measurementSystem()`）：`metric`（公制）、`us`（英尺、英里、磅、加仑）或 `uk`（公制，但距离用英里、容量用品脱）。
+- `temperature_unit()`（TSX：`temperatureUnit()`）：`celsius` 或 `fahrenheit`。
+
+用户做了设置时，各项是系统的设置，否则是所在地区自己的（按 Unicode CLDR 的数据：美国是 12 小时制、每周从星期日开始，德国是 24 小时制、每周从星期一开始）。用户修改它们时，读取它们的地方会随之更新。
+
+```rust tabs
+use nsh_core::{platform::TemperatureUnit, prelude::*};
+
+/// 一个摄氏温度，用用户的单位书写。
+fn temperature(celsius: f32) -> String {
+    match temperature_unit() {
+        TemperatureUnit::Celsius => format!("{celsius:.0} °C"),
+        TemperatureUnit::Fahrenheit => format!("{:.0} °F", celsius * 9.0 / 5.0 + 32.0),
+    }
+}
+
+/// 从用户的第一天开始的日历列：1 是星期一，7 是星期日。
+fn week_columns() -> [u8; 7] {
+    let first = first_day_of_week().number();
+    std::array::from_fn(|i| (first - 1 + i as u8) % 7 + 1)
+}
+```
+
+```tsx tabs
+import { firstDayOfWeek, hourCycle, temperatureUnit } from "nsh";
+
+const time = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hourCycle() });
+
+const temperature = (celsius: number) =>
+  temperatureUnit() === "fahrenheit" ? `${Math.round((celsius * 9) / 5 + 32)} °F` : `${Math.round(celsius)} °C`;
+
+// 从用户的第一天开始的日历列：1 是星期一，7 是星期日。
+const weekColumns = () => Array.from({ length: 7 }, (_, i) => ((firstDayOfWeek() - 1 + i) % 7) + 1);
+```
+
+`Intl` 按区域设置自己的小时周期书写时间：像上面那样把 `hourCycle()` 作为它的 `hourCycle` 选项传入，就能按用户的习惯书写。在 Web 上，浏览器不提供这些用户设置：小时周期和每周的第一天是浏览器按其语言给出的，单位是其地区的。测试中，`open` 的 `hourCycle`、`firstDayOfWeek`、`measurementSystem` 和 `temperatureUnit` 设置它们（否则是区域设置所在地区的），`app.setRegionalPreferences({ hourCycle: "h23" })` 修改它们（[测试](./testing-and-trace.md#操作步骤)）。
 
 ## 时区
 

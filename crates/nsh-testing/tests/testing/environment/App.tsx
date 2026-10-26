@@ -1,6 +1,18 @@
 import { mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh";
-import { colorScheme, lifecycle, languages, locale, platform, timeZone, windowSize } from "nsh";
+import {
+  colorScheme,
+  lifecycle,
+  firstDayOfWeek,
+  hourCycle,
+  languages,
+  locale,
+  measurementSystem,
+  platform,
+  temperatureUnit,
+  timeZone,
+  windowSize,
+} from "nsh";
 
 // `Intl`'s default zone, read again when the device's changes.
 const intlZone = () => {
@@ -34,6 +46,9 @@ function App() {
       <Text>{`Zone: ${timeZone()}`}</Text>
       <Text>{`Intl zone: ${intlZone()}`}</Text>
       <Text>{`Languages: ${languages().join(",")}`}</Text>
+      <Text>
+        {`Regional: ${hourCycle()} ${firstDayOfWeek()} ${measurementSystem()} ${temperatureUnit()}`}
+      </Text>
       {button("Echo", "echo")}
       {button("Item", "items/7")}
       {button("Down", "down")}

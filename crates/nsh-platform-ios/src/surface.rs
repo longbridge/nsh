@@ -374,6 +374,7 @@ impl RootView {
             },
             locale: current_locale(),
             languages: preferred_languages(),
+            regional: nsh_engine::RegionalPreferences::EN_US,
             time_zone: time_zone(),
             lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.

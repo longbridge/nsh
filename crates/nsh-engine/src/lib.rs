@@ -58,8 +58,9 @@ pub use nsh_core::{
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
     platform::{
-        ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
-        HttpRequest, Idiom, Languages, Lifecycle, Locale, Os, TimeZone,
+        ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HourCycle, HttpBody,
+        HttpHead, HttpRequest, Idiom, Languages, Lifecycle, Locale, MeasurementSystem, Os,
+        RegionalPreferences, TemperatureUnit, TimeZone, Weekday,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -831,6 +832,14 @@ pub struct EnvironmentPins {
     pub locale: Option<nsh_core::platform::Locale>,
     /// The preferred languages (`Environment::languages`).
     pub languages: Option<nsh_core::platform::Languages>,
+    /// The hour cycle (`Environment::regional`).
+    pub hour_cycle: Option<nsh_core::platform::HourCycle>,
+    /// The first day of the week (`Environment::regional`).
+    pub first_day_of_week: Option<nsh_core::platform::Weekday>,
+    /// The measurement system (`Environment::regional`).
+    pub measurement_system: Option<nsh_core::platform::MeasurementSystem>,
+    /// The temperature unit (`Environment::regional`).
+    pub temperature_unit: Option<nsh_core::platform::TemperatureUnit>,
     /// The time zone (`Environment::time_zone`).
     pub time_zone: Option<nsh_core::platform::TimeZone>,
     /// Whether the user asked for less motion
@@ -848,6 +857,19 @@ impl EnvironmentPins {
         }
         if let Some(languages) = self.languages {
             environment.languages = languages;
+        }
+        let regional = &mut environment.regional;
+        if let Some(hour_cycle) = self.hour_cycle {
+            regional.hour_cycle = hour_cycle;
+        }
+        if let Some(day) = self.first_day_of_week {
+            regional.first_day_of_week = day;
+        }
+        if let Some(system) = self.measurement_system {
+            regional.measurement_system = system;
+        }
+        if let Some(unit) = self.temperature_unit {
+            regional.temperature_unit = unit;
         }
         if let Some(time_zone) = self.time_zone {
             environment.time_zone = time_zone;
@@ -2950,6 +2972,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         idiom: env.idiom,
         locale: env.locale,
         languages: env.languages,
+        regional: env.regional,
         time_zone: env.time_zone,
         apple_keyboard: env.apple_keyboard,
         ctrl_for_command: env.ctrl_for_command,

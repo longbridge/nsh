@@ -843,17 +843,17 @@ const toggle = () => {
 
 ## Device
 
-设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`languages()`、`time_zone()`、`lifecycle()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度、区域设置、偏好语言、时区和应用状态是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一个时区、移到另一种像素密度的屏幕、离开应用再回来）时，读取它们的地方会随之更新。
+设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`languages()`、`hour_cycle()`、`first_day_of_week()`、`measurement_system()`、`temperature_unit()`、`time_zone()`、`lifecycle()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度、区域设置、偏好语言、地区偏好、时区和应用状态是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小、语言或地区设置、移到另一个时区、移到另一种像素密度的屏幕、离开应用再回来）时，读取它们的地方会随之更新。
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Lifecycle, Os, TimeZone},
-    prelude::*, // window、dark、font_scale、locale、languages、time_zone、lifecycle、os、idiom、pixel_ratio、set_color_scheme……
+    platform::{Appearance, HourCycle, Idiom, Lifecycle, MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday},
+    prelude::*, // window、dark、font_scale、locale、languages、hour_cycle、first_day_of_week、measurement_system、temperature_unit、time_zone、lifecycle、os、idiom、pixel_ratio、set_color_scheme……
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, languages, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, timeZone, windowSize } from "nsh";
+import { colorScheme, firstDayOfWeek, fontScale, hourCycle, languages, lifecycle, locale, measurementSystem, openUrl, pixelRatio, platform, setColorScheme, temperatureUnit, timeZone, windowSize } from "nsh";
 ```
 
 教程见[设备与环境](../docs/device-and-environment.md)。
@@ -919,6 +919,38 @@ const languages: Accessor<readonly string[]>;
 ```
 
 用户的偏好语言，BCP 47 标签，按偏好从高到低排列（`["de-DE", "en-US"]`）：系统的列表；嵌入它的应用设置了自己的语言时，那个语言排在最前。从不为空。响应式：用户修改列表时变化。Rust：`languages() -> Languages`（`iter()`、`first()`、`as_slice()`，每项是一个 `Locale`）。用其中第一个有翻译的语言显示应用的文字，其余是它的后备（[设备与环境](../docs/device-and-environment.md#偏好语言)）。`locale()` 是区域格式，可以不同（英文文字、德国日期）。除非 `open` 设置了 `languages`，headless 测试中它是 `[locale]`。
+
+### hourCycle
+
+```ts
+const hourCycle: Accessor<"h11" | "h12" | "h23" | "h24">;
+```
+
+用户使用 12 小时制还是 24 小时制，用 `Intl` 对小时周期的命名：`"h12"`（`12:30 PM`）、`"h23"`（`00:30`），以及较少见的 `"h11"`（`0:30 PM`）和 `"h24"`（`24:30`）。是系统的设置，否则是所在地区的。响应式。Rust：`hour_cycle() -> HourCycle`（`twelve_hour()` 表示有上午和下午）。`Intl` 按区域设置自己的小时周期书写时间：把 `hourCycle()` 作为它的 `hourCycle` 选项传入，就能按用户的习惯书写（[设备与环境](../docs/device-and-environment.md#地区偏好)）。除非 `open` 设置了 `hourCycle`，headless 测试中它是区域设置所在地区的。
+
+### firstDayOfWeek
+
+```ts
+const firstDayOfWeek: Accessor<1 | 2 | 3 | 4 | 5 | 6 | 7>;
+```
+
+用户每周从哪一天开始，按 ISO 8601（以及 `Intl.Locale` 的 `firstDay`）给星期编号：1 是星期一，7 是星期日。即日历的第一列。是系统的设置，否则是所在地区的（美国是 7，德国是 1，埃及是 6）。响应式。Rust：`first_day_of_week() -> Weekday`（`number()`）。除非 `open` 设置了 `firstDayOfWeek`，headless 测试中它是区域设置所在地区的。
+
+### measurementSystem
+
+```ts
+const measurementSystem: Accessor<"metric" | "us" | "uk">;
+```
+
+用户度量长度、重量和容积所用的单位：`"metric"`（公制）、`"us"`（英尺、英里、磅、加仑）或 `"uk"`（公制，但距离用英里、容量用品脱）。是系统的设置，否则是所在地区的。响应式。Rust：`measurement_system() -> MeasurementSystem`。除非 `open` 设置了 `measurementSystem`，headless 测试中它是区域设置所在地区的。
+
+### temperatureUnit
+
+```ts
+const temperatureUnit: Accessor<"celsius" | "fahrenheit">;
+```
+
+用户读温度所用的单位：`"celsius"`（摄氏度）或 `"fahrenheit"`（华氏度）。是系统的设置，否则是所在地区的（美国及少数几个地区是华氏度）。响应式。Rust：`temperature_unit() -> TemperatureUnit`。除非 `open` 设置了 `temperatureUnit`，headless 测试中它是区域设置所在地区的。
 
 ### timeZone
 

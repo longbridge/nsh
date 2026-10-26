@@ -13,7 +13,10 @@ use nsh_core::{
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
-use crate::headless::{DialogAnswer, Headless};
+use crate::{
+    headless::{DialogAnswer, Headless},
+    module::RegionalPreferences,
+};
 
 /// An app a test opened, driven by steps and read by queries.
 pub(crate) trait Driver: Send {
@@ -80,6 +83,12 @@ pub(crate) trait Driver: Send {
     fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
         let _ = languages;
         Err(headless_only("setLanguages"))
+    }
+    /// The user's regional preferences that `preferences` names, as the
+    /// system reports them (`hourCycle()` and the like).
+    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
+        let _ = preferences;
+        Err(headless_only("setRegionalPreferences"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -239,6 +248,11 @@ impl Driver for Headless {
         self.set_environment(&format!("setLanguages({languages:?})"), |e| {
             e.languages = languages;
         })
+    }
+    fn set_regional_preferences(&mut self, preferences: RegionalPreferences) -> Result<(), String> {
+        let pins = preferences.pins("setRegionalPreferences")?;
+        let what = format!("setRegionalPreferences({})", preferences.label());
+        self.set_environment(&what, |e| pins.apply(e))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
         Headless::run_for(self, time)
