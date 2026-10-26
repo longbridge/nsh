@@ -447,7 +447,12 @@ fn import_specifier(line: &str) -> Option<&str> {
         side_effect if line.starts_with("import") && side_effect.starts_with(['"', '\'']) => {
             side_effect
         }
-        _ => rest[rest.rfind("from")? + "from".len()..].trim_start(),
+        _ => {
+            // Module paths can themselves contain `from`.
+            let first_quote = rest.find(['"', '\''])?;
+            let from = rest[..first_quote].rfind("from")?;
+            rest[from + "from".len()..].trim_start()
+        }
     };
     let quote = quoted.chars().next().filter(|c| matches!(c, '"' | '\''))?;
     let (specifier, _) = quoted[1..].split_once(quote)?;
@@ -632,6 +637,20 @@ mod tests {
     }
 
     #[test]
+    fn snippet_paths_containing_from_are_relocated_without_changing_wasm_keys() {
+        let glue = "import { first } from './snippets/from-app-123/inline0.js';\n\
+                    import { shout } from \"./snippets/app-123/js/from.js\";\n\
+                    const imports = { './snippets/from-app-123/inline0.js': { first } };\n";
+        let linked = link_snippets(glue, "snippets.0123456789");
+        assert_eq!(
+            linked,
+            "import { first } from './snippets.0123456789/from-app-123/inline0.js';\n\
+             import { shout } from \"./snippets.0123456789/app-123/js/from.js\";\n\
+             const imports = { './snippets/from-app-123/inline0.js': { first } };\n"
+        );
+    }
+
+    #[test]
     fn wasm_bindgen_snippets_are_found_beside_the_glue() {
         let out = std::env::temp_dir().join(format!("nsh-bindgen-snippets-{}", std::process::id()));
         let glue = out.join("nsh-bindgen.js");
@@ -780,7 +799,7 @@ mod tests {
             ),
         );
         write(
-            "js/shout.js",
+            "js/from.js",
             "export function shout(text) { return text.toUpperCase(); }\n",
         );
         write(
@@ -792,7 +811,7 @@ extern "C" {
     fn now_ms() -> f64;
 }
 
-#[wasm_bindgen(inline_js = "import { shout } from './js/shout.js'; export function twice(s) { return shout(s + s); }")]
+#[wasm_bindgen(inline_js = "import { shout } from './js/from.js'; export function twice(s) { return shout(s + s); }")]
 extern "C" {
     fn twice(s: &str) -> String;
 }
@@ -807,7 +826,7 @@ extern "C" {
     fn second(x: f64) -> f64;
 }
 
-#[wasm_bindgen(module = "/js/shout.js")]
+#[wasm_bindgen(module = "/js/from.js")]
 extern "C" {
     fn shout(s: &str) -> String;
 }
@@ -842,6 +861,9 @@ pub extern "C" fn probe() -> f64 {
         );
         let out = root.join("web-runtime");
         std::fs::create_dir_all(&out).unwrap();
+        // Snippets are ES modules, including on Node versions without
+        // automatic module-syntax detection for `.js` files.
+        std::fs::write(out.join("package.json"), r#"{"type":"module"}"#).unwrap();
         let glue = install(&built, &out, "nsh").unwrap().expect("a glue");
         assert_eq!(glue, out.join("nsh-bindgen.js"));
         // The module wasm-bindgen wrote: its imports are the glue's now.
@@ -860,7 +882,7 @@ pub extern "C" fn probe() -> f64 {
             "{found:?}"
         );
         assert!(
-            found.iter().any(|p| p.ends_with("/js/shout.js")),
+            found.iter().any(|p| p.ends_with("/js/from.js")),
             "{found:?}"
         );
         // Run the actual glue and Wasm, including wasm-bindgen's direct
@@ -873,6 +895,10 @@ pub extern "C" fn probe() -> f64 {
                     .join(name.strip_prefix("snippets/").unwrap());
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::copy(file, path).unwrap();
+            }
+            if directory != "snippets" {
+                // Publication must work without the development paths.
+                std::fs::remove_dir_all(out.join("snippets")).unwrap();
             }
             let text = std::fs::read_to_string(&glue).unwrap();
             let text = link_snippets(&text, directory);
