@@ -1314,7 +1314,7 @@ mod tests {
         let error = bundling(&dir).unwrap_err().plain;
         assert!(error.contains("App.tsx"), "{error}");
         assert!(
-            error.contains("`nsh/animated` has no export `AnimatedValu`"),
+            error.contains("`nsh` has no export `AnimatedValu`"),
             "{error}"
         );
         assert!(error.contains("2:"), "{error}");
