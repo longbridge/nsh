@@ -761,11 +761,11 @@ pub(crate) fn Components() -> impl IntoElement {
             .flush()
             .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
                 IconName::Form,
-                "KeyboardAvoidingView",
-                "padding / height",
+                "Keyboard inset",
+                "padding / margin",
                 |_: &()| {
                     nav::push("keyboard-avoiding", || {
-                        titled("KeyboardAvoidingView").child(avoiding_page())
+                        titled("Keyboard inset").child(avoiding_page())
                     });
                 },
             )))

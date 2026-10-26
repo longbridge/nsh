@@ -1,5 +1,5 @@
-//! Selection areas (`ViewProps::selection_area`, `SelectionArea` of
-//! `nsh/base`): one selection across the texts of a view's subtree, from a
+//! Selection areas (`ViewProps::selection_area`, `View`'s
+//! `selectable`): one selection across the texts of a view's subtree, from a
 //! point in one text to a point in another, as a browser selects across a
 //! page. The texts that take part are those not `selectable={false}`, in
 //! document order (subviews are in mount order); an area inside another is

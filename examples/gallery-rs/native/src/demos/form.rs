@@ -851,7 +851,7 @@ pub(crate) fn Form() -> impl IntoElement {
                     .child(link_row(
                         IconName::Text,
                         "A message bar at the bottom",
-                        "KeyboardAvoidingView",
+                        "env(keyboard-inset-height)",
                         false,
                         |_: &()| {
                             nav::push("message-bar", || titled("Message bar").child(message_bar()));
@@ -1093,7 +1093,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         ),
         (
             false,
-            "KeyboardAvoidingView lifts it with the keyboard. Say something.".to_owned(),
+            "Its bottom padding, env(keyboard-inset-height), lifts it with the keyboard. Say something.".to_owned(),
         ),
     ]);
     let draft = signal(String::new());

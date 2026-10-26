@@ -1,5 +1,5 @@
-//! Selection areas (`ViewProps::selection_area`: `SelectionArea` of
-//! `nsh/base`, a selectable `TextView`): one selection across the texts of
+//! Selection areas (`ViewProps::selection_area`: `View`'s
+//! `selectable`, a selectable `TextView`): one selection across the texts of
 //! a view's subtree, from text to text, as a browser selects across a
 //! page. The selection itself is [`nsh_core::selection`]'s model; this
 //! module lists an area's texts for it ([`Texts`]), feeds it the mouse's

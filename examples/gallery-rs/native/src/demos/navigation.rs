@@ -410,7 +410,7 @@ fn headerless() -> Screen {
                             .px_1()
                             .pt_3()
                             .child(body(
-                                "The screen owns the whole surface; a SafeAreaView keeps it \
+                                "The screen owns the whole surface; its env(safe-area-inset-*) padding keeps it \
                                      clear of the status bar and the home indicator.",
                             )),
                     ),
@@ -418,7 +418,7 @@ fn headerless() -> Screen {
                 .child(
                     appear().index(1).child(
                         Section::new("Safe area")
-                            .note("SafeAreaView")
+                            .note("env(safe-area-inset-*)")
                             .child(insets()),
                     ),
                 )

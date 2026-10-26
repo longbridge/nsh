@@ -2074,8 +2074,7 @@ pub enum Prop {
     /// points on the physical edges; set by components
     /// (`Element::inset_padding`), never by JS.
     InsetPadding(EdgeInsets),
-    /// Margin added to the style's own (`KeyboardAvoidingView`'s
-    /// `height` behavior), in points on the physical edges; set by
+    /// Margin added to the style's own (an inset margin), in points on the physical edges; set by
     /// components.
     InsetMargin(EdgeInsets),
     /// `class`: Tailwind CSS classes (`"flex-row gap-2 p-4 bg-white

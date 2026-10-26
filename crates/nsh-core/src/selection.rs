@@ -1,5 +1,5 @@
-//! A selection across the texts of a selection area (`SelectionArea` of
-//! `nsh/base`, a selectable `TextView`): one range from a point in one text
+//! A selection across the texts of a selection area (a `View` with
+//! `selectable`, a selectable `TextView`): one range from a point in one text
 //! to a point in another, in document order, as a browser selects across
 //! the elements of a page.
 //!

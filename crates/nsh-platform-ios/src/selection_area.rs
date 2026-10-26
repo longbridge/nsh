@@ -1,5 +1,5 @@
-//! Selection areas (`ViewProps::selection_area`, `SelectionArea` of
-//! `nsh/base`): one selection across the texts of a view's subtree, from
+//! Selection areas (`ViewProps::selection_area`, `View`'s
+//! `selectable`): one selection across the texts of a view's subtree, from
 //! text to text, as `nsh_core::selection` models it.
 //!
 //! `UITextInteraction` selects within one `UITextInput` view, so an area
