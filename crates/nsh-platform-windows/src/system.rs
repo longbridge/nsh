@@ -22,6 +22,9 @@
 //!   Windows. POSIX variables (`LANG`, `LC_*`) are not looked at: Windows
 //!   programs do not, and shells like Git Bash set `LANG` regardless of
 //!   the user's settings;
+//! - the preferred languages (`languages()`): the user's display languages,
+//!   most preferred first (`GetUserPreferredUILanguages`: Settings > Time &
+//!   language > Language & region), the locale alone when it lists none;
 //! - the font scale: Settings > Accessibility > Text size
 //!   (`TextScaleFactor`, 100 to 225 percent);
 //! - reduce motion: Settings > Accessibility > Visual effects > Animation
@@ -69,13 +72,14 @@ use nsh_core::{
     geometry::px,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
+use nsh_engine::{ColorScheme, Edges, Environment, Languages, Lifecycle, Locale, TimeZone};
 use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
         Globalization::{
-            GetLocaleInfoEx, GetUserDefaultLocaleName, GetUserDefaultUILanguage, LCIDToLocaleName,
-            LOCALE_IREADINGLAYOUT,
+            GetLocaleInfoEx, GetUserDefaultLocaleName, GetUserDefaultUILanguage,
+            GetUserPreferredUILanguages, LCIDToLocaleName, LOCALE_IREADINGLAYOUT,
+            MUI_LANGUAGE_NAME,
         },
         Graphics::{
             Direct2D::{D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_ROUNDED_RECT},
@@ -109,7 +113,7 @@ use windows::{
             },
         },
     },
-    core::{BOOL, HSTRING, PCWSTR, s, w},
+    core::{BOOL, HSTRING, PCWSTR, PWSTR, s, w},
 };
 
 use crate::{
@@ -160,6 +164,7 @@ struct Settings {
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
+    languages: Languages,
 }
 
 /// Makes the system look dark (or light) from now on (`nsh test
@@ -241,6 +246,7 @@ pub(crate) fn set_app_id(id: &str) {
 
 /// The system's settings now.
 fn settings() -> Settings {
+    let locale = user_locale(user_locale_name().as_deref());
     Settings {
         dark: system_dark(),
         font_scale: text_scale(reg_dword(
@@ -252,8 +258,39 @@ fn settings() -> Settings {
         reduce_motion: spi_bool(SPI_GETCLIENTAREAANIMATION) == Some(false),
         rtl: ui_language_rtl(),
         screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
-        locale: user_locale(user_locale_name().as_deref()),
+        locale,
+        languages: preferred_languages(locale),
     }
+}
+
+/// The user's display languages, most preferred first (`languages()`);
+/// `locale` alone when Windows lists none.
+fn preferred_languages(locale: Locale) -> Languages {
+    let (mut count, mut len) = (0u32, 0u32);
+    // SAFETY: a size query: no buffer, the length written to `len`.
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, None, &mut len) }
+        .is_err()
+        || len == 0
+    {
+        return Languages::one(locale);
+    }
+    let mut names = vec![0u16; len as usize];
+    // SAFETY: a buffer of the `len` characters the query asked for.
+    if unsafe {
+        GetUserPreferredUILanguages(
+            MUI_LANGUAGE_NAME,
+            &mut count,
+            Some(PWSTR(names.as_mut_ptr())),
+            &mut len,
+        )
+    }
+    .is_err()
+    {
+        return Languages::one(locale);
+    }
+    // A list of null-terminated names, ended by an empty one.
+    let names = String::from_utf16_lossy(&names);
+    Languages::parse(names.split('\0')).unwrap_or(Languages::one(locale))
 }
 
 /// `WM_ACTIVATEAPP`: this thread's windows became the active app's
@@ -320,6 +357,7 @@ fn update(surface: &Surface, settings: Settings) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = settings.locale;
+    env.languages = settings.languages;
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
     env.rtl = settings.rtl;
