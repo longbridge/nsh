@@ -1,9 +1,9 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, toneColor } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, radius, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, tints, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -171,10 +171,40 @@ const USAGE: [string, string][] = [
 
 const count = (n: number) => n.toLocaleString("en-US");
 
+const SORTS = [
+  { value: "newest", title: "Newest first" },
+  { value: "oldest", title: "Oldest first" },
+  { value: "name", title: "Name" },
+  { value: "size", title: "Size" },
+  { value: "kind", title: "Kind" },
+];
+
+const FONTS = [
+  { value: "helvetica", title: "Helvetica", group: "Sans serif" },
+  { value: "inter", title: "Inter", group: "Sans serif" },
+  { value: "roboto", title: "Roboto", group: "Sans serif" },
+  { value: "source-sans", title: "Source Sans", group: "Sans serif" },
+  { value: "georgia", title: "Georgia", group: "Serif" },
+  { value: "merriweather", title: "Merriweather", group: "Serif" },
+  { value: "playfair", title: "Playfair Display", group: "Serif", disabled: true },
+  { value: "times", title: "Times New Roman", group: "Serif" },
+  { value: "fira-code", title: "Fira Code", group: "Monospace" },
+  { value: "jetbrains-mono", title: "JetBrains Mono", group: "Monospace" },
+  { value: "menlo", title: "Menlo", group: "Monospace" },
+  { value: "sf-mono", title: "SF Mono", group: "Monospace" },
+];
+
+const LANGUAGES = [
+  { value: "en", title: "English" },
+  { value: "de", title: "Deutsch" },
+];
+
+const titleOf = (items: { value: string; title: string }[], value: string | null) => items.find((i) => i.value === value)?.title ?? "None";
+
 /**
  * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup`,
- * `Tab` and `Tabs`, `Collapsible` in the settings, filters, pickers, section
- * switchers and disclosures apps use them for.
+ * `Tab` and `Tabs`, `Select`, `Collapsible` in the settings, filters,
+ * pickers, section switchers, choices and disclosures apps use them for.
  */
 export function Controls() {
   const last = signal("—");
@@ -377,6 +407,167 @@ export function Controls() {
               </View>
             )}
           </Each>
+        </View>
+      </Card>
+    );
+  }
+
+  function Choices() {
+    const sort = signal<string | null>("newest");
+    const font = signal<string | null>("inter");
+    const sortOpen = signal(false);
+    const fontOpen = signal(false);
+    /** The list: a popup at the trigger with a pointer, as the menus'; a sheet at the bottom on a touch screen. */
+    const surface = () =>
+      pointer
+        ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
+        : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
+    const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+    /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
+    function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
+      return (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            height: size.line,
+            paddingLeft: 10,
+            // Room for the clear button, which goes over the trigger's end in place of the chevron.
+            paddingRight: props.clearable ? size.line : 10,
+            borderRadius: radius.control,
+            borderWidth: 1,
+            borderColor: props.open ? colors.faint : colors.border,
+            backgroundColor: colors.raised,
+            ...finish.raised,
+            // Dimmed while the select is: the app knows, as it passes `disabled`.
+            opacity: props.disabled ? dimmed.opacity : 1,
+          }}
+          hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
+          activeStyle={pressed}
+          focusStyle={focusRing()}
+          disabledStyle={dimmed}
+        >
+          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+          {/* A lane as wide as the chevron's stroke (half its icon box); it points down, and up while open. */}
+          <View
+            class="transition-transform duration-150 motion-reduce:transition-none"
+            style={{ display: props.clearable ? "none" : "flex", width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
+          >
+            <Icon name="chevron" size={size.check} tint={colors.muted} />
+          </View>
+        </View>
+      );
+    }
+    /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
+    function Option(props: { item: SelectItemState; note?: string }) {
+      return (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            height: pointer ? 32 : 46,
+            paddingHorizontal: 8,
+            borderRadius: 7,
+            borderWidth: 1,
+            borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
+            backgroundColor: props.item.highlighted ? tints.accent : "transparent",
+            opacity: props.item.disabled ? 0.35 : 1,
+          }}
+        >
+          <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
+            {props.item.title}
+          </Text>
+          <If when={props.note}>
+            <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
+          </If>
+          <View style={{ width: 16, alignItems: "center" }}>
+            <If when={props.item.selected}>
+              <Icon name="check" size={14} tint={colors.accent} />
+            </If>
+          </View>
+        </View>
+      );
+    }
+    function Header(props: { group: SelectGroup }) {
+      return (
+        <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 4 }}>
+          {props.group.title.toUpperCase()}
+        </Text>
+      );
+    }
+    const opened = (set: (open: boolean) => void) => (open: boolean) => set(open);
+    return (
+      <Card icon="controls" title="Select" subtitle="A choice from a list: the app owns the value">
+        <View>
+          <View style={row(true)}>
+            <Label label="Sort by" detail={pointer ? "Press a letter to jump to an order" : "Five orders in a sheet"} />
+            <Select
+              items={SORTS}
+              value={sort()}
+              onChange={(next) => {
+                sort.set(next);
+                last.set(`Sort by: ${titleOf(SORTS, next)}`);
+              }}
+              onOpenChange={opened((open) => sortOpen.set(open))}
+              accessibilityLabel="Sort by"
+              offset={4}
+              margin={8}
+              align="end"
+              // Wider than the trigger with a pointer: the titles whole.
+              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
+              renderItem={(item) => <Option item={item} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Font" detail="Search, sections, one not installed" />
+            <Select
+              items={FONTS}
+              value={font()}
+              onChange={(next) => {
+                font.set(next);
+                last.set(next === null ? "Font: cleared" : `Font: ${titleOf(FONTS, next)}`);
+              }}
+              onOpenChange={opened((open) => fontOpen.set(open))}
+              accessibilityLabel="Font"
+              searchable
+              searchPlaceholder="Search fonts"
+              searchClass={`${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`}
+              searchStyle={{
+                height: pointer ? 32 : 40,
+                paddingHorizontal: 9,
+                marginBottom: 6,
+                borderRadius: radius.control,
+                borderWidth: 1,
+                borderColor: colors.fieldBorder,
+                backgroundColor: colors.field,
+                ...finish.field,
+              }}
+              empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>No font matches</Text>}
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={pointer ? { ...surface(), width: 260 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              cleanable
+              clearButtonAccessibilityLabel="Clear the font"
+              clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+              clearButtonStyle={{ position: "absolute", top: (size.line - 24) / 2, right: (size.line - 24) / 2, width: 24, height: 24 }}
+              clearButton={<Icon name="close" size={14} tint={colors.muted} />}
+              trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
+              renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
+              renderGroup={(group) => <Header group={group} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Language" detail="Set by your organization" />
+            <Select items={LANGUAGES} value="en" disabled accessibilityLabel="Language" trigger={<Picker title="English" open={false} disabled />} />
+          </View>
         </View>
       </Card>
     );
@@ -793,5 +984,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Quantities, Verify, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Choices, Disclosure, Transfers, Levels, Quantities, Verify, Last]} />;
 }

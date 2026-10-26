@@ -1165,6 +1165,179 @@ covers [events] onChange
 covers [events] onFocus
 covers [events] onBlur
 covers [events] onSubmit
+# base-select
+tap id:case-base-select
+# Open at first (`defaultOpen`); Escape or back closes it.
+expect OpenAtStart
+event label:OpenAtStart onCancel
+absent OpenAtStart
+# The trigger (the select's view around the app's element) is the
+# combobox screen readers hear, named by `accessibilityLabel`, collapsed;
+# `value={null}` is nothing chosen, whatever `defaultValue` says.
+expect Fruit: none
+prop label:Fruit role combobox
+prop label:Fruit accessibilityLabel Fruit
+prop label:Fruit accessibilityState expanded=false
+noprop label:Fruit accessibilityValue
+# A press opens the list, a sheet over a backdrop on a phone: the listbox
+# of the items' options under their sections' headers (the app's rows and
+# headers), every part in the app's look.
+tap id:fruit
+expect Open: true triggerPress
+expect Life: open
+expect [Fruits]
+expect [Vegetables]
+expect Apple
+prop label:Fruit accessibilityState expanded=true
+prop scroll:label:Apple role listbox
+prop label:Apple role option
+prop label:Banana accessibilityState disabled=true
+style parent:scroll:label:Apple backgroundColor #00ff00ff
+style parent:scroll:label:Apple borderRadius 12
+style below:parent:scroll:label:Apple backgroundColor #000000ff
+style below:parent:scroll:label:Apple opacity 0.5
+style scroll:label:Apple backgroundColor #0000ffff
+style scroll:label:Apple opacity 0.75
+style label:Apple backgroundColor #ff00ffff
+# Opened by a press with nothing chosen, no row is highlighted (30 high);
+# a disabled one takes `disabled:` (24).
+frame label:Apple 0 0 390 30
+frame label:Banana 0 0 390 24
+# A choice: `onChange` with its value, which the app sets; the list closes
+# with "select" and the trigger's value is the item's title.
+tap label:Cherry
+expect Changed: cherry 1
+expect Open: false select
+expect Life: closed
+absent Apple
+expect Fruit: Cherry
+prop label:Fruit accessibilityValue text=Cherry
+prop label:Fruit accessibilityState expanded=false
+# Opening again highlights the chosen item (`focus:`, 40 high; the
+# renderer's `highlighted`), which is selected for screen readers.
+tap id:fruit
+expect >Cherry ✓
+prop label:Cherry accessibilityState selected=true
+frame label:Cherry 0 0 390 40
+frame label:Apple 0 0 390 30
+# Choosing the chosen item again closes the list and reports no change.
+tap label:Cherry
+expect Open: false select
+absent >Cherry ✓
+expect Changed: cherry 1
+# The app opens it (`open`); Escape or back is heard, and closes it.
+tap text:ShowFruit
+expect >Cherry ✓
+event label:Cherry onCancel
+expect Heard: cancel
+expect Open: false cancel
+absent >Cherry ✓
+# The backdrop closes it too.
+tap id:fruit
+expect >Cherry ✓
+tap below:parent:scroll:label:Cherry
+expect Open: false backdropPress
+absent >Cherry ✓
+covers [nsh/base] Select
+covers [props] Select.items
+covers [props] value
+covers [props] Select.open
+covers [props] Select.defaultOpen
+covers [props] accessibilityLabel
+covers [props] Select.popupClass
+covers [props] Select.popupStyle
+covers [props] Select.backdropClass
+covers [props] Select.backdropStyle
+covers [props] Select.listClass
+covers [props] Select.listStyle
+covers [props] Select.itemClass
+covers [props] Select.itemStyle
+covers [props] Select.trigger
+covers [props] Select.renderItem
+covers [props] Select.renderGroup
+covers [events] onChange
+covers [events] Select.onOpenChange
+covers [events] Select.onOpen
+covers [events] Select.onClose
+covers [events] Select.onCancel
+# A value the app keeps: a choice asks for another (`onChange`), which it
+# does not set, and the trigger keeps the app's.
+prop label:Pinned accessibilityValue text=Rice
+tap id:pinned
+expect Rice
+prop label:Rice accessibilityState selected=true
+tap label:Carrot
+expect Asked: carrot
+prop label:Pinned accessibilityValue text=Rice
+# Without `value` the select keeps its own, from `defaultValue`; without
+# renderers a row shows its title and a header its section's, in the
+# app's look (`groupClass`, `groupStyle`).
+prop label:Own accessibilityValue text=Carrot
+tap id:own
+expect Vegetables
+prop parent:text:Fruits role header
+style parent:text:Fruits backgroundColor #ffff00ff
+style parent:text:Fruits opacity 0.5
+prop label:Carrot accessibilityState selected=true
+tap label:Apple
+absent Vegetables
+prop label:Own accessibilityValue text=Apple
+covers [props] defaultValue
+covers [props] Select.groupClass
+covers [props] Select.groupStyle
+# `cleanable`: a button screen readers name while an item is chosen; a
+# press clears the select's own value, reported as `null`, and the list
+# stays closed.
+prop label:ClearOwn role button
+frame label:ClearOwn 0 30 20 20
+tap label:ClearOwn
+expect Own: null
+absent X
+absent Vegetables
+noprop label:Own accessibilityValue
+covers [props] Select.cleanable
+covers [props] Select.clearButtonClass
+covers [props] Select.clearButtonStyle
+covers [props] Select.clearButton
+covers [props] Select.clearButtonAccessibilityLabel
+# `disabled`: dimmed for screen readers.
+prop label:Locked accessibilityState disabled=true expanded=false
+covers [props] disabled
+# `searchable`: a field above the items (its placeholder and look the
+# app's; on a phone the keyboard comes when it is pressed) filters them by
+# title, ignoring case, and a section without a match goes; `empty` shows
+# in the list's place while none matches.
+tap id:find
+expect Find: true triggerPress
+expect Apple
+prop below:scroll:label:Apple placeholder Find food
+prop below:scroll:label:Apple autoFocus false
+style below:scroll:label:Apple backgroundColor #abcdefff
+style below:scroll:label:Apple borderRadius 4
+type below:scroll:label:Apple AN
+expect Banana
+expect Fruits
+absent Apple
+absent Carrot
+absent Vegetables
+type below:scroll:label:Banana zz
+expect Nothing found
+absent Banana
+event text:"Nothing found" onCancel
+expect Find: false cancel
+absent Nothing found
+# Each opening starts with an empty search.
+tap id:find
+expect Apple
+expect Carrot
+tap below:parent:scroll:label:Apple
+expect Find: false backdropPress
+absent Apple
+covers [props] Select.searchable
+covers [props] Select.searchPlaceholder
+covers [props] Select.searchClass
+covers [props] Select.searchStyle
+covers [props] Select.empty
 
 # base-slider
 tap id:case-base-slider
