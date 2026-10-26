@@ -191,6 +191,10 @@ impl Model {
             .time_zone
             .as_deref()
             .and_then(nsh_core::platform::TimeZone::parse);
+        pins.languages = environment
+            .languages
+            .as_ref()
+            .and_then(|tags| nsh_core::platform::Languages::parse(tags.iter().map(String::as_str)));
         pins.reduce_motion = environment.reduced_motion;
         pins.safe_area =
             environment

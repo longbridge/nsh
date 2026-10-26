@@ -854,17 +854,17 @@ const toggle = () => {
 
 ## Device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `time_zone()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the time zone and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `languages()`, `time_zone()`, `lifecycle()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale, the preferred languages, the time zone and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to another time zone, moving to a screen of another density, leaving the app and coming back).
 
 ```rust tabs
 use nsh_core::{
     platform::{Appearance, Idiom, Lifecycle, Os, TimeZone},
-    prelude::*, // window, dark, font_scale, locale, time_zone, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
+    prelude::*, // window, dark, font_scale, locale, languages, time_zone, lifecycle, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, timeZone, windowSize } from "nsh";
+import { colorScheme, fontScale, languages, lifecycle, locale, openUrl, pixelRatio, platform, setColorScheme, timeZone, windowSize } from "nsh";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -922,6 +922,14 @@ const locale: Accessor<string>;
 ```
 
 The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. Rust: `locale() -> Locale` (`locale().as_str()` is the tag). `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
+
+### languages
+
+```ts
+const languages: Accessor<readonly string[]>;
+```
+
+The user's preferred languages as BCP 47 tags, most preferred first (`["de-DE", "en-US"]`): the system's list, with the embedding app's own language first when it sets one. Never empty. Reactive: it changes when the user changes the list. Rust: `languages() -> Languages` (`iter()`, `first()`, `as_slice()`, each a `Locale`). Show the app's text in the first of them it has a translation for: the others are its fallbacks ([Device and environment](../docs/device-and-environment.md#preferred-languages)). `locale()` is the region format, which can differ (English text, German dates). Headless tests have `[locale]` unless `open` sets `languages`.
 
 ### timeZone
 

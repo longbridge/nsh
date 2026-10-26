@@ -20,7 +20,7 @@ use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
     element::{AssetFile, AssetKind, Registry, Root},
-    platform::{Idiom, Lifecycle, Locale, Os, TimeZone},
+    platform::{Idiom, Languages, Lifecycle, Locale, Os, TimeZone},
     prelude::*,
 };
 use nsh_engine::{App, Assets, Engine, EngineConfig, Environment, MountSink};
@@ -373,6 +373,40 @@ fn components_follow_whether_the_app_is_in_use() {
         texts.iter().all(|t| t == "active after 4 runs"),
         "{texts:?}"
     );
+}
+
+/// Greets in the first of the user's languages it has, as an app's
+/// translated text does.
+#[component]
+fn Greeting() -> impl IntoElement {
+    view().child(text(move || {
+        let words = languages()
+            .iter()
+            .find_map(|l| match l.as_str().split('-').next() {
+                Some("de") => Some("Willkommen"),
+                Some("fr") => Some("Bienvenue"),
+                _ => None,
+            })
+            .unwrap_or("Welcome");
+        format!("{words} ({})", languages().as_slice().len())
+    }))
+}
+
+#[test]
+fn components_follow_the_preferred_languages() {
+    let (engine, rx, _) = start::<Greeting>(Environment::default());
+    until(&rx, "Welcome (1)");
+    for (tags, shown) in [
+        (&["ja-JP", "fr-FR", "de-DE"][..], "Bienvenue (3)"),
+        (&["de_AT", "en-US"][..], "Willkommen (2)"),
+    ] {
+        engine.control().set_environment(Environment {
+            languages: Languages::parse(tags.iter().copied()).unwrap(),
+            ..Environment::default()
+        });
+        let (texts, ..) = until(&rx, shown);
+        assert_eq!(texts.last().map(|t| t.as_ref()), Some(shown));
+    }
 }
 
 /// Shows the time zone and counts its effect's runs, as a clock that

@@ -21,6 +21,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `cx.insets()` | `safeAreaInsets()` (`nsh`) | The insets where the calling component renders (a page, a dialog). |
 | `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
+| `languages()` | `languages()` (`nsh`) | The user's preferred languages, most preferred first (`["de-DE", "en-US"]`) ([Preferred languages](#preferred-languages)). |
 | `time_zone()` | `timeZone()` (`nsh`) | The device's time zone as the system names it (`"Europe/Berlin"`) ([Time zone](#time-zone)). |
 | `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
@@ -248,6 +249,34 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
 
+## Preferred languages
+
+`languages()` is the user's list of preferred languages, most preferred first, as BCP 47 tags: the system's (Settings' language list on a phone, the UI languages of a desktop, the browser's on the web). Show the app's text in the first one it has a translation for, and fall back along the list: a user who prefers Swiss German, then German, then English gets German text from an app that has German and English. `locale()` is something else, the region format numbers and dates follow, which can be another (English text, German dates). The list is never empty, and what read it updates when the user changes it.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
+
+fn text_language() -> &'static str {
+    languages()
+        .iter()
+        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
+        .unwrap_or("en")
+}
+```
+
+```tsx tabs
+import { languages } from "nsh";
+
+const TRANSLATED = ["en", "de", "zh"];
+
+const textLanguage = () =>
+  languages().map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
+```
+
+An app shown inside a native app that sets its own language has that language first. In tests, `open`'s `languages` sets the list (`[locale]` otherwise) and `app.setLanguages(["ja-JP", "en-US"])` changes it ([Testing](./testing-and-trace.md#steps)).
+
 ## Time zone
 
 `time_zone()` (TSX: `timeZone()`) is the device's time zone as the system names it: an IANA name such as `Europe/Berlin` or `America/New_York`, `UTC`, or an offset zone where the system has one (`GMT+01:00` on Android). It changes when the user changes the setting or the device moves to another zone, and what read it updates: a clock that names its zone, a list of times in the user's zone, a date saved with the zone it was made in.
@@ -269,7 +298,7 @@ import { timeZone } from "nsh";
 
 ## In an embedding app
 
-An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./ios.md), `setLocale` and `setFontScale` in Java on [Android](./android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
+An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./ios.md), `setLocale` and `setFontScale` in Java on [Android](./android.md)) stand in for the system's language and text size. `locale()`, `languages()` (the embedding app's language first), `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
 
 ## In the background
 

@@ -452,6 +452,15 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     {
         env.locale = locale;
     }
+    if let Some(languages) = value
+        .get("languages")
+        .and_then(|v| v.as_array())
+        .and_then(|tags| {
+            nsh_core::platform::Languages::parse(tags.iter().filter_map(|t| t.as_str()))
+        })
+    {
+        env.languages = languages;
+    }
     if let Some(zone) = value
         .get("timeZone")
         .and_then(|v| v.as_str())
@@ -496,6 +505,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     send(|app| {
         let e = &mut app.environment;
         e.locale = env.locale;
+        e.languages = env.languages;
         e.time_zone = env.time_zone;
         e.rtl = env.rtl;
         e.apple_keyboard = env.apple_keyboard;

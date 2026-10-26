@@ -240,6 +240,9 @@ pub struct Environment {
     pub ctrl_for_command: bool,
     /// The user's locale (number and date formats: `Intl`'s default).
     pub locale: Locale,
+    /// The user's preferred languages, most preferred first (the system's
+    /// list: the language apps show their text in, then its fallbacks).
+    pub languages: Languages,
     /// The device's time zone, as the system names it (`Europe/Berlin`).
     pub time_zone: TimeZone,
     /// The app embedding NSH answers `nsh/host`'s calls
@@ -314,6 +317,7 @@ impl Default for Environment {
             apple_keyboard: false,
             ctrl_for_command: false,
             locale: Locale::EN_US,
+            languages: Languages::EN_US,
             time_zone: TimeZone::UTC,
             host: false,
             lifecycle: Lifecycle::Active,
@@ -331,8 +335,8 @@ impl Default for Environment {
 /// system's (`None`: the system's): its own language and text size, for an
 /// app inside a native app that lets its users switch them. The platforms
 /// write them over what they read from the system ([`Self::apply`]), so the
-/// app's `Intl`, `locale()`, `fontScale()` and text follow them like a system
-/// change.
+/// app's `Intl`, `locale()`, `languages()` (its language first),
+/// `fontScale()` and text follow them like a system change.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HostEnvironment {
     /// The locale in place of the user's ([`Environment::locale`]).
@@ -347,6 +351,7 @@ impl HostEnvironment {
     pub fn apply(&self, env: &mut Environment) {
         if let Some(locale) = self.locale {
             env.locale = locale;
+            env.languages = env.languages.preferring(locale);
         }
         if let Some(scale) = self.font_scale.filter(|s| s.is_finite() && *s > 0.0) {
             env.font_scale = scale;
@@ -441,6 +446,100 @@ impl std::fmt::Debug for Locale {
 impl std::fmt::Display for Locale {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// The user's preferred languages, most preferred first, as BCP 47 tags
+/// (`languages()`): never empty, at most [`Languages::CAPACITY`], each
+/// once. Held inline so that the environment stays `Copy`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Languages {
+    tags: [Locale; Languages::CAPACITY],
+    len: u8,
+}
+
+impl Languages {
+    /// How many it keeps: systems list a few (iOS and Android up to the
+    /// ones the user added, desktops their UI languages).
+    pub const CAPACITY: usize = 8;
+
+    /// `en-US` alone, the default when a platform reports none.
+    pub const EN_US: Languages = Languages {
+        tags: [Locale::EN_US; Languages::CAPACITY],
+        len: 1,
+    };
+
+    /// `locale` alone.
+    pub const fn one(locale: Locale) -> Languages {
+        Languages {
+            tags: [locale; Languages::CAPACITY],
+            len: 1,
+        }
+    }
+
+    /// The languages of platform identifiers, most preferred first
+    /// ([`Locale::parse`]'s forms: `en_US`, `zh-Hans-CN`): ones that name
+    /// no language and repeats are left out, the first
+    /// [`Languages::CAPACITY`] kept. `None` when none is a language.
+    pub fn parse<'a>(identifiers: impl IntoIterator<Item = &'a str>) -> Option<Languages> {
+        let mut languages = Languages::EN_US;
+        languages.len = 0;
+        for locale in identifiers.into_iter().filter_map(Locale::parse) {
+            if usize::from(languages.len) == Self::CAPACITY {
+                break;
+            }
+            if !languages.as_slice().contains(&locale) {
+                languages.tags[usize::from(languages.len)] = locale;
+                languages.len += 1;
+            }
+        }
+        (languages.len > 0).then_some(languages)
+    }
+
+    /// These with `locale` first (an embedding app's own language): it
+    /// moves there if it is listed, else comes before them (the last one
+    /// then left out when they are [`Languages::CAPACITY`]).
+    pub fn preferring(&self, locale: Locale) -> Languages {
+        let mut languages = Languages::one(locale);
+        for &other in self.as_slice() {
+            if usize::from(languages.len) == Self::CAPACITY {
+                break;
+            }
+            if other != locale {
+                languages.tags[usize::from(languages.len)] = other;
+                languages.len += 1;
+            }
+        }
+        languages
+    }
+
+    /// The most preferred.
+    pub fn first(&self) -> Locale {
+        self.tags[0]
+    }
+
+    /// All of them, most preferred first.
+    pub fn as_slice(&self) -> &[Locale] {
+        &self.tags[..usize::from(self.len)]
+    }
+
+    /// All of them, most preferred first.
+    pub fn iter(&self) -> impl Iterator<Item = Locale> + '_ {
+        self.as_slice().iter().copied()
+    }
+}
+
+impl Default for Languages {
+    fn default() -> Self {
+        Self::EN_US
+    }
+}
+
+impl std::fmt::Debug for Languages {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.iter().map(|l| l.to_string()))
+            .finish()
     }
 }
 
@@ -667,7 +766,7 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Environment, HostEnvironment, Idiom, Locale, Os, TimeZone};
+    use super::{Environment, HostEnvironment, Idiom, Languages, Locale, Os, TimeZone};
 
     #[test]
     fn desktop_is_a_desktop_os_or_a_desktop_browser() {
@@ -739,6 +838,39 @@ mod tests {
         }
         .apply(&mut env);
         assert_eq!((env.locale, env.font_scale), (zh, 1.5));
+    }
+
+    #[test]
+    fn languages_parse_platform_identifiers_and_an_embedding_app_goes_first() {
+        let tags = |l: Languages| l.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        let system = Languages::parse(["de_DE", "C", "en-US", "de-DE", "fr"]).unwrap();
+        assert_eq!(tags(system), ["de-DE", "en-US", "fr"]);
+        assert_eq!(system.first().as_str(), "de-DE");
+        assert_eq!(Languages::parse(["C", ""]), None);
+        let many: Vec<String> = (0..20)
+            .map(|i| format!("x{}", (b'a' + i) as char))
+            .collect();
+        let many = Languages::parse(many.iter().map(String::as_str)).unwrap();
+        assert_eq!(many.as_slice().len(), Languages::CAPACITY);
+        let fr = Locale::parse("fr").unwrap();
+        assert_eq!(tags(system.preferring(fr)), ["fr", "de-DE", "en-US"]);
+        let ja = Locale::parse("ja-JP").unwrap();
+        assert_eq!(
+            tags(system.preferring(ja)),
+            ["ja-JP", "de-DE", "en-US", "fr"]
+        );
+        assert_eq!(tags(Languages::default()), ["en-US"]);
+        // An embedding app's language comes first.
+        let mut env = Environment {
+            languages: system,
+            ..Environment::default()
+        };
+        HostEnvironment {
+            locale: Some(ja),
+            font_scale: None,
+        }
+        .apply(&mut env);
+        assert_eq!(tags(env.languages), ["ja-JP", "de-DE", "en-US", "fr"]);
     }
 
     #[test]

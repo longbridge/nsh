@@ -21,6 +21,7 @@ demo: guide-device
 | `cx.insets()` | `safeAreaInsets()`（`nsh`） | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh`） | 软键盘的高度和动画时长。 |
 | `locale()` | `locale()`（`nsh`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
+| `languages()` | `languages()`（`nsh`） | 用户的偏好语言，按偏好从高到低排列（`["de-DE", "en-US"]`）（[偏好语言](#偏好语言)）。 |
 | `time_zone()` | `timeZone()`（`nsh`） | 设备的时区，即系统给它的名称（`"Europe/Berlin"`）（[时区](#时区)）。 |
 | `lifecycle()` | `lifecycle()`（`nsh`） | 应用是否正在使用：`active`、`inactive`（可见但没有焦点）或 `background`（[在后台](#在后台)）。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
@@ -248,6 +249,34 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 <Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
 ```
 
+## 偏好语言
+
+`languages()` 是用户的偏好语言列表，按偏好从高到低排列，BCP 47 标签：系统的列表（手机设置中的语言列表、桌面的界面语言、Web 上浏览器的语言）。用其中第一个有翻译的语言显示应用的文字，并沿列表回退：偏好瑞士德语、然后德语、然后英语的用户，在一个有德语和英语的应用中看到德语文字。`locale()` 是另一回事，它是数字和日期遵循的区域格式，可以是另一种（英文文字、德国日期）。列表从不为空，用户修改它时，读取它的地方会随之更新。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+const TRANSLATED: [&str; 3] = ["en", "de", "zh"];
+
+fn text_language() -> &'static str {
+    languages()
+        .iter()
+        .find_map(|l| TRANSLATED.into_iter().find(|t| l.as_str().split('-').next() == Some(*t)))
+        .unwrap_or("en")
+}
+```
+
+```tsx tabs
+import { languages } from "nsh";
+
+const TRANSLATED = ["en", "de", "zh"];
+
+const textLanguage = () =>
+  languages().map((tag) => tag.split("-")[0]).find((l) => TRANSLATED.includes(l)) ?? "en";
+```
+
+显示在原生应用中、且该应用设置了自己语言的应用，会把那个语言排在最前。测试中，`open` 的 `languages` 设置这个列表（否则是 `[locale]`），`app.setLanguages(["ja-JP", "en-US"])` 修改它（[测试](./testing-and-trace.md#操作步骤)）。
+
 ## 时区
 
 `time_zone()`（TSX：`timeZone()`）是设备的时区，即系统给它的名称：`Europe/Berlin`、`America/New_York` 这样的 IANA 名称、`UTC`，或系统使用偏移量时区时的名称（Android 上的 `GMT+01:00`）。用户修改设置或设备到了另一个时区时它会变化，读取它的地方随之更新：标出时区的时钟、按用户时区显示的时间列表、和创建时所在时区一起保存的日期。
@@ -269,7 +298,7 @@ import { timeZone } from "nsh";
 
 ## 在嵌入它的应用中
 
-嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`languages()`（宿主应用的语言排在最前）、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
 
 ## 在后台
 

@@ -121,6 +121,7 @@ expect Window: 390x844
 expect Scheme: light
 expect Lifecycle: active
 expect Time zone: UTC
+expect Languages: en-US
 tap id:dark
 expect Scheme: dark
 absent Scheme: light
@@ -140,6 +141,7 @@ covers [nsh] fontScale
 covers [nsh] windowSize
 covers [nsh] lifecycle
 covers [nsh] timeZone
+covers [nsh] languages
 # mod-host-channel
 tap id:case-mod-host-channel
 # no embedding app: no parameters, posts go nowhere and calls reject at

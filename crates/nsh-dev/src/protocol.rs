@@ -140,6 +140,9 @@ pub struct TestEnvironment {
     /// The time zone, an IANA name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_zone: Option<String>,
+    /// The preferred languages, BCP 47 tags, most preferred first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<String>>,
     /// Whether the user asked for less motion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reduced_motion: Option<bool>,

@@ -1,6 +1,6 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, time zone, lifecycle) written when the platform reports a
+//! reduced motion, pixel ratio, locale, languages, time zone, lifecycle) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -45,9 +45,10 @@ enum Part {
     Locale,
     Lifecycle,
     TimeZone,
+    Languages,
 }
 
-const PARTS: usize = 12;
+const PARTS: usize = 13;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -369,6 +370,16 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
+    if changed(&|p| p.languages == next.languages) {
+        let mut tags: Vec<JsValue> = next
+            .languages
+            .iter()
+            .map(|l| string(cx, l.as_str()))
+            .collect();
+        // SAFETY: the array takes the strings.
+        let array = unsafe { qjs::JS_NewArrayFrom(cx, tags.len() as c_int, tags.as_mut_ptr()) };
+        writes.push((Part::Languages, array));
+    }
     if changed(&|p| p.time_zone == next.time_zone) {
         writes.push((Part::TimeZone, string(cx, next.time_zone.as_str())));
     }
@@ -633,6 +644,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Ts::value(
             "The user's locale as a BCP 47 tag (`\"en-US\"`, `\"zh-Hans-CN\"`), which\n`Intl` formats for by default (reactive): the system's, unless the\nembedding app set its own.",
             "Accessor<string>",
+        ),
+    ),
+    (
+        "languages",
+        Export::Value(|cx| accessor(cx, Part::Languages)),
+        Ts::value(
+            "The user's preferred languages as BCP 47 tags, most preferred first\n(reactive): the system's list (`[\"de-DE\", \"en-US\"]`), with the embedding\napp's own language first when it sets one. Show the app's text in the\nfirst it has, the others are its fallbacks. `[locale()]` in headless tests\nunless `open` sets `languages`.",
+            "Accessor<readonly string[]>",
         ),
     ),
     (

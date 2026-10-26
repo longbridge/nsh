@@ -8,7 +8,7 @@ use std::time::Duration;
 use nsh_core::{
     Dialog, ResolvedTextStyle,
     geometry::{Point, Points, Size},
-    platform::{ColorScheme, Lifecycle, TimeZone},
+    platform::{ColorScheme, Languages, Lifecycle, TimeZone},
 };
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
@@ -74,6 +74,12 @@ pub(crate) trait Driver: Send {
     fn set_time_zone(&mut self, zone: TimeZone) -> Result<(), String> {
         let _ = zone;
         Err(headless_only("setTimeZone"))
+    }
+    /// The user's preferred languages, as the system reports them
+    /// (`languages()`).
+    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
+        let _ = languages;
+        Err(headless_only("setLanguages"))
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
@@ -227,6 +233,11 @@ impl Driver for Headless {
     fn set_time_zone(&mut self, zone: TimeZone) -> Result<(), String> {
         self.set_environment(&format!("setTimeZone({zone})"), |e| {
             e.time_zone = zone;
+        })
+    }
+    fn set_languages(&mut self, languages: Languages) -> Result<(), String> {
+        self.set_environment(&format!("setLanguages({languages:?})"), |e| {
+            e.languages = languages;
         })
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
