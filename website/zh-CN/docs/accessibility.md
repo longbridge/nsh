@@ -163,11 +163,13 @@ function Quantity() {
 | 名称 | iOS（VoiceOver） | Android（TalkBack） |
 |---|---|---|
 | `activate` | 双击 | 双击（点击） |
-| `increment`、`decrement` | 在可调整元素上向上 / 向下轻扫 | 向前 / 向后滚动 |
+| `increment`、`decrement` | 向上 / 向下轻扫，随后 VoiceOver 读出新值 | 向前 / 向后滚动 |
 | `longpress` | | 双击并按住 |
 | `expand`、`collapse` | | 展开 / 收起 |
 | `magicTap` | 双指双击 | |
 | `escape` | 双指 Z 字形擦除 | |
+
+带有 `increment` 或 `decrement` 的元素，不论角色如何都是可调整的：图表保持 `"image"` 角色，同样能用 VoiceOver 的轻扫和 TalkBack 的滚动逐个切换数据点，每一步之后读出它的 `accessibilityValue`。
 
 其他名称都成为自定义操作，以 `label`（或名称）列在 VoiceOver 的操作转子和 TalkBack 的操作菜单中。自定义操作是滑动删除之类手势的无障碍替代：
 

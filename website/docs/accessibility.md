@@ -163,11 +163,13 @@ Some action names are standard and map to the platforms' own gestures:
 | Name | iOS (VoiceOver) | Android (TalkBack) |
 |---|---|---|
 | `activate` | Double tap | Double tap (click) |
-| `increment`, `decrement` | Swipe up / down on an adjustable element | Scroll forward / backward |
+| `increment`, `decrement` | Swipe up / down, then VoiceOver reads the new value | Scroll forward / backward |
 | `longpress` | | Double tap and hold |
 | `expand`, `collapse` | | Expand / collapse |
 | `magicTap` | Two-finger double tap | |
 | `escape` | Two-finger Z scrub | |
+
+An element with `increment` or `decrement` is adjustable whatever its role: a chart keeps its `"image"` role and steps through its points with VoiceOver's swipes and TalkBack's scrolls, its `accessibilityValue` read after each step.
 
 Any other name becomes a custom action, listed in VoiceOver's actions rotor and TalkBack's actions menu with its `label` (or its name). Custom actions are the accessible form of swipe-to-delete and similar gestures:
 
