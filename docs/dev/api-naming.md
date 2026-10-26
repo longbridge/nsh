@@ -160,6 +160,14 @@ go elsewhere under these rules rather than into them.
 every platform, as the user decided (2026-10-20) for `onSubmit` (a phone's return key is not Enter), `animation`
 (`transition` is a style key), `multiline` (one word) and a page's `onDismiss`. Each such row says "not followed" and why.
 
+The same holds for where behavior lives. `gpui-base`'s `Select` and `Combobox` are thin roots: the combobox role, a
+controlled `open`, Up / Down / Return opening it and moving the focus into the content, Escape dismissing it and
+giving the trigger the focus back. The list itself (the highlight, search, sections, typeahead) is
+`gpui-component`'s `SearchableList`, a styled layer NSH does not have (`gpui-shell`'s JS `Select`, without it, cannot
+be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled state machine
+(`crates/nsh-base/src/listbox.rs`, which `Combobox` will share) and keeps `gpui-component`'s names for its data
+(`SearchableListItem::title`, `SearchableGroup`'s sections) while its look stays the app's.
+
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
@@ -474,6 +482,15 @@ and `Input`'s React Native names follow the rules as well.
 | `gpui-component`'s `HOVER_DIM` (bars away from the hovered one fade by distance, `chart/bar_chart.rs:26`, `:974`) and its highlight band (`CrossLine::band`) | `inactiveOpacity` on `Bar` (none by default); the plot's cross line as wide as the band on a band scale | `chart/bar_chart.rs:968-985`, `:1143-1156` | No look of NSH's own: how far the other bars fade is the app's. The opacity follows the hover's band as it glides and fades, computed by the animator, so no bar is drawn again. A cross line as wide as the band lets the app's `w-full` tint it and `w-px` keep a line |
 | Bars' hover (`tooltip_state` with no dots, `chart/bar_chart.rs:1102`) | a `Bar` shows no hover dot; a band y scale finds the row along y, its cross line across the plot | `chart/bar_chart.rs:1064-1103` | As `gpui-component`'s bar chart |
 | `PlotAxis` | (later) | `axis.rs` | With its own pull request |
+| **Select** (`nsh/base`) | | | |
+| `Select` (a root around the app's trigger and popup: `open`, `on_open_change`, `on_confirm`, `on_dismiss`, `accessibility_value`) | `Select` with a `trigger` slot and `items: SelectItem[]` data | `gpui-base` `select.rs`; `gpui-component` `Select` (a `SearchableVec` of items); `nsh/mobile`'s `TabBar` `items` | The list is virtualized (thousands of items make only the rows in view), so its rows are data the select renders, not children; `renderItem` / `renderGroup` draw them (as `DataTable`'s `renderCell`). The confirmed and dismissed acts are `onChange` and `onCancel`; the trigger's accessibility value is the chosen item's title, which the select knows. Above: the state machine is `nsh-base`'s |
+| `SearchableListItem::title`, `value` | `SelectItem { value, title, disabled?, group? }` | `gpui-component` `SearchableListItem`, `SelectItem::value` | `title` is what the row shows, search and typeahead match and the trigger's value for screen readers; `disabled` as a menu item's |
+| `SearchableGroup { title, items }` | `SelectItem.group` (adjacent items of one group are a section) | `gpui-component` `SearchableGroup` | Flattened as data, so the items stay one array; `SelectGroup { title }` is what `renderGroup` gets |
+| `Select::value`, `on_change` | `value: string \| null`, `defaultValue`, `onChange(value: string)` | "Value state" above | Left out, the select keeps its own value; `null` is nothing chosen, controlled (`SelectValue::Controlled(None)` in Rust: the props tell `undefined` from `null`). `onChange` reports a change only: choosing the chosen item closes the list without it (`gpui-component` confirms the same value again; `on_change` observes changes, *guides*) |
+| `Select::open`, `on_open_change` | `open`, `defaultOpen`, `onOpenChange(open, reason)`, `onOpen`, `onClose`, `onCancel` | `Menu`'s (popups, below) | The keys that open it from the trigger (Down, Up, Return, Space) are presses of the trigger: reason `"triggerPress"`; a choice is `"select"` |
+| `SearchableList::searchable`, its search input's placeholder | `searchable`, `searchPlaceholder`; `searchClass` / `searchStyle` | `gpui-component` `Select::searchable`, `search_placeholder` | |
+| the highlighted row (`ListItem::selected` in `gpui-component`'s list; `aria_active_descendant()` in `gpui-base`) | `focus:` on the row (`itemClass`), `highlighted` in `SelectItemState` | Radix / shadcn `SelectItem` (`focus:bg-accent`: the highlighted item has the focus) | Not followed: the row's `selected` is its accessibility state, the chosen value's, as ARIA's option has it; the highlight is where the keyboard's focus would be with an active descendant, which NSH lacks, so the row shows `focus:` (`Interactive::project_focused`) while the real focus stays on the trigger or the search field, and a screen reader's focus moves to the highlighted row (while a search field edits, its title is announced instead) |
+| `SelectContent` and its viewport | `popupClass` / `popupStyle`, `listClass` / `listStyle`, `itemClass` / `itemStyle`, `groupClass` / `groupStyle`, `backdropClass` / `backdropStyle` | `Dialog::popup` / `backdrop` → `popupClass` | Parts named as `Menu`'s, plus the list (the scroll view of the rows), each row and each section's header; `empty` is the slot shown while no item matches (`Command::empty`) |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |
