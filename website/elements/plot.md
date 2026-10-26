@@ -154,7 +154,7 @@ colors like any view's background.
 ## Motion
 
 Motion is the app's, and none by default: everything shows at once. `motion` takes the timings of
-[`nsh/animated`](../modules/nsh-animated.md) (`{ duration, easing, delay }` and `{ stiffness, damping, mass }`):
+[`nsh`](../modules/nsh.md#animation) (`{ duration, easing, delay }` and `{ stiffness, damping, mass }`):
 
 | Key | Type | What moves |
 |---|---|---|
@@ -168,7 +168,7 @@ reduced motion. A plot that a list makes again for a row that comes back draws i
 `appearGeneration`.
 
 It is the plot's own motion, the timings of what a chart moves: its marks' clip and its hover's parts. A view's
-entrances, exits and attention seekers are [`createMotion`](../modules/nsh-animated.md#createmotion)'s presets and
+entrances, exits and attention seekers are [`createMotion`](../modules/nsh.md#createmotion)'s presets and
 keyframes, which an app can still play on the plot's view or on the elements around it.
 
 ## Building charts
