@@ -46,6 +46,11 @@
 //!   `WindowVisibility::Hidden`: minimized, covered or on another desktop,
 //!   as far as the platform reports it), active while one of the windows
 //!   showing a surface is the active one, inactive otherwise;
+//! - the preferred languages (`languages()`), most preferred first:
+//!   `GetUserPreferredUILanguages` on Windows,
+//!   `CFLocaleCopyPreferredLanguages` on macOS, gettext's list on Linux
+//!   (`LANGUAGE`, then the messages' locale, each with its language alone
+//!   after it);
 //! - the time zone (`timeZone()`), as the native backends name it: on
 //!   Windows the setting's zone (`GetDynamicTimeZoneInformation`) by its
 //!   IANA name from the ICU Windows ships; elsewhere `TZ` when it names a
@@ -80,7 +85,7 @@ use nsh_core::{
     Points, ROOT_ID,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale, TimeZone};
+use nsh_engine::{ColorScheme, Edges, Environment, Languages, Lifecycle, Locale, TimeZone};
 
 use crate::{
     app::AppView,
@@ -151,6 +156,7 @@ struct Settings {
     rtl: bool,
     screen_reader: bool,
     locale: Locale,
+    languages: Languages,
     time_zone: TimeZone,
     os_version: (u16, u16),
 }
@@ -392,6 +398,7 @@ fn update(surface: &Surface) {
     };
     env.color_scheme = surface.appearance.get().resolve(system);
     env.locale = settings.locale;
+    env.languages = settings.languages;
     env.time_zone = settings.time_zone;
     env.font_scale = settings.font_scale;
     env.reduce_motion = settings.reduce_motion;
@@ -447,6 +454,35 @@ fn posix_locale(var: impl Fn(&str) -> Option<String>) -> Locale {
         .unwrap_or_default()
 }
 
+/// The user's preferred languages on POSIX systems, as gettext lists them:
+/// `LANGUAGE`'s list (`fr_CA:de`, unless the messages' locale is `C`), then
+/// the first set of `LC_ALL`, `LC_MESSAGES` and `LANG`, each with its
+/// language alone after it (`de_DE.UTF-8`: `de-DE`, then `de`). `None` when
+/// none names a language.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn posix_languages(var: impl Fn(&str) -> Option<String>) -> Option<Languages> {
+    let messages = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|v| var(v).filter(|s| !s.is_empty()));
+    // gettext ignores `LANGUAGE` while the messages' locale is `C`.
+    let plain = messages
+        .as_deref()
+        .is_some_and(|m| m == "C" || m == "POSIX" || m.starts_with("C."));
+    let mut names: Vec<String> = Vec::new();
+    if !plain && let Some(list) = var("LANGUAGE") {
+        names.extend(list.split(':').filter(|n| !n.is_empty()).map(str::to_owned));
+    }
+    names.extend(messages);
+    let mut tags = Vec::new();
+    for locale in names.iter().filter_map(|n| Locale::parse(n)) {
+        tags.push(locale.as_str().to_owned());
+        if let Some((language, _)) = locale.as_str().split_once('-') {
+            tags.push(language.to_owned());
+        }
+    }
+    Languages::parse(tags.iter().map(String::as_str))
+}
+
 /// True when the language of locale `tag` (`ar-EG`, `he`) is written right
 /// to left.
 fn rtl_language(tag: &str) -> bool {
@@ -487,7 +523,9 @@ mod os {
         zvariant::{OwnedValue, Value},
     };
 
-    use super::{Settings, parse_version, posix_locale, posix_time_zone, rtl_language};
+    use super::{
+        Settings, parse_version, posix_languages, posix_locale, posix_time_zone, rtl_language,
+    };
 
     const PORTAL: &str = "org.freedesktop.portal.Desktop";
     const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -537,6 +575,8 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: desktop.screen_reader,
             locale,
+            languages: posix_languages(|v| std::env::var(v).ok())
+                .unwrap_or(nsh_engine::Languages::one(locale)),
             time_zone: posix_time_zone(),
             os_version: os_version(),
         }
@@ -726,6 +766,12 @@ mod os {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn GetDynamicTimeZoneInformation(info: *mut DynamicTimeZoneInformation) -> u32;
+        fn GetUserPreferredUILanguages(
+            flags: u32,
+            count: *mut u32,
+            names: *mut u16,
+            len: *mut u32,
+        ) -> i32;
         fn LoadLibraryExW(name: *const u16, file: isize, flags: u32) -> isize;
         fn GetProcAddress(module: isize, name: *const std::ffi::c_char) -> *mut c_void;
         fn GetUserDefaultLocaleName(name: *mut u16, len: i32) -> i32;
@@ -780,9 +826,43 @@ mod os {
             rtl: ui_language().is_some_and(|l| rtl_language(&l)),
             screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
             locale,
+            languages: preferred_languages(locale),
             time_zone: time_zone(),
             os_version: os_version(),
         }
+    }
+
+    /// The user's display languages, most preferred first
+    /// (`GetUserPreferredUILanguages`); `locale` alone when Windows lists
+    /// none.
+    fn preferred_languages(locale: Locale) -> nsh_engine::Languages {
+        const MUI_LANGUAGE_NAME: u32 = 0x8;
+        let (mut count, mut len) = (0u32, 0u32);
+        // SAFETY: a size query: no buffer, the length written to `len`.
+        if unsafe {
+            GetUserPreferredUILanguages(
+                MUI_LANGUAGE_NAME,
+                &mut count,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        } == 0
+            || len == 0
+        {
+            return nsh_engine::Languages::one(locale);
+        }
+        let mut names = vec![0u16; len as usize];
+        // SAFETY: a buffer of the `len` characters the query asked for.
+        if unsafe {
+            GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, names.as_mut_ptr(), &mut len)
+        } == 0
+        {
+            return nsh_engine::Languages::one(locale);
+        }
+        // A list of null-terminated names, ended by an empty one.
+        let names = String::from_utf16_lossy(&names);
+        nsh_engine::Languages::parse(names.split('\0'))
+            .unwrap_or(nsh_engine::Languages::one(locale))
     }
 
     /// `DYNAMIC_TIME_ZONE_INFORMATION`.
@@ -955,6 +1035,9 @@ mod os {
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn CFLocaleCopyCurrent() -> CFTypeRef;
+        fn CFLocaleCopyPreferredLanguages() -> CFTypeRef;
+        fn CFArrayGetCount(array: CFTypeRef) -> isize;
+        fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
         fn CFLocaleGetIdentifier(locale: CFTypeRef) -> CFTypeRef;
         fn CFStringGetCString(s: CFTypeRef, buf: *mut c_char, size: isize, encoding: u32) -> u8;
         fn CFStringCreateWithCString(
@@ -994,9 +1077,36 @@ mod os {
             rtl: rtl_language(locale.as_str()),
             screen_reader: universal_access(c"voiceOverOnOffKey"),
             locale,
+            languages: preferred_languages(locale),
             time_zone: posix_time_zone(),
             os_version: os_version(),
         }
+    }
+
+    /// The user's preferred languages, most preferred first
+    /// (`CFLocaleCopyPreferredLanguages`: System Settings' list); `locale`
+    /// alone when it names none.
+    fn preferred_languages(locale: Locale) -> nsh_engine::Languages {
+        let mut tags = Vec::new();
+        // SAFETY: the array is released after its strings (owned by it) are
+        // copied into the buffer, whose size is passed with it.
+        unsafe {
+            let array = CFLocaleCopyPreferredLanguages();
+            if !array.is_null() {
+                for i in 0..CFArrayGetCount(array) {
+                    let mut buf = [0 as c_char; 64];
+                    let tag = CFArrayGetValueAtIndex(array, i);
+                    if !tag.is_null()
+                        && CFStringGetCString(tag, buf.as_mut_ptr(), buf.len() as isize, UTF8) != 0
+                    {
+                        tags.push(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned());
+                    }
+                }
+                CFRelease(array);
+            }
+        }
+        nsh_engine::Languages::parse(tags.iter().map(String::as_str))
+            .unwrap_or(nsh_engine::Languages::one(locale))
     }
 
     /// The user's region format (`en_US@rg=gbzzzz`), `Intl`'s default.
@@ -2541,6 +2651,37 @@ pub(crate) fn set_clipboard_text(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn posix_languages_list_languages_then_messages_with_their_fallbacks() {
+        let vars = |set: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                set.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| (*v).to_owned())
+            }
+        };
+        let tags =
+            |l: Option<Languages>| l.map(|l| l.iter().map(|l| l.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            tags(posix_languages(vars(&[("LANG", "de_DE.UTF-8")]))).unwrap(),
+            ["de-DE", "de"]
+        );
+        assert_eq!(
+            tags(posix_languages(vars(&[
+                ("LANGUAGE", "fr_CA:pt"),
+                ("LANG", "en_US.UTF-8")
+            ])))
+            .unwrap(),
+            ["fr-CA", "fr", "pt", "en-US", "en"]
+        );
+        // `LANGUAGE` is ignored while messages are in `C`.
+        assert_eq!(
+            posix_languages(vars(&[("LANGUAGE", "fr"), ("LC_ALL", "C")])),
+            None
+        );
+        assert_eq!(posix_languages(vars(&[])), None);
+    }
 
     #[test]
     fn posix_locales() {
