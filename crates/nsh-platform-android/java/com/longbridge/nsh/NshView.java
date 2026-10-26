@@ -761,7 +761,10 @@ public class NshView extends FrameLayout {
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
             lifecycle,
-        }, dark, locale.toLanguageTag(), timeZone);
+        }, dark, locale.toLanguageTag(), timeZone,
+                // The user's list (an app's own language first, Android 13's
+                // per-app language included), after the embedding app's own.
+                (hostLocale != null ? hostLocale.toLanguageTag() + "," : "") + c.getLocales().toLanguageTags());
     }
 
     /** The system's time zone's ID (`timeZone()`). */
