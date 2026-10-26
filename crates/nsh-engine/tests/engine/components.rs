@@ -728,7 +728,7 @@ fn alert_dialogs_resolve_with_the_action_chosen() {
 }
 
 const SAFE_AREA: &str = r#"import { mount, Text, View } from "nsh";
-import { safeArea } from "nsh/base";
+import { safeArea } from "nsh";
 
 mount(() => (
   <View style={{ flex: 1, marginBottom: "env(keyboard-inset-height)" }}>

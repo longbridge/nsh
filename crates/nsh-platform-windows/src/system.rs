@@ -698,9 +698,8 @@ fn remove_overlay(surface: &Rc<Surface>, serial: u64) {
     let Some((_, kind)) = find(serial) else {
         return;
     };
-    if let OverlayKind::Dialog(d) = &kind {
-        d.closing.set(true);
-    }
+    let OverlayKind::Dialog(d) = &kind;
+    d.closing.set(true);
     if surface.environment.get().reduce_motion {
         drop_overlay(surface, serial);
     } else {

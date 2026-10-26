@@ -154,7 +154,8 @@ fn a_single_file_app_on_the_native_modules() {
 }
 
 const NAVIGATION: &str = r#"import { mount, signal, Text, View } from "nsh";
-import { Dialog, NavPage, NavStack, createNavStack, safeAreaInsets } from "nsh/base";
+import { Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
+import { safeAreaInsets } from "nsh";
 
 type Route = { name: string };
 const nav = createNavStack<Route>([{ name: "home" }]);

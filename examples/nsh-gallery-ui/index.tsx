@@ -4,7 +4,7 @@ import { reduceMotion } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
-import { Button as BaseButton, Sheet as BaseSheet, Switch } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { alpha, colors, finish, focusRing, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
@@ -536,3 +536,13 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
 }
 
 export { Icon, type IconName } from "./icons";
+
+/** A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
+ * small bubble of the theme's `popover` tokens. */
+export function Tip(props: { label: string }) {
+  return (
+    <Tooltip class="rounded-md border border-border bg-popover px-2 py-1">
+      <Text class="text-xs text-popover-foreground">{props.label}</Text>
+    </Tooltip>
+  );
+}
