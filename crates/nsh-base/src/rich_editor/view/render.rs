@@ -270,8 +270,29 @@ fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
         rv.doc_rev.get();
         let it = item.get();
         let label = marker_text(&rv, &it)?;
-        Some(part(
+        // The first line's typography (and the space above it), so the
+        // marker sits on that line's baseline as a browser's does; the
+        // marker's part comes after it.
+        let first = it.node.first_child().cloned();
+        let props = rv.props;
+        let typography = move || {
+            props.classes.with(|c| {
+                let mut list: Vec<String> = first
+                    .as_ref()
+                    .map(|n| parts::node_classes(c, n))
+                    .unwrap_or_default()
+                    .iter()
+                    .flat_map(|class| class.split_whitespace())
+                    .filter(|t| first_line_class(t))
+                    .map(str::to_owned)
+                    .collect();
+                list.extend(c.part(Part::ListMarker).cloned().map(|s| s.to_string()));
+                parts::join(list)
+            })
+        };
+        Some(
             text(label)
+                .app_class(typography)
                 .absolute()
                 .top(px(0.0))
                 .right(relative(1.0))
@@ -280,11 +301,39 @@ fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
                 .w(px(32.0))
                 .pe(px(6.0))
                 .text_right()
-                .pointer_events(PointerEvents::None),
-            &rv,
-            Part::ListMarker,
-        ))
+                .pointer_events(PointerEvents::None)
+                .inline_style(move || {
+                    props
+                        .styles
+                        .with(|s| s.part(Part::ListMarker).cloned().unwrap_or_default())
+                }),
+        )
     })
+}
+
+/// Whether a class of an item's first block sets how its first line sits:
+/// its font, size, line height and the space above it (not its box: a code
+/// block's background stays its own).
+fn first_line_class(class: &str) -> bool {
+    let utility = class.rsplit(':').next().unwrap_or(class);
+    [
+        "text-",
+        "leading-",
+        "font-",
+        "tracking-",
+        "pt-",
+        "py-",
+        "p-",
+        "mt-",
+        "my-",
+    ]
+    .iter()
+    .any(|p| utility.starts_with(p))
+        && !matches!(
+            utility,
+            "text-left" | "text-center" | "text-right" | "text-justify" | "text-start" | "text-end"
+        )
+        || matches!(utility, "italic" | "not-italic")
 }
 
 /// Whether a node selection holds the block (subscribes to the

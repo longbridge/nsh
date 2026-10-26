@@ -16,10 +16,12 @@ use serde_json::Value;
 
 use crate::rich_editor::{
     commands::list::wrap_range_in_list,
+    extensions::input_rules::{InputRulesState, mark_rule, record_rule},
     formats::{MarkdownFormat, MarkdownNames},
     model::{Attrs, Fragment, Node, ResolvedPos, Slice},
     state::{
-        EditorState, Plugin, PluginKey, PluginSpec, TextSelection, Transaction, TransactionOrigin,
+        EditorState, EditorStateConfig, Plugin, PluginKey, PluginSpec, PluginState, TextSelection,
+        Transaction, TransactionOrigin,
     },
     transform::find_wrapping,
 };
@@ -303,6 +305,20 @@ impl PluginSpec for MarkdownPlugin {
         PluginKey::new("markdown")
     }
 
+    fn init_state(&self, _: &EditorStateConfig, _: &EditorState) -> Option<PluginState> {
+        Some(Arc::new(InputRulesState::default()))
+    }
+
+    fn apply_state(
+        &self,
+        tr: &Transaction,
+        value: &PluginState,
+        _: &EditorState,
+        _: &EditorState,
+    ) -> PluginState {
+        record_rule("markdown", tr, value)
+    }
+
     fn handle_text_input(
         &self,
         state: &EditorState,
@@ -312,7 +328,10 @@ impl PluginSpec for MarkdownPlugin {
         dispatch: &mut dyn FnMut(Transaction),
     ) -> bool {
         match self.rule_transaction(state, from, to, text) {
-            Some(tr) => {
+            Some(mut tr) => {
+                // Backspace right after takes the rule back
+                // (`undo_input_rule`), as input rules' rules.
+                mark_rule(&mut tr, "markdown", from, to, text);
                 dispatch(tr);
                 true
             }

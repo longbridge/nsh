@@ -51,8 +51,9 @@ impl std::error::Error for KeymapError {}
 #[derive(Default)]
 pub struct KeymapOptions {
     /// Whether `Mod-` is `Meta-` (Apple platforms) rather than `Ctrl-`;
-    /// by default, whether this is macOS or iOS.
-    pub mac: bool,
+    /// by default (`None`), as each key event's platform has it (the
+    /// view's [`KeyEvent::mod_key`]).
+    pub mac: Option<bool>,
 }
 
 /// `name` in the normal form bindings are looked up by: modifiers in the
@@ -133,6 +134,8 @@ fn modifiers(name: &str, event: &KeyEvent, shift: bool) -> String {
 #[derive(Clone, Default)]
 pub struct Keymap {
     bindings: HashMap<String, BoxCommand>,
+    /// With `Mod-` read as `Meta-`, when the platform is the event's.
+    apple: Option<HashMap<String, BoxCommand>>,
 }
 
 impl fmt::Debug for Keymap {
@@ -151,15 +154,38 @@ impl Keymap {
         options: &KeymapOptions,
     ) -> Result<Self, KeymapError> {
         let mut map = HashMap::with_capacity(bindings.len());
+        let mut apple = options
+            .mac
+            .is_none()
+            .then(|| HashMap::with_capacity(bindings.len()));
         for (name, command) in bindings {
-            map.insert(normalize_key_name(&name, options.mac)?, command);
+            if let Some(apple) = &mut apple {
+                apple.insert(normalize_key_name(&name, true)?, command.clone());
+            }
+            map.insert(
+                normalize_key_name(&name, options.mac.unwrap_or(false))?,
+                command,
+            );
         }
-        Ok(Self { bindings: map })
+        Ok(Self {
+            bindings: map,
+            apple,
+        })
     }
 
-    /// The command bound to a normalized name.
+    /// The command bound to a normalized name (`Mod-` read off Apple
+    /// platforms when the options left it to the event).
     pub fn get(&self, name: &str) -> Option<&BoxCommand> {
         self.bindings.get(name)
+    }
+
+    // The bindings for `event`'s platform: Apple's when its command key is
+    // Meta (or Control is held without being it).
+    fn for_event(&self, event: &KeyEvent) -> &HashMap<String, BoxCommand> {
+        match &self.apple {
+            Some(apple) if (event.mod_key && event.meta) || (!event.mod_key && event.ctrl) => apple,
+            _ => &self.bindings,
+        }
     }
 
     /// Runs the command bound to `event`, as `prosemirror-keymap`'s
@@ -176,8 +202,9 @@ impl Keymap {
             event.key.as_str()
         };
         let is_char = name.chars().count() == 1 && name != " ";
+        let bindings = self.for_event(event);
         // A character's Shift is in its case already.
-        if let Some(command) = self.bindings.get(&modifiers(name, event, !is_char))
+        if let Some(command) = bindings.get(&modifiers(name, event, !is_char))
             && command(state, Some(&mut *dispatch))
         {
             return true;
@@ -185,14 +212,14 @@ impl Keymap {
         if is_char && event.shift {
             // Also the binding with Shift spelled out, and of the base key
             // (`Shift-Mod-z` for a Z typed with Shift).
-            if let Some(command) = self.bindings.get(&modifiers(name, event, true))
+            if let Some(command) = bindings.get(&modifiers(name, event, true))
                 && command(state, Some(&mut *dispatch))
             {
                 return true;
             }
             let lower = name.to_lowercase();
             if lower != name
-                && let Some(command) = self.bindings.get(&modifiers(&lower, event, true))
+                && let Some(command) = bindings.get(&modifiers(&lower, event, true))
                 && command(state, Some(&mut *dispatch))
             {
                 return true;
@@ -232,7 +259,7 @@ pub fn keymap(bindings: Vec<(String, BoxCommand)>) -> Plugin {
     let options = KeymapOptions::default();
     let mut valid = Vec::with_capacity(bindings.len());
     for (name, command) in bindings {
-        match normalize_key_name(&name, options.mac) {
+        match normalize_key_name(&name, options.mac.unwrap_or(false)) {
             Ok(_) => valid.push((name, command)),
             Err(error) => log::warn!("{error}"),
         }
@@ -307,7 +334,7 @@ mod tests {
                 ("Shift-Mod-z".into(), counter(&hits, 10)),
                 ("Shift-Enter".into(), counter(&hits, 100)),
             ],
-            &KeymapOptions { mac: false },
+            &KeymapOptions { mac: Some(false) },
         )
         .unwrap();
         let state = EditorState::create(EditorStateConfig::new(starter::schema())).unwrap();

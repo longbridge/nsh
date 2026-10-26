@@ -21,12 +21,12 @@ use super::{
 };
 use crate::rich_editor::{
     commands::{
-        BoxCommand, base_keymap, chain_commands, command, exit_code, join_down, join_up, lift,
-        lift_list_item, select_parent_node, set_block_type, sink_list_item, split_list_item,
+        BoxCommand, Dispatch, base_keymap, chain_commands, command, exit_code, join_down, join_up,
+        lift, lift_list_item, select_parent_node, set_block_type, sink_list_item, split_list_item,
         toggle_mark, wrap_in, wrap_in_list,
     },
     model::{AttrSpec, Attrs, MarkSpec, NodeSpec, Schema, SchemaSpec},
-    state::Plugin,
+    state::{EditorState, Plugin},
 };
 
 fn attr(default: Option<Value>) -> AttrSpec {
@@ -300,6 +300,43 @@ fn attrs_of(key: &str, value: Value) -> Attrs {
     attrs
 }
 
+/// Turns the empty code block the caret is in into the schema's default
+/// textblock (its first block type that takes text, a paragraph in the
+/// starter's) when it is the first child of its parent: after another block,
+/// `join_backward` deletes it instead.
+fn clear_empty_code_block(state: &EditorState, dispatch: Dispatch<'_>) -> bool {
+    let selection = state.selection();
+    let Some(cursor) = selection.cursor() else {
+        return false;
+    };
+    let parent = cursor.parent();
+    if !parent.ty().spec().code
+        || parent.content().size() > 0
+        || cursor.depth == 0
+        || cursor.index(cursor.depth - 1) > 0
+    {
+        return false;
+    }
+    let Some(paragraph) = cursor
+        .node(cursor.depth - 1)
+        .content_match_at(cursor.index(cursor.depth - 1))
+        .and_then(|m| m.default_type())
+        .filter(|ty| ty.is_textblock() && !ty.spec().code)
+    else {
+        return false;
+    };
+    if let Some(dispatch) = dispatch {
+        let mut tr = state.tr();
+        let pos = cursor.pos;
+        if tr.set_block_type(pos, pos, &paragraph, None).is_err() {
+            return false;
+        }
+        tr.scroll_into_view();
+        dispatch(tr);
+    }
+    true
+}
+
 /// Key bindings for the starter's types that `schema` has, after
 /// `prosemirror-example-setup`: history (`Mod-z`, `Shift-Mod-z`, `Mod-y`
 /// off Apple platforms), marks (`Mod-b`, `Mod-i`, `Mod-u`, `` Mod-` ``),
@@ -309,19 +346,26 @@ fn attrs_of(key: &str, value: Value) -> Attrs {
 /// `Shift-Enter` line breaks, Backspace undoing an input rule, `Escape`
 /// selecting the parent and `Alt-ArrowUp`/`Down` joining.
 pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
-    let mac = cfg!(any(target_os = "macos", target_os = "ios"));
     let mut keys: Vec<(String, BoxCommand)> = vec![
         ("Mod-z".into(), command(undo)),
         ("Shift-Mod-z".into(), command(redo)),
-        ("Backspace".into(), command(undo_input_rule)),
+        // Backspace first takes back an input rule, then turns an empty
+        // code block into a paragraph (as Tiptap's code block does), so a
+        // second Backspace deletes it even with no block before to join.
+        (
+            "Backspace".into(),
+            chain_commands(vec![
+                command(undo_input_rule),
+                Arc::new(clear_empty_code_block),
+            ]),
+        ),
         ("Alt-ArrowUp".into(), command(join_up)),
         ("Alt-ArrowDown".into(), command(join_down)),
         ("Mod-BracketLeft".into(), command(lift)),
         ("Escape".into(), command(select_parent_node)),
     ];
-    if !mac {
-        keys.push(("Mod-y".into(), command(redo)));
-    }
+    // Ctrl-Y off Apple platforms; Cmd-Y redoes there too, harmlessly.
+    keys.push(("Mod-y".into(), command(redo)));
     for (name, key) in [
         ("bold", "Mod-b"),
         ("italic", "Mod-i"),
@@ -357,9 +401,8 @@ pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
         let line_break = chain_commands(vec![command(exit_code), insert_break]);
         keys.push(("Mod-Enter".into(), line_break.clone()));
         keys.push(("Shift-Enter".into(), line_break.clone()));
-        if mac {
-            keys.push(("Ctrl-Enter".into(), line_break));
-        }
+        // On Apple platforms Mod-Enter is Cmd-Enter: Ctrl-Enter breaks too.
+        keys.push(("Ctrl-Enter".into(), line_break));
     }
     if let Some(ty) = schema.node_type("list_item") {
         keys.push(("Enter".into(), split_list_item(ty.clone(), None)));

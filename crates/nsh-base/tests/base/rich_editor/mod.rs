@@ -4,6 +4,11 @@
 //! pastes as blocks, a node view renders an atom, undo takes typing
 //! back, and lists' items show their markers.
 
+mod marks_clipboard_history;
+mod selection;
+mod structure;
+mod typing;
+
 use std::sync::Arc;
 
 use nsh_base::rich_editor::{
@@ -94,6 +99,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             let s = state.selection();
             (
                 doc_text(&doc),
+                doc.to_string(),
                 types.join(","),
                 bold,
                 format!("{}-{}", s.from(), s.to()),
@@ -113,9 +119,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             ),
         )
         .child(text(move || format!("Doc {:?}", shown.get().0)))
-        .child(text(move || format!("Types {}", shown.get().1)))
-        .child(text(move || format!("Bold {}", shown.get().2)))
-        .child(text(move || format!("Sel {}", shown.get().3)))
+        .child(text(move || format!("Tree {}", shown.get().1)))
+        .child(text(move || format!("Types {}", shown.get().2)))
+        .child(text(move || format!("Bold {}", shown.get().3)))
+        .child(text(move || format!("Sel {}", shown.get().4)))
+        .child(text("Ready"))
 }
 
 fn start(doc: Value) -> Headless {
@@ -129,7 +137,7 @@ fn start(doc: Value) -> Headless {
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
-    app.wait_for("text:Bold 0").unwrap();
+    app.wait_for("text:Ready").unwrap();
     app
 }
 

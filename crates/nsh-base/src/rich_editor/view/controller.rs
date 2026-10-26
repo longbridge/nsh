@@ -148,8 +148,8 @@ impl Rv {
             .unwrap_or_else(|| own_session(&props));
         let state = session.state();
         let mac = matches!(os(), Os::MacOs | Os::Ios);
-        let base_keymap =
-            Keymap::new(base_keymap_for(mac), &KeymapOptions { mac }).unwrap_or_default();
+        let base_keymap = Keymap::new(base_keymap_for(mac), &KeymapOptions { mac: Some(mac) })
+            .unwrap_or_default();
         let rv = Rv {
             node_views: Rc::new(RefCell::new(session.node_views())),
             session,
@@ -606,9 +606,63 @@ impl Rv {
                 _ => {}
             }
         }
+        if editable && self.delete_by_key(event) {
+            self.after_key(event);
+            return;
+        }
         if let Some(m) = keys::movement(event) {
             self.move_caret(m);
         }
+    }
+
+    /// Backspace and Delete in a textblock's text, which the keymaps leave
+    /// to the platform's editing (ProseMirror leaves them to the
+    /// browser's): the grapheme before or after the caret, the word with
+    /// Control (Option on Apple's), the rest of the line with Command.
+    fn delete_by_key(&self, event: &KeyEvent) -> bool {
+        let dir = match event.key.as_str() {
+            "Backspace" => -1,
+            "Delete" => 1,
+            _ => return false,
+        };
+        let state = self.session.state();
+        let sel = state.selection();
+        if !sel.empty() || sel.as_node().is_some() {
+            return false;
+        }
+        let doc = state.doc().clone();
+        let head = sel.head();
+        let Ok(at) = doc.resolve(head) else {
+            return false;
+        };
+        if !at.parent().inline_content() {
+            return false;
+        }
+        let apple = matches!(os(), Os::MacOs | Os::Ios);
+        let (start, end) = (at.start(at.depth), at.end(at.depth));
+        let target = if apple && event.meta {
+            let geo = self.geo.borrow();
+            geo.line_edge(head, sel.affinity(), dir > 0)
+        } else if (apple && event.alt) || (!apple && event.ctrl) {
+            self.word_step(&doc, head, dir)
+        } else {
+            self.char_step(&doc, sel, dir).map(|s| s.head())
+        };
+        // Within the textblock: what lies past its edges is the keymaps'.
+        let Some(target) = target.map(|t| t.clamp(start, end)) else {
+            return false;
+        };
+        if target == head {
+            return false;
+        }
+        let (from, to) = (head.min(target), head.max(target));
+        let mut tr = state.tr();
+        if tr.delete(from, to).is_err() {
+            return false;
+        }
+        tr.scroll_into_view();
+        self.dispatch(tr);
+        true
     }
 
     fn after_key(&self, event: &KeyEvent) {
@@ -653,6 +707,15 @@ impl Rv {
                 Err(_) => return,
             };
             return self.set_selection(next, false);
+        }
+        // Up and down from a selected node leave it on that side, as
+        // ProseMirror moves out of a node selection.
+        if vertical && !m.extend && sel.as_node().is_some() {
+            let pos = if m.dir > 0 { sel.to() } else { sel.from() };
+            if let Ok(p) = doc.resolve(pos) {
+                self.set_selection(Selection::near(&p, m.dir), true);
+            }
+            return;
         }
         let head = sel.head();
         let affinity = sel.affinity();

@@ -67,7 +67,8 @@ impl Eq for Node {}
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut close = 0;
-        for mark in self.0.marks.iter().rev() {
+        // The first mark outermost, as ProseMirror's `wrapMarks` writes them.
+        for mark in self.0.marks.iter() {
             write!(f, "{}(", mark.ty.name())?;
             close += 1;
         }

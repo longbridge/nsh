@@ -213,31 +213,7 @@ impl PluginSpec for InputRules {
         _: &EditorState,
         _: &EditorState,
     ) -> PluginState {
-        if let Some(meta) = tr
-            .get_meta(INPUT_RULE_META)
-            .filter(|meta| meta["key"] == self.key.name())
-        {
-            let pos = |name: &str| meta[name].as_u64().unwrap_or(0) as usize;
-            let steps = tr
-                .steps
-                .iter()
-                .zip(tr.docs.iter())
-                .map(|(step, doc)| (step.clone(), doc.clone()))
-                .collect();
-            return Arc::new(InputRulesState {
-                undoable: Some(Arc::new(Undoable {
-                    steps,
-                    from: pos("from"),
-                    to: pos("to"),
-                    text: meta["text"].as_str().unwrap_or_default().to_owned(),
-                })),
-            });
-        }
-        if tr.selection_set() || tr.doc_changed() {
-            Arc::new(InputRulesState::default())
-        } else {
-            value.clone()
-        }
+        record_rule(self.key.name(), tr, value)
     }
 
     fn handle_text_input(
@@ -249,6 +225,45 @@ impl PluginSpec for InputRules {
         dispatch: &mut dyn FnMut(Transaction),
     ) -> bool {
         run(self, state, from, to, text, dispatch)
+    }
+}
+
+/// Marks `tr` as a rule's change that [`undo_input_rule`] can take back,
+/// for the plugin `key`: the text typed at `from..to` that fired it.
+pub(crate) fn mark_rule(tr: &mut Transaction, key: &str, from: usize, to: usize, text: &str) {
+    tr.set_meta(
+        INPUT_RULE_META,
+        json!({ "key": key, "from": from, "to": to, "text": text }),
+    );
+}
+
+/// The state of the plugin `key` after `tr`: the rule's change it marks
+/// ([`mark_rule`]), kept until the selection or the document changes.
+pub(crate) fn record_rule(key: &str, tr: &Transaction, value: &PluginState) -> PluginState {
+    if let Some(meta) = tr
+        .get_meta(INPUT_RULE_META)
+        .filter(|meta| meta["key"] == key)
+    {
+        let pos = |name: &str| meta[name].as_u64().unwrap_or(0) as usize;
+        let steps = tr
+            .steps
+            .iter()
+            .zip(tr.docs.iter())
+            .map(|(step, doc)| (step.clone(), doc.clone()))
+            .collect();
+        return Arc::new(InputRulesState {
+            undoable: Some(Arc::new(Undoable {
+                steps,
+                from: pos("from"),
+                to: pos("to"),
+                text: meta["text"].as_str().unwrap_or_default().to_owned(),
+            })),
+        });
+    }
+    if tr.selection_set() || tr.doc_changed() {
+        Arc::new(InputRulesState::default())
+    } else {
+        value.clone()
     }
 }
 
@@ -316,10 +331,7 @@ fn run(
             continue;
         };
         if rule.undoable {
-            tr.set_meta(
-                INPUT_RULE_META,
-                json!({ "key": plugin.key.name(), "from": from, "to": to, "text": text }),
-            );
+            mark_rule(&mut tr, plugin.key.name(), from, to, text);
         }
         dispatch(tr);
         return true;
