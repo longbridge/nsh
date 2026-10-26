@@ -85,7 +85,7 @@ export function Physics() {
     <View style={short ? { padding: 16, gap: 12 } : { flex: 1, padding: 16, gap: 12, backgroundColor: colors.background }}>
       <Appear index={0}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <IconTile name="atom" tint={colors.accent} />
+          <IconTile name="physics" tint={colors.accent} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>Drag and release</Text>
             <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
@@ -193,7 +193,7 @@ export function Physics() {
             ],
           }}
         >
-          <Icon name="hand" size={28} tint={colors.onAccent} />
+          <Icon name="gestures" size={28} tint={colors.onAccent} />
           <Text style={{ color: colors.onAccent, fontSize: 15, fontWeight: "700" }}>Drag me</Text>
         </View>
       </View>

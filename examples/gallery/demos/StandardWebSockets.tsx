@@ -60,7 +60,7 @@ export function StandardWebSockets() {
     finally { if (!disposed) busy.set(false); }
   };
 
-  return <Card icon="settings" title="WebSockets" subtitle="websocket module and global WebSocket · local echo on 127.0.0.1:9877">
+  return <Card icon="system" title="WebSockets" subtitle="websocket module and global WebSocket · local echo on 127.0.0.1:9877">
     <Button label="Run WebSockets" disabled={busy()} onPress={() => { void run(); }} />
     <Text selectable style={{ color: colors.text, fontSize: 13, fontFamily: mono }}>{result()}</Text>
   </Card>;

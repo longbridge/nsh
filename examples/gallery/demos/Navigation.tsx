@@ -44,7 +44,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
             {props.note}
           </Text>
         </View>
-        <Icon name="chevron-right" size={14} tint={colors.faint} />
+        <Icon name="chevron" size={14} tint={colors.faint} />
       </View>
     </Press>
   );
@@ -221,7 +221,7 @@ function Unsaved() {
           "Type something, then go back (header button, Escape, Alt+Left, the mouse's back button): the screen asks first.",
         )}
       >
-        <Card icon="text-cursor-input" title="Draft" subtitle="popOnBack + onBackPress" right={<Badge label={text().length > 0 ? "Guarded" : "Empty"} tone={text().length > 0 ? "warn" : "neutral"} />}>
+        <Card icon="form" title="Draft" subtitle="popOnBack + onBackPress" right={<Badge label={text().length > 0 ? "Guarded" : "Empty"} tone={text().length > 0 ? "warn" : "neutral"} />}>
           <Input
             value={text()}
             onChange={(v) => text.set(v)}
@@ -308,7 +308,7 @@ function Deep(props: { depth: number }) {
   return (
     <NavPage title={`Level ${props.depth}`} {...header} header={<PageHeader title={`Level ${props.depth}`} />}>
       <Page intro="Every push is a native screen; popToRoot() unwinds them all at once.">
-        <Card icon="layers" title={`Level ${props.depth}`} subtitle={`${props.depth} deep in the stack`}>
+        <Card icon="nav" title={`Level ${props.depth}`} subtitle={`${props.depth} deep in the stack`}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             <Each of={Array.from({ length: props.depth }, (_, i) => i + 1)}>
               {(level) => (
@@ -343,10 +343,10 @@ function Deep(props: { depth: number }) {
 type Sheet = "fullScreen" | "pageSheet" | "formSheet" | "fade" | "dialog" | "kept" | null;
 
 const modals: { key: Exclude<Sheet, null>; title: string; note: string; icon: IconName }[] = [
-  { key: "fullScreen", title: "Full screen", note: "Slides up", icon: "smartphone" },
-  { key: "pageSheet", title: "Page sheet", note: hint("iOS sheet", "A tall centered card"), icon: "blocks" },
-  { key: "formSheet", title: "Form sheet", note: hint("iOS, centered", "A smaller centered card"), icon: "text-cursor-input" },
-  { key: "fade", title: "Fade", note: "Fades in", icon: "sparkles" },
+  { key: "fullScreen", title: "Full screen", note: "Slides up", icon: "mobile" },
+  { key: "pageSheet", title: "Page sheet", note: hint("iOS sheet", "A tall centered card"), icon: "components" },
+  { key: "formSheet", title: "Form sheet", note: hint("iOS, centered", "A smaller centered card"), icon: "form" },
+  { key: "fade", title: "Fade", note: "Fades in", icon: "spark" },
   { key: "dialog", title: "Dialog", note: "See-through", icon: "bell" },
   { key: "kept", title: "Kept open", note: hint("No swipe to close", "Escape does not close"), icon: "arrow-down" },
 ];
@@ -404,22 +404,22 @@ export function Navigation() {
     <DemoPage
       cards={[
         () => (
-          <Card icon="layers" title="Native stack" subtitle="Headers, transitions, the safe area" right={<Badge label={hint("UIKit / View", platform.os === "linux" ? "GTK 4" : "Native views")} />}>
+          <Card icon="nav" title="Native stack" subtitle="Headers, transitions, the safe area" right={<Badge label={hint("UIKit / View", platform.os === "linux" ? "GTK 4" : "Native views")} />}>
             <Insets />
           </Card>
         ),
         () => (
           <Card title="Pages" subtitle="Page options, pushed with nav.push" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow first icon="type" title="Large title" note="headerLargeTitle" onPress={push(LargeTitle)} />
-              <LinkRow icon="palette" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
+              <LinkRow first icon="text" title="Large title" note="headerLargeTitle" onPress={push(LargeTitle)} />
+              <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
-              <LinkRow icon="smartphone" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
-              <LinkRow icon="sparkles" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
+              <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
+              <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
               <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />
-              <LinkRow icon="hand" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
-              <LinkRow icon="text-cursor-input" title="Unsaved changes" note="popOnBack + onBackPress" onPress={push(Unsaved)} />
-              <LinkRow icon="list" title="A deep stack" note="push / popToRoot" onPress={push(() => <Deep depth={1} />)} />
+              <LinkRow icon="gestures" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />
+              <LinkRow icon="form" title="Unsaved changes" note="popOnBack + onBackPress" onPress={push(Unsaved)} />
+              <LinkRow icon="lists" title="A deep stack" note="push / popToRoot" onPress={push(() => <Deep depth={1} />)} />
             </Inset>
           </Card>
         ),
@@ -456,7 +456,7 @@ export function Navigation() {
         ),
         () => (
           <Card
-            icon="settings"
+            icon="system"
             title="Back button"
             subtitle={hint("Android: BackHandler", "BackHandler: Escape, Alt+Left")}
             right={<Toggle value={intercept()} onChange={(v) => intercept.set(v)} label="Intercept the back button" />}

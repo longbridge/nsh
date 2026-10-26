@@ -573,7 +573,7 @@ function More() {
             style={{ borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
             empty={
               <View style={{ alignItems: "center", justifyContent: "center", gap: 10, height: 194 }}>
-                <IconTile name="list" tint={colors.faint} />
+                <IconTile name="lists" tint={colors.faint} />
                 <Text style={{ fontSize: 13, color: colors.muted }}>{hint("Nothing here yet: tap Add", "Nothing here yet: click Add")}</Text>
               </View>
             }

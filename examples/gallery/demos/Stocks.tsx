@@ -112,7 +112,7 @@ function MarketStrip(props: { market: Market }) {
           </Text>
           <Text style={{ fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>{signed(change())}%</Text>
           <View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["90deg", "-90deg"] }) }] }}>
-            <Icon name="chevron-right" size={12} tint={colors.faint} />
+            <Icon name="chevron" size={12} tint={colors.faint} />
           </View>
         </View>
         <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{time(props.market.clock())}</Text>

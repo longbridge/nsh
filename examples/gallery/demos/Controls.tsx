@@ -208,7 +208,7 @@ export function Controls() {
       );
     }
     return (
-      <Card icon="toggle-right" title="Switch" subtitle="Settings that take effect at once">
+      <Card icon="controls" title="Switch" subtitle="Settings that take effect at once">
         <View>
           <Setting
             first
@@ -238,7 +238,7 @@ export function Controls() {
     const all = () => shown().length === KINDS.length;
     const mark = (): Mark => (all() ? "check" : shown().length > 0 ? "dash" : null);
     return (
-      <Card icon="toggle-right" title="Checkbox" subtitle="A filter: “Select all” shows a partial selection" right={<Badge label={`${shown().length} of ${KINDS.length}`} />}>
+      <Card icon="controls" title="Checkbox" subtitle="A filter: “Select all” shows a partial selection" right={<Badge label={`${shown().length} of ${KINDS.length}`} />}>
         <View>
           <Checkbox
             checked={all()}
@@ -288,7 +288,7 @@ export function Controls() {
     const plan = signal("Plus");
     const chosen = () => PLANS.find((p) => p.name === plan())!;
     return (
-      <Card icon="toggle-right" title="Radio" subtitle="A plan picker: one of a small set, all in view">
+      <Card icon="controls" title="Radio" subtitle="A plan picker: one of a small set, all in view">
         <RadioGroup>
           <Each of={PLANS}>
             {(p, i) => (
@@ -331,7 +331,7 @@ export function Controls() {
     // The track's padding and border: a tab is a pill inside them.
     const inner = size.tabs - 2 * (3 + 1);
     return (
-      <Card icon="toggle-right" title="Tabs" subtitle="A section switcher: the app shows the selected one">
+      <Card icon="controls" title="Tabs" subtitle="A section switcher: the app shows the selected one">
         <Tabs
           style={{
             height: size.tabs,
@@ -409,13 +409,13 @@ export function Controls() {
             class="transition-transform duration-150 motion-reduce:transition-none"
             style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
           >
-            <Icon name="chevron-right" size={size.check} tint={colors.muted} />
+            <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>
         </View>
       );
     }
     return (
-      <Card icon="toggle-right" title="Collapsible" subtitle="Details under a summary, kept while collapsed">
+      <Card icon="controls" title="Collapsible" subtitle="Details under a summary, kept while collapsed">
         <View>
           <Collapsible
             open={storage()}
@@ -519,7 +519,7 @@ export function Controls() {
       );
     }
     return (
-      <Card icon="toggle-right" title="Progress" subtitle="Transfers: the app owns the value">
+      <Card icon="controls" title="Progress" subtitle="Transfers: the app owns the value">
         <View>
           <Transfer
             first
@@ -561,7 +561,7 @@ export function Controls() {
 
   function Last() {
     return (
-      <Card icon="settings" title="Last event">
+      <Card icon="system" title="Last event">
         <Text style={{ fontSize: 13, color: colors.text, fontFamily: mono }}>{last()}</Text>
       </Card>
     );

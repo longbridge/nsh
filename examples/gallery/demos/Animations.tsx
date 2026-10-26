@@ -69,7 +69,7 @@ function Hero() {
   );
   return (
     <Card
-      icon="activity"
+      icon="animation"
       title="Native motion"
       subtitle="Three loops, started once, run on the UI thread"
     >
@@ -111,7 +111,7 @@ function Hero() {
               transform: [{ scale: breathe.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.08] }) }],
             }}
           >
-            <Icon name="activity" size={22} tint={colors.onAccent} />
+            <Icon name="animation" size={22} tint={colors.onAccent} />
           </View>
         </View>
       </View>
@@ -218,7 +218,7 @@ function MotionPresets() {
   const status = signal("tap a tile");
   const names = () => presetNames.filter((n) => motions[n].kind === kind());
   return (
-    <Card icon="sparkles" title="Motion presets" subtitle={`${presetNames.length} ready-made motions, played natively`} right={<Badge label={status()} tone="accent" />}>
+    <Card icon="spark" title="Motion presets" subtitle={`${presetNames.length} ready-made motions, played natively`} right={<Badge label={status()} tone="accent" />}>
       <Scroll horizontal scrollbar={false}>
         <Tabs style={{ flexDirection: "row", gap: 8 }}>
           <Each of={kinds}>
@@ -293,7 +293,7 @@ function StaggeredEntrance() {
     wave.set(wave() + 1);
   };
   return (
-    <Card icon="list" title="Staggered entrance" subtitle="createMotion({ enter, delay }) per item" right={<Badge label="70 ms apart" />}>
+    <Card icon="lists" title="Staggered entrance" subtitle="createMotion({ enter, delay }) per item" right={<Badge label="70 ms apart" />}>
       <View style={{ height: 140, flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
         <Each of={items()} key={(it) => it.key}>
           {(it) => <StaggerBar height={it().height} tone={tones()[it().i % tones().length]} delay={staggerSteps(it().i, BARS.length, from()) * 70} />}
@@ -367,7 +367,7 @@ function Keyframes() {
   });
 
   return (
-    <Card icon="activity" title="Keyframes" subtitle="Steps, frames as the Web Animations API writes them, chained motions">
+    <Card icon="animation" title="Keyframes" subtitle="Steps, frames as the Web Animations API writes them, chained motions">
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-around" }}>
         <View style={{ alignItems: "center", gap: 8 }}>
           <View style={{ width: MOON, height: MOON, borderRadius: MOON / 2, overflow: "hidden", backgroundColor: colors.raised }}>
@@ -490,7 +490,7 @@ function Aurora() {
   cleanup(() => drifts.forEach((m) => m.stop()));
   const ink = () => (isDark() ? "#ffffff" : "#1b1035");
   return (
-    <Card icon="palette" title="Aurora" subtitle="Blurred gradients on looping motions" flush>
+    <Card icon="styles" title="Aurora" subtitle="Blurred gradients on looping motions" flush>
       <View
         style={{
           height: 260,
@@ -626,7 +626,7 @@ function EasingPlot() {
   const lo = -0.18;
   const hi = 1.24;
   return (
-    <Card icon="sparkles" title="Easing" subtitle="Curves are data, evaluated natively">
+    <Card icon="spark" title="Easing" subtitle="Curves are data, evaluated natively">
       <Canvas
         style={{ height: 196 }}
         draw={(cx, { width, height }) => {
@@ -740,7 +740,7 @@ function EasingRace() {
     Animated.parallel(dots.map((d, i) => Animated.timing(d, { toValue: there() ? 1 : 0, duration: 1200, easing: curves[i].easing }))).start();
   };
   return (
-    <Card icon="list" title="Side by side" subtitle="Ten timings started together" right={<Badge label="1.2 s" />}>
+    <Card icon="lists" title="Side by side" subtitle="Ten timings started together" right={<Badge label="1.2 s" />}>
       <View style={{ gap: 2 }}>
         <Each of={curves}>
           {(c, i) => (
@@ -836,7 +836,7 @@ function Composition() {
     a.start().then((finished) => state.set({ label: `${name} ${finished ? "finished" : "stopped"}`, tone: finished ? "accent" : "warn" }));
   };
   return (
-    <Card icon="blocks" title="Composition" subtitle="Each step starts as the last one ends" right={<Badge label={state().label} tone={state().tone} />}>
+    <Card icon="components" title="Composition" subtitle="Each step starts as the last one ends" right={<Badge label={state().label} tone={state().tone} />}>
       <View style={{ height: 116, flexDirection: "row", justifyContent: "center", alignItems: "flex-end", gap: 12, paddingBottom: 14 }}>
         <View
           pointerEvents="none"
@@ -929,7 +929,7 @@ function Springs() {
     ]).start();
   };
   return (
-    <Card icon="atom" title="Springs" subtitle="Stiffness and damping, mass 1">
+    <Card icon="physics" title="Springs" subtitle="Stiffness and damping, mass 1">
       <Canvas
         style={{ height: 150 }}
         draw={(cx, { width: cw, height }) => {
@@ -1043,7 +1043,7 @@ function Interpolations() {
   };
   const D = 128;
   return (
-    <Card icon="palette" title="Interpolation" subtitle="One value drives color, angle and scale" right={<Badge label={`t = ${at()}`} tone="accent" />}>
+    <Card icon="styles" title="Interpolation" subtitle="One value drives color, angle and scale" right={<Badge label={`t = ${at()}`} tone="accent" />}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <View style={{ width: D, height: D }}>
           <DialFace size={D} />
@@ -1117,7 +1117,7 @@ function HidingHeader() {
   const H = 52;
   const header = scroll.diffClamp(0, H);
   return (
-    <Card icon="scroll-text" title="Hiding header" subtitle="Hides as the list scrolls up, returns as it scrolls down">
+    <Card icon="scroll" title="Hiding header" subtitle="Hides as the list scrolls up, returns as it scrolls down">
       <View style={{ height: 300, borderRadius: radius.control, overflow: "hidden", backgroundColor: colors.background, ...finish.track }}>
         <Scroll style={{ flex: 1 }} scrollValue={scroll}>
           <View style={{ paddingTop: H + 8, paddingHorizontal: 8, paddingBottom: 8, gap: 6 }}>
@@ -1191,7 +1191,7 @@ function Layout() {
     fn();
   };
   return (
-    <Card icon="smartphone" title="Layout animation" subtitle="Frames, inserts and removals of the next commit" right={<Badge label={`${items().length} views`} />}>
+    <Card icon="mobile" title="Layout animation" subtitle="Frames, inserts and removals of the next commit" right={<Badge label={`${items().length} views`} />}>
       <Segmented
         size="small"
         options={[

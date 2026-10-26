@@ -217,7 +217,7 @@ function DocumentEditor() {
   const mode = signal<"edit" | "markdown">("edit");
   const words = () => text().split(/\s+/).filter(Boolean).length;
   return (
-    <Card icon="pilcrow" title="Document" subtitle="A toolbar of commands, Markdown shortcuts, undo and redo">
+    <Card icon="text" title="Document" subtitle="A toolbar of commands, Markdown shortcuts, undo and redo">
       <View style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, overflow: "hidden" }}>
         <View style={{ paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.inset }}>
           <Toolbar editor={editor} revision={revision()} />
@@ -453,7 +453,7 @@ function ChatComposer() {
   });
 
   return (
-    <Card icon="message-circle" title="Chat" subtitle="Type @ to mention someone · Enter sends, Shift-Enter breaks the line">
+    <Card icon="chat" title="Chat" subtitle="Type @ to mention someone · Enter sends, Shift-Enter breaks the line">
       <View style={{ gap: 10, paddingVertical: 4 }}>
         <Each of={thread()}>{(message) => <Bubble message={message()} />}</Each>
       </View>

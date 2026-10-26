@@ -73,7 +73,7 @@ function Corners() {
     { label: "Pill", style: () => ({ width: 60, height: 28, borderRadius: 14, borderCurve: "continuous", backgroundColor: colors.up }) },
   ];
   return (
-    <Card icon="palette" title="Corners" subtitle="borderRadius · borderCurve · per corner">
+    <Card icon="styles" title="Corners" subtitle="borderRadius · borderCurve · per corner">
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Each of={shapes}>
           {(shape) => (
@@ -115,7 +115,7 @@ function Corners() {
 
 function Borders() {
   return (
-    <Card icon="blocks" title="Borders" subtitle="per side · dashed · dotted">
+    <Card icon="components" title="Borders" subtitle="per side · dashed · dotted">
       <Grid>
         <Tile label="Per-side borders" note="6 · 2 · 4 · 1 pt, clockwise">
           <View
@@ -146,7 +146,7 @@ function Borders() {
 /** Shadows that read on a dark page: colored glows rather than black. */
 function Shadows() {
   return (
-    <Card icon="sparkles" title="Shadows and glow" subtitle="shadowColor · elevation · text shadow">
+    <Card icon="spark" title="Shadows and glow" subtitle="shadowColor · elevation · text shadow">
       <Grid>
         <Tile label="Glow" code="shadowColor" note="A colored shadow">
           <View
@@ -237,7 +237,7 @@ function Layers() {
   const level = signal<"0.2" | "0.45" | "1">("0.45");
   const stack = ["danger", "info", "up"] as const;
   return (
-    <Card icon="list" title="Clipping and layers" subtitle="overflow · zIndex · opacity" right={<Toggle value={clip()} onChange={(v) => clip.set(v)} label="Clip" />}>
+    <Card icon="lists" title="Clipping and layers" subtitle="overflow · zIndex · opacity" right={<Toggle value={clip()} onChange={(v) => clip.set(v)} label="Clip" />}>
       <Grid>
         <Tile label={clip() ? "Clipped" : "Visible"} code={`overflow: ${clip() ? "hidden" : "visible"}`} note={hint("Tap to switch", "Click to switch")} onPress={() => clip.set(!clip())}>
           <View
@@ -403,7 +403,7 @@ function Transforms() {
   loop.start();
   cleanup(() => loop.stop());
   return (
-    <Card icon="atom" title="3D transforms" subtitle="perspective · rotateX/Y · skew · origin">
+    <Card icon="physics" title="3D transforms" subtitle="perspective · rotateX/Y · skew · origin">
       <FlipCard />
       <Grid>
         <Tile label="Perspective" code="rotateY" note="Swaying, driven natively">
@@ -448,7 +448,7 @@ function Transforms() {
 function Numerals() {
   const figure = () => ({ fontSize: 22, color: colors.text, fontWeight: "500" }) as const;
   return (
-    <Card icon="type" title="Numerals" subtitle="fontVariant">
+    <Card icon="text" title="Numerals" subtitle="fontVariant">
       <View style={{ flexDirection: "row", gap: 12 }}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={{ fontSize: 12, color: colors.muted }}>Proportional</Text>
@@ -477,7 +477,7 @@ function RightToLeft() {
   const chip = { width: 40, height: 40, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" } as const;
   return (
     <Card
-      icon="layers"
+      icon="nav"
       title="Right to left"
       subtitle={rtl() ? "direction: rtl" : "direction: ltr"}
       right={<Button label="Flip" variant="secondary" onPress={() => rtl.set(!rtl())} />}

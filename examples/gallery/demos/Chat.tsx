@@ -25,8 +25,8 @@ const models = [
 const providers = [{ value: "Claude", label: "Claude" }, { value: "Codex", label: "Codex" }] as const;
 
 const featured: { id: string; icon: IconName; note: string }[] = [
-  { id: "guide", icon: "type", note: "Markdown, a table, code" },
-  { id: "reason", icon: "sparkles", note: "Reasoning first" },
+  { id: "guide", icon: "text", note: "Markdown, a table, code" },
+  { id: "reason", icon: "spark", note: "Reasoning first" },
   { id: "search", icon: "search", note: "A tool call" },
   { id: "vision", icon: "image", note: "A photo and a file" },
 ];
@@ -490,7 +490,7 @@ export function Chat() {
     <View style={{ ...column, flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
         <Appear>
           <View style={{ alignItems: "center", gap: 12 }}>
-            <IconTile name="sparkles" tint={colors.accent} size={56} />
+            <IconTile name="spark" tint={colors.accent} size={56} />
             <Text style={{ fontSize: 22, fontWeight: "600", color: colors.text }}>How can I help?</Text>
             <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, textAlign: "center" }}>
               {native ? "Chat with your local Claude or Codex CLI. Sign in to the CLI in a terminal first." : "A simulated assistant: every reply is scripted and streamed locally."}

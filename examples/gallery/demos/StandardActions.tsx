@@ -31,7 +31,7 @@ export function StandardActions() {
     finally { if (!disposed) busy.set({ ...busy(), [key]: false }); }
   };
   function Action(props: { name: string; detail: string; action: () => Promise<string> }) {
-    return <Card icon="settings" title={props.name} subtitle={props.detail}>
+    return <Card icon="system" title={props.name} subtitle={props.detail}>
       <Button label={`Run ${props.name}`} disabled={busy()[props.name] ?? false} onPress={() => { void run(props.name, props.action); }} />
       <Text selectable style={{ color: colors.text, fontSize: 13, fontFamily: mono }}>{results()[props.name] ?? "Ready"}</Text>
     </Card>;

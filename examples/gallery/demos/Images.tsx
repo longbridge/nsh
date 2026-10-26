@@ -77,7 +77,7 @@ function ResizeModes() {
 function Corners() {
   const square = () => ({ ...frame(), width: 88, height: 88 }) as const;
   return (
-    <Card icon="palette" title="Corners and borders" subtitle="Radii per corner, borders on the image">
+    <Card icon="styles" title="Corners and borders" subtitle="Radii per corner, borders on the image">
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <View style={{ alignItems: "center", gap: 8 }}>
           <Image src={wide} style={{ ...square(), borderRadius: 44 }} />
@@ -159,7 +159,7 @@ function Svg() {
 
 function Animated() {
   return (
-    <Card icon="activity" title="Animated GIF and WebP" subtitle="Decoded and played natively">
+    <Card icon="animation" title="Animated GIF and WebP" subtitle="Decoded and played natively">
       <View style={{ flexDirection: "row", gap: 12 }}>
         <Tile note="bounce.gif" code height={96}>
           <Image src={bounce} />
@@ -187,7 +187,7 @@ function Placeholders() {
   ];
   return (
     <Card
-      icon="images"
+      icon="photos"
       title="Placeholder and fade"
       subtitle="A placeholder, then a fade"
       right={<Button label="Reload" variant="secondary" onPress={() => seed.set(seed() + 1)} />}
@@ -216,7 +216,7 @@ function Placeholders() {
 function Blur() {
   const radii = [0, 2, 6, 16];
   return (
-    <Card icon="sparkles" title="Blur radius" subtitle="blurRadius, applied while decoding">
+    <Card icon="spark" title="Blur radius" subtitle="blurRadius, applied while decoding">
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Each of={radii}>
           {(r) => (

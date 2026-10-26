@@ -58,7 +58,7 @@ function Transformable() {
     last.set({ scale: 1, angle: 0, drag: 0 });
   };
   return (
-    <Card icon="hand" title="Pan, pinch and rotation" subtitle="Three recognizers on one view, driven natively">
+    <Card icon="gestures" title="Pan, pinch and rotation" subtitle="Three recognizers on one view, driven natively">
       <View style={{ ...stage(), height: 260, alignItems: "center", justifyContent: "center" }}>
         <Dots />
         <View
@@ -126,7 +126,7 @@ function Ball() {
     },
   });
   return (
-    <Card icon="scroll-text" title="PanResponder" subtitle="Positions go through JS; the page does not scroll" right={<Badge label={state().label} tone={state().tone} />}>
+    <Card icon="scroll" title="PanResponder" subtitle="Positions go through JS; the page does not scroll" right={<Badge label={state().label} tone={state().tone} />}>
       <View style={{ ...stage(), height: 200 }}>
         <Dots />
         <View
@@ -173,7 +173,7 @@ function TouchPad() {
     );
   };
   return (
-    <Card icon="settings" title="Touch events" subtitle={hint("Start, move, end and cancel, for every finger", "Start, move, end and cancel, for the mouse and every finger")} right={<Badge label={`${fingers().length} down`} tone={fingers().length ? "accent" : "neutral"} />}>
+    <Card icon="system" title="Touch events" subtitle={hint("Start, move, end and cancel, for every finger", "Start, move, end and cancel, for the mouse and every finger")} right={<Badge label={`${fingers().length} down`} tone={fingers().length ? "accent" : "neutral"} />}>
       <View
         onTouchStart={note("start")}
         onTouchMove={note("move")}
@@ -238,7 +238,7 @@ function PressEvents() {
     }
   };
   return (
-    <Card icon="blocks" title="Press events" subtitle="In, press, long press and out; native feedback" right={<Badge label={`${count()}`} />}>
+    <Card icon="components" title="Press events" subtitle="In, press, long press and out; native feedback" right={<Badge label={`${count()}`} />}>
       <View
         onPressDown={() => fire("pressIn")}
         onPressUp={() => fire("pressOut")}
@@ -368,7 +368,7 @@ function HitSlop() {
 function PointerEvents() {
   const through = signal(0);
   return (
-    <Card icon="layers" title="Pointer events" subtitle={hint("An overlay that lets taps through", "An overlay that lets clicks through")} right={<Badge label={`${through()}`} tone="up" />}>
+    <Card icon="nav" title="Pointer events" subtitle={hint("An overlay that lets taps through", "An overlay that lets clicks through")} right={<Badge label={`${through()}`} tone="up" />}>
       <View style={{ height: 88 }}>
         <Press onPress={() => through.set(through() + 1)} scale={0.98} style={{ flex: 1 }}>
           <View
@@ -422,7 +422,7 @@ function Hover() {
   const over = signal(false);
   const at = signal({ x: 0, y: 0 });
   return (
-    <Card icon="hand" title="Hover" subtitle={hint("A pointer over a view: iPad, desktops", "The mouse over a view")} right={<Badge label={over() ? "Over" : "Away"} tone={over() ? "accent" : "neutral"} />}>
+    <Card icon="gestures" title="Hover" subtitle={hint("A pointer over a view: iPad, desktops", "The mouse over a view")} right={<Badge label={over() ? "Over" : "Away"} tone={over() ? "accent" : "neutral"} />}>
       <View
         testID="hover-pad"
         onHoverIn={() => over.set(true)}
@@ -447,7 +447,7 @@ function Accessibility() {
     { label: "Notify", hint: "Turns on alerts", icon: "bell" },
   ];
   return (
-    <Card icon="type" title="Accessibility" subtitle="Roles, labels and hints for screen readers" right={<If when={last()}><Badge label={last()} tone="info" /></If>}>
+    <Card icon="text" title="Accessibility" subtitle="Roles, labels and hints for screen readers" right={<If when={last()}><Badge label={last()} tone="info" /></If>}>
       <Each of={items}>
         {(item, i) => (
           <View
