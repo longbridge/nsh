@@ -1,10 +1,10 @@
 import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
-import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { platform, windowSize } from "nsh/device";
+import { Animated, createAnimatedValue, Easing } from "nsh";
+import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { NavPage, NavStack } from "nsh/base";
-import { keymap } from "nsh/keymap";
-import { Storage } from "nsh/storage";
+import { keymap } from "nsh";
+import { Storage } from "nsh";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
@@ -16,57 +16,58 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
   {
     title: "Apps",
     demos: [
-      { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "chart-candlestick", screen: lazy(() => import("./demos/Stocks").then((m) => m.Stocks)) },
-      { name: "AI Chat", detail: "Local Claude / Codex, streaming replies, web simulation", icon: "message-circle", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
-      { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "images", screen: lazy(() => import("./demos/Photos").then((m) => m.Photos)) },
+      { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "stocks", screen: lazy(() => import("./demos/Stocks").then((m) => m.Stocks)) },
+      { name: "AI Chat", detail: "Local Claude / Codex, streaming replies, web simulation", icon: "chat", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
+      { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "photos", screen: lazy(() => import("./demos/Photos").then((m) => m.Photos)) },
     ],
   },
   {
     title: "Layout and lists",
     demos: [
-      { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "list", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
-      { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll-text", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
-      { name: "Collapsing header", detail: "A header that shrinks to a bar as the page scrolls, headings sticking below it", icon: "scroll-text", screen: lazy(() => import("./demos/CollapsingHeader").then((m) => m.CollapsingHeader)) },
-      { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "layers", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
-      { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "text-cursor-input", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
-      { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "panel-left", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
-      { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "blocks", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
+      { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
+      { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
+      { name: "Collapsing header", detail: "A header that shrinks to a bar as the page scrolls, headings sticking below it", icon: "scroll", screen: lazy(() => import("./demos/CollapsingHeader").then((m) => m.CollapsingHeader)) },
+      { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
+      { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
+      { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
+      { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "components", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
     ],
   },
   {
     title: "Touch and motion",
     demos: [
-      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "hand", screen: lazy(() => import("./demos/Gestures").then((m) => m.Gestures)) },
-      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "atom", screen: lazy(() => import("./demos/Physics").then((m) => m.Physics)) },
-      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "activity", screen: lazy(() => import("./demos/Animations").then((m) => m.Animations)) },
+      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "gestures", screen: lazy(() => import("./demos/Gestures").then((m) => m.Gestures)) },
+      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "physics", screen: lazy(() => import("./demos/Physics").then((m) => m.Physics)) },
+      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "animation", screen: lazy(() => import("./demos/Animations").then((m) => m.Animations)) },
     ],
   },
   {
     title: "Drawing and type",
     demos: [
-      { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "pencil", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
-      { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "palette", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
-      { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "wind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
-      { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "type", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
-      { name: "Text View", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "type", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
-      { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "type", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
-      { name: "Rich Editor", detail: "A chat input with mentions and a Markdown editor: a schema, commands, plugins, history, Markdown shortcuts", icon: "type", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
-      { name: "Data table", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "list", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
-      { name: "Diff", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "type", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
+      { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
+      { name: "Charts", detail: "A line and area plot with hover, grid lines and motion, sparklines in a list", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
+      { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
+      { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
+      { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
+      { name: "Text View", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "text", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
+      { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "text", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
+      { name: "Rich Editor", detail: "A chat input with mentions and a Markdown editor: a schema, commands, plugins, history, Markdown shortcuts", icon: "text", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
+      { name: "DataTable", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "lists", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
+      { name: "Diff", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "text", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
       { name: "Images", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: lazy(() => import("./demos/Images").then((m) => m.Images)) },
     ],
   },
   {
     title: "Platform",
     demos: [
-      { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "blocks", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
-      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "blocks", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
-      { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "list", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
-      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars", icon: "toggle-right", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
-      { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "circle-play", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
-      { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "settings", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
-      { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "settings", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
-      { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "database", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
+      { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
+      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
+      { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
+      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
+      { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
+      { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
+      { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
+      { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
     ],
   },
 ];
@@ -92,7 +93,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
             {props.demo.detail}
           </Text>
         </View>
-        <Icon name="chevron-right" size={16} tint={colors.faint} />
+        <Icon name="chevron" size={16} tint={colors.faint} />
       </View>
     </Press>
   );
@@ -215,7 +216,7 @@ function SidebarToggle() {
       class="hover:bg-hover active:bg-accent"
       style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control, cursor: "pointer" }}
     >
-      <Icon name="panel-left" size={18} tint={colors.muted} />
+      <Icon name="sidebar" size={18} tint={colors.muted} />
     </View>
   );
 }

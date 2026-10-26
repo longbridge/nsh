@@ -4,7 +4,7 @@
 // for a URL it opens (the headless runtime answers none), a `TypeError` for
 // one it never opens. Its script checks each.
 import { Text, View, signal } from "nsh";
-import { colorScheme, fontScale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh/device";
+import { colorScheme, fontScale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 
 function App() {
   const opened = signal("not opened");

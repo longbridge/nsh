@@ -34,8 +34,9 @@ impl NativeComponent for Square {
 
 /// A component and, after it, a focused field.
 const FIELD_AFTER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { nativeComponent } from "nsh/native";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { nativeComponent } from "nsh";
 
 const Square = nativeComponent<{}, {}>("test.square", { props: [], events: [] });
 
@@ -56,7 +57,8 @@ mount(App);
 /// composition is cancelled), "stale" on "hao" (dropped, as "好" is
 /// committed after it); the log becomes the text when "hao" ends.
 const COMPOSING_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("abcd");
@@ -312,10 +314,11 @@ impl NativeComponent for KeyLog {
 /// that takes the keyboard. `mod+k` fires while text is edited. `j` does
 /// not. The menu's `mod+z` and `mod+shift+n` still choose their items.
 const SHORTCUTS_OVER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
-import { keymap } from "nsh/keymap";
-import { nativeComponent } from "nsh/native";
+import { keymap } from "nsh";
+import { nativeComponent } from "nsh";
 
 const KeyLog = nativeComponent<{}, {}>("test.keylog", { props: [], events: [] });
 
@@ -410,10 +413,10 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
 struct Desk(&'static str);
 
 /// Which desk the engine running the call was given.
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 struct Whose;
 
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 impl Whose {
     /// In the JS call.
     pub(crate) fn now() -> String {
@@ -422,20 +425,21 @@ impl Whose {
 
     /// As a task, after it waited.
     pub(crate) async fn later() -> String {
-        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        nsh_core::prelude::timer(Duration::from_millis(5)).await;
         desk()
     }
 }
 
 fn desk() -> String {
-    nsh_core::ui::engine_context::<Desk>()
+    nsh_core::element::engine_context::<Desk>()
         .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
 }
 
 /// A field showing which desk `Whose` names, in the call and in a task.
 const WHOSE: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { nativeModule } from "nsh/native";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { nativeModule } from "nsh";
 
 interface WhoseApi {
   now(): string;
@@ -473,7 +477,7 @@ impl gpui::Render for Pair {
 }
 
 fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
-    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    let mut context = nsh_core::element::Registry::ui_set("test/context");
     context.module::<Whose>();
     crate::set_ui_sets(vec![nsh_base::registry(), context]);
     let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
@@ -503,7 +507,7 @@ fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut T
 
 /// A Rust view (`test/keys`) that binds a keystroke of its own.
 mod rust_keys {
-    use nsh_core::ui::{Registry, prelude::*};
+    use nsh_core::{element::Registry, prelude::*};
 
     /// The set the app imports `Shortcut` from.
     pub(super) fn registry() -> Registry {
@@ -545,8 +549,9 @@ mod rust_keys {
 fn js_and_rust_view(view_first: bool) -> String {
     format!(
         r#"
-import {{ Input, mount, signal, View }} from "nsh";
-import {{ keymap }} from "nsh/keymap";
+import {{ mount, signal, View }} from "nsh";
+import {{ Input }} from "nsh/base";
+import {{ keymap }} from "nsh";
 import {{ Shortcut }} from "test/keys";
 
 const VIEW_FIRST = {view_first};
@@ -614,7 +619,8 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// A pad inside 8 points of padding. A press writes where it was in the
 /// pad and in the window.
 mod press_point {
-    use nsh_core::ui::prelude::*;
+    use nsh_core::prelude::*;
+    use nsh_base::input;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {
@@ -750,7 +756,8 @@ fn height_below_title_bar(cx: &mut VisualTestContext) -> f32 {
 /// and an application menu: File with New, Quit (the `quit` role, with a
 /// shortcut of its own) and Close (the `close` role).
 const OWNED_WINDOW: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -839,7 +846,8 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
 /// The app's height under an auto-hidden menu bar (and ` new` once File
 /// > New was chosen).
 const AUTO_HIDDEN_BAR: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -909,8 +917,9 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
 /// Two images from two asset directories: each reports its size, or why
 /// it did not load.
 const TWO_ASSET_ROOTS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { Image } from "nsh/image";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { Image } from "nsh";
 
 function App() {
   const text = signal("waiting");
@@ -1000,7 +1009,8 @@ fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut Tes
 }
 
 const MENU_OVER_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
 
 function App() {
@@ -1096,7 +1106,8 @@ fn wait_until_blurred(view: &Entity<AppView>, cx: &mut VisualTestContext) {
 /// carried: the field reads the modifier keys and click count of the last
 /// press.
 const PRESS_MODIFIERS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("none");

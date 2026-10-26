@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nsh_core::{JsonValue, ui::prelude::*};
+use nsh_core::{JsonValue, prelude::*};
 
 use super::json::{AttrsJson, Content};
 use crate::rich_editor::{

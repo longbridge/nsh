@@ -8,10 +8,7 @@
 //! Characters typed without those modifiers are text, which the native
 //! input takes; `mod+v` is left to it too (the paste comes as an event).
 
-use nsh_core::{
-    keymap::Keystroke,
-    ui::{Os, prelude::os},
-};
+use nsh_core::{element::Os, keymap::Keystroke, prelude::os};
 
 use crate::rich_editor::state::KeyEvent;
 

@@ -1,5 +1,5 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { SelectionArea, TextView, type TextViewImage } from "nsh/base";
+import { TextView, type TextViewImage } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 
@@ -243,7 +243,7 @@ function Markdown() {
   const pressed = signal("nothing yet");
   const viewing = signal<TextViewImage | null>(null);
   return (
-    <Card icon="type" title="Markdown" subtitle="CommonMark and GitHub's: tables, tasks, alerts, footnotes, math, HTML">
+    <Card icon="text" title="Markdown" subtitle="CommonMark and GitHub's: tables, tasks, alerts, footnotes, math, HTML">
       <TextView
         markdown={MARKDOWN}
         selectable
@@ -262,7 +262,7 @@ function Markdown() {
 function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
-    <Card icon="type" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
+    <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
       <TextView html={HTML} selectable classes={links} onImagePress={(image) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
@@ -294,7 +294,7 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
-    <Card icon="blocks" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
+    <Card icon="components" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
         extensions={extensions}
@@ -355,7 +355,7 @@ function Streaming() {
     }, 40);
   };
   return (
-    <Card icon="message-circle" title="Streaming" subtitle="A reply as an AI model writes it, with a caret">
+    <Card icon="chat" title="Streaming" subtitle="A reply as an AI model writes it, with a caret">
       <TextView
         markdown={text()}
         options={{ streaming: streaming() }}
@@ -378,15 +378,15 @@ const ANSWER = `Every one with a native backend:
 /** Two documents and a plain text that select as one, around a label that stays out. */
 function Selection() {
   return (
-    <Card icon="type" title="SelectionArea" subtitle="One selection across texts and TextViews">
-      <SelectionArea class="gap-3">
+    <Card icon="text" title="Selectable view" subtitle="One selection across texts and TextViews">
+      <View selectable class="gap-3">
         <TextView markdown={QUESTION} />
         <TextView markdown={ANSWER} />
         <View class="flex-row items-baseline gap-2">
           <Text selectable={false} style={{ fontSize: 13, color: colors.faint }}>Not selectable</Text>
           <Text style={{ fontSize: 15, color: colors.text }}>A plain Text joins the selection too.</Text>
         </View>
-      </SelectionArea>
+      </View>
       <Caption label="Drag from the question into the answer, or long press and move the handles" />
     </Card>
   );

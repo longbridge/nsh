@@ -7,7 +7,10 @@
 
 use std::collections::BTreeMap;
 
-use nsh_core::ui::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes, prelude::*};
+use nsh_core::{
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes},
+    prelude::*,
+};
 use serde_json::Value;
 
 use crate::{

@@ -7,12 +7,12 @@ use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
     StatusBarSetting, StatusBarStyle, Viewability,
+    element::TsTypes,
     geometry::{Bounds, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
-    ui::TsTypes,
 };
 
 fn number<I: HostInput>(input: &I, key: &str) -> Option<f32> {
@@ -436,13 +436,11 @@ pub(crate) fn overlay_anchor<I: HostInput>(input: &I, _: &mut HostCx) -> Option<
     Some(OverlayProp::Anchor(anchor))
 }
 
-/// `tooltip`: a string, an element (a node JS made), or nothing.
+/// `tooltip`: an element (a node JS made), or nothing.
 pub(crate) fn tooltip<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
-    let content = match (input.node(), input.as_string()) {
-        (Some(id), _) => TooltipContent::Node(id),
-        (None, Some(text)) if !text.is_empty() => TooltipContent::Text(text.into()),
-        _ => TooltipContent::None,
-    };
+    let content = input
+        .node()
+        .map_or(TooltipContent::None, TooltipContent::Node);
     Some(Prop::Tooltip(content))
 }
 

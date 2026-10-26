@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use nsh_core::{
     JsonValue,
-    ui::{Arg, JsHost, JsIn, JsOwned, PropError, Registry, Ret, TsTypes, prelude::*},
+    element::{Arg, JsHost, JsIn, JsOwned, PropError, Registry, Ret, TsTypes},
+    prelude::*,
 };
 
 pub(crate) use self::{
@@ -52,7 +53,7 @@ fn attrs_json(attrs: &super::model::Attrs) -> JsonValue {
     JsonValue::Object(attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
-fn rect_json(b: &nsh_core::ui::prelude::Bounds<nsh_core::ui::prelude::Points>) -> JsonValue {
+fn rect_json(b: &nsh_core::prelude::Bounds<nsh_core::prelude::Points>) -> JsonValue {
     serde_json::json!({
         "x": b.origin.x.0,
         "y": b.origin.y.0,
@@ -559,7 +560,7 @@ impl RichEditorSession {
         let x = coords.get("x")?.as_f64()? as f32;
         let y = coords.get("y")?.as_f64()? as f32;
         self.session
-            .pos_at_coords(nsh_core::ui::prelude::point(px(x), px(y)))
+            .pos_at_coords(nsh_core::prelude::point(px(x), px(y)))
     }
 
     /// The box around the selection in the view showing the editor, or

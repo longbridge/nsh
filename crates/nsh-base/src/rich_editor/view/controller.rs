@@ -13,8 +13,9 @@ use std::{
 };
 
 use nsh_core::{
+    element::Os,
     keymap::{Modifiers, When},
-    ui::{Os, prelude::*},
+    prelude::*,
 };
 use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use nsh_core::{TextLine, ui::prelude::*};
+use nsh_core::{TextLine, prelude::*};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::rich_editor::state::Affinity;

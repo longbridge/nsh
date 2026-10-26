@@ -1,36 +1,13 @@
 import { cleanup, resource, signal, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
-import { Toast } from "nsh/android";
-import { colorScheme, fontScale, windowSize } from "nsh/device";
-import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
+import { createAnimatedValue, Easing } from "nsh";
+import { colorScheme, fontScale, windowSize } from "nsh";
+import { AlertDialog, Dialog, type StatusBarForeground } from "nsh/base";
+import { keyboardFrame, safeArea } from "nsh";
 import { Menu } from "nsh/desktop";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
-import {
-  Appear,
-  Badge,
-  Button,
-  Caption,
-  Card,
-  colors,
-  DemoPage,
-  Figure,
-  finish,
-  IconTile,
-  isDark,
-  Inset,
-  Legend,
-  Meter,
-  mono,
-  Press,
-  Row,
-  Segmented,
-  Stat,
-  tints,
-  Toggle,
-  type Tone,
-  toneColor,
-} from "../ui";
+import { toast } from "../toast";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, IconTile, isDark, Inset, Legend, Meter, mono, Press, Row, Segmented, Stat, tints, Toggle, type Tone, toneColor } from "../ui";
 
 /** The window drawn to scale, with the safe area insets shaded. */
 function SafeAreaDiagram() {
@@ -69,7 +46,7 @@ function Environment() {
     { label: "Left", value: safeArea().left },
   ];
   return (
-    <Card icon="settings" title="Environment" subtitle="Updates when the window, insets or keyboard change" right={<Badge label="Live" tone="up" />}>
+    <Card icon="system" title="Environment" subtitle="Updates when the window, insets or keyboard change" right={<Badge label="Live" tone="up" />}>
       <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
         <View style={{ flex: 1, gap: 12 }}>
           <View style={{ gap: 2 }}>
@@ -110,7 +87,7 @@ function StatusBarCard() {
   // The preview's background: the one its content is for.
   const backdrop = () => (foreground() === "light" ? "#101113" : foreground() === "dark" ? "#f4f4f2" : colors.background);
   return (
-    <Card icon="smartphone" title="Status bar" subtitle="A dialog's statusBar: over the page's while it is open">
+    <Card icon="mobile" title="Status bar" subtitle="A dialog's statusBar: over the page's while it is open">
       <Segmented
         options={[
           { value: "light", label: "Light" },
@@ -127,7 +104,7 @@ function StatusBarCard() {
         </View>
         <Toggle value={barHidden()} onChange={(v) => barHidden.set(v)} label="Hide the status bar" />
       </Row>
-      <Button label="Preview" icon="smartphone" onPress={() => open.set(true)} />
+      <Button label="Preview" icon="mobile" onPress={() => open.set(true)} />
       <Dialog
         open={open()}
         animation="fade"
@@ -156,7 +133,7 @@ function ActionRow(props: { first?: boolean; icon: IconName; tint: string; title
           <Text style={{ fontSize: 15, color: colors.text }}>{props.title}</Text>
           <Text style={{ fontSize: 12, color: colors.muted }}>{props.detail}</Text>
         </View>
-        <Icon name="chevron-right" size={14} tint={colors.faint} />
+        <Icon name="chevron" size={14} tint={colors.faint} />
       </Row>
     </Press>
   );
@@ -220,7 +197,7 @@ function Dialogs() {
           }}
         />
         <ActionRow
-          icon="list"
+          icon="lists"
           tint={colors.accent}
           title="Action sheet"
           detail="Title, cancel and destructive options"
@@ -234,7 +211,7 @@ function Dialogs() {
             show(text, text === "Delete" ? "danger" : "accent");
           }}
         />
-        <ActionRow icon="sparkles" tint={colors.warn} title="Toast" detail="Android only" onPress={() => Toast.show("Hello from a toast", "long")} />
+        <ActionRow icon="spark" tint={colors.warn} title="Toast" detail="nsh/base, every platform" onPress={() => void toast({ title: "Hello from a toast", description: "nsh/base's ToastManager, styled by the gallery" })} />
       </Inset>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 11, paddingTop: 12, paddingBottom: 11, minHeight: 44 }}>
         <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>Answer</Text>
@@ -288,7 +265,7 @@ function FramesAndTimers() {
   });
 
   return (
-    <Card icon="activity" title="Frames and timers" subtitle="requestAnimationFrame · setInterval">
+    <Card icon="animation" title="Frames and timers" subtitle="requestAnimationFrame · setInterval">
       <View style={{ flexDirection: "row", gap: 12 }}>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 12, color: colors.muted }}>Frame rate</Text>

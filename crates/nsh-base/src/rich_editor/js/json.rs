@@ -4,7 +4,7 @@
 
 use nsh_core::{
     JsonValue,
-    ui::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, TsTypes},
+    element::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, TsTypes},
 };
 use serde_json::{Map, Value};
 

@@ -13,7 +13,7 @@
 
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 use super::session::EditorSession;
 use crate::rich_editor::{

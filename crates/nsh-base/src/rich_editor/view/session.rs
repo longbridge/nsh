@@ -13,7 +13,10 @@ use std::{
     },
 };
 
-use nsh_core::ui::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes, prelude::*};
+use nsh_core::{
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes},
+    prelude::*,
+};
 use serde_json::{Value, json};
 
 use super::node_view::NodeView;

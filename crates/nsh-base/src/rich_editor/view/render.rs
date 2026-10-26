@@ -12,7 +12,10 @@
 
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
-use nsh_core::ui::{EventKind, EventPayload, Style, prelude::*};
+use nsh_core::{
+    element::{EventKind, EventPayload, Style},
+    prelude::*,
+};
 use serde_json::Value;
 
 use super::{
@@ -22,6 +25,7 @@ use super::{
     parts::{self, Part},
 };
 use crate::{
+    input,
     rich_editor::{
         model::{Mark, Node, utf16_len},
         state::{Decoration, DecorationKind},

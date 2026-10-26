@@ -29,8 +29,8 @@ import {
   wrapIn,
   wrapInList,
 } from "nsh/base";
-import { Icon } from "../icons";
-import { Card, colors, finish, IconButton, mono, Segmented, ToggleGroup, type ToggleItem, ToolbarSeparator } from "../ui";
+import { Card, colors, finish, mono, Segmented } from "../ui";
+import { IconButton, LucideIcon as Icon, ToggleGroup, type ToggleItem, ToolbarSeparator } from "./RichEditorUi";
 
 // `nsh/base`'s `RichEditor` renders a session the app makes with
 // `createRichEditor`: the state, the commands and the plugins run in Rust,

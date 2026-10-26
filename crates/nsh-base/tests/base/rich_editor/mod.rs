@@ -22,8 +22,9 @@ use nsh_base::rich_editor::{
 };
 use nsh_core::{
     PasteEvent, Size,
+    element::Root,
     platform::{Idiom, Os},
-    ui::{Root, prelude::*},
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
