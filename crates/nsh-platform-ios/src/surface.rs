@@ -18,8 +18,8 @@ use objc2::{
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectProtocol, NSOperationQueue,
-    NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSValue,
+    NSCurrentLocaleDidChangeNotification, NSNotification, NSNotificationCenter, NSNumber, NSObject,
+    NSObjectProtocol, NSOperationQueue, NSSystemTimeZoneDidChangeNotification, NSTimeZone, NSValue,
 };
 use objc2_ui_kit::{
     NSValueUIGeometryExtensions, UIApplication, UIApplicationDidBecomeActiveNotification,
@@ -374,7 +374,7 @@ impl RootView {
             },
             locale: current_locale(),
             languages: preferred_languages(),
-            regional: nsh_engine::RegionalPreferences::EN_US,
+            regional: regional_preferences(),
             time_zone: time_zone(),
             lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.
@@ -426,6 +426,28 @@ impl RootView {
         let observer = unsafe {
             center.addObserverForName_object_queue_usingBlock(
                 Some(NSSystemTimeZoneDidChangeNotification),
+                None,
+                Some(&NSOperationQueue::mainQueue()),
+                &block,
+            )
+        };
+        this.ivars().observers.borrow_mut().push(observer);
+    }
+
+    /// The environment follows the region's settings: the region format,
+    /// 24-hour time, the first day of the week, the measurement system and
+    /// the temperature unit, which iOS changes while apps run.
+    fn observe_locale(this: &Retained<Self>) {
+        let center = NSNotificationCenter::defaultCenter();
+        let weak = Weak::from_retained(this);
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            let Some(view) = weak.load() else { return };
+            view.publish_environment();
+        });
+        // SAFETY: as in `observe_time_zone`.
+        let observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSCurrentLocaleDidChangeNotification),
                 None,
                 Some(&NSOperationQueue::mainQueue()),
                 &block,
@@ -923,6 +945,7 @@ impl Surface {
         RootView::observe_keyboard(&view);
         RootView::observe_lifecycle(&view);
         RootView::observe_time_zone(&view);
+        RootView::observe_locale(&view);
         Ok(Surface { view })
     }
 
@@ -1055,6 +1078,59 @@ fn preferred_languages() -> nsh_engine::Languages {
         .collect();
     nsh_engine::Languages::parse(tags.iter().map(String::as_str))
         .unwrap_or_else(|| nsh_engine::Languages::one(current_locale()))
+}
+
+/// The user's regional preferences (`hourCycle()` and the like):
+/// Settings' time format (the hours of `NSDateFormatter`'s format for the
+/// `j` template, which 24-hour time changes), `NSCalendar`'s first weekday,
+/// `NSLocale`'s measurement system and the `AppleTemperatureUnit` default,
+/// over the region's.
+fn regional_preferences() -> nsh_engine::RegionalPreferences {
+    use nsh_engine::{HourCycle, MeasurementSystem, TemperatureUnit, Weekday};
+    use objc2_foundation::{
+        NSCalendar, NSDateFormatter, NSLocale, NSLocaleMeasurementSystem, NSString, NSUserDefaults,
+        ns_string,
+    };
+    let locale = NSLocale::currentLocale();
+    let mut preferences =
+        nsh_engine::RegionalPreferences::parse(&locale.localeIdentifier().to_string());
+    // The hours of the user's time format, which 24-hour time changes.
+    let hours =
+        NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("j"), 0, Some(&locale));
+    if let Some(cycle) = hours.and_then(|format| HourCycle::of_pattern(&format.to_string())) {
+        preferences.hour_cycle = cycle;
+    }
+    // From 1 for Sunday to 7 for Saturday.
+    let first = match NSCalendar::currentCalendar().firstWeekday() {
+        1 => Some(Weekday::Sunday),
+        n => u8::try_from(n)
+            .ok()
+            .and_then(|n| Weekday::from_number(n.wrapping_sub(1))),
+    };
+    if let Some(day) = first {
+        preferences.first_day_of_week = day;
+    }
+    // SAFETY: a key Foundation defines.
+    let system = locale.objectForKey(unsafe { NSLocaleMeasurementSystem });
+    match system
+        .and_then(|s| s.downcast::<NSString>().ok())
+        .map(|s| s.to_string())
+        .as_deref()
+    {
+        Some("Metric") => preferences.measurement_system = MeasurementSystem::Metric,
+        Some("U.S.") => preferences.measurement_system = MeasurementSystem::Us,
+        Some("U.K.") => preferences.measurement_system = MeasurementSystem::Uk,
+        _ => {}
+    }
+    // Set once the user picks one.
+    let unit =
+        NSUserDefaults::standardUserDefaults().stringForKey(ns_string!("AppleTemperatureUnit"));
+    match unit.map(|u| u.to_string()).as_deref() {
+        Some("Celsius") => preferences.temperature_unit = TemperatureUnit::Celsius,
+        Some("Fahrenheit") => preferences.temperature_unit = TemperatureUnit::Fahrenheit,
+        _ => {}
+    }
+    preferences
 }
 
 /// The user's region format (`NSLocale.currentLocale`: language and
