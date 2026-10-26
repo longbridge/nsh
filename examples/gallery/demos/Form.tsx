@@ -1,6 +1,6 @@
-import { effect, type InputProps, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { effect, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
-import { Dialog, NavPage, Input } from "nsh/base";
+import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
