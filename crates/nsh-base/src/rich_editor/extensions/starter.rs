@@ -170,6 +170,8 @@ pub mod nodes {
                 content: Some("list_item+".into()),
                 group: Some("block".into()),
                 attrs: vec![("order".into(), attr(Some(Value::from(1))))],
+                // The editor's view numbers its items from `order`.
+                extra: [("listMarker".to_owned(), Value::from("ordered"))].into(),
                 ..Default::default()
             },
         )
@@ -182,6 +184,8 @@ pub mod nodes {
             NodeSpec {
                 content: Some("list_item+".into()),
                 group: Some("block".into()),
+                // The editor's view marks its items with bullets.
+                extra: [("listMarker".to_owned(), Value::from("bullet"))].into(),
                 ..Default::default()
             },
         )

@@ -173,6 +173,7 @@ pub fn registry() -> Registry {
         .register::<TableCell>()
         .register::<TableCaption>()
         .register::<Progress>()
+        .register::<rich_editor::view::RichEditor>()
         .register::<Tab>()
         .register::<Tabs>()
         .register::<TextView>()
@@ -181,7 +182,9 @@ pub fn registry() -> Registry {
         .class::<toast::ToastManagerClass>()
         .module::<AlertDialog>()
         .module::<Keyboard>()
-        .module::<TextView>()
+        .module::<TextView>();
+    rich_editor::js::register(&mut registry);
+    registry
         // The environment's accessors and hooks, as they are.
         .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &["Edges"])
         // Navigation: made by `nsh-js` (`navigation.rs`), declared by hand.
@@ -226,6 +229,7 @@ mod tests {
                 "RadioGroup",
                 "ResizablePanel",
                 "ResizablePanelGroup",
+                "RichEditor",
                 "SafeAreaView",
                 "SelectionArea",
                 "Sheet",
@@ -248,7 +252,10 @@ mod tests {
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
-        assert_eq!(modules, ["AlertDialog", "Keyboard", "TextView"]);
+        assert_eq!(
+            modules,
+            ["AlertDialog", "Keyboard", "RichEditorApi", "TextView"]
+        );
     }
 
     /// Every export TS sees has a doc comment (the declarations show it).

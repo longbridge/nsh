@@ -307,6 +307,13 @@ impl Transaction {
         self.meta.get(key)
     }
 
+    /// Every JSON metadata entry, by key (what a transaction's JSON form
+    /// carries; [`Transaction::set_meta_any`]'s Rust values are not among
+    /// them).
+    pub fn meta_entries(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.meta.iter().map(|(key, value)| (key.as_str(), value))
+    }
+
     /// Sets metadata under a plugin's key.
     pub fn set_plugin_meta(&mut self, key: &PluginKey, value: Value) -> &mut Self {
         self.set_meta(key.name(), value)

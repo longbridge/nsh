@@ -9,5 +9,6 @@ mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
 mod resizable;
+mod rich_editor;
 mod sheet;
 mod text_view;

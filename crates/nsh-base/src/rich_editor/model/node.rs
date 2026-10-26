@@ -120,6 +120,12 @@ impl Node {
         }))
     }
 
+    /// Whether `other` is this very node (shared, not only equal): what a
+    /// view keeps its rendering of an unchanged node by.
+    pub fn ptr_eq(&self, other: &Node) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Its type.
     pub fn ty(&self) -> &NodeType {
         &self.0.ty

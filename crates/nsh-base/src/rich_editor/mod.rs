@@ -13,6 +13,8 @@
 pub mod commands;
 pub mod extensions;
 pub mod formats;
+pub(crate) mod js;
 pub mod model;
 pub mod state;
 pub mod transform;
+pub mod view;

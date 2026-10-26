@@ -1559,3 +1559,81 @@ covers [props] DataTable.sort
 covers [props] DataTable.renderCell
 covers [events] DataTable.onSortChange
 covers [events] DataTable.onVisibleRowsChange
+
+# base-rich-editor-session
+tap id:case-base-rich-editor-session
+tap text:RunSession
+expect Schema: doc,paragraph,text 0 doc
+expect Parse: 2 heading
+expect Serialize: a|b
+expect Check: 1
+expect Plugin: watch true
+expect Classes: true true
+expect Blocks: 2 false
+expect Heading: true true
+expect Bold: true true true
+expect Undo: true false 1
+expect Redo: true true
+expect Marks: false true
+expect Block: true true
+expect Quote: true false
+expect List: true false false
+expect Chain: true Replaced
+expect First: true true
+expect Filter: true
+expect Decorations: set
+expect State: text string true false
+expect Attr: true
+expect Split: true 2
+expect Content: Plain line **b**
+expect Insert: xyb
+expect Dispatch: all xy
+expect Node: true node
+expect Items: true true
+expect Takeover: true 1 ba
+expect Empty: true
+expect Error: thrown
+expect Keys: none
+# The subscriber hears the changes in JS's next turn.
+wait 50
+expect Updates: true
+covers [nsh/base] RichEditorSession
+covers [nsh/base] RichEditorPlugin
+covers [nsh/base] RichSchema
+covers [nsh/base] baseKeymap
+covers [nsh/base] chain
+covers [nsh/base] command
+covers [nsh/base] createRichEditor
+covers [nsh/base] defineSchema
+covers [nsh/base] first
+covers [nsh/base] history
+covers [nsh/base] inputRules
+covers [nsh/base] insertContent
+covers [nsh/base] insertText
+covers [nsh/base] keymap
+covers [nsh/base] lift
+covers [nsh/base] liftListItem
+covers [nsh/base] markRule
+covers [nsh/base] markdown
+covers [nsh/base] markdownRules
+covers [nsh/base] redo
+covers [nsh/base] selectAll
+covers [nsh/base] setBlockType
+covers [nsh/base] setMark
+covers [nsh/base] setNodeAttribute
+covers [nsh/base] setNodeSelection
+covers [nsh/base] setTextSelection
+covers [nsh/base] sinkListItem
+covers [nsh/base] splitListItem
+covers [nsh/base] starterKeymap
+covers [nsh/base] starterKit
+covers [nsh/base] starterSchema
+covers [nsh/base] textRule
+covers [nsh/base] textblockRule
+covers [nsh/base] toggleMark
+covers [nsh/base] typographyRules
+covers [nsh/base] undo
+covers [nsh/base] unsetMark
+covers [nsh/base] wrapIn
+covers [nsh/base] wrapInList
+covers [nsh/base] wrappingRule
