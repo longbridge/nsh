@@ -114,7 +114,7 @@ import type {
 
 ### Plot（`nsh/base/plot`）
 
-构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Grid } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point` 或 `linear` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`。悬停的十字线、圆点和提示框是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。见 [Plot](../elements/plot.md)。
+构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Grid } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point` 或 `linear` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`；`Area` 可以在形状内显示背景（渐变，`bg-linear-*`）。悬停的十字线、圆点（每个图形可用 `hoverDotClass` 设置自己的圆点）和提示框（`tooltipPlacement`，留在 plot 内）是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。见 [Plot](../elements/plot.md)。
 
 <a id="workspaces"></a>
 

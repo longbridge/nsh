@@ -3407,3 +3407,218 @@ fn base_plot_moves_natively_with_its_motion() {
             .all(|(_, d)| !d.ops.iter().any(|op| matches!(op, CanvasOp::Clip(..))))
     );
 }
+
+const BASE_PLOT_PARTS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Area, Line, Plot } from "nsh/base/plot";
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const placement = signal<"top" | "pointer">("top");
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={[{ v: 10, w: 5 }, { v: 20, w: 15 }, { v: 30, w: 35 }]}
+        y="v"
+        yScale={{ type: "linear", domain: [0, 40] }}
+        dotClass="size-2"
+        dotStyle={{ backgroundColor: "#ffffff" }}
+        tooltipContent={<View testID="tip" style={{ width: 60, height: 20 }} />}
+        tooltipPlacement={placement()}
+        tooltipOffset={8}
+        onHoverChange={(index) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Area curve="linear" backgroundClass="bg-linear-to-b from-[#ff0000] to-transparent" hoverDotClass="hidden" />
+        <Line curve="linear" hoverDotStyle={{ backgroundColor: "#ff0000" }} />
+        <Line y="w" curve="linear" />
+      </Plot>
+      <Text>{`hover ${hovered()} ${placement()}`}</Text>
+      <View testID="pointer" onPress={() => placement.set("pointer")} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The parts `gpui-base`'s plot gives each mark and its tooltip: a mark's
+/// own hover dot (`hoverDotStyle`, the plot's `dotStyle` for the marks
+/// that set none), an area's background (a CSS gradient over the box
+/// around its shape, shown inside the shape only, its `fill` then none),
+/// and the tooltip's placement (`tooltipPlacement`, `tooltipOffset`): the
+/// layout puts it on a side of a point the animator moves and keeps
+/// inside the plot.
+#[test]
+fn base_plot_marks_have_parts_of_their_own_and_the_tooltip_stays_inside() {
+    use nsh_core::{
+        Color, HoverEvent,
+        animation::Animator,
+        canvas::{CanvasOp, GradientShape, Paint},
+        geometry::point,
+    };
+    let (engine, rx) = start(BASE_PLOT_PARTS);
+    let mut all = until_drawn(&rx, |d| {
+        d.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::FillStyle(Paint::Gradient(_))))
+    });
+    all.extend(until(&rx, |_| false));
+
+    // The area's background: the gradient from its highest point (25) to
+    // its baseline (100), filling its shape; the canvas's view draws no
+    // background, and the area's `fill` is none.
+    let drawings = plot_drawings(&all);
+    let (background, gradient) = drawings
+        .iter()
+        .find_map(|(id, d)| {
+            d.ops.iter().find_map(|op| match op {
+                CanvasOp::FillStyle(Paint::Gradient(g)) => Some((*id, g.clone())),
+                _ => None,
+            })
+        })
+        .expect("a gradient");
+    assert_eq!(
+        gradient.shape,
+        GradientShape::Linear {
+            start: point(px(100.0), px(25.0)),
+            end: point(px(100.0), px(100.0)),
+        }
+    );
+    assert_eq!(gradient.stops[0].1, Color(0xff00_00ff));
+    let style = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .filter_map(|i| match i {
+            MountItem::ViewStyle { id, style } if *id == background => Some(style.clone()),
+            _ => None,
+        })
+        .next_back()
+        .unwrap();
+    assert!(style.background_color.is_transparent());
+    assert!(
+        style
+            .effects
+            .as_deref()
+            .is_none_or(|e| e.background_images.is_empty())
+    );
+    assert!(drawings.iter().any(|(id, d)| *id != background
+        && d.ops.first() == Some(&CanvasOp::FillStyle(Paint::Color(Color::TRANSPARENT)))));
+
+    // The hover's dots: the first line's its own, the other line's the
+    // plot's (the area's is hidden).
+    let backgrounds = |all: &[MountBatch], color: Color| {
+        let mut ids: Vec<u32> = all
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::ViewStyle { id, style } if style.background_color == color => Some(*id),
+                _ => None,
+            })
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids.len()
+    };
+    assert_eq!(backgrounds(&all, Color(0xff00_00ff)), 1);
+    assert!(backgrounds(&all, Color(0xffff_ffff)) >= 1);
+
+    let plot = test_view(&all, "plot");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::HoverMove,
+            EventPayload::Hover(HoverEvent {
+                position: point(px(x), px(y)),
+                ..Default::default()
+            }),
+        )
+    };
+    // The tooltip: the view around the app's content, and the point it is
+    // placed by around that; where the layout puts the one and the
+    // animator the other.
+    let tip = test_view(&all, "tip");
+    let parent = |all: &[MountBatch], child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // The tooltip's content sits in its slot's view, inside the box its
+    // margins place, inside the point the animator moves.
+    let (holder, point_view) = {
+        let holder = parent(&all, parent(&all, tip));
+        (holder, parent(&all, holder))
+    };
+    let placed = |all: &[MountBatch]| {
+        let frame = all
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Frame { id, frame } if *id == holder => Some(*frame),
+                _ => None,
+            })
+            .next_back()
+            .unwrap();
+        let mut animator = Animator::default();
+        for item in all.iter().flat_map(|b| b.items.iter()) {
+            animator.apply(item);
+        }
+        let mut moved = (f32::NAN, f32::NAN);
+        animator.write(
+            |id| (id == point_view).then_some(id),
+            |_, values, _| {
+                moved = (
+                    values.transform[0].unwrap_or(f32::NAN),
+                    values.transform[1].unwrap_or(f32::NAN),
+                )
+            },
+        );
+        (
+            (frame.origin.x.0, frame.origin.y.0),
+            (frame.size.width.0, frame.size.height.0),
+            moved,
+        )
+    };
+    let near = |(x, y): (f32, f32), (wx, wy): (f32, f32)| {
+        assert!(
+            (x - wx).abs() < 0.01 && (y - wy).abs() < 0.01,
+            "({x}, {y}) is not ({wx}, {wy})"
+        );
+    };
+
+    // `"top"`: centered on the cross line at the last row (200), kept
+    // inside the right edge (140 + 60), its offset below the top.
+    hover(190.0, 10.0);
+    all.extend(until(&rx, |b| shows(b, "hover 2 top")));
+    all.extend(until(&rx, |_| false));
+    let (at, size, moved) = placed(&all);
+    near(at, (0.0, 8.0));
+    near(size, (60.0, 20.0));
+    near(moved, (140.0, 0.0));
+
+    // `"pointer"`: in the lower right, left of the cross line and above
+    // the pointer, its offset from both.
+    let pointer = test_view(&all, "pointer");
+    engine
+        .control()
+        .dispatch_event(pointer, EventKind::Press, EventPayload::None);
+    all.extend(until(&rx, |b| shows(b, "hover 2 pointer")));
+    hover(190.0, 80.0);
+    all.extend(until(&rx, |_| false));
+    let (at, _, moved) = placed(&all);
+    near(at, (-68.0, -28.0));
+    near(moved, (200.0, 80.0));
+    // In the upper left: right of the cross line, below the pointer.
+    hover(10.0, 10.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0 pointer")));
+    all.extend(until(&rx, |_| false));
+    let (at, _, moved) = placed(&all);
+    near(at, (8.0, 8.0));
+    near(moved, (0.0, 10.0));
+}

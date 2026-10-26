@@ -1058,6 +1058,26 @@ event id:plot onHoverMove position.x=45 position.y=10
 expect hovered 1
 expect tip 1
 prop id:plot accessibilityValue text=row1
+# The hover's dots, one per mark, each a box the size of its dot around
+# the mark's point (the tooltip's sibling below it the last mark's): the
+# plot's `dotClass` (8), a mark's own `hoverDotStyle` (10 by 10) or
+# `hoverDotClass` (12) in its place, an area's class and style each in
+# place of the plot's (4 wide, 6 high).
+frame below:parent:parent:parent:id:tip 0 0 10 10
+frame below:below:parent:parent:parent:id:tip 0 0 12 12
+frame below:below:below:parent:parent:parent:id:tip 0 0 8 8
+frame below:below:below:below:parent:parent:parent:id:tip 0 0 4 6
+# The tooltip at the top, `tooltipOffset` below the top edge (the
+# animator centers it on the cross line, inside the plot).
+frame parent:parent:id:tip 0 6 40 16
+# Beside the pointer: right of the cross line in the plot's left half,
+# above the pointer in its lower half and below it in the upper one,
+# `tooltipOffset` away.
+tap id:pointer-tip
+event id:plot onHoverMove position.x=45 position.y=80
+frame parent:parent:id:tip 6 -22 40 16
+event id:plot onHoverMove position.x=45 position.y=10
+frame parent:parent:id:tip 6 6 40 16
 event id:plot onHoverMove position.x=90 position.y=10
 expect hovered 2
 prop id:plot accessibilityValue text=row2
@@ -1085,6 +1105,12 @@ covers [props] Plot.data
 covers [props] Plot.x
 covers [props] Plot.xScale
 covers [props] Plot.tooltipContent
+covers [props] Plot.tooltipPlacement
+covers [props] Plot.tooltipOffset
+covers [props] Line.hoverDotClass
+covers [props] Line.hoverDotStyle
+covers [props] Area.hoverDotClass
+covers [props] Area.hoverDotStyle
 covers [props] Plot.interactive
 covers [events] Plot.onHoverChange
 

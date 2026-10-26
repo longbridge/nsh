@@ -59,6 +59,12 @@ function LegendItem(props: { label: string; dashed?: boolean }) {
   );
 }
 
+/** A wash of `color` under a line: its background, fading out from the
+ * line's highest point (16%) to the baseline. */
+const wash = (color: string) => ({
+  backgroundImage: `linear-gradient(to bottom, ${alpha(color, 0.16)}, ${alpha(color, 0)})`,
+});
+
 /** A value in the tooltip, after its series' key. */
 function TipValue(props: { value: string; dashed?: boolean }) {
   return (
@@ -73,10 +79,13 @@ function TipValue(props: { value: string; dashed?: boolean }) {
  * Charts: `nsh/base/plot`'s `Plot` with `Line`, `Area` and `Grid`, drawn
  * natively from the app's rows: a week of visitors over the other week
  * (dashed), with a legend, compact y labels and the hover's cross line,
- * dots and tooltip gliding natively, and a list of sparklines, each with a
- * wash in its tone and its change beside it, that draw in as their rows
- * come. Grid lines are hairlines with a firmer baseline; the tooltip floats
- * in the room above the highest value, off the lines.
+ * dots (each series' own, in its color, ringed in the card's) and tooltip
+ * gliding natively, and a list of sparklines, each with a wash in its tone
+ * and its change beside it, that draw in as their rows come. Washes fade
+ * out toward the baseline (an area's background, a gradient inside its
+ * shape). Grid lines are hairlines with a firmer baseline; the tooltip
+ * floats in the room above the highest value, off the lines, and stays
+ * within the plot's width at the first and last days.
  */
 export function Charts() {
   const last = signal("—");
@@ -111,11 +120,11 @@ export function Charts() {
             }}
             crossLineClass="w-px h-full"
             crossLineStyle={{ backgroundColor: alpha(colors.text, 0.3) }}
-            // A dot per mark, the same for both weeks: hollow, in the text color.
+            // The dots' shape; each week's line gives its own its color.
             dotClass="size-2.5 rounded-full border-2"
-            dotStyle={{ backgroundColor: colors.surface, borderColor: colors.text }}
+            tooltipOffset={4}
             tooltipContent={
-              <View style={{ ...finish.menu, marginTop: 4, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
+              <View style={{ ...finish.menu, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
                 <TipValue value={count(rows()[tip()].visitors)} />
                 <TipValue value={count(other()[tip()].visitors)} dashed />
               </View>
@@ -128,10 +137,17 @@ export function Charts() {
             style={{ flex: 1, height: 160 }}
           >
             <Grid y={[1000, 2000, 3000]} style={{ stroke: colors.line }} />
-            <Area style={{ fill: alpha(toneColor("accent"), 0.12) }} />
+            {/* The line over it has the dot. */}
+            <Area backgroundStyle={wash(toneColor("accent"))} hoverDotClass="hidden" />
             <Grid y={[0]} style={{ stroke: colors.border }} />
-            <Line data={other()} y="visitors" style={{ stroke: colors.muted, strokeWidth: 1.5, strokeDasharray: "4 4" }} />
-            <Line style={{ stroke: toneColor("accent"), strokeWidth: 2 }} />
+            {/* Each week's dot in its line's color, ringed in the card's, so it cuts out of the line. */}
+            <Line
+              data={other()}
+              y="visitors"
+              style={{ stroke: colors.muted, strokeWidth: 1.5, strokeDasharray: "4 4" }}
+              hoverDotStyle={{ backgroundColor: colors.muted, borderColor: colors.surface }}
+            />
+            <Line style={{ stroke: toneColor("accent"), strokeWidth: 2 }} hoverDotStyle={{ backgroundColor: toneColor("accent"), borderColor: colors.surface }} />
           </Plot>
           {/* The y axis' labels at the grid's values, compact. */}
           <View style={{ width: AXIS, height: 160 }}>
@@ -186,8 +202,8 @@ export function Charts() {
                   accessibilityLabel={`${ticker().symbol}, ${up() ? "up" : "down"} ${Math.abs(change()).toFixed(2)}%`}
                   style={{ flex: 1, height: 28 }}
                 >
-                  {/* A faint wash under the line, in its tone. */}
-                  <Area style={{ fill: alpha(toneColor(tone()), 0.1) }} />
+                  {/* A wash under the line, in its tone, fading out. */}
+                  <Area backgroundStyle={wash(toneColor(tone()))} />
                   <Line style={{ stroke: toneColor(tone()), strokeWidth: 1.5 }} />
                 </Plot>
                 {/* The close over its change: an explicit plus, a true minus. */}

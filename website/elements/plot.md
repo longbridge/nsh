@@ -14,8 +14,9 @@ lines across. Each mark is one canvas filling the plot, drawn natively from the 
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
 hears of a new row, nothing more. The look is the app's: marks paint with CSS's paint properties of SVG shapes
-(`stroke-*`, `fill-*`), `currentColor` where none is set, and the hover's parts and the axis labels are the app's to
-style and fill.
+(`stroke-*`, `fill-*`), `currentColor` where none is set, an area shows a background (a gradient, `bg-linear-*`)
+inside its shape, and the hover's parts (each mark's dot among them) and the axis labels are the app's to style and
+fill.
 
 ```rust tabs
 use nsh_base::{
@@ -99,8 +100,10 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | none | What screen readers hear as its value: the app's words for the row under the pointer. |
 | `crossLineClass`, `crossLineStyle` | `.cross_line_class(..)`, `.cross_line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The cross line: a view as tall as the plot, centered on the row under the pointer. |
-| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line` and `Area`, centered on its point at the row under the pointer. |
-| `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, at the top of the plot, centered on the cross line and moved and faded with it. |
+| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line` and `Area`, centered on its point at the row under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
+| `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, placed by `tooltipPlacement` and moved and faded with the cross line. |
+| `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. |
+| `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | The distance between the tooltip and what places it: the top edge for `"top"`, the cross line and the pointer for `"pointer"`. |
 | `children` | `.child(..)` | `JSX.Element` | none | The marks, drawn in order over each other, and whatever the app lays over them. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The plot's size and look; the marks inherit its paint properties, as CSS inherits them. |
 
@@ -123,6 +126,8 @@ name is read with no JS at all.
 | `Line`, `Area` | `data`, `x` | `T[]`, `string \| (d, index) => number` | the plot's rows | Rows of a series of its own (other x values), placed on the plot's scales by its own `x` (a row's index without). |
 | `Line`, `Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | How it connects its points: a smooth curve, straight segments, or steps that hold each value until the next row. |
 | `Line` | `dot`, `dotClass`, `dotStyle` | `boolean`, `string`, `StyleProp<ViewStyle>` | `false` | A dot on every point: a view centered on it, its size, background and border the app's. |
+| `Line`, `Area` | `hoverDotClass`, `hoverDotStyle` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point at the row under the pointer: each series' dot in its own color. Each replaces the plot's for this mark (a mark's color over the plot's size and ring); `hidden` shows none. |
+| `Area` | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its shape (from its first point to its last, from its highest point to its baseline) whose background (`bg-*`, `bg-linear-to-b from-… to-…`, `backgroundImage`) shows only inside the shape, under its `fill`. With one, `fill` is `none` where none is set. |
 | `Area` | `y1` | `string \| (d, index) => number` | the plot's `y` | What makes its top edge. |
 | `Area` | `y0` | `number` | the bottom edge | The value of its baseline on the y scale. |
 | `Grid` | `x` | `number[]` | none | Where its vertical lines go, as values of the x scale (row indices on a `point` scale). |
@@ -134,12 +139,17 @@ over those of the plot, as CSS inherits them:
 | Mark | Paints with | Where none is set |
 |---|---|---|
 | `Line` | `stroke`, `strokeWidth`, `strokeDasharray` | `currentColor`, 1 wide, solid |
-| `Area` | `fill`; its top edge `stroke`, `strokeWidth`, `strokeDasharray` | `fill` `currentColor`; no stroke |
+| `Area` | `fill` (over its `background` part); its top edge `stroke`, `strokeWidth`, `strokeDasharray` | `fill` `currentColor` (`none` beside a background); no stroke |
 | `Grid` | `stroke`, `strokeWidth`, `strokeDasharray` | `currentColor`, 1 wide, solid; each line on whole device pixels, so a thin one stays sharp |
 
 The values a `Line` or an `Area` draws, an area's `y0` too, make the y scale's domain when the plot has none; a grid's
 do not. A mark draws again only when what it draws changes (its rows, values, curve, the plot's size or scales, its
 paint); the pointer moves the hover's parts and never draws a mark again.
+
+`fill` is CSS's, as in a browser: a color. A gradient under a line is an area's background, the way a page shows a
+gradient in a shape (a box's `background-image` under `clip-path`): `backgroundClass="bg-linear-to-b from-chart-1/20
+to-transparent"` fades from the area's highest point to its baseline, in the theme's tokens and the appearance's
+colors like any view's background.
 
 ## Motion
 
@@ -168,9 +178,10 @@ it: the labels then sit at the grid's values. The hover's cross line, dots and t
 filled by the app; the row's values go where the app shows them.
 
 Grids read best as solid hairlines with a firmer baseline, which leaves a dashed line free to mean a reference value
-(the opening price below). The dots take the color of the surface the chart sits on as their ring, so they cut out of
-the line, and the tooltip sits at the top of the plot: a `domain` with room above the highest value keeps it off the
-line.
+(the opening price below). An area reads lighter as a wash that fades out toward its baseline than as a flat fill.
+Each series' hover dot takes its series' color, and the color of the surface the chart sits on as its ring, so it
+cuts out of its line, and the tooltip sits at the top of the plot, inside its edges at the first and last rows: a
+`domain` with room above the highest value keeps it off the line.
 
 ```tsx
 import { signal, Text, View } from "nsh";
@@ -199,9 +210,9 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           appearGeneration={props.rows.length}
           motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
           crossLineClass="w-px h-full bg-muted-foreground/50"
-          dotClass="size-2.5 rounded-full border-2 border-card bg-chart-1"
+          tooltipOffset={4}
           tooltipContent={
-            <View class="mt-1 flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+            <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
               <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
               <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
             </View>
@@ -210,10 +221,11 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           class="h-48 flex-1"
         >
           <Grid y={[middle(), props.high]} class="stroke-border" />
-          <Area class="fill-chart-1/15" />
+          {/* A wash that fades out toward the baseline. */}
+          <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
           <Grid y={[props.low]} class="stroke-muted-foreground/40" />
           <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
-          <Line class="stroke-chart-1 stroke-2" />
+          <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
         </Plot>
         {/* The y axis' labels, at the grid's values (Text until an axis mark lands). */}
         <View class="-my-2 w-8 justify-between">
@@ -252,4 +264,7 @@ See [Accessibility](../docs/accessibility.md) for labels and roles in general.
   the marks that read them again in one batch, and a change of a paint class (the appearance, `dark:`) sends the
   drawing again without recording it.
 - The appear clips the marks with a value the platform's animator moves; the hover's parts are views the animator moves
-  and fades.
+  and fades, and it keeps the tooltip inside the plot from the plot's size and the tooltip's.
+- An area's background is drawn in its own canvas, clipped to the area's shape, with the same gradient the platform
+  draws for a view's `bg-linear-*`; a change of its classes (the appearance, `dark:`) sends the drawing again without
+  recording it.

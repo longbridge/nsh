@@ -1,16 +1,18 @@
 //! A mark's series: its rows (its own or the plot's), the values it reads
 //! of them (a field, or the app's function, called when they change), where
 //! each row lands, and what it adds to the plot (its extent in the y
-//! domain, its hover dot).
+//! domain, its hover dot and how the app styles it).
 
 use std::sync::Arc;
 
-use nsh_core::ui::{RowAccessor, Rows, prelude::*};
+use nsh_core::ui::{RowAccessor, Rows, Style, prelude::*};
 
 use super::{PlotContext, scale::extent};
 
-/// A mark the plot knows: its extent along the y axis, its points, and
-/// where its hover dot is.
+/// A mark the plot knows: its extent along the y axis, its points, where
+/// its hover dot is and the app's classes and style of it (`hoverDotClass`
+/// / `hoverDotStyle`; the plot's `dotClass` / `dotStyle` where it sets
+/// none).
 #[derive(Clone, Copy)]
 pub(super) struct Mark {
     pub(super) key: u64,
@@ -18,6 +20,22 @@ pub(super) struct Mark {
     pub(super) points: Memo<Arc<[Point<Points>]>>,
     pub(super) dot_x: AnimatedValue,
     pub(super) dot_y: AnimatedValue,
+    pub(super) dot: HoverDot,
+}
+
+/// A mark's own part of the hover's dots (`hoverDotClass` /
+/// `hoverDotStyle`).
+#[derive(Clone, Copy)]
+pub(super) struct HoverDot {
+    pub(super) class: Prop<Option<SharedString>>,
+    pub(super) style: Prop<Style>,
+}
+
+impl HoverDot {
+    /// The mark styles its hover dot.
+    pub(super) fn is_set(&self) -> bool {
+        self.class.with(Option::is_some) || self.style.with(|s| *s != Style::default())
+    }
 }
 
 impl PartialEq for Mark {
@@ -121,8 +139,13 @@ impl Series {
     }
 
     /// Adds the series to `plot` while the mark lives: its values (and
-    /// `also`) in the y domain, and a hover dot.
-    pub(super) fn join(&self, plot: PlotContext, also: impl Fn() -> Option<f64> + 'static) {
+    /// `also`) in the y domain, and a hover dot, styled by `dot`.
+    pub(super) fn join(
+        &self,
+        plot: PlotContext,
+        also: impl Fn() -> Option<f64> + 'static,
+        dot: HoverDot,
+    ) {
         let ys = self.ys;
         let extent = computed(move || {
             let values = ys.get()?;
@@ -136,6 +159,7 @@ impl Series {
             points,
             dot_x,
             dot_y,
+            dot,
         });
     }
 }

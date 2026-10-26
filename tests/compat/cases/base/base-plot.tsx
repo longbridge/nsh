@@ -3,12 +3,14 @@
 // fields, the `xScale` / `yScale`), one image for screen readers
 // (`accessibilityLabel`, `accessibilityValue`), the row nearest the pointer
 // (`onHoverChange`) with its parts (`crossLineClass`, `dotClass`,
-// `tooltipContent`) and `motion`, and its marks `Grid` (`x`, `y`), `Area`
-// (`y1`, `y0`, `curve`) and `Line` (`y` as a field and as a function,
-// `data` / `x` of its own, `curve`, `dot`), painted with the paint style
-// keys. A headless run paints nothing, so the script checks the plot's
-// layout, its role, label and value, the tooltip's text and what it
-// reports.
+// `tooltipContent`, `tooltipPlacement`, `tooltipOffset`) and `motion`, and
+// its marks `Grid` (`x`, `y`), `Area` (`y1`, `y0`, `curve`, a gradient
+// `background`, its own `hoverDot`) and `Line` (`y` as a field and as a
+// function, `data` / `x` of its own, `curve`, `dot`, its own `hoverDot`),
+// painted with the paint style keys. A headless run paints nothing, so the
+// script checks the plot's layout, its role, label and value, the
+// tooltip's text, where the layout puts the tooltip and the hover's dots,
+// and what it reports.
 import { Text, View, signal } from "nsh";
 import { Area, Grid, Line, Plot } from "nsh/base/plot";
 
@@ -21,6 +23,7 @@ function App() {
     { t: 20, price: 20, avg: 22 },
   ]);
   const hovered = signal<number | null>(null);
+  const placement = signal<"top" | "pointer">("top");
   return (
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <Plot
@@ -36,18 +39,34 @@ function App() {
         motion={{ appear: { duration: 300 }, enter: { duration: 100 }, exit: { duration: 100 }, pointer: { stiffness: 300, damping: 30 } }}
         crossLineClass="w-px h-full bg-[#999999]"
         dotClass="size-2 rounded-full bg-[#3366ff]"
-        tooltipContent={<Text>{`tip ${hovered()}`}</Text>}
+        tooltipContent={
+          <View testID="tip" style={{ width: 40, height: 16 }}>
+            <Text>{`tip ${hovered()}`}</Text>
+          </View>
+        }
+        tooltipPlacement={placement()}
+        tooltipOffset={6}
         onHoverChange={(index) => hovered.set(index)}
         class="h-[100px] w-[200px] stroke-current"
         style={{ color: "#3366ff" }}
       >
         <Grid x={[0, 10, 20]} y={[0, 20, 40]} class="stroke-[#cccccc] stroke-1" style={{ strokeDasharray: "2 2" }} />
-        <Area y1="price" y0={0} curve="linear" class="fill-[#3366ff]/20 stroke-none" />
+        <Area
+          y1="price"
+          y0={0}
+          curve="linear"
+          class="stroke-none"
+          backgroundClass="bg-linear-to-b from-[#3366ff]/30 to-transparent"
+          backgroundStyle={{ opacity: 0.8 }}
+          hoverDotClass="size-1"
+          hoverDotStyle={{ height: 6 }}
+        />
         <Line y={(d: Row) => d.avg} curve="stepAfter" style={{ stroke: "#ff0000", strokeWidth: 2 }} />
-        <Line data={[{ at: 5, v: 15 }, { at: 15, v: 25 }]} x="at" y="v" dot dotClass="size-1" />
-        <Line class="fill-none" />
+        <Line data={[{ at: 5, v: 15 }, { at: 15, v: 25 }]} x="at" y="v" dot dotClass="size-1" hoverDotClass="size-3 rounded-full" />
+        <Line class="fill-none" hoverDotStyle={{ width: 10, height: 10, backgroundColor: "#ff0000" }} />
       </Plot>
       <Text>{`hovered ${hovered()}`}</Text>
+      <View testID="pointer-tip" onPress={() => placement.set("pointer")} style={{ height: 20 }} />
       <View testID="more" onPress={() => rows.set([...rows(), { t: 20, price: 35, avg: 25 }])} style={{ height: 20 }} />
       <Text>{`rows ${rows().length}`}</Text>
       {/* A sparkline: no pointer. */}

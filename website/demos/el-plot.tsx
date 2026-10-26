@@ -9,8 +9,12 @@ import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette
 // and the plot's cross line, dot and tooltip follow it natively. Grid lines
 // are solid hairlines and the bottom one a firmer baseline; the one dashed
 // line is a reference, the opening price the change is measured from. The
-// tooltip is the time of the row, a tag over the x axis' labels, so it
-// never covers the line. Numbers are tabular and at the trailing edge.
+// area is a wash of the line's color that fades out toward the baseline
+// (its background, a gradient inside its shape), and the line has the
+// hover's dot, in its color. The tooltip is the time of the row, a tag
+// over the x axis' labels, so it never covers the line, and it stays
+// within the plot's width at the first and last rows. Numbers are tabular
+// and at the trailing edge.
 type Row = { minute: number; price: number };
 type Range = "1D" | "1W" | "1M";
 type Curve = "natural" | "linear" | "stepAfter";
@@ -120,11 +124,11 @@ function App() {
               crossLineClass="w-px h-full"
               crossLineStyle={{ backgroundColor: ui().muted }}
               dotClass="size-2.5 rounded-full border-2"
-              // The ring is the card's color: the dot cuts out of the line.
-              dotStyle={{ backgroundColor: color(), borderColor: ui().card.backgroundColor }}
-              // The time of the row, at the foot of the cross line.
+              // The time of the row, at the foot of the cross line, kept
+              // within the plot's width.
+              tooltipOffset={height + 9}
               tooltipContent={
-                <View style={{ ...ui().raised, marginTop: height + 9, height: 20, paddingHorizontal: 6, borderRadius: 6, justifyContent: "center" }}>
+                <View style={{ ...ui().raised, height: 20, paddingHorizontal: 6, borderRadius: 6, justifyContent: "center" }}>
                   <Text style={{ fontSize: 11, color: ui().text, ...num }}>{RANGES[range()].time(Math.min(tipRow(), rows().length - 1))}</Text>
                 </View>
               }
@@ -137,10 +141,20 @@ function App() {
               style={{ flex: 1, height }}
             >
               <Grid y={[(lo() + hi()) / 2, hi()]} style={{ stroke: tint(ui().text, 0.08) }} />
-              <Area curve={curve()} style={{ fill: tint(color(), 0.1) }} />
+              {/* A wash that fades out toward the baseline; the line has the dot. */}
+              <Area
+                curve={curve()}
+                backgroundStyle={{ backgroundImage: `linear-gradient(to bottom, ${tint(color(), 0.16)}, ${tint(color(), 0)})` }}
+                hoverDotClass="hidden"
+              />
               <Grid y={[lo()]} style={{ stroke: tint(ui().text, 0.2) }} />
               <Grid y={[open()]} style={{ stroke: ui().faint, strokeDasharray: "3 3" }} />
-              <Line curve={curve()} style={{ stroke: color(), strokeWidth: 2 }} />
+              {/* Its dot in its color, ringed in the card's: it cuts out of the line. */}
+              <Line
+                curve={curve()}
+                style={{ stroke: color(), strokeWidth: 2 }}
+                hoverDotStyle={{ backgroundColor: color(), borderColor: ui().card.backgroundColor }}
+              />
             </Plot>
             <View style={{ justifyContent: "space-between", marginVertical: -7, width: 28 }}>
               {[hi(), (lo() + hi()) / 2, lo()].map((v) => (

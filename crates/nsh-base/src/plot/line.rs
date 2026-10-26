@@ -5,7 +5,10 @@ use nsh_core::{
     ui::{RowAccessor, Rows, Style, prelude::*},
 };
 
-use super::{PlotContext, STROKE_ROOM, layer, mark_canvas, reach, series::Series};
+use super::{
+    PlotContext, STROKE_ROOM, layer, mark_canvas, reach,
+    series::{HoverDot, Series},
+};
 
 /// How a [`Line`] or an [`Area`](super::Area) connects its points
 /// (`gpui-base`'s `Curve`, d3's curve factories).
@@ -80,6 +83,18 @@ pub struct LineProps {
     /// The style of its dots, over `dotClass`.
     #[prop(default)]
     pub dot_style: Prop<Style>,
+    /// The Tailwind classes of its hover dot, the `hoverDot` part: the
+    /// dot the plot shows on its point at the row under the pointer
+    /// (`TooltipState::dots`, which `gpui-component` fills with each
+    /// series' color, as `gpui-base`'s `Line::dot_fill` / `dot_stroke`
+    /// paint a line's own dots, `shape/line.rs:103-114`), its size,
+    /// background and border the app's; the plot's `dotClass` where none
+    /// is set. `hidden` shows none.
+    pub hover_dot_class: Prop<Option<SharedString>>,
+    /// The style of its hover dot, over `hoverDotClass`; the plot's
+    /// `dotStyle` where none is set.
+    #[prop(default)]
+    pub hover_dot_style: Prop<Style>,
 }
 
 /// A series of a [`Plot`](super::Plot) drawn as a line through its points
@@ -90,15 +105,19 @@ pub struct LineProps {
 /// inherited from the plot as CSS inherits them), `currentColor` where none
 /// is set, and with `dot` shows a dot the app styles on every point. Its
 /// values count in the y scale's domain when the plot has none, and it has
-/// a hover dot when the plot has a `dotClass`. It draws in with the plot's
-/// appear.
+/// a hover dot when it or the plot styles one (`hoverDotClass`, the plot's
+/// `dotClass`). It draws in with the plot's appear.
 #[component]
 pub fn Line(props: LineProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Line");
     let curve = props.curve;
+    let hover_dot = HoverDot {
+        class: props.hover_dot_class,
+        style: props.hover_dot_style,
+    };
     let series = plot.map(|plot| {
         let series = Series::new(plot, props.data, props.x, props.y);
-        series.join(plot, || None);
+        series.join(plot, || None, hover_dot);
         series
     });
     let (dot, dot_class, dot_style) = (props.dot, props.dot_class, props.dot_style);

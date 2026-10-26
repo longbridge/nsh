@@ -8,8 +8,10 @@
 //! and on the platform's animator (the app hears of a new index, nothing
 //! more). Marks paint with SVG's paint properties, CSS's on any element
 //! (`fill-*`, `stroke-*`, `strokeWidth`, `strokeDasharray`),
-//! `currentColor` where the app sets none; the hover's cross line, dots
-//! and tooltip are parts the app styles and fills.
+//! `currentColor` where the app sets none, and an `Area` shows the app's
+//! background (a gradient) inside its shape; the hover's cross line, dots
+//! (the plot's, or a mark's own) and tooltip are parts the app styles and
+//! fills, the tooltip placed and kept inside the plot natively.
 //!
 //! A module of its own (`nsh/base/plot`, a submodule of the `nsh/base`
 //! set) because `Line`, `Area` and `Grid` only make sense inside a plot.
@@ -23,7 +25,7 @@ mod series;
 use std::sync::Arc;
 
 use nsh_core::{
-    AccessibilityValue, PatchValue, StyleDecl, StyleKey,
+    AccessibilityValue,
     ui::{Registry, RowAccessor, Rows, Spring, Style, Timing, prelude::*},
 };
 
@@ -35,7 +37,7 @@ pub use self::{
 };
 use self::{
     scale::{Linear, extent, point_tick},
-    series::Mark,
+    series::{HoverDot, Mark},
 };
 
 /// The JS module apps import the plot parts as.
@@ -89,6 +91,25 @@ pub struct PlotAccessibilityValue {
     pub now: Option<f64>,
     /// The value in words (`"Thursday, 2,480 visitors"`).
     pub text: Option<SharedString>,
+}
+
+/// Where a [`Plot`]'s tooltip goes (`gpui-base`'s `Plot::tooltip` gets
+/// the cursor and the plot's bounds to place it, `plot/mod.rs:215`;
+/// `gpui-component`'s `Tooltip` hugs the cursor, `plot/tooltip.rs:585`).
+/// Either way it moves along the plot's edges rather than past them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum TooltipPlacement {
+    /// At the top of the plot, centered on the cross line and moved with
+    /// it, kept between the plot's left and right edges; its
+    /// `tooltipOffset` below the top edge (past the bottom one for a tag
+    /// under the plot).
+    #[default]
+    Top,
+    /// Beside the pointer, as `gpui-component`'s chart tooltips: on the
+    /// side of the cross line toward the plot's middle, below the pointer
+    /// in the plot's upper half and above it in the lower one, its
+    /// `tooltipOffset` from both, kept inside the plot.
+    Pointer,
 }
 
 /// The props of [`Plot`].
@@ -145,16 +166,30 @@ pub struct PlotProps {
     pub cross_line_style: Prop<Style>,
     /// The Tailwind classes of the hover's dots (`TooltipState::dots`): one
     /// view per `Line` and `Area`, centered on its point at the row under
-    /// the pointer (its size, color and border the app's).
+    /// the pointer (its size, color and border the app's). A mark's
+    /// `hoverDotClass` replaces it for that mark's dot.
     pub dot_class: Prop<Option<SharedString>>,
-    /// The style of the hover's dots, over `dotClass`.
+    /// The style of the hover's dots, over `dotClass`; a mark's
+    /// `hoverDotStyle` replaces it for that mark's dot.
     #[prop(default)]
     pub dot_style: Prop<Style>,
-    /// The app's tooltip (`gpui-base`'s `Plot::tooltip`): placed at the
-    /// top of the plot, centered on the cross line, and moved and faded
-    /// with it; its content is the app's, for the row `onHoverChange`
-    /// reported.
+    /// The app's tooltip (`gpui-base`'s `Plot::tooltip`): placed by
+    /// `tooltipPlacement` and kept inside the plot's edges, moved and faded with
+    /// the cross line; its content is the app's, for the row
+    /// `onHoverChange` reported.
     pub tooltip_content: Prop<Option<Slot>>,
+    /// Where the tooltip goes: `"top"` (the default, at the top, centered
+    /// on the cross line, between the left and right edges) or
+    /// `"pointer"` (beside the pointer, toward the plot's middle, inside
+    /// the plot).
+    #[prop(default)]
+    pub tooltip_placement: Prop<TooltipPlacement>,
+    /// The distance between the tooltip and what places it
+    /// (`gpui-component`'s `Tooltip::gap`, `gpui-base`'s
+    /// `Positioner::offset`): the top edge for `"top"`, the cross line and
+    /// the pointer for `"pointer"`; 0 by default.
+    #[prop(default)]
+    pub tooltip_offset: Prop<Points>,
     /// The marks, drawn in order over each other (each fills the plot),
     /// and whatever the app lays over them.
     pub children: Prop<Children>,
@@ -284,8 +319,10 @@ impl PlotContext {
 /// it and its motion. It draws nothing itself: its marks, the children
 /// (`Line`, `Area`, `Grid`), each fill it and draw in order over each
 /// other. It reports the row nearest to the pointer (`onHoverChange`) and
-/// shows the hover's parts the app styles (`crossLineClass`, `dotClass`,
-/// `tooltipContent`), moved and faded natively with `motion`. It is one
+/// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
+/// a mark's `hoverDotClass`, `tooltipContent`), moved and faded natively
+/// with `motion`, the tooltip placed by `tooltipPlacement` and kept inside
+/// the plot on the platform's animator. It is one
 /// element for screen readers, with the image role, the app's
 /// `accessibilityLabel` and `accessibilityValue`. The app's `class` and
 /// `style` size and style it; the marks' paint inherits from it as CSS
@@ -382,6 +419,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let cross_x = animated_value(0.0);
     let fade = animated_value(0.0);
     let hovered = stored(None::<u32>);
+    let place = TooltipPlace::new(cross_x, props.tooltip_placement, props.tooltip_offset);
     let follow = move |index: Option<u32>| {
         let was = hovered.get();
         if was == index {
@@ -401,6 +439,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         let Some(x) = xs.with_untracked(|xs| xs.get(index as usize).copied()) else {
             return;
         };
+        place.row_at(x);
         // Entering: the parts take the row where they are, then fade in;
         // over the plot, they glide to the next one on the pointer spring
         // (`PlotHover::glide`).
@@ -446,11 +485,15 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 text: v.text.map(|t| std::sync::Arc::from(&*t)),
             })
         })
-        .on_layout(move |b: &Bounds<Points>| size.set(b.size))
+        .on_layout(move |b: &Bounds<Points>| {
+            size.set(b.size);
+            place.plot_is(b.size);
+        })
         .on_hover_move(move |e: &HoverEvent| {
             if !interactive.get_untracked() {
                 return;
             }
+            place.pointer_at(e.position.y.0);
             let at = e.position.x.0;
             let nearest = xs.with_untracked(|xs| {
                 xs.iter()
@@ -468,30 +511,42 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         .child(when(
             move || interactive.get() && has_cross(),
             move || {
-                anchor(&cross_x, None, &fade)
-                    .top(px(0.0))
-                    .bottom(px(0.0))
-                    .child(
-                        view()
-                            .h_full()
-                            .app_class(cross_class)
-                            .inline_style(cross_style),
-                    )
+                anchor(&cross_x, &fade).top(px(0.0)).bottom(px(0.0)).child(
+                    view()
+                        .h_full()
+                        .app_class(cross_class)
+                        .inline_style(cross_style),
+                )
             },
         ))
+        // A dot per mark, styled by the mark (`hoverDotClass` /
+        // `hoverDotStyle`) or else by the plot (`dotClass` / `dotStyle`);
+        // none where neither styles one.
         .child(when(
-            move || interactive.get() && has_dots(),
+            move || interactive.get(),
             move || {
                 each(
                     move || marks.get(),
                     |m| m.key,
                     move |mark, _| {
                         let m = mark.get_untracked();
-                        anchor(&m.dot_x, Some(&m.dot_y), &fade).child(
-                            view()
-                                .flex_none()
-                                .app_class(dot_class)
-                                .inline_style(dot_style),
+                        let own: HoverDot = m.dot;
+                        let own_style = move || own.style.with(|s| *s != Style::default());
+                        when(
+                            move || has_dots() || own.is_set(),
+                            move || {
+                                dot_anchor(&m.dot_x, &m.dot_y, &fade).child(
+                                    view()
+                                        .flex_none()
+                                        .app_class(move || {
+                                            own.class.get().or_else(|| dot_class.get())
+                                        })
+                                        .inline_style(move || match own_style() {
+                                            true => own.style.get(),
+                                            false => dot_style.get(),
+                                        }),
+                                )
+                            },
                         )
                     },
                 )
@@ -499,22 +554,204 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         ))
         .child(when(
             move || interactive.get() && tooltip.get().is_some(),
-            move || {
-                // A row whose item does not shrink: the content keeps its
-                // own width (the anchor has none) and centers on the line,
-                // overflowing it on both sides.
-                anchor(&cross_x, None, &fade)
-                    .flex_row()
-                    .top(px(0.0))
-                    .child(view().flex_none().child(tooltip.place(|t| t)))
-            },
+            move || place.view(&fade, tooltip.place(|t| t)),
         ))
 }
 
-/// A part's anchor: a point with no size at `x` (and `y`, else the top),
-/// faded by `fade`, its content centered on it; it takes no pointer.
-fn anchor(x: &AnimatedValue, y: Option<&AnimatedValue>, fade: &AnimatedValue) -> View {
-    let v = view()
+/// Where a plot's tooltip goes (`tooltipPlacement`, `tooltipOffset`), kept
+/// inside the plot: between its left and right edges for `"top"` (its
+/// offset from the top edge is the app's, a tag under the plot too), and
+/// its edges all round for `"pointer"`. The layout puts the tooltip on a
+/// side of a point with no size (its margins the offset), and the animator
+/// moves that point to the cross line (and the pointer) and clamps it, from
+/// the plot's size and the tooltip's, which the layout sets as animated
+/// values: no JS runs as the pointer moves, and the clamp follows the cross
+/// line's glide.
+#[derive(Clone, Copy)]
+struct TooltipPlace {
+    placement: Prop<TooltipPlacement>,
+    offset: Prop<Points>,
+    /// Where the point goes along each axis before the clamp: the cross
+    /// line, and the pointer for `"pointer"` (the top edge for `"top"`).
+    x: AnimatedValue,
+    y: AnimatedValue,
+    plot: Size<AnimatedValue>,
+    tooltip: Size<AnimatedValue>,
+    /// The tooltip goes left of the cross line, above the pointer (the
+    /// plot's right and lower halves, for `"pointer"`).
+    flip: Point<Signal<bool>>,
+    /// The size of the plot, to tell its halves apart.
+    size: Stored<Size<Points>>,
+    /// The terms the clamp takes from the placement ([`Self::new`]).
+    terms: [AnimatedValue; 6],
+}
+
+impl TooltipPlace {
+    fn new(x: AnimatedValue, placement: Prop<TooltipPlacement>, offset: Prop<Points>) -> Self {
+        let value = || animated_value(0.0);
+        let place = Self {
+            placement,
+            offset,
+            x,
+            y: value(),
+            plot: size(value(), value()),
+            tooltip: size(value(), value()),
+            flip: point(signal(false), signal(false)),
+            size: stored(Size::default()),
+            terms: [value(), value(), value(), value(), value(), value()],
+        };
+        // What the clamp takes from the placement: how far the tooltip's
+        // width moves it from the point (`shift`, -1/2 to center it), and
+        // where its box starts from the point along each axis, as a share
+        // of its size and an offset (the box starts at `-(share * size +
+        // offset)`, as its margins and the alignment place it); and whether
+        // it follows the pointer, whose y is clamped (`pointer`, 1 or 0).
+        let [shift, share_x, off_x, share_y, off_y, pointer] = place.terms;
+        effect(move || {
+            let off = offset.get().0;
+            let side = |flipped: bool| match flipped {
+                true => (1.0, off),
+                false => (0.0, -off),
+            };
+            let (s, (sx, ox), (sy, oy), p) = match placement.get() {
+                TooltipPlacement::Top => (-0.5, (0.0, 0.0), (0.0, -off), 0.0),
+                TooltipPlacement::Pointer => {
+                    (0.0, side(place.flip.x.get()), side(place.flip.y.get()), 1.0)
+                }
+            };
+            for (value, v) in [
+                (shift, s),
+                (share_x, sx),
+                (off_x, ox),
+                (share_y, sy),
+                (off_y, oy),
+                (pointer, p),
+            ] {
+                value.set(v);
+            }
+        });
+        place
+    }
+
+    /// The plot has `size`.
+    fn plot_is(&self, size: Size<Points>) {
+        self.size.replace(size);
+        self.plot.width.set(size.width.0);
+        self.plot.height.set(size.height.0);
+    }
+
+    /// The hover is at the row at `x` (where the cross line goes).
+    fn row_at(&self, x: f32) {
+        let right = x > self.size.get().width.0 / 2.0;
+        if self.flip.x.get_untracked() != right {
+            self.flip.x.set(right);
+        }
+    }
+
+    /// The pointer is at `y`.
+    fn pointer_at(&self, y: f32) {
+        if self.placement.get_untracked() != TooltipPlacement::Pointer {
+            return;
+        }
+        self.y.set(y);
+        let lower = y > self.size.get().height.0 / 2.0;
+        if self.flip.y.get_untracked() != lower {
+            self.flip.y.set(lower);
+        }
+    }
+
+    /// `at` clamped so that a box of `extent` starting `-(share * extent +
+    /// offset)` from it stays within `0..room`: `lo + clamp01((at - lo) /
+    /// (room - extent)) * (room - extent)`, `lo` the least `at`.
+    fn clamped(
+        at: &impl Animated,
+        room: AnimatedValue,
+        extent: AnimatedValue,
+        share: AnimatedValue,
+        offset: AnimatedValue,
+    ) -> AnimatedNode {
+        let range = room.sub(&extent);
+        let lo = extent.mul(&share).add(&offset);
+        let t = at
+            .animated_node()
+            .sub(&lo)
+            .div(&range)
+            .interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+        lo.add(&t.mul(&range))
+    }
+
+    /// The tooltip, faded by `fade`, holding `content`: a point with no
+    /// size the animator places, the content on its side of it.
+    fn view(self, fade: &AnimatedValue, content: impl IntoElement) -> View {
+        let [shift, share_x, off_x, share_y, off_y, pointer] = self.terms;
+        let want_x = self.x.add(&self.tooltip.width.mul(&shift));
+        let x = Self::clamped(&want_x, self.plot.width, self.tooltip.width, share_x, off_x);
+        // At the top edge for `"top"`: its offset there is the app's.
+        let y = Self::clamped(
+            &self.y,
+            self.plot.height,
+            self.tooltip.height,
+            share_y,
+            off_y,
+        )
+        .mul(&pointer);
+        let (placement, offset, flip, tooltip) =
+            (self.placement, self.offset, self.flip, self.tooltip);
+        // A row with no size whose item does not shrink: the content keeps
+        // its own size and overflows the point on the side the alignment
+        // gives it, its margins away from it.
+        view()
+            .absolute()
+            .left(px(0.0))
+            .top(px(0.0))
+            .w(px(0.0))
+            .h(px(0.0))
+            .flex_row()
+            .pointer_events(PointerEvents::None)
+            .bind_translate_x(&x)
+            .bind_translate_y(&y)
+            .bind_opacity(fade)
+            .style_with(move |s| {
+                let pointer = placement.get() == TooltipPlacement::Pointer;
+                let s = match pointer && flip.x.get() {
+                    true => s.justify_end(),
+                    false => s.justify_start(),
+                };
+                match pointer && flip.y.get() {
+                    true => s.items_end(),
+                    false => s.items_start(),
+                }
+            })
+            .child(
+                view()
+                    .flex_none()
+                    .on_layout(move |b: &Bounds<Points>| {
+                        tooltip.width.set(b.size.width.0);
+                        tooltip.height.set(b.size.height.0);
+                    })
+                    .style_with(move |s| {
+                        let off = offset.get();
+                        if placement.get() == TooltipPlacement::Top {
+                            return s.mt(off);
+                        }
+                        let s = match flip.x.get() {
+                            true => s.mr(off),
+                            false => s.ml(off),
+                        };
+                        match flip.y.get() {
+                            true => s.mb(off),
+                            false => s.mt(off),
+                        }
+                    })
+                    .child(content),
+            )
+    }
+}
+
+/// A part's anchor: a line with no width at `x`, faded by `fade`, its
+/// content centered on it; it takes no pointer.
+fn anchor(x: &AnimatedValue, fade: &AnimatedValue) -> View {
+    view()
         .absolute()
         .left(px(0.0))
         .top(px(0.0))
@@ -523,11 +760,23 @@ fn anchor(x: &AnimatedValue, y: Option<&AnimatedValue>, fade: &AnimatedValue) ->
         .justify_center()
         .pointer_events(PointerEvents::None)
         .bind_translate_x(x)
-        .bind_opacity(fade);
-    match y {
-        Some(y) => v.h(px(0.0)).bind_translate_y(y),
-        None => v,
-    }
+        .bind_opacity(fade)
+}
+
+/// A hover dot's place: a box the size of the dot it holds, its center at
+/// (`x`, `y`) (moved back by half its size, then by the animated point),
+/// faded by `fade`; it takes no pointer.
+fn dot_anchor(x: &AnimatedValue, y: &AnimatedValue, fade: &AnimatedValue) -> View {
+    view()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .pointer_events(PointerEvents::None)
+        .translate_x(relative(-0.5))
+        .translate_y(relative(-0.5))
+        .bind_translate_x(x)
+        .bind_translate_y(y)
+        .bind_opacity(fade)
 }
 
 /// A mark's layer: it fills the plot.
@@ -573,23 +822,31 @@ fn mark_canvas(
     bleed: impl Fn() -> f32 + Copy + 'static,
     draw: impl Fn(Painter, f32) -> Painter + 'static,
 ) -> CanvasView {
+    mark_canvas_with(plot, bleed, Painter::new, draw)
+}
+
+/// [`mark_canvas`], recording `before_layout()` before the plot's first
+/// layout.
+fn mark_canvas_with(
+    plot: Option<PlotContext>,
+    bleed: impl Fn() -> f32 + Copy + 'static,
+    before_layout: impl Fn() -> Painter + 'static,
+    draw: impl Fn(Painter, f32) -> Painter + 'static,
+) -> CanvasView {
     canvas(move || {
         if plot.is_some_and(|plot| !plot.is_sized()) {
-            return Painter::new();
+            return before_layout();
         }
         let b = bleed();
         draw(Painter::new().translate(b, b), b)
     })
     .absolute()
     .pointer_events(PointerEvents::None)
-    .inline_style(move || {
-        let b = -bleed();
-        Style::from_decls([
-            StyleDecl::Set(StyleKey::Left, PatchValue::Number(b)),
-            StyleDecl::Set(StyleKey::Top, PatchValue::Number(b)),
-            StyleDecl::Set(StyleKey::Right, PatchValue::Number(b)),
-            StyleDecl::Set(StyleKey::Bottom, PatchValue::Number(b)),
-        ])
+    // Typed, so the app's inline style of a part's canvas (an area's
+    // background) is its own.
+    .style_with(move |s| {
+        let b = px(-bleed());
+        s.left(b).top(b).right(b).bottom(b)
     })
 }
 

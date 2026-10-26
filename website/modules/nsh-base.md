@@ -142,9 +142,10 @@ The parts charts are built from, as `gpui-base`'s `plot`, in a module of their o
 from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y` are checked
 keys or functions of a row), the `point` or `linear` scales of its axes, the row under the pointer (`onHoverChange`)
 and its motion (`motion`: the appear, the hover's fade and glide); its marks draw natively from the rows, with no JS
-per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none is set. The
-hover's cross line, dots and tooltip are parts the app styles and fills, moved natively; axis labels are the app's own
-elements. See [Plot](../elements/plot.md).
+per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none is set; an
+`Area` shows a background (a gradient, `bg-linear-*`) inside its shape. The hover's cross line, dots (each mark's own
+with `hoverDotClass`) and tooltip (`tooltipPlacement`, kept inside the plot) are parts the app styles and fills, moved
+natively; axis labels are the app's own elements. See [Plot](../elements/plot.md).
 
 ## Workspaces
 

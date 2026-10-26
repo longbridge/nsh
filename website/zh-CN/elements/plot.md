@@ -8,7 +8,7 @@ demo: el-plot
 
 # Plot
 
-Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Grid` 是横跨图表的网格线。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；悬停部件和坐标轴标签都由应用设置样式和内容。
+Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Grid` 是横跨图表的网格线。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）和坐标轴标签都由应用设置样式和内容。
 
 ```rust tabs
 use nsh_base::{
@@ -88,8 +88,10 @@ mount(App);
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对图表读出的内容：图表显示了什么，以及值得注意的地方。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 无 | 屏幕阅读器读出的数值：应用对指针下那一行的描述。 |
 | `crossLineClass`、`crossLineStyle` | `.cross_line_class(..)`、`.cross_line_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 十字线：与 plot 等高的视图，以指针下的行为中心。 |
-| `dotClass`、`dotStyle` | `.dot_class(..)`、`.dot_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 悬停圆点：每个 `Line` 和 `Area` 一个视图，以该图形在指针下那一行的点为中心。 |
-| `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | 无 | 应用的提示框，位于 plot 顶部，以十字线为中心，随十字线移动和淡入淡出。 |
+| `dotClass`、`dotStyle` | `.dot_class(..)`、`.dot_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 悬停圆点：每个 `Line` 和 `Area` 一个视图，以该图形在指针下那一行的点为中心。图形自己的 `hoverDotClass` / `hoverDotStyle` 会替换它们，用于该图形的圆点。 |
+| `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | 无 | 应用的提示框，按 `tooltipPlacement` 放置，随十字线移动和淡入淡出。 |
+| `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | 提示框的位置：在 plot 顶部、以十字线为中心；或在指针旁边，位于十字线朝 plot 中间的一侧，指针在上半部时在它下方，在下半部时在它上方。在顶部时，提示框留在 plot 的左右边缘之间（与顶边的距离由应用决定：放在 plot 下方的标签取 plot 的高度再多一些）；在指针旁边时，提示框留在 plot 内。 |
+| `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | 提示框与定位依据之间的距离：`"top"` 时是顶边，`"pointer"` 时是十字线和指针。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 图形，按顺序叠加绘制，以及应用放在它们上面的内容。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | plot 的尺寸和外观；图形会像 CSS 那样继承它的绘制属性。 |
 
@@ -109,6 +111,8 @@ mount(App);
 | `Line`、`Area` | `data`、`x` | `T[]`、`string \| (d, index) => number` | plot 的数据行 | 自己的一组数据行（x 值不同的系列），用自己的 `x` 放在 plot 的比例尺上（没有时用行的序号）。 |
 | `Line`、`Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | 点与点之间如何连接：平滑曲线、直线段，或保持每个值直到下一行的阶梯。 |
 | `Line` | `dot`、`dotClass`、`dotStyle` | `boolean`、`string`、`StyleProp<ViewStyle>` | `false` | 在每个点上显示圆点：以点为中心的视图，尺寸、背景和边框由应用决定。 |
+| `Line`、`Area` | `hoverDotClass`、`hoverDotStyle` | `string`、`StyleProp<ViewStyle>` | plot 的 `dotClass`、`dotStyle` | 它的悬停圆点，位于它在指针下那一行的点上：每个系列的圆点用自己的颜色。两者分别替换 plot 上对应的值，只作用于这个图形（图形的颜色配合 plot 的尺寸和描边）；`hidden` 表示不显示。 |
+| `Area` | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：包围其形状的盒子（从第一个点到最后一个点，从最高点到基线），盒子的背景（`bg-*`、`bg-linear-to-b from-… to-…`、`backgroundImage`）只在形状内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
 | `Area` | `y1` | `string \| (d, index) => number` | plot 的 `y` | 顶边使用的取值。 |
 | `Area` | `y0` | `number` | 底边 | 基线在 y 比例尺上的值。 |
 | `Grid` | `x` | `number[]` | 无 | 竖线的位置，取 x 比例尺上的值（`point` 比例尺上是行的序号）。 |
@@ -119,10 +123,12 @@ mount(App);
 | 图形 | 使用的属性 | 没有设置时 |
 |---|---|---|
 | `Line` | `stroke`、`strokeWidth`、`strokeDasharray` | `currentColor`，宽 1，实线 |
-| `Area` | `fill`；顶边使用 `stroke`、`strokeWidth`、`strokeDasharray` | `fill` 为 `currentColor`；没有描边 |
+| `Area` | `fill`（位于 `background` 部件之上）；顶边使用 `stroke`、`strokeWidth`、`strokeDasharray` | `fill` 为 `currentColor`（有背景时为 `none`）；没有描边 |
 | `Grid` | `stroke`、`strokeWidth`、`strokeDasharray` | `currentColor`，宽 1，实线；每条线都落在整数设备像素上，细线也保持清晰 |
 
 plot 没有设置定义域时，`Line` 和 `Area` 绘制的数值（包括 area 的 `y0`）构成 y 比例尺的定义域；grid 的数值不计入。图形只在要画的内容变化时重绘（数据行、取值、曲线、plot 的尺寸或比例尺、绘制属性）；指针只移动悬停部件，从不让图形重绘。
+
+`fill` 与浏览器中一样是 CSS 的 `fill`：一个颜色。折线下方的渐变是 area 的背景，就像网页在形状里显示渐变那样（盒子的 `background-image` 加上 `clip-path`）：`backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent"` 从 area 的最高点渐隐到基线，与任何视图的背景一样使用主题令牌和当前外观的颜色。
 
 ## 动效
 
@@ -143,7 +149,7 @@ plot 没有设置定义域时，`Line` 和 `Area` 绘制的数值（包括 area 
 
 一个图表由 plot、它的图形以及应用自己放在周围的元素组成。应用要给 y 轴加标签时，为 y 比例尺指定 `domain`，标签就能对齐网格线的数值。悬停的十字线、圆点和提示框是 plot 的部件，由应用设置样式和内容；该行的数值显示在应用想放的地方。
 
-网格线用实线细线、底部基线稍深时最清楚，虚线就可以专门表示参考值（下例中的开盘价）。圆点的描边用图表所在表面的颜色，从折线上“挖”出来；提示框位于 plot 顶部，`domain` 在最高值之上留出空间，提示框就不会盖住折线。
+网格线用实线细线、底部基线稍深时最清楚，虚线就可以专门表示参考值（下例中的开盘价）。area 用朝基线渐隐的淡色比平涂更轻盈。每个系列的悬停圆点用该系列的颜色，描边用图表所在表面的颜色，从折线上“挖”出来；提示框位于 plot 顶部，在第一行和最后一行时也留在边缘以内，`domain` 在最高值之上留出空间，提示框就不会盖住折线。
 
 ```tsx
 import { signal, Text, View } from "nsh";
@@ -172,9 +178,9 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           appearGeneration={props.rows.length}
           motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
           crossLineClass="w-px h-full bg-muted-foreground/50"
-          dotClass="size-2.5 rounded-full border-2 border-card bg-chart-1"
+          tooltipOffset={4}
           tooltipContent={
-            <View class="mt-1 flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+            <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
               <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
               <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
             </View>
@@ -183,10 +189,11 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           class="h-48 flex-1"
         >
           <Grid y={[middle(), props.high]} class="stroke-border" />
-          <Area class="fill-chart-1/15" />
+          {/* 朝基线渐隐的淡色。 */}
+          <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
           <Grid y={[props.low]} class="stroke-muted-foreground/40" />
           <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
-          <Line class="stroke-chart-1 stroke-2" />
+          <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
         </Plot>
         {/* y 轴标签，放在网格线的数值处（坐标轴图形推出之前先用 Text）。 */}
         <View class="-my-2 w-8 justify-between">
@@ -217,4 +224,5 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
 ## 平台说明
 
 - 所有平台以相同的方式绘制图形：每个图形一份在 Rust 中录制的绘图。数据行变化时，读取它们的图形在一个批次中重绘；绘制类名的变化（外观、`dark:`）只会重新发送绘图，不需要重新录制。
-- 出现动效用平台动画器推动的值裁剪图形；悬停部件是由动画器移动和淡入淡出的视图。
+- 出现动效用平台动画器推动的值裁剪图形；悬停部件是由动画器移动和淡入淡出的视图，动画器还根据 plot 和提示框的尺寸把提示框留在 plot 内。
+- area 的背景画在它自己的画布里，裁剪到 area 的形状，使用的渐变与平台为视图的 `bg-linear-*` 绘制的相同；它的类名变化（外观、`dark:`）只会重新发送绘图，不需要重新录制。
