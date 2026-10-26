@@ -447,7 +447,14 @@ of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which 
 `nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
 For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
 (`DevServer::test_session`: its hello says `test`), publishes the build and starts the host with `--dev-server`,
-`--window-size` and a fresh `--data-dir`, removed after it. A host whose hello says `tests` takes steps:
+`--window-size` and a fresh `--data-dir`, removed after it. The macOS host also gets `--display`: the display
+`nsh test --display <n>` names, else `secondary`, which centers its windows on the first display of `NSScreen.screens`
+besides the primary one whose frame is not the primary's (a mirror's is), the primary one when there is no other
+(`AppOptions::display`, `WindowDisplay`), so a run keeps off the screen in use; `nsh run` opens on the main display
+unless `--display` names one. It gets `--keep-window-size` too (`AppOptions::keep_size`): AppKit shrinks a window
+taller than its screen when it shows it, and a test's window keeps the size the test opens it at on any display. Synthesized input is
+window-relative on macOS (posted `NSEvent`s carry the window's number and a window point; wheels a location that
+makes their window point the agent's), so the tests run the same on any display. A host whose hello says `tests` takes steps:
 `DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the
 `ClientMessage::StepDone` with that id; a host that leaves fails its waiting steps.
 

@@ -129,7 +129,14 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 - **Embedding**: `AppView` (`app.rs`) is one surface as a view; `run_app` opens one in a window with a standard menu
   (About, Hide, Quit; Edit's undo / redo / cut / copy / paste / select all, which fields answer; Minimize, Zoom, Enter
   Full Screen, Close), titled with `AppOptions::title`: `name_app` sets the main bundle's `CFBundleName` to it, as the
-  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The standalone event loop
+  menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The window
+  opens centered where AppKit centers a new one, or on `AppOptions::display`: a `WindowDisplay::Index` of
+  `NSScreen.screens` (the host's one-based `--display <n>`) or `WindowDisplay::Secondary` (`--display secondary`,
+  `nsh test`'s default: the first display besides the primary one whose frame is not the primary's, as a mirror's
+  is; the primary one when there is no other). With `AppOptions::keep_size` (the host's `--keep-window-size`, which
+  `nsh test` passes) the window is an `NshKeptSizeWindow`, whose `constrainFrameRect:toScreen:` returns the frame as
+  it is: AppKit would shrink a window taller than its screen when it shows it, and a test's window keeps the size the
+  test opens it at on a shorter secondary display. The standalone event loop
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
