@@ -1,5 +1,5 @@
 import { Canvas, computed, signal, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 import { Icon } from "../icons";
 import {
   addPhase,

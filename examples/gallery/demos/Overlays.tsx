@@ -1,7 +1,7 @@
 import { Overlay, signal, Text, View, type YNode } from "nsh";
 import { Popover, Sheet, Tooltip } from "nsh/base";
 import { dismissToast, toast } from "../toast";
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius, Tip } from "../ui";
 
 /** The popups' look: the gallery's, as `nsh/base` draws none. */

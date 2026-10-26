@@ -14,10 +14,9 @@ Dialog 负责行为，外观交给应用：它的样式设定弹出层（包含�
 
 ```rust tabs
 use nsh_base::{button, dialog};
-use nsh_core::element::safe_area_view;
 use nsh_core::prelude::*;
 
-/// 白色文字的蓝色按钮。
+/// A blue button with a white label.
 fn primary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
     button()
         .on_press(on_press)
@@ -36,7 +35,7 @@ fn example() -> impl IntoElement {
         .flex_1()
         .justify_center()
         .p_6()
-        .child(primary("打开", move || open.set(true)))
+        .child(primary("Open", move || open.set(true)))
         .child(when(open, move || {
             dialog()
                 .presentation(ModalPresentation::PageSheet)
@@ -44,19 +43,21 @@ fn example() -> impl IntoElement {
                 .flex_1()
                 .bg(white())
                 .child(
-                    safe_area_view()
+                    view()
                         .flex_1()
-                        .p_5()
+                        .px_5()
+                        .pt_safe_area_plus(px(20.0))
+                        .pb_safe_area_plus(px(20.0))
                         .gap_3()
-                        .child(text("一个 sheet").text_2xl().font_weight(FontWeight::BOLD))
-                        .child(primary("关闭", move || open.set(false))),
+                        .child(text("A sheet").text_2xl().font_weight(FontWeight::BOLD))
+                        .child(primary("Close", move || open.set(false))),
                 )
         }))
 }
 ```
 
 ```tsx tabs
-import { signal, Text, View, SafeAreaView } from "nsh";
+import { signal, Text, View } from "nsh";
 import { Button, Dialog } from "nsh/base";
 
 function Example() {
@@ -64,22 +65,30 @@ function Example() {
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: 24 }}>
       <Button onPress={() => open.set(true)} class="items-center rounded-lg bg-blue-600 px-4 py-3 active:opacity-70">
-        <Text class="font-semibold text-white">打开</Text>
+        <Text class="font-semibold text-white">Open</Text>
       </Button>
       <Dialog open={open()} presentation="pageSheet" onOpenChange={(next) => open.set(next)} class="flex-1 bg-white">
-        <SafeAreaView style={{ flex: 1, padding: 20, gap: 12 }}>
-          <Text style={{ fontSize: 24, fontWeight: "700" }}>一个 sheet</Text>
+        <View
+          style={{
+            flex: 1,
+            gap: 12,
+            paddingHorizontal: 20,
+            paddingTop: "calc(env(safe-area-inset-top) + 20px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom) + 20px)",
+          }}
+        >
+          <Text style={{ fontSize: 24, fontWeight: "700" }}>A sheet</Text>
           <Button onPress={() => open.set(false)} class="items-center rounded-lg bg-blue-600 px-4 py-3 active:opacity-70">
-            <Text class="font-semibold text-white">关闭</Text>
+            <Text class="font-semibold text-white">Close</Text>
           </Button>
-        </SafeAreaView>
+        </View>
       </Dialog>
     </View>
   );
 }
 ```
 
-在 TSX 中，`open` 不为 `false` 时显示，变为 `false` 时关闭。在 Rust 中，它在视图中时呈现，离开视图时消失，所以由 `when` 持有它。无论哪种方式，它都会给内容提供 dialog 的安全区域 inset，供其内部的 [`SafeAreaView`](./safe-area-view.md) 和 `safeAreaInsets()`（Rust 组件中为 `cx.insets()`）读取。[`Button`](./button.md) 同样来自 `nsh/base`，是由应用设定样式的按压目标。
+在 TSX 中，`open` 不为 `false` 时显示，变为 `false` 时关闭。在 Rust 中，它在视图中时呈现，离开视图时消失，所以由 `when` 持有它。无论哪种方式，它都会给内容提供 dialog 的安全区域 inset，供其内部的 [`env(safe-area-inset-*)`](./safe-area.md) 变量和 `safeAreaInsets()`（Rust 组件中为 `cx.insets()`）读取。[`Button`](./button.md) 同样来自 `nsh/base`，是由应用设定样式的按压目标。
 
 `nsh_core::prelude` 中也有一个较旧的、已弃用的 `dialog` 函数：像上面那样按名称导入 `nsh_base::dialog`，显式导入会取代它。如果需要系统提示框或操作表，请使用 [`AlertDialog`](./alert-dialog.md)。
 

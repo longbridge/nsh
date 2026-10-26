@@ -119,7 +119,7 @@ fn native(registry: &mut Registry) {
 
 ## 按键
 
-编辑器的按键在它拥有焦点时生效；其他输入框保留各自的按键。`mod` 在 macOS 和 iOS 上是 Command，在其他平台上是 Control（`nsh/keymap` 的按键写法）。
+编辑器的按键在它拥有焦点时生效；其他输入框保留各自的按键。`mod` 在 macOS 和 iOS 上是 Command，在其他平台上是 Control（`keymap` 的按键写法）。
 
 | 按键（macOS） | 按键（Windows、Linux） | 命令 |
 |---|---|---|
@@ -160,10 +160,10 @@ fn native(registry: &mut Registry) {
 
 macOS 和 iOS 还有 Cocoa 的文本按键：`ctrl+b` / `ctrl+f` / `ctrl+p` / `ctrl+n` 移动，`ctrl+h` / `ctrl+d` 删除。
 
-没有默认按键的命令和应用自己的命令，使用应用通过 [`nsh/keymap`](../modules/nsh-keymap.md) 绑定的按键，经由 ref 的 `run` 执行：
+没有默认按键的命令和应用自己的命令，使用应用通过 [`keymap`](../modules/nsh.md#keymap) 绑定的按键，经由 ref 的 `run` 执行：
 
 ```tsx
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 
 let editor!: EditorRef;
 
@@ -690,5 +690,5 @@ let editor!: EditorRef;
 - [TextView](./text-view.md)：Markdown 和 HTML 文档，其代码块与编辑器使用相同的语法颜色。
 - [DiffView](./diff-view.md)：两段文本之间的改动，使用编辑器的语法颜色。
 - [Input](./input.md)：单行和多行文本框，使用平台自己的编辑。
-- [`nsh/keymap`](../modules/nsh-keymap.md)：应用为编辑器命令绑定的按键。
+- [`keymap`](../modules/nsh.md#keymap)：应用为编辑器命令绑定的按键。
 - [`nsh/base`](../modules/nsh-base.md)：其他基础组件。

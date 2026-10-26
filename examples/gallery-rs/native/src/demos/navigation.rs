@@ -6,7 +6,7 @@
 use nsh_base::{alert_dialog, dialog, input, nav_page};
 use nsh_core::{
     ModalPresentation,
-    element::{AnyElement, Os, Screen, safe_area_view},
+    element::{AnyElement, Os, Screen},
     prelude::*,
 };
 
@@ -399,7 +399,7 @@ fn instant() -> Screen {
 
 fn headerless() -> Screen {
     nav_page().header_visible(false).child(
-        safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+        view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
             view()
                 .flex_1()
                 .p_4()
@@ -597,7 +597,7 @@ fn modal_body(
     text_body: &str,
     close: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+    view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
         view()
             .flex_1()
             .p_4()

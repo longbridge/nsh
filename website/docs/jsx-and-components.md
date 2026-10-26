@@ -357,7 +357,7 @@ A Rust ref is a `Copy` handle; its calls go to the element that carries it, and 
 
 A `const` or an import holds a signal or a function, as in `const input = signal<YNode>()` with `<Input ref={input} />` and `input()?.focus()`; one holding anything else is reported when the element is made, with what to write.
 
-The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. `SafeAreaView`, `KeyboardAvoidingView` and the Rust components of your own crate accept `ref` too (in Rust `component_ref()`, put on the element with `.component_ref(&r)`: `safe_area_view().component_ref(&r)`).
+The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. The base components and the Rust components of your own crate accept `ref` too (in Rust `component_ref()`, put on the element with `.component_ref(&r)`: `dialog().component_ref(&r)`).
 
 ## Spreading props
 

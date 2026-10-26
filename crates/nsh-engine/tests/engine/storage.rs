@@ -104,7 +104,7 @@ fn shown(rx: &Receiver<MountBatch>, prefix: &str) -> String {
 }
 
 const COUNTER: &str = r#"import { mount, signal, Text } from "nsh";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 const shown = signal("waiting");
 setTimeout(async () => {
@@ -195,7 +195,7 @@ fn rust_shares_the_entries_of_js() {
 }
 
 const EDGES: &str = r#"import { mount, signal, Text } from "nsh";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 const shown = signal("waiting");
 const outcomes: string[] = [];

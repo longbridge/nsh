@@ -502,7 +502,7 @@ A failure goes to the nearest boundary above where it happened, and one in a fal
 | `when(cond, ..)` / `<If when>` | When created | Whether the condition holds changes |
 | `each(..)` / `<Each of>` row | When its key first appears | Never; its item and index signals change instead |
 
-The environment is reactive the same way: `window()`, `dark()`, `font_scale()`, `safe_area()` and `keyboard_height()` in Rust, `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh/device`](../modules/nsh-device.md) and `safeArea()` and `keyboardFrame()` from [`nsh`](../modules/nsh.md) in TSX, so bindings that read them follow rotation, dark mode or the keyboard.
+The environment is reactive the same way: `window()`, `dark()`, `font_scale()`, `safe_area()` and `keyboard_height()` in Rust, `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh`](../modules/nsh.md#device) and `safeArea()` and `keyboardFrame()` from [`nsh`](../modules/nsh.md) in TSX, so bindings that read them follow rotation, dark mode or the keyboard.
 
 ## Common mistakes
 

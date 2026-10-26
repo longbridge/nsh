@@ -14,14 +14,14 @@ demo: guide-device
 
 | Rust | TSX | 值 |
 |---|---|---|
-| `window()` | `windowSize()`（`nsh/device`） | surface 的宽和高，单位为点。 |
-| `dark()` | `colorScheme()`（`nsh/device`） | 深色或浅色：系统的外观，或应用自己设置的外观（`set_color_scheme`、`setColorScheme`）。 |
-| `font_scale()` | `fontScale()`（`nsh/device`） | 用户偏好的文字大小相对于默认值的比例（1 为默认）。 |
+| `window()` | `windowSize()`（`nsh`） | surface 的宽和高，单位为点。 |
+| `dark()` | `colorScheme()`（`nsh`） | 深色或浅色：系统的外观，或应用自己设置的外观（`set_color_scheme`、`setColorScheme`）。 |
+| `font_scale()` | `fontScale()`（`nsh`） | 用户偏好的文字大小相对于默认值的比例（1 为默认）。 |
 | `safe_area()` | `safeArea()`（`nsh`） | surface 中未被系统 UI 遮挡的 inset：上、右、下、左。 |
 | `cx.insets()` | `safeAreaInsets()`（`nsh`） | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh`） | 软键盘的高度和动画时长。 |
-| `locale()` | `locale()`（`nsh/device`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
-| `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh/accessibility`） | 见[无障碍](./accessibility.md)。 |
+| `locale()` | `locale()`（`nsh`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
+| `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh`） | 见[无障碍](./accessibility.md)。 |
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -51,7 +51,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Text, View, safeArea } from "nsh";
-import { colorScheme, fontScale, windowSize } from "nsh/device";
+import { colorScheme, fontScale, windowSize } from "nsh";
 
 function App() {
   return (
@@ -89,7 +89,7 @@ fn gallery() -> impl IntoElement {
 
 ```tsx tabs
 import { Image, View } from "nsh";
-import { windowSize } from "nsh/device";
+import { windowSize } from "nsh";
 
 function Gallery() {
   const columns = () => (windowSize().width >= 700 ? 4 : windowSize().width >= 500 ? 3 : 2);
@@ -140,7 +140,7 @@ view()
 
 ```tsx tabs
 import { computed, Text, View } from "nsh";
-import { colorScheme } from "nsh/device";
+import { colorScheme } from "nsh";
 
 const palette = computed(() =>
   colorScheme() === "dark"
@@ -163,7 +163,7 @@ Rust 组件也从主题中取色，主题为每种颜色提供浅色和深色两
 { "appearance": "dark" }
 ```
 
-`set_color_scheme(Appearance::Dark)`（TSX：`nsh/device` 中的 `setColorScheme`）在运行时修改它，用于应用内的外观设置；`Appearance::System`（`"system"`）恢复跟随系统：
+`set_color_scheme(Appearance::Dark)`（TSX：`nsh` 中的 `setColorScheme`）在运行时修改它，用于应用内的外观设置；`Appearance::System`（`"system"`）恢复跟随系统：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -185,7 +185,7 @@ view()
 
 ```tsx tabs
 import { Text, View } from "nsh";
-import { colorScheme, setColorScheme } from "nsh/device";
+import { colorScheme, setColorScheme } from "nsh";
 
 <View onPress={() => setColorScheme(colorScheme() === "dark" ? "light" : "dark")} role="button" class="rounded-lg px-4 py-2 bg-neutral-200 dark:bg-neutral-800">
   <Text class="text-neutral-900 dark:text-neutral-50">{colorScheme() === "dark" ? "Light" : "Dark"}</Text>
@@ -239,7 +239,7 @@ text(greeting)
 
 ```tsx tabs
 import { Text } from "nsh";
-import { locale } from "nsh/device";
+import { locale } from "nsh";
 
 const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
 
@@ -256,15 +256,15 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 - `safe_area()`（TSX：`safeArea()`）给出整个 surface 的 inset。
 - 组件的 `cx.insets()`（TSX：`safeAreaInsets()`）给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[对话框](../elements/dialog.md)中是对话框自己的。可能出现在多个地方的组件应该优先用它。
-- `nsh_core::element::safe_area_view()`（TSX：`nsh` 的 `SafeAreaView`）是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `.edges(vec![Edge::Top, Edge::Bottom])`、`edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
+- CSS 的 `env(safe-area-inset-top)`、`-right`、`-bottom`、`-left` 在 `padding*` 和 `margin*` 中按组件渲染处的 inset 为任意视图加内边距或外边距（`calc(env(safe-area-inset-bottom) + 8px)` 再加一段长度；Tailwind `pt-[env(safe-area-inset-top)]`；Rust `.p_safe_area()`、`.pt_safe_area()`、`.pb_safe_area_plus(px(8.0))` 等）。inset 变化时内边距原生更新（[安全区域](../elements/safe-area.md)）。
 
 ```rust tabs
-use nsh_core::element::{Edge, safe_area_view};
 use nsh_core::prelude::*;
 
 fn screen() -> impl IntoElement {
-    safe_area_view()
-        .edges(vec![Edge::Top, Edge::Left, Edge::Right])
+    view()
+        .pt_safe_area()
+        .px_safe_area()
         .flex_1()
         .bg(white())
         .child(content())
@@ -283,14 +283,14 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View, SafeAreaView, safeAreaInsets } from "nsh";
+import { View, safeAreaInsets } from "nsh";
 
 function Screen() {
   return (
-    <SafeAreaView edges={["top", "left", "right"]} style={{ flex: 1, backgroundColor: "#ffffff" }}>
+    <View class="flex-1 bg-white pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
       <Content />
       <BottomBar />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -304,7 +304,7 @@ function BottomBar() {
 
 ## 平台
 
-Rust 中的 `os()`、`os_version()`、`idiom()` 和 `is_desktop()`，以及 TSX 中 `nsh/device` 的常量 `platform`，描述应用运行的平台。它们在应用运行期间保持不变。
+Rust 中的 `os()`、`os_version()`、`idiom()` 和 `is_desktop()`，以及 TSX 中 `nsh` 的常量 `platform`，描述应用运行的平台。它们在应用运行期间保持不变。
 
 | Rust | TSX | 说明 |
 |---|---|---|
@@ -330,7 +330,7 @@ let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().
 ```
 
 ```tsx tabs
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 const hapticsSupported = platform.os === "ios" || (platform.os === "android" && Number(platform.version) >= 30);
 ```
@@ -356,7 +356,7 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 
 ## 像素密度
 
-Rust 中的 `pixel_ratio()` 和 `round_to_nearest_pixel(points)`，以及 TSX 中 `nsh/device` 的 `pixelRatio()`，在点与设备像素之间换算。
+Rust 中的 `pixel_ratio()` 和 `round_to_nearest_pixel(points)`，以及 TSX 中 `nsh` 的 `pixelRatio()`，在点与设备像素之间换算。
 
 | Rust | TSX | 说明 |
 |---|---|---|
@@ -373,7 +373,7 @@ view()
 
 ```tsx tabs
 import { View } from "nsh";
-import { pixelRatio } from "nsh/device";
+import { pixelRatio } from "nsh";
 
 <View style={{ height: 1 / pixelRatio(), backgroundColor: "#d0d7de" }} />
 ```
@@ -392,8 +392,8 @@ import { pixelRatio } from "nsh/device";
 
 ## 相关内容
 
-- [`nsh/device`](../modules/nsh-device.md)：参考。
+- [`nsh` 的设备 API](../modules/nsh.md#device)：参考。
 - [平台特定代码](./platform-specific.md)：`platform.select`、平台属性与模块。
 - [无障碍](./accessibility.md)：屏幕阅读器与减少动态效果。
-- [`SafeAreaView`](../modules/nsh.md#safeareaview) 与[状态栏](../modules/nsh-base.md#status-bar)。
+- [安全区域](../elements/safe-area.md)、[键盘](../elements/keyboard.md)与[状态栏](../modules/nsh-base.md#status-bar)。
 - [Tailwind](./tailwind.md)：`dark:`、断点与方向变体。

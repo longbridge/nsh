@@ -8,12 +8,11 @@ use anyhow::{Context as _, bail};
 use crate::ui;
 
 const APP: &str = r##"import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh";
 
 function App() {
   const count = signal(0);
   return (
-    <SafeAreaView class="flex-1 items-center justify-center gap-4 bg-background">
+    <View class="flex-1 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] items-center justify-center gap-4 bg-background">
       <Text class="text-3xl font-semibold text-foreground">{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
@@ -22,7 +21,7 @@ function App() {
       >
         <Text class="text-lg text-primary-foreground">Tap</Text>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

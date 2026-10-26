@@ -160,7 +160,7 @@ gives a reason in `unitless.txt`).
 Groups A–E touch disjoint files in nsh-core; a group that changes a type other crates read (C's text metrics, E's wire
 types) also updates those readers (`nsh-js`, `nsh-engine`, the backends, `crates/gpui`), so C and E should not land at
 the same time as each other's backend edits without a rebase. `nsh-base` (the runtime's components) is not scanned;
-its props and code use the geometry types all the same (`KeyboardAvoidingView`'s `offset` is `Points`).
+its props and code use the geometry types all the same (`Styled::pb_keyboard_plus` takes `Points`).
 
 Each group checks its backends as this migration did: `cargo test --workspace`, the GPUI workspace, and every backend
 through `cargo check --target …` (iOS / Catalyst, macOS, Windows, Android, `wasm32`, Linux). Values that reach a

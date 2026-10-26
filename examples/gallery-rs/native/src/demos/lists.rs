@@ -9,7 +9,7 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_base::input;
 use nsh_core::{
-    element::{LayoutAnimation, SubmitBehavior, keyboard_avoiding_view},
+    element::{LayoutAnimation, SubmitBehavior},
     prelude::*,
 };
 
@@ -631,7 +631,8 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             move |_: &()| send(),
         ));
     view().flex_1().child(
-        keyboard_avoiding_view()
+        view()
+            .pb_keyboard()
             .flex_1()
             .child(room)
             .child(list)

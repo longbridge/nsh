@@ -1,5 +1,5 @@
-import { mount, Scroll, signal, Text, View, KeyboardAvoidingView } from "nsh";
-import { Button, Keyboard, Switch, keyboardFrame, Input } from "nsh/base";
+import { mount, Scroll, signal, Text, View, Keyboard, keyboardFrame } from "nsh";
+import { Button, Switch, Input } from "nsh/base";
 import { desktop, tint, ui } from "./palette";
 
 function App() {
@@ -20,13 +20,16 @@ function App() {
   });
   const chipText = (on: boolean) => ({ color: on ? ui().onAccent : ui().text, fontSize: 13, fontWeight: "600" as const });
   return (
-    <KeyboardAvoidingView
-      enabled={enabled()}
-      behavior={behavior()}
-      style={{ flex: 1, backgroundColor: behavior() === "height" ? tint(ui().info, 0.12) : ui().page }}
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: behavior() === "height" ? tint(ui().info, 0.12) : ui().page,
+        // Bottom padding (or margin) by the keyboard's height, while enabled.
+        ...(!enabled() ? {} : behavior() === "padding" ? { paddingBottom: "env(keyboard-inset-height)" } : { marginBottom: "env(keyboard-inset-height)" }),
+      }}
     >
       <View style={{ padding: 20, paddingTop: 24, paddingBottom: 8, gap: 8 }}>
-        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>keyboard-avoiding-view</Text>
+        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>keyboard inset</Text>
         <Text style={{ color: ui().muted }}>
           {desktop
             ? "Desktops type with a hardware keyboard: its height stays 0 and the view keeps its layout. Open this on a phone to see it move."
@@ -85,7 +88,7 @@ function App() {
           <Text style={{ color: ui().text, fontWeight: "600" }}>Done</Text>
         </Button>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

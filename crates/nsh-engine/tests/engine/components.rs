@@ -1,8 +1,8 @@
 //! Rust components through the generated JS glue (the tests' own set,
 //! `test/ui`): props, events, children, named slots, children placed one by
 //! one, and a list of the app's rows; the runtime's modules (`Alert`), the
-//! status bar of pages and dialogs and the environment (`SafeAreaView`,
-//! `KeyboardAvoidingView`).
+//! status bar of pages and dialogs and the environment (`env()` paddings
+//! and margins of the safe area and the keyboard).
 
 use std::time::Duration;
 
@@ -726,22 +726,28 @@ fn alert_dialogs_resolve_with_the_action_chosen() {
     );
 }
 
-const SAFE_AREA: &str = r#"import { mount, Text } from "nsh";
-import { KeyboardAvoidingView, SafeAreaView } from "nsh";
+const SAFE_AREA: &str = r#"import { mount, Text, View } from "nsh";
 import { safeArea } from "nsh/base";
 
 mount(() => (
-  <KeyboardAvoidingView style={{ flex: 1 }}>
-    <SafeAreaView style={{ flex: 1, padding: 4 }} edges={["top", "bottom"]}>
+  <View style={{ flex: 1, marginBottom: "env(keyboard-inset-height)" }}>
+    <View
+      style={{
+        flex: 1,
+        padding: 4,
+        paddingTop: "calc(env(safe-area-inset-top) + 4px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom) + 4px)",
+      }}
+    >
       <Text>inside</Text>
       <Text>{`top ${safeArea().top}`}</Text>
-    </SafeAreaView>
-  </KeyboardAvoidingView>
+    </View>
+  </View>
 ));
 "#;
 
 #[test]
-fn safe_area_and_keyboard_avoiding_views() {
+fn safe_area_and_keyboard_env_insets() {
     let environment = Environment {
         window: Size::new(px(390.0), px(844.0)),
         safe_area: Edges {
@@ -781,13 +787,13 @@ fn safe_area_and_keyboard_avoiding_views() {
         after.iter().flat_map(|b| &b.items).any(
             |i| matches!(i, MountItem::Frame { frame, .. } if frame.size.height.0 == 844.0 - 300.0)
         ),
-        "the safe area view above the keyboard"
+        "the view above the keyboard"
     );
 }
 
 const RUNTIME_MODULES: &str = r#"import { mount, signal, Text } from "nsh";
-import { reduceMotion, setAccessibilityFocus } from "nsh/accessibility";
-import { platform } from "nsh/device";
+import { reduceMotion, setAccessibilityFocus } from "nsh";
+import { platform } from "nsh";
 import { Image } from "nsh";
 
 const shown = signal("waiting");
@@ -931,7 +937,7 @@ fn measure_reports_frames_and_page_positions() {
 }
 
 const CLIPBOARD: &str = r#"import { mount, signal, Text } from "nsh";
-import { Clipboard } from "nsh/clipboard";
+import { Clipboard } from "nsh";
 
 const shown = signal("waiting");
 setTimeout(async () => {
@@ -1024,7 +1030,7 @@ fn the_clipboard_needs_its_capability() {
 }
 
 const CLIPBOARD_IMAGE: &str = r#"import { mount, signal, Text } from "nsh";
-import { Clipboard } from "nsh/clipboard";
+import { Clipboard } from "nsh";
 
 const shown = signal("waiting");
 setTimeout(async () => {
@@ -1109,7 +1115,7 @@ fn clipboard_images_and_files_reach_js() {
 }
 
 const PICKER: &str = r#"import { mount, signal, Text } from "nsh";
-import { Picker } from "nsh/picker";
+import { Picker } from "nsh";
 
 const shown = signal("");
 setTimeout(async () => {
@@ -1365,7 +1371,7 @@ mount(() => (
 "##;
 
 const BACK: &str = r#"import { mount, signal, Text } from "nsh";
-import { BackHandler } from "nsh/android";
+import { BackHandler } from "nsh/mobile";
 
 const presses = signal(0);
 BackHandler.onBackPress(() => {
@@ -1390,7 +1396,7 @@ mount(() => (
 "#;
 
 const APPEARANCE: &str = r#"import { mount, Text, View } from "nsh";
-import { colorScheme, setColorScheme } from "nsh/device";
+import { colorScheme, setColorScheme } from "nsh";
 
 setTimeout(() => setColorScheme("light"), 20);
 
@@ -1596,7 +1602,7 @@ fn menus_reach_the_platform_and_call_back() {
 }
 
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
-import { fontScale, locale } from "nsh/device";
+import { fontScale, locale } from "nsh";
 
 mount(() => (
   <Text>{`${locale()} ${new Intl.NumberFormat().format(1234.5)} ${fontScale()}`}</Text>

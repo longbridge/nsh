@@ -1297,7 +1297,7 @@ impl Motion {
 /// `nsh/animated`, with its defaults (300 ms, ease in-out, no delay).
 impl super::JsValue for Timing {
     fn ts_type(_types: &mut super::TsTypes) -> String {
-        "{ duration?: number; easing?: import(\"nsh/animated\").Easing; delay?: number }".into()
+        "{ duration?: number; easing?: import(\"nsh\").Easing; delay?: number }".into()
     }
 
     fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {

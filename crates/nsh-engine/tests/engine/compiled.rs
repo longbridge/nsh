@@ -434,7 +434,6 @@ fn screens_and_modals_build_their_content_once() {
 const CHILDREN_SIBLINGS: &str = r#"
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { KeyboardAvoidingView } from "nsh";
 
 function Wrap(props: { children?: any }) {
   return <View>{props.children}</View>;
@@ -443,10 +442,10 @@ function Wrap(props: { children?: any }) {
 const saved = signal(false);
 mount(() => (
   <View>
-    <KeyboardAvoidingView>
+    <View class="pb-[env(keyboard-inset-height)]">
       <Input testID="a" />
       <If when={saved()}><Text>saved a</Text></If>
-    </KeyboardAvoidingView>
+    </View>
     <Wrap>
       <Input testID="b" />
       {saved() ? <Text>saved b</Text> : null}

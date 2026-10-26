@@ -37,7 +37,7 @@
   the focus it is given (`Focusable`). The crate depends on `gpui-fast` 0.1 from crates.io (re-exported as
   `nsh_platform_gpui::gpui`); GPUI Kit's `gpui-fast` feature makes `gpui_component` use that same crate, so both share
   one GPUI. `open_app_window` opens a window showing an app in a running GPUI app.
-- **Native components** (`nsh/native`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
+- **Native components** (`nsh`'s `nativeComponent`; `component.rs`, `ComponentBox.java`): the embedding app registers its own native
   views by name — Swift `NshAppView.register(component:) { context in … }` (`NshComponent`: `view`, `setProp`,
   `command`), Java `NshView.registerComponent(name, factory)` (`NshComponent`), Rust `AppView::register_component`
   (`NativeComponent`) — one registry per view, no globals. Names under `nsh/` are NSH's own
@@ -60,7 +60,7 @@
   clipping ancestors), the tree paints it where it draws the box (NSH content drawn later covers it), and a `BlockMouse`
   hitbox under it keeps NSH's input away; keys go to it first while focus is inside it (GPUI dispatches its key
   bindings, then its key listeners, then the surface's), and the keys it lets through reach the window's shortcuts,
-  then the app's `nsh/keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
+  then the app's `keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
   typing keys to the component) and the menu's shortcuts, and nothing else of NSH's (`input::component_key`); one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
   scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
@@ -68,7 +68,7 @@
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.
-- **Native modules** (`nsh/native`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
+- **Native modules** (`nsh`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
   written in Rust gives its engines a UI set of its own (`Registry::ui_set("host/trading")` with its `#[module]`s,
   `#[class]`es and Rust components) next to NSH's (`set_ui_sets` of the platform crate, `EngineConfig::ui_sets`), and
   the app reaches it by name at run time: `nativeModule<{ Trading: TradingApi }>("host/trading")` is an object of
@@ -77,7 +77,7 @@
   set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
   answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
   throws a `ReferenceError` naming it.
-- **The host channel** (`nsh/host`; `nsh_engine::HostChannel`, `nsh_core::host_channel`, `nsh-js`
+- **The host channel** (`nsh`'s `host`; `nsh_engine::HostChannel`, `nsh_core::host_channel`, `nsh-js`
   `host_channel.rs`): the embedding app and the app talk without a view in between and without Rust of the
   embedding app's. Every view keeps one channel for every app it loads (Rust `AppView::host()` on iOS, macOS,
   Linux, Windows and GPUI, `AppOptions::host` / `SurfaceOptions::host` to bring one's own; Swift `NshAppView.params`,
@@ -114,11 +114,11 @@
     `destroy`, then joins the engine with the Java lock released. Data crosses the C ABI and JNI as JSON text
     (Swift `JSONSerialization`, Java
     `org.json` as maps and lists), the VM as JSON values converted natively.
-  - A Rust app (`App::Rust`) has no `nsh/host`: events reach no one; its own Rust reaches the embedding app's
+  - A Rust app (`App::Rust`) has no `host`: events reach no one; its own Rust reaches the embedding app's
     directly ("Native modules", below). The host grants the native functions the app may call through `capabilities.host`.
   - *The URL handler* (`HostChannel::handle_open_url`; Swift `NshAppView.onOpenURL`, C
     `nsh_app_set_open_url_handler`; Java `NshView.setOpenUrlHandler`, `NshView.OpenUrlHandler`): the URLs the app
-    opens (`openUrl` of `nsh/device`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;
+    opens (`openUrl` of `nsh`, `nsh_core::element::open_url`, a `TextView` with `links="open"`;
     `nsh_core::open_url`) reach it before the platform, so a host routes its own links through its router. It is a
     typed hook of the channel, not a named message: the channel is already the view's one object for the host's side,
     threaded to every engine and through both SDKs' main-thread glue, and a hook of its own takes only what passed
@@ -266,7 +266,7 @@ NSH draws (`src/layers.rs`).
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
   in another app) unless set; the development host `nsh-gpui-host` runs apps on its own, with `Limits::standalone()`
   (`sandbox.md`).
-- **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
+- **Storage.** Each app keeps its `Storage` in `<data dir>/<app id>/storage.json`, which the engine picks
   (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
   (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
   package's id; `Root::app_id` in Rust apps' generated code). Platforms only give the data dir: the system's

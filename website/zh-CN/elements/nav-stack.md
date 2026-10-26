@@ -266,7 +266,7 @@ fn profile(edit: impl Fn() + 'static) -> Screen {
 </NavPage>
 ```
 
-页面的内容从标题栏下方开始：在 iOS 和 Android 上位于不透明的系统标题栏之下，在桌面平台和 Web 上位于 `header` 之下。使用 `headerTransparent`、`headerLargeTitle` 或 `headerVisible={false}` 时，在 iOS 和 Android 上内容从页面顶部开始；用 [SafeAreaView](./safe-area-view.md) 或 `safeAreaInsets()` 让它避开标题栏和状态栏。
+页面的内容从标题栏下方开始：在 iOS 和 Android 上位于不透明的系统标题栏之下，在桌面平台和 Web 上位于 `header` 之下。使用 `headerTransparent`、`headerLargeTitle` 或 `headerVisible={false}` 时，在 iOS 和 Android 上内容从页面顶部开始；用 [`env(safe-area-inset-top)`](./safe-area.md) 或 `safeAreaInsets()` 让它避开标题栏和状态栏。
 
 在 iOS 上，设置 `headerVisible={false}` 的页面在 `popOnSwipe` 和 `popOnBack` 为 true 时仍支持侧滑返回。
 允许的交互式返回手势在转场开始时结束当前输入，键盘在拖动过程中收起。取消转场时，若其他控件没有取得焦点，
@@ -363,7 +363,7 @@ function EditNote() {
 ## 平台说明
 
 - **iOS**：`UINavigationController`，带系统标题栏、返回按钮和侧滑返回；`headerLargeTitle` 是 UIKit 的大标题。转场进行期间到达的栈变化会在转场结束时应用。
-- **Android**：带工具栏的页面栈。系统返回键弹出顶部页面，在支持的 Android 版本上带预测性返回；向上箭头给屏幕阅读器的描述是下面那个页面的 `headerBackTitle`，否则为系统的描述。要自己处理返回键，见 [nsh/android](../modules/nsh-android.md) 中的 `BackHandler`。
+- **Android**：带工具栏的页面栈。系统返回键弹出顶部页面，在支持的 Android 版本上带预测性返回；向上箭头给屏幕阅读器的描述是下面那个页面的 `headerBackTitle`，否则为系统的描述。要自己处理返回键，见 [`BackHandler`](../modules/nsh-mobile.md#backhandler) 中的 `BackHandler`。
 - **Mac Catalyst**：与 iOS 相同。
 - **桌面平台（macOS、Windows、Linux、GPUI）和 Web**：每个页面在顶部显示它的 `header`，内容位于其下方。桌面平台上 Escape、Alt+左方向键和鼠标的后退键返回，Web 上是浏览器的后退按钮。
 

@@ -3056,7 +3056,7 @@ mod tests {
                 .starts_with("the description of the Rust crates: the description is in format 0")
         );
         // A specifier of nsh's own or of another crate.
-        for nsh in ["nsh/base", "nsh", "nsh/device"] {
+        for nsh in ["nsh/base", "nsh", "nsh/mobile"] {
             let error = read(&text(vec![set(nsh)]), &["charts"]).unwrap_err();
             assert!(
                 error.contains(&format!(

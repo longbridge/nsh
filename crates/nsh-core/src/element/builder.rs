@@ -840,10 +840,11 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
-    /// Makes the view a selection area (`SelectionArea` of `nsh`):
-    /// the texts in it that are not `selectable={false}` share one
-    /// selection, from text to text ([`crate::selection`]).
-    fn selection_area(mut self, area: impl IntoReactive<bool>) -> Self {
+    /// Makes the texts in the view select together, as a browser page's
+    /// do (TSX `<View selectable>`): a selection runs from text to text,
+    /// across views and `TextView`s; texts that are not selectable stay
+    /// out of it ([`crate::selection`]).
+    fn selectable(mut self, area: impl IntoReactive<bool>) -> Self {
         self.node()
             .bind_attr(area, |a, area| a.selection_area = area);
         self

@@ -5,7 +5,7 @@
 // them), the steps easing's curve, and that keyframes, motions and
 // staggers build and start.
 import { Text, View } from "nsh";
-import { Animated, Easing, createAnimatedValue, createMotion, motions } from "nsh/animated";
+import { Animated, Easing, createAnimatedValue, createMotion, motions } from "nsh";
 
 function App() {
   const card = createMotion({ enter: "fadeInUp", delay: 40 });

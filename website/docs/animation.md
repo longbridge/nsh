@@ -23,7 +23,7 @@ There are six tools, from the readiest to the most flexible:
 
 ## Motion
 
-A motion moves a view's opacity and transform through keyframes, natively. Create one in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh/animated` in TSX), bind it to the view, and play a ready-made motion or one of your own on it. `enter` starts the view where a motion begins and plays it at once, so the view comes in from its first frame.
+A motion moves a view's opacity and transform through keyframes, natively. Create one in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh` in TSX), bind it to the view, and play a ready-made motion or one of your own on it. `enter` starts the view where a motion begins and plays it at once, so the view comes in from its first frame.
 
 ```rust tabs
 #[component]
@@ -44,7 +44,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createMotion } from "nsh/animated";
+import { createMotion } from "nsh";
 
 function App() {
   const card = createMotion({ enter: "fadeInUp" });
@@ -80,7 +80,7 @@ A motion moves opacity and transform only. Spreading `m.style` sets the view's `
 
 ### Presets
 
-The ready-made motions are data: `motions` from `nsh/animated` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards; for larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin: give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
+The ready-made motions are data: `motions` from `nsh` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards; for larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin: give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
 
 **Enter**: they start hidden or away and end at rest.
 
@@ -367,7 +367,7 @@ Tailwind: `animate-spin`, `animate-ping`, `animate-pulse`, `animate-bounce`, `an
 
 ## Animated values
 
-An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh/animated` in TSX), bind it to styles, and animate it; the bound views follow it every frame without an update.
+An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh` in TSX), bind it to styles, and animate it; the bound views follow it every frame without an update.
 
 ```rust tabs
 #[component]
@@ -401,7 +401,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -622,7 +622,7 @@ const header = scroll.diffClamp(0, 56, { snap: true });
 
 ## Composite animations
 
-Animations are built out of steps (`Animation` in Rust, `Animated` from `nsh/animated` in TSX) and the whole tree runs natively: each step starts on the UI thread the moment the previous one ends, with no gap and none of your code in between.
+Animations are built out of steps (`Animation` in Rust, `Animated` from `nsh` in TSX) and the whole tree runs natively: each step starts on the UI thread the moment the previous one ends, with no gap and none of your code in between.
 
 ```rust tabs
 let ys: Vec<AnimatedValue> = (0..5).map(|_| animated_value(0.0)).collect();
@@ -651,7 +651,7 @@ spawn(async move {
 ```
 
 ```tsx tabs
-import { Animated, createAnimatedValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh";
 
 const ys = [0, 1, 2, 3, 4].map(() => createAnimatedValue(0));
 const fade = createAnimatedValue(1);
@@ -694,7 +694,7 @@ A running animation does not keep its values alive: when the component that owns
 
 ## Easing
 
-Easing curves are data, evaluated natively: `Easing` from `nsh/animated` in TSX, the `Easing` enum in Rust.
+Easing curves are data, evaluated natively: `Easing` from `nsh` in TSX, the `Easing` enum in Rust.
 
 | TSX | Rust | Description |
 |---|---|---|
@@ -764,7 +764,7 @@ let remove = move || {
 
 ```tsx tabs
 import { signal } from "nsh";
-import { LayoutAnimation } from "nsh/animated";
+import { LayoutAnimation } from "nsh";
 
 const items = signal([1, 2, 3]);
 let next = 4;
@@ -826,7 +826,7 @@ Reach for `requestAnimationFrame` (a global in TSX, following the display) only 
 
 ## Reduced motion
 
-When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh/accessibility` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
+When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
 
 [Motions](#motion) follow the setting on their own: `play` and `enter` land where the motion ends at once, without moving, and the answer is `true` as for a motion that played. An exit still ends hidden, an entrance still ends at rest. Pass `ignoreReduceMotion: true` (`play_ignoring_reduce_motion` in Rust) for a motion that carries meaning the user needs, such as a progress spinner.
 
@@ -846,7 +846,7 @@ view().style_when(|| !reduce_motion(), |s| s.animate_bounce())
 
 ```tsx tabs
 import { View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
+import { reduceMotion } from "nsh";
 
 const open = () => (reduceMotion() ? panel.set(0) : panel.spring(0));
 
@@ -857,7 +857,7 @@ See [Accessibility](./accessibility.md#reduced-motion).
 
 ## Related
 
-- [`nsh/animated`](../modules/nsh-animated.md): the TSX reference.
+- [`nsh`'s animation API](../modules/nsh.md#animation): the TSX reference.
 - [Touch and gestures](./touch-and-gestures.md): driving animated values with the finger.
 - [Scrolling](./scrolling.md#scroll-linked-effects-scrollvalue): `scrollValue`.
 - [Canvas](./canvas.md#driving-drawings-with-animated-values): animated values in drawings.

@@ -4949,6 +4949,103 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
+    /// What `env` (a node's `env()` terms) comes to for `key` now: the
+    /// insets of the root view it renders in ([`Self::insets_of`]) and the
+    /// software keyboard's height.
+    pub(super) fn env_insets(
+        &self,
+        key: super::Key,
+        env: &crate::style::EnvEdges,
+    ) -> [EdgeInsets; 2] {
+        use crate::style::EnvVar;
+        let mut root = None;
+        let mut value = |var: Option<EnvVar>| {
+            let Some(var) = var else {
+                return Points::ZERO;
+            };
+            if var == EnvVar::KeyboardInsetHeight {
+                return self
+                    .components
+                    .environment
+                    .keyboard_height
+                    .max(Points::ZERO);
+            }
+            let insets = *root.get_or_insert_with(|| self.insets_of(self.nodes[key as usize].id));
+            match var {
+                EnvVar::SafeAreaInsetTop => insets.top,
+                EnvVar::SafeAreaInsetRight => insets.right,
+                EnvVar::SafeAreaInsetBottom => insets.bottom,
+                _ => insets.left,
+            }
+        };
+        let mut edges = |vars: &[Option<EnvVar>; 4]| EdgeInsets {
+            top: value(vars[0]),
+            right: value(vars[1]),
+            bottom: value(vars[2]),
+            left: value(vars[3]),
+        };
+        [edges(&env.padding), edges(&env.margin)]
+    }
+
+    /// The nodes whose padding or margin uses `env()` follow the
+    /// environment: restyled where what their terms come to changed (a
+    /// safe area, a page's insets, the keyboard, a move to another root
+    /// view). A change of the keyboard's height animates with the
+    /// keyboard, natively. Nothing to do without such nodes.
+    pub(super) fn sync_env(&mut self) {
+        if self.env_styled.is_empty() {
+            return;
+        }
+        let mut ids = std::mem::take(&mut self.env_scratch);
+        ids.extend(self.env_styled.iter().copied());
+        let mut keyboard_moved = false;
+        for &id in &ids {
+            let node = self.key(id).ok().and_then(|key| {
+                let env = self.nodes[key as usize].env.as_deref().copied()?;
+                Some((key, env))
+            });
+            let Some((key, (env, applied))) = node else {
+                self.env_styled.remove(&id);
+                continue;
+            };
+            let now = self.env_insets(key, &env);
+            if now == applied {
+                continue;
+            }
+            // The edges the keyboard moves.
+            let keyboard = |vars: &[Option<crate::style::EnvVar>; 4],
+                            was: &EdgeInsets,
+                            now: &EdgeInsets| {
+                let (was, now) = (
+                    [was.top, was.right, was.bottom, was.left],
+                    [now.top, now.right, now.bottom, now.left],
+                );
+                (0..4).any(|i| {
+                    vars[i] == Some(crate::style::EnvVar::KeyboardInsetHeight) && was[i] != now[i]
+                })
+            };
+            keyboard_moved |= keyboard(&env.padding, &applied[0], &now[0])
+                || keyboard(&env.margin, &applied[1], &now[1]);
+            self.restyle(key);
+        }
+        ids.clear();
+        self.env_scratch = ids;
+        let duration = self.components.environment.keyboard_duration;
+        if keyboard_moved && duration > 0.0 && self.layout_animation.is_none() {
+            use crate::props::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
+            self.layout_animation = Some(LayoutAnimation {
+                create: None,
+                update: Some(LayoutTransition {
+                    curve: LayoutCurve::Keyboard,
+                    property: LayoutProperty::Opacity,
+                    duration_ms: duration * 1000.0,
+                    delay_ms: 0.0,
+                }),
+                delete: None,
+            });
+        }
+    }
+
     /// Applies what handlers, handles (element refs, animated values) and
     /// services asked for, in order.
     pub(super) fn apply_actions(&mut self) {

@@ -263,7 +263,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -522,7 +522,7 @@ mount(Sketch);
 
 ## PanResponder
 
-在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh/gesture` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
+在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -555,7 +555,7 @@ fn ball() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
-import { PanResponder } from "nsh/gesture";
+import { PanResponder } from "nsh";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -635,5 +635,5 @@ view()
 - [`View`](../elements/view.md)：基础元素上的所有触摸属性。
 - [动画](./animation.md)：用于手势驱动运动的动画值、弹簧和衰减。
 - [滚动](./scrolling.md)：键盘点击设置、滚动视图与嵌套手势。
-- [`nsh/gesture`](../modules/nsh-gesture.md)：`PanResponder` 参考。
+- [`PanResponder`](../modules/nsh.md#panresponder)：`PanResponder` 参考。
 - [无障碍](./accessibility.md)：可按压视图是无障碍元素；给它们设置角色和标签。

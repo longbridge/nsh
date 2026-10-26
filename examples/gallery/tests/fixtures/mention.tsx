@@ -3,7 +3,7 @@
 // `{ when: "always" }` take the keys before the input does.
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 
 const people = ["Alice", "Bob", "Carol"];
 

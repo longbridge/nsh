@@ -924,7 +924,7 @@ fn a_module_named_like_a_function_is_on_the_function() {
 }
 
 const FRAMED: &str = r#"import { mount } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 import { Framed } from "test/classes";
 
 const v = createAnimatedValue(0.25);

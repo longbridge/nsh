@@ -160,7 +160,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 快捷键适用于任何键盘布局（在西里尔或希腊字母布局下，Ctrl+C 是美式布局中输入 C 的那个键）。确认输入法组合文字（中文、日文等）的回车
 不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`；粘贴的文字不报告。
 
-应用自己的快捷键（[`nsh/keymap`](../modules/nsh-keymap.md)）先于有焦点的输入框、导航和滚动处理按键；Alt+F4、F11 和 Ctrl+Q 不能被绑定。
+应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）先于有焦点的输入框、导航和滚动处理按键；Alt+F4、F11 和 Ctrl+Q 不能被绑定。
 
 不同之处或不支持的功能：
 

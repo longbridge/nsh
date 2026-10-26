@@ -41,17 +41,18 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   `import.meta` goes through the compiler even without JSX), which `dom.rs` resolves against the app's directory
   (`${pluginDir}` as a `file:` URL), else the page's URL (`HostOptions::base_url`), else `asset:/`. `import.meta`
   itself is left as it is.
-- `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform`) and
-  `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `announce`, `setAccessibilityFocus`): the environment (`env.rs`), one
+- `nsh`'s `windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` and
+  `reduceMotion`, `screenReaderEnabled`, `announce`, `setAccessibilityFocus`: the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
 - `nsh`'s primitives `List`, `Canvas` (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), `WebView`,
   `Video` and `Image` (the image element's component with the `nsh` registry's `Image` functions on it): internal
-  sources `nsh` serves (`modules.rs` `PRIMITIVE_MODULES`, `NativeModule::moved_to`), no modules apps import; their
-  declarations go into `nsh`'s own file. `nsh/gesture`, `nsh/animated`, `nsh/native`, `nsh/ios` and the hand-written
-  part of `nsh/android` (below).
-- The modules of registries (`Registry::specifier`): the runtime's (`nsh/clipboard` and the registry parts of
-  `nsh` (`SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`, `Keyboard`, `Image`'s functions), `nsh/android`,
-  `nsh/accessibility` and `nsh/desktop`) and the UI sets a host serves
+  sources `nsh` serves (`modules.rs` `NSH_SOURCES`, `NativeModule::moved_to`), no modules apps import; their
+  declarations go into `nsh`'s own file (`nsh/index.d.ts`). So are the rest of `nsh`'s hand-written exports
+  (animation, gestures, native components, the host channel, keyboard shortcuts); `nsh/mobile`'s hand-written part
+  (`InputAccessoryView`, `BackHandler`'s listeners) is served from `MOBILE_SOURCES` the same way (below).
+- The modules of registries (`Registry::specifier`): the runtime's (the registry part of
+  `nsh` (`Keyboard`, `Image`'s functions, the environment's
+  and accessibility functions, `Clipboard`, `Picker`, `Storage`, `host`), `nsh/mobile` (`TabBar`, `BackHandler`) and `nsh/desktop`) and the UI sets a host serves
   (`HostOptions::ui_sets`: `nsh/base` by default, the app's `app/native`). Their
   components, modules and re-exports become exports (`components.rs`): a component is a host view naming it, with its
   props converted into their Rust types and sent by one render effect, events delivered to `on<Event>` handlers,
@@ -184,11 +185,11 @@ events are the runtime's: they keep the stack in step and call the app's props (
 
 ## Runtime modules
 
-- `nsh/gesture`: the responder system and `PanResponder` (`touch.rs`), in Rust as it runs on every touch move.
-- `nsh/animated` (`animated.rs`): operations are encoded as a few values (`ANIMATION_*`) and decoded into `AnimationOp`s
+- `PanResponder` (`nsh`): the responder system and `PanResponder` (`touch.rs`), in Rust as it runs on every touch move.
+- Animation (`nsh`, `animated.rs`): operations are encoded as a few values (`ANIMATION_*`) and decoded into `AnimationOp`s
   (`protocol::decode_animation_op`); nodes and composites are released by their finalizers; a started animation's promise
   settles when the core reports its end (`Host::animations_finished`).
-- `WebView`, `Video` (`nsh`), `nsh/native`, `nsh/ios` and the hand-written part of `nsh/android` (`isAvailable`,
+- `WebView`, `Video`, `nativeComponent`, `nativeModule` (`nsh`) and the hand-written part of `nsh/mobile` (`isAvailable`, `InputAccessoryView`,
   `BackHandler`'s listeners): `platform_modules.rs`.
 - `Canvas` (`nsh`, `canvas.rs`): a drawing makes thousands of calls, so the context records into a Rust list instead of a
   JS array, and the core's decoder (`nsh_core::js::canvas::decode`) reads it into one `Op::Draw`. The recording methods

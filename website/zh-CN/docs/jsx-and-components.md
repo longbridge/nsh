@@ -353,7 +353,7 @@ Rust 的 ref 是一个 `Copy` 句柄；它的调用发往携带它的元素，�
 
 `const` 或导入的绑定应持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他内容时，会在元素创建时报告，并说明应该怎么写。
 
-ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`SafeAreaView`、`KeyboardAvoidingView` 以及你自己 crate 中的 Rust 组件同样接受 `ref`（Rust 中是 `component_ref()`，用 `.component_ref(&r)` 放到元素上：`safe_area_view().component_ref(&r)`）。
+ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。基础组件以及你自己 crate 中的 Rust 组件同样接受 `ref`（Rust 中是 `component_ref()`，用 `.component_ref(&r)` 放到元素上：`dialog().component_ref(&r)`）。
 
 ## 展开 props
 

@@ -182,7 +182,7 @@ Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is t
 A return that commits an input method's composition (Chinese, Japanese, ...) never submits. `onKeyPress` reports
 what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`; pasted text is not reported.
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) come before a focused field's keys, navigation
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come before a focused field's keys, navigation
 and scrolling; Alt+F4, F11 and Ctrl+Q cannot be bound.
 
 Different, or not supported:

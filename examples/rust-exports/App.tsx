@@ -2,7 +2,7 @@
 // `Ledger` and the class `Account` all come from the app's crate
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
-import { type JSX, mount, Scroll, signal, Text, View, SafeAreaView } from "nsh";
+import { type JSX, mount, Scroll, signal, Text, View } from "nsh";
 import { Button as BaseButton } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
@@ -77,7 +77,7 @@ function App() {
   const changes = signal(0);
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingTop: "env(safe-area-inset-top)", paddingRight: "env(safe-area-inset-right)", paddingBottom: "env(safe-area-inset-bottom)", paddingLeft: "env(safe-area-inset-left)" }}>
       <Scroll contentStyle={{ padding: 16, gap: 16 }}>
         <Card title="Ledger · a module">
           <Line>{`Formatted at once: ${Ledger.format(1234.5)}`}</Line>
@@ -149,7 +149,7 @@ function App() {
           <Line muted>{`Pressed ${changes()}×, onChange gave ${spent()}`}</Line>
         </Card>
       </Scroll>
-    </SafeAreaView>
+    </View>
   );
 }
 

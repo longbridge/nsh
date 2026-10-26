@@ -501,7 +501,7 @@ function ProfileCard(props: { user: User | undefined }) {
 | `when(cond, ..)` / `<If when>` | 创建时 | 条件是否成立发生变化时 |
 | `each(..)` / `<Each of>` 的行 | 它的 key 第一次出现时 | 从不；改为由条目和索引的 signal 变化 |
 
-环境同样是响应式的：Rust 中的 `window()`、`dark()`、`font_scale()`、`safe_area()` 和 `keyboard_height()`，TSX 中 [`nsh/device`](../modules/nsh-device.md) 的 `windowSize()`、`colorScheme()`、`fontScale()` 以及 [`nsh`](../modules/nsh.md) 的 `safeArea()` 和 `keyboardFrame()`，读取它们的绑定会跟随屏幕旋转、深色模式或键盘变化。
+环境同样是响应式的：Rust 中的 `window()`、`dark()`、`font_scale()`、`safe_area()` 和 `keyboard_height()`，TSX 中 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`、`colorScheme()`、`fontScale()` 以及 [`nsh`](../modules/nsh.md) 的 `safeArea()` 和 `keyboardFrame()`，读取它们的绑定会跟随屏幕旋转、深色模式或键盘变化。
 
 ## 常见错误
 

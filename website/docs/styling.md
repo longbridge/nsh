@@ -132,7 +132,7 @@ In TSX, color properties accept CSS color strings:
 | `oklch()` / `oklab()` | `"oklch(62.3% 0.214 259.8)"` |
 | Named | `"white"`, `"black"`, `"transparent"`, `"rebeccapurple"`, ... |
 
-For dark mode in TSX, read [`colorScheme()`](../modules/nsh-device.md) from `nsh/device`, an accessor that follows the system appearance, or use Tailwind's `dark:` variant:
+For dark mode in TSX, read [`colorScheme()`](../modules/nsh.md#device) from `nsh`, an accessor that follows the system appearance, or use Tailwind's `dark:` variant:
 
 ```rust tabs
 view()
@@ -143,7 +143,7 @@ view()
 
 ```tsx tabs
 import { Text, View } from "nsh";
-import { colorScheme } from "nsh/device";
+import { colorScheme } from "nsh";
 
 const palette = () =>
   colorScheme() === "dark"

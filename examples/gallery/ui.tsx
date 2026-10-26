@@ -1,9 +1,9 @@
 import type { JSX, ScrollProps, Tokens, ViewStyle } from "nsh";
 import { computed, effect, Image, Scroll, signal, Text, token, View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
-import { createAnimatedValue, Easing } from "nsh/animated";
-import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
-import { keymap } from "nsh/keymap";
+import { reduceMotion } from "nsh";
+import { createAnimatedValue, Easing } from "nsh";
+import { colorScheme, platform, setColorScheme, windowSize } from "nsh";
+import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch, Tab, Tabs, Tooltip } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";

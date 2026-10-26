@@ -1699,3 +1699,51 @@ fn svg_paint_utilities_follow_tailwind_css() {
         )))
     );
 }
+
+#[test]
+fn env_in_arbitrary_spacing() {
+    use crate::style::EnvVar::*;
+    let s = styled(
+        "pb-[env(safe-area-inset-bottom)] pt-[calc(env(safe-area-inset-top)+8px)] \
+         mb-[env(keyboard-inset-height)] ml-[calc(4px_+_env(safe-area-inset-left))] \
+         px-[env(safe-area-inset-right,_4px)]",
+    );
+    assert_eq!(
+        s.pending.env.padding,
+        [
+            Some(SafeAreaInsetTop),
+            Some(SafeAreaInsetRight),
+            Some(SafeAreaInsetBottom),
+            Some(SafeAreaInsetRight)
+        ]
+    );
+    assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(8.0));
+    assert_eq!(
+        s.pending.env.margin,
+        [
+            None,
+            None,
+            Some(KeyboardInsetHeight),
+            Some(SafeAreaInsetLeft)
+        ]
+    );
+    assert_eq!(
+        s.layout.margin.left,
+        taffy::LengthPercentageAuto::length(4.0)
+    );
+    // A later utility wins, as in CSS.
+    assert_eq!(
+        styled("pb-[env(keyboard-inset-height)] pb-2")
+            .pending
+            .env
+            .padding[2],
+        None
+    );
+    // Unsupported: unknown classes.
+    let list = parse(
+        &themed(),
+        "ps-[env(safe-area-inset-left)] -mb-[env(keyboard-inset-height)] pb-[env(nope)] \
+         pb-[calc(env(safe-area-inset-top)*2)] w-[env(safe-area-inset-top)]",
+    );
+    assert_eq!(list.unknown().len(), 5, "{:?}", list.unknown());
+}

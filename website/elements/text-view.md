@@ -101,8 +101,8 @@ are its [spans](./text.md#spans); inline code is a span with a [span background]
 
 With `selectable`, the whole document selects as one, as a web page does: a drag (or, on touch screens, a long press
 and the handles) runs from one paragraph, list item, cell or code block to the next, and Copy takes the text of them
-all. A `selectable` `TextView` is a [`SelectionArea`](./selection-area.md) of its own; inside a
-`SelectionArea`, its selection also runs on into the texts and other `TextView`s around it.
+all. A `selectable` `TextView` selects as one of its own; inside a
+[selectable view](./text-selection.md), its selection also runs on into the texts and other `TextView`s around it.
 
 What `TextView` adds is the rest: reading Markdown, HTML or a document into blocks, the views around the texts (lists,
 quotes, tables, code blocks, disclosures, footnotes), streaming, styles by part, render functions and extensions.
@@ -314,7 +314,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 }
 ```
 
-The caret is the app's own view, so it can blink or pulse with [`nsh/animated`](../modules/nsh-animated.md), and new
+The caret is the app's own view, so it can blink or pulse with [`nsh`'s animation API](../modules/nsh.md#animation), and new
 blocks can fade in with the app's animations.
 
 ## Links
@@ -351,7 +351,7 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 `scroll_to_anchor` and `open_web` (`scrollToAnchor` and `nav` in TSX) stand for the app's own functions.
 
 With `links="open"`, a press on a link to another site or app (a URL with a scheme: `https:`, `mailto:`, ...) also
-opens it outside the app with [`openUrl`](../modules/nsh-device.md#openurl), under the app's `openUrl` capability,
+opens it outside the app with [`openUrl`](../modules/nsh.md#openurl), under the app's `openUrl` capability,
 after `onLinkPress` reported it; anchors in the document (`#…`) are only reported. The default, `"report"`, opens
 nothing.
 
@@ -384,7 +384,7 @@ Code blocks carry actions over their top right corner, all drawn alike: ghost bu
 hovered or pressed, shown while a pointer is over the block on desktops and always on touch screens. `copy` is built
 in: it copies the code and shows a check for a moment. Other actions are the app's: `renderCodeBlockAction` draws
 their icon and `onCodeBlockAction` reports their presses (the built-in `copy` too, after it copied). `copy` writes the
-clipboard as `nsh/clipboard` does, so it needs the app's `clipboard` capability (`nsh.json`).
+clipboard as `Clipboard` does, so it needs the app's `clipboard` capability (`nsh.json`).
 
 ```rust tabs
 use nsh_base::{TextViewCodeAction, TextViewCodeActionEvent, text_view};
@@ -787,7 +787,7 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 | `extensions` | `.extensions(..)` | `MarkdownExtension[]` | `[]` | The app's syntax, as custom nodes ([Markdown extensions](#markdown-extensions)). |
 | `classes` | `.classes(..)` | `TextViewClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `TextViewStyles` | `{}` | Inline styles by part (each a `StyleProp<TextStyle>`), over the classes. |
-| `selectable` | `.selectable(..)` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([SelectionArea](./selection-area.md)). |
+| `selectable` | `.selectable(..)` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([Text selection](./text-selection.md)). |
 | `links` | `.links(..)` | `"report" \| "open"` | `"report"` | What a press on a link does: reports it (`onLinkPress`), and with `"open"` also opens a link to another site or app outside the app ([Links](#links)). |
 | `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
 | `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
@@ -821,6 +821,6 @@ disclosure's summary is a button that says whether it is expanded, and images ar
 ## Related
 
 - [Text](./text.md): the element every text of `TextView` is, with its spans, links, inline attachments and selection.
-- [SelectionArea](./selection-area.md): one selection across several `TextView`s and texts.
+- [Text selection](./text-selection.md): one selection across several `TextView`s and texts.
 - [`nsh/base`](../modules/nsh-base.md): the other base components.
 - [Styling](../docs/styling.md) and [Tailwind](../docs/tailwind.md).

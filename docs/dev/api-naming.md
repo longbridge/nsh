@@ -17,11 +17,10 @@ Each part of the API takes its names from one source, so an app's code never mix
 | Components and their behavior (`nsh/base`, the interaction props of elements) | `gpui-base`, then GPUI, `gpui-component` (this page) |
 | What primitives show and the web APIs (`src`, `html`, styles, Tailwind, `fetch`, `window`'s events, the clipboard, storage) | HTML, the DOM and CSS, as a browser has them |
 | The standard modules (`process`, `os`, `fs/promises`, ...) | Node's names; values as Rust's `std::env::consts` gives them (`process.platform` is `"macos"`, `arch` `"aarch64"`; decided by the user, 2026-10-21), documented on each |
-| The environment (`nsh` / `nsh/<module>` accessors) | NSH's rules below: a lowercase accessor per value, `set<Value>` beside it |
+| The environment (`nsh`'s accessors) | NSH's rules below: a lowercase accessor per value, `set<Value>` beside it |
 | React Native | none: a reference for which capabilities exist; the RN-shaped modules frozen as they are (below) |
 
-**Frozen RN-shaped modules.** `nsh/animated` (`Animated`, `Easing`, `LayoutAnimation`), `nsh/gesture`
-(`PanResponder`) and the responder props (`onTouch*`, `on*ShouldSetResponder*`, `onResponder*`) keep React Native's
+**Frozen RN-shaped APIs.** `nsh`'s animation API (`Animated`, `Easing`, `LayoutAnimation`) and `PanResponder` and the responder props (`onTouch*`, `on*ShouldSetResponder*`, `onResponder*`) keep React Native's
 names and semantics as a whole, as they shipped (decided by the user, 2026-10-21): they are consistent in themselves
 and ported from React Native code as they are. The rules of this page do not apply inside them, and new capabilities
 go elsewhere under these rules rather than into them.
@@ -196,7 +195,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
-| **`nsh/device`** | | | |
+| **`nsh`: the environment** | | | |
 | `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
 | `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
 | `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
@@ -205,17 +204,17 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
 | `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations, when NSH has them, come from rust-i18n |
 | `OS` (type) | unchanged | | `platform.os`'s type |
-| **`nsh/accessibility`** | | | |
+| **`nsh`: accessibility** | | | |
 | `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
 | `AccessibilityInfo.announceForAccessibility(message)` | `announce(message)` | Environment | A function of the module |
 | `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
-| **`nsh/android`** | | | |
+| **`nsh/mobile`: `BackHandler`** | | | |
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
-| **`nsh/clipboard`** | | | |
+| **`nsh`: `Clipboard`** | | | |
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
 | `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
-| **`nsh/storage`** | | | |
+| **`nsh`: `Storage`** | | | |
 | `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
 | **Styles** | | | |
 | `experimental_backgroundImage` | (dropped) | Where names come from | React Native's name of `backgroundImage` |
@@ -249,7 +248,7 @@ and `Input`'s React Native names follow the rules as well.
 | `ios` / `desktop` `headerBackTitle` | `headerBackTitle` | none | Top-level |
 | `onDismiss` | unchanged | `NavStackEvent::Popped` (not followed) | The user popped it (back button, swipe). Decided by the user: a page leaving the stack is dismissed, as UIKit says |
 | `preventBack` | `popOnBack` (default `true`; `false` = `preventBack`) | `Dialog::close_on_escape` | By analogy: `popOn<Trigger>` as `closeOn<Trigger>`; covers every back (header, Android back, swipe) |
-| `onBackRequest` | `onBackPress` | `DialogChangeReason::*Press`; `nsh/android` `"hardwareBackPress"` | Fires on every back press, before the pop when `popOnBack` allows it |
+| `onBackRequest` | `onBackPress` | `DialogChangeReason::*Press`; `BackHandler`'s `"hardwareBackPress"` | Fires on every back press, before the pop when `popOnBack` allows it |
 | `gestureEnabled` | `popOnSwipe` (default `true`) | `Dialog::close_on_backdrop_press` | By analogy; the interactive gesture only, the buttons still pop |
 | `animation` | unchanged | | As Dialog's |
 | (new, desktop / web header) | `header` | *guides* named slots (`header`, `footer`) | Top-level slot: the whole bar where NSH draws it |
@@ -272,11 +271,10 @@ and `Input`'s React Native names follow the rules as well.
 | `foreground: "auto" \| "light" \| "dark"` (`Foreground`) | `foreground` of `StatusBar` (`StatusBarForeground`) | none; `gpui-kit` theme `foreground` (the content's color) | Not `style` (the inline style every component takes); `"light"` is light content, for dark backgrounds |
 | `hidden`, `animated` | fields of `StatusBar` | `NavMotion::Animated` (UIKit `animated:`) | `nsh.json` takes `foreground` and `hidden` |
 | `StatusBar.setBarStyle`, `StatusBar.setHidden`, `BarAnimation` | (dropped) | | The pages and dialogs are the API |
-| `android.backgroundColor`; `nsh/android` `setStatusBarBackgroundColor` | (dropped) | | Edge-to-edge (API 35) has no bar color |
-| **KeyboardAvoidingView** | | | |
-| `behavior="position"`, `contentContainerStyle` | (dropped) | | `behavior: "padding" \| "height"` |
-| `keyboardVerticalOffset` | `offset` | `popup.rs` `Popup::offset` | The enclosing name says keyboard and vertical |
-| `enabled` | unchanged | *guides* "Name predicates positively" | `disabled` means no presses on a view |
+| `android.backgroundColor`; Android's `setStatusBarBackgroundColor` | (dropped) | | Edge-to-edge (API 35) has no bar color |
+| **KeyboardAvoidingView**, **SafeAreaView** | | | |
+| `KeyboardAvoidingView` (`behavior="padding"` / `"height"`, `keyboardVerticalOffset`) | `padding-bottom` / `margin-bottom: env(keyboard-inset-height)`, `calc(env(..) + <length>)` | CSS `env()` and the VirtualKeyboard API's `keyboard-inset-height` | CSS as in a browser: a style, no wrapper component |
+| `SafeAreaView` (`edges`) | `padding: env(safe-area-inset-top)` and the other edges | CSS `env(safe-area-inset-*)` | The same |
 | **Keyboard** | | | |
 | `keyboard` (accessor) | `keyboardFrame` | none (UIKit's `keyboardFrameEndUserInfoKey` and animation duration arrive together) | Differed from `Keyboard` by case only; `Keyboard.dismiss()` unchanged |
 | **List, Scroll** | | | |

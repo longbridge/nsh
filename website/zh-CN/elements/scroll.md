@@ -173,7 +173,7 @@ scroller.scrollTo({ y: 0, animated: true });
 
 ## 键盘
 
-滚动视图中的输入框会在原生侧自动避开键盘：滚动视图获得底部内边距，并自行滚动到获得焦点的输入框。对于滚动视图之外的内容，请使用 `nsh` 的 [`KeyboardAvoidingView`](./keyboard-avoiding-view.md)。参见[表单与键盘](../docs/forms-and-keyboard.md)。
+滚动视图中的输入框会在原生侧自动避开键盘：滚动视图获得底部内边距，并自行滚动到获得焦点的输入框。对于滚动视图之外的内容，请在底部内边距或外边距中使用 [`env(keyboard-inset-height)`](./keyboard.md)。参见[表单与键盘](../docs/forms-and-keyboard.md)。
 
 ## 从右到左
 

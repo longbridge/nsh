@@ -8,7 +8,7 @@ demo: ui-navigation
 # nsh/base
 
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
-accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
+accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
 [Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
@@ -73,7 +73,6 @@ import {
   ToastStack,
   Tooltip,
 } from "nsh/base";
-import { KeyboardAvoidingView, SafeAreaView, SelectionArea } from "nsh";
 import type {
   AlertDialogAction,
   AlertDialogOptions,
@@ -131,7 +130,6 @@ import type {
   ToastStackProps,
   ToastTransitionStatus,
 } from "nsh/base";
-import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 ```
 
 This page is the module's index: each component has an element page with its examples, props and platform notes. For
@@ -411,4 +409,4 @@ launch screen.
   [Text](../elements/text.md) and
   [Input](../elements/input.md).
 - [Device and environment](../docs/device-and-environment.md).
-- [nsh/android](./nsh-android.md): `BackHandler` and other Android-only APIs.
+- [`BackHandler`](./nsh-mobile.md#backhandler): `BackHandler` and other Android-only APIs.

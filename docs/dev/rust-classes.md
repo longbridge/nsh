@@ -161,10 +161,10 @@ take `ModuleCx` or are `async`), and an app crate's are rebuilt with the app, wh
 
 What TSX imports from NSH is made two ways today:
 
-- **Runtime modules in Rust** (`crates/nsh-core/src/runtime/`: `nsh/accessibility`, `nsh/android`,
-  `nsh/clipboard`, `nsh/desktop`, `nsh`'s `Keyboard` and `Image` functions) already use `#[module]` and `Registry`, the app crates'
+- **Runtime modules in Rust** (`crates/nsh-core/src/runtime/`: `nsh`'s `Keyboard`, `Image`, `Clipboard`,
+  `Storage` and accessibility functions, `nsh/mobile`, `nsh/desktop`) already use `#[module]` and `Registry`, the app crates'
   mechanism; they take the synchronous functions and classes as they come.
-- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `AnimatedValue` and
+- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh`'s `AnimatedValue` and
   `AnimatedNode`, `nsh`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
   web globals (`URL`, `Headers`, `Blob`, `fetch`, streams, events). Their classes already sit on one piece of
   machinery: a QuickJS class whose opaque is the Rust value in a `RefCell` (`nsh-js` `web/mod.rs`).

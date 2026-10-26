@@ -277,7 +277,7 @@ fn profile(edit: impl Fn() + 'static) -> Screen {
 
 The page's content starts below the header: below an opaque system header on iOS and Android, below `header` on the
 desktops and the web. With `headerTransparent`, `headerLargeTitle` or `headerVisible={false}`, it starts at the top of
-the page on iOS and Android; use [SafeAreaView](./safe-area-view.md) or `safeAreaInsets()` to keep it clear of the
+the page on iOS and Android; use [`env(safe-area-inset-top)`](./safe-area.md) or `safeAreaInsets()` to keep it clear of the
 header and the status bar.
 
 On iOS, `headerVisible={false}` keeps swipe back enabled while `popOnSwipe` and `popOnBack` are true.
@@ -379,7 +379,7 @@ To turn off only the swipe gesture and keep the back buttons, use `popOnSwipe={f
   large title. Stack changes that arrive during a running transition are applied when it ends.
 - **Android**: a stack with a toolbar. The system back button pops the top page, with predictive back on Android
   versions that have it; the up arrow's description for screen readers is the lower page's `headerBackTitle`, or the
-  system's. See `BackHandler` in [nsh/android](../modules/nsh-android.md) to handle the back button yourself.
+  system's. See `BackHandler` in [`BackHandler`](../modules/nsh-mobile.md#backhandler) to handle the back button yourself.
 - **Mac Catalyst**: as on iOS.
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: each page shows its `header` at the top and its content
   below it. Escape, Alt+Left and a mouse's back button go back on the desktops, the browser's back button on the web.

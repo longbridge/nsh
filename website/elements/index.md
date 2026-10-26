@@ -70,17 +70,17 @@ could not infer their item types. The compiler recognizes the elements through t
 views in place, so importing them costs nothing at run time. See [JSX and components](../docs/jsx-and-components.md).
 
 ```tsx
-import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeAreaView } from "nsh";
+import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView } from "nsh";
 import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
 ## Primitives
 
-Imported from `nsh` in TSX, from `nsh_core::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::element`).
+Imported from `nsh` in TSX, from `nsh_core::prelude` in Rust.
 
 | Element | Rust | Native view (iOS / Android) | Page |
 |---|---|---|---|
-| `<View>` | `view()` | UIView / ViewGroup | [View](./view.md) |
+| `<View>` | `view()` | UIView / ViewGroup; with `selectable`, the texts inside it select together | [View](./view.md), [Text selection](./text-selection.md) |
 | `<Text>` | `text(content)` | CoreText view / StaticLayout view | [Text](./text.md) |
 | `<Image>` | `image(src)` | a view with an image layer / an image view | [Image](./image.md) |
 | `<Scroll>` | `scroll()` | UIScrollView / ScrollView | [Scroll](./scroll.md) |
@@ -89,11 +89,10 @@ Imported from `nsh` in TSX, from `nsh_core::prelude` in Rust (`SafeAreaView`, `K
 | `<WebView>` | `web_view(url)`, `web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `video(url)` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | a view on top of the window (or the dialog it is in), placed against an anchor | [Overlay](./overlay.md) |
-| `<SafeAreaView>` | `safe_area_view()` | a view: pads its content clear of notches, bars and the home indicator | [SafeAreaView](./safe-area-view.md) |
-| `<KeyboardAvoidingView>` | `keyboard_avoiding_view()` | a view: keeps its content above the software keyboard | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
-| `<SelectionArea>` | `selection_area()` | a view: makes the texts inside it select together | [SelectionArea](./selection-area.md) |
 | `<If>`, `<Each>` | `when(..)`, `each(..)`, `dynamic(..)` | control flow: the elements they choose | [Control flow](./control-flow.md) |
-| `<InputAccessoryView>` (`nsh/ios`) | `input_accessory_view(id)` | a bar over the keyboard on iOS | [nsh/ios](../modules/nsh-ios.md) |
+| `<InputAccessoryView>` (`nsh/mobile`) | `input_accessory_view(id)` | a bar over the keyboard on iOS | [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview) |
+
+Padding and margin keep content clear of system UI with CSS's `env()`: `env(safe-area-inset-top)` and the other edges ([Safe area](./safe-area.md)) and `env(keyboard-inset-height)` ([Keyboard](./keyboard.md)).
 
 ## Base
 
@@ -368,7 +367,7 @@ view().absolute().inset_0().focusable(false).on_press(close)
 
 ### Gestures driving animated values
 
-These props bind a gesture to [native animated values](../modules/nsh-animated.md) that move on the UI thread, with no
+These props bind a gesture to [native animated values](../modules/nsh.md#animation) that move on the UI thread, with no
 work in the app's code per frame. See [touch and gestures](../docs/touch-and-gestures.md).
 
 | Prop | Rust | Type | Description |
@@ -398,7 +397,7 @@ Returning `true` from `onResponderGrant` keeps native scroll views from taking t
 (`{ activeOffsetX, activeOffsetY, failOffsetX, failOffsetY }`) makes the view the responder only once the platform
 activates its pan, so drags inside scroll views leave the other axis to them
 ([Touch and gestures](../docs/touch-and-gestures.md#pans-inside-scroll-views-panactivation)).
-`PanResponder` in [`nsh/gesture`](../modules/nsh-gesture.md) builds on them. In Rust, `.on_touch(..)` hears every touch
+`PanResponder` in [`PanResponder`](../modules/nsh.md#panresponder) builds on them. In Rust, `.on_touch(..)` hears every touch
 (`TouchEvent`), `.claim_touches(..)` decides when the view takes them, and `.on_responder_grant(..)`,
 `.on_responder_move(..)`, `.on_responder_release(..)` and the others follow the responder.
 
@@ -480,7 +479,7 @@ Each element page says which apply to it.
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `List` | Scrolls to the end of the content. |
 | `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebView` | Controls the page. |
 | `seek(seconds)` | `seek(seconds)` | `Video` | Jumps to a time. |
-| `command(name, args?)` | `command(name, args)` | native components | Calls a command of a registered native component ([`nsh/native`](../modules/nsh-native.md)). |
+| `command(name, args?)` | `command(name, args)` | native components | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |
 
 ```rust tabs
 let field = element_ref();

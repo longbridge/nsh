@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
-import { PanResponder } from "nsh/gesture";
+import { createAnimatedValue } from "nsh";
+import { PanResponder } from "nsh";
 import { desktop, Inspector, Log, Panel, size, tint, ui, wide } from "./palette";
 
 /** A card dragged on the UI thread: `pan` drives two animated values. */

@@ -999,7 +999,7 @@ mod tests {
         host.eval_source(
             r#"
             import { element, append, spread } from "nsh:rt";
-            import { PanResponder } from "nsh/gesture";
+            import { PanResponder } from "nsh";
             const log = [];
             globalThis.log = log;
             const outer = element("view");

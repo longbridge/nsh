@@ -14,7 +14,7 @@ use serde_json::json;
 use crate::ChannelSink;
 
 const APP: &str = r#"import { mount, signal, Text, View } from "nsh";
-import { nativeComponent } from "nsh/native";
+import { nativeComponent } from "nsh";
 
 const Map = nativeComponent<
   { center: { lat: number; lng: number }; zoom?: number; title?: string },

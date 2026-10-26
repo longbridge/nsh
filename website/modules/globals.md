@@ -98,7 +98,7 @@ requestAnimationFrame(tick);
 ```
 
 > [!TIP]
-> Driving an animation from JS frame by frame runs your code on every frame in QuickJS. For animations of styles and transforms, prefer [nsh/animated](./nsh-animated.md), whose drivers run natively without calling back into JS (see [Animation](../docs/animation.md)).
+> Driving an animation from JS frame by frame runs your code on every frame in QuickJS. For animations of styles and transforms, prefer [`nsh`'s animation API](./nsh.md#animation), whose drivers run natively without calling back into JS (see [Animation](../docs/animation.md)).
 
 ## Base64 and errors
 

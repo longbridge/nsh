@@ -306,7 +306,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const offset = createAnimatedValue(0);
@@ -562,7 +562,7 @@ Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`; see [Lists](./lis
 
 ## Scroll views and the keyboard
 
-NSH keeps a focused input visible on its own: when the keyboard shows, the scroll view around the input gets a bottom inset as tall as the keyboard and scrolls the input into view. This happens natively, with no code in your app. Use [`KeyboardAvoidingView`](./forms-and-keyboard.md#content-outside-scroll-views-keyboardavoidingview) for content outside scroll views, such as a message bar pinned to the bottom.
+NSH keeps a focused input visible on its own: when the keyboard shows, the scroll view around the input gets a bottom inset as tall as the keyboard and scrolls the input into view. This happens natively, with no code in your app. Use `env(keyboard-inset-height)` as a bottom padding ([Content outside scroll views](./forms-and-keyboard.md#content-outside-scroll-views)) for content outside scroll views, such as a message bar pinned to the bottom.
 
 Two props decide how scrolling and taps interact with the keyboard:
 

@@ -169,7 +169,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 | Ctrl+W, F11, Ctrl+Q | Close the window, full screen, quit (`nsh package` and `nsh run` apps) |
 | Ctrl+R | Reloads the latest build (`nsh run`) |
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) are a window-wide shortcut controller; Ctrl+Q and
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) are a window-wide shortcut controller; Ctrl+Q and
 F11 cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is the key that types C on a US layout).

@@ -321,21 +321,31 @@ export type Component<P = {}> = (props: P) => JSX.Element;
 export interface Tokens {}
 "#;
 
-/// The sources of primitives `nsh` serves (`NativeModule::moved_to`),
-/// kept by area.
-const PRIMITIVE_MODULES: &[&str] = &[
+/// The sources of what `nsh` serves (`NativeModule::moved_to`), kept by
+/// area.
+const NSH_SOURCES: &[&str] = &[
     "nsh/image",
     "nsh/list",
     "nsh/canvas",
     "nsh/webview",
     "nsh/video",
+    "nsh/device",
+    "nsh/accessibility",
+    "nsh/native",
+    "nsh/gesture",
+    "nsh/animated",
+    "nsh/host",
+    "nsh/keymap",
 ];
+
+/// The sources of what `nsh/mobile` serves, by platform.
+const MOBILE_SOURCES: &[&str] = &["nsh/ios", "nsh/android"];
 
 pub(crate) const MODULES: &[NativeModule] = &[
     NativeModule {
         name: "nsh",
         exports: NSH,
-        also: PRIMITIVE_MODULES,
+        also: NSH_SOURCES,
         moved_to: None,
         types: decl!(NSH_TYPES),
     },
@@ -350,28 +360,28 @@ pub(crate) const MODULES: &[NativeModule] = &[
         name: "nsh/device",
         exports: env::DEVICE_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(env::DEVICE_TYPES),
     },
     NativeModule {
         name: "nsh/accessibility",
         exports: env::ACCESSIBILITY_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: "",
     },
     NativeModule {
         name: "nsh/android",
         exports: platform_modules::ANDROID_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh/mobile"),
         types: decl!(platform_modules::ANDROID_TYPES),
     },
     NativeModule {
         name: "nsh/ios",
         exports: platform_modules::IOS_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh/mobile"),
         types: decl!(platform_modules::IOS_TYPES),
     },
     NativeModule {
@@ -384,7 +394,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
     NativeModule {
         name: "nsh/mobile",
         exports: platform_modules::MOBILE_EXPORTS,
-        also: &[],
+        also: MOBILE_SOURCES,
         moved_to: None,
         types: "",
     },
@@ -406,21 +416,21 @@ pub(crate) const MODULES: &[NativeModule] = &[
         name: "nsh/native",
         exports: platform_modules::NATIVE_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(platform_modules::NATIVE_TYPES),
     },
     NativeModule {
         name: "nsh/gesture",
         exports: touch::GESTURE_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(touch::GESTURE_TYPES),
     },
     NativeModule {
         name: "nsh/animated",
         exports: animated::EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(animated::TYPES),
     },
     NativeModule {
@@ -448,14 +458,14 @@ pub(crate) const MODULES: &[NativeModule] = &[
         name: "nsh/host",
         exports: platform_modules::HOST_EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(crate::host_channel::TYPES),
     },
     NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
         also: &[],
-        moved_to: None,
+        moved_to: Some("nsh"),
         types: decl!(keymap::TYPES),
     },
 ];

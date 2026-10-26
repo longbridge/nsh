@@ -6,7 +6,7 @@
 // (it compiles one file), so it has no JSX and renames what it imports.
 import type { JSX as __JSX } from "nsh";
 import { Text as __Text, View as __View } from "nsh";
-import { colorScheme as __scheme, platform as __platform, windowSize as __windowSize } from "nsh/device";
+import { colorScheme as __scheme, platform as __platform, windowSize as __windowSize } from "nsh";
 
 const __dark = {
   page: "#101113",

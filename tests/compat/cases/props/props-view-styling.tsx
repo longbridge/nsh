@@ -8,7 +8,7 @@
 // script checks each.
 import { Text, View, signal } from "nsh";
 import { Input } from "nsh/base";
-import { InputAccessoryView } from "nsh/ios";
+import { InputAccessoryView } from "nsh/mobile";
 
 function App() {
   const busy = signal(true);

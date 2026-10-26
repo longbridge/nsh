@@ -194,7 +194,7 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
   arrows by a line, Page Up / Down, Option+Up / Down and Space / Shift+Space by a page, Home / End and Cmd+Up / Down
   to the edges. The mouse's back button goes back from `input::event`.
-- **The app's shortcuts** (`nsh/keymap`, `keymap.rs`): while the surface has bindings, a local key-down monitor
+- **The app's shortcuts** (`nsh`'s `keymap`, `keymap.rs`): while the surface has bindings, a local key-down monitor
   matches every key of its window against the mounted table (`Keymap::find`) before AppKit dispatches it, so they
   come before menus' key equivalents, the field editor's key bindings and the root's keys (Escape going back,
   Tab, scrolling); a match is consumed and reported as the root's `KeyCommand`. Quit, Hide, Hide Others, Minimize

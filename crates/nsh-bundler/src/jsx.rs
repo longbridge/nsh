@@ -63,8 +63,8 @@ pub(crate) enum Compiled {
 }
 
 /// nsh's primitives, by their home (module, export), and what their tags
-/// compile to: `nsh`'s, `nsh/base`'s `Input` and `Dialog` and `nsh/ios`'s
-/// `InputAccessoryView`.
+/// compile to: `nsh`'s, `nsh/base`'s `Input` and `Dialog` and
+/// `nsh/mobile`'s `InputAccessoryView`.
 pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "View", Compiled::Host("view")),
     ("nsh", "Text", Compiled::Host("text")),
@@ -78,7 +78,7 @@ pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh/base", "Input", Compiled::Host("input")),
     ("nsh/base", "Dialog", Compiled::Component("modal")),
     (
-        "nsh/ios",
+        "nsh/mobile",
         "InputAccessoryView",
         Compiled::Component("inputaccessory"),
     ),
@@ -1519,9 +1519,9 @@ mod tests {
         assert!(err.contains("write <InputAccessoryView>"), "{err}");
         let err = error("export const a = <each of={[]}>{() => null}</each>;");
         assert!(err.contains("write <Each> (a global: no import)"), "{err}");
-        let err = error("export const a = <safe-area-view />;");
+        let err = error("export const a = <text-view />;");
         assert!(
-            err.contains(r#"write <SafeAreaView> and `import { SafeAreaView } from "nsh"`"#),
+            err.contains(r#"write <TextView> and `import { TextView } from "nsh/base"`"#),
             "{err}"
         );
         let err = error(
@@ -1775,15 +1775,14 @@ mod tests {
     fn imports_tags_use_stay_and_type_only_ones_go() {
         let code = flat(
             &compile(
-                r#"import { SafeAreaView, Edge } from "nsh";
-import { Edges } from "nsh/base";
+                r#"import { Button, Edges } from "nsh/base";
             let r: Edges | undefined;
-            export const a = <SafeAreaView ref={r} />;"#,
+            export const a = <Button ref={r} />;"#,
             )
             .unwrap(),
         );
         assert!(
-            code.contains(r#"import { SafeAreaView } from "nsh";"#),
+            code.contains(r#"import { Button } from "nsh/base";"#),
             "{code}"
         );
         assert!(

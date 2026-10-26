@@ -829,6 +829,12 @@ impl StyleRefinement {
         }
     }
 
+    /// `key: calc(env(name) + extra)`.
+    pub(crate) fn env_plus(&mut self, key: StyleKey, name: &str, extra: AbsoluteLength) {
+        let calc = format!("calc(env({name}) + {}px)", points(extra));
+        self.push(Declaration::Str(key, calc.into()));
+    }
+
     pub(crate) fn keyword(&mut self, key: StyleKey, k: &'static str) {
         self.push(Declaration::Keyword(key, k));
     }
@@ -1047,6 +1053,251 @@ pub trait Styled: Sized {
         inset => [Top, Right, Bottom, Left],
         /// The flex basis
         basis => [FlexBasis],
+    }
+
+    // Environment variables: CSS's `env()` on padding and margin.
+
+    /// Padding on every side by the safe area's insets where the view renders
+    /// (CSS's `padding: env(safe-area-inset-*)`): the insets of its root
+    /// view (the surface's safe area, a dialog's, or a page's below its
+    /// header).
+    fn p_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::PaddingTop, "env(safe-area-inset-top)");
+        s.keyword(StyleKey::PaddingRight, "env(safe-area-inset-right)");
+        s.keyword(StyleKey::PaddingBottom, "env(safe-area-inset-bottom)");
+        s.keyword(StyleKey::PaddingLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Left and right padding by the safe area's insets on those edges
+    /// ([`Styled::p_safe_area`]).
+    fn px_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::PaddingRight, "env(safe-area-inset-right)");
+        s.keyword(StyleKey::PaddingLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Top and bottom padding by the safe area's insets on those edges
+    /// ([`Styled::p_safe_area`]).
+    fn py_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::PaddingTop, "env(safe-area-inset-top)");
+        s.keyword(StyleKey::PaddingBottom, "env(safe-area-inset-bottom)");
+        self
+    }
+
+    /// Top padding by the safe area's top inset where the view renders
+    /// (CSS's `padding-top: env(safe-area-inset-top)`, [`Styled::p_safe_area`]).
+    fn pt_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::PaddingTop, "env(safe-area-inset-top)");
+        self
+    }
+
+    /// Top padding by the safe area's top inset plus `extra` (CSS's
+    /// `padding-top: calc(env(safe-area-inset-top) + <extra>)`); `extra` is not negative.
+    fn pt_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style()
+            .env_plus(StyleKey::PaddingTop, "safe-area-inset-top", extra.into());
+        self
+    }
+
+    /// Right padding by the safe area's right inset where the view renders
+    /// (CSS's `padding-right: env(safe-area-inset-right)`, [`Styled::p_safe_area`]).
+    fn pr_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::PaddingRight, "env(safe-area-inset-right)");
+        self
+    }
+
+    /// Right padding by the safe area's right inset plus `extra` (CSS's
+    /// `padding-right: calc(env(safe-area-inset-right) + <extra>)`); `extra` is not negative.
+    fn pr_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style().env_plus(
+            StyleKey::PaddingRight,
+            "safe-area-inset-right",
+            extra.into(),
+        );
+        self
+    }
+
+    /// Bottom padding by the safe area's bottom inset where the view renders
+    /// (CSS's `padding-bottom: env(safe-area-inset-bottom)`, [`Styled::p_safe_area`]).
+    fn pb_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::PaddingBottom, "env(safe-area-inset-bottom)");
+        self
+    }
+
+    /// Bottom padding by the safe area's bottom inset plus `extra` (CSS's
+    /// `padding-bottom: calc(env(safe-area-inset-bottom) + <extra>)`); `extra` is not negative.
+    fn pb_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style().env_plus(
+            StyleKey::PaddingBottom,
+            "safe-area-inset-bottom",
+            extra.into(),
+        );
+        self
+    }
+
+    /// Left padding by the safe area's left inset where the view renders
+    /// (CSS's `padding-left: env(safe-area-inset-left)`, [`Styled::p_safe_area`]).
+    fn pl_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::PaddingLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Left padding by the safe area's left inset plus `extra` (CSS's
+    /// `padding-left: calc(env(safe-area-inset-left) + <extra>)`); `extra` is not negative.
+    fn pl_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style()
+            .env_plus(StyleKey::PaddingLeft, "safe-area-inset-left", extra.into());
+        self
+    }
+
+    /// Bottom padding by the software keyboard's height over the surface, 0
+    /// while it is hidden (CSS's `padding-bottom: env(keyboard-inset-height)`):
+    /// content kept above the keyboard, moving with it natively. For a
+    /// view that reaches the bottom of the surface.
+    fn pb_keyboard(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::PaddingBottom, "env(keyboard-inset-height)");
+        self
+    }
+
+    /// Bottom padding by the keyboard's height plus `extra` (CSS's
+    /// `padding-bottom: calc(env(keyboard-inset-height) + <extra>)`,
+    /// [`Styled::pb_keyboard`]); `extra` is not negative.
+    fn pb_keyboard_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style().env_plus(
+            StyleKey::PaddingBottom,
+            "keyboard-inset-height",
+            extra.into(),
+        );
+        self
+    }
+
+    /// Margin on every side by the safe area's insets where the view renders
+    /// (CSS's `margin: env(safe-area-inset-*)`): the insets of its root
+    /// view (the surface's safe area, a dialog's, or a page's below its
+    /// header).
+    fn m_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::MarginTop, "env(safe-area-inset-top)");
+        s.keyword(StyleKey::MarginRight, "env(safe-area-inset-right)");
+        s.keyword(StyleKey::MarginBottom, "env(safe-area-inset-bottom)");
+        s.keyword(StyleKey::MarginLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Left and right margin by the safe area's insets on those edges
+    /// ([`Styled::m_safe_area`]).
+    fn mx_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::MarginRight, "env(safe-area-inset-right)");
+        s.keyword(StyleKey::MarginLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Top and bottom margin by the safe area's insets on those edges
+    /// ([`Styled::m_safe_area`]).
+    fn my_safe_area(mut self) -> Self {
+        let s = self.style();
+        s.keyword(StyleKey::MarginTop, "env(safe-area-inset-top)");
+        s.keyword(StyleKey::MarginBottom, "env(safe-area-inset-bottom)");
+        self
+    }
+
+    /// Top margin by the safe area's top inset where the view renders
+    /// (CSS's `margin-top: env(safe-area-inset-top)`, [`Styled::m_safe_area`]).
+    fn mt_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::MarginTop, "env(safe-area-inset-top)");
+        self
+    }
+
+    /// Top margin by the safe area's top inset plus `extra` (CSS's
+    /// `margin-top: calc(env(safe-area-inset-top) + <extra>)`).
+    fn mt_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style()
+            .env_plus(StyleKey::MarginTop, "safe-area-inset-top", extra.into());
+        self
+    }
+
+    /// Right margin by the safe area's right inset where the view renders
+    /// (CSS's `margin-right: env(safe-area-inset-right)`, [`Styled::m_safe_area`]).
+    fn mr_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::MarginRight, "env(safe-area-inset-right)");
+        self
+    }
+
+    /// Right margin by the safe area's right inset plus `extra` (CSS's
+    /// `margin-right: calc(env(safe-area-inset-right) + <extra>)`).
+    fn mr_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style()
+            .env_plus(StyleKey::MarginRight, "safe-area-inset-right", extra.into());
+        self
+    }
+
+    /// Bottom margin by the safe area's bottom inset where the view renders
+    /// (CSS's `margin-bottom: env(safe-area-inset-bottom)`, [`Styled::m_safe_area`]).
+    fn mb_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::MarginBottom, "env(safe-area-inset-bottom)");
+        self
+    }
+
+    /// Bottom margin by the safe area's bottom inset plus `extra` (CSS's
+    /// `margin-bottom: calc(env(safe-area-inset-bottom) + <extra>)`).
+    fn mb_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style().env_plus(
+            StyleKey::MarginBottom,
+            "safe-area-inset-bottom",
+            extra.into(),
+        );
+        self
+    }
+
+    /// Left margin by the safe area's left inset where the view renders
+    /// (CSS's `margin-left: env(safe-area-inset-left)`, [`Styled::m_safe_area`]).
+    fn ml_safe_area(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::MarginLeft, "env(safe-area-inset-left)");
+        self
+    }
+
+    /// Left margin by the safe area's left inset plus `extra` (CSS's
+    /// `margin-left: calc(env(safe-area-inset-left) + <extra>)`).
+    fn ml_safe_area_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style()
+            .env_plus(StyleKey::MarginLeft, "safe-area-inset-left", extra.into());
+        self
+    }
+
+    /// Bottom margin by the software keyboard's height over the surface, 0
+    /// while it is hidden (CSS's `margin-bottom: env(keyboard-inset-height)`):
+    /// content kept above the keyboard, moving with it natively. For a
+    /// view that reaches the bottom of the surface.
+    fn mb_keyboard(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::MarginBottom, "env(keyboard-inset-height)");
+        self
+    }
+
+    /// Bottom margin by the keyboard's height plus `extra` (CSS's
+    /// `margin-bottom: calc(env(keyboard-inset-height) + <extra>)`,
+    /// [`Styled::mb_keyboard`]).
+    fn mb_keyboard_plus(mut self, extra: impl Into<AbsoluteLength>) -> Self {
+        self.style().env_plus(
+            StyleKey::MarginBottom,
+            "keyboard-inset-height",
+            extra.into(),
+        );
+        self
     }
 
     // Layout.
@@ -3532,6 +3783,61 @@ mod tests {
 
     fn s() -> StyleRefinement {
         StyleRefinement::default()
+    }
+
+    #[test]
+    fn env_methods_are_the_arbitrary_classes() {
+        let env_of = |list: &ClassList| {
+            let cx = Context {
+                env: ClassEnvironment::default(),
+                window: crate::geometry::size_pt(390.0, 844.0),
+                rtl: false,
+                states: 0,
+                position: 0,
+                group: &|_| 0,
+            };
+            let mut style = Style::default();
+            list.apply(
+                &cx,
+                &PRESETS,
+                &mut style,
+                &mut ClassProps::default(),
+                &|_: &mut Style| {},
+            );
+            style.pending.env
+        };
+        let sides = |p: &str| {
+            ["top", "right", "bottom", "left"]
+                .map(|side| format!("{p}{}-[env(safe-area-inset-{side})]", &side[..1]))
+                .join(" ")
+        };
+        for (typed, classes) in [
+            (s().p_safe_area(), sides("p")),
+            (s().m_safe_area(), sides("m")),
+            (
+                s().px_safe_area(),
+                "pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]".into(),
+            ),
+            (
+                s().my_safe_area(),
+                "mt-[env(safe-area-inset-top)] mb-[env(safe-area-inset-bottom)]".into(),
+            ),
+            (s().pl_safe_area(), "pl-[env(safe-area-inset-left)]".into()),
+            (
+                s().pt_safe_area_plus(px(8.0)),
+                "pt-[calc(env(safe-area-inset-top)+8px)]".into(),
+            ),
+            (s().pb_keyboard(), "pb-[env(keyboard-inset-height)]".into()),
+            (
+                s().mb_keyboard_plus(px(49.0)),
+                "mb-[calc(env(keyboard-inset-height)+49px)]".into(),
+            ),
+        ] {
+            same(typed.clone(), &classes);
+            let parsed = tailwind::parse(&PRESETS, &classes);
+            assert_eq!(env_of(&typed.lower()), env_of(&parsed), "{classes}");
+            assert!(!env_of(&parsed).is_empty(), "{classes}");
+        }
     }
 
     #[test]

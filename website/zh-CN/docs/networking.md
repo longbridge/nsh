@@ -154,7 +154,7 @@ const response = await fetch("https://api.example.com/photos", { method: "POST",
 
 ### 上传用户选中的照片
 
-[`nsh/picker`](../modules/nsh-picker.md) 把用户选中的照片交给应用，它们是字节留在原生侧的文件，已经缩小并转成服务器认的格式；
+[`Picker`](../modules/nsh.md#picker) 把用户选中的照片交给应用，它们是字节留在原生侧的文件，已经缩小并转成服务器认的格式；
 Rust 直接发送字节，TSX 把 `File` 加进 `FormData`：
 
 ```rust tabs
@@ -175,7 +175,7 @@ spawn(async move {
 ```
 
 ```tsx tabs
-import { Picker } from "nsh/picker";
+import { Picker } from "nsh";
 
 const [photo] = await Picker.pickImages({ maxDimension: 2048 });
 if (photo) {

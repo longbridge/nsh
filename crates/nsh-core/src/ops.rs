@@ -2131,10 +2131,11 @@ pub enum Prop {
     /// closes a popover). Default true.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
-    /// The view is a selection area (`SelectionArea` of `nsh`): the
-    /// texts in it share one selection ([`crate::selection`]); set by
-    /// components (`Element::selection_area`).
-    #[prop(js = "selectionArea", internal)]
+    /// `selectable` of a view: the texts in it share one selection, as a
+    /// browser page's do ([`crate::selection`]); texts with
+    /// `selectable={false}` stay out of it, a selectable view inside
+    /// another is part of the outer one.
+    #[prop(js = "selectable", on = VIEW, shared)]
     SelectionArea(bool),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
@@ -2145,7 +2146,7 @@ pub enum Prop {
     /// `selectable`: a long press offers to copy the text; `false` also
     /// keeps it from being selected where text is by default (desktop
     /// browsers), unset leaves it to the platform.
-    #[prop(js = "selectable", on = TEXT)]
+    #[prop(js = "selectable", on = TEXT, shared)]
     Selectable(Option<bool>),
     /// `adjustsFontSizeToFit`: shrink the font until the text fits its lines
     /// (`numberOfLines`) and box.

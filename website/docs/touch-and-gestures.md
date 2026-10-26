@@ -263,7 +263,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -522,7 +522,7 @@ How it runs: a view with any touch or responder handler listens to touches nativ
 
 ## PanResponder
 
-In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh/gesture` wraps the responder system and adds the same gesture state; spread its `panHandlers` on a view.
+In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh` wraps the responder system and adds the same gesture state; spread its `panHandlers` on a view.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -555,7 +555,7 @@ fn ball() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
-import { PanResponder } from "nsh/gesture";
+import { PanResponder } from "nsh";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -635,5 +635,5 @@ The main thread never waits for your code. When the system needs an answer on th
 - [`View`](../elements/view.md): every touch prop on the basic element.
 - [Animation](./animation.md): animated values, springs and decay for gesture-driven motion.
 - [Scrolling](./scrolling.md): the keyboard taps setting, scroll views and nested gestures.
-- [`nsh/gesture`](../modules/nsh-gesture.md): the `PanResponder` reference.
+- [`PanResponder`](../modules/nsh.md#panresponder): the `PanResponder` reference.
 - [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.

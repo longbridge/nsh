@@ -1,6 +1,6 @@
 ---
 title: 平台特定代码
-description: 为手机、桌面和浏览器编写同一个应用：ios={{}} / android={{}} / desktop={{}} / web={{}} 中的平台专属属性，nsh/ios 与 nsh/android 模块，platform.os 与 platform.select，以及平台相关的 Tailwind 变体。
+description: 为手机、桌面和浏览器编写同一个应用：ios={{}} / android={{}} / desktop={{}} / web={{}} 中的平台专属属性，nsh/mobile 与 nsh/desktop 模块，platform.os 与 platform.select，以及平台相关的 Tailwind 变体。
 order: 17
 group: platforms
 ---
@@ -12,7 +12,7 @@ group: platforms
 | Rust | TSX | 用途 |
 |---|---|---|
 | [构建方法（`.ripple(..)`、`.input_accessory(..)`）](#平台专属属性) | [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`、`web={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
-| [`on_back_press`、`nsh_core::element::desktop`](#平台模块) | [`nsh/ios`、`nsh/android`、`nsh/desktop`](#平台模块) | 只有一个平台才有的 API。 |
+| [`on_back_press`、`nsh_core::element::desktop`](#平台模块) | [`nsh/mobile`、`nsh/desktop`](#平台模块) | 只有移动平台或只有桌面才有的 API。 |
 | [`os()`、`idiom()`、`is_desktop()`](#platformos-与-platformselect) | [`platform.os`、`platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
 | [`.when(os() == Os::Ios, ..)`](#tailwind-中的平台变体) | [`ios:` / `android:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
 
@@ -94,15 +94,18 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 
 ## 平台模块
 
-在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（`set_title_bar`、`title_bar`、`close_window`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/ios` 和 `nsh/android` 存放只有一个平台才有的 API，`nsh/desktop` 存放只有桌面才有的 API。它们在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数什么都不做，组件什么都不渲染。每个模块都导出 `isAvailable`，只在自己的平台上为 `true`。
+在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（`set_title_bar`、`title_bar`、`close_window`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
 
-### nsh/android
+### nsh/mobile
+
+`isAvailable` 在 iOS（包括 Mac Catalyst）和 Android 上为 `true`。两个平台都有系统标签栏 [`TabBar`](../modules/nsh-mobile.md#tabbar)。
+
+#### BackHandler（Android）
 
 | Rust | TSX | 说明 |
 |---|---|---|
 | `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
-| `os() == Os::Android` | `isAvailable` | Android 上为 `true`。 |
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -122,7 +125,7 @@ fn player() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { BackHandler } from "nsh/android";
+import { BackHandler } from "nsh/mobile";
 
 function Player() {
   // 返回键先退出全屏，再离开页面。监听器随组件一起结束。
@@ -137,12 +140,11 @@ function Player() {
 
 返回键先由最上层的对话框处理，然后是返回键监听器（最近添加的最先），再然后是最上层的导航栈，都没有处理时应用退出。见[导航](./navigation.md#android-返回键)。
 
-### nsh/ios
+#### InputAccessoryView（iOS）
 
 | Rust | TSX | 说明 |
 |---|---|---|
 | `input_accessory_view(native_id)` | `InputAccessoryView` | 在引用其原生 id（`.input_accessory(..)`、`ios={{ inputAccessoryViewID }}`）的输入框的键盘上方显示的工具栏。 |
-| `os() == Os::Ios` | `isAvailable` | iOS 和 Mac Catalyst 上为 `true`。 |
 
 见[表单与键盘](./forms-and-keyboard.md#键盘上方的工具栏inputaccessoryview)。
 
@@ -192,7 +194,7 @@ function PhotoViewer() {
 
 ## platform.os 与 platform.select
 
-Rust 中的 `os()` 和 TSX 中 `nsh/device` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `platform.catalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
+Rust 中的 `os()` 和 TSX 中 `nsh` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `platform.catalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};
@@ -203,7 +205,7 @@ if os() == Os::Android {
 ```
 
 ```tsx tabs
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 if (platform.os === "android") {
   // …
@@ -305,7 +307,7 @@ view()
 
 ## 相关内容
 
-- [`nsh/ios`](../modules/nsh-ios.md) 与 [`nsh/android`](../modules/nsh-android.md)：参考。
-- [`nsh/device`](../modules/nsh-device.md)：`platform`。
+- [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview) 与 [`BackHandler`](../modules/nsh-mobile.md#backhandler)：参考。
+- [`nsh` 的设备 API](../modules/nsh.md#device)：`platform`。
 - [原生组件](./native-components.md)：使用宿主应用在各平台上提供的视图。
 - [Tailwind](./tailwind.md)：所有变体。

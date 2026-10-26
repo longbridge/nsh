@@ -108,7 +108,7 @@ const values = signal([12, 40, 28, 64]);
 />;
 ```
 
-数字和颜色也可以是[原生动画值](../modules/nsh-animated.md)（`CanvasNumber`、`CanvasPaint`；在 Rust 中，凡是数字的位置都可以传 `&AnimatedValue`）：这些值动画时，平台会自行重绘，每帧都不经过应用代码。
+数字和颜色也可以是[原生动画值](../modules/nsh.md#animation)（`CanvasNumber`、`CanvasPaint`；在 Rust 中，凡是数字的位置都可以传 `&AnimatedValue`）：这些值动画时，平台会自行重绘，每帧都不经过应用代码。
 
 ```rust tabs
 use std::f32::consts::TAU;
@@ -128,7 +128,7 @@ canvas(
 
 ```tsx tabs
 import { Canvas } from "nsh";
-import { Animated, createAnimatedValue } from "nsh/animated";
+import { Animated, createAnimatedValue } from "nsh";
 
 const angle = createAnimatedValue(0);
 Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();

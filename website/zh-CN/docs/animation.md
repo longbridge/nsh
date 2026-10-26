@@ -23,7 +23,7 @@ NSH 中的所有动画都运行在 UI 线程上。你用 Rust 或 TSX 描述一�
 
 ## 动效
 
-动效（motion）以原生方式让视图的不透明度和变换走过一组关键帧。在拥有该视图的组件中创建它（Rust 中的 `motion()`，TSX 中 `nsh/animated` 的 `createMotion()`），绑定到视图上，再在它上面播放现成的动效或你自己的动效。`enter` 让视图从某个动效的起点开始，并立即播放它，于是视图从第一帧起就在入场。
+动效（motion）以原生方式让视图的不透明度和变换走过一组关键帧。在拥有该视图的组件中创建它（Rust 中的 `motion()`，TSX 中 `nsh` 的 `createMotion()`），绑定到视图上，再在它上面播放现成的动效或你自己的动效。`enter` 让视图从某个动效的起点开始，并立即播放它，于是视图从第一帧起就在入场。
 
 ```rust tabs
 #[component]
@@ -44,7 +44,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createMotion } from "nsh/animated";
+import { createMotion } from "nsh";
 
 function App() {
   const card = createMotion({ enter: "fadeInUp" });
@@ -80,7 +80,7 @@ mount(App);
 
 ### 预设
 
-现成的动效就是数据：`nsh/animated` 的 `motions`（`play("fadeInUp")` 播放的就是 `motions.fadeInUp`），以及 Rust 中的 `MotionPreset`（`MotionPreset::FadeInUp.spec()`）。距离以点为单位，按控件和卡片的尺寸设定；对更大的视图，可以按比例放大动效的数值，或者编写自己的关键帧。`swing` 等旋转都绕视图的变换原点进行：给摇摆的挂牌加上 `transformOrigin: "top"`（`.origin_top()`）。
+现成的动效就是数据：`nsh` 的 `motions`（`play("fadeInUp")` 播放的就是 `motions.fadeInUp`），以及 Rust 中的 `MotionPreset`（`MotionPreset::FadeInUp.spec()`）。距离以点为单位，按控件和卡片的尺寸设定；对更大的视图，可以按比例放大动效的数值，或者编写自己的关键帧。`swing` 等旋转都绕视图的变换原点进行：给摇摆的挂牌加上 `transformOrigin: "top"`（`.origin_top()`）。
 
 **入场（enter）**：从隐藏或偏离的位置开始，在静止状态结束。
 
@@ -367,7 +367,7 @@ Tailwind：`animate-spin`、`animate-ping`、`animate-pulse`、`animate-bounce`�
 
 ## 动画值
 
-动画值是一个存在于 UI 线程上的数字。创建它（Rust 中用 `animated_value(..)`，TSX 中用 `nsh/animated` 的 `createAnimatedValue`），把它绑定到样式，再让它动起来；绑定它的视图每一帧都跟随它，而无需更新。
+动画值是一个存在于 UI 线程上的数字。创建它（Rust 中用 `animated_value(..)`，TSX 中用 `nsh` 的 `createAnimatedValue`），把它绑定到样式，再让它动起来；绑定它的视图每一帧都跟随它，而无需更新。
 
 ```rust tabs
 #[component]
@@ -401,7 +401,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -622,7 +622,7 @@ const header = scroll.diffClamp(0, 56, { snap: true });
 
 ## 组合动画
 
-动画由步骤搭建（Rust 中的 `Animation`，TSX 中 `nsh/animated` 的 `Animated`），整棵动画树在原生端运行：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也不运行你的代码。
+动画由步骤搭建（Rust 中的 `Animation`，TSX 中 `nsh` 的 `Animated`），整棵动画树在原生端运行：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也不运行你的代码。
 
 ```rust tabs
 let ys: Vec<AnimatedValue> = (0..5).map(|_| animated_value(0.0)).collect();
@@ -651,7 +651,7 @@ spawn(async move {
 ```
 
 ```tsx tabs
-import { Animated, createAnimatedValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh";
 
 const ys = [0, 1, 2, 3, 4].map(() => createAnimatedValue(0));
 const fade = createAnimatedValue(1);
@@ -694,7 +694,7 @@ hop.start(({ finished }) => console.log(finished ? "landed" : "stopped"));
 
 ## 缓动
 
-缓动曲线是在原生端求值的数据：TSX 中是 `nsh/animated` 的 `Easing`，Rust 中是 `Easing` 枚举。
+缓动曲线是在原生端求值的数据：TSX 中是 `nsh` 的 `Easing`，Rust 中是 `Easing` 枚举。
 
 | TSX | Rust | 说明 |
 |---|---|---|
@@ -764,7 +764,7 @@ let remove = move || {
 
 ```tsx tabs
 import { signal } from "nsh";
-import { LayoutAnimation } from "nsh/animated";
+import { LayoutAnimation } from "nsh";
 
 const items = signal([1, 2, 3]);
 let next = 4;
@@ -826,7 +826,7 @@ LayoutAnimation.configureNext({
 
 ## 减少动态效果
 
-当用户要求减少动态效果时（iOS 的"减弱动态效果"、Android 的"移除动画"），Rust 中的 `reduce_motion()` 和 TSX 中 `nsh/accessibility` 的 `reduceMotion()` 为 `true`，Tailwind 的 `motion-reduce:` / `motion-safe:` 变体随之生效。
+当用户要求减少动态效果时（iOS 的"减弱动态效果"、Android 的"移除动画"），Rust 中的 `reduce_motion()` 和 TSX 中 `nsh` 的 `reduceMotion()` 为 `true`，Tailwind 的 `motion-reduce:` / `motion-safe:` 变体随之生效。
 
 [动效](#动效)会自动遵循这一设置：`play` 和 `enter` 会立即落在动效的终点，不产生移动，结果与正常播放完一样为 `true`。退场依然以隐藏结束，入场依然以静止结束。对承载用户所需信息的动效（例如表示进度的旋转指示器），传入 `ignoreReduceMotion: true`（Rust 中用 `play_ignoring_reduce_motion`）。
 
@@ -846,7 +846,7 @@ view().style_when(|| !reduce_motion(), |s| s.animate_bounce())
 
 ```tsx tabs
 import { View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
+import { reduceMotion } from "nsh";
 
 const open = () => (reduceMotion() ? panel.set(0) : panel.spring(0));
 
@@ -857,7 +857,7 @@ const open = () => (reduceMotion() ? panel.set(0) : panel.spring(0));
 
 ## 相关内容
 
-- [`nsh/animated`](../modules/nsh-animated.md)：TSX 参考。
+- [`nsh` 的动画 API](../modules/nsh.md#animation)：TSX 参考。
 - [触摸与手势](./touch-and-gestures.md)：用手指驱动动画值。
 - [滚动](./scrolling.md#滚动联动效果scrollvalue)：`scrollValue`。
 - [画布](./canvas.md#用动画值驱动绘制)：在绘制中使用动画值。

@@ -154,7 +154,7 @@ const response = await fetch("https://api.example.com/photos", { method: "POST",
 
 ### Uploading a photo the user picks
 
-[`nsh/picker`](../modules/nsh-picker.md) gives the photos the user picks as files whose bytes stay native, scaled down
+[`Picker`](../modules/nsh.md#picker) gives the photos the user picks as files whose bytes stay native, scaled down
 and in a format servers take; Rust sends their bytes, TSX appends the `File` to a `FormData`:
 
 ```rust tabs
@@ -175,7 +175,7 @@ spawn(async move {
 ```
 
 ```tsx tabs
-import { Picker } from "nsh/picker";
+import { Picker } from "nsh";
 
 const [photo] = await Picker.pickImages({ maxDimension: 2048 });
 if (photo) {

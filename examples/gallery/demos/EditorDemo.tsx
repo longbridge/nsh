@@ -18,8 +18,8 @@ import {
   Input,
 } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
-import { openUrl, platform, windowSize } from "nsh/device";
-import { keymap } from "nsh/keymap";
+import { openUrl, platform, windowSize } from "nsh";
+import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { colors, handleThumb, Tip } from "../ui";
 import { SAMPLE } from "./lsp/sample";

@@ -1,8 +1,6 @@
 //! Elements and the components written in Rust: `nsh`'s primitives (the host
-//! elements, and `SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea`,
-//! views that lay out by what the surface reports or tell the platform how
-//! their texts select) and the components of apps' own crates (their UI
-//! sets), run by the core on the engine thread.
+//! elements) and the components of apps' own crates (their UI sets), run by
+//! the core on the engine thread.
 //!
 //! A [`Component`] is a function that runs once ([`Component::view`]) and
 //! makes a tree of elements ([`view`], [`text`], [`image`], other
@@ -63,9 +61,7 @@ pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
 mod rows;
-mod safe_area;
 mod scrollable;
-mod selection_area;
 pub(crate) mod services;
 pub(crate) mod status_bar;
 mod style;
@@ -153,10 +149,7 @@ pub use self::{
         input_accessory_view, native, overlay, scroll, video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
-    keyboard::{
-        AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
-        KeyboardAvoidingViewProps, keyboard_avoiding_view,
-    },
+    keyboard::Keyboard,
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,
         ModuleCx, ModuleFuture, ModuleParam, ModuleSpec, Overload, OverloadSpec, SyncCall,
@@ -172,9 +165,7 @@ pub use self::{
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     rows::{RowAccessor, RowRef, Rows},
-    safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     scrollable::Scrollable,
-    selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
     services::{Fetch, HttpResponse, Prefetch},
     style::{
         AdaptiveColor, BorderCurve, FontWeight, LayoutDirection, StyleRefinement, Styled,

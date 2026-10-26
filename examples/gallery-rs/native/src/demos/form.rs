@@ -10,7 +10,7 @@ use nsh_core::{
     Points, Size,
     element::{
         AutoCapitalize, AutoFill, KeyboardDismissMode, LayoutAnimation, ReturnKeyType,
-        SubmitBehavior, View, keyboard_avoiding_view, safe_area_view,
+        SubmitBehavior, View,
     },
     prelude::*,
 };
@@ -889,7 +889,7 @@ fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
         .presentation(ModalPresentation::PageSheet)
         .on_cancel(close)
         .child(
-            safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+            view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
                 scroll()
                     .flex_1()
                     .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
@@ -1144,7 +1144,8 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         },
     );
     view().flex_1().child(
-        keyboard_avoiding_view()
+        view()
+            .pb_keyboard()
             .flex_1()
             .bg(colors::BACKGROUND)
             .child(

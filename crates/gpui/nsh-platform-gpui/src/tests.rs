@@ -37,7 +37,7 @@ impl NativeComponent for Square {
 const FIELD_AFTER_COMPONENT: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
-import { nativeComponent } from "nsh/native";
+import { nativeComponent } from "nsh";
 
 const Square = nativeComponent<{}, {}>("test.square", { props: [], events: [] });
 
@@ -318,8 +318,8 @@ const SHORTCUTS_OVER_COMPONENT: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
-import { keymap } from "nsh/keymap";
-import { nativeComponent } from "nsh/native";
+import { keymap } from "nsh";
+import { nativeComponent } from "nsh";
 
 const KeyLog = nativeComponent<{}, {}>("test.keylog", { props: [], events: [] });
 
@@ -440,7 +440,7 @@ fn desk() -> String {
 const WHOSE: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
-import { nativeModule } from "nsh/native";
+import { nativeModule } from "nsh";
 
 interface WhoseApi {
   now(): string;
@@ -552,7 +552,7 @@ fn js_and_rust_view(view_first: bool) -> String {
         r#"
 import {{ mount, signal, View }} from "nsh";
 import {{ Input }} from "nsh/base";
-import {{ keymap }} from "nsh/keymap";
+import {{ keymap }} from "nsh";
 import {{ Shortcut }} from "test/keys";
 
 const VIEW_FIRST = {view_first};

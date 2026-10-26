@@ -1,7 +1,7 @@
 import { type JSX, Scroll, signal, Text, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
-import { platform } from "nsh/device";
-import { keymap } from "nsh/keymap";
+import { platform } from "nsh";
+import { keymap } from "nsh";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, Tip } from "../ui";
 

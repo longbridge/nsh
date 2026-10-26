@@ -14003,11 +14003,7 @@ mod rust_selection_area {
         let area = signal(true);
         AREA.set(Some(area));
         view()
-            .child(
-                view()
-                    .selection_area(move || area.get())
-                    .child(text("inside")),
-            )
+            .child(view().selectable(move || area.get()).child(text("inside")))
             .child(view().child(text("outside")))
     }
 
@@ -17866,4 +17862,227 @@ fn span_test_ids_reuse_fitted_and_hidden_layouts() {
             counts
         );
     }
+}
+
+/// What a node's `env()` terms came to: its padding and margin insets.
+fn env_applied(c: &Core<FakeEngine>, id: NodeId) -> [EdgeInsets; 2] {
+    let key = c.key(id).unwrap();
+    c.nodes[key as usize]
+        .env
+        .as_deref()
+        .map(|(_, applied)| *applied)
+        .unwrap_or_default()
+}
+
+fn env_with_keyboard(height: f32, duration: f32) -> crate::element::Environment {
+    crate::element::Environment {
+        window: size_pt(320.0, 480.0),
+        keyboard_height: px(height),
+        keyboard_duration: duration,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn keyboard_inset_height_pads_and_animates_with_the_keyboard() {
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 0.25));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(
+                2,
+                &[
+                    ("height", StyleValue::Number(100.0)),
+                    (
+                        "paddingBottom",
+                        StyleValue::Str("env(keyboard-inset-height)"),
+                    ),
+                ],
+            ),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(3, &[("flex", StyleValue::Number(1.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).map(|f| f.size.height.0), Some(100.0));
+    assert!(!matches!(batch.items[0], MountItem::LayoutAnimation(_)));
+
+    // The keyboard shows: the padding follows, animated with its curve.
+    c.set_environment(env_with_keyboard(40.0, 0.25));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).map(|f| f.size.height.0), Some(60.0));
+    assert!(
+        matches!(
+            &batch.items[0],
+            MountItem::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(t),
+                ..
+            }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
+        ),
+        "{:?}",
+        batch.items
+    );
+    assert_eq!(env_applied(&c, 2)[0].bottom, px(40.0));
+
+    // Without a duration it moves at once.
+    c.set_environment(env_with_keyboard(0.0, 0.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 3).map(|f| f.size.height.0), Some(100.0));
+    assert!(!matches!(batch.items[0], MountItem::LayoutAnimation(_)));
+
+    // A plain value replaces the term: the keyboard no longer moves it.
+    apply(
+        &mut c,
+        vec![style_op(
+            2,
+            &[
+                ("height", StyleValue::Number(100.0)),
+                ("paddingBottom", StyleValue::Number(10.0)),
+            ],
+        )],
+    );
+    c.commit();
+    assert!(c.env_styled.is_empty());
+    c.set_environment(env_with_keyboard(40.0, 0.25));
+    assert!(c.commit().is_none());
+}
+
+#[test]
+fn calc_adds_a_length_to_the_keyboard_inset() {
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 0.0));
+    view_with_classes(
+        &mut c,
+        2,
+        "h-[100px] mb-[calc(env(keyboard-inset-height)+8px)]",
+    );
+    view_with_classes(&mut c, 4, "h-[10px]");
+    let batch = c.commit().unwrap();
+    // Hidden: only the length, between it and the view below.
+    assert_eq!(frame_of(&batch, 4).map(|f| f.origin.y.0), Some(108.0));
+    c.set_environment(env_with_keyboard(300.0, 0.0));
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 4).map(|f| f.origin.y.0), Some(408.0));
+}
+
+#[test]
+fn safe_area_insets_are_those_of_the_root_view_a_node_renders_in() {
+    let mut c = core();
+    c.set_environment(crate::element::Environment {
+        window: size_pt(320.0, 480.0),
+        safe_area: EdgeInsets {
+            top: px(20.0),
+            bottom: px(34.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let padded = [
+        (
+            "paddingTop",
+            StyleValue::Str("calc(env(safe-area-inset-top) + 8px)"),
+        ),
+        (
+            "paddingBottom",
+            StyleValue::Str("env(safe-area-inset-bottom)"),
+        ),
+    ];
+    apply(
+        &mut c,
+        vec![
+            // On the surface.
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &padded),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            // On a page, whose header covers the top.
+            Op::Create {
+                id: 4,
+                tag: Tag::Stack,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::Screen,
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            style_op(8, &padded),
+            Op::Insert {
+                parent: 6,
+                child: 8,
+                before: None,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    assert_eq!(
+        env_applied(&c, 2)[0],
+        EdgeInsets {
+            top: px(20.0),
+            bottom: px(34.0),
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        env_applied(&c, 8)[0],
+        EdgeInsets {
+            bottom: px(34.0),
+            ..Default::default()
+        }
+    );
+    // The page reports its insets: its node follows, the surface's does
+    // not.
+    c.component_event(
+        6,
+        EventKind::Insets,
+        &EventPayload::Map(vec![
+            ("top", PayloadValue::Number(64.0)),
+            ("bottom", PayloadValue::Number(0.0)),
+        ]),
+    );
+    c.commit();
+    assert_eq!(
+        env_applied(&c, 8)[0],
+        EdgeInsets {
+            top: px(64.0),
+            ..Default::default()
+        }
+    );
+    assert_eq!(env_applied(&c, 2)[0].top, px(20.0));
 }

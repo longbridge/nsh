@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 function App() {
   const todos = signal<string[]>([]);

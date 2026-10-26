@@ -130,7 +130,7 @@ input()
 | `ios` key | Rust | Type | Description |
 |---|---|---|---|
 | `textContentType` | `.auto_fill(..)` | `AutoComplete \| TextContentType` | iOS's names for `autoComplete` (`"oneTimeCode"`, `"newPassword"`, …). |
-| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | The `nativeID` of an `InputAccessoryView` ([`nsh/ios`](../modules/nsh-ios.md)) shown over the keyboard while the input has focus. |
+| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | The `nativeID` of an `InputAccessoryView` ([`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)) shown over the keyboard while the input has focus. |
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | The keyboard's look; `"default"` follows the system's appearance. Android's keyboards follow the system's theme. |
 
 ```rust tabs
@@ -216,7 +216,7 @@ let password!: YNode;
 - On macOS, single-line text, placeholders and carets share the native field's font metrics and are centered together
   inside the content box. `lineHeight` participates in layout; multiline editors also use it for paragraph spacing.
 - Inputs inside a [scroll view](./scroll.md#keyboard) are kept clear of the keyboard natively. Elsewhere use
-  [`KeyboardAvoidingView`](./keyboard-avoiding-view.md).
+  a bottom padding or margin of [`env(keyboard-inset-height)`](./keyboard.md).
 - `disabled` disables the input (no focus) as well as applying the disabled styles; a `readonly` input keeps its
   focus and selection.
 - `inputAccessoryViewID` applies on iOS, where the keyboard has an accessory bar.

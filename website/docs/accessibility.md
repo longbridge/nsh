@@ -213,7 +213,7 @@ Hide what adds nothing: decorative images, dividers, an icon next to a text that
 
 ## The screen reader and the user's settings
 
-In Rust, the prelude reports the user's settings and talks to the screen reader: `screen_reader()` and `reduce_motion()` are reactive, `announce_for_accessibility(message)` has the screen reader read a message, and an element's `element_ref()` moves the screen reader's focus to it with `set_accessibility_focus()`. In TSX, `nsh/accessibility` reports the user's settings and lets you talk to the screen reader.
+In Rust, the prelude reports the user's settings and talks to the screen reader: `screen_reader()` and `reduce_motion()` are reactive, `announce_for_accessibility(message)` has the screen reader read a message, and an element's `element_ref()` moves the screen reader's focus to it with `set_accessibility_focus()`. In TSX, `nsh`'s accessibility API reports the user's settings and lets you talk to the screen reader.
 
 | Member | Description |
 |---|---|
@@ -248,7 +248,7 @@ fn upload() -> impl IntoElement {
 
 ```tsx tabs
 import { signal, Text, View, type YNode } from "nsh";
-import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
+import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 
 function Upload() {
   const done = signal(false);
@@ -278,7 +278,7 @@ Text and inputs follow the system text size (Dynamic Type on iOS, font size on A
 
 - Let text wrap: avoid fixed heights on views that contain text.
 - Cap very large headings with `.max_font_size_multiplier(..)` / `maxFontSizeMultiplier` instead of disabling scaling.
-- Switch layouts when the text is large: read `font_scale()` (Rust) or `fontScale()` from `nsh/device` (TSX) (for example, stack a label and its value vertically above 1.3).
+- Switch layouts when the text is large: read `font_scale()` (Rust) or `fontScale()` from `nsh` (TSX) (for example, stack a label and its value vertically above 1.3).
 
 See [Device and environment](./device-and-environment.md#text-size).
 
@@ -303,8 +303,8 @@ view()
 
 ```tsx tabs
 import { View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
-import { LayoutAnimation } from "nsh/animated";
+import { reduceMotion } from "nsh";
+import { LayoutAnimation } from "nsh";
 
 const toggle = () => {
   if (!reduceMotion()) LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
@@ -328,6 +328,6 @@ Make pressable elements at least 44 × 44 points. When a control must look small
 
 ## Related
 
-- [`nsh/accessibility`](../modules/nsh-accessibility.md): the reference.
+- [`nsh`'s accessibility API](../modules/nsh.md#accessibility): the reference.
 - [`View`](../elements/view.md): every accessibility prop.
 - [Animation](./animation.md#reduced-motion) and [Device and environment](./device-and-environment.md).

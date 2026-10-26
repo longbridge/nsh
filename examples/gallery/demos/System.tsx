@@ -1,9 +1,9 @@
 import { cleanup, resource, signal, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
-import { colorScheme, fontScale, windowSize } from "nsh/device";
+import { createAnimatedValue, Easing } from "nsh";
+import { colorScheme, fontScale, windowSize } from "nsh";
 import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
 import { Menu } from "nsh/desktop";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { toast } from "../toast";
 import {

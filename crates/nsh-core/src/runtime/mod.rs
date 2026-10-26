@@ -1,5 +1,4 @@
-//! The runtime's modules written in Rust: `nsh`'s `SafeAreaView`,
-//! `KeyboardAvoidingView` and `SelectionArea`, `nsh/android`'s `BackHandler`,
+//! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
 //! `Image` functions, all of `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
@@ -40,31 +39,24 @@ pub const MAX_WEBSOCKETS: usize = 32;
 pub fn registries() -> &'static [Registry] {
     static REGISTRIES: OnceLock<Vec<Registry>> = OnceLock::new();
     REGISTRIES.get_or_init(|| {
-        let mut android = Registry::runtime("nsh/android");
-        android.module::<android::BackHandler>();
-        let mut accessibility = Registry::runtime("nsh/accessibility");
-        accessibility.module::<accessibility::Accessibility>();
-        let mut device = Registry::runtime("nsh/device");
-        device.module::<device::Device>();
-        let mut clipboard = Registry::runtime("nsh/clipboard");
-        clipboard.module::<clipboard::Clipboard>();
-        let mut picker = Registry::runtime("nsh/picker");
-        picker.module::<picker::Picker>();
-        let mut storage = Registry::runtime("nsh/storage");
-        storage.module::<storage::Storage>();
         let mut desktop = Registry::runtime("nsh/desktop");
         desktop.module::<desktop::Window>();
-        // `nsh`'s primitives written in Rust; the rest of `nsh` is `nsh-js`'s.
+        // `nsh`'s modules written in Rust; the rest of `nsh` is `nsh-js`'s.
         let mut nsh = Registry::runtime("nsh");
-        nsh.register::<crate::element::SafeAreaView>()
-            .register::<crate::element::KeyboardAvoidingView>()
-            .register::<crate::element::SelectionArea>()
-            .module::<crate::element::Keyboard>()
+        nsh.module::<crate::element::Keyboard>()
             .module::<image::Image>()
+            .module::<device::Device>()
+            .module::<accessibility::Accessibility>()
+            .module::<clipboard::Clipboard>()
+            .module::<picker::Picker>()
+            .module::<storage::Storage>()
+            .module::<host::Host>()
             // The environment's accessors and hooks, made by `nsh-js`.
             .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &[]);
         let mut mobile = Registry::runtime("nsh/mobile");
-        mobile.register::<crate::mobile::TabBar>();
+        mobile
+            .register::<crate::mobile::TabBar>()
+            .module::<android::BackHandler>();
         let mut os = Registry::runtime("os");
         os.module::<os::Os>();
         let mut process = Registry::runtime("process");
@@ -80,25 +72,7 @@ pub fn registries() -> &'static [Registry] {
             websocket.module::<websocket::WebSocket>();
             websocket
         };
-        let mut host = Registry::runtime("nsh/host");
-        host.module::<host::Host>();
-        vec![
-            nsh,
-            android,
-            accessibility,
-            device,
-            clipboard,
-            picker,
-            storage,
-            desktop,
-            mobile,
-            os,
-            net,
-            process,
-            fs,
-            websocket,
-            host,
-        ]
+        vec![nsh, desktop, mobile, os, net, process, fs, websocket]
     })
 }
 

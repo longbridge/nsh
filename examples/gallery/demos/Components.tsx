@@ -1,8 +1,8 @@
-import { type InputProps, type JSX, signal, Text, View, type YNode, KeyboardAvoidingView, SafeAreaView } from "nsh";
-import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
-import { LayoutAnimation } from "nsh/animated";
-import { locale, pixelRatio, platform } from "nsh/device";
-import { InputAccessoryView } from "nsh/ios";
+import { type InputProps, type JSX, signal, Text, View, type YNode } from "nsh";
+import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
+import { LayoutAnimation } from "nsh";
+import { locale, pixelRatio, platform } from "nsh";
+import { InputAccessoryView } from "nsh/mobile";
 import { Dialog, NavPage, safeArea, Sheet, Input } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
@@ -266,15 +266,23 @@ const behaviors = [
 ] as const;
 
 const behaviorNote = {
-  padding: "The bottom pads: the tinted background stays under the keyboard.",
-  height: "The view shrinks: its background ends at the keyboard.",
+  padding: "padding-bottom: env(keyboard-inset-height). The tinted background stays under the keyboard.",
+  height: "margin-bottom: env(keyboard-inset-height). The view shrinks: its background ends at the keyboard.",
 } as const;
 
 function AvoidingPage() {
   const behavior = signal<"padding" | "height">("padding");
   return (
-    <NavPage title="KeyboardAvoidingView" {...header} header={<PageHeader title="KeyboardAvoidingView" />}>
-      <KeyboardAvoidingView behavior={behavior()} style={{ flex: 1, backgroundColor: tints.info }}>
+    <NavPage title="Keyboard inset" {...header} header={<PageHeader title="Keyboard inset" />}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: tints.info,
+          ...(behavior() === "padding"
+            ? { paddingBottom: "env(keyboard-inset-height)" }
+            : { marginBottom: "env(keyboard-inset-height)" }),
+        }}
+      >
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
             <Card icon="form" title={`behavior="${behavior()}"`} subtitle="Focus the field at the bottom">
@@ -285,7 +293,7 @@ function AvoidingPage() {
           <View style={{ flex: 1 }} />
           <Field placeholder="Type here" />
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </NavPage>
   );
 }
@@ -315,7 +323,17 @@ function ModalOptions() {
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
           <TitleBar />
-          <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
+          <View
+            style={{
+              flex: 1,
+              padding: 16,
+              paddingTop: "calc(env(safe-area-inset-top) + 16px)",
+              paddingRight: "calc(env(safe-area-inset-right) + 16px)",
+              paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)",
+              paddingLeft: "calc(env(safe-area-inset-left) + 16px)",
+              gap: 12,
+            }}
+          >
             <View style={{ flexDirection: "row", paddingTop: 8 }}>
               <Badge label={translucent() ? "translucent" : "opaque bar"} tone="accent" />
             </View>
@@ -325,7 +343,7 @@ function ModalOptions() {
             </Text>
             <View style={{ flex: 1 }} />
             <Button label="Close" onPress={() => visible.set(false)} />
-          </SafeAreaView>
+          </View>
         </View>
       </Dialog>
     </Card>
@@ -393,7 +411,7 @@ export function Components() {
         () => (
           <Card title="Keyboard avoidance" subtitle="Content outside scroll views" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow icon="form" title="KeyboardAvoidingView" note="padding / height" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
+              <LinkRow icon="form" title="Keyboard inset" note="env(keyboard-inset-height)" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
             </Inset>
           </Card>
         ),

@@ -79,7 +79,8 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `DimensionValue` | `number` (points), `` `${number}%` `` (of the parent), or `"auto"`. | `Length`: `px(…)`, `relative(0.5)`, `auto()` |
 | `LengthValue` | `number` (points) or `` `${number}%` ``. No `"auto"`. | `DefiniteLength`: `px(…)`, `relative(0.5)` |
 | `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). | `Hsla` / `AdaptiveColor`: `rgb(0x2563eb)`, `hsla(…)`, theme colors (`theme().primary`) |
-| `AnimatedNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. | `AnimatedValue` / `AnimatedNode`, bound with `.bind_opacity(&v)`, `.bind_background(&v)`, `.bind_translate_x(&v)`, ... |
+| `EnvValue` | An environment variable in a padding or margin: `env(name)`, `env(name, <length>)` (the length stands in for an unknown name), `calc(env(name) + <length>)` or `calc(<length> + env(name))`. The names are `safe-area-inset-top`, `-right`, `-bottom`, `-left` ([Safe area](../elements/safe-area.md)) and `keyboard-inset-height` ([Keyboard](../elements/keyboard.md)). Accepted by the physical padding and margin keys and their shorthands. | `.p_safe_area()`, `.pt_safe_area_plus(px(8.0))`, `.pb_keyboard()`, `.mb_keyboard_plus(…)`, ... |
+| `AnimatedNode` | A native animated value or a node derived from it (see [`nsh`'s animation API](./nsh.md#animation)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. | `AnimatedValue` / `AnimatedNode`, bound with `.bind_opacity(&v)`, `.bind_background(&v)`, `.bind_translate_x(&v)`, ... |
 
 Strings with CSS syntax (`boxShadow`, `backgroundImage`, `filter`, `gridTemplateColumns`, ...) take lengths in `px` and bare numbers (both points), `pt` (4/3 of a point, as in CSS), or `rem` (16 points).
 
@@ -171,31 +172,33 @@ view()
 
 ### Margin
 
-Margins accept `"auto"` (absorbs free space, as in flexbox) and negative values.
+Margins accept `"auto"` (absorbs free space, as in flexbox) and negative values. The physical keys (all but `marginStart` / `marginEnd`) also take an `EnvValue`: `marginBottom: "env(keyboard-inset-height)"` (Rust `.mb_keyboard()`, `.mt_safe_area()`, ...).
 
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `margin` | `DimensionValue` | `.m(…)`, `.m_4()` | All four sides. |
-| `marginHorizontal` | `DimensionValue` | `.mx(…)` | Left and right. |
-| `marginVertical` | `DimensionValue` | `.my(…)` | Top and bottom. |
-| `marginTop` | `DimensionValue` | `.mt(…)` | Top. |
-| `marginRight` | `DimensionValue` | `.mr(…)` | Right. |
-| `marginBottom` | `DimensionValue` | `.mb(…)` | Bottom. |
-| `marginLeft` | `DimensionValue` | `.ml(…)` | Left. |
+| `margin` | `DimensionValue \| EnvValue` | `.m(…)`, `.m_4()` | All four sides. |
+| `marginHorizontal` | `DimensionValue \| EnvValue` | `.mx(…)` | Left and right. |
+| `marginVertical` | `DimensionValue \| EnvValue` | `.my(…)` | Top and bottom. |
+| `marginTop` | `DimensionValue \| EnvValue` | `.mt(…)` | Top. |
+| `marginRight` | `DimensionValue \| EnvValue` | `.mr(…)` | Right. |
+| `marginBottom` | `DimensionValue \| EnvValue` | `.mb(…)` | Bottom. |
+| `marginLeft` | `DimensionValue \| EnvValue` | `.ml(…)` | Left. |
 | `marginStart` | `DimensionValue` | `.ms(…)` | Left in left-to-right layouts, right in right-to-left ones. |
 | `marginEnd` | `DimensionValue` | `.me(…)` | The opposite of `marginStart`. |
 
 ### Padding
 
+The physical keys (all but `paddingStart` / `paddingEnd`) also take an `EnvValue`: `paddingTop: "env(safe-area-inset-top)"`, `paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)"` (Rust `.pt_safe_area()`, `.pb_safe_area_plus(px(16.0))`, `.pb_keyboard()`, ...). A padding is at least 0.
+
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `padding` | `LengthValue` | `.p(…)`, `.p_4()` | All four sides. |
-| `paddingHorizontal` | `LengthValue` | `.px(…)` | Left and right. |
-| `paddingVertical` | `LengthValue` | `.py(…)` | Top and bottom. |
-| `paddingTop` | `LengthValue` | `.pt(…)` | Top. |
-| `paddingRight` | `LengthValue` | `.pr(…)` | Right. |
-| `paddingBottom` | `LengthValue` | `.pb(…)` | Bottom. |
-| `paddingLeft` | `LengthValue` | `.pl(…)` | Left. |
+| `padding` | `LengthValue \| EnvValue` | `.p(…)`, `.p_4()` | All four sides. |
+| `paddingHorizontal` | `LengthValue \| EnvValue` | `.px(…)` | Left and right. |
+| `paddingVertical` | `LengthValue \| EnvValue` | `.py(…)` | Top and bottom. |
+| `paddingTop` | `LengthValue \| EnvValue` | `.pt(…)` | Top. |
+| `paddingRight` | `LengthValue \| EnvValue` | `.pr(…)` | Right. |
+| `paddingBottom` | `LengthValue \| EnvValue` | `.pb(…)` | Bottom. |
+| `paddingLeft` | `LengthValue \| EnvValue` | `.pl(…)` | Left. |
 | `paddingStart` | `LengthValue` | `.ps(…)` | Left in left-to-right layouts, right in right-to-left ones. |
 | `paddingEnd` | `LengthValue` | `.pe(…)` | The opposite of `paddingStart`. |
 
@@ -384,7 +387,7 @@ Built-in keyframe animations, run natively (Tailwind's `animate-*`).
 | `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | The easing curve. |
 | `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | How many times it runs. |
 
-For animations driven by values, gestures or springs, use [nsh/animated](./nsh-animated.md) instead.
+For animations driven by values, gestures or springs, use [`nsh`'s animation API](./nsh.md#animation) instead.
 
 ### Pointer
 

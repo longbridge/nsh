@@ -1,8 +1,19 @@
-import { mount, signal, Text, View, type Edge, SafeAreaView } from "nsh";
+import { mount, signal, Text, View } from "nsh";
 import { safeArea, safeAreaInsets } from "nsh/base";
 import { desktop, size, tint, ui } from "./palette";
 
+type Edge = "top" | "right" | "bottom" | "left";
+
 const EDGES: Edge[] = ["top", "right", "bottom", "left"];
+
+// `calc(env(safe-area-inset-<edge>) + 16px)` on the edges chosen, 16 px on the others.
+const side = (edges: Edge[], e: Edge) => (edges.includes(e) ? `calc(env(safe-area-inset-${e}) + 16px)` : 16);
+const padding = (edges: Edge[]) => ({
+  paddingTop: side(edges, "top"),
+  paddingRight: side(edges, "right"),
+  paddingBottom: side(edges, "bottom"),
+  paddingLeft: side(edges, "left"),
+});
 
 const format = (i: { top: number; right: number; bottom: number; left: number }) =>
   `top ${Math.round(i.top)} · right ${Math.round(i.right)} · bottom ${Math.round(i.bottom)} · left ${Math.round(i.left)}`;
@@ -19,9 +30,9 @@ function App() {
   const toggle = (edge: Edge) => edges.update((list) => (list.includes(edge) ? list.filter((e) => e !== edge) : EDGES.filter((e) => e === edge || list.includes(e))));
   const label = () => ({ fontSize: 12, color: ui().muted });
   return (
-    // The tinted band around the card is SafeAreaView's padding: the insets of
-    // the edges chosen, plus its own 16 pt.
-    <SafeAreaView edges={edges()} style={{ flex: 1, backgroundColor: tint(ui().accent, 0.16), padding: 16 }}>
+    // The tinted band around the card is the view's padding: the insets of
+    // the edges chosen, plus 16 pt.
+    <View style={{ flex: 1, backgroundColor: tint(ui().accent, 0.16), ...padding(edges()) }}>
       <View
         style={{
           flex: 1,
@@ -37,11 +48,11 @@ function App() {
           gap: 14,
         }}
       >
-        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>safe area view</Text>
+        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>safe area insets</Text>
         <Text style={{ color: ui().muted, lineHeight: 20 }}>
           {desktop
-            ? "A desktop window or a browser page has no system UI over it: the insets are 0, so SafeAreaView pads only by its own 16 pt (the tinted band)."
-            : "On a phone the insets are the status bar or notch on top and the home indicator below; SafeAreaView adds them to its own 16 pt. This browser frame has none, so they are 0 here."}
+            ? "A desktop window or a browser page has no system UI over it: the insets are 0, so the view pads only by its 16 pt (the tinted band)."
+            : "On a phone the insets are the status bar or notch on top and the home indicator below; env(safe-area-inset-*) adds them to its 16 pt. This browser frame has none, so they are 0 here."}
         </Text>
 
         <Text style={label()}>edges ({desktop ? "click" : "tap"} to toggle)</Text>
@@ -75,7 +86,7 @@ function App() {
           <Insets />
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

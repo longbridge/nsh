@@ -132,7 +132,7 @@ NSH 的默认值与 Web 不同：
 | `oklch()` / `oklab()` | `"oklch(62.3% 0.214 259.8)"` |
 | 颜色名 | `"white"`、`"black"`、`"transparent"`、`"rebeccapurple"` 等 |
 
-在 TSX 中要支持深色模式，可以读取 `nsh/device` 中的 [`colorScheme()`](../modules/nsh-device.md)（一个跟随系统外观的访问器），或使用 Tailwind 的 `dark:` 变体：
+在 TSX 中要支持深色模式，可以读取 `nsh` 中的 [`colorScheme()`](../modules/nsh.md#device)（一个跟随系统外观的访问器），或使用 Tailwind 的 `dark:` 变体：
 
 ```rust tabs
 view()
@@ -143,7 +143,7 @@ view()
 
 ```tsx tabs
 import { Text, View } from "nsh";
-import { colorScheme } from "nsh/device";
+import { colorScheme } from "nsh";
 
 const palette = () =>
   colorScheme() === "dark"

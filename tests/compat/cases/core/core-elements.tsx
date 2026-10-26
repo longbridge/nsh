@@ -6,9 +6,9 @@
 // each.
 import { Scroll, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { PanResponder } from "nsh/gesture";
+import { PanResponder } from "nsh";
 import { Image } from "nsh";
-import { nativeComponent, nativeModule } from "nsh/native";
+import { nativeComponent, nativeModule } from "nsh";
 import { Video } from "nsh";
 import { WebView } from "nsh";
 

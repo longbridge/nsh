@@ -347,7 +347,7 @@ function SignIn() {
 mount(SignIn);
 ```
 
-第一个字段上提交而不失去焦点（`SubmitBehavior::Submit`，`submitBehavior="submit"`）让键盘在焦点切换时保持弹出，不会先收起再弹起。按回车发送并保持焦点的聊天输入框也这样提交（见[下面](#滚动视图之外的内容keyboardavoidingview)的输入栏）。
+第一个字段上提交而不失去焦点（`SubmitBehavior::Submit`，`submitBehavior="submit"`）让键盘在焦点切换时保持弹出，不会先收起再弹起。按回车发送并保持焦点的聊天输入框也这样提交（见[下面](#滚动视图之外的内容)的输入栏）。
 
 最大长度和提交行为都在原生端执行：用户输入时，平台会询问"能否再加这个字符？"和"回车是否结束编辑？"，NSH 根据属性直接回答，不等待 JS。
 
@@ -590,12 +590,11 @@ scroll()
 
 收起方式（`.keyboard_dismiss_mode(..)`，TSX 的 `keyboardDismissMode`：不收起、拖动时、交互式）让拖动表单时收起键盘；已处理的点击（`.keyboard_taps(KeyboardTaps::Handled)`，TSX 的 `keyboardShouldPersistTaps="handled"`）让键盘弹出时点击按钮能直接生效，而不只是收起键盘。见[滚动](./scrolling.md#滚动视图与键盘)。
 
-### 滚动视图之外的内容：KeyboardAvoidingView
+### 滚动视图之外的内容
 
-固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::element::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
+固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 CSS 的 `env(keyboard-inset-height)` 为页面底部加内边距（`paddingBottom: "env(keyboard-inset-height)"`、Tailwind `pb-[env(keyboard-inset-height)]`、Rust `.pb_keyboard()`）：它会在底部让出与键盘等高的空间，并与键盘原生同步动画。
 
 ```rust tabs
-use nsh_core::element::keyboard_avoiding_view;
 use nsh_core::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
@@ -607,8 +606,9 @@ pub fn chat_screen() -> impl IntoElement {
         }
         draft.set(String::new());
     };
-    keyboard_avoiding_view()
+    view()
         .flex_1()
+        .pb_keyboard()
         .child(scroll().flex_1().keyboard_dismiss_mode(KeyboardDismissMode::Interactive) /* 消息 */)
         .child(
             view()
@@ -635,7 +635,7 @@ pub fn chat_screen() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Scroll, signal, View, KeyboardAvoidingView, keyboardFrame, safeAreaInsets } from "nsh";
+import { Scroll, signal, View, keyboardFrame, safeAreaInsets } from "nsh";
 import { Input } from "nsh/base";
 
 function ChatScreen() {
@@ -646,7 +646,7 @@ function ChatScreen() {
     draft.set("");
   };
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
       <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
         {/* 消息 */}
       </Scroll>
@@ -669,24 +669,18 @@ function ChatScreen() {
           style={{ flex: 1, maxHeight: 120 }}
         />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 ```
 
-在 Rust 中，每个属性都是 `keyboard_avoiding_view()` 的一个设置方法（`.behavior(AvoidBehavior::Height)`、`.offset(px(49.0))`、`.enabled(move || ..)`）：
+内边距（`.pb_keyboard()`）让上方内容缩小，背景仍延伸到屏幕底部；底部外边距（`marginBottom: "env(keyboard-inset-height)"`、`.mb_keyboard()`）让整个视图止于键盘顶部。`calc(env(keyboard-inset-height) + <length>)`（Rust `.pb_keyboard_plus(..)`、`.mb_keyboard_plus(..)`）再加一段长度，例如减去视图下方标签栏的高度。
 
-| 属性 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `behavior` | `"padding" \| "height"` | `"padding"` | `padding` 按键盘高度增加底部内边距；`height` 缩短视图（背景止于键盘处）。 |
-| `enabled` | `boolean` | `true` | 是否避开键盘。 |
-| `offset` | `number` | `0` | 键盘显示时额外加到键盘高度上的值（比如视图下方还有一个标签栏）。 |
-
-它假定自己延伸到 surface 的底部，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，`KeyboardAvoidingView` 无事可做。见 [KeyboardAvoidingView](../modules/nsh.md#keyboardavoidingview)。
+完整的键盘高度适合延伸到 surface 底部的视图，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，该变量为 0。见[键盘](../elements/keyboard.md)。
 
 ### 键盘访问器
 
-Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration * 1000, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`KeyboardAvoidingView` 就是这样做的。
+Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration * 1000, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`env(keyboard-inset-height)` 就是这样做的。
 
 ```rust tabs
 view().child(when(
@@ -705,7 +699,7 @@ import { View, keyboardFrame } from "nsh";
 
 ## 键盘上方的工具栏：InputAccessoryView
 
-Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/ios` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间；输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
+Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/mobile` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间；输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -748,7 +742,7 @@ pub fn note() -> impl IntoElement {
 ```tsx tabs
 import { signal, Text, View, type YNode } from "nsh";
 import { Input } from "nsh/base";
-import { InputAccessoryView } from "nsh/ios";
+import { InputAccessoryView } from "nsh/mobile";
 
 function Note() {
   const text = signal("");
@@ -773,11 +767,11 @@ function Note() {
 }
 ```
 
-工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图（`nsh/ios` 的 `isAvailable` 为 `false`），所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `platform.os === "android"`）。
+工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图，所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `platform.os === "android"`）。
 
 ## 相关内容
 
 - [`Input`](../elements/input.md)：元素参考。
-- [`KeyboardAvoidingView`](../modules/nsh.md#keyboardavoidingview) 与 [`Keyboard`](../modules/nsh.md#keyboard-and-keyboardframe)。
-- [`nsh/ios`](../modules/nsh-ios.md)：`InputAccessoryView`。
+- [键盘](../elements/keyboard.md)与 [`Keyboard`](../modules/nsh.md#keyboard-and-keyboardframe)。
+- [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)：`InputAccessoryView`。
 - [滚动](./scrolling.md#滚动视图与键盘)：滚动视图中的键盘收起与点击。

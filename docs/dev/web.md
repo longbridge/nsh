@@ -486,7 +486,7 @@ browsers' touches into what phones report:
   horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
   (`grabBar`: `onScrollDragStart` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
-- **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
+- **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh`'s `keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding.
   Its `f64` result preserves the full `u32` ID range, including Rust shortcuts and overlay Escape, apart from
   the `-1` (unmatched) and `-2` (held repeat) sentinels. Keys are passed as the character they type without
@@ -532,7 +532,7 @@ browsers' touches into what phones report:
   DOM order, each followed by its line's break when its end is selected (`Run::after`, the run tuple's fifth element:
   a newline, or the spaces a wrap dropped) and a newline between texts: the browser would run the absolutely placed
   runs together.
-- **Selection areas** (`SelectionArea`, `ViewProps::selection_area`): `op_vp` marks a view whose props have
+- **Selection areas** (`<View selectable>`, `ViewProps::selection_area`): `op_vp` marks a view whose props have
   `selectionArea` `nsh-area`, and the browser's own selection spans its texts (handles and long presses on phones
   included). The area and everything in it is `user-select: text` in every idiom, inside views that take presses too,
   except texts set off (`selectable={false}`: `nsh-noselect`, set by `op_t`), images and videos; an area inside
@@ -602,7 +602,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 
 ## Platform services
 
-- **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`
+- **Storage** (`nsh`'s `Storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`
   (`nsh_engine::local_storage_prefix`; the id `nsh.json` gives, which published sites, the dev host and Rust apps
   carry), so an app keeps its data wherever its page is and apps of one origin keep theirs apart. An app without an id
   (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
@@ -632,7 +632,7 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
   gesture (a warning says so).
 - **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
-- **The host** (`nsh/host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
+- **The host** (`nsh`'s `host`): the page answers the app's calls with `createPlayer`'s `host` option, an object whose
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
   the id written whole, not rounded as `num` would), and `nsh.js` `hostCall` answers every one with `onHost`
   `{ type: "reply", id, ok, value?, error? }` (`EventPayload::Json`, `nsh_event`): `ok: false` with the error's message when the page has no host, `call` throws or

@@ -98,7 +98,7 @@ requestAnimationFrame(tick);
 ```
 
 > [!TIP]
-> 在 JS 里逐帧驱动动画，意味着每一帧都要在 QuickJS 中执行你的代码。样式和变换的动画请优先使用 [nsh/animated](./nsh-animated.md)，它的驱动器在原生侧运行，不回调 JS（见[动画](../docs/animation.md)）。
+> 在 JS 里逐帧驱动动画，意味着每一帧都要在 QuickJS 中执行你的代码。样式和变换的动画请优先使用 [`nsh` 的动画 API](./nsh.md#animation)，它的驱动器在原生侧运行，不回调 JS（见[动画](../docs/animation.md)）。
 
 ## Base64 与错误
 

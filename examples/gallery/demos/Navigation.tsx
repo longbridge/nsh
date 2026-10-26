@@ -1,7 +1,7 @@
-import { effect, type JSX, Scroll, signal, Text, View, SafeAreaView } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
-import { BackHandler } from "nsh/android";
-import { platform } from "nsh/device";
+import { effect, type JSX, Scroll, signal, Text, View } from "nsh";
+import { createAnimatedValue } from "nsh";
+import { BackHandler } from "nsh/mobile";
+import { platform } from "nsh";
 import { AlertDialog, Dialog, NavPage, safeAreaInsets, Input } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
@@ -266,10 +266,18 @@ function Instant() {
   );
 }
 
+/** Padding by the insets of the root the view renders in, on every edge. */
+const safeAreaPadding = {
+  paddingTop: "env(safe-area-inset-top)",
+  paddingRight: "env(safe-area-inset-right)",
+  paddingBottom: "env(safe-area-inset-bottom)",
+  paddingLeft: "env(safe-area-inset-left)",
+} as const;
+
 function Headerless() {
   return (
     <NavPage headerVisible={false}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ flex: 1, backgroundColor: colors.background, ...safeAreaPadding }}>
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
             <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 12 }}>
@@ -278,19 +286,19 @@ function Headerless() {
               </View>
               <Text style={{ fontSize: 30, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>No header</Text>
               <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted }}>
-                The screen owns the whole surface; a SafeAreaView keeps it clear of the status bar and the home indicator.
+                The screen owns the whole surface; padding of env(safe-area-inset-*) keeps it clear of the status bar and the home indicator.
               </Text>
             </View>
           </Appear>
           <Appear index={1}>
-            <Section title="Safe area" note="SafeAreaView">
+            <Section title="Safe area" note="env(safe-area-inset-*)">
               <Insets />
             </Section>
           </Appear>
           <View style={{ flex: 1 }} />
           <Button label="Back" onPress={() => nav.pop()} />
         </View>
-      </SafeAreaView>
+      </View>
     </NavPage>
   );
 }
@@ -345,7 +353,7 @@ const modals: { key: Exclude<Sheet, null>; title: string; note: string; icon: Ic
 /** A modal's content: what it is, its safe area, a close button. */
 function ModalBody(props: { title: string; note: string; body: string; fullScreen?: boolean; onClose: () => void }) {
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, ...safeAreaPadding }}>
       <If when={props.fullScreen}><TitleBar /></If>
       <View style={{ flex: 1, padding: 16, gap: 16 }}>
         <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
@@ -361,7 +369,7 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
         <View style={{ flex: 1 }} />
         <Button label="Close" onPress={props.onClose} />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

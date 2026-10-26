@@ -346,26 +346,25 @@ nav_page()
 </NavPage>
 ```
 
-A page that shows no header still has the system bars around it; pad its content with [`SafeAreaView`](../modules/nsh.md#safeareaview):
+A page that shows no header still has the system bars around it; pad its content by the [safe area](../elements/safe-area.md) insets:
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::element::safe_area_view;
 
 nav_page()
     .header_visible(false)
-    .child(safe_area_view().flex_1().p(px(16.0)) /* … */)
+    .child(view().flex_1().p_safe_area() /* … */)
 ```
 
 ```tsx tabs
 <NavPage headerVisible={false}>
-  <SafeAreaView style={{ flex: 1, padding: 16 }}>…</SafeAreaView>
+  <View class="flex-1 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+16px)] px-4">…</View>
 </NavPage>
 ```
 
 ### Safe areas under the header
 
-Inside a page, `SafeAreaView` and the page's insets (`Scope::insets` in Rust, `safeAreaInsets()` in TSX) are those below the system header, within the page. With a transparent header, the content starts at the top of the page and the top inset is the header's height, so `SafeAreaView` keeps text clear of it while a background image fills the whole page. With a large title, put a scroll view directly in the page so the title can collapse as it scrolls. On the desktops and the web, the content starts below the page's header slot.
+Inside a page, the `env(safe-area-inset-*)` variables and the page's insets (`Scope::insets` in Rust, `safeAreaInsets()` in TSX) are those below the system header, within the page. With a transparent header, the content starts at the top of the page and the top inset is the header's height, so padding by `env(safe-area-inset-top)` keeps text clear of it while a background image fills the whole page. With a large title, put a scroll view directly in the page so the title can collapse as it scrolls. On the desktops and the web, the content starts below the page's header slot.
 
 ## Keeping the user on a page: popOnBack
 
@@ -520,14 +519,14 @@ function Files() {
 
 Escape, Android's back button, a press on the backdrop (TSX's backdrop, a native sheet's in Rust) and a swipe down on a sheet close it natively (`close_on_escape`, `close_on_backdrop_press` and `close_on_swipe`, TSX `closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each true by default). In Rust, `on_cancel` reports every attempt and `on_close` the close, so leave the dialog out of the view there; a backdrop your app draws closes it with its own press handler, as above. In TSX, `onOpenChange(false, reason)` tells you, so set `open` to `false` there. To confirm first, set a flag to false and handle the cancel event (`on_cancel`, `onCancel`), which reports every attempt, then close the dialog yourself. On iOS, `.presentation(ModalPresentation::PageSheet)` or `FormSheet` (`presentation="pageSheet"` or `"formSheet"`) presents a sheet that keeps what is behind visible.
 
-See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, `SafeAreaView` and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
+See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, the `env(safe-area-inset-*)` variables and the insets are the dialog's own. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh_base` (TSX: `nsh/base`).
 
 ## The Android back button
 
 On Android, the back button (or gesture) is handled in this order:
 
 1. The top dialog: it reports the cancel (`on_cancel`, `onCancel`), and closes while `close_on_escape` / `closeOnEscape` is true (the default).
-2. Your back listeners (`on_back_press` in Rust, `BackHandler` from `nsh/android` in TSX), most recently added first.
+2. Your back listeners (`on_back_press` in Rust, `BackHandler` from `nsh/mobile` in TSX), most recently added first.
 3. The top stack: its top page reports the back press, and pops while `pop_on_back` / `popOnBack` is true.
 4. Nothing handled it: the app exits.
 
@@ -556,7 +555,7 @@ pub fn editor() -> impl IntoElement {
 
 ```tsx tabs
 import { effect, signal } from "nsh";
-import { BackHandler } from "nsh/android";
+import { BackHandler } from "nsh/mobile";
 
 function Editor() {
   const selecting = signal(false);
@@ -574,7 +573,7 @@ function Editor() {
 ```
 
 A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
-`BackHandler.onBackPress` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/android` can be imported on iOS too, where its calls do nothing, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
+`BackHandler.onBackPress` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
 ## Tabs and other layouts
 
@@ -582,7 +581,7 @@ A tab bar is your own UI, drawn from primitives: a row of pressable views and a 
 
 ## Related
 
-- [`nsh/base`](../modules/nsh-base.md): the `nav_stack`, `nav_page`, `dialog`, `createNavStack`, `NavStack`, `NavPage` and `Dialog` reference; [`nsh`](../modules/nsh.md#safeareaview) has `SafeAreaView`.
+- [`nsh/base`](../modules/nsh-base.md): the `nav_stack`, `nav_page`, `dialog`, `createNavStack`, `NavStack`, `NavPage` and `Dialog` reference; [Safe area](../elements/safe-area.md) for the insets.
 - [The status bar](../modules/nsh-base.md#status-bar) of pages and dialogs.
 - [`AlertDialog`](../modules/nsh-base.md#alertdialog).
-- [`nsh/android`](../modules/nsh-android.md): `BackHandler`.
+- [`BackHandler`](../modules/nsh-mobile.md#backhandler): `BackHandler`.

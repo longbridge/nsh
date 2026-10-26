@@ -14,7 +14,7 @@ import {
   Easing,
   LayoutAnimation,
   createAnimatedValue,
-} from "nsh/animated";
+} from "nsh";
 
 const fixed = (values: number[]) => values.map((v) => v.toFixed(3)).join(" ");
 

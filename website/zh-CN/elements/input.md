@@ -121,7 +121,7 @@ input()
 | `ios` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `textContentType` | `.auto_fill(..)` | `AutoComplete \| TextContentType` | `autoComplete` 在 iOS 上的名称（`"oneTimeCode"`、`"newPassword"` 等）。 |
-| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | 一个 `InputAccessoryView`（[`nsh/ios`](../modules/nsh-ios.md)）的 `nativeID`，输入框获得焦点时显示在键盘上方。 |
+| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | 一个 `InputAccessoryView`（[`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)）的 `nativeID`，输入框获得焦点时显示在键盘上方。 |
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | 键盘的外观；`"default"` 跟随系统外观。Android 的键盘跟随系统主题。 |
 
 ```rust tabs
@@ -206,6 +206,6 @@ let password!: YNode;
 
 - 在 macOS 上，单行文字、提示文字和光标使用原生输入框一致的字体度量，在内容区域内一起垂直居中。
   `lineHeight` 参与布局；多行编辑器同时用它控制段落行高。
-- [滚动视图](./scroll.md#键盘)中的输入框会在原生侧自动避开键盘。其他位置请使用 [`KeyboardAvoidingView`](./keyboard-avoiding-view.md)。
+- [滚动视图](./scroll.md#键盘)中的输入框会在原生侧自动避开键盘。其他位置请使用 [`env(keyboard-inset-height)`](./keyboard.md) 作为底部内边距或外边距。
 - `disabled` 除了应用禁用样式，还会禁用输入框（不能获得焦点）；`readonly` 的输入框仍可获得焦点和选择文本。
 - `inputAccessoryViewID` 在 iOS 上生效，那里的键盘有附件栏。

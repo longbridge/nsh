@@ -237,8 +237,8 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .line_height(px(BODY_SIZE * BODY_LINE))
         .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
-        // a `SelectionArea`, the outer area's).
-        .selection_area(props.selectable)
+        // a `selectable` view, the outer one's).
+        .selectable(props.selectable)
         .map(|mut el| {
             if let Some(parts) = use_context::<TextViewParts>() {
                 let style = std::mem::take(el.style());

@@ -172,7 +172,7 @@ pub(crate) fn position(source: &str, offset: u32) -> (usize, usize) {
 }
 
 /// The first named import of a native module that it does not export:
-/// `import { createNativeValue } from "nsh/animated"` bundles fine and only
+/// `import { createNativeValue } from "nsh"` bundles fine and only
 /// fails when the app runs, so it is reported with its place in the source.
 /// Only names the code uses as values count (`scoping` is that of the
 /// program once TypeScript and the JSX are compiled): the declarations also

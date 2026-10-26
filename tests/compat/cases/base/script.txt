@@ -432,16 +432,10 @@ frame id:avoid-padding-inner 0 0 390 30
 frame id:avoid-off 0 185 390 30
 tap text:Dismiss the keyboard
 expect Dismiss: called
-covers [nsh/base] safeArea
-covers [nsh/base] safeAreaInsets
-covers [nsh/base] SafeAreaView
-covers [nsh/base] keyboardFrame
-covers [nsh/base] Keyboard
-covers [nsh/base] KeyboardAvoidingView
-covers [props] SafeAreaView.edges
-covers [props] KeyboardAvoidingView.enabled
-covers [props] KeyboardAvoidingView.behavior
-covers [props] KeyboardAvoidingView.offset
+covers [nsh] safeArea
+covers [nsh] safeAreaInsets
+covers [nsh] keyboardFrame
+covers [nsh] Keyboard
 # base-text-view
 tap id:case-base-text-view
 # Markdown: a heading, a link, a list, a table with the app's actions
@@ -549,7 +543,6 @@ prop text:"Area label" selectable false
 noprop text:"Inner text" selectable
 prop text:"Own selection" selectable true
 noprop text:"Outside text" selectable
-covers [nsh/base] SelectionArea
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip

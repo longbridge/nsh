@@ -1,6 +1,6 @@
-import { batch, computed, effect, List, Scroll, signal, Text, View, type YNode, KeyboardAvoidingView, SelectionArea } from "nsh";
-import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
-import { Clipboard } from "nsh/clipboard";
+import { batch, computed, effect, List, Scroll, signal, Text, View, type YNode } from "nsh";
+import { createAnimatedValue, LayoutAnimation } from "nsh";
+import { Clipboard } from "nsh";
 import { keyboardFrame, safeAreaInsets, Input } from "nsh/base";
 import { Icon, type IconName } from "./icons";
 import { alpha, Appear, Badge, colors, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "./ui";
@@ -500,11 +500,11 @@ export function Chat(props: { autoplay?: string } = {}) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }}>
+      <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
         <View style={{ flex: 1 }}>
           <If when={messages().length} else={empty}>
             {/* One selection across messages: in the List, over the rows that are mounted. */}
-            <SelectionArea style={{ flex: 1 }}>
+            <View selectable style={{ flex: 1 }}>
               <List
                 ref={list}
                 each={messages()}
@@ -541,7 +541,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                   );
                 }}
               </List>
-            </SelectionArea>
+            </View>
           </If>
 
           {/* Jump to the latest message: shown while scrolled up. */}
@@ -754,7 +754,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             </View>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

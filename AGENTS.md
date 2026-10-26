@@ -27,7 +27,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 crates/
   nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
-                       `nsh`'s primitives written as Rust components (`element/`: `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`);
+                       CSS environment variables in padding and margin (`env(safe-area-inset-*)`, `env(keyboard-inset-height)`: `Core::sync_env`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); opening URLs outside the app (`open_url.rs`: the check, the flow); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
@@ -43,7 +43,7 @@ crates/
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`element/class.rs`), JS's calls into
                        Rust and what comes back, typed (`element/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
                        toolchain (`element/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
-                       modules (`runtime/`: `nsh`'s `SafeAreaView`, `Keyboard` and `Image` functions, `nsh/android`'s BackHandler, ...; their JS face is made from their specs),
+                       modules (`runtime/`: `nsh`'s `Keyboard` and `Image` functions, `nsh/mobile`'s BackHandler, ...; their JS face is made from their specs),
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
@@ -62,7 +62,7 @@ crates/
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
   nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
-                       app's side of the channel with the embedding app (`host_channel.rs`: `nsh/host`), the
+                       app's side of the channel with the embedding app (`host_channel.rs`: `nsh`'s `host`), the
                        renderer of compiled JSX (`dom.rs`, `nsh:rt`), JS's reactive graph (`reactive.rs`: `nsh-core`'s
                        graph with JS values: signals, memos, effects, owners, context), `resource` (`resource.rs`), Rust components' and modules' JS face (`components.rs`), navigation,
                        lists, canvas, animation (`navigation.rs`, `list.rs`, `canvas.rs`, `animated.rs`), touches and the
@@ -88,7 +88,7 @@ crates/
                        the steps, stand-in network and storage, fetch on ureq; no QuickJS, for Rust apps' `cargo test`); feature
                        `js`: `nsh test`'s side, the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
                        engine of its own and each app it opens on a headless one (`run.rs`; the web page's host module,
-                       nsh.json `web.host`, answers `nsh/host` there: `page_host.rs`) or a real host (`driver.rs`, `--target`),
+                       nsh.json `web.host`, answers `nsh`'s `host` there: `page_host.rs`) or a real host (`driver.rs`, `--target`),
                        apps' headless runners (`runner.rs`); feature `bundle`: building entries in process (TSX entries of
                        `cargo test`, the CLI's compiler); feature `agent`: a real host's test agent (`agent.rs`, the dev hosts'),
                        which takes the steps with the platform's input
@@ -157,7 +157,7 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
-                      with a test; host-echo: an app calling its web page's host (`nsh/host`, nsh.json `web.host`), the host
+                      with a test; host-echo: an app calling its web page's host (`nsh`'s `host`, nsh.json `web.host`), the host
                       module and their tests), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
                       `cargo run -p example-embed-gpui`) and the app they run (embedded: uses a native component the samples
@@ -298,11 +298,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `CARGO_TARGET_DIR` behavior; do not add Cargo configuration or change that environment variable just to organize
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
-  `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
+  `nsh` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
   TSX imports every primitive from `nsh`, as Rust does from `nsh_core::element` (and `nsh_core::prelude`).
   Which side an element is on: `nsh-core` holds the foundational elements, what draws or lays out content and what
   the surface reports (`View`, `Text`, `Scroll`, `List`, `Image`, `Canvas`, `Overlay`, `Video`, `WebView`,
-  `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`, with `safeArea()`, `safeAreaInsets()`, `Keyboard` and
+  selectable views, the `env()` insets of padding and margin, with `safeArea()`, `safeAreaInsets()`, `Keyboard` and
   `keyboardFrame()`); `nsh-base` holds the functional components, controls a
   user operates (`Button`, `Input`, `Checkbox`, `Switch`, `Slider`, `Editor`, ...), even when one is a native view the
   core makes (`Input`: `nsh_base::input()`, TSX `nsh/base`). The Rust home and the TS home of an element are the
@@ -314,14 +314,14 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   prop of pages and dialogs; controls such as toggles, sliders and selects as their behavior is written). Names follow `gpui-base`'s
   (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two
-  registries exporting one name panic, `Registry::merged`). Platform-only APIs go to `nsh/ios` / `nsh/android`, what iOS and Android share to `nsh/mobile`, what the desktops share to `nsh/desktop`,
+  registries exporting one name panic, `Registry::merged`). Mobile-only APIs (iOS, Android or both) go to `nsh/mobile`, desktop-only ones to `nsh/desktop`,
   platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}`. `nsh` has no catch-all re-exports. Beside
   them sits a fixed catalog of eleven standard modules with bare specifiers (`nsh_core::js::STANDARD_MODULES`:
   `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib`):
   Node-shaped subsets compatible with gpui-shell's, built on the same native machinery (typed registries, capability
   checks in Rust) with generated declarations. Exactly these names import; `node:` prefixes and other Node modules
   (`fs`, `events`, `util`, ...) are refused. Files and processes are these modules (`fs/promises`, `process`), never
-  an `nsh/<module>`; the catalog grows only by a design decision.
+  part of `nsh`, `nsh/mobile` or `nsh/desktop`; the catalog grows only by a design decision.
 - **Backward compatible, from the first recorded release on.** Apps are delivered to host apps as plugins and may
   never be built again, so every release runs every app built for an earlier compatible one. What a release recorded
   in [`longbridge/nsh-compat`](https://github.com/longbridge/nsh-compat) shipped is never removed or renamed: modules,
@@ -399,10 +399,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   (legacy, to migrate) does not list (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
-  (`View`, `Text`, `Scroll`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`, `SafeAreaView`,
-  `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::element` holds them, every base
+  (`View`, `Text`, `Scroll`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`), as `nsh_core::element` holds them, every base
   component from `nsh/base` (`Input`, `Dialog`, `Button`, `NavStack`, ...), and
-  `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
+  `InputAccessoryView` from `nsh/mobile`; the compiler makes their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
   They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.

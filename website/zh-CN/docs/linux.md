@@ -154,7 +154,7 @@ view.load(Bundle::source(code).into());
 | Ctrl+W、F11、Ctrl+Q | 关闭窗口、全屏、退出（`nsh package` 和 `nsh run` 的应用） |
 | Ctrl+R | 重新加载最新的构建（`nsh run`） |
 
-应用自己的快捷键（[`nsh/keymap`](../modules/nsh-keymap.md)）是一个窗口范围的快捷键控制器；Ctrl+Q 和 F11 不能被绑定。
+应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）是一个窗口范围的快捷键控制器；Ctrl+Q 和 F11 不能被绑定。
 
 快捷键适用于任何键盘布局（在西里尔或希腊字母布局下，Ctrl+C 是美式布局中输入 C 的那个键）。确认输入法组合文字（中文、日文等）的回车
 不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`；粘贴的文字不报告。

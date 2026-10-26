@@ -57,17 +57,17 @@ mount(App);
 在 TSX 中，每个标签都使用 PascalCase，并指向作用域中的绑定：原语从 `nsh` 导入，基础组件从 `nsh/base` 导入。只有 `<If>` 和 `<Each>` 是无需导入的全局组件。`<view>` 这样的小写标签会导致构建错误，因为 TypeScript 只能对照每个名称一个的全局类型来检查它，`List`、`Each` 这类泛型组件就无法推断条目类型。编译器通过导入识别这些元素并就地创建原生视图，所以导入它们在运行时没有任何开销。参见 [JSX 与组件](../docs/jsx-and-components.md)。
 
 ```tsx
-import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeAreaView } from "nsh";
+import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView } from "nsh";
 import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
 ## 原语
 
-TSX 从 `nsh` 导入，Rust 从 `nsh_core::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::element`）。
+TSX 从 `nsh` 导入，Rust 从 `nsh_core::prelude` 导入。
 
 | 元素 | Rust | 原生视图（iOS / Android） | 页面 |
 |---|---|---|---|
-| `<View>` | `view()` | UIView / ViewGroup | [View](./view.md) |
+| `<View>` | `view()` | UIView / ViewGroup；设置 `selectable` 后，其中的文字一起选择 | [View](./view.md)、[文字选择](./text-selection.md) |
 | `<Text>` | `text(content)` | CoreText 视图 / StaticLayout 视图 | [Text](./text.md) |
 | `<Image>` | `image(src)` | 带图片图层的视图 / 图片视图 | [Image](./image.md) |
 | `<Scroll>` | `scroll()` | UIScrollView / ScrollView | [Scroll](./scroll.md) |
@@ -76,11 +76,10 @@ TSX 从 `nsh` 导入，Rust 从 `nsh_core::prelude` 导入（`SafeAreaView`、`K
 | `<WebView>` | `web_view(url)`、`web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `video(url)` | AVPlayerLayer / TextureView 上的 MediaPlayer | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | 窗口（或所在对话框）之上的视图，相对锚点放置 | [Overlay](./overlay.md) |
-| `<SafeAreaView>` | `safe_area_view()` | 一个视图：让内容避开刘海、系统栏和主屏幕指示条 | [SafeAreaView](./safe-area-view.md) |
-| `<KeyboardAvoidingView>` | `keyboard_avoiding_view()` | 一个视图：让内容保持在软键盘之上 | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
-| `<SelectionArea>` | `selection_area()` | 一个视图：让其中的文字一起选择 | [SelectionArea](./selection-area.md) |
 | `<If>`、`<Each>` | `when(..)`、`each(..)`、`dynamic(..)` | 控制流：它们选出的元素 | [控制流](./control-flow.md) |
-| `<InputAccessoryView>`（`nsh/ios`） | `input_accessory_view(id)` | iOS 上键盘上方的工具栏 | [nsh/ios](../modules/nsh-ios.md) |
+| `<InputAccessoryView>`（`nsh/mobile`） | `input_accessory_view(id)` | iOS 上键盘上方的工具栏 | [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview) |
+
+padding 和 margin 用 CSS 的 `env()` 让内容避开系统 UI：`env(safe-area-inset-top)` 及其他边（[安全区](./safe-area.md)），以及 `env(keyboard-inset-height)`（[键盘](./keyboard.md)）。
 
 ## Base
 
@@ -329,7 +328,7 @@ view().absolute().inset_0().focusable(false).on_press(close)
 
 ### 驱动动画值的手势
 
-这些属性把手势绑定到[原生动画值](../modules/nsh-animated.md)，值在 UI 线程上变化，每帧都不经过应用代码。参见[触摸与手势](../docs/touch-and-gestures.md)。
+这些属性把手势绑定到[原生动画值](../modules/nsh.md#animation)，值在 UI 线程上变化，每帧都不经过应用代码。参见[触摸与手势](../docs/touch-and-gestures.md)。
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
@@ -355,7 +354,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 `onResponderGrant` 返回 `true` 可阻止原生滚动视图接管触摸。`panActivation`
 （`{ activeOffsetX, activeOffsetY, failOffsetX, failOffsetY }`）让视图只在平台激活它的拖动后才成为响应者，
 滚动视图里的拖动因此把另一个轴留给滚动视图（[触摸与手势](../docs/touch-and-gestures.md#滚动视图里的拖动panactivation)）。
-[`nsh/gesture`](../modules/nsh-gesture.md) 中的 `PanResponder` 就构建在它们之上。在 Rust 中，`.on_touch(..)` 接收每次触摸（`TouchEvent`），`.claim_touches(..)` 决定视图何时接管触摸，`.on_responder_grant(..)`、`.on_responder_move(..)`、`.on_responder_release(..)` 等跟随响应者状态。
+[`PanResponder`](../modules/nsh.md#panresponder) 中的 `PanResponder` 就构建在它们之上。在 Rust 中，`.on_touch(..)` 接收每次触摸（`TouchEvent`），`.claim_touches(..)` 决定视图何时接管触摸，`.on_responder_grant(..)`、`.on_responder_move(..)`、`.on_responder_release(..)` 等跟随响应者状态。
 
 ### 无障碍
 
@@ -431,7 +430,7 @@ view()
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `List` | 滚动到内容末尾。 |
 | `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebView` | 控制页面。 |
 | `seek(seconds)` | `seek(seconds)` | `Video` | 跳转到某个时间点。 |
-| `command(name, args?)` | `command(name, args)` | 原生组件 | 调用已注册原生组件的命令（[`nsh/native`](../modules/nsh-native.md)）。 |
+| `command(name, args?)` | `command(name, args)` | 原生组件 | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |
 
 ```rust tabs
 let field = element_ref();

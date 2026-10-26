@@ -406,7 +406,7 @@ pub fn ring() -> impl IntoElement {
 
 ```tsx tabs
 import { Canvas, mount, signal, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 
 function Ring() {
   const progress = createAnimatedValue(0.3);

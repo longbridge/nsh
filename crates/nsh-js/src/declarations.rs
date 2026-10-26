@@ -80,7 +80,7 @@ export interface WebProps {}
 export interface AndroidProps extends AndroidHostProps {}
 
 /** `<View>` */
-export interface ViewProps extends CommonProps {
+export interface ViewProps extends CommonProps, ViewHostProps {
   style?: StyleProp<ViewStyle>;
 }
 
@@ -310,8 +310,16 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
             body.push('\n');
         }
         body.push_str(&generated(m.name));
+        // What nsh-js declares itself, the sources it serves included.
+        let own: Vec<Item> = m
+            .also
+            .iter()
+            .filter_map(|a| MODULES.iter().find(|o| o.name == *a))
+            .flat_map(|o| o.exports.iter().copied())
+            .chain(m.exports.iter().copied())
+            .collect();
         for registry in registries.iter().filter(|r| r.specifier() == Some(m.name)) {
-            registry_part(&mut body, registry, m.exports);
+            registry_part(&mut body, registry, &own);
         }
         // A UI set is a module of its own (the command line refuses one
         // named as nsh's): nothing of nsh's to leave out.

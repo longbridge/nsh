@@ -306,7 +306,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const offset = createAnimatedValue(0);
@@ -562,7 +562,7 @@ let scroll!: YNode;
 
 ## 滚动视图与键盘
 
-NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。滚动视图之外的内容（例如固定在底部的消息栏）使用 [`KeyboardAvoidingView`](./forms-and-keyboard.md#滚动视图之外的内容keyboardavoidingview)。
+NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。滚动视图之外的内容（例如固定在底部的消息栏）以 `env(keyboard-inset-height)` 作为底部内边距（见[滚动视图之外的内容](./forms-and-keyboard.md#滚动视图之外的内容)）。
 
 有两个属性决定滚动和点击如何与键盘交互：
 

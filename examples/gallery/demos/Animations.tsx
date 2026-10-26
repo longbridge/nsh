@@ -12,7 +12,7 @@ import {
   type MotionPreset,
   type MotionSpec,
   motions,
-} from "nsh/animated";
+} from "nsh";
 import { Button as BaseButton, Tab, Tabs } from "nsh/base";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, radius, Segmented, tabPress, tints } from "../ui";

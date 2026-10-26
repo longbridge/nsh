@@ -1,5 +1,5 @@
 import { cleanup, mount, signal, Text, View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
+import { reduceMotion } from "nsh";
 import { Button, Progress, Switch } from "nsh/base";
 import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
 
