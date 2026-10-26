@@ -19,7 +19,7 @@ children), and in TSX `backdropClass` / `backdropStyle` add a backdrop behind it
 ```rust tabs
 use nsh_base::{button, dialog};
 use nsh_core::element::safe_area_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// A blue button with a white label.
 fn primary(label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
@@ -88,7 +88,7 @@ while it is in the view and dismissed when it leaves it, so `when` holds it. Eit
 safe-area insets, which [`SafeAreaView`](./safe-area-view.md) and `safeAreaInsets()` (`cx.insets()` in a Rust
 component) inside it read. [`Button`](./button.md), also from `nsh/base`, is a press target styled by the app.
 
-`nsh_core::element::prelude` also has an older, deprecated `dialog` function: import `nsh_base::dialog` by name, as above,
+`nsh_core::prelude` also has an older, deprecated `dialog` function: import `nsh_base::dialog` by name, as above,
 and the explicit import takes its place. For the system's alert or action sheet, use
 [`AlertDialog`](./alert-dialog.md).
 

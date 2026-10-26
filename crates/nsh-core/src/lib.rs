@@ -38,6 +38,7 @@ mod ops;
 pub mod overlay;
 pub mod picker;
 pub mod platform;
+pub mod prelude;
 mod props;
 pub mod reactive;
 pub mod resource;

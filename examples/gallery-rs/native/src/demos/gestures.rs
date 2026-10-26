@@ -6,7 +6,8 @@
 use nsh_core::{
     Bounds, Points, Ripple, TouchPhase, TouchPoint,
     animation::{Curve, EaseMode},
-    element::{Animation, BoxShadow, TouchEvent, prelude::*},
+    element::{Animation, BoxShadow, TouchEvent},
+    prelude::*,
 };
 
 use crate::ui::{

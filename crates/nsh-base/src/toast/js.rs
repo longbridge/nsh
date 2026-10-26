@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use nsh_core::{
     JsonValue, Points,
-    element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes, prelude::*},
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes},
+    prelude::*,
     time::now,
 };
 

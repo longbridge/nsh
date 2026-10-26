@@ -44,7 +44,7 @@ Use these boundaries:
 - **app component:** a repeated domain-aware pattern;
 - **component library:** styled, general-purpose UI, the app's own or the community's, built on `nsh/base`;
 - **`nsh/base`:** reusable behavior without product presentation: navigation, dialogs, popovers, menus, sheets, a
-  press target, safe areas, the keyboard;
+  press target;
 - **`nsh`:** the primitives, styles, layout, reactivity and the environment.
 
 ### Lay out an app's files
@@ -322,7 +322,7 @@ in Rust and placed from Rust and TSX:
 
 ```rust tabs
 use nsh_base::{button, theme};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// The props of [`QuantityStepper`].
 #[derive(Debug, Clone, PartialEq, Props)]

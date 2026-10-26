@@ -31,7 +31,7 @@ impl Picker {
     ) -> Result<Later<Vec<PickedImage>>, JsError> {
         let request = options.unwrap_or_default().request()?;
         Ok(Later::new(async move {
-            let files = crate::element::prelude::pick_images(request).await;
+            let files = crate::prelude::pick_images(request).await;
             Ok::<_, JsError>(files.into_iter().map(PickedImage).collect())
         }))
     }

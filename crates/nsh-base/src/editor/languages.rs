@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use nsh_core::element::prelude::{global, try_global};
+use nsh_core::prelude::{global, try_global};
 
 use super::{
     highlight::{Factory, Syntax},

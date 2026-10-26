@@ -17,11 +17,11 @@ import {
   WebView,
   signal,
 } from "nsh";
-import * as oldCanvas from "nsh/canvas";
-import * as oldImage from "nsh/image";
-import * as oldList from "nsh/list";
-import * as oldVideo from "nsh/video";
-import * as oldWebView from "nsh/webview";
+import * as oldCanvas from "nsh";
+import * as oldImage from "nsh";
+import * as oldList from "nsh";
+import * as oldVideo from "nsh";
+import * as oldWebView from "nsh";
 
 function App() {
   let kept: CanvasRenderingContext2D | undefined;

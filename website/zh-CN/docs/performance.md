@@ -58,7 +58,7 @@ computed 值一次性看到所有写入，而不是每次写入后都运行一�
 `when`（`<If>`）的一个分支、`each`（`<Each>`）的各行。不会为了找出变化而重新渲染整棵子树。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[derive(Clone, PartialEq)]
 struct Quote {
@@ -125,7 +125,7 @@ core 只发送变化的部分：新视图不带默认样式，也不带空的事
 动画值（[动画](./animation.md)：Rust 中的 `animated_value`，TSX 中的 [`nsh/animated`](../modules/nsh-animated.md)）则以原生方式运行动画：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 let scroll_y = animated_value(0.0);
 

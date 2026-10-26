@@ -10,8 +10,9 @@ use nsh_core::{
     Points, Size,
     element::{
         AutoCapitalize, AutoFill, KeyboardDismissMode, LayoutAnimation, ReturnKeyType,
-        SubmitBehavior, View, keyboard_avoiding_view, prelude::*, safe_area_view,
+        SubmitBehavior, View, keyboard_avoiding_view, safe_area_view,
     },
+    prelude::*,
 };
 
 use crate::{

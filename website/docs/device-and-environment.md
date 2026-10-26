@@ -10,21 +10,21 @@ demo: guide-device
 
 The environment an app runs in changes while it runs: the window resizes (rotation, split view, a Mac window), the user switches to dark mode or a larger text size, the keyboard comes and goes. NSH exposes each of these as a **reactive accessor**: call it like a signal, and whatever read it (a style, a text, a computed value) updates when it changes. There are no listeners to add or remove.
 
-In Rust the accessors are functions of `nsh_core::element::prelude`; in TSX they come from the modules listed.
+In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come from the modules listed.
 
 | Rust | TSX | Value |
 |---|---|---|
 | `window()` | `windowSize()` (`nsh/device`) | The surface's width and height, in points. |
 | `dark()` | `colorScheme()` (`nsh/device`) | Dark or light: the system's, or the app's own (`set_color_scheme`, `setColorScheme`). |
 | `font_scale()` | `fontScale()` (`nsh/device`) | The user's preferred text size relative to the default (1 is the default). |
-| `safe_area()` | `safeArea()` (`nsh/base`) | Insets of the surface not covered by system UI: top, right, bottom, left. |
-| `cx.insets()` | `safeAreaInsets()` (`nsh/base`) | The insets where the calling component renders (a page, a dialog). |
-| `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh/base`) | The software keyboard's height and animation duration. |
+| `safe_area()` | `safeArea()` (`nsh`) | Insets of the surface not covered by system UI: top, right, bottom, left. |
+| `cx.insets()` | `safeAreaInsets()` (`nsh`) | The insets where the calling component renders (a page, a dialog). |
+| `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh/device`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh/accessibility`) | See [Accessibility](./accessibility.md). |
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -50,9 +50,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, Text, View } from "nsh";
+import { mount, Text, View, safeArea } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
-import { safeArea } from "nsh/base";
 
 function App() {
   return (
@@ -72,7 +71,7 @@ mount(App);
 `window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when NSH is embedded. Use it to change the layout, not only sizes:
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn gallery() -> impl IntoElement {
     let columns = || {
@@ -130,7 +129,7 @@ view()
 For anything else, read `dark()` (TSX: `colorScheme()`) in a closure or a computed value; in TSX, for more than a few colors, derive a palette once:
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 // `dark()` is reactive: the closure runs again when the appearance changes.
 view()
@@ -167,7 +166,7 @@ An app that is always dark (or always light) says so in `nsh.json`, and `dark()`
 `set_color_scheme(Appearance::Dark)` (TSX: `setColorScheme` from `nsh/device`) changes it at run time, for an in-app appearance setting; `Appearance::System` (`"system"`) follows the system again:
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 view()
     .on_press(move || {
@@ -225,7 +224,7 @@ The text size scales text: every text and input that allows font scaling, and th
 `locale()` is the user's locale, as a BCP 47 tag (`locale().as_str()` in Rust). In TSX, `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn greeting() -> &'static str {
     match locale().as_str().split('-').next() {
@@ -261,7 +260,7 @@ Notches, the home indicator, the status bar, Android's navigation bar and the Ma
 
 ```rust tabs
 use nsh_core::element::{Edge, safe_area_view};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn screen() -> impl IntoElement {
     safe_area_view()
@@ -284,8 +283,7 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View, SafeAreaView } from "nsh";
-import { safeAreaInsets } from "nsh/base";
+import { View, SafeAreaView, safeAreaInsets } from "nsh";
 
 function Screen() {
   return (
@@ -326,7 +324,7 @@ TSX's `platform` in full:
 | `platform.select(spec)` | The value for this platform; see [Platform-specific code](./platform-specific.md#platformselect). |
 
 ```rust tabs
-use nsh_core::element::{Os, prelude::*};
+use nsh_core::{element::Os, prelude::*};
 
 let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().0 >= 30);
 ```

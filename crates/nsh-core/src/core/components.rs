@@ -4963,7 +4963,7 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn route_emit(
         &mut self,
         host: NodeId,
-        event: Box<dyn crate::element::element::AnyEvent>,
+        event: Box<dyn crate::element::builder::AnyEvent>,
     ) {
         match self.components.owners.get(&host).copied() {
             Some(parent) => {

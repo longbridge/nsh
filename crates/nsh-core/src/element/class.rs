@@ -871,7 +871,10 @@ pub(crate) mod __private {
 
 #[cfg(test)]
 mod tests {
-    use crate::element::{Registry, declarations, prelude::*};
+    use crate::{
+        element::{Registry, declarations},
+        prelude::*,
+    };
 
     /// A function the generated code must not call for `core::mem::drop`.
     #[allow(dead_code)]
@@ -1180,7 +1183,7 @@ export declare const Tools: ToolsModule;
 
     /// A component exported as `Tally`.
     mod view {
-        use crate::element::prelude::*;
+        use crate::prelude::*;
 
         pub(super) struct Tally;
 

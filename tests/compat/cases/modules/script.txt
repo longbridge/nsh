@@ -42,7 +42,6 @@ tap id:call
 expect Calls: done, remove function
 covers [nsh/android] isAvailable
 covers [nsh/android] BackHandler
-covers [nsh/android] Toast
 # mod-clipboard
 tap id:case-mod-clipboard
 # the headless runtime: writes go through, reads are promises that stay

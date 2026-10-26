@@ -27,7 +27,7 @@ A family installed on the device can be named directly (`"Georgia"`, `"Avenir Ne
 A Rust crate ships the files of its `assets/` directory: `registry.assets(assets!())` in its `#[native_module]` function ships them all, and `asset!("fonts/Pacifico-Regular.ttf")` is a `FontAsset` whose `family` is the font's family name, read from the file when the crate compiles. In TSX, import a `.ttf` or `.otf` file: the import evaluates to the font's family name. Either way the font is registered before the first frame, so it is ready when text first renders:
 
 ```rust tabs
-use nsh_core::element::{FontAsset, prelude::*};
+use nsh_core::{element::FontAsset, prelude::*};
 
 const PACIFICO: FontAsset = asset!("fonts/Pacifico-Regular.ttf");
 

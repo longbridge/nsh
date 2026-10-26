@@ -13,7 +13,7 @@
 //! (a transparent backdrop takes it). A popover stays anchored to its
 //! trigger everywhere: what it shows belongs next to it.
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// Why a popup opened or closed (`onOpenChange`'s `reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]

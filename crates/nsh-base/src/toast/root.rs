@@ -2,7 +2,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_core::{TouchEvent, TouchPhase, element::prelude::*};
+use nsh_core::{TouchEvent, TouchPhase, prelude::*};
 
 use super::ToastTransitionStatus;
 

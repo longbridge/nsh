@@ -6,10 +6,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use crossbeam_channel::Receiver;
 use nsh_base::{Theme, theme};
-use nsh_core::{
-    ApproxTextEngine, Color, MountBatch, MountItem, Size,
-    element::{Root, prelude::*},
-};
+use nsh_core::{ApproxTextEngine, Color, MountBatch, MountItem, Size, element::Root, prelude::*};
 use nsh_engine::{App, ColorScheme, Engine, EngineConfig, Environment};
 
 use crate::ChannelSink;

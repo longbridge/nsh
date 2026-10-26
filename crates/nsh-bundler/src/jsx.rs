@@ -64,9 +64,7 @@ pub(crate) enum Compiled {
 
 /// nsh's primitives, by their home (module, export), and what their tags
 /// compile to: `nsh`'s, `nsh/base`'s `Input` and `Dialog` and `nsh/ios`'s
-/// `InputAccessoryView`, then the modules that exported them before `nsh`
-/// did (deprecated, still compiled alike). The first home of a name is the
-/// one hints name.
+/// `InputAccessoryView`.
 pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "View", Compiled::Host("view")),
     ("nsh", "Text", Compiled::Host("text")),
@@ -84,11 +82,6 @@ pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
         "InputAccessoryView",
         Compiled::Component("inputaccessory"),
     ),
-    ("nsh/image", "Image", Compiled::Host("image")),
-    ("nsh/webview", "WebView", Compiled::Host("webview")),
-    ("nsh/video", "Video", Compiled::Host("video")),
-    ("nsh/list", "List", Compiled::List),
-    ("nsh/canvas", "Canvas", Compiled::Component("canvas")),
 ];
 
 /// The control flow tags, global unless a binding of the name shadows them.
@@ -1454,39 +1447,7 @@ mod tests {
         assert!(!code.contains(r#"from "nsh";"#), "{code}");
     }
 
-    #[test]
-    fn primitives_compile_in_place_by_their_imports() {
-        let code = flat(
-            &compile(
-                r#"import { View as Box, Text } from "nsh";
-            import { Image } from "nsh/image";
-            import { WebView } from "nsh/webview";
-            import { List } from "nsh/list";
-            import { Canvas } from "nsh/canvas";
-            export const a = <Box><Text>t</Text><Image src="x" /><WebView src="about:blank" /></Box>;
-            export const b = <List each={[1]}>{(i) => <Text>{i()}</Text>}</List>;
-            export const c = <Canvas draw={() => {}} />;
-            Image.prefetch("x");"#,
-            )
-            .unwrap(),
-        );
-        for tag in ["view", "text", "image", "webview"] {
-            assert!(code.contains(&format!(r#"_$element("{tag}")"#)), "{code}");
-        }
-        assert!(code.contains("_$component(_$list, {"), "{code}");
-        // `Canvas` is a native component of its own (the drawing).
-        assert!(code.contains("_$component(Canvas, {"), "{code}");
-        // Used as a value, `Image` stays imported.
-        assert!(
-            code.contains(r#"import { Image } from "nsh/image";"#),
-            "{code}"
-        );
-        assert!(!code.contains("nsh/webview"), "{code}");
-        assert!(!code.contains("nsh/list"), "{code}");
-    }
-
-    /// Every primitive compiles alike imported from `nsh`, where it lives
-    /// now, as from the module it was first exported from.
+    /// Every primitive compiles in place by its import from `nsh`.
     #[test]
     fn primitives_from_nsh_compile_in_place() {
         let code = flat(

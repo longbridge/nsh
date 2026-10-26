@@ -7,10 +7,7 @@ use std::{
     time::Duration,
 };
 
-use nsh_core::{
-    element::{Os, prelude::*},
-    keymap::When,
-};
+use nsh_core::{element::Os, keymap::When, prelude::*};
 
 use super::{
     EditorCommand, EditorContextMenuEvent, EditorEvent, EditorFoldRange, EditorProps,

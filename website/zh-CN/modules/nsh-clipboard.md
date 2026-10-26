@@ -6,10 +6,10 @@ order: 8.5
 
 # nsh/clipboard
 
-剪贴板 API 读写系统剪贴板：各平台都能读写文本（iOS 上是 `UIPasteboard`，Android 上是 `ClipboardManager`，桌面上是 `NSPasteboard`、GDK 和 Win32 剪贴板，Web 上是 `navigator.clipboard`）；iOS、桌面和 Web 还能读写图片，桌面和 Mac Catalyst 还能读到在文件管理器里复制的文件。Rust 代码调用 `nsh_core::element::prelude` 中的函数（`set_clipboard`、`clipboard_string` 等）；TSX 从 `nsh/clipboard` 导入 `Clipboard`。
+剪贴板 API 读写系统剪贴板：各平台都能读写文本（iOS 上是 `UIPasteboard`，Android 上是 `ClipboardManager`，桌面上是 `NSPasteboard`、GDK 和 Win32 剪贴板，Web 上是 `navigator.clipboard`）；iOS、桌面和 Web 还能读写图片，桌面和 Mac Catalyst 还能读到在文件管理器里复制的文件。Rust 代码调用 `nsh_core::prelude` 中的函数（`set_clipboard`、`clipboard_string` 等）；TSX 从 `nsh/clipboard` 导入 `Clipboard`。
 
 ```rust tabs
-use nsh_core::element::prelude::*; // set_clipboard、clipboard_string、clipboard_image……
+use nsh_core::prelude::*; // set_clipboard、clipboard_string、clipboard_image……
 use nsh_core::element::ClipboardImage;
 ```
 
@@ -34,7 +34,7 @@ interface ClipboardImage {
 }
 ```
 
-| TS | Rust（`nsh_core::element::prelude`） |
+| TS | Rust（`nsh_core::prelude`） |
 |---|---|
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
@@ -57,7 +57,7 @@ writeText(text: string): Promise<void>;
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn copy_button(code: Signal<String>) -> impl IntoElement {
     let copied = signal(false);
@@ -137,7 +137,7 @@ readImage(): Promise<ClipboardImage | null>;
 
 ```rust tabs
 use base64::Engine as _;
-use nsh_core::element::{ClipboardImage, prelude::*};
+use nsh_core::{element::ClipboardImage, prelude::*};
 
 fn attachments() -> impl IntoElement {
     let attachments = signal(Vec::<ClipboardImage>::new());

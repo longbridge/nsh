@@ -2,7 +2,6 @@
 //! `shot`, which turns on GPUI's test support): a surface drawn by GPUI
 //! and given GPUI's input, with the engine running on its own thread.
 
-use nsh_base::input;
 use std::{
     rc::Rc,
     time::{Duration, Instant},
@@ -12,6 +11,7 @@ use gpui::{
     AnyElement, App as GpuiApp, Entity, Focusable, IntoElement, Styled, TestAppContext,
     VisualTestContext, Window, div,
 };
+use nsh_base::input;
 
 use crate::{App, AppOptions, AppView, Bundle, NativeComponent, Root};
 
@@ -426,7 +426,7 @@ impl Whose {
 
     /// As a task, after it waited.
     pub(crate) async fn later() -> String {
-        nsh_core::element::prelude::timer(Duration::from_millis(5)).await;
+        nsh_core::prelude::timer(Duration::from_millis(5)).await;
         desk()
     }
 }
@@ -508,7 +508,7 @@ fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut T
 
 /// A Rust view (`test/keys`) that binds a keystroke of its own.
 mod rust_keys {
-    use nsh_core::element::{Registry, prelude::*};
+    use nsh_core::{element::Registry, prelude::*};
 
     /// The set the app imports `Shortcut` from.
     pub(super) fn registry() -> Registry {
@@ -620,7 +620,7 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// A pad inside 8 points of padding. A press writes where it was in the
 /// pad and in the window.
 mod press_point {
-    use nsh_core::element::prelude::*;
+    use nsh_core::prelude::*;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {
@@ -919,7 +919,7 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
 const TWO_ASSET_ROOTS: &str = r#"
 import { mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 
 function App() {
   const text = signal("waiting");

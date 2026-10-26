@@ -12,7 +12,7 @@ demo: el-keyboard-avoiding-view
 
 ```rust tabs
 use nsh_core::element::keyboard_avoiding_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn chat() -> impl IntoElement {
     let draft = signal(String::new());
@@ -92,7 +92,7 @@ mount(App);
 
 ```rust tabs
 use nsh_core::element::{AvoidBehavior, keyboard_avoiding_view};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn sign_in() -> impl IntoElement {
     keyboard_avoiding_view()
@@ -117,11 +117,11 @@ fn sign_in() -> impl IntoElement {
 
 ## 隐藏键盘
 
-`Keyboard.dismiss()` 让当前获得焦点的输入框失去焦点，从而隐藏键盘。没有输入框获得焦点时，什么也不改变。Rust 组件调用 `dismiss_keyboard()`。
+`nsh` 的 `Keyboard.dismiss()` 让当前获得焦点的输入框失去焦点，从而隐藏键盘。没有输入框获得焦点时，什么也不改变。Rust 组件调用 `dismiss_keyboard()`。
 
 ```rust tabs
 use nsh_base::button;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn done() -> impl IntoElement {
     button()
@@ -135,8 +135,8 @@ fn done() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Text } from "nsh";
-import { Button, Keyboard } from "nsh/base";
+import { Text, Keyboard } from "nsh";
+import { Button } from "nsh/base";
 
 function Done() {
   return (
@@ -161,7 +161,7 @@ function Done() {
 两者都是响应式的：读取它们的 effect、JSX 表达式或样式闭包会在键盘显示、隐藏或改变高度时重新运行。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn message_bar() -> impl IntoElement {
     view()
@@ -181,8 +181,8 @@ fn message_bar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { keyboardFrame, safeArea, Input } from "nsh/base";
+import { View, keyboardFrame, safeArea } from "nsh";
+import { Input } from "nsh/base";
 
 function MessageBar() {
   const insets = safeArea();

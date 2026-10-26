@@ -3,9 +3,6 @@
 //! same layer. The elements are the core's host elements ([`Stack`],
 //! [`Screen`], [`Modal`]); these are where apps make them.
 
-// The core's builders, deprecated for apps in favor of these.
-#![allow(deprecated)]
-
 use nsh_core::element::{Modal, Screen, Stack};
 
 /// A native navigation stack (TSX: `NavStack`): its children are its

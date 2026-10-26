@@ -1958,11 +1958,6 @@ final class Mounter {
                 SystemUi.dialog(this, dialog, title, message, cancelable, sheet, texts, styles);
                 break;
             }
-            case 13: {
-                String text = (String) objects[b.getInt()];
-                SystemUi.toast(context, text, b.getInt() != 0);
-                break;
-            }
             case 14: {
                 boolean block = b.getInt() != 0;
                 clearJsResponder();

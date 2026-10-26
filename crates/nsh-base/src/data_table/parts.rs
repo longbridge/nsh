@@ -2,7 +2,7 @@
 //! ([`DataTableClasses`]) and inline styles ([`DataTableStyles`]) by part,
 //! over the table's defaults (the theme's tokens).
 
-use nsh_core::element::{Style, prelude::*};
+use nsh_core::{element::Style, prelude::*};
 
 use crate::text_view::PartStyle;
 

@@ -5,7 +5,8 @@
 
 use nsh_core::{
     animation::{Curve, EaseMode},
-    element::{Animation, TransformKind, prelude::*},
+    element::{Animation, TransformKind},
+    prelude::*,
 };
 
 use crate::ui::{

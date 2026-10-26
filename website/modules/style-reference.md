@@ -6,7 +6,7 @@ order: 16
 
 # Style reference
 
-This page lists every key of the `style` prop, and the method of `Styled` that sets it in Rust. Rust components style elements with typed methods named after Tailwind's utilities (`.p_4()`, `.rounded(px(12.0))`, `.bg(color)`, from `nsh_core::element::prelude`), which lower to the same keys; TSX passes `style` objects (and classes). The Rust column names the method; a value, a signal or a closure goes to most of them, and `.style_when(…)` / `.style_with(…)` make any of them conditional. The keys and their types come from the generated declarations in `.nsh/types/nsh/types.d.ts`, so your editor checks them as you type. Layout is flexbox with a column default, numbers are points, and the CSS features are there too: grid, gradients, box shadows, filters, blend modes, outlines, transitions and keyframe animations.
+This page lists every key of the `style` prop, and the method of `Styled` that sets it in Rust. Rust components style elements with typed methods named after Tailwind's utilities (`.p_4()`, `.rounded(px(12.0))`, `.bg(color)`, from `nsh_core::prelude`), which lower to the same keys; TSX passes `style` objects (and classes). The Rust column names the method; a value, a signal or a closure goes to most of them, and `.style_when(…)` / `.style_with(…)` make any of them conditional. The keys and their types come from the generated declarations in `.nsh/types/nsh/types.d.ts`, so your editor checks them as you type. Layout is flexbox with a column default, numbers are points, and the CSS features are there too: grid, gradients, box shadows, filters, blend modes, outlines, transitions and keyframe animations.
 
 For how to apply styles, combine them with classes and inherit text styles, see [Styling](../docs/styling.md). For the class syntax, see the [Tailwind reference](./tailwind-reference.md).
 
@@ -22,7 +22,7 @@ Each interface extends the one before it:
 | `ImageStyle` | `ViewStyle` | `<Image>` |
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn card() -> View {
     view().p_4().rounded(px(12.0)).bg(white()).shadow([BoxShadow {

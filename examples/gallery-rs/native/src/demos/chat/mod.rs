@@ -20,9 +20,8 @@ use std::{rc::Rc, time::Duration};
 use nsh_base::input;
 use nsh_core::{
     LayoutAnimation, Points, Size,
-    element::{
-        AccessibilityState, ScrollEvent, View, keyboard_avoiding_view, prelude::*, selection_area,
-    },
+    element::{AccessibilityState, ScrollEvent, View, keyboard_avoiding_view, selection_area},
+    prelude::*,
     time::Instant,
 };
 

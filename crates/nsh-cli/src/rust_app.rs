@@ -2233,7 +2233,7 @@ mod tests {
         write_crate(
             &dir.join("native/storage"),
             "storage",
-            "use nsh_core::element::prelude::*;\n\n#[nsh_core::element::native_module( \"app/storage\" )]\nfn native(r: &mut Registry) {}\n",
+            "use nsh_core::prelude::*;\n\n#[nsh_core::element::native_module( \"app/storage\" )]\nfn native(r: &mut Registry) {}\n",
             "",
         );
         let json = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
@@ -3056,7 +3056,7 @@ mod tests {
                 .starts_with("the description of the Rust crates: the description is in format 0")
         );
         // A specifier of nsh's own or of another crate.
-        for nsh in ["nsh/base", "nsh", "nsh/image"] {
+        for nsh in ["nsh/base", "nsh", "nsh/device"] {
             let error = read(&text(vec![set(nsh)]), &["charts"]).unwrap_err();
             assert!(
                 error.contains(&format!(

@@ -54,11 +54,6 @@ pub(super) mod watch {
     pub(in crate::core) const HINT: u8 = 2;
 }
 
-/// The classes of the bubble of an element's text `tooltip`: as little as
-/// shows it, drawn with the theme's `popover` tokens (the app's to change).
-const TOOLTIP_CLASS: &str = "rounded-md border border-border bg-popover px-2 py-1";
-/// The classes of its text.
-const TOOLTIP_TEXT_CLASS: &str = "text-xs text-popover-foreground";
 /// The gap between an element and its `tooltip`, and the distance the
 /// tooltip keeps from the safe area's edges.
 const TOOLTIP_GAP: f32 = 4.0;
@@ -77,9 +72,6 @@ impl std::fmt::Debug for HintTimer {
 pub(super) struct CoreTooltip {
     /// The hint overlay, a child of the element.
     pub(super) overlay: NodeId,
-    /// The text block of a text tooltip and its raw text, inside the
-    /// overlay.
-    text: Option<(NodeId, NodeId)>,
     /// The element shown as the tooltip, inside the overlay (JS's).
     content: Option<NodeId>,
 }
@@ -670,7 +662,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Sets the `tooltip` of node `key`: a hint overlay the core makes
-    /// inside it, with a text in a bubble or the element JS made.
+    /// inside it, showing the element JS made.
     pub(super) fn set_tooltip(&mut self, key: Key, content: TooltipContent) {
         let id = self.nodes[key as usize].id;
         let mut made = self.overlay_state.tooltips.get(&id).copied();
@@ -692,65 +684,6 @@ impl<M: TextEngine> Core<M> {
                 }
                 return;
             }
-            (TooltipContent::Text(text), made) => {
-                let mut made = match made {
-                    Some(made) => made,
-                    None => match self.make_tooltip(id) {
-                        Some(made) => made,
-                        None => return,
-                    },
-                };
-                if let Some(content) = made.content.take() {
-                    self.detach_tooltip_content(content);
-                }
-                match made.text {
-                    Some((_, raw)) => {
-                        let _ = self.apply_op(Op::SetText {
-                            id: raw,
-                            text: text.to_string(),
-                        });
-                    }
-                    None => {
-                        let block = self.components.alloc();
-                        let raw = self.components.alloc();
-                        let ops = [
-                            Op::Create {
-                                id: block,
-                                tag: Tag::Text,
-                            },
-                            Op::SetProp {
-                                id: block,
-                                prop: Prop::Class(TOOLTIP_TEXT_CLASS.into()),
-                            },
-                            Op::CreateText {
-                                id: raw,
-                                text: text.to_string(),
-                            },
-                            Op::Insert {
-                                parent: block,
-                                child: raw,
-                                before: None,
-                            },
-                            Op::SetProp {
-                                id: made.overlay,
-                                prop: Prop::Class(TOOLTIP_CLASS.into()),
-                            },
-                            Op::Insert {
-                                parent: made.overlay,
-                                child: block,
-                                before: None,
-                            },
-                        ];
-                        for op in ops {
-                            if let Err(e) = self.apply_op(op) {
-                                log::error!(target: "js", "a tooltip is not made: {e:?}");
-                            }
-                        }
-                        made.text = Some((block, raw));
-                    }
-                }
-                made
-            }
             (TooltipContent::Node(node), made) => {
                 let mut made = match made {
                     Some(made) => made,
@@ -761,14 +694,6 @@ impl<M: TextEngine> Core<M> {
                 };
                 if made.content == Some(node) {
                     return;
-                }
-                if let Some((block, raw)) = made.text.take() {
-                    let _ = self.release(raw);
-                    let _ = self.release(block);
-                    let _ = self.apply_op(Op::SetProp {
-                        id: made.overlay,
-                        prop: Prop::Class("".into()),
-                    });
                 }
                 if let Some(old) = made.content.take() {
                     self.detach_tooltip_content(old);
@@ -829,7 +754,6 @@ impl<M: TextEngine> Core<M> {
         }
         Some(CoreTooltip {
             overlay,
-            text: None,
             content: None,
         })
     }
@@ -883,10 +807,6 @@ impl<M: TextEngine> Core<M> {
                 // The element's own (a `Tooltip`'s): JS's to release.
                 return;
             }
-        }
-        if let Some((block, raw)) = made.text {
-            let _ = self.release(raw);
-            let _ = self.release(block);
         }
         let _ = self.release(made.overlay);
     }

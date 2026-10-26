@@ -11,7 +11,7 @@ demo: el-text
 `Text` 绘制一个段落。它是显示字符串的元素：`View` 的字符串子节点什么也不会画。段落在原生侧排版（iOS 和 Mac Catalyst 上用 CoreText，Android 上用 `StaticLayout`），并在引擎线程上测量，主线程只负责绘制。Rust 用 `text(content)` 创建，TSX 用从 `nsh` 导入的 `<Text>`。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 text("继续之前请阅读")
     .text_base()

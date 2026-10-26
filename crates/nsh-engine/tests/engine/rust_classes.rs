@@ -5,10 +5,7 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use nsh_core::{
-    ApproxTextEngine, MountBatch, MountItem, Size,
-    element::{Registry, prelude::*},
-};
+use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, element::Registry, prelude::*};
 use nsh_engine::{Bundle, Engine, EngineConfig, Environment};
 
 use crate::ChannelSink;
@@ -105,7 +102,7 @@ impl Counter {
 
 /// Another set's class of the same name.
 mod other {
-    use nsh_core::element::prelude::*;
+    use nsh_core::prelude::*;
 
     #[class]
     pub(crate) struct Counter;

@@ -1,7 +1,7 @@
 //! The runtime's modules written in Rust: `nsh`'s `SafeAreaView`,
-//! `KeyboardAvoidingView` and `SelectionArea`, `nsh/android`'s `Toast`,
-//! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, all of
-//! `nsh/image`, `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
+//! `KeyboardAvoidingView` and `SelectionArea`, `nsh/android`'s `BackHandler`,
+//! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
+//! `Image` functions, all of `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -41,15 +41,11 @@ pub fn registries() -> &'static [Registry] {
     static REGISTRIES: OnceLock<Vec<Registry>> = OnceLock::new();
     REGISTRIES.get_or_init(|| {
         let mut android = Registry::runtime("nsh/android");
-        android
-            .module::<android::Toast>()
-            .module::<android::BackHandler>();
+        android.module::<android::BackHandler>();
         let mut accessibility = Registry::runtime("nsh/accessibility");
         accessibility.module::<accessibility::Accessibility>();
         let mut device = Registry::runtime("nsh/device");
         device.module::<device::Device>();
-        let mut image = Registry::runtime("nsh/image");
-        image.module::<image::Image>();
         let mut clipboard = Registry::runtime("nsh/clipboard");
         clipboard.module::<clipboard::Clipboard>();
         let mut picker = Registry::runtime("nsh/picker");
@@ -62,7 +58,11 @@ pub fn registries() -> &'static [Registry] {
         let mut nsh = Registry::runtime("nsh");
         nsh.register::<crate::element::SafeAreaView>()
             .register::<crate::element::KeyboardAvoidingView>()
-            .register::<crate::element::SelectionArea>();
+            .register::<crate::element::SelectionArea>()
+            .module::<crate::element::Keyboard>()
+            .module::<image::Image>()
+            // The environment's accessors and hooks, made by `nsh-js`.
+            .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &[]);
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile.register::<crate::mobile::TabBar>();
         let mut os = Registry::runtime("os");
@@ -87,7 +87,6 @@ pub fn registries() -> &'static [Registry] {
             android,
             accessibility,
             device,
-            image,
             clipboard,
             picker,
             storage,

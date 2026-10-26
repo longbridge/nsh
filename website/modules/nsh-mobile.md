@@ -46,7 +46,7 @@ platform, use `nsh/base`'s [Tabs](../elements/tabs.md).
 ```rust tabs
 use nsh_core::{
     mobile::{TabBarItem, tab_bar},
-    element::prelude::*,
+    prelude::*,
 };
 
 fn sections() -> impl IntoElement {

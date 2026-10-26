@@ -1,7 +1,7 @@
 //! The app's Rust UI: its root component, which `nsh run`, `nsh package`
 //! and `cargo run` mount.
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 use nsh_base::theme;
 use nsh_core::element::safe_area_view;
 

@@ -22,7 +22,7 @@ use crate::{
     NodeId, Op, Tag, TextEngine,
     element::{
         Attrs, BoundListConfig, ElNode, ListConfig, SharedString, StyleRefinement,
-        element::BoundAttrs,
+        builder::BoundAttrs,
         flow::{Region, RegionElement},
         reactive::render_effect,
     },
@@ -281,7 +281,7 @@ impl<M: TextEngine> Core<M> {
         &mut self,
         host: NodeId,
         base: Attrs,
-        parts: Vec<crate::element::element::BoundAttrs>,
+        parts: Vec<crate::element::builder::BoundAttrs>,
     ) -> Attrs {
         let patches = self.components.patches.clone();
         let (runs, first) = Runs::new();

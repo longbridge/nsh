@@ -13,7 +13,7 @@ demo: guide-forms
 输入框和其他视图一样接受样式（Rust 中是类型化的样式方法，TSX 中是样式和 Tailwind 类），所以表单里的输入框是应用自己的外观。带标签的输入框就是一个简短的自定义组件：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoElement {
     let focused = signal(false);
@@ -65,7 +65,7 @@ function Field(props: { label: string; value: string; onChange: (text: string) =
 传入值时（`.value(..)`，TSX 的 `value`）输入框是**受控**的：它显示 signal 中的内容，由你在变化事件（`.on_change(..)`，TSX 的 `onChange`）中更新 signal。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -286,7 +286,7 @@ input()
 要切换到下一个字段，保存输入框的 ref（Rust 中是 `element_ref()` 和 `.element_ref(&r)`，TSX 中是 `ref`）并调用 `focus()`：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn sign_in() -> impl IntoElement {
     let email = signal(String::new());
@@ -361,15 +361,14 @@ mount(SignIn);
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
 
-Rust 中的 `dismiss_keyboard()` 和 TSX 中 `nsh/base` 的 `Keyboard.dismiss()` 让当前拥有焦点的输入框失去焦点：
+Rust 中的 `dismiss_keyboard()` 和 TSX 中 `nsh` 的 `Keyboard.dismiss()` 让当前拥有焦点的输入框失去焦点：
 
 ```rust tabs
 view().on_press(|| dismiss_keyboard())
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { Keyboard } from "nsh/base";
+import { View, Keyboard } from "nsh";
 
 <View onPress={() => Keyboard.dismiss()}>…</View>
 ```
@@ -597,7 +596,7 @@ scroll()
 
 ```rust tabs
 use nsh_core::element::keyboard_avoiding_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
     let draft = signal(String::new());
@@ -636,8 +635,8 @@ pub fn chat_screen() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Scroll, signal, View, KeyboardAvoidingView } from "nsh";
-import { keyboardFrame, safeAreaInsets, Input } from "nsh/base";
+import { Scroll, signal, View, KeyboardAvoidingView, keyboardFrame, safeAreaInsets } from "nsh";
+import { Input } from "nsh/base";
 
 function ChatScreen() {
   const insets = safeAreaInsets();
@@ -687,7 +686,7 @@ function ChatScreen() {
 
 ### 键盘访问器
 
-Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh/base` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration * 1000, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`KeyboardAvoidingView` 就是这样做的。
+Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration * 1000, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`KeyboardAvoidingView` 就是这样做的。
 
 ```rust tabs
 view().child(when(
@@ -697,8 +696,7 @@ view().child(when(
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { keyboardFrame } from "nsh/base";
+import { View, keyboardFrame } from "nsh";
 
 <If when={keyboardFrame().height === 0}>
   <View style={{ position: "absolute", right: 16, bottom: 16 }}>…</View>
@@ -710,7 +708,7 @@ import { keyboardFrame } from "nsh/base";
 Rust 中的 `input_accessory_view(id)` 和 TSX 中 `nsh/ios` 的 `InputAccessoryView` 会在引用它的输入框获得焦点时，在键盘顶部显示一个附着的工具栏，即 iOS 的 `inputAccessoryView`。它由原生跟随键盘移动，包括交互式收起键盘的过程。它在树中所处的位置不占空间；输入框通过它的 id 引用它（`.input_accessory(id)`，TSX 的 `ios={{ inputAccessoryViewID }}` 与 `nativeID`）：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn note() -> impl IntoElement {
     let content = signal(String::new());
@@ -780,6 +778,6 @@ function Note() {
 ## 相关内容
 
 - [`Input`](../elements/input.md)：元素参考。
-- [`KeyboardAvoidingView`](../modules/nsh.md#keyboardavoidingview) 与 [`Keyboard`](../modules/nsh-base.md#keyboard)。
+- [`KeyboardAvoidingView`](../modules/nsh.md#keyboardavoidingview) 与 [`Keyboard`](../modules/nsh.md#keyboard-and-keyboardframe)。
 - [`nsh/ios`](../modules/nsh-ios.md)：`InputAccessoryView`。
 - [滚动](./scrolling.md#滚动视图与键盘)：滚动视图中的键盘收起与点击。

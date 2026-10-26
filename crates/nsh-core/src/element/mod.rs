@@ -36,13 +36,13 @@ pub mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
+pub(crate) mod builder;
 pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
 pub mod description;
 pub mod desktop;
-pub(crate) mod element;
 mod element_ref;
 mod engine_context;
 pub(crate) mod env;
@@ -52,7 +52,7 @@ pub(crate) mod host;
 mod js;
 #[cfg(test)]
 pub(crate) mod json_host;
-mod keyboard_avoiding;
+mod keyboard;
 pub(crate) mod keys;
 pub(crate) mod module;
 mod once;
@@ -100,15 +100,14 @@ pub use nsh_macros::{
     native_module,
 };
 
-// Kept for apps written before `nsh_base` presented dialogs and
-// navigation, as TSX's `nsh/base` does.
-#[allow(deprecated)]
+// The core's parts of `nsh_base`'s navigation and dialogs.
+#[doc(hidden)]
 pub use self::host::{modal, screen, stack};
 pub(crate) use self::{
     animated::LiveNode,
     back::BackListener,
+    builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    element::{ElKind, PlaceFn},
     task::{Action, AnswerSlot, ClipboardRead, Executor},
 };
 pub use self::{
@@ -118,6 +117,12 @@ pub use self::{
         sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    builder::{
+        __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
+        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive,
+        IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig, ListElement,
+        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
+    },
     call::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
         RustOp, TaskStart, ToJs,
@@ -134,12 +139,6 @@ pub use self::{
         Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
         declarations,
     },
-    element::{
-        __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
-        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive,
-        IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig, ListElement,
-        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
-    },
     element_ref::{ComponentRef, ElementRef},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
@@ -154,8 +153,8 @@ pub use self::{
         input_accessory_view, native, overlay, scroll, video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
-    keyboard_avoiding::{
-        AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewElement,
+    keyboard::{
+        AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
         KeyboardAvoidingViewProps, keyboard_avoiding_view,
     },
     module::{
@@ -176,7 +175,7 @@ pub use self::{
     safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     scrollable::Scrollable,
     selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
-    services::{Fetch, HttpResponse, Prefetch, ToastDuration},
+    services::{Fetch, HttpResponse, Prefetch},
     style::{
         AdaptiveColor, BorderCurve, FontWeight, LayoutDirection, StyleRefinement, Styled,
         WritingDirection,
@@ -219,248 +218,6 @@ pub use crate::{
     platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Locale, Os},
     style::Color,
 };
-
-/// Everything a component's module needs: `use nsh_core::element::prelude::*;`.
-pub mod prelude {
-    // Components that run once: signals, bindings, control flow; what they
-    // read of the surface and ask of the platform.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub use super::ambient::{background, blocking};
-    pub use super::{
-        AbsoluteLength,
-        AccessibilityRole,
-        AccessibilityState,
-        Accessible,
-        AdaptiveColor,
-        Align,
-        Animated,
-        AnimatedNode,
-        AnimatedValue,
-        Animation,
-        AnimationOutput,
-        AnyElement,
-        Appearance,
-        // Host elements and their settings.
-        AutoCapitalize,
-        BackdropMaterial,
-        BlendMode,
-        BorderCurve,
-        Bounds,
-        BoxShadow,
-        CallCx,
-        Callback,
-        CanvasView,
-        CaretEvent,
-        Child,
-        Children,
-        ClaimRequest,
-        Component,
-        ComponentBuilder,
-        ComponentElement,
-        ComponentError,
-        ComponentRef,
-        Composition,
-        ContextMenuEvent,
-        Corners,
-        Cursor,
-        Curve,
-        DefiniteLength,
-        DevicePixels,
-        DialogAnswer,
-        DiffClamp,
-        EaseMode,
-        // Native animation values.
-        Easing,
-        EdgeInsets,
-        Edges,
-        Element,
-        ElementRef,
-        Environment,
-        Event,
-        EventKind,
-        EventPayload,
-        Extrapolate,
-        // Typed events.
-        FileDropEvent,
-        FluentBuilder,
-        FontAsset,
-        FontWeight,
-        GestureEvent,
-        HoverEvent,
-        Hsla,
-        // The network.
-        HttpRequest,
-        HttpResponse,
-        ImageAsset,
-        Input,
-        InputAccessoryView,
-        Instance,
-        Interactive,
-        Interpolation,
-        IntoElement,
-        IntoListener,
-        IntoTooltip,
-        Items,
-        JsError,
-        JsObject,
-        JsValue,
-        // Scrolling and lists.
-        KeyboardAppearance,
-        KeyboardDismissMode,
-        KeyboardTaps,
-        KeyboardType,
-        Keyframe,
-        KeyframeAnimation,
-        KeyframeTiming,
-        Keyframes,
-        Later,
-        LayoutDirection,
-        Length,
-        ListLayout,
-        ListViewport,
-        Listener,
-        Measurement,
-        Method,
-        Methods,
-        Modal,
-        ModalAnimation,
-        ModalPresentation,
-        ModuleCx,
-        Motion,
-        MotionChannel,
-        MotionPreset,
-        MotionSpec,
-        NativeEvent,
-        NativeView,
-        NoEvent,
-        Orientation,
-        Overlay,
-        OverlayPosition,
-        Painter,
-        PanActivation,
-        PanEvent,
-        PanGesture,
-        ParentElement,
-        PasteBehavior,
-        PasteEvent,
-        PastedFile,
-        Percentage,
-        Placement,
-        PlaybackDirection,
-        Point,
-        PointerEvents,
-        Points,
-        Position,
-        PressEvent,
-        PropEnum,
-        Props,
-        Radians,
-        Registry,
-        Rems,
-        Rendered,
-        Renderer,
-        ResizeMode,
-        ResponderEvent,
-        ReturnKeyType,
-        Rgba,
-        Screen,
-        ScreenAnimation,
-        Scroll,
-        ScrollEvent,
-        Scrollable,
-        Selection,
-        SharedString,
-        Size,
-        Slot,
-        SnapAlignment,
-        Spring,
-        Stack,
-        StaggerFrom,
-        StatusBarSetting,
-        StatusBarStyle,
-        StepPosition,
-        Styled,
-        SubmitBehavior,
-        System,
-        Task,
-        Text,
-        Timing,
-        ToastDuration,
-        Tokens,
-        TouchClaim,
-        Video,
-        VideoInfo,
-        VideoProgress,
-        View,
-        Viewability,
-        ViewableItems,
-        VirtualList,
-        WebNavigation,
-        WebView,
-        WritingDirection,
-        asset,
-        assets,
-        auto,
-        black,
-        bounds,
-        canvas,
-        class,
-        deg,
-        hsl,
-        hsla,
-        image,
-        input_accessory_view,
-        methods,
-        module,
-        native,
-        native_module,
-        opaque_grey,
-        overlay,
-        percentage,
-        point,
-        px,
-        radians,
-        relative,
-        rems,
-        rgb,
-        rgba,
-        scroll,
-        size,
-        text,
-        transparent_black,
-        transparent_white,
-        video,
-        view,
-        virtual_list,
-        web_view,
-        web_view_html,
-        white,
-    };
-    pub use super::{
-        Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Resource,
-        ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Stored,
-        ambient::{
-            Delay, KeyOptions, Spawned, animate_layout, animated_value, announce_for_accessibility,
-            clipboard_files, clipboard_has_image, clipboard_has_string, clipboard_image,
-            clipboard_string, color, component_ref, dark, dismiss_keyboard, element_ref, fetch,
-            font_scale, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
-            keyboard_height, locale, measure_text, motion, next_frame, on_back_press, on_key,
-            on_key_with, open_url, os, os_version, pick_images, pixel_ratio, prefetch_image,
-            reduce_motion, request_animation_frame, round_to_nearest_pixel, safe_area,
-            screen_reader, set_clipboard, set_clipboard_image, set_color_scheme, set_interval,
-            set_timeout, spawn, text_metrics, timer, timer_until, toast, tokens, try_global,
-            window,
-        },
-        batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
-        provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,
-        use_context, when,
-    };
-    // Kept for apps written before `nsh_base` presented dialogs,
-    // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,
-    // alert_dialog}`).
-    #[allow(deprecated)]
-    pub use super::{ambient::dialog, modal, screen, stack};
-}
 
 /// What the macros' code and nsh's generated workspace name.
 #[doc(hidden)]
@@ -506,7 +263,7 @@ pub mod __private {
     #[diagnostic::on_unimplemented(
         message = "a crate of the app (nsh.json \"rust\") has no `#[native_module(\"…\")]` at its root",
         label = "the crate's UI set",
-        note = "add to the crate's lib.rs, with the specifier its TSX imports the set by: `#[native_module(\"my-app/native\")] fn native(registry: &mut Registry) {{ registry.register::<MyComponent>(); }}` (`use nsh_core::element::prelude::*`)"
+        note = "add to the crate's lib.rs, with the specifier its TSX imports the set by: `#[native_module(\"my-app/native\")] fn native(registry: &mut Registry) {{ registry.register::<MyComponent>(); }}` (`use nsh_core::prelude::*`)"
     )]
     pub trait NoNativeModule {}
 

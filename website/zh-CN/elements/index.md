@@ -11,7 +11,7 @@ Native Shell 用一小组元素构建每个界面：`View`、`Text`、`Image` �
 这些页面上的每个示例都同时给出 Rust 和 TSX：选择一个标签页，页面上的所有示例都会随之切换。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     let count = signal(0_u32);
@@ -52,7 +52,7 @@ function App() {
 mount(App);
 ```
 
-在 Rust 中，原语是 `nsh_core::element::prelude` 中的函数（`view()`、`text(..)`、`image(..)`），基础组件来自 `nsh_base` crate。样式是有类型的方法（`.flex_1()`、`.gap_3()`、`.px(px(20.0))`、`.bg(..)`），状态样式接收一个闭包（`.active(|s| s.opacity(0.6))`），监听器是接收事件的闭包（`.on_press(move || ..)`、`.on_change(move |text: &str| ..)`），`.child(..)` 添加子元素。一段 UI 就是一个返回 `impl IntoElement` 的普通函数，只运行一次；它在闭包里读取的 signal（`text(move || ..)`、`.bg(move || ..)`）会更新所绑定的内容。参见[用 Rust 构建](../docs/rust.md)。
+在 Rust 中，原语是 `nsh_core::prelude` 中的函数（`view()`、`text(..)`、`image(..)`），基础组件来自 `nsh_base` crate。样式是有类型的方法（`.flex_1()`、`.gap_3()`、`.px(px(20.0))`、`.bg(..)`），状态样式接收一个闭包（`.active(|s| s.opacity(0.6))`），监听器是接收事件的闭包（`.on_press(move || ..)`、`.on_change(move |text: &str| ..)`），`.child(..)` 添加子元素。一段 UI 就是一个返回 `impl IntoElement` 的普通函数，只运行一次；它在闭包里读取的 signal（`text(move || ..)`、`.bg(move || ..)`）会更新所绑定的内容。参见[用 Rust 构建](../docs/rust.md)。
 
 在 TSX 中，每个标签都使用 PascalCase，并指向作用域中的绑定：原语从 `nsh` 导入，基础组件从 `nsh/base` 导入。只有 `<If>` 和 `<Each>` 是无需导入的全局组件。`<view>` 这样的小写标签会导致构建错误，因为 TypeScript 只能对照每个名称一个的全局类型来检查它，`List`、`Each` 这类泛型组件就无法推断条目类型。编译器通过导入识别这些元素并就地创建原生视图，所以导入它们在运行时没有任何开销。参见 [JSX 与组件](../docs/jsx-and-components.md)。
 
@@ -61,12 +61,9 @@ import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeA
 import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
-> [!NOTE]
-> 为早期版本构建的应用从 `nsh/image`、`nsh/list`、`nsh/canvas`、`nsh/webview` 和 `nsh/video` 导入 `Image`、`List`、`Canvas`、`WebView` 和 `Video`；这些导入继续有效，指向同样的元素。
-
 ## 原语
 
-TSX 从 `nsh` 导入，Rust 从 `nsh_core::element::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::element`）。
+TSX 从 `nsh` 导入，Rust 从 `nsh_core::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::element`）。
 
 | 元素 | Rust | 原生视图（iOS / Android） | 页面 |
 |---|---|---|---|
@@ -233,19 +230,36 @@ const at = signal<number | null>(null);
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `tooltip` | `.tooltip(..)` | `string \| JSX.Element` | 文字，显示在用主题 `popover` 令牌（`bg-popover`、`text-popover-foreground`、`border-border`，外观由主题决定）绘制的小气泡中；或一个元素，按原样显示（`nsh/base` 的 `Tooltip` 就是工具提示本身）。 |
+| `tooltip` | `.tooltip(..)` | `JSX.Element` | 提示，一个由应用设置样式的元素：`nsh/base` 的 [`Tooltip`](tooltip.md) 就是工具提示本身，带有它的位置、延迟和事件；其他元素按原样显示。 |
 
 ```rust tabs
-view().on_press(save).tooltip("保存文档").child(text("💾"))
+view()
+    .on_press(save)
+    .tooltip(
+        tooltip()
+            .rounded_md()
+            .bg(rgb(0x111827))
+            .px_2()
+            .py_1()
+            .child(text("保存文档").text_color(white())),
+    )
+    .child(text("💾"))
 ```
 
 ```tsx tabs
-<View onPress={save} tooltip="保存文档">
+<View
+  onPress={save}
+  tooltip={
+    <Tooltip class="rounded-md bg-gray-900 px-2 py-1">
+      <Text class="text-white">保存文档</Text>
+    </Tooltip>
+  }
+>
   <Text>💾</Text>
 </View>
 ```
 
-需要自己的外观、位置、延迟或事件时，把 `nsh/base` 的 [`Tooltip`](tooltip.md) 作为 `tooltip` 传入，与 GPUI 的 `.tooltip(..)` 相同。
+`Tooltip` 决定自己的外观、位置、延迟和事件，与 GPUI 的 `.tooltip(..)` 相同。提示较多的应用可以写一个自己的小组件，把文字包进它的 `Tooltip`。
 
 ### 上下文菜单
 

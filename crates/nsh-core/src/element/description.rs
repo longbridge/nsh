@@ -372,7 +372,7 @@ fn strings(object: &Map<String, Value>, key: &str, at: &str) -> Result<Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::prelude::*;
+    use crate::prelude::*;
 
     /// A component of the test set.
     #[component]

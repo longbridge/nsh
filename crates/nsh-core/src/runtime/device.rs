@@ -23,7 +23,7 @@ impl Device {
             return Err(JsError::Type(crate::open_url::not_granted(&url)));
         }
         Ok(Later::new(async move {
-            Ok::<bool, JsError>(crate::element::prelude::open_url(url).await)
+            Ok::<bool, JsError>(crate::prelude::open_url(url).await)
         }))
     }
 }

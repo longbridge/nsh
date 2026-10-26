@@ -66,7 +66,7 @@ changes: a text, a style property, a branch of `when` (`<If>`), the rows of `eac
 subtree to find out what changed.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[derive(Clone, PartialEq)]
 struct Quote {
@@ -135,7 +135,7 @@ in TSX, and stutters when the engine thread is busy. Animated values ([Animation
 Rust, [`nsh/animated`](../modules/nsh-animated.md) in TSX) run animations natively instead:
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 let scroll_y = animated_value(0.0);
 

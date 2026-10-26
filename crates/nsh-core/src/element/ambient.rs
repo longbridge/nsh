@@ -3,7 +3,7 @@
 //!
 //! The environment, the design tokens, globals and screens' insets are signals the
 //! core writes: reading one in a binding subscribes it, so a change reaches
-//! only what read it. Services (dialogs, the clipboard, toasts) are actions
+//! only what read it. Services (dialogs, the clipboard) are actions
 //! for the core; tasks and timers belong to the current owner and end with
 //! it.
 
@@ -346,7 +346,9 @@ pub(crate) fn insets_of(host: NodeId) -> EdgeInsets {
 
 /// Shows `dialog` (an alert, or with `sheet` an action sheet); await the
 /// answer in a task.
-#[deprecated(note = "use nsh_base::alert_dialog, as TSX's `AlertDialog.show` of `nsh/base`")]
+///
+/// The core's part of `nsh_base::alert_dialog`, which apps use.
+#[doc(hidden)]
 pub fn dialog(dialog: Dialog) -> DialogAnswer {
     let (answer, slot) = DialogAnswer::new();
     act(Action::Dialog(dialog, slot));
@@ -472,12 +474,6 @@ pub(crate) fn host_call(
 /// Forgets the host calls whose answers were dropped (they timed out).
 pub(crate) fn forget_host_calls() {
     act(Action::ForgetHostCalls);
-}
-
-/// Shows `message` at the bottom of the screen (Android's toasts, TS:
-/// `Toast.show`); nothing happens elsewhere.
-pub fn toast(message: impl Into<String>, duration: super::ToastDuration) {
-    act(super::services::toast(message.into(), duration));
 }
 
 /// The size in pixels of the image at `src` (TS: `Image.getSize`).

@@ -87,7 +87,7 @@ text("Settings")
 For an on / off control in an app, use [`Switch`](../elements/switch.md) from `nsh/base`, which sets the role and state itself. The example shows what a role and state on a view do.
 
 ```rust tabs
-use nsh_core::{Checked, element::prelude::*};
+use nsh_core::{Checked, prelude::*};
 
 // A toggle drawn with views.
 view()
@@ -225,7 +225,7 @@ In Rust, the prelude reports the user's settings and talks to the screen reader:
 The settings are accessors: read them in a binding or an effect, and what reads them updates when the user changes the setting, with no cleanup.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn upload() -> impl IntoElement {
     let done = signal(false);
@@ -287,7 +287,7 @@ See [Device and environment](./device-and-environment.md#text-size).
 `reduce_motion()` (Rust) and `reduceMotion()` (TSX) are `true` when the user turned on iOS's Reduce Motion or Android's remove animations setting. Your animations run as you write them, so use it, or the `motion-reduce:` and `motion-safe:` Tailwind variants, to replace large movement with a fade or an instant change:
 
 ```rust tabs
-use nsh_core::element::{LayoutAnimation, prelude::*};
+use nsh_core::{element::LayoutAnimation, prelude::*};
 
 let toggle = move || {
     if !reduce_motion() {

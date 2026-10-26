@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, safe area insets, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -14,9 +14,8 @@ app's own component library, as `gpui-base` sits between `gpui` and a styled lib
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
-by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe area insets
-(`safeArea()` and `safeAreaInsets()`), the system's alert dialogs (`AlertDialog`), the software
-keyboard (`Keyboard` and `keyboardFrame()`). Pages and dialogs also decide the status bar
+by the state you create with `createNavStack`, and `Dialog` for content presented over everything else) and the system's
+alert dialogs (`AlertDialog`). Pages and dialogs also decide the status bar
 (`statusBar`).
 
 The look is the app's: what goes inside a page, a dialog or a header is your own JSX, drawn from the primitives with
@@ -44,8 +43,6 @@ import {
   DiffView,
   DockArea,
   Editor,
-  Keyboard,
-  keyboardFrame,
   Menu,
   Progress,
   MenuItem,
@@ -57,8 +54,6 @@ import {
   RadioGroup,
   ResizablePanel,
   ResizablePanelGroup,
-  safeArea,
-  safeAreaInsets,
   Sheet,
   Submenu,
   Switch,
@@ -155,8 +150,6 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`DockArea`](../elements/dock.md) | `dock_area()` | A workspace of splits, tab groups and edge docks the user arranges; its layout is the app's data. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | Content presented over everything else: sheets, full-screen flows, dialogs. |
-| [`safeArea()`, `safeAreaInsets()`](../elements/safe-area-view.md#safearea-and-safeareainsets) | `safe_area()`, `cx.insets()` | The insets themselves, reactive. |
-| [`Keyboard.dismiss()`, `keyboardFrame()`](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) | `dismiss_keyboard()`, `keyboard_height()` | Hides the keyboard; its height over the surface. |
 | [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | The platform's alert or action sheet. |
 | [`TextView`](../elements/text-view.md) | `text_view()` | A document of Markdown, HTML or blocks, drawn with texts and views, for streamed AI replies. |
 | [`Editor`](../elements/editor.md) | `editor()` | A code editor: syntax highlighting, several carets, folding, find and replace, diagnostics. |
@@ -290,16 +283,6 @@ Android; on the desktops and the web each page shows the app's own `header`. See
 `Dialog` presents content over everything else, including the stack's header, in its own native window layer. Its
 popup and backdrop are styled by the app. See [Dialog](../elements/dialog.md).
 
-## Safe areas
-
-The view that pads its content by these insets is [`SafeAreaView`](./nsh.md#safeareaview), from `nsh`.
-
-### safeArea and safeAreaInsets
-
-`safeArea()` is the surface's safe area; `safeAreaInsets()` the insets where a component renders. Both are reactive
-`Edges` (`{ top, right, bottom, left }` in points). See
-[safeArea and safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets).
-
 ## Alert dialogs
 
 ### AlertDialog
@@ -307,17 +290,10 @@ The view that pads its content by these insets is [`SafeAreaView`](./nsh.md#safe
 `AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with the action the user
 chose. See [AlertDialog](../elements/alert-dialog.md).
 
-## Keyboard
-
-`Keyboard.dismiss()` hides the software keyboard and `keyboardFrame()` tells you how much of the screen it covers. See
-[Hiding the keyboard](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) and
-[The keyboard's height](../elements/keyboard-avoiding-view.md#the-keyboards-height). The view that keeps content above
-the keyboard is [`KeyboardAvoidingView`](./nsh.md#keyboardavoidingview), from `nsh`.
-
 ## Input
 
 `Input` is the platform's native text input: a single-line or multiline field whose typing, caret, selection,
-autocorrection and autofill the platform handles. The app owns its value and its look. See [Input](../elements/input.md).
+autocorrection and autofill the platform handles. The app owns its value and its look. Its props are the type `InputProps` (with `IOSInputProps` for `ios={{…}}`), exported beside it. See [Input](../elements/input.md).
 
 ## Status bar
 
@@ -328,7 +304,7 @@ The status bar belongs to what is on screen, as in UIKit, where each view contro
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn photo_viewer() -> Screen {
     nav_page().header_visible(false).status_bar(
@@ -435,4 +411,4 @@ launch screen.
   [Text](../elements/text.md) and
   [Input](../elements/input.md).
 - [Device and environment](../docs/device-and-environment.md).
-- [nsh/android](./nsh-android.md): `BackHandler`, `Toast.show` for short messages and other Android-only APIs.
+- [nsh/android](./nsh-android.md): `BackHandler` and other Android-only APIs.

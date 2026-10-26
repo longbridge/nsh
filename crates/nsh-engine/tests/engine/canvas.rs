@@ -345,7 +345,7 @@ fn redrawing_derives_the_same_nodes() {
 /// afterwards; `fontVariantNumeric` records with the font kept apart.
 /// (Imported from `nsh/canvas`, where they were first: they still are.)
 const HIT: &str = r#"import { signal, mount } from "nsh";
-import { Canvas, Path2D, CanvasRenderingContext2D } from "nsh/canvas";
+import { Canvas, Path2D, CanvasRenderingContext2D } from "nsh";
 
 const later = signal("");
 const p = new Path2D();

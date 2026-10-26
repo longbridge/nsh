@@ -1535,8 +1535,6 @@ impl Mounter {
                 input.select(start, end)
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
-            // Toasts are Android only.
-            (Command::Toast { .. }, _) => {}
             (Command::Announce(text), _) => crate::system::announce(&text),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),

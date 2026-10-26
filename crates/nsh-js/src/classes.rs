@@ -1528,7 +1528,10 @@ pub(crate) fn close(cx: Ctx) {
 pub(crate) mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use nsh_core::element::{Answer, PropError, Registry, prelude::*};
+    use nsh_core::{
+        element::{Answer, PropError, Registry},
+        prelude::*,
+    };
 
     use crate::{Host, HostOptions};
 

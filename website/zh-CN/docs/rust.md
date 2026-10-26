@@ -45,7 +45,7 @@ nsh package --target web       # 或 ios、ios-simulator、android、macos、lin
 
 ```rust
 use nsh_base::{button, theme};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// TSX 通过 `app/native` 可以使用的组件。
 #[native_module("app/native")]
@@ -139,7 +139,7 @@ Rust 应用通过 `nsh_core::element::desktop` 绘制自定义标题栏。调用
 ```rust
 use nsh_core::{
     desktop::TitleBarStyle,
-    element::{desktop::{close_window, set_title_bar, title_bar}, prelude::*},
+    element::{desktop::{close_window, set_title_bar, title_bar}}, prelude::*,
 };
 
 fn window_bar() -> impl IntoElement {

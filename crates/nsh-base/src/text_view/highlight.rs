@@ -36,7 +36,7 @@ mod syntect_highlighter {
         sync::{Mutex, MutexGuard},
     };
 
-    use nsh_core::{element::prelude::*, time::Instant};
+    use nsh_core::{prelude::*, time::Instant};
     use syntect::{
         parsing::{ParseState, ScopeStack, SyntaxReference},
         util::LinesWithEndings,

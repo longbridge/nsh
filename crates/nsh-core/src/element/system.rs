@@ -531,7 +531,8 @@ impl IntoThrown for JsError {
 mod tests {
     use crate::{
         JsonValue,
-        element::{JsValue, Registry, declarations, json_host, prelude::*},
+        element::{JsValue, Registry, declarations, json_host},
+        prelude::*,
     };
 
     #[module]

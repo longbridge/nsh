@@ -1,13 +1,13 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、复选框、单选框、开关、标签页、可调整大小的面板、可停靠的工作区、Markdown 与 HTML 文档、代码编辑器、diff、文本输入框、导航栈与对话框、安全区边距、系统警告对话框、软键盘，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、复选框、单选框、开关、标签页、可调整大小的面板、可停靠的工作区、Markdown 与 HTML 文档、代码编辑器、diff、文本输入框、导航栈与对话框、系统警告对话框，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区边距（`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard` 和 `keyboardFrame()`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
@@ -31,8 +31,6 @@ import {
   DiffView,
   DockArea,
   Editor,
-  Keyboard,
-  keyboardFrame,
   Menu,
   Progress,
   MenuItem,
@@ -44,8 +42,6 @@ import {
   RadioGroup,
   ResizablePanel,
   ResizablePanelGroup,
-  safeArea,
-  safeAreaInsets,
   Sheet,
   Submenu,
   Switch,
@@ -141,8 +137,6 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 | [`DockArea`](../elements/dock.md) | `dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区；它的布局是应用的数据。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | 在所有内容之上呈现的内容：sheet、全屏流程、对话框。 |
-| [`safeArea()`、`safeAreaInsets()`](../elements/safe-area-view.md#safearea-and-safeareainsets) | `safe_area()`、`cx.insets()` | 边距本身，响应式。 |
-| [`Keyboard.dismiss()`、`keyboardFrame()`](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) | `dismiss_keyboard()`、`keyboard_height()` | 隐藏键盘；键盘在界面上的高度。 |
 | [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | 平台的警告框或操作表。 |
 | [`TextView`](../elements/text-view.md) | `text_view()` | 用文字和视图绘制的 Markdown、HTML 或文档块组成的文档，适用于流式输出的 AI 回复。 |
 | [`Editor`](../elements/editor.md) | `editor()` | 代码编辑器：语法高亮、多光标、折叠、查找与替换、诊断。 |
@@ -269,18 +263,6 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 
 `Dialog` 在所有内容之上（包括栈的标题栏）、在它自己的原生窗口层中呈现内容。它的弹出层和背景层由应用设定样式。见 [Dialog](../elements/dialog.md)。
 
-<a id="safe-areas"></a>
-
-## 安全区
-
-为内容加上这些边距的视图是 `nsh` 的 [`SafeAreaView`](./nsh.md#safeareaview)。
-
-<a id="safearea-and-safeareainsets"></a>
-
-### safeArea 与 safeAreaInsets
-
-`safeArea()` 是界面的安全区；`safeAreaInsets()` 是组件渲染位置的边距。两者都是响应式的 `Edges`（`{ top, right, bottom, left }`，单位为点）。见 [safeArea 与 safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets)。
-
 <a id="alert-dialogs"></a>
 
 ## 警告对话框
@@ -291,17 +273,11 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 
 `AlertDialog.show(options)` 显示平台自己的警告框或操作表，并以用户选择的操作作为结果。见 [AlertDialog](../elements/alert-dialog.md)。
 
-<a id="keyboard"></a>
-
-## 键盘
-
-`Keyboard.dismiss()` 隐藏软键盘，`keyboardFrame()` 告诉你它覆盖了屏幕的多少。见[隐藏键盘](../elements/keyboard-avoiding-view.md#hiding-the-keyboard)和[键盘高度](../elements/keyboard-avoiding-view.md#the-keyboards-height)。让内容保持在键盘上方的视图是 `nsh` 的 [`KeyboardAvoidingView`](./nsh.md#keyboardavoidingview)。
-
 <a id="input"></a>
 
 ## Input
 
-`Input` 是平台原生的文本输入框：单行或多行，输入、光标、选区、自动更正和自动填充都由平台处理。值和外观归应用所有。见 [Input](../elements/input.md)。
+`Input` 是平台原生的文本输入框：单行或多行，输入、光标、选区、自动更正和自动填充都由平台处理。值和外观归应用所有。它的属性类型 `InputProps`（`ios={{…}}` 的为 `IOSInputProps`）与它一起导出。见 [Input](../elements/input.md)。
 
 <a id="status-bar"></a>
 
@@ -311,7 +287,7 @@ import type { AvoidBehavior, Edge, SelectionAreaProps } from "nsh";
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn photo_viewer() -> Screen {
     nav_page().header_visible(false).status_bar(
@@ -410,4 +386,4 @@ nav_page()
 - [表单与键盘](../docs/forms-and-keyboard.md)。
 - [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
-- [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。
+- [nsh/android](./nsh-android.md)：`BackHandler` 及其他 Android 专用 API。

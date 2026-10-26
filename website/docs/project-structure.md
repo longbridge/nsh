@@ -54,7 +54,7 @@ A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -194,7 +194,7 @@ An app made by an earlier `nsh init` gets the new `tsconfig.json` with its next 
 
 ## Modules
 
-A Rust app's code is its crate's modules (`mod screens;`), and its dependencies come from crates.io like any crate's; NSH's own crates are `nsh-core` (the primitives, signals and typed styles, `use nsh_core::element::prelude::*`) and `nsh-base` (the base components and the theme).
+A Rust app's code is its crate's modules (`mod screens;`), and its dependencies come from crates.io like any crate's; NSH's own crates are `nsh-core` (the primitives, signals and typed styles, `use nsh_core::prelude::*`) and `nsh-base` (the base components and the theme).
 
 In TSX, split the app into as many `.ts` and `.tsx` modules as you like and import them with relative paths; the extension may be left out:
 
@@ -225,8 +225,8 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 
 | Module | What it has |
 |---|---|
-| `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; the primitives `View`, `Text`, `Scroll`, `Image`, `List`, `Canvas`, `WebView`, `Video`; `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea` ([reference](../modules/nsh.md)) |
-| `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`), safe area insets (`safeArea`, `safeAreaInsets`), the system's alert dialog (`AlertDialog`), the software keyboard (`Keyboard`, `keyboardFrame`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
+| `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; the primitives `View`, `Text`, `Scroll`, `Image`, `List`, `Canvas`, `WebView`, `Video`; `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`; safe area insets (`safeArea`, `safeAreaInsets`) and the software keyboard (`Keyboard`, `keyboardFrame`) ([reference](../modules/nsh.md)) |
+| `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), a text input (`Input`) and the system's alert dialog (`AlertDialog`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/animated` | Native animations |
 | `nsh/gesture` | `PanResponder` |
 | `nsh/device` | `platform`, `windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale` |

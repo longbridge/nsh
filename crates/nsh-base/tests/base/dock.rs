@@ -11,9 +11,10 @@ use nsh_base::dock::{
 };
 use nsh_core::{
     Size,
-    element::{Root, prelude::*},
+    element::Root,
     geometry::{Axis, point},
     platform::{Idiom, Os},
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;

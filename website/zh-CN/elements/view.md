@@ -11,7 +11,7 @@ demo: el-view
 `View` 是每个界面的基本构件：一个原生容器（iOS 和 Mac Catalyst 上是 UIView，Android 上是 ViewGroup），用 flexbox 或 grid 布局子元素，绘制背景、边框、阴影和渐变，并处理按压。按钮、卡片、列表行和整个界面都是 view。Rust 用 `view()` 创建，TSX 用从 `nsh` 导入的 `<View>`。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     let liked = signal(false);

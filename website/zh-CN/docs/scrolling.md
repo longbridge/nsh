@@ -577,7 +577,7 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 - `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持；点在空白处则收起键盘。表单通常应选它。
 - `"always"`：键盘在每次点击后都保持显示。
 
-两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh/base`](../modules/nsh-base.md#keyboard) 的 `Keyboard.dismiss()`。
+两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) 的 `Keyboard.dismiss()`。
 
 ## 嵌套滚动视图
 

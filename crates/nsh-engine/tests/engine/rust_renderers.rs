@@ -8,7 +8,8 @@ use std::{collections::HashSet, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     MountBatch, MountItem,
-    element::{Registry, Rendered, Renderer, dynamic, prelude::*},
+    element::{Registry, Rendered, Renderer, dynamic},
+    prelude::*,
 };
 
 /// Renders each item (`key:label`) with the app's function, keyed by its

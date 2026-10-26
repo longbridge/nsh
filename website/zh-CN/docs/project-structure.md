@@ -54,7 +54,7 @@ Rust 应用的根是它的 crate 中的一个组件，`nsh.json` 的 `"root"` �
 // src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
 mod screens;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// What a TSX entry may import from the crate.
 #[native_module("my-app/native")]
@@ -193,7 +193,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 
 ## 模块
 
-Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io；NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::element::prelude::*`）和 `nsh-base`（基础组件和主题）。
+Rust 应用的代码就是它的 crate 的模块（`mod screens;`），依赖和任何 crate 一样来自 crates.io；NSH 自己的 crate 是 `nsh-core`（基础元素、signal 和带类型的样式，`use nsh_core::prelude::*`）和 `nsh-base`（基础组件和主题）。
 
 在 TSX 中，可以把应用拆成任意多个 `.ts` 和 `.tsx` 模块，用相对路径导入；扩展名可以省略：
 
@@ -224,8 +224,8 @@ const open = async () => {
 
 | 模块 | 内容 |
 |---|---|
-| `nsh` | 响应式（`signal`、`computed`、`effect` 等）、`mount`、`split`、`context`；基础元素 `View`、`Text`、`Scroll`、`Image`、`List`、`Canvas`、`WebView`、`Video`；`SafeAreaView`、`KeyboardAvoidingView`、`SelectionArea`（[参考](../modules/nsh.md)） |
-| `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、文本输入框（`Input`）、安全区域边距（`safeArea`、`safeAreaInsets`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
+| `nsh` | 响应式（`signal`、`computed`、`effect` 等）、`mount`、`split`、`context`；基础元素 `View`、`Text`、`Scroll`、`Image`、`List`、`Canvas`、`WebView`、`Video`；`SafeAreaView`、`KeyboardAvoidingView`、`SelectionArea`；安全区域边距（`safeArea`、`safeAreaInsets`）和软键盘（`Keyboard`、`keyboardFrame`）（[参考](../modules/nsh.md)） |
+| `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、文本输入框（`Input`）和系统警告对话框（`AlertDialog`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
 | `nsh/animated` | 原生动画 |
 | `nsh/gesture` | `PanResponder` |
 | `nsh/device` | `platform`、`windowSize`、`colorScheme`、`fontScale`、`pixelRatio`、`locale` |

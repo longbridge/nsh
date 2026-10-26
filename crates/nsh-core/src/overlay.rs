@@ -18,7 +18,7 @@
 //! anchor or presses it, as GPUI's tooltips are. An element's `tooltip`
 //! ([`TooltipContent`]) is one the core makes.
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use crate::{
     geometry::{Bounds, Point, Points, Size, point, rect, size},
@@ -135,14 +135,12 @@ pub struct OverlayConfig {
 pub const HINT_DELAY: Duration = Duration::from_millis(500);
 
 /// What an element's `tooltip` shows, in a hint overlay the core makes
-/// above the element ([`OverlayConfig::hint`]).
+/// above the element (or the element itself when it is a hint overlay) ([`OverlayConfig::hint`]).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum TooltipContent {
     /// No tooltip.
     #[default]
     None,
-    /// A text, in a minimal bubble drawn with the theme's `popover` tokens.
-    Text(Arc<str>),
     /// An element (JS's: a node it made), shown as it is.
     Node(NodeId),
 }

@@ -1525,13 +1525,6 @@ pub enum Command {
         /// End.
         end: u32,
     },
-    /// Show a short message (Android toast; on the root).
-    Toast {
-        /// The message.
-        text: String,
-        /// Show it longer.
-        long: bool,
-    },
     /// Have the screen reader read a message (on the root).
     Announce(String),
     /// Load the image at `uri` (keeping its bytes for views that show it
@@ -2127,9 +2120,9 @@ pub enum Prop {
     /// `tooltip`: a hint about the view, shown above it on the desktops
     /// while the pointer rests on it (after half a second) until the
     /// pointer leaves or presses it, never on touch screens; it never takes
-    /// the pointer. A string shows in a minimal bubble drawn with the
-    /// theme's `popover` tokens; an element is shown as it is (style it, or
-    /// use `Tooltip` of `nsh/base` for its placement, delay and events).
+    /// the pointer. The element is shown as it is; a `Tooltip` of
+    /// `nsh/base` is the tooltip itself, with its placement, delay and
+    /// events.
     #[prop(js = "tooltip", with = crate::js::host_values::tooltip, reset = Prop::Tooltip(TooltipContent::None), ts = "JSX.Element")]
     Tooltip(TooltipContent),
     /// `focusable`: whether a view that takes presses is a stop of the

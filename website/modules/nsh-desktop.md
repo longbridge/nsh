@@ -11,10 +11,7 @@ order: 12.5
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    element::{
-        desktop::{close_window, set_title_bar, title_bar},
-        prelude::*,
-    },
+    element::{desktop::{close_window, set_title_bar, title_bar}}, prelude::*,
 };
 ```
 
@@ -78,10 +75,7 @@ With the title bar hidden, the app draws its own bar and says which parts of it 
 ```rust tabs
 use nsh_core::{
     desktop::TitleBarStyle,
-    element::{
-        desktop::{set_title_bar, title_bar},
-        prelude::*,
-    },
+    element::{desktop::{set_title_bar, title_bar}}, prelude::*,
 };
 
 #[component]

@@ -358,15 +358,8 @@ impl ModuleCx {
             .push(super::services::set_clipboard_image(uri.into()));
     }
 
-    /// Shows `message` at the bottom of the screen (Android's toasts);
-    /// nothing happens elsewhere.
-    pub fn toast(&mut self, message: impl Into<String>, duration: super::ToastDuration) {
-        self.actions
-            .push(super::services::toast(message.into(), duration));
-    }
-
     /// Shows the surface in `appearance` whatever the system's (TS:
-    /// `setColorScheme`): [`crate::element::prelude::dark`] (the theme's mode),
+    /// `setColorScheme`): [`crate::prelude::dark`] (the theme's mode),
     /// `dark:` classes and the platform's controls follow it;
     /// [`crate::platform::Appearance::System`] follows the system again.
     pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {

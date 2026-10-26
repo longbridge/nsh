@@ -10,7 +10,8 @@ use std::{cell::Cell, ptr};
 
 use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
-    element::{AccessibilityRole, AccessibilityState, AnyElement, prelude::*},
+    element::{AccessibilityRole, AccessibilityState, AnyElement},
+    prelude::*,
     storage::Storage,
 };
 

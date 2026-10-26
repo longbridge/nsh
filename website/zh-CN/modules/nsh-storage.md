@@ -116,7 +116,7 @@ clear(): Promise<void>;
 应用启动时读取保存的值，之后每当 signal 变化就写回去：
 
 ```rust tabs
-use nsh_core::{storage::Storage, element::prelude::*};
+use nsh_core::{storage::Storage, prelude::*};
 
 #[component]
 pub fn App() -> impl IntoElement {

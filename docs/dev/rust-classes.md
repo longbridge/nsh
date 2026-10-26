@@ -149,7 +149,7 @@ a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 - **`async fn`:** a task of the core; it gives a Promise (`Promise<void>` for `()`, resolved when the task ends).
 
 The same holds for a component's ref methods (`docs/dev/components.md`, "Methods"). An op returning `()` is
-`void` because the runtime modules released theirs as `void` (`Toast.show`, `Window.close`,
+`void` because the runtime modules released theirs as `void` (`Window.close`,
 ...) and a return type never changes (`docs/dev/compatibility.md`); a Rust function that can fail says so with
 `Result<(), E>`, and TS gets a promise to see the error. `FunctionSpec::promises` / `MethodSpec::promises` decide
 it for the declarations and the JS face alike; `-> ()` written out is the same as no return type.
@@ -162,10 +162,10 @@ take `ModuleCx` or are `async`), and an app crate's are rebuilt with the app, wh
 What TSX imports from NSH is made two ways today:
 
 - **Runtime modules in Rust** (`crates/nsh-core/src/runtime/`: `nsh/accessibility`, `nsh/android`,
-  `nsh/clipboard`, `nsh/desktop`, `nsh/image`'s functions) already use `#[module]` and `Registry`, the app crates'
+  `nsh/clipboard`, `nsh/desktop`, `nsh`'s `Keyboard` and `Image` functions) already use `#[module]` and `Registry`, the app crates'
   mechanism; they take the synchronous functions and classes as they come.
 - **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `AnimatedValue` and
-  `AnimatedNode`, `nsh/canvas`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
+  `AnimatedNode`, `nsh`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
   web globals (`URL`, `Headers`, `Blob`, `fetch`, streams, events). Their classes already sit on one piece of
   machinery: a QuickJS class whose opaque is the Rust value in a `RefCell` (`nsh-js` `web/mod.rs`).
 
@@ -409,7 +409,7 @@ JSON).
 1. **Synchronous or a promise is the Rust signature's `async`**: a member or function that is not `async` runs in
    the JS call and returns its value (it computes and keeps state, without the UI's free functions); an `async`
    one returns a promise and runs as a core task, with them. The one exception, for functions only: one taking
-   `cx: &mut ModuleCx` stays an op ordered with the UI (a toast, the status bar, focus), as now.
+   `cx: &mut ModuleCx` stays an op ordered with the UI (the status bar, focus), as now.
 2. **`dispose()` and `[Symbol.dispose]`** besides collection.
 3. **Callbacks in the first version** (above); events and iterators later.
 4. **Functions follow the same rule**, so a plain `fn` returning a value becomes synchronous in TS.

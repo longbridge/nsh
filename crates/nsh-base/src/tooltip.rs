@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 use crate::popup::{OpenChangeReason, OpenState, lifecycle};
 
@@ -64,8 +64,7 @@ pub enum TooltipEvent {
 /// touch screens show it only when the app opens it (`open`). It never
 /// takes the pointer or presses, so the element works as it does without
 /// it. It looks like nothing: it is the bubble, styled with its `class` /
-/// `style`, and its children are what it says. A text `tooltip` is the
-/// short form, in a minimal bubble of the theme's tokens.
+/// `style`, and its children are what it says.
 #[component]
 pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);

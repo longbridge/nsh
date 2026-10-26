@@ -478,7 +478,7 @@ pub struct Answer<T> {
     slot: Rc<RefCell<Output<T>>>,
 }
 
-/// The answer to a dialog ([`super::ambient::dialog`]): the index of the
+/// The answer to a dialog (`nsh_base::alert_dialog`): the index of the
 /// button pressed, -1 when it was dismissed.
 pub type DialogAnswer = Answer<i32>;
 

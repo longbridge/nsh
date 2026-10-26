@@ -44,18 +44,21 @@ loader). Where each one is implemented and declared: `js-modules.md`.
 - `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform`) and
   `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `announce`, `setAccessibilityFocus`): the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
-- `nsh/list`, `nsh/gesture`, `nsh/animated`, `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/native`, `nsh/ios`,
-  `nsh/image` (`Image`: the image element's component with its registry's functions on it) and the hand-written part
-  of `nsh/android` (below).
+- `nsh`'s primitives `List`, `Canvas` (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), `WebView`,
+  `Video` and `Image` (the image element's component with the `nsh` registry's `Image` functions on it): internal
+  sources `nsh` serves (`modules.rs` `PRIMITIVE_MODULES`, `NativeModule::moved_to`), no modules apps import; their
+  declarations go into `nsh`'s own file. `nsh/gesture`, `nsh/animated`, `nsh/native`, `nsh/ios` and the hand-written
+  part of `nsh/android` (below).
 - The modules of registries (`Registry::specifier`): the runtime's (`nsh/clipboard` and the registry parts of
-  `nsh/android`, `nsh/accessibility`, `nsh/desktop` and `nsh/image`) and the UI sets a host serves
+  `nsh` (`SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`, `Keyboard`, `Image`'s functions), `nsh/android`,
+  `nsh/accessibility` and `nsh/desktop`) and the UI sets a host serves
   (`HostOptions::ui_sets`: `nsh/base` by default, the app's `app/native`). Their
   components, modules and re-exports become exports (`components.rs`): a component is a host view naming it, with its
   props converted into their Rust types and sent by one render effect, events delivered to `on<Event>` handlers,
   children and slot holders; a module function runs in the call, or converts its arguments there and sends what it
   runs to the core as an op, returning a promise the core's events settle when it has a result
   (`docs/dev/rust-classes.md`, "How calls cross"). Values a registry names natively (`Registry::native_values`: `nsh/base`'s navigation) and
-  re-exports (`safeArea`, `safeAreaInsets`) come from the runtime. NSH's own export wins over a registry's of the
+  re-exports (`nsh`'s `safeArea`, `safeAreaInsets`, `keyboardFrame`) come from the runtime. NSH's own export wins over a registry's of the
   same name.
 
 QuickJS-NG resolves imports when it compiles a module, so the bytecode compiler installs the same loader
@@ -76,9 +79,7 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   with no component call: `View`, `Text`, `Scroll`, `Overlay`, `Image`, `WebView`, `Video` (`nsh`) and `Input`
   (`nsh/base`) to their host elements made in place, `List` to `nsh:rt`'s `list`, `If` / `Each` to `cond` / `each`; `Canvas`,
   `Dialog` (`nsh/base`) and `InputAccessoryView` are native components that do more than make their element (the
-  drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. Imported from the modules
-  they were first exported from (`nsh/image`, `nsh/list`, `nsh/canvas`, `nsh/webview`, `nsh/video`, deprecated), they
-  compile alike; hints name `nsh`. The exports are callable components too (`dom.rs`
+  drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. The exports are callable components too (`dom.rs`
   `host_component`; `If` and `Each` are real globals), so `const C = cond ? View : Text; <C />` works through the
   component path. Lowercase tags are errors with the import to write (`<view>`: write `<View>` and `import { View }
   from "nsh"`; for another, the closest binding, primitive or registry component). Why: TypeScript checks a lowercase
@@ -187,9 +188,9 @@ events are the runtime's: they keep the stack in step and call the app's props (
 - `nsh/animated` (`animated.rs`): operations are encoded as a few values (`ANIMATION_*`) and decoded into `AnimationOp`s
   (`protocol::decode_animation_op`); nodes and composites are released by their finalizers; a started animation's promise
   settles when the core reports its end (`Host::animations_finished`).
-- `nsh/webview`, `nsh/video`, `nsh/native`, `nsh/ios` and the hand-written part of `nsh/android` (`isAvailable`,
+- `WebView`, `Video` (`nsh`), `nsh/native`, `nsh/ios` and the hand-written part of `nsh/android` (`isAvailable`,
   `BackHandler`'s listeners): `platform_modules.rs`.
-- `nsh/canvas` (`canvas.rs`): a drawing makes thousands of calls, so the context records into a Rust list instead of a
+- `Canvas` (`nsh`, `canvas.rs`): a drawing makes thousands of calls, so the context records into a Rust list instead of a
   JS array, and the core's decoder (`nsh_core::js::canvas::decode`) reads it into one `Op::Draw`. The recording methods
   and properties are made from the core's specs (`CanvasOp::methods` / `properties`), so a new operation needs no
   change here. Paths and gradients are taken as they are when the drawing uses them.

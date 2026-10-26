@@ -23,7 +23,7 @@ NSH 的界面分为三层，与 GPUI Kit 的分层（`gpui`、`gpui-base`、`gpu
 | 层 | 模块 | 为应用提供什么 |
 |---|---|---|
 | 基础元素 | `nsh`、`nsh/<module>` | 响应式、宿主元素、布局、列表、画布、动画、手势、设备信息以及各平台自己的 API |
-| 基础组件 | [`nsh/base`](./nsh-base.md) | 无样式的组件，负责行为、状态、焦点和无障碍：按钮、Markdown 与 HTML 文档、导航栈与对话框、安全区域、系统对话框和软键盘，各平台通用 |
+| 基础组件 | [`nsh/base`](./nsh-base.md) | 无样式的组件，负责行为、状态、焦点和无障碍：按钮、Markdown 与 HTML 文档、导航栈与对话框和系统对话框，各平台通用 |
 | 组件库 | 你的应用自己的，或社区提供的 | 带有外观的按钮、卡片、列表行和页面 |
 
 应用的外观由应用自己决定。它的组件库就是第三层：用[宿主元素](../elements/index.md)和 `nsh/base` 写成的组件，通过 `style`、[Tailwind](../docs/tailwind.md) 类和主题设置样式；或者是它在[自己的 crate](../docs/rust.md) 中提供的 Rust 组件；也可以是社区基于同一基础发布的组件库。
@@ -36,8 +36,8 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 
 | 模块 | 导出 | 页面 |
 |---|---|---|
-| `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`、`ErrorBoundary`；原语 `View`、`Text`、`Scroll`、[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)（以及 `Image.getSize`、`Image.prefetch`）、[`Canvas`](./nsh-canvas.md)（以及 `Path2D`、`CanvasRenderingContext2D`、`CanvasGradient`）、[`WebView`](./nsh-webview.md)、[`Video`](./nsh-video.md)；`SafeAreaView`、`KeyboardAvoidingView`、`SelectionArea`；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
-| `nsh/base` | `Button`、`Input`；`TextView`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`safeArea`、`safeAreaInsets`；`AlertDialog`；`Keyboard`、`keyboardFrame` | [nsh/base](./nsh-base.md) |
+| `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`、`ErrorBoundary`；原语 `View`、`Text`、`Scroll`、[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)（以及 `Image.getSize`、`Image.prefetch`）、[`Canvas`](./nsh-canvas.md)（以及 `Path2D`、`CanvasRenderingContext2D`、`CanvasGradient`）、[`WebView`](./nsh-webview.md)、[`Video`](./nsh-video.md)；`SafeAreaView`、`KeyboardAvoidingView`、`SelectionArea`；`safeArea`、`safeAreaInsets`；`Keyboard`、`keyboardFrame`；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
+| `nsh/base` | `Button`、`Input`；`TextView`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`AlertDialog` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`、`AnimatedValue`、`AnimatedNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/device` | `windowSize`、`colorScheme`、`setColorScheme`、`fontScale`、`pixelRatio`、`locale`、`platform`、`openUrl` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
@@ -49,7 +49,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/native` | `nativeComponent`、`nativeModule`（宿主应用注册的原生组件和函数） | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `announce`、`setAccessibilityFocus`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
 | `nsh/ios` | `isAvailable`、`InputAccessoryView` | [nsh/ios](./nsh-ios.md) |
-| `nsh/android` | `isAvailable`、`Toast`、`BackHandler` | [nsh/android](./nsh-android.md) |
+| `nsh/android` | `isAvailable`、`BackHandler` | [nsh/android](./nsh-android.md) |
 | `nsh/mobile` | `isAvailable`、`TabBar`（系统标签栏，iOS 和 Android） | [nsh/mobile](./nsh-mobile.md) |
 | `nsh/desktop` | `isAvailable`、`Window`（标题、标题栏、最大化、全屏）、`titleBar`、`Menu`（应用菜单、右键菜单） | [nsh/desktop](./nsh-desktop.md) |
 | Standard modules | `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib` | [标准模块](./standard-modules.md) |

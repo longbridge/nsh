@@ -13,7 +13,7 @@ A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -769,7 +769,7 @@ The look of a list is the app's own: the list places and recycles the rows, and 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::element::{palette::NEUTRAL, prelude::*};
+use nsh_core::{element::palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,

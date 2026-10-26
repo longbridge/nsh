@@ -21,7 +21,7 @@ defaults (`classes` and `styles`). Rust makes one with `nsh_base::data_table()`,
 
 ```rust tabs
 use nsh_base::{DataTableColumn, data_table};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn column(key: &str, title: &str) -> DataTableColumn {
     let mut column = DataTableColumn::default();

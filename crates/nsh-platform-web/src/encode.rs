@@ -1354,14 +1354,6 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             };
             out.bool(*animated).end();
         }
-        Command::Toast { text, long } => {
-            out.item("cmd")
-                .num(id)
-                .str("toast")
-                .str(text)
-                .bool(*long)
-                .end();
-        }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
         Command::OpenUrl { id: request, url } => out
             .item("cmd")

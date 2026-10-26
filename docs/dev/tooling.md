@@ -6,7 +6,7 @@
   are removed). None of it is checked in, and nothing in it depends on the app's code: `nsh_js::type_definitions(ui_sets)`
   (the UI sets as data: `nsh_core::element::description::SetDescription`, each with its generated declarations)
   makes the declarations of everything NSH serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
-  the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/list.d.ts`, `nsh/base.d.ts`,
+  the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/base.d.ts`, `nsh/device.d.ts`,
   an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
@@ -608,7 +608,7 @@ that specifier (`examples/rust-exports`: `import { Account, Gauge, Ledger } from
 (`import { Chart } from "app/charts"`, `import { Store } from "app/storage"`; `docs/dev/rust-modules.md`):
 
 ```rust
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[native_module("rust-exports/native")]
 fn native(registry: &mut Registry) {

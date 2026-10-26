@@ -43,11 +43,11 @@ crates/
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`element/class.rs`), JS's calls into
                        Rust and what comes back, typed (`element/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
                        toolchain (`element/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
-                       modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs),
+                       modules (`runtime/`: `nsh`'s `SafeAreaView`, `Keyboard` and `Image` functions, `nsh/android`'s BackHandler, ...; their JS face is made from their specs),
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Collapsible`, `Progress`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), `Input` (a native text input, made by `nsh-js`), safe area insets, the keyboard, the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Collapsible`, `Progress`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), `Input` (a native text input, made by `nsh-js`), the status
                        bar, `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), `ResizablePanelGroup` / `ResizablePanel` (`resizable/`), `DockArea` (a dockable workspace: splits, tab groups and edge docks whose layout is
                        data, `dock/`, docs/dev/dock.md), `Editor` (a code editor: highlighting, several carets, folds, search, diagnostics;
                        `editor/`, docs/dev/editor.md), `DiffView` (the changes between two texts or of a patch, split or unified: `diff/`,
@@ -299,16 +299,18 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
   `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
-  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::element` (and its `prelude`).
+  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::element` (and `nsh_core::prelude`).
   Which side an element is on: `nsh-core` holds the foundational elements, what draws or lays out content and what
   the surface reports (`View`, `Text`, `Scroll`, `List`, `Image`, `Canvas`, `Overlay`, `Video`, `WebView`,
-  `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`); `nsh-base` holds the functional components, controls a
+  `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`, with `safeArea()`, `safeAreaInsets()`, `Keyboard` and
+  `keyboardFrame()`); `nsh-base` holds the functional components, controls a
   user operates (`Button`, `Input`, `Checkbox`, `Switch`, `Slider`, `Editor`, ...), even when one is a native view the
   core makes (`Input`: `nsh_base::input()`, TSX `nsh/base`). The Rust home and the TS home of an element are the
-  same layer.
+  same layer. Navigation (`NavStack`, `NavPage`), `Dialog` and `AlertDialog` are `nsh-base`'s: the core makes their
+  native containers, `nsh-base` owns the component apps use, in Rust and TS alike.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
-  button, a checkbox, radios, a switch, tabs, popovers, menus, tooltips and sheets, text input, safe area insets, system alerts and the keyboard today, with the status bar a
+  button, a checkbox, radios, a switch, tabs, popovers, menus, tooltips and sheets, text input and system alerts today, with the status bar a
   prop of pages and dialogs; controls such as toggles, sliders and selects as their behavior is written). Names follow `gpui-base`'s
   (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two
@@ -400,9 +402,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   (`View`, `Text`, `Scroll`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`, `SafeAreaView`,
   `KeyboardAvoidingView`, `SelectionArea`), as `nsh_core::element` holds them, every base
   component from `nsh/base` (`Input`, `Dialog`, `Button`, `NavStack`, ...), and
-  `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
-  `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same
-  values, deprecated): new code imports them from `nsh`. Lowercase tags are compile errors: TypeScript checks a lowercase tag
+  `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
   They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.

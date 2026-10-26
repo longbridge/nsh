@@ -1,5 +1,5 @@
 //! The platform's services for components, modules and tasks beyond
-//! dialogs and the keyboard: screen reader announcements, toasts, the
+//! dialogs and the keyboard: screen reader announcements, the
 //! clipboard, image information, display frames and the layout direction
 //! ([`super::ambient`]'s functions, [`super::ModuleCx`]). Each is an
 //! [`Action`] the core applies in order with the component's other changes.
@@ -11,7 +11,7 @@ use std::{
 };
 
 use super::{
-    Answer, ImageSize, PropEnum,
+    Answer, ImageSize,
     task::{Action, AnswerSlot, ClipboardImage, ClipboardRead},
 };
 use crate::{
@@ -19,16 +19,6 @@ use crate::{
     platform::{HttpHead, HttpRequest},
     time::Instant,
 };
-
-/// How long a toast shows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
-pub enum ToastDuration {
-    /// About 2 seconds.
-    #[default]
-    Short,
-    /// About 3.5 seconds.
-    Long,
-}
 
 /// Whether an image loaded ahead ([`super::ambient::prefetch_image`]): true
 /// once its bytes are in memory.
@@ -104,17 +94,6 @@ pub(crate) fn fetch(request: HttpRequest) -> (Fetch, Action) {
 /// The screen reader reads `message`.
 pub(crate) fn announce(message: String) -> Action {
     Action::Command(ROOT_ID, Command::Announce(message))
-}
-
-/// A toast (Android; nothing happens elsewhere).
-pub(crate) fn toast(message: String, duration: ToastDuration) -> Action {
-    Action::Command(
-        ROOT_ID,
-        Command::Toast {
-            text: message,
-            long: duration == ToastDuration::Long,
-        },
-    )
 }
 
 /// Puts `text` on the system clipboard.

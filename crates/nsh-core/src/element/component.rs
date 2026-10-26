@@ -12,9 +12,9 @@ use rustc_hash::FxHashMap;
 
 use super::{
     Children, IntoElement, PropError, Slot, TsType, TsTypes,
+    builder::{ComponentElement, ElNode},
     call::{AnyValue, JsResult, MethodCall},
     class::{Class, ClassDef, ClassSpec, MemberKind, Thrown},
-    element::{ComponentElement, ElNode},
     js::{JsHost, JsIn, JsOwned},
     module::{FunctionSpec, Module, ModuleSpec},
 };
@@ -663,7 +663,7 @@ pub struct Registry {
     /// from a spec).
     native_values: Arc<Vec<&'static str>>,
     /// The runtime module the functions belong to (`nsh/android`): JS
-    /// calls them as `nsh/android:Toast.show`, apart from any UI set's.
+    /// calls them as `nsh/android:BackHandler.exitApp`, apart from any UI set's.
     namespace: Option<&'static str>,
     /// The JS module a UI set is imported as (`app/native`).
     ui_set: Option<&'static str>,
@@ -1527,7 +1527,7 @@ fn handler_name(event: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::prelude::*;
+    use crate::prelude::*;
 
     #[derive(Default)]
     struct Stepper;
@@ -1848,7 +1848,7 @@ mod tests {
     }
 
     mod other {
-        use crate::element::prelude::*;
+        use crate::prelude::*;
 
         /// Another component exported as `Stepper`.
         #[derive(Default)]

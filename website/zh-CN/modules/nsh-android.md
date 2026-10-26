@@ -1,20 +1,22 @@
 ---
 title: nsh/android
-description: Android 专有 API：isAvailable、Toast 和 BackHandler。
+description: Android 专有 API：isAvailable 和 BackHandler。
 order: 12
 ---
 
 # nsh/android
 
-`nsh/android` 包含只有 Android 才有的 API。Rust 代码调用 `nsh_core::element::prelude` 中对应的函数（`toast`、`on_back_press`），并用 `os() == Os::Android` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的函数什么也不做，`isAvailable` 告诉你当前是否在 Android 上。
+`nsh/android` 包含只有 Android 才有的 API。Rust 代码调用 `nsh_core::prelude` 中对应的函数（`on_back_press`），并用 `os() == Os::Android` 判断平台；TSX 导入这个模块，它在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的函数什么也不做，`isAvailable` 告诉你当前是否在 Android 上。
 
 ```rust tabs
-use nsh_core::{platform::Os, element::prelude::*}; // os、toast、ToastDuration、on_back_press
+use nsh_core::{platform::Os, prelude::*}; // os、on_back_press
 ```
 
 ```tsx tabs
-import { BackHandler, isAvailable, Toast } from "nsh/android";
+import { BackHandler, isAvailable } from "nsh/android";
 ```
+
+所有平台（包括 Android）上的简短消息使用 `nsh/base` 的 [`Toast`](../elements/toast.md)，外观由应用决定。
 
 元素和组件的 Android 专有*属性*不在这里：在 TSX 中它们放在 `android={{…}}` 属性中（例如 `<View android={{ elevation: 4, ripple: … }} />`）。见[平台专有代码](../docs/platform-specific.md)。
 
@@ -25,43 +27,6 @@ const isAvailable: boolean;
 ```
 
 在 Android 上为 `true`，其他平台为 `false`。Rust：`os() == Os::Android`。
-
-## Toast
-
-```ts
-const Toast: {
-  show(message: string, duration?: "short" | "long" | null): void;
-};
-```
-
-在屏幕底部显示一条简短消息（Android 的 toast）。`duration` 默认为 `"short"`。Rust：`toast(message, ToastDuration::Short)`（或 `ToastDuration::Long`），在其他平台上什么也不做。
-
-```rust tabs
-use nsh_base::alert_dialog;
-use nsh_core::{platform::Os, element::prelude::*};
-
-fn notify(message: &str) {
-    if os() == Os::Android {
-        toast(message, ToastDuration::Short);
-    } else {
-        let message = message.to_string();
-        spawn(async move {
-            let _ = alert_dialog().title("Done").description(message).action("OK").show().await;
-        });
-    }
-}
-```
-
-```tsx tabs
-import { platform } from "nsh/device";
-import { Toast } from "nsh/android";
-import { AlertDialog } from "nsh/base";
-
-const notify = (message: string) =>
-  platform.os === "android"
-    ? Toast.show(message)
-    : AlertDialog.show({ title: "Done", description: message, actions: [{ label: "OK" }] });
-```
 
 ## BackHandler
 
@@ -81,7 +46,7 @@ const BackHandler: {
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn Editor() -> impl IntoElement {

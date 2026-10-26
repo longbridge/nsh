@@ -1,11 +1,11 @@
 import { cleanup, resource, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { Toast } from "nsh/android";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
 import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
 import { Menu } from "nsh/desktop";
 import { keymap } from "nsh/keymap";
 import { Icon, type IconName } from "../icons";
+import { toast } from "../toast";
 import {
   Appear,
   Badge,
@@ -234,7 +234,7 @@ function Dialogs() {
             show(text, text === "Delete" ? "danger" : "accent");
           }}
         />
-        <ActionRow icon="spark" tint={colors.warn} title="Toast" detail="Android only" onPress={() => Toast.show("Hello from a toast", "long")} />
+        <ActionRow icon="spark" tint={colors.warn} title="Toast" detail="nsh/base, every platform" onPress={() => void toast({ title: "Hello from a toast", description: "nsh/base's ToastManager, styled by the gallery" })} />
       </Inset>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 11, paddingTop: 12, paddingBottom: 11, minHeight: 44 }}>
         <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>Answer</Text>

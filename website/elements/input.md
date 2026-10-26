@@ -14,7 +14,7 @@ with `nsh_base::input()`, TSX with `<Input>` from `nsh/base`.
 
 ```rust tabs
 use nsh_base::input;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn name_field() -> impl IntoElement {
     let name = signal(String::new());
@@ -209,7 +209,7 @@ let password!: YNode;
 </>;
 ```
 
-`Keyboard.dismiss()` from `nsh/base` (`dismiss_keyboard()` in Rust) hides the keyboard whichever input has it.
+`Keyboard.dismiss()` from `nsh` (`dismiss_keyboard()` in Rust) hides the keyboard whichever input has it.
 
 ## Platform notes
 

@@ -16,7 +16,7 @@ iOS and Mac Catalyst, `android.graphics.Canvas` on Android) at the screen's reso
 ```rust tabs
 use std::f32::consts::{FRAC_PI_2, TAU};
 
-use nsh_core::{canvas::LineCap, element::prelude::*};
+use nsh_core::{canvas::LineCap, prelude::*};
 
 /// A progress ring, 120 points square.
 fn ring(progress: f32) -> impl IntoElement {

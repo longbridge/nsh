@@ -13,7 +13,7 @@ paragraph is typeset natively (CoreText on iOS and Mac Catalyst, `StaticLayout` 
 thread, so the main thread only draws it. Rust makes one with `text(content)`, TSX with `<Text>` from `nsh`.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 text("Read the ")
     .text_base()

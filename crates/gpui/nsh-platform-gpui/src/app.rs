@@ -513,7 +513,7 @@ impl AppView {
 
     /// The embedding app's text size relative to the default (1.0), which
     /// stands in for the user's: every text that allows font scaling (texts,
-    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// inputs, the components' labels and alerts) is laid out again
     /// at it, and `fontScale()` reads it, at once and for every app loaded
     /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
     /// boxes sized by their text grow with it. `None` follows the system's

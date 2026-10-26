@@ -12,7 +12,7 @@ demo: el-safe-area-view
 
 ```rust tabs
 use nsh_core::element::safe_area_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     safe_area_view()
@@ -83,7 +83,7 @@ safe_area_view()
 
 ## safeArea 与 safeAreaInsets
 
-需要具体数值时，比如自己为底栏添加内边距，可以直接读取它们。两个 TSX 访问器都返回一个 `Edges` 对象（`{ top, right, bottom, left }`，单位为点），并且是响应式的：读取它们的代码会在它们变化时重新运行，比如旋转屏幕时。
+需要具体数值时，比如自己为底栏添加内边距，可以直接读取它们。两个 TSX 访问器都来自 `nsh`，都返回一个 `Edges` 对象（`{ top, right, bottom, left }`，单位为点），并且是响应式的：读取它们的代码会在它们变化时重新运行，比如旋转屏幕时。
 
 | TSX | Rust | 返回 |
 |---|---|---|
@@ -91,7 +91,7 @@ safe_area_view()
 | `safeAreaInsets()` | `safe_area_view()`、`cx.insets()` | 组件渲染位置的边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。SafeAreaView 使用的就是这些边距。在 TSX 中，在组件里调用它，它返回一个 accessor。在 Rust 中，`safe_area_view()` 会把它们应用到内容上，你的 crate 中的组件用 `cx.insets()` 读取它们。 |
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn bottom_bar() -> impl IntoElement {
     view()
@@ -103,8 +103,7 @@ fn bottom_bar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Text, View } from "nsh";
-import { safeArea } from "nsh/base";
+import { Text, View, safeArea } from "nsh";
 
 function BottomBar() {
   return (

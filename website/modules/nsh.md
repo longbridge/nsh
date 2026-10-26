@@ -203,8 +203,8 @@ function split<T extends object, K extends readonly (keyof T)[]>(
 Splits a props object into the props named in `keys` and the rest. Both halves stay reactive: props whose values change are getters, and `split` keeps them as getters. Use it in a component that handles some props itself and passes the others on. Destructuring props (`const { label } = props`) would read them once and lose updates.
 
 ```tsx
-import { type InputProps, split, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { split, Text, View } from "nsh";
+import { Input, type InputProps } from "nsh/base";
 
 function LabeledInput(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);
@@ -288,14 +288,26 @@ page. Their props are documented under [Elements](../elements/index.md). The tex
 
 `SafeAreaView` pads its content by the insets where it renders: the nearest page's (below its header), the nearest
 dialog's, or else the surface's safe area. Rust builds it with `nsh_core::element::safe_area_view()` (its edges an
-`Edge`). The insets themselves, `safeArea()` and `safeAreaInsets()`, come from [`nsh/base`](./nsh-base.md#safe-areas).
-See [SafeAreaView](../elements/safe-area-view.md).
+`Edge`). See [SafeAreaView](../elements/safe-area-view.md).
+
+### safeArea and safeAreaInsets
+
+`safeArea()` is the surface's safe area (`safe_area()` in Rust); `safeAreaInsets()` the insets where a component
+renders (`cx.insets()` in Rust). Both are reactive `Edges` (`{ top, right, bottom, left }` in points). See
+[safeArea and safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets).
 
 ## KeyboardAvoidingView
 
 `KeyboardAvoidingView` keeps its content above the software keyboard, moving with it. Rust builds it with
-`nsh_core::element::keyboard_avoiding_view()` (its behavior an `AvoidBehavior`). `Keyboard` and `keyboardFrame()`
-come from [`nsh/base`](./nsh-base.md#keyboard). See [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md).
+`nsh_core::element::keyboard_avoiding_view()` (its behavior an `AvoidBehavior`). See
+[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md).
+
+### Keyboard and keyboardFrame
+
+`Keyboard.dismiss()` hides the software keyboard (`dismiss_keyboard()` in Rust) and `keyboardFrame()` tells you how
+much of the screen it covers (`keyboard_height()` and `keyboard_duration()` in Rust). See
+[Hiding the keyboard](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) and
+[The keyboard's height](../elements/keyboard-avoiding-view.md#the-keyboards-height).
 
 ## SelectionArea
 
@@ -316,7 +328,7 @@ come from [`nsh/base`](./nsh-base.md#keyboard). See [KeyboardAvoidingView](../el
 | `Component<P>` | `(props: P) => JSX.Element` |
 | `JSX` | The JSX namespace (`JSX.Element`) |
 | `YNode` | What a `ref` receives: focus, scroll and other commands. See [Elements](../elements/index.md) |
-| `ViewProps`, `TextProps`, `ImageProps`, `ScrollProps`, `InputProps`, `CommonProps`, `TouchProps` | Props of host elements |
+| `ViewProps`, `TextProps`, `ImageProps`, `ScrollProps`, `CommonProps`, `TouchProps` | Props of host elements |
 | `ViewStyle`, `TextStyle`, `ImageStyle`, `LayoutStyle`, `StyleProp<T>` | Style objects; see the [style reference](./style-reference.md) |
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `HoverEvent`, `ContextMenuEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |

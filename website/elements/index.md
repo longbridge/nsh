@@ -15,7 +15,7 @@ these elements and styled by the app, so the app's look is entirely its own.
 Every example on these pages comes in Rust and TSX: pick a tab, and every example on the page follows.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     let count = signal(0_u32);
@@ -56,7 +56,7 @@ function App() {
 mount(App);
 ```
 
-In Rust, the primitives are functions of `nsh_core::element::prelude` (`view()`, `text(..)`, `image(..)`) and the base
+In Rust, the primitives are functions of `nsh_core::prelude` (`view()`, `text(..)`, `image(..)`) and the base
 components come from the `nsh_base` crate. Styles are typed methods (`.flex_1()`, `.gap_3()`, `.px(px(20.0))`,
 `.bg(..)`), state styles take a closure (`.active(|s| s.opacity(0.6))`), listeners are closures of their event
 (`.on_press(move || ..)`, `.on_change(move |text: &str| ..)`) and `.child(..)` adds children. A piece of UI is a plain function returning
@@ -74,13 +74,9 @@ import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeA
 import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
-> [!NOTE]
-> Apps built for earlier releases import `Image`, `List`, `Canvas`, `WebView` and `Video` from `nsh/image`,
-> `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`; those imports keep working and name the same elements.
-
 ## Primitives
 
-Imported from `nsh` in TSX, from `nsh_core::element::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::element`).
+Imported from `nsh` in TSX, from `nsh_core::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::element`).
 
 | Element | Rust | Native view (iOS / Android) | Page |
 |---|---|---|---|
@@ -263,20 +259,37 @@ and tablets show none. The hint never takes the pointer or presses, so the eleme
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `tooltip` | `.tooltip(..)` | `string \| JSX.Element` | A text, in a small bubble drawn with the theme's `popover` tokens (`bg-popover`, `text-popover-foreground`, `border-border`: the theme decides how it looks), or an element, shown as it is (a `Tooltip` of `nsh/base` is the tooltip itself). |
+| `tooltip` | `.tooltip(..)` | `JSX.Element` | The hint, an element the app styles: a [`Tooltip`](tooltip.md) of `nsh/base` is the tooltip itself, with its placement, delay and events; any other element is shown as it is. |
 
 ```rust tabs
-view().on_press(save).tooltip("Save the document").child(text("💾"))
+view()
+    .on_press(save)
+    .tooltip(
+        tooltip()
+            .rounded_md()
+            .bg(rgb(0x111827))
+            .px_2()
+            .py_1()
+            .child(text("Save the document").text_color(white())),
+    )
+    .child(text("💾"))
 ```
 
 ```tsx tabs
-<View onPress={save} tooltip="Save the document">
+<View
+  onPress={save}
+  tooltip={
+    <Tooltip class="rounded-md bg-gray-900 px-2 py-1">
+      <Text class="text-white">Save the document</Text>
+    </Tooltip>
+  }
+>
   <Text>💾</Text>
 </View>
 ```
 
-For a tooltip of its own look, placement, delay or events, give a [`Tooltip`](tooltip.md) of `nsh/base` as the
-`tooltip`, as GPUI's `.tooltip(..)` takes one.
+The `Tooltip` sets its own look, placement, delay and events, as GPUI's `.tooltip(..)` takes one. An app with many
+tooltips keeps one small component of its own that wraps a text in its `Tooltip`.
 
 ### Context menus
 

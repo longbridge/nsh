@@ -15,7 +15,7 @@ use std::{
 
 use super::{
     AnyElement, IntoElement, IntoReactive, Owner, Reactive, ReadSignal, Signal, SignalEquals,
-    cleanup, computed, create_root, element::ElKind, signal, signal_with, untracked,
+    builder::ElKind, cleanup, computed, create_root, signal, signal_with, untracked,
 };
 use crate::Tag;
 

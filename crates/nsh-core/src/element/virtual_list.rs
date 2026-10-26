@@ -14,7 +14,7 @@ use std::{
 
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive, Position, Reactive,
-    element::{BoundListConfig, ElKind, ElNode, Element, IntoElement, IntoListener, ListConfig},
+    builder::{BoundListConfig, ElKind, ElNode, Element, IntoElement, IntoListener, ListConfig},
     events, when,
 };
 use crate::{

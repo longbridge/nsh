@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
-    element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
+    builder::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
         self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
         VideoProgress, WebNavigation,
@@ -124,7 +124,7 @@ macro_rules! host_element {
         impl Accessible for $name {}
         impl Interactive for $name {}
 
-        impl super::element::IntoTooltip for $name {
+        impl super::builder::IntoTooltip for $name {
             fn apply_tooltip(self, node: &mut ElNode) {
                 self.into_element().apply_tooltip(node);
             }
@@ -280,14 +280,18 @@ pub fn scroll() -> Scroll {
 /// A native navigation stack of [`screen`]s: put a screen in to push it,
 /// leave it out to pop it. Give each screen a [`Element::key`] (its route)
 /// so the screens below keep their state.
-#[deprecated(note = "use nsh_base::nav_stack, as TSX's `NavStack` of `nsh/base`")]
+///
+/// The core's part of `nsh_base::nav_stack`, which apps use.
+#[doc(hidden)]
 pub fn stack() -> Stack {
     Stack(ElNode::new(Tag::Stack))
 }
 
 /// A screen of a [`stack`]. What it shows reads its insets below the
 /// header ([`super::Scope::insets`]).
-#[deprecated(note = "use nsh_base::nav_page, as TSX's `NavPage` of `nsh/base`")]
+///
+/// The core's part of `nsh_base::nav_page`, which apps use.
+#[doc(hidden)]
 pub fn screen() -> Screen {
     let mut node = ElNode::new(Tag::Screen);
     // Its insets come with this event.
@@ -297,7 +301,9 @@ pub fn screen() -> Screen {
 
 /// A modal presenting its children. Put it in the view to present it (in
 /// a region: [`super::If`]), leave it out to dismiss it.
-#[deprecated(note = "use nsh_base::dialog, as TSX's `Dialog` of `nsh/base`")]
+///
+/// The core's part of `nsh_base::dialog`, which apps use.
+#[doc(hidden)]
 pub fn modal() -> Modal {
     let mut node = ElNode::new(Tag::Modal);
     // Its insets (`Scope::insets` inside it) come with this event.

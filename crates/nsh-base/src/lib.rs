@@ -5,8 +5,8 @@
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
 //! with a table's semantics (`Table` and its parts), toasts (`Toast`,
-//! `ToastStack`, `ToastManager`), text input (`Input`), safe area insets,
-//! the system's dialogs and the software keyboard, and the theme's semantic
+//! `ToastStack`, `ToastManager`), text input (`Input`), the system's
+//! dialogs, and the theme's semantic
 //! tokens (`Theme`, as `gpui-base`'s).
 //!
 //! What it renders lays out or tells the platform, never styles: the look
@@ -23,7 +23,6 @@ mod data_table;
 mod diff;
 pub mod dock;
 pub mod editor;
-mod keyboard;
 mod menu;
 mod navigation;
 mod popover;
@@ -80,7 +79,6 @@ pub use crate::{
         EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, EditorToken,
         editor,
     },
-    keyboard::Keyboard,
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
@@ -171,10 +169,7 @@ pub fn registry() -> Registry {
         .register::<ToastStack>()
         .class::<toast::ToastManagerClass>()
         .module::<AlertDialog>()
-        .module::<Keyboard>()
         .module::<TextView>()
-        // The environment's accessors and hooks, as they are.
-        .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &["Edges"])
         // Navigation and `Input`: made by `nsh-js` (`navigation.rs`,
         // `env.rs`), declared by hand.
         .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack", "Input"])
@@ -237,7 +232,7 @@ mod tests {
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
-        assert_eq!(modules, ["AlertDialog", "Keyboard", "TextView"]);
+        assert_eq!(modules, ["AlertDialog", "TextView"]);
     }
 
     /// Every export TS sees has a doc comment (the declarations show it).

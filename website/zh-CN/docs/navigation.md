@@ -13,7 +13,7 @@ group: ui
 
 ```rust tabs
 use nsh_base::{nav_page, nav_stack};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Route {
@@ -175,7 +175,7 @@ mount(App);
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// 一个压入的页面：它的 key（在栈中唯一）和创建它的函数。
 #[derive(Clone)]
@@ -379,7 +379,7 @@ nav_page()
 
 ```rust tabs
 use nsh_base::{alert_dialog, nav_page};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
     let draft = signal(String::new());
@@ -455,7 +455,7 @@ function EditNote() {
 
 ```rust tabs
 use nsh_base::dialog;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn files() -> impl IntoElement {
     let open = signal(false);
@@ -542,7 +542,7 @@ Escape、Android 返回键、点击背景（TSX 的背景，Rust 中是原生表
 监听器处理了按键时返回 `true`，栈就不会弹出。注册了监听器时，Android 的返回手势不会预览弹出效果（手势结束后应用才给出答复），所以只在监听器可能处理按键时才注册它：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn editor() -> impl IntoElement {
     let selecting = signal(false);

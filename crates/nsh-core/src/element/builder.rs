@@ -1118,40 +1118,16 @@ pub trait Accessible: Element {
     }
 }
 
-/// What an element's tooltip can be ([`Interactive::tooltip`]): a text,
-/// in a minimal bubble drawn with the theme's `popover` tokens, or an
-/// element, shown as it is.
+/// What an element's tooltip can be ([`Interactive::tooltip`]): an
+/// element, shown as it is (`nsh_base`'s `Tooltip` is the tooltip itself).
 pub trait IntoTooltip {
     #[doc(hidden)]
     fn apply_tooltip(self, node: &mut ElNode);
 }
 
-impl IntoTooltip for &'static str {
-    fn apply_tooltip(self, node: &mut ElNode) {
-        SharedString::from(self).apply_tooltip(node);
-    }
-}
-
-impl IntoTooltip for String {
-    fn apply_tooltip(self, node: &mut ElNode) {
-        SharedString::from(self).apply_tooltip(node);
-    }
-}
-
-impl IntoTooltip for SharedString {
-    fn apply_tooltip(self, node: &mut ElNode) {
-        let content = if self.is_empty() {
-            crate::overlay::TooltipContent::None
-        } else {
-            crate::overlay::TooltipContent::Text(Arc::from(self.as_str()))
-        };
-        super::host::set(node, Prop::Tooltip(content));
-    }
-}
-
 impl IntoTooltip for AnyElement {
     fn apply_tooltip(self, node: &mut ElNode) {
-        // A hint overlay inside the element, as the core makes for a text.
+        // A hint overlay inside the element, as the core makes for JS's.
         let mut hint = ElNode::new(Tag::Overlay);
         hint.key = Some("tooltip".into());
         hint.attrs.pointer_events = PointerEvents::None;
@@ -1191,9 +1167,8 @@ pub trait Interactive: Element {
     /// A hint about it, shown above it on the desktops while the pointer
     /// rests on it (after half a second), until the pointer leaves or
     /// presses it; never on touch screens, and it never takes the pointer.
-    /// A text shows in a minimal bubble drawn with the theme's `popover`
-    /// tokens; an element is shown as it is. `nsh_base`'s `Tooltip` places
-    /// one, delays it and reports it.
+    /// The element is shown as it is; `nsh_base`'s `Tooltip` is the tooltip
+    /// itself, with its own placement, delay and reports.
     fn tooltip(mut self, tooltip: impl IntoTooltip) -> Self {
         tooltip.apply_tooltip(self.node());
         self
@@ -2282,7 +2257,7 @@ impl<C: Component> ComponentElement<C> {
 /// before [`Styled::size`]; call those as `Styled::selected(element, ..)`).
 ///
 /// ```
-/// use nsh_core::element::prelude::*;
+/// use nsh_core::prelude::*;
 ///
 /// /// The props of [`Picker`].
 /// #[derive(Clone, PartialEq, Props)]

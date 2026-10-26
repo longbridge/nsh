@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     Color, EventKind, IMAGE_SCALES, ImageScales, StyleValue,
     animation::{AnimationOp, AnimationProp},
-    element::input,
+    element::{input, modal, screen, stack},
     geometry::{point, px},
 };
 
@@ -5601,7 +5601,8 @@ mod components {
     use super::*;
     use crate::{
         Prop,
-        element::{Children, Event, Props, Registry, Slot, prelude::*},
+        element::{Children, Event, Props, Registry, Slot},
+        prelude::*,
     };
 
     /// Counts taps; shows `label` and the count; holds its JSX children.
@@ -8754,7 +8755,8 @@ mod touch {
     use super::*;
     use crate::{
         TouchEvent, TouchPhase, TouchPoint,
-        element::{ClaimRequest, ResponderEvent, TouchClaim, prelude::*},
+        element::{ClaimRequest, ResponderEvent, TouchClaim},
+        prelude::*,
     };
 
     #[derive(Clone, PartialEq, Props)]
@@ -9150,8 +9152,8 @@ mod painter {
     use super::*;
     use crate::{
         canvas::{CanvasGradient, CanvasOp, FillRule, GradientShape, Num, Paint, svg_path},
-        element::prelude::*,
         geometry::{bounds, percentage, point, px, radians, size},
+        prelude::*,
     };
 
     #[test]
@@ -9285,7 +9287,7 @@ mod painter {
     #[component]
     fn Label() -> impl IntoElement {
         let offset = animated_value(3.0);
-        let width = crate::element::prelude::measure_text("600 20px system-ui", "100%");
+        let width = crate::prelude::measure_text("600 20px system-ui", "100%");
         let mut p = Painter::new()
             .stroke_style(
                 CanvasGradient::conic(radians(0.0), point(px(50.0), px(50.0)))
@@ -9755,7 +9757,8 @@ mod views {
     use super::*;
     use crate::{
         Prop,
-        element::{Component, Props, Registry, Root, Scope, prelude::*},
+        element::{Component, Props, Registry, Root, Scope},
+        prelude::*,
     };
 
     fn texts(batch: &MountBatch) -> Vec<String> {
@@ -12864,9 +12867,9 @@ mod rust_desktop {
         element::{
             Root,
             desktop::{close_window, set_title_bar, title_bar},
-            prelude::*,
         },
         geometry::{Edges, Points},
+        prelude::*,
     };
 
     thread_local! {
@@ -12993,7 +12996,7 @@ mod rust_desktop {
 
 #[test]
 fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
-    use crate::element::prelude::*;
+    use crate::prelude::*;
     #[component]
     fn DropView() -> impl IntoElement {
         let received = signal(String::new());
@@ -13052,7 +13055,7 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
 
 #[test]
 fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
-    use crate::element::prelude::*;
+    use crate::prelude::*;
     #[component]
     fn Crosshair() -> impl IntoElement {
         let at = signal(String::new());
@@ -13102,7 +13105,7 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
 
 #[test]
 fn context_menus_reach_rust_listeners_with_their_positions() {
-    use crate::element::prelude::*;
+    use crate::prelude::*;
     #[component]
     fn Row() -> impl IntoElement {
         let at = signal(String::new());
@@ -13402,7 +13405,10 @@ fn start_and_end_follow_the_writing_direction() {
 /// `Option`, a `Vec`, an array or an iterator.
 mod builders {
     use super::*;
-    use crate::element::{Listener, Root, prelude::*};
+    use crate::{
+        element::{Listener, Root},
+        prelude::*,
+    };
 
     /// The mount items of `C`'s first frame and of the frames after a press
     /// on each text of `taps`, in order.
@@ -13597,7 +13603,8 @@ mod renders {
     use super::*;
     use crate::{
         Prop,
-        element::{AnyValue, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
+        element::{AnyValue, Props, Registry, Rendered, Renderer, Root, dynamic},
+        prelude::*,
     };
 
     /// Renders each item (`key:label`) with the app's function, keyed by
@@ -13985,7 +13992,7 @@ mod rust_selection_area {
     use std::cell::Cell;
 
     use super::*;
-    use crate::element::{Root, prelude::*};
+    use crate::{element::Root, prelude::*};
 
     thread_local! {
         static AREA: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
@@ -14811,10 +14818,26 @@ fn tooltips_show_after_the_pointer_rests_and_hide_when_it_leaves_or_presses() {
     );
     apply(
         &mut c,
-        vec![Op::SetProp {
-            id: 2,
-            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Saves it".into())),
-        }],
+        vec![
+            // The app's element, out of the tree.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "Saves it".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(4)),
+            },
+        ],
     );
     let batch = c.commit().unwrap();
     // The element follows the pointer; the tooltip waits out of the view.
@@ -14839,14 +14862,6 @@ fn tooltips_show_after_the_pointer_rests_and_hide_when_it_leaves_or_presses() {
         .expect("the tooltip's overlay in the root view");
     let frame = frame_of(&batch, overlay).unwrap();
     assert_eq!(frame.bottom(), px(96.0));
-    // A bubble of the theme's `popover` tokens.
-    let style = batch.items.iter().find_map(|i| match i {
-        MountItem::ViewStyle { id, style } if *id == overlay => Some(style.clone()),
-        _ => None,
-    });
-    assert!(
-        style.is_some_and(|s| s.background_color != Color::default() && s.border_radius.0 > 0.0)
-    );
 
     // Leaving hides it.
     c.component_event(2, EventKind::HoverOut, &EventPayload::None);
@@ -14894,10 +14909,26 @@ fn tooltips_wait_for_nothing_on_touch_screens() {
     add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
     apply(
         &mut c,
-        vec![Op::SetProp {
-            id: 2,
-            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Saves it".into())),
-        }],
+        vec![
+            // The app's element, out of the tree.
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 6,
+                text: "Saves it".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(4)),
+            },
+        ],
     );
     let batch = c.commit().unwrap();
     assert_eq!(mounts_listening(&batch, 2, EventKind::HoverIn), None);
@@ -14932,13 +14963,19 @@ fn a_tooltip_element_is_shown_as_it_is() {
     let overlay = c.nodes[key as usize].parent;
     assert_eq!(c.nodes[overlay as usize].kind, Kind::Overlay);
     assert_eq!(c.nodes[c.nodes[overlay as usize].parent as usize].id, 2);
-    // A text in place of the element: it leaves (still JS's).
+    // Another element in its place: the first leaves (still JS's).
     apply(
         &mut c,
-        vec![Op::SetProp {
-            id: 2,
-            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Hi".into())),
-        }],
+        vec![
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(8)),
+            },
+        ],
     );
     c.commit();
     assert_eq!(c.nodes[c.key(4).unwrap() as usize].parent, NO_KEY);
@@ -14992,10 +15029,16 @@ fn a_tooltip_element_that_is_a_hint_overlay_is_the_tooltip_itself() {
     // Another tooltip: it leaves the element, still JS's.
     apply(
         &mut c,
-        vec![Op::SetProp {
-            id: 2,
-            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Hi".into())),
-        }],
+        vec![
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(8)),
+            },
+        ],
     );
     c.commit();
     assert_eq!(c.nodes[c.key(4).unwrap() as usize].parent, NO_KEY);
@@ -15322,7 +15365,7 @@ fn image_scales_change_nothing_without_scales() {
 /// is picked as an imported one.
 mod asset_variants {
     use super::*;
-    use crate::element::{ImageAsset, prelude::*};
+    use crate::{element::ImageAsset, prelude::*};
 
     const FLAG: ImageAsset = ImageAsset {
         url: "asset:/@demo/flag.png",
@@ -15408,7 +15451,7 @@ mod asset_variants {
 
 mod rust_lazy_context {
     use super::*;
-    use crate::element::{Root, prelude::*};
+    use crate::{element::Root, prelude::*};
 
     #[derive(Clone, PartialEq, Props)]
     struct ProviderProps {

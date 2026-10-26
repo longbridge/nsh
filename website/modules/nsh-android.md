@@ -1,20 +1,22 @@
 ---
 title: nsh/android
-description: "Android-only APIs: isAvailable, Toast and BackHandler."
+description: "Android-only APIs: isAvailable and BackHandler."
 order: 12
 ---
 
 # nsh/android
 
-`nsh/android` holds APIs that only Android has. Rust code calls their counterparts in `nsh_core::element::prelude` (`toast`, `on_back_press`) and checks `os() == Os::Android`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its functions do nothing, and `isAvailable` tells you whether you are on Android.
+`nsh/android` holds APIs that only Android has. Rust code calls their counterparts in `nsh_core::prelude` (`on_back_press`) and checks `os() == Os::Android`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its functions do nothing, and `isAvailable` tells you whether you are on Android.
 
 ```rust tabs
-use nsh_core::{platform::Os, element::prelude::*}; // os, toast, ToastDuration, on_back_press
+use nsh_core::{platform::Os, prelude::*}; // os, on_back_press
 ```
 
 ```tsx tabs
-import { BackHandler, isAvailable, Toast } from "nsh/android";
+import { BackHandler, isAvailable } from "nsh/android";
 ```
+
+Short messages on every platform, Android included, are [`Toast`](../elements/toast.md) of `nsh/base`, styled by the app.
 
 Android-only *props* of elements and components are not here: they go in the `android={{…}}` prop in TSX (for example `<View android={{ elevation: 4, ripple: … }} />`). See [Platform-specific code](../docs/platform-specific.md).
 
@@ -25,43 +27,6 @@ const isAvailable: boolean;
 ```
 
 `true` on Android; `false` elsewhere. Rust: `os() == Os::Android`.
-
-## Toast
-
-```ts
-const Toast: {
-  show(message: string, duration?: "short" | "long" | null): void;
-};
-```
-
-Shows a short message at the bottom of the screen (Android's toast). `duration` is `"short"` by default. Rust: `toast(message, ToastDuration::Short)` (or `ToastDuration::Long`), which does nothing off Android.
-
-```rust tabs
-use nsh_base::alert_dialog;
-use nsh_core::{platform::Os, element::prelude::*};
-
-fn notify(message: &str) {
-    if os() == Os::Android {
-        toast(message, ToastDuration::Short);
-    } else {
-        let message = message.to_string();
-        spawn(async move {
-            let _ = alert_dialog().title("Done").description(message).action("OK").show().await;
-        });
-    }
-}
-```
-
-```tsx tabs
-import { platform } from "nsh/device";
-import { Toast } from "nsh/android";
-import { AlertDialog } from "nsh/base";
-
-const notify = (message: string) =>
-  platform.os === "android"
-    ? Toast.show(message)
-    : AlertDialog.show({ title: "Done", description: message, actions: [{ label: "OK" }] });
-```
 
 ## BackHandler
 
@@ -81,7 +46,7 @@ The system back button and back gesture. Dialogs handle the back press first (a 
 
 ```rust tabs
 use nsh_base::alert_dialog;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn Editor() -> impl IntoElement {

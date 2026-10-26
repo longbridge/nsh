@@ -17,7 +17,7 @@ with `nsh_core::element::selection_area()`, TSX with `<SelectionArea>` from `nsh
 ```rust tabs
 use nsh_base::text_view;
 use nsh_core::element::selection_area;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn release_notes(notes: &'static str) -> impl IntoElement {
     selection_area()
@@ -65,7 +65,7 @@ of every message in between.
 ```rust tabs
 use nsh_base::text_view;
 use nsh_core::element::selection_area;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
     scroll().flex_1().child(

@@ -7,7 +7,10 @@
 //! wrapped lines and the annotations under them. Only the rows in view
 //! (and a few around them) are made.
 
-use nsh_core::element::{EventKind, EventPayload, Style, prelude::*};
+use nsh_core::{
+    element::{EventKind, EventPayload, Style},
+    prelude::*,
+};
 
 use super::{
     DiffAnnotation, DiffExpand, DiffIndicators, DiffLayout, DiffSeparator, DiffSide, DiffViewPart,

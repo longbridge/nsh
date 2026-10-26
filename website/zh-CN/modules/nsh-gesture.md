@@ -6,10 +6,10 @@ order: 7
 
 # nsh/gesture
 
-Pan responder 是构建在手势响应者系统之上的拖动手势：元素认领一次手势的触摸，然后独自接收这些触摸和手势状态，手势状态会帮你跟踪各触点的中心、移动距离和速度。Rust 代码用 `.claim_touches(TouchClaim::…)` 认领触摸，用 `.on_responder_*` 监听，其 `ResponderEvent` 带有 `PanGesture`，都在 `nsh_core::element::prelude` 中；TSX 从 `nsh/gesture` 导入 `PanResponder`，它的 `onPanResponder…` 回调接收触摸事件和手势状态。
+Pan responder 是构建在手势响应者系统之上的拖动手势：元素认领一次手势的触摸，然后独自接收这些触摸和手势状态，手势状态会帮你跟踪各触点的中心、移动距离和速度。Rust 代码用 `.claim_touches(TouchClaim::…)` 认领触摸，用 `.on_responder_*` 监听，其 `ResponderEvent` 带有 `PanGesture`，都在 `nsh_core::prelude` 中；TSX 从 `nsh/gesture` 导入 `PanResponder`，它的 `onPanResponder…` 回调接收触摸事件和手势状态。
 
 ```rust tabs
-use nsh_core::element::prelude::*; // TouchClaim、ClaimRequest、ResponderEvent、PanGesture
+use nsh_core::prelude::*; // TouchClaim、ClaimRequest、ResponderEvent、PanGesture
 ```
 
 ```tsx tabs
@@ -32,7 +32,7 @@ interface PanResponderInstance {
 创建一个 pan responder。把它的 `panHandlers` 展开到需要接收手势的视图上。在 Rust 中，由视图自己认领触摸并监听：
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {

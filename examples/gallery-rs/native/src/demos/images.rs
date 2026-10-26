@@ -4,7 +4,8 @@
 
 use nsh_core::{
     Points, Size,
-    element::{AnyElement, Image, ImageProgress, ImageSize, prelude::*},
+    element::{AnyElement, Image, ImageProgress, ImageSize},
+    prelude::*,
 };
 
 use crate::{

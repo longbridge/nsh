@@ -548,11 +548,6 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                             });
                         }
                     }
-                    Command::Toast { text, long } => {
-                        e.int(13);
-                        e.string(text);
-                        e.bool(long);
-                    }
                     Command::SetJsResponder { block } => {
                         e.int(14);
                         e.bool(block);

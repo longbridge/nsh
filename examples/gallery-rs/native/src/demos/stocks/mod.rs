@@ -30,7 +30,8 @@ use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     animation::{Curve, EaseMode},
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
-    element::{AccessibilityState, AnimatedNode, View, prelude::*},
+    element::{AccessibilityState, AnimatedNode, View},
+    prelude::*,
     time::Instant,
 };
 

@@ -12,8 +12,8 @@ use nsh_core::{
     element::{
         Root,
         palette::{SKY, VIOLET, ZINC},
-        prelude::*,
     },
+    prelude::*,
     tailwind::state,
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};

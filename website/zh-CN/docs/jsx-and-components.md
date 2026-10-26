@@ -27,7 +27,7 @@ NSH 应用用元素和组件描述界面，可以用 Rust，也可以用 TSX。R
 | `when(..)`、`each(..)` | `<If>`、`<Each>` | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
 ```rust tabs
-use nsh_core::element::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
+use nsh_core::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
 ```
 
 ```tsx tabs
@@ -362,8 +362,8 @@ ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./r
 在 TSX 中，用 `{...props}` 把一个 props 对象展开到元素或组件上。getter 仍然是 getter，所以展开的 props 会继续跟随它们读取的内容。要取出一部分 props 自己用、把其余的传下去，使用 `split`：
 
 ```tsx
-import { type InputProps, split, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { split, Text, View } from "nsh";
+import { Input, type InputProps } from "nsh/base";
 
 function Field(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);

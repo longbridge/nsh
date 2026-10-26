@@ -4,7 +4,7 @@
 // Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import { BackHandler, Toast, isAvailable } from "nsh/android";
+import { BackHandler, isAvailable } from "nsh/android";
 
 function App() {
   const calls = signal("not called");
@@ -18,8 +18,6 @@ function App() {
         onPress={() => {
           const remove = BackHandler.onBackPress(() => true);
           remove();
-          Toast.show("Saved");
-          Toast.show("Saved for long", "long");
           calls.set(`done, remove ${typeof remove}`);
         }}
       >

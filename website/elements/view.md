@@ -13,7 +13,7 @@ Android) that lays out its children with flexbox or grid, draws a background, bo
 presses. Buttons, cards, rows and screens are all views. Rust makes one with `view()`, TSX with `<View>` from `nsh`.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     let liked = signal(false);

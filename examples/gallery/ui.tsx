@@ -4,11 +4,21 @@ import { reduceMotion } from "nsh/accessibility";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch, Tab, Tabs } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch, Tab, Tabs, Tooltip } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
+
+/** A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
+ * small bubble of the theme's `popover` tokens. */
+export function Tip(props: { label: string }) {
+  return (
+    <Tooltip class="rounded-md border border-border bg-popover px-2 py-1">
+      <Text class="text-xs text-popover-foreground">{props.label}</Text>
+    </Tooltip>
+  );
+}
 
 /** Whether the gallery shows its dark palette (reactive: reading it subscribes). */
 export const isDark = () => colorScheme() !== "light";

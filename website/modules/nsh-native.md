@@ -6,10 +6,10 @@ order: 9
 
 # nsh/native
 
-`nsh/native` connects your app to what the host app provides, by name, at run time. An iOS or Android app that embeds NSH can register its own views (a map, a chart, a camera preview) by name; `nativeComponent` gives you a typed component for one of them. Because NSH renders with real native views, such a component sits in the view hierarchy like any other view: it is laid out by NSH, clips and scrolls with its parents, and overlaps correctly. An app that embeds NSH from Rust can also register functions, classes and Rust components; `nativeModule` gives you them as one typed object. Your app builds with the stock `nsh build` either way: the host connects what it provides when it runs the app. Rust code places a registered view with `native(name)` from `nsh_core::element::prelude`, sets its props with `.prop(name, value)` (a JSON value, or a signal or closure of one), hears its events with `.on_native_event(…)` and calls its commands through an `ElementRef`; TSX imports `nsh/native`.
+`nsh/native` connects your app to what the host app provides, by name, at run time. An iOS or Android app that embeds NSH can register its own views (a map, a chart, a camera preview) by name; `nativeComponent` gives you a typed component for one of them. Because NSH renders with real native views, such a component sits in the view hierarchy like any other view: it is laid out by NSH, clips and scrolls with its parents, and overlaps correctly. An app that embeds NSH from Rust can also register functions, classes and Rust components; `nativeModule` gives you them as one typed object. Your app builds with the stock `nsh build` either way: the host connects what it provides when it runs the app. Rust code places a registered view with `native(name)` from `nsh_core::prelude`, sets its props with `.prop(name, value)` (a JSON value, or a signal or closure of one), hears its events with `.on_native_event(…)` and calls its commands through an `ElementRef`; TSX imports `nsh/native`.
 
 ```rust tabs
-use nsh_core::element::prelude::*; // native, NativeEvent, element_ref
+use nsh_core::prelude::*; // native, NativeEvent, element_ref
 ```
 
 ```tsx tabs
@@ -70,7 +70,7 @@ Where nothing is registered under `name` (a different host app, the dev host, th
 The badge here is a native view of the host app, registered as `embed.badge`. NSH lays it out, sends it `text` and `color`, receives its `tap` events, and calls its `pulse` command:
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 use serde_json::json;
 
 #[component]
@@ -160,7 +160,7 @@ const price = Trading.quote("AAPL");
 The host registers the set from Rust, with the platform crate's `set_ui_sets` (next to NSH's own sets) before it starts its views, or `EngineConfig::ui_sets`:
 
 ```rust
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 pub struct Trading;
 

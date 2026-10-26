@@ -30,7 +30,7 @@ requestAnimationFrame ───────────┘                      
 - **文本在 Rust 里排版**，字体度量来自浏览器（`CanvasRenderingContext2D.measureText`），再按排版确定的位置逐段绘制，所以测量的就是绘制的。换行发生在空格之后、CJK 字符前后和 `\n` 处；`numberOfLines` 会截断并加省略号。
 - **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的动画值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
 - **输入**：带 `activeStyle` / `active:` 反馈的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带页面 `header` 的 `NavStack` 和 `NavPage`、`Dialog`。
-- **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
+- **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文）。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
 - **对话框**与桌面后端一样，是覆盖整个应用的一层，显示应用的弹出层和背景。Escape、浏览器的返回按钮和点击背景会关闭它（`closeOnEscape`、`closeOnBackdropPress`），`animation`、`onOpen`、`onClose`、`onCancel` 和 `onOpenChange` 与设备上一致。
 
 ## 键盘、鼠标和触摸

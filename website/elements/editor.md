@@ -23,7 +23,7 @@ Rust makes one with `nsh_base::editor()`, TSX with `<Editor>` from `nsh/base`.
 
 ```rust tabs
 use nsh_base::editor;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 const MAIN: &str = "fn main() {\n    println!(\"Hello, world!\");\n}\n";
 
@@ -103,7 +103,7 @@ crate registers them for the TSX app in the setup of its UI set, which every eng
 
 ```rust
 use nsh_base::editor::{EditorLanguage, register_highlighter, register_language};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 static NIMBLE: EditorLanguage = EditorLanguage::new("Nimble")
     .extensions(&["nb"])

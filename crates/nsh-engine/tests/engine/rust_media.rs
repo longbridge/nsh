@@ -9,11 +9,10 @@ use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NativeProps, NodeId,
     PayloadValue, ViewKind, WebSource,
-    element::{
-        ImageAsset, ImageProgress, Root, VideoInfo, VideoProgress, WebNavigation, prelude::*,
-    },
+    element::{ImageAsset, ImageProgress, Root, VideoInfo, VideoProgress, WebNavigation},
     geometry::{DevicePixels, size},
     platform::ColorScheme,
+    prelude::*,
 };
 use nsh_engine::{Engine, EngineConfig, Environment};
 

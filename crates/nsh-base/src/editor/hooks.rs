@@ -17,8 +17,8 @@
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
 use nsh_core::{
-    element::prelude::*,
     keymap::Modifiers,
+    prelude::*,
     time::{Instant, now},
 };
 

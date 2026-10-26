@@ -2,8 +2,7 @@
 
 Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Overlay`, `Image`,
 `List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
-`InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals. (`nsh/image`, `nsh/list`, `nsh/canvas`,
-`nsh/webview` and `nsh/video`, where some primitives were first, still export them, deprecated.)
+`InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals.
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|
@@ -146,7 +145,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also
-  `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; `Keyboard.dismiss()`.
+  `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; `Keyboard.dismiss()` (`nsh`).
   Commands run after the commit's other mount items; list scrolls are resolved by the core with the current item sizes.
 - **`measure()`** (on any node's ref) resolves, once the turn's changes are laid out, to `{ bounds, pagePosition }`
   or `null` (not in the tree, never shown). `bounds` is the frame in the parent, as
@@ -231,7 +230,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `Command::StatusBar`, the desktops and the web ignore it. `AlertDialog.show({ title, description, actions, presentation })`
   (`nsh/base`: a promise of the chosen action's `id`, its `label` without one, `null` when closed without an action;
   `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
-  own, and an iPad / Mac action sheet gets an untitled cancel action), `Toast` (`nsh/android`). Answers come back as the
+  own, and an iPad / Mac action sheet gets an untitled cancel action). Answers come back as the
   root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
@@ -247,7 +246,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   negative offsets), starting at the right end and keeping their distance from it; horizontal lists are flipped natively
   (`ScrollConfig::mirrored`: the scroll view and each cell get scaleX −1, composed with their transforms), so the list's
   offset logic stays left to right.
-- **Environment** (reactive accessors; `nsh/device` and `nsh/base` (`safeArea()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
+- **Environment** (reactive accessors; `nsh/device` and `nsh` (`safeArea()`, `safeAreaInsets()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
   `colorScheme()`, `fontScale()`. `KeyboardAvoidingView` pads its bottom by `keyboardFrame().height`, animated with the keyboard,
   for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
@@ -353,10 +352,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   not take the pointer (`pointerEvents: "none"`).
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
-  placement never moves it), placed on top with a 4 pt gap: a text in a bubble of the theme's tokens
-  (`bg-popover`, `text-popover-foreground`, `border-border`, `rounded-md`, `px-2 py-1`, `text-xs`; NSH's one default
-  look of this kind, all the theme's), or the element JS made (retained by the node, moved into the overlay, detached
-  again when the prop changes). An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
+  placement never moves it), placed on top with a 4 pt gap, holding the element JS made (retained by the node, moved
+  into the overlay, detached again when the prop changes). The prop takes elements only: the core draws no bubble, the
+  look is the app's. An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
   made its root one) replaces the core's overlay, with its own placement, delay, look and events
   (`adopt_hint_tooltips`, each commit before the overlays are shown). Released with the element. It counts for nothing else: text skips overlays, and
   positional classes (`first:`, `last:`) skip a tooltip's overlay. Rust's element tooltips are an overlay child of the

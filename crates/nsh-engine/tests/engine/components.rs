@@ -788,13 +788,11 @@ fn safe_area_and_keyboard_avoiding_views() {
 const RUNTIME_MODULES: &str = r#"import { mount, signal, Text } from "nsh";
 import { reduceMotion, setAccessibilityFocus } from "nsh/accessibility";
 import { platform } from "nsh/device";
-import { Toast } from "nsh/android";
 import { Image } from "nsh";
 
 const shown = signal("waiting");
 let note: unknown;
 setTimeout(async () => {
-  Toast.show("hello", "long");
   setAccessibilityFocus(note);
   const size = await Image.getSize("https://example.com/a.png");
   let failed = "no";
@@ -817,17 +815,12 @@ fn runtime_modules() {
         .ok()
         .and_then(|b| text_ids(&b, "waiting"))
         .expect("first frame");
-    let mut toast = None;
     let mut focused = None;
     let mut requests = Vec::new();
     let control = engine.control();
     until(&rx, |batch| {
         for item in &batch.items {
             match item {
-                MountItem::Command {
-                    id: ROOT_ID,
-                    command: Command::Toast { text, long },
-                } => toast = Some((text.clone(), *long)),
                 MountItem::Command {
                     id,
                     command: Command::AccessibilityFocus,
@@ -860,7 +853,6 @@ fn runtime_modules() {
         }
         shows(batch, "640x480 not found ios false")
     });
-    assert_eq!(toast, Some(("hello".to_owned(), true)));
     assert_eq!(focused, Some(note));
 }
 

@@ -12,7 +12,7 @@ demo: el-input
 
 ```rust tabs
 use nsh_base::input;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn name_field() -> impl IntoElement {
     let name = signal(String::new());
@@ -200,7 +200,7 @@ let password!: YNode;
 </>;
 ```
 
-无论哪个输入框持有键盘，`nsh/base` 的 `Keyboard.dismiss()`（Rust 中为 `dismiss_keyboard()`）都能把它收起。
+无论哪个输入框持有键盘，`nsh` 的 `Keyboard.dismiss()`（Rust 中为 `dismiss_keyboard()`）都能把它收起。
 
 ## 平台说明
 

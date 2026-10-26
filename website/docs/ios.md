@@ -410,7 +410,7 @@ updates the app in place, logs appear in the `nsh dev` terminal, and errors show
 - **Status bar.** The embedded app's pages and dialogs (`statusBar`) change what `NshAppView.preferredStatusBarStyle` and friends return;
   the hosting view controller must forward them, as in the example above.
 - **Safe area.** Apps use `safe_area()` in Rust, `SafeAreaView` from [`nsh`](../modules/nsh.md#safeareaview) or
-  `safeAreaInsets()` from [`nsh/base`](../modules/nsh-base.md#safe-areas) in TSX, as usual. An `NshAppView` placed below your own header gets the insets that apply to it, not the window's.
+  `safeAreaInsets()` from [`nsh`](../modules/nsh.md#safearea-and-safeareainsets) in TSX, as usual. An `NshAppView` placed below your own header gets the insets that apply to it, not the window's.
 - **Mac Catalyst.** The same framework works in Catalyst apps.
 
 ## See also

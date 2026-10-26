@@ -7,10 +7,10 @@ demo: mod-animated
 
 # nsh/animated
 
-动画 API 在 UI 线程上执行动画。你创建一个**动画值**（animated value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行应用的代码。引擎线程或 JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗应用任何开销。Rust 代码使用 `nsh_core::element::prelude` 中的 `animated_value()`、`motion()`、`Animation`、`Spring`、`Timing`、`KeyframeTiming`、`MotionPreset` 和 `Easing`，用元素的 `.bind_*` 方法绑定动画值；TSX 导入 `nsh/animated`。
+动画 API 在 UI 线程上执行动画。你创建一个**动画值**（animated value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行应用的代码。引擎线程或 JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗应用任何开销。Rust 代码使用 `nsh_core::prelude` 中的 `animated_value()`、`motion()`、`Animation`、`Spring`、`Timing`、`KeyframeTiming`、`MotionPreset` 和 `Easing`，用元素的 `.bind_*` 方法绑定动画值；TSX 导入 `nsh/animated`。
 
 ```rust tabs
-use nsh_core::element::{LayoutAnimation, prelude::*}; // animated_value、motion、Animation、Spring、Timing、Keyframe、KeyframeTiming、MotionPreset、MotionSpec、Easing、animate_layout
+use nsh_core::{element::LayoutAnimation, prelude::*}; // animated_value、motion、Animation、Spring、Timing、Keyframe、KeyframeTiming、MotionPreset、MotionSpec、Easing、animate_layout
 ```
 
 ```tsx tabs
@@ -44,7 +44,7 @@ function createAnimatedValue(value?: number): AnimatedValue;
 创建一个初始值为 `value`（默认 `0`）的动画值。Rust：`animated_value(value)`，一个由创建它的组件持有的 `Copy` 句柄。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {

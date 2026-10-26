@@ -10,19 +10,17 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Collapsible`, `Progress`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `SelectionArea` (texts that select
-  together, `text.md` "Selection areas"), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Collapsible`, `Progress`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
-  modules `AlertDialog`, `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
+  module `AlertDialog`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
-  own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{SafeAreaView, …}`, and make navigation and
-  dialogs with `nsh_base::{nav_stack, nav_page, dialog}` (builders of the core's `Stack`, `Screen` and `Modal` host
-  elements; the core's `stack()`, `screen()` and `modal()` are their deprecated old names), and show system
-  alerts with `nsh_base::alert_dialog()` (the prelude's `dialog(Dialog)` is its deprecated old form; import
-  `nsh_base::dialog` by name, as that glob still brings the old one). What goes in is behavior:
+  own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{button, …}`, make navigation and
+  dialogs with `nsh_base::{nav_stack, nav_page, dialog}` (on the core's `Stack`, `Screen` and `Modal` host
+  elements, whose builders are hidden building blocks of these), and show system alerts with
+  `nsh_base::alert_dialog()`. What goes in is behavior:
   - it owns behavior, state, focus, keyboard handling and accessibility (roles, states, actions), or tells the
     platform (insets, the keyboard's height, the status bar's setting, a system dialog);
   - it has no look: no colors, paddings, radii, fonts or variants of its own; it takes the app's `class` / `style`
@@ -45,8 +43,8 @@ come from two places:
 | `crates/nsh-core/src/element/` | The API (`nsh_core::element`, `prelude`): `Component`, `Module`, `Class` (`class.rs`, `callback.rs`; direct JS values: `js.rs`), elements, `Styled`, `Theme`, `Registry`, the status bar's layers (`status_bar.rs`), the declarations generator `typescript` |
 | `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
 | `crates/nsh-core/src/core/components.rs` | The core side: instances, children and slots, events; `core/views.rs`: views, their bindings' patches and regions |
-| `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`safe_area.rs`, `keyboard.rs`, `alert_dialog.rs`, `button.rs`, `checkbox.rs`, `radio.rs`, `switch.rs`, `tabs.rs`; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
-| `crates/nsh-core/src/runtime/` | The runtime's Rust modules (`nsh/android`, `nsh/accessibility`, `nsh/image`, `nsh/clipboard`, `nsh/desktop`), one `Registry` per JS module (`mod.rs`) |
+| `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`alert_dialog.rs`, `button.rs`, `checkbox.rs`, `radio.rs`, `switch.rs`, `tabs.rs`; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
+| `crates/nsh-core/src/runtime/` | The runtime's Rust modules (`nsh`'s `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`, `Keyboard` and `Image` functions, `nsh/android`, `nsh/accessibility`, `nsh/clipboard`, `nsh/desktop`), one `Registry` per JS module (`mod.rs`) |
 | `crates/nsh-js/src/components.rs` | The JS face of components and modules, made from their specs when a bundle imports the module; `classes.rs`: classes' (on the web classes' machinery), synchronous functions', callbacks |
 | `crates/nsh-js/src/declarations.rs` | `nsh/base.d.ts`, `app/native.d.ts`, ...: the declarations generated from each registry (`nsh_core::element::declarations`) with the re-exports and the navigation |
 | `nsh_engine::EngineConfig::ui_sets` | The UI sets a surface serves besides the runtime's modules (the platforms' `set_ui_sets`; `nsh_base::registry()` by default; an app's own set: `docs/dev/tooling.md`) |
@@ -54,7 +52,7 @@ come from two places:
 ## Writing a component
 
 - **One file per component**, registered in the crate's `#[native_module]` function (an app's) or in its crate's
-  registry (`nsh_base::registry()`, `nsh/base`'s). Start with `use nsh_core::element::prelude::*;`. The JS export is the
+  registry (`nsh_base::registry()`, `nsh/base`'s). Start with `use nsh_core::prelude::*;`. The JS export is the
   type's name (`#[component] pub fn Chip` is `Chip`): no name is written by hand. `nsh/base`'s exports are pinned
   by `nsh-base`'s `tests::the_exports_are_pinned`.
 - **Props are a struct** (`#[derive(Clone, Copy, PartialEq, Props)]`, its fields `Prop<T>`), **events an enum**
@@ -174,7 +172,7 @@ reasons: `reactive-components.md`.
   `ios` prop of a `JsObject` struct (an app's `ChartWeb { … }`), as for host elements.
 - **`Scope<E>`** (`Copy`) is what the component has of its own: `cx.emit(event)` (to the app's `on<Event>`, or to the
   parent's listener method, `.on_press(..)`), `cx.insets()` (its screen's or modal's insets, reading subscribes) and
-  `cx.methods(api)` (below). Everything else is a free function of `element::prelude`.
+  `cx.methods(api)` (below). Everything else is a free function of `nsh_core::prelude`.
 - **The app's content is props too, placed by closures**: the component never creates or touches the app's elements,
   it only lays them out.
   - `header: Prop<Option<Slot>>` is `Some` while the app passes non-empty JSX for it: `props.header.place(|h|
@@ -299,7 +297,6 @@ reasons: `reactive-components.md`.
   | `Clipboard.writeText(text)`, `await Clipboard.readText()` / `hasText()`, `writeImage(src)`, `readImage()` / `hasImage()`, `readFiles()` (`nsh/clipboard`) | `set_clipboard(text)`, `clipboard_string()` / `clipboard_has_string()`, `set_clipboard_image(uri)`, `clipboard_image()` (an `Option<ClipboardImage>`) / `clipboard_has_image()`, `clipboard_files()`: answers to await in a task (the app's `capabilities.clipboard` applies as for JS) |
   | `await Storage.getItem(k)`, `setItem(k, v)`, `removeItem(k)`, `keys()`, `clear()` (`nsh/storage`) | `nsh_core::storage::Storage::get_item(k)`, `set_item(k, v)` (`Err(StorageFull)` past the quota), `remove_item(k)`, `get_all_keys()`, `clear()`: synchronous (the entries are in memory on the engine thread), and the same entries the app's JS uses, so a TSX entry and a Rust entry of one app read each other's data |
   | `announce(message)`, `setAccessibilityFocus(ref)` (`nsh/accessibility`) | `announce_for_accessibility(msg)`, `note.set_accessibility_focus()` (an `ElementRef`) |
-  | `Toast.show(msg, "long")` (`nsh/android`) | `toast(msg, ToastDuration::Long)` (nothing happens off Android) |
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
@@ -347,7 +344,7 @@ reasons: `reactive-components.md`.
     they handle the events instead of the app;
   - what every element takes (`Styled`, `ParentElement`, `FluentBuilder`, the inline style, animated values, insets;
     below) and `ComponentBuilder`'s `.active(..)` / `.hover(..)` / `.focus(..)` / `.disabled_style(..)` (the root's
-    states) and `.component_ref(&r)`. `ComponentBuilder` is in the prelude, so `use nsh_core::element::prelude::*;` and
+    states) and `.component_ref(&r)`. `ComponentBuilder` is in the prelude, so `use nsh_core::prelude::*;` and
     the constructor (`use nsh_base::button;`) are all a caller imports.
 
   A prop's setter is an inherent method, so it comes before a trait's method of the same name: `nsh_base`'s
@@ -366,7 +363,7 @@ reasons: `reactive-components.md`.
 - **Platform services** are free functions (`element/ambient.rs`): `dialog(Dialog)` (deprecated for apps in favor of
   `nsh_base::alert_dialog()`, which calls it) shows an alert or action sheet and returns a future of the index
   chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
-  `toast(..)`, `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
+  `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
   `clipboard_has_string`), the image information (`image_size`, `prefetch_image`), display frames
   (`request_animation_frame`, `next_frame`: the core keeps the waiting tasks' answers, the engine asks the platform
   for a frame while one waits, `MountSink::request_frame`, and delivers it at `EngineControl::frame`), and the status
@@ -461,7 +458,7 @@ Parameters are `Arg`s: the `JsValue` types, instances (`Instance<T>`) and `Callb
 or a task, instances and functions ride in its closure as they are (`docs/dev/rust-classes.md`, "How calls
 cross"). A panic in an op rejects it (its actions dropped). `Registry::module::<M>()` registers it; `components.rs` builds
 the object. A module with a component's name is merged into it (the component gets static
-functions). `Registry::reexport` re-exports environment values (`safeArea`, `safeAreaInsets`, `keyboardFrame` in `nsh/base`:
+functions). `Registry::reexport` re-exports environment values (`safeArea`, `safeAreaInsets`, `keyboardFrame` in `nsh`:
 `nsh-js` `env.rs`) under the registry's module, and `Registry::native_values` names the
 values `nsh-js` makes for it (`nsh/base`'s `NavStack`, `NavPage`, `Dialog`, `createNavStack`: `navigation.rs`).
 
@@ -469,7 +466,7 @@ The runtime's Rust modules are written the same way (`crates/nsh-core/src/runtim
 `runtime::registries()`): one `Registry` per JS module (`Registry::runtime("nsh/clipboard")`), always served, which the
 core always serves (`Core::set_components` merges the UI sets after them); a call carries what it runs, so a
 runtime module's functions never clash with an app set's of the same name. Runtime modules
-use the same services as components (`cx.toast`, `cx.announce_for_accessibility`, `image_size`), and the core's
+use the same services as components (`cx.announce_for_accessibility`, `image_size`), and the core's
 internal actions for the rest (exiting the app, a ref's accessibility focus).
 `#[module(flat)]` exports functions one by one (top-level exports, not an object's). `#[module(name = "test")]` names a
 module's object in JS (the type's name otherwise); a module named like a function a flat module of the set exports
@@ -900,8 +897,8 @@ element is what the pointer rests on and what it is placed against. The core fol
 (`on_hint_show` / `on_hint_hide`); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
 the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app's `class` / `style`), its children
 what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
-`Prop::Tooltip`) takes a text too, in a minimal bubble of the theme's tokens, or any other element as it is, in a
-hint overlay the core makes itself (`Core::set_tooltip`).
+`Prop::Tooltip`) takes any other element too, shown as it is in a hint overlay the core makes itself
+(`Core::set_tooltip`); it takes no text, so every tooltip's look is the app's.
 
 ## Toasts
 

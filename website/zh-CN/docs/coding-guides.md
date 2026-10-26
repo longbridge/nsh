@@ -36,7 +36,7 @@ Rust 组件、嵌入 NSH 的原生应用），以及在 `nsh/base` 之上构建�
 - **页面：** 一个 `NavPage`，包括它的内容、对话框和它发起的工作；
 - **应用组件：** 跨页面复用且带有领域语义的模式；
 - **组件库：** 带样式的通用界面，应用自己的或社区的，构建在 `nsh/base` 之上；
-- **`nsh/base`：** 不带产品表现的可复用行为：导航、对话框、弹出框、菜单、面板、按压目标、安全区域、键盘；
+- **`nsh/base`：** 不带产品表现的可复用行为：导航、对话框、弹出框、菜单、面板、按压目标；
 - **`nsh`：** 原语、样式、布局、响应式与环境。
 
 ### 应用文件的布局
@@ -291,7 +291,7 @@ switch()
 
 ```rust tabs
 use nsh_base::{button, theme};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 /// The props of [`QuantityStepper`].
 #[derive(Debug, Clone, PartialEq, Props)]

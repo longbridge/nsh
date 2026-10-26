@@ -27,7 +27,7 @@ The **host elements** are each backed by a native view. Rust makes them with the
 | `when(..)`, `each(..)` | `<If>`, `<Each>` | Control flow, no view of its own | [Control flow](../elements/control-flow.md) |
 
 ```rust tabs
-use nsh_core::element::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
+use nsh_core::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
 ```
 
 ```tsx tabs
@@ -366,8 +366,8 @@ In Rust, a parent calls the setters of the props it needs and the rest keep thei
 In TSX, spread an object of props onto an element or a component with `{...props}`. Getters stay getters, so spread props keep following what they read. To take some props for yourself and pass the rest on, use `split`:
 
 ```tsx
-import { type InputProps, split, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { split, Text, View } from "nsh";
+import { Input, type InputProps } from "nsh/base";
 
 function Field(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);

@@ -282,7 +282,7 @@ fn fetch_stays_within_the_capabilities() {
 /// request is cancelled with the task that waited for it.
 #[nsh_core::element::component]
 fn Fetcher() -> impl nsh_core::element::IntoElement {
-    use nsh_core::element::prelude::*;
+    use nsh_core::prelude::*;
     let shown = signal(SharedString::from("loading"));
     spawn(async move {
         let slow = spawn(fetch("https://example.com/slow"));

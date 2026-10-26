@@ -6,10 +6,10 @@ order: 11
 
 # nsh/ios
 
-`nsh/ios` holds APIs that only iOS has. Rust code builds the same bar with `input_accessory_view()` of `nsh_core::element::prelude` and checks `os() == Os::Ios`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its components render nothing, and `isAvailable` tells you whether you are on iOS.
+`nsh/ios` holds APIs that only iOS has. Rust code builds the same bar with `input_accessory_view()` of `nsh_core::prelude` and checks `os() == Os::Ios`; TSX imports the module, which can be imported on every platform, so one bundle runs everywhere: elsewhere its components render nothing, and `isAvailable` tells you whether you are on iOS.
 
 ```rust tabs
-use nsh_core::{platform::Os, element::prelude::*}; // os, input_accessory_view
+use nsh_core::{platform::Os, prelude::*}; // os, input_accessory_view
 ```
 
 ```tsx tabs
@@ -51,7 +51,7 @@ A bar over the keyboard (UIKit's `inputAccessoryView`), shown while an input who
 It renders nothing where it is placed in the tree, and nothing at all on Android, so you can place it next to the input it belongs to.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn Note() -> impl IntoElement {

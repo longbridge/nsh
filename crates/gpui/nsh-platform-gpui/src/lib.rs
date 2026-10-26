@@ -65,8 +65,8 @@ mod tests;
 pub use gpui;
 pub use nsh_base::{Theme, ThemeError};
 pub use nsh_core::{
-    platform::{Appearance, Locale},
     element::{AdaptiveColor, Color, Hsla, Rgba},
+    platform::{Appearance, Locale},
 };
 pub use nsh_engine::{
     App, AppError, AppErrorKind, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy,

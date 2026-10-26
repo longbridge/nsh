@@ -7,10 +7,10 @@
 import { Scroll, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { PanResponder } from "nsh/gesture";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 import { nativeComponent, nativeModule } from "nsh/native";
-import { Video } from "nsh/video";
-import { WebView } from "nsh/webview";
+import { Video } from "nsh";
+import { WebView } from "nsh";
 
 const Map = nativeComponent<{ zoom: number }, { regionChange: { zoom: number } }>("CompatMap", {
   props: ["zoom"],

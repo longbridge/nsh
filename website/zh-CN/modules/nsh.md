@@ -203,8 +203,8 @@ function split<T extends object, K extends readonly (keyof T)[]>(
 把 props 对象拆成 `keys` 中列出的属性和其余属性。两部分都保持响应式：会变化的属性是 getter，`split` 会保留这些 getter。适用于组件自己处理一部分 props、把其余部分透传下去的场景。直接解构 props（`const { label } = props`）只会读取一次，之后的更新就丢失了。
 
 ```tsx
-import { type InputProps, split, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { split, Text, View } from "nsh";
+import { Input, type InputProps } from "nsh/base";
 
 function LabeledInput(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);
@@ -280,13 +280,25 @@ function Overlay(props: OverlayProps): YNode;
 
 ## SafeAreaView
 
-`SafeAreaView` 按自己渲染位置的边距为内容添加内边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。Rust 用 `nsh_core::element::safe_area_view()` 创建（边用 `Edge` 表示）。边距本身 `safeArea()` 和 `safeAreaInsets()` 来自 [`nsh/base`](./nsh-base.md#safe-areas)。见 [SafeAreaView](../elements/safe-area-view.md)。
+`SafeAreaView` 按自己渲染位置的边距为内容添加内边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。Rust 用 `nsh_core::element::safe_area_view()` 创建（边用 `Edge` 表示）。见 [SafeAreaView](../elements/safe-area-view.md)。
+
+<a id="safearea-and-safeareainsets"></a>
+
+### safeArea 与 safeAreaInsets
+
+`safeArea()` 是界面的安全区（Rust 中为 `safe_area()`）；`safeAreaInsets()` 是组件渲染位置的边距（Rust 中为 `cx.insets()`）。两者都是响应式的 `Edges`（`{ top, right, bottom, left }`，单位为点）。见 [safeArea 与 safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets)。
 
 <a id="keyboardavoidingview"></a>
 
 ## KeyboardAvoidingView
 
-`KeyboardAvoidingView` 让它的内容保持在软键盘上方，并随键盘移动。Rust 用 `nsh_core::element::keyboard_avoiding_view()` 创建（行为用 `AvoidBehavior` 表示）。`Keyboard` 和 `keyboardFrame()` 来自 [`nsh/base`](./nsh-base.md#keyboard)。见 [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)。
+`KeyboardAvoidingView` 让它的内容保持在软键盘上方，并随键盘移动。Rust 用 `nsh_core::element::keyboard_avoiding_view()` 创建（行为用 `AvoidBehavior` 表示）。见 [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)。
+
+<a id="keyboard-and-keyboardframe"></a>
+
+### Keyboard 与 keyboardFrame
+
+`Keyboard.dismiss()` 隐藏软键盘（Rust 中为 `dismiss_keyboard()`），`keyboardFrame()` 告诉你它覆盖了屏幕的多少（Rust 中为 `keyboard_height()` 和 `keyboard_duration()`）。见[隐藏键盘](../elements/keyboard-avoiding-view.md#hiding-the-keyboard)和[键盘高度](../elements/keyboard-avoiding-view.md#the-keyboards-height)。
 
 <a id="selectionarea"></a>
 
@@ -307,7 +319,7 @@ function Overlay(props: OverlayProps): YNode;
 | `Component<P>` | `(props: P) => JSX.Element` |
 | `JSX` | JSX 命名空间（`JSX.Element`） |
 | `YNode` | `ref` 拿到的对象：聚焦、滚动等命令。见[元素](../elements/index.md) |
-| `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`InputProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
+| `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
 | `ViewStyle`、`TextStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
 | `GestureResponderEvent`、`HoverEvent`、`ContextMenuEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |

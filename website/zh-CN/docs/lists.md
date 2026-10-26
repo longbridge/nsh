@@ -13,7 +13,7 @@ demo: guide-lists
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -771,7 +771,7 @@ list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::element::{palette::NEUTRAL, prelude::*};
+use nsh_core::{element::palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,

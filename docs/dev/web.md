@@ -612,8 +612,6 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
   and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
-- **Toasts** (`Toast.show` from `nsh/android`, which the desktop backends also show) are a pill at the bottom of the
-  root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
   `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
@@ -661,6 +659,6 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
 
 ## Not implemented
 
-Platform services other than the theme color, toasts, dialogs, the clipboard and the host; image download progress; a web
+Platform services other than the theme color, dialogs, the clipboard and the host; image download progress; a web
 view's events and commands for pages of other sites (beyond `postMessage` and loads), user agents. A published app
 ships no source map.

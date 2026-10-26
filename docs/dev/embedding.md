@@ -160,8 +160,8 @@
   (C `nsh_app_set_locale` / `nsh_app_set_font_scale`), Java `NshView.setLocale` / `setFontScale`. Each platform writes
   them over the system's values where it builds the environment (`Surface::set_environment` on the desktops, the root
   view's `environment()` on iOS, `publishEnvironment` in Java), so they reach the engine as a system change would and
-  are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts,
-  toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
+  are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts)
+  follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
   in classes included, stay as they are. The layout direction stays the system's language's.
 - **The host's theme overrides**: a host that embeds one app in several branded host apps overrides the app's theme

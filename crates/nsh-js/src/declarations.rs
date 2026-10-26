@@ -119,15 +119,6 @@ export interface ScrollProps extends CommonProps, ScrollingHostProps, ScrollHost
   contentClass?: string;
 }
 
-/** `<Input>` */
-export interface InputProps extends CommonProps, InputHostProps {
-  style?: StyleProp<TextStyle>;
-  ios?: IOSInputProps;
-}
-
-/** iOS-only props of `<Input>`. */
-export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
-
 /** `<Overlay>`: its children shown on top of the root view it is in (the
  * surface, or the dialog around it), outside its parent's layout and
  * clipping; laid out as a `position: fixed` box of that root view, or
@@ -180,29 +171,17 @@ fn doc_comment(out: &mut String, doc: &str, indent: &str) {
 
 /// The declaration of export `name`.
 fn export(out: &mut String, name: &str, ts: Ts) {
-    export_moved(out, name, ts, None);
-}
-
-/// The declaration of export `name`, `@deprecated` when it is imported
-/// from module `moved_to` now.
-fn export_moved(out: &mut String, name: &str, ts: Ts, moved_to: Option<&str>) {
-    let doc = |doc: &str| match moved_to {
-        Some(to) => format!("{doc}\n\n@deprecated Import from \"{to}\"."),
-        None => doc.to_owned(),
-    };
     match ts {
         Ts::Function(text, signatures) => {
-            doc_comment(out, &doc(text), "");
+            doc_comment(out, text, "");
             for signature in signatures {
                 let _ = writeln!(out, "export declare function {name}{signature};");
             }
         }
         Ts::Const(text, ty) => {
-            doc_comment(out, &doc(text), "");
+            doc_comment(out, text, "");
             let _ = writeln!(out, "export declare const {name}: {ty};");
         }
-        // One declaration for both modules (a class declared twice is two
-        // types), which `nsh` re-exports: never deprecated.
         Ts::Class(text, body) => {
             doc_comment(out, text, "");
             let _ = writeln!(out, "export declare class {name}{body}");
@@ -212,35 +191,9 @@ fn export_moved(out: &mut String, name: &str, ts: Ts, moved_to: Option<&str>) {
     out.push('\n');
 }
 
-fn exports(out: &mut String, items: &[Item], moved_to: Option<&str>) {
+fn exports(out: &mut String, items: &[Item]) {
     for &(name, _, ts) in items {
-        export_moved(out, name, ts, moved_to);
-    }
-}
-
-/// What module `m` serves of module `other` (`nsh` of `nsh/list`): its
-/// values declared again, its classes and types re-exported from its file
-/// (`other_body`, the names it declares).
-fn also_part(out: &mut String, m: &NativeModule, other: &NativeModule, other_body: &str) {
-    let from = relative(&path_of(m.name), &path_of(other.name));
-    for &(name, _, ts) in other.exports {
-        match ts {
-            Ts::Class(..) => {
-                let _ = writeln!(out, "export {{ {name} }} from \"{from}\";");
-            }
-            ts => export(out, name, ts),
-        }
-    }
-    let values: Vec<&str> = other.exports.iter().map(|e| e.0).collect();
-    let mut any = false;
-    for name in exported_names(other_body) {
-        if !values.contains(&name.as_str()) {
-            let _ = writeln!(out, "export type {{ {name} }} from \"{from}\";");
-            any = true;
-        }
-    }
-    if any || other.exports.iter().any(|e| matches!(e.2, Ts::Class(..))) {
-        out.push('\n');
+        export(out, name, ts);
     }
 }
 
@@ -308,6 +261,17 @@ fn set_part(out: &mut String, set: &SetDescription) {
     );
 }
 
+/// The props of `Input`, declared beside it (`nsh/base`).
+const INPUT_TYPES: &str = r#"/** `<Input>` */
+export interface InputProps extends CommonProps, InputHostProps {
+  style?: StyleProp<TextStyle>;
+  ios?: IOSInputProps;
+}
+
+/** iOS-only props of `<Input>`. */
+export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
+"#;
+
 /// The declarations of what a set exports as the runtime makes it: the
 /// runtime's `values` and `types`, and the values nsh-js makes for it
 /// (`natives`: `Input` and navigation's).
@@ -326,6 +290,9 @@ fn reexports_part(out: &mut String, values: &[&str], types: &[&str], natives: &[
     if navigation {
         out.push_str(crate::navigation::TYPES);
         out.push('\n');
+    }
+    if natives.contains(&"Input") {
+        out.push_str(INPUT_TYPES);
     }
     if !types.is_empty() {
         let _ = writeln!(out, "export type {{ {} }};", types.join(", "));
@@ -351,17 +318,23 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         for set in ui_sets.iter().filter(|s| s.specifier == m.name) {
             set_part(&mut body, set);
         }
-        exports(&mut body, m.exports, m.moved_to);
+        exports(&mut body, m.exports);
         body
     };
-    for m in MODULES.iter().filter(declared) {
+    // A module `nsh` serves (`moved_to`) is declared in `nsh`'s file.
+    for m in MODULES
+        .iter()
+        .filter(declared)
+        .filter(|m| m.moved_to.is_none())
+    {
         let mut body = body_of(m);
         for other in m
             .also
             .iter()
             .filter_map(|a| MODULES.iter().find(|o| o.name == *a))
         {
-            also_part(&mut body, m, other, &body_of(other));
+            body.push('\n');
+            body.push_str(&body_of(other));
         }
         files.push((path_of(m.name), body));
     }

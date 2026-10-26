@@ -15,7 +15,7 @@ insets, and elsewhere the surface's safe area. It has no look of its own; its ba
 
 ```rust tabs
 use nsh_core::element::safe_area_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn app() -> impl IntoElement {
     safe_area_view()
@@ -81,7 +81,7 @@ inset there is 0. SafeAreaView is for:
 
 ## safeArea and safeAreaInsets
 
-When you need the numbers, for example to pad a bottom bar yourself, read them directly. Both TSX accessors return an
+When you need the numbers, for example to pad a bottom bar yourself, read them directly. Both TSX accessors come from `nsh`, return an
 `Edges` object (`{ top, right, bottom, left }` in points) and are reactive: code that reads them runs again when they
 change, for example on rotation.
 
@@ -91,7 +91,7 @@ change, for example on rotation.
 | `safeAreaInsets()` | `safe_area_view()`, `cx.insets()` | The insets where the component renders: the nearest page's (below its header), the nearest dialog's, or else the surface's safe area. These are the insets SafeAreaView uses. In TSX, call it in a component; it returns an accessor. In Rust, `safe_area_view()` applies them to its content and a component of your crate reads them with `cx.insets()`. |
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn bottom_bar() -> impl IntoElement {
     view()
@@ -103,8 +103,7 @@ fn bottom_bar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Text, View } from "nsh";
-import { safeArea } from "nsh/base";
+import { Text, View, safeArea } from "nsh";
 
 function BottomBar() {
   return (

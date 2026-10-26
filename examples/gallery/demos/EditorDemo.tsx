@@ -21,7 +21,7 @@ import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMen
 import { openUrl, platform, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Icon, type IconName } from "../icons";
-import { colors, handleThumb } from "../ui";
+import { colors, handleThumb, Tip } from "../ui";
 import { SAMPLE } from "./lsp/sample";
 import { type CodeAction, type DocumentColor, LanguageServer, type Problem } from "./lsp/server";
 
@@ -175,7 +175,7 @@ function Tool(props: { label: string; name: string; onPress: () => void; on?: bo
       onPress={props.onPress}
       selected={props.on}
       accessibilityLabel={props.label}
-      tooltip={props.label}
+      tooltip={<Tip label={props.label} />}
       class="h-7 min-w-7 items-center justify-center rounded-md px-1.5 hover:bg-foreground/10 active:opacity-70 selected:bg-primary"
     >
       <Text class={`font-mono text-[11px] font-semibold ${props.on ? "text-primary-foreground" : "text-foreground"}`}>{props.name}</Text>
@@ -191,7 +191,7 @@ function IconTool(props: { label: string; icon: IconName; onPress: () => void; o
       onPress={props.onPress}
       selected={props.on}
       accessibilityLabel={props.label}
-      tooltip={props.label}
+      tooltip={<Tip label={props.label} />}
       class={`${props.size === "small" ? "size-5" : "size-7"} items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70 selected:bg-foreground/15`}
     >
       <Icon name={props.icon} size={props.size === "small" ? 13 : 16} tint={props.on ? colors.text : colors.muted} />
@@ -625,7 +625,7 @@ export function EditorDemo() {
           trigger={
             <View
               accessibilityLabel="Language"
-              tooltip="Language"
+              tooltip={<Tip label="Language" />}
               class="h-7 flex-row items-center gap-1.5 rounded-md px-1.5 hover:bg-foreground/10 active:opacity-70"
             >
               <Icon name="code" size={16} tint={colors.muted} />
@@ -655,7 +655,7 @@ export function EditorDemo() {
           popupClass={popup}
           backdropClass="bg-black/40"
           trigger={
-            <View accessibilityLabel="Editor options" tooltip="Editor options" class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
+            <View accessibilityLabel="Editor options" tooltip={<Tip label="Editor options" />} class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
               <Icon name="sliders" size={16} tint={colors.muted} />
             </View>
           }

@@ -13,7 +13,7 @@ demo: guide-canvas
 ```rust tabs
 use std::f32::consts::TAU;
 
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -357,7 +357,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 
 use nsh_core::{
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineCap},
-    element::prelude::*,
+    prelude::*,
 };
 
 pub fn ring() -> impl IntoElement {

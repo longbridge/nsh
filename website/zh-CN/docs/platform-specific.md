@@ -12,7 +12,7 @@ group: platforms
 | Rust | TSX | 用途 |
 |---|---|---|
 | [构建方法（`.ripple(..)`、`.input_accessory(..)`）](#平台专属属性) | [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`、`web={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
-| [`toast`、`on_back_press`、`nsh_core::element::desktop`](#平台模块) | [`nsh/ios`、`nsh/android`、`nsh/desktop`](#平台模块) | 只有一个平台才有的 API。 |
+| [`on_back_press`、`nsh_core::element::desktop`](#平台模块) | [`nsh/ios`、`nsh/android`、`nsh/desktop`](#平台模块) | 只有一个平台才有的 API。 |
 | [`os()`、`idiom()`、`is_desktop()`](#platformos-与-platformselect) | [`platform.os`、`platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
 | [`.when(os() == Os::Ios, ..)`](#tailwind-中的平台变体) | [`ios:` / `android:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
 
@@ -24,7 +24,7 @@ group: platforms
 use nsh_base::dialog;
 use nsh_core::{
     Ripple,
-    element::{AutoFill, Orientation, prelude::*},
+    element::{AutoFill, Orientation}, prelude::*,
 };
 
 view()
@@ -94,28 +94,18 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 
 ## 平台模块
 
-在 Rust 中，只有一个平台才有的 API 是 `nsh_core::element::prelude` 的函数（`toast`、`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（`set_title_bar`、`title_bar`、`close_window`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/ios` 和 `nsh/android` 存放只有一个平台才有的 API，`nsh/desktop` 存放只有桌面才有的 API。它们在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数什么都不做，组件什么都不渲染。每个模块都导出 `isAvailable`，只在自己的平台上为 `true`。
+在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（`set_title_bar`、`title_bar`、`close_window`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/ios` 和 `nsh/android` 存放只有一个平台才有的 API，`nsh/desktop` 存放只有桌面才有的 API。它们在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数什么都不做，组件什么都不渲染。每个模块都导出 `isAvailable`，只在自己的平台上为 `true`。
 
 ### nsh/android
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `toast(message, ToastDuration::Short)` | `Toast.show(message, duration?)` | 在屏幕底部显示 toast；`"short"`（默认）或 `"long"`。 |
 | `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
 | `os() == Os::Android` | `isAvailable` | Android 上为 `true`。 |
 
 ```rust tabs
-use nsh_base::alert_dialog;
-use nsh_core::element::{Os, prelude::*};
-
-fn saved() {
-    if os() == Os::Android {
-        toast("Saved", ToastDuration::Short);
-    } else {
-        spawn(alert_dialog().title("Saved").action("OK").show());
-    }
-}
+use nsh_core::prelude::*;
 
 fn player() -> impl IntoElement {
     let full_screen = signal(false);
@@ -132,14 +122,7 @@ fn player() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { BackHandler, Toast } from "nsh/android";
-import { platform } from "nsh/device";
-import { AlertDialog } from "nsh/base";
-
-function saved() {
-  if (platform.os === "android") Toast.show("Saved");
-  else AlertDialog.show({ title: "Saved", actions: [{ label: "OK" }] });
-}
+import { BackHandler } from "nsh/android";
 
 function Player() {
   // 返回键先退出全屏，再离开页面。监听器随组件一起结束。
@@ -182,7 +165,7 @@ Rust 应用用 `nsh_core::element::desktop` 绘制自己的标题栏（[用 Rust
 
 ```rust tabs
 use nsh_base::nav_page;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn photo_viewer() -> impl IntoElement {
     nav_page()
@@ -212,7 +195,7 @@ function PhotoViewer() {
 Rust 中的 `os()` 和 TSX 中 `nsh/device` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `platform.catalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
 
 ```rust tabs
-use nsh_core::element::{Os, prelude::*};
+use nsh_core::{element::Os, prelude::*};
 
 if os() == Os::Android {
     // …
@@ -232,7 +215,7 @@ if (platform.os === "android") {
 在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后是 `mobile`（iOS、Android、手机和平板浏览器）或 `desktop`（macOS、Windows、Linux、桌面浏览器），再是 `native`（除 Web 外的所有平台），最后是 `default`：
 
 ```rust tabs
-use nsh_core::element::{Os, prelude::*};
+use nsh_core::{element::Os, prelude::*};
 
 fn card() -> View {
     let card = view().rounded(px(12.0)).bg(white());

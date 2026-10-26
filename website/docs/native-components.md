@@ -10,7 +10,7 @@ group: platforms
 A native component is a view the **embedding app** registers by name: a map, a camera preview, a chart library, any
 `UIView` on iOS, `android.view.View` on Android, `NSView` on macOS, `gtk::Widget` on Linux, or Direct2D drawing or a
 child `HWND` on Windows. The NSH app uses it like any other element: a Rust app makes it with `native(name)` from
-`nsh_core::element::prelude`, a TSX app declares it with `nativeComponent()` from [`nsh/native`](../modules/nsh-native.md). NSH lays it out with the rest of the
+`nsh_core::prelude`, a TSX app declares it with `nativeComponent()` from [`nsh/native`](../modules/nsh-native.md). NSH lays it out with the rest of the
 app, sends it props, delivers its events to handlers and forwards commands from a `ref`.
 
 Because NSH renders with the system's own views, a native component is just one more subview in the same hierarchy:
@@ -42,7 +42,7 @@ for the name with the props and events it uses.
 
 ```rust tabs
 use nsh_core::element::safe_area_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 use serde_json::json;
 
 const COLORS: [&str; 4] = ["#8250df", "#0969da", "#1a7f37", "#cf222e"];

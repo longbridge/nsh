@@ -1,6 +1,23 @@
-//! `KeyboardAvoidingView`: content kept above the software keyboard.
+//! The software keyboard: `Keyboard` and `KeyboardAvoidingView`, content
+//! kept above it.
 
-use crate::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, prelude::*};
+use crate::{
+    element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition},
+    prelude::*,
+};
+
+/// The software keyboard.
+#[module]
+#[derive(Debug)]
+pub struct Keyboard;
+
+#[module]
+impl Keyboard {
+    /// Unfocuses the focused input, hiding the keyboard.
+    pub fn dismiss(cx: &mut ModuleCx) {
+        cx.dismiss_keyboard();
+    }
+}
 
 /// The props of [`KeyboardAvoidingView`].
 #[derive(Debug, Clone, PartialEq, Props)]

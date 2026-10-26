@@ -93,7 +93,7 @@ fn images(batch: &MountBatch) -> Vec<(NodeId, String)> {
 }
 
 const APP: &str = r#"import { mount, View } from "nsh";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 
 const icon = { url: "asset:/img.png", size: { width: 40, height: 30 }, scales: [1, 2, 3] };
 const single = { url: "asset:/single.png", size: { width: 10, height: 10 } };
@@ -195,7 +195,7 @@ fn variant_repick_item_counts_stay_bounded() {
 }
 
 const INFO_APP: &str = r#"import { mount, signal, Text } from "nsh";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 
 const icon = { url: "asset:/img.png", size: { width: 40, height: 30 }, scales: [1, 2, 3] };
 const shown = signal("waiting");
@@ -304,7 +304,7 @@ fn shared_names_decode_as_their_elements_props() {
     use nsh_core::{NativeProps, WebSource, geometry::Points};
     const APP: &str = r#"import { mount, View, Video, WebView } from "nsh";
 import { Input } from "nsh/base";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 
 const logo = { url: "asset:/logo.png", size: { width: 10, height: 10 } };
 

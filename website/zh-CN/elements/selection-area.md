@@ -13,7 +13,7 @@ demo: el-selection-area
 ```rust tabs
 use nsh_base::text_view;
 use nsh_core::element::selection_area;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn release_notes(notes: &'static str) -> impl IntoElement {
     selection_area()
@@ -58,7 +58,7 @@ function ReleaseNotes(props: { notes: string }) {
 ```rust tabs
 use nsh_base::text_view;
 use nsh_core::element::selection_area;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
     scroll().flex_1().child(

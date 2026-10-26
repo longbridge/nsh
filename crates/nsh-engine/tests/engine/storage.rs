@@ -5,9 +5,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
-    ApproxTextEngine, MountBatch, MountItem, Size,
-    element::{Root, prelude::*},
-    storage::Storage,
+    ApproxTextEngine, MountBatch, MountItem, Size, element::Root, prelude::*, storage::Storage,
 };
 use nsh_engine::{App, Bundle, Engine, EngineConfig, Environment, FileStorage};
 

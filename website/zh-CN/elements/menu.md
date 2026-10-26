@@ -17,7 +17,7 @@ demo: el-menu
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
     menu_item()

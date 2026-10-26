@@ -1,6 +1,6 @@
 //! `SafeAreaView`: content kept clear of system UI and headers.
 
-use crate::element::prelude::*;
+use crate::prelude::*;
 
 /// The props of [`SafeAreaView`].
 #[derive(Debug, Clone, PartialEq, Props)]

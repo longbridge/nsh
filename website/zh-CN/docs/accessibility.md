@@ -87,7 +87,7 @@ text("Settings")
 应用里的开关用 `nsh/base` 的 [`Switch`](../elements/switch.md)，角色和状态由它自己设置。下面的例子展示在视图上设置角色和状态的效果。
 
 ```rust tabs
-use nsh_core::{Checked, element::prelude::*};
+use nsh_core::{Checked, prelude::*};
 
 // 用视图画出来的开关。
 view()
@@ -225,7 +225,7 @@ view()
 这些设置是访问器：在绑定或 effect 中读取它们，用户更改设置时读取它们的地方随之更新，而且不需要清理。
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn upload() -> impl IntoElement {
     let done = signal(false);
@@ -287,7 +287,7 @@ function Upload() {
 当用户打开 iOS 的"减弱动态效果"或 Android 的"移除动画"时，`reduce_motion()`（Rust）和 `reduceMotion()`（TSX）为 `true`。你的动画按你编写的方式运行，所以用它，或 Tailwind 的 `motion-reduce:` 和 `motion-safe:` 变体，把大幅度的运动替换为淡入淡出或直接切换：
 
 ```rust tabs
-use nsh_core::element::{LayoutAnimation, prelude::*};
+use nsh_core::{element::LayoutAnimation, prelude::*};
 
 let toggle = move || {
     if !reduce_motion() {

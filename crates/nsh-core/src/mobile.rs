@@ -7,8 +7,9 @@
 
 use crate::{
     JsonValue,
-    element::{NativeEvent, native, prelude::*},
+    element::{NativeEvent, native},
     platform::{Os, TAB_BAR_COMPONENT},
+    prelude::*,
 };
 
 /// One tab of a [`TabBar`].

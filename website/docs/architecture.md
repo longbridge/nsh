@@ -154,7 +154,7 @@ the names show up in logs and docs:
 | Crate | What it is |
 |---|---|
 | `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the native animation graph (values, interpolation, timing / spring / decay); the Rust components' framework and theme; the runtime's Rust modules (`nsh/android`, ...). |
-| `nsh-base` | `nsh/base`, the unstyled base components (NSH's `gpui-base`): navigation, safe areas, dialogs, the keyboard and the status bar; Rust apps use it as `nsh_base`. |
+| `nsh-base` | `nsh/base`, the unstyled base components (NSH's `gpui-base`): navigation, dialogs, controls and the status bar; Rust apps use it as `nsh_base`. |
 | `nsh-js` | The QuickJS host and NSH's runtime: the reactive graph, the renderer, every native module, the global APIs, hot module replacement, limits; and the TypeScript declarations of all of it. |
 | `nsh-engine` | The engine thread: drives `nsh-js` and `nsh-core` and hands one batch per frame to the platform. |
 | `nsh-package` | Signed packages: keys, certificates, revocation, the trust store. |

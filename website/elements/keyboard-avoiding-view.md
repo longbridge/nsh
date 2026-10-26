@@ -16,7 +16,7 @@ the keyboard's height, for layouts of your own.
 
 ```rust tabs
 use nsh_core::element::keyboard_avoiding_view;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn chat() -> impl IntoElement {
     let draft = signal(String::new());
@@ -94,7 +94,7 @@ The padding or margin is added to what the view's own style sets, so your paddin
 
 ```rust tabs
 use nsh_core::element::{AvoidBehavior, keyboard_avoiding_view};
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn sign_in() -> impl IntoElement {
     keyboard_avoiding_view()
@@ -117,12 +117,12 @@ Here a 49 pt tab bar below the view already covers part of the keyboard's height
 
 ## Hiding the keyboard
 
-`Keyboard.dismiss()` unfocuses the focused input, which hides the keyboard. With no input focused, it leaves
+`Keyboard.dismiss()`, from `nsh`, unfocuses the focused input, which hides the keyboard. With no input focused, it leaves
 everything as it is. Rust components call `dismiss_keyboard()`.
 
 ```rust tabs
 use nsh_base::button;
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn done() -> impl IntoElement {
     button()
@@ -136,8 +136,8 @@ fn done() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Text } from "nsh";
-import { Button, Keyboard } from "nsh/base";
+import { Text, Keyboard } from "nsh";
+import { Button } from "nsh/base";
 
 function Done() {
   return (
@@ -162,7 +162,7 @@ Both are reactive: an effect, a JSX expression or a style closure that reads the
 hides or changes height.
 
 ```rust tabs
-use nsh_core::element::prelude::*;
+use nsh_core::prelude::*;
 
 fn message_bar() -> impl IntoElement {
     view()
@@ -182,8 +182,8 @@ fn message_bar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { keyboardFrame, safeArea, Input } from "nsh/base";
+import { View, keyboardFrame, safeArea } from "nsh";
+import { Input } from "nsh/base";
 
 function MessageBar() {
   const insets = safeArea();

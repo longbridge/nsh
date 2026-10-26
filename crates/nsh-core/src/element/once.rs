@@ -12,7 +12,7 @@ use std::{any::Any, marker::PhantomData};
 
 use super::{
     AnyValue, Component, Event, IntoElement, JsResult, MethodCall, Owner, PropError, Props,
-    element::{AnyEvent, ElNode},
+    builder::{AnyEvent, ElNode},
 };
 use crate::NodeId;
 

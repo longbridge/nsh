@@ -122,7 +122,7 @@ pub(crate) fn try_with_data<R>(f: impl FnOnce(&mut RustData) -> R) -> Option<R> 
 }
 
 /// Queues `event` of the component on `host` for the core.
-pub(crate) fn emit(host: crate::NodeId, event: Box<dyn super::element::AnyEvent>) {
+pub(crate) fn emit(host: crate::NodeId, event: Box<dyn super::builder::AnyEvent>) {
     graph().data.emits.push((host, event));
 }
 
