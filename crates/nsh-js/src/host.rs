@@ -1221,6 +1221,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         // The bytes cross natively: each file is a `File` over them.
         EventPayload::Paste(paste) => {
             obj.set("text", paste.text.as_str())?;
+            obj.set("html", paste.html.as_str())?;
             let files = rquickjs::Array::new(cx.clone())?;
             for (index, file) in paste.files.iter().enumerate() {
                 let blob = crate::web::blob::Blob::new(file.data.clone(), file.mime.clone());

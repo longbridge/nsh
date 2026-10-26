@@ -2988,6 +2988,7 @@ class Player {
     if (!el._events.has("onPaste")) return;
     const data = e.clipboardData;
     const text = data?.getData("text/plain") ?? "";
+    const html = data?.getData("text/html") ?? "";
     const files = [...(data?.files ?? [])];
     // A file manager's files are local paths the page cannot read: their
     // `file:` URLs, when the browser lists them.
@@ -3002,6 +3003,7 @@ class Player {
       }
       const json = JSON.stringify({
         text,
+        html,
         files: files.map((f, i) => ({ name: f.name || "image.png", type: f.type, size: buffers[i].byteLength })),
         uris,
       });

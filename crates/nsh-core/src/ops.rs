@@ -429,6 +429,10 @@ pub struct TouchEvent {
 pub struct PasteEvent {
     /// The plain text, empty when it held none.
     pub text: String,
+    /// The same content as HTML (`text/html`), empty when the clipboard
+    /// held none: what a browser, an office suite or a rich text editor
+    /// copied, with its formatting.
+    pub html: String,
     /// Files with their bytes: images (a screenshot, an image copied from a
     /// page or an app), in the platform's order.
     pub files: Vec<PastedFile>,
@@ -444,11 +448,15 @@ impl EventPayload {
     pub fn into_paste(self) -> EventPayload {
         match self {
             EventPayload::Map(fields) => {
-                let text = fields.into_iter().find_map(|(k, v)| match (k, v) {
-                    ("text", PayloadValue::Str(text)) => Some(text),
-                    _ => None,
-                });
-                EventPayload::Paste(Box::new(PasteEvent::new(text.unwrap_or_default())))
+                let mut paste = PasteEvent::default();
+                for (key, value) in fields {
+                    match (key, value) {
+                        ("text", PayloadValue::Str(text)) => paste.text = text,
+                        ("html", PayloadValue::Str(html)) => paste.html = html,
+                        _ => {}
+                    }
+                }
+                EventPayload::Paste(Box::new(paste))
             }
             EventPayload::None => EventPayload::Paste(Box::default()),
             payload => payload,
@@ -467,7 +475,10 @@ impl PasteEvent {
 
     /// Whether it holds nothing.
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.files.is_empty() && self.uris.is_empty()
+        self.text.is_empty()
+            && self.html.is_empty()
+            && self.files.is_empty()
+            && self.uris.is_empty()
     }
 }
 

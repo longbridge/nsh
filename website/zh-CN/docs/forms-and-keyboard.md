@@ -198,7 +198,7 @@ let composing = false;
 | `onSubmit` | `{ text }` | 在会提交的输入框中按下回车键（单行，或 `submitBehavior` 为 `"submit"` / `"blurAndSubmit"`）。 |
 | `onFocus` / `onBlur` | | 获得 / 失去焦点。 |
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 码元）。 |
-| `onPaste` | `{ text, files, uris }` | 用户粘贴了内容：文本、作为 `File` 的图片、本地文件的 URL（[粘贴](#粘贴图片和文件)）。 |
+| `onPaste` | `{ text, html, files, uris }` | 用户粘贴了内容：文本、带格式的 HTML（Linux、Web）、作为 `File` 的图片、本地文件的 URL（[粘贴](#粘贴图片和文件)）。 |
 | `onCaretMove` | `{ bounds, pageBounds }` | 光标移动：它在输入框和窗口中的位置（[光标位置](#光标位置)）。 |
 | `onKeyPress` | `{ key }` | 文本改变之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
@@ -495,7 +495,7 @@ const caret = signal<Bounds | null>(null);
 
 ## 粘贴图片和文件
 
-粘贴事件（`.on_paste(..)`，TSX 的 `onPaste`）报告用户粘贴了什么，无论来自快捷键、菜单中的“粘贴”，还是键盘插入的图片：`text`、`files` 和 `uris`。`files` 是剪贴板中以数据形式存在的内容，例如截图、从网页或其他应用复制的图片：应用可以上传或显示的 `File`，名为 `image.png`（或其实际类型）。`uris` 是在文件管理器中复制的文件的 `file:` URL，与拖放文件时一样。平台在用户粘贴时读取剪贴板，且只在那时读取。
+粘贴事件（`.on_paste(..)`，TSX 的 `onPaste`）报告用户粘贴了什么，无论来自快捷键、菜单中的“粘贴”，还是键盘插入的图片：`text`、`html`、`files` 和 `uris`。`html` 是带格式的同一内容，即浏览器、办公软件或富文本编辑器复制的 HTML（Linux 和 Web）。`files` 是剪贴板中以数据形式存在的内容，例如截图、从网页或其他应用复制的图片：应用可以上传或显示的 `File`，名为 `image.png`（或其实际类型）。`uris` 是在文件管理器中复制的文件的 `file:` URL，与拖放文件时一样。平台在用户粘贴时读取剪贴板，且只在那时读取。
 
 输入框照常自己插入粘贴的文本：事件在该文本的 `onChange` 之前到达。图片和文件从不插入，因为输入框只容纳文本。`pasteBehavior` 为 `"report"` 时输入框什么都不插入，由应用决定粘贴的效果：把长文本作为附件发送，或插入整理后的版本。由于系统要求当场作答，输入框根据这个属性立即决定。
 
