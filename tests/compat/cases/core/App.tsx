@@ -15,6 +15,7 @@ import CorePrimitives from "./core-primitives";
 import CoreReactive from "./core-reactive";
 import CoreRef from "./core-ref";
 import CoreResource from "./core-resource";
+import CoreShader from "./core-shader";
 import ModuleUrl from "./module-url";
 import Steps from "./steps";
 
@@ -31,6 +32,7 @@ const cases: Record<string, () => JSX.Element> = {
   "core-reactive": CoreReactive,
   "core-ref": CoreRef,
   "core-resource": CoreResource,
+  "core-shader": CoreShader,
   "module-url": ModuleUrl,
   "steps": Steps,
 };

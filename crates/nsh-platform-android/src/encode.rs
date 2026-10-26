@@ -67,6 +67,7 @@ const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
 const COMPONENT_PROP_SLOTS: i32 = 34;
+const SHADER: i32 = 35;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -323,6 +324,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(CANVAS);
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
+            }
+            MountItem::Shader { id, layer } => {
+                // Java learns only whether the view shows a shader; the
+                // layer goes to the UI-thread renderer (`crate::shader`).
+                e.int(SHADER);
+                e.int(id as i32);
+                e.bool(layer.is_some());
+                e.animation.push(MountItem::Shader { id, layer });
             }
             MountItem::Overflow { id, extent } => {
                 e.int(OVERFLOW);

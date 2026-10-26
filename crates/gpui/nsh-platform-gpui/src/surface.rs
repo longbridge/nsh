@@ -157,6 +157,9 @@ pub(crate) struct Surface {
     /// Extra frame clients (transitions, glides, spinners): called on every
     /// frame until they return false ([`Surface::on_frame`]).
     frame_clients: RefCell<Vec<FrameClient>>,
+    /// The GPU device shader views render with, opened when the first
+    /// shader is mounted (`None` inside: there is none).
+    shader_renderer: std::cell::OnceCell<Option<Rc<nsh_shader::Renderer>>>,
     /// The model of a test session's app (`nsh test --target gpui`).
     #[cfg(feature = "dev")]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
@@ -233,6 +236,7 @@ impl Surface {
             appearance: Cell::default(),
             js_frame: Cell::new(false),
             frame_clients: RefCell::default(),
+            shader_renderer: std::cell::OnceCell::new(),
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
             stats: RefCell::new(None),
@@ -274,6 +278,19 @@ impl Surface {
     /// Its key ([`Surface::by_key`]).
     pub(crate) fn key(&self) -> u64 {
         self.key
+    }
+
+    /// Pixels per point (the window's scale factor).
+    pub(crate) fn scale(&self) -> f32 {
+        self.scale.get()
+    }
+
+    /// The GPU device shader views render with ([`crate::shader`]), opened
+    /// the first time one asks.
+    pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_shader::Renderer>> {
+        self.shader_renderer
+            .get_or_init(|| nsh_shader::Renderer::new(nsh_shader::PixelFormat::Bgra).map(Rc::new))
+            .clone()
     }
 
     /// The surface's size in points.
@@ -575,6 +592,13 @@ impl Surface {
     pub(crate) fn on_frame(self: &Rc<Self>, f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static) {
         self.frame_clients.borrow_mut().push(Box::new(f));
         self.ensure_ticking();
+    }
+
+    /// [`Surface::on_frame`] while the animation graph is borrowed (its
+    /// writes into the views): asks for a frame without looking at it.
+    pub(crate) fn add_frame_client(&self, f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static) {
+        self.frame_clients.borrow_mut().push(Box::new(f));
+        self.invalidate();
     }
 
     /// Whether a native animation runs: the graph's, or the platform's own

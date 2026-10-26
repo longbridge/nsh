@@ -39,6 +39,7 @@ log.workspace = true
 nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine = { workspace = true, features = ["net"] }
 nsh-base = { workspace = true, features = ["highlight"] }
+nsh-shader.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 image = { workspace = true, features = ["gif", "webp", "jpeg", "bmp", "ico", "tiff"] }

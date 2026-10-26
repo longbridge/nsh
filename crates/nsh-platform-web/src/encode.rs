@@ -1161,6 +1161,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .raw(&crate::canvas::encode(drawing))
                 .end();
         }
+        MountItem::Shader { id, layer } => {
+            out.item("sh")
+                .num(*id)
+                .raw(&crate::shader::encode(layer.as_deref()))
+                .end();
+        }
         MountItem::Gestures { id, values } => {
             out.item("g")
                 .num(*id)

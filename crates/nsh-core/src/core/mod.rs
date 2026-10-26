@@ -91,6 +91,8 @@ mod dirty {
     /// Emit [`crate::MountItem::AccessibilityLabel`] (unless
     /// [`VIEW_PROPS`] sends everything).
     pub(super) const LABEL: u32 = 1 << 18;
+    /// Emit [`crate::MountItem::Shader`].
+    pub(super) const SHADER: u32 = 1 << 19;
 }
 
 /// A layout root other than the surface's: screens, modals and header
@@ -197,6 +199,7 @@ enum Kind {
     Video,
     Native,
     Overlay,
+    Shader,
 }
 
 impl Kind {
@@ -214,6 +217,7 @@ impl Kind {
                 | Kind::HeaderItem
                 | Kind::InputAccessory
                 | Kind::Overlay
+                | Kind::Shader
         )
     }
 
@@ -240,7 +244,11 @@ impl Kind {
             Kind::WebView => ViewKind::WebView,
             Kind::Video => ViewKind::Video,
             Kind::Native => ViewKind::Native,
-            Kind::View | Kind::Cell | Kind::RawText | Kind::Overlay => ViewKind::View,
+            // A shader's view is a view the platform draws its layer in
+            // (`MountItem::Shader`), under its children.
+            Kind::View | Kind::Cell | Kind::RawText | Kind::Overlay | Kind::Shader => {
+                ViewKind::View
+            }
         }
     }
 
@@ -265,6 +273,7 @@ impl Kind {
             Tag::Video => Kind::Video,
             Tag::Native => Kind::Native,
             Tag::Overlay => Kind::Overlay,
+            Tag::Shader => Kind::Shader,
         }
     }
 
@@ -397,6 +406,19 @@ struct InputState {
     empty_line: Option<(u64, Size<Points>)>,
 }
 
+/// A shader node's props and the layer they make.
+#[derive(Debug, Default)]
+struct ShaderNode {
+    /// `source`, as JS set it.
+    source: Option<Arc<str>>,
+    /// The program: `source` compiled, or what Rust set.
+    shader: Option<crate::shader::Shader>,
+    uniforms: crate::shader::ShaderUniforms,
+    paused: bool,
+    /// What the platform shows (`None`: nothing, as a view).
+    layer: Option<Arc<crate::shader::ShaderLayer>>,
+}
+
 #[derive(Debug, Default)]
 struct ImageState {
     source: Option<ImageSource>,
@@ -424,6 +446,8 @@ struct Node {
     animated: Vec<(AnimationProp, crate::animation::NodeId)>,
     /// What a canvas draws.
     drawing: Option<Arc<crate::canvas::Drawing>>,
+    /// A shader's program, uniforms and layer.
+    shader: Option<Box<ShaderNode>>,
     /// The `style` prop as written, applied over the class styles.
     inline_style: StylePatch,
     /// `class` / `classList` as set.
@@ -646,6 +670,7 @@ impl Node {
             paint: None,
             animated: Vec::new(),
             drawing: None,
+            shader: matches!(kind, Kind::Shader).then(Box::default),
             inline_style: StylePatch::default(),
             class_names: None,
             classes: None,
@@ -862,6 +887,9 @@ pub struct Core<M: TextEngine> {
     /// The warning about animated insets of views that are not sticky, or
     /// on the axis their scroll view does not scroll, was logged.
     inset_warned: bool,
+    /// Compiled shaders by the hash of their source, with their errors
+    /// (an app setting the same source again compiles it once).
+    shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
     /// Live screens, modals and header items.
     roots: Vec<Key>,
     /// Attached input accessories by `nativeID`.
@@ -1012,6 +1040,7 @@ impl<M: TextEngine> Core<M> {
             sticky_changed: false,
             sticky_warned: false,
             inset_warned: false,
+            shaders: Default::default(),
             roots: Vec::new(),
             accessories: Default::default(),
             header_heights: (Points(44.0), Points(96.0)),
@@ -2609,6 +2638,87 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A shader's `source`, program, `uniforms` or `paused`: the layer is
+    /// made again, and sent when it changed.
+    fn set_shader_prop(&mut self, key: Key, prop: Prop) {
+        let id = self.nodes[key as usize].id;
+        let Some(state) = self.nodes[key as usize].shader.as_mut() else {
+            log::warn!(target: "js", "shader props are a `<Shader>`'s; node {id} is not one");
+            return;
+        };
+        match prop {
+            Prop::ShaderSource(source) => {
+                if state.source == source {
+                    return;
+                }
+                state.source = source;
+                state.shader = None;
+                if let Some(source) = &state.source {
+                    let hash = crate::shader::source_hash(source);
+                    let compiled = self
+                        .shaders
+                        .get(&hash)
+                        .filter(|c| match c {
+                            Ok(shader) => shader.source() == &**source,
+                            Err(_) => true,
+                        })
+                        .cloned();
+                    let compiled = compiled.unwrap_or_else(|| {
+                        let compiled = crate::shader::Shader::compile(source);
+                        // Bounded: an app making sources on the fly does not
+                        // keep them all.
+                        if self.shaders.len() >= 64 {
+                            self.shaders.clear();
+                        }
+                        self.shaders.insert(hash, compiled.clone());
+                        compiled
+                    });
+                    let state = self.nodes[key as usize]
+                        .shader
+                        .as_mut()
+                        .expect("shader node");
+                    match compiled {
+                        Ok(shader) => state.shader = Some(shader),
+                        Err(error) => log::warn!(target: "js", "the shader of node {id}: {error}"),
+                    }
+                }
+            }
+            Prop::Shader(shader) => {
+                state.source = None;
+                state.shader = shader;
+            }
+            Prop::Uniforms(uniforms) => state.uniforms = uniforms,
+            Prop::ShaderPaused(paused) => state.paused = paused,
+            _ => return,
+        }
+        let state = self.nodes[key as usize]
+            .shader
+            .as_mut()
+            .expect("shader node");
+        let layer = state.shader.clone().map(|shader| {
+            let mut warnings = Vec::new();
+            let mut layer =
+                crate::shader::ShaderLayer::new(shader, &state.uniforms.0, &mut warnings);
+            layer.paused = state.paused;
+            for warning in warnings {
+                log::warn!(target: "js", "the shader of node {id}: {warning}");
+            }
+            Arc::new(layer)
+        });
+        if layer == state.layer {
+            return;
+        }
+        let nodes_of = |l: &Option<Arc<crate::shader::ShaderLayer>>| {
+            l.as_ref().map_or(&[][..], |l| &l.nodes[..]).to_vec()
+        };
+        let slots_changed = nodes_of(&layer) != nodes_of(&state.layer);
+        state.layer = layer;
+        self.mark(
+            key,
+            dirty::SHADER | if slots_changed { dirty::ANIMATION } else { 0 },
+        );
+    }
+
     fn set_prop(&mut self, id: NodeId, prop: Prop) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         // Rust components: `component` makes a view a host, its props
@@ -2635,6 +2745,12 @@ impl<M: TextEngine> Core<M> {
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
+        if let Prop::ShaderSource(_) | Prop::Shader(_) | Prop::Uniforms(_) | Prop::ShaderPaused(_) =
+            prop
+        {
+            self.set_shader_prop(key, prop);
+            return Ok(());
+        }
         if let Prop::Screen(ScreenProp::StatusBar(setting)) = prop {
             self.set_status_bar(key, setting);
             return Ok(());
@@ -4058,11 +4174,19 @@ impl<M: TextEngine> Core<M> {
         if !node.animated.is_empty()
             || node.drawing.as_ref().is_some_and(|d| !d.slots.is_empty())
             || node.component.as_ref().is_some_and(|c| !c.slots.is_empty())
+            || node
+                .shader
+                .as_ref()
+                .and_then(|s| s.layer.as_ref())
+                .is_some_and(|l| !l.nodes.is_empty())
         {
             flags |= dirty::ANIMATION;
         }
         if node.drawing.is_some() {
             flags |= dirty::CANVAS;
+        }
+        if node.shader.as_ref().is_some_and(|s| s.layer.is_some()) {
+            flags |= dirty::SHADER;
         }
         if !node.gestures.is_empty() {
             flags |= dirty::PAN;
@@ -4297,6 +4421,15 @@ impl<M: TextEngine> Core<M> {
                             .map(|(i, &n)| (AnimationProp::CanvasArg(i as u16), n)),
                     );
                 }
+                if let Some(layer) = node.shader.as_ref().and_then(|s| s.layer.as_ref()) {
+                    bindings.extend(
+                        layer
+                            .nodes
+                            .iter()
+                            .enumerate()
+                            .map(|(i, &n)| (AnimationProp::CanvasArg(i as u16), n)),
+                    );
+                }
                 if let Some(component) = &node.component {
                     bindings.extend(
                         component
@@ -4331,6 +4464,14 @@ impl<M: TextEngine> Core<M> {
                     Arc::new(drawing.painted(&paint, current, style.background_color, images))
                 };
                 self.mount.push(MountItem::Canvas { id, drawing });
+            }
+            if flags & dirty::SHADER != 0
+                && let Some(shader) = &node.shader
+            {
+                self.mount.push(MountItem::Shader {
+                    id,
+                    layer: shader.layer.clone(),
+                });
             }
             if flags & dirty::PAN != 0 {
                 let mut values = node.gestures;

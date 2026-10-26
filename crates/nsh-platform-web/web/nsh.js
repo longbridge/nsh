@@ -161,6 +161,7 @@ const KEYFRAMES = `
 .nsh-sticky { isolation: isolate; }
 .nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
 img.nsh-fill { pointer-events: none; }
+.nsh-shader { pointer-events: none; border-radius: inherit; }
 .nsh-fit-cover { object-fit: cover; }
 .nsh-fit-contain { object-fit: contain; }
 .nsh-fit-fill { object-fit: fill; }
@@ -548,6 +549,20 @@ export async function createPlayer(container, options = {}) {
   return player;
 }
 
+/** A CSS color as `#rrggbb`, `#rrggbbaa` or `rgba(r,g,b,a)` (what the
+ * animator writes) in 0..1 components. */
+function parseCssColor(value) {
+  const v = String(value).trim();
+  if (v.startsWith("#")) {
+    const n = (i) => parseInt(v.slice(i, i + 2), 16) / 255;
+    return [n(1), n(3), n(5), v.length >= 9 ? n(7) : 1];
+  }
+  const m = v.match(/\(([^)]*)\)/);
+  if (!m) return [0, 0, 0, 0];
+  const p = m[1].split(",").map(Number);
+  return [p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1];
+}
+
 class Player {
   /** The player that last took input (keys go to it while nothing has the focus). */
   static active = null;
@@ -569,6 +584,8 @@ class Player {
     container.append(this.root);
     this.views = new Map();
     this.mouseTracked = new Set();
+    // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
+    this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
@@ -1540,6 +1557,7 @@ class Player {
     if (!el) return;
     this.views.delete(id);
     this.mouseTracked.delete(id);
+    if (el._shader) this.op_sh([, id, null]);
     if (el._video) {
       // A removed media element keeps playing until it is collected.
       clearInterval(el._progressTimer);
@@ -1588,6 +1606,7 @@ class Player {
       el._frameAnimation = a;
     }
     if (el._kind === "canvas") this.drawSoon(el);
+    if (el._shader) this.shaderDirty(el);
     if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h, this.screenInsets(screen));
   }
 
@@ -1639,6 +1658,10 @@ class Player {
   op_a([, id, prop, value]) {
     const el = this.view(id);
     if (!el) return;
+    if (prop.startsWith("canvas:") && el._shader) {
+      this.shaderSlot(el, Number(prop.slice(7)), value);
+      return;
+    }
     if (prop.startsWith("canvas:")) {
       el._slots[Number(prop.slice(7))] = isNaN(Number(value)) ? value : Number(value);
       this.drawSoon(el);
@@ -2069,6 +2092,198 @@ class Player {
     el._img.classList.add("nsh-hidden");
     if (el._events.has("onError")) this.event(el._id, "onError", { message: `failed to load ${el._src}` });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
+  }
+
+  // Shader views. Every shader view draws on one WebGL 2 context (a page
+  // gets few contexts): the program renders into its canvas at the view's
+  // size, and the picture moves to the view's own canvas, under its
+  // children and inside its rounded corners. A view renders when what it
+  // reads changed (size, uniforms, animated slots) or, reading the time,
+  // on every animation frame while it is in sight and not paused.
+
+  op_sh([, id, layer]) {
+    const el = this.view(id);
+    if (!el) return;
+    if (!layer) {
+      el._shaderCanvas?.remove();
+      el._shaderCanvas = null;
+      el._shaderObserver?.disconnect();
+      el._shader = null;
+      this.shaderViews.delete(el);
+      return;
+    }
+    const old = el._shader;
+    const words = new Uint32Array(layer.words);
+    // Animated slots keep their values while the program and slots stay.
+    if (old && old.layer.key === layer.key && JSON.stringify(old.layer.slots) === JSON.stringify(layer.slots)) {
+      for (const [word, kind] of layer.slots) {
+        const n = kind === 3 ? 3 : kind === 4 ? 4 : 1;
+        for (let i = 0; i < n; i++) words[word + i] = old.words[word + i];
+      }
+    }
+    const now = performance.now();
+    const kept = old ? old.kept + (old.since != null ? now - old.since : 0) : 0;
+    el._shader = { layer, words, kept, since: layer.paused ? null : now, dirty: true };
+    if (!el._shaderCanvas) {
+      const canvas = document.createElement("canvas");
+      canvas.className = "nsh-fill nsh-shader";
+      el.insertBefore(canvas, el.firstChild);
+      el._shaderCanvas = canvas;
+      el._shaderVisible = true;
+      if (typeof IntersectionObserver !== "undefined") {
+        el._shaderObserver = new IntersectionObserver((entries) => {
+          el._shaderVisible = entries[entries.length - 1].isIntersecting;
+          if (el._shaderVisible) this.shaderDirty(el);
+        });
+        el._shaderObserver.observe(el);
+      }
+    }
+    this.shaderViews.add(el);
+    this.shaderDirty(el);
+  }
+
+  /** Writes an animated value into its slot (`op_a`'s `canvas:N`): a number, or a CSS color. */
+  shaderSlot(el, slot, value) {
+    const s = el._shader;
+    const entry = s.layer.slots[slot];
+    if (!entry) return;
+    const [word, kind] = entry;
+    const f32 = new Float32Array(s.words.buffer);
+    if (kind >= 3) {
+      const c = parseCssColor(value);
+      for (let i = 0; i < (kind === 3 ? 3 : 4); i++) f32[word + i] = c[i];
+    } else if (kind === 0) {
+      f32[word] = Number(value);
+    } else {
+      s.words[word] = kind === 1 ? Math.trunc(Number(value)) | 0 : Math.max(0, Math.trunc(Number(value))) >>> 0;
+    }
+    this.shaderDirty(el);
+  }
+
+  shaderDirty(el) {
+    if (el._shader) el._shader.dirty = true;
+    if (this.shaderFrameQueued) return;
+    this.shaderFrameQueued = true;
+    requestAnimationFrame((t) => this.shaderFrame(t));
+  }
+
+  shaderFrame(t) {
+    this.shaderFrameQueued = false;
+    let again = false;
+    for (const el of this.shaderViews) {
+      const s = el._shader;
+      if (!el.isConnected || !s) continue;
+      const runs = s.layer.animated && s.since != null;
+      if (!el._shaderVisible || !(s.dirty || runs)) continue;
+      s.dirty = false;
+      this.renderShader(el, t);
+      again ||= runs;
+    }
+    if (again) {
+      this.shaderFrameQueued = true;
+      requestAnimationFrame((t) => this.shaderFrame(t));
+    }
+  }
+
+  /** The shared WebGL 2 context; `null` where there is none (said once). */
+  shaderGl() {
+    if (this._shaderGl !== undefined) return this._shaderGl;
+    const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: false });
+    if (!gl) console.warn("[nsh] shaders: no WebGL 2; shader views draw nothing");
+    this._shaderGl = gl;
+    this._shaderPrograms = new Map();
+    return gl;
+  }
+
+  shaderProgram(gl, layer) {
+    const cached = this._shaderPrograms.get(layer.key);
+    if (cached !== undefined) return cached;
+    const compile = (type, source) => {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.warn("[nsh] shader:", gl.getShaderInfoLog(shader));
+        return null;
+      }
+      return shader;
+    };
+    let program = null;
+    const vs = compile(gl.VERTEX_SHADER, layer.vs);
+    const fs = vs && compile(gl.FRAGMENT_SHADER, layer.fs);
+    if (fs) {
+      program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.warn("[nsh] shader:", gl.getProgramInfoLog(program));
+        program = null;
+      }
+    }
+    let entry = null;
+    if (program) {
+      const block = (name, binding) => {
+        if (!name) return null;
+        const index = gl.getUniformBlockIndex(program, name);
+        if (index === gl.INVALID_INDEX) return null;
+        gl.uniformBlockBinding(program, index, binding);
+        return gl.createBuffer();
+      };
+      entry = { program, builtins: block(layer.nsh, 0), uniforms: block(layer.u, 1), vao: gl.createVertexArray() };
+    }
+    this._shaderPrograms.set(layer.key, entry);
+    return entry;
+  }
+
+  renderShader(el, t) {
+    const s = el._shader;
+    const gl = this.shaderGl();
+    if (!gl || !el._frame) return;
+    const program = this.shaderProgram(gl, s.layer);
+    if (!program) return;
+    const [, , w, h] = el._frame;
+    let ratio = (devicePixelRatio || 1) * Math.min(4, this.zoomOf(el));
+    ratio = Math.min(ratio, 4096 / Math.max(w, h, 1));
+    const pw = Math.max(1, Math.round(w * ratio));
+    const ph = Math.max(1, Math.round(h * ratio));
+    const canvas = gl.canvas;
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    const time = (s.kept + (s.since != null ? t - s.since : 0)) / 1000;
+    gl.viewport(0, 0, pw, ph);
+    gl.useProgram(program.program);
+    gl.bindVertexArray(program.vao);
+    if (program.builtins) {
+      gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
+      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6)]), gl.DYNAMIC_DRAW);
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
+    }
+    if (program.uniforms) {
+      gl.bindBuffer(gl.UNIFORM_BUFFER, program.uniforms);
+      gl.bufferData(gl.UNIFORM_BUFFER, s.words, gl.DYNAMIC_DRAW);
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, program.uniforms);
+    }
+    gl.disable(gl.BLEND);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const target = el._shaderCanvas;
+    if (target.width !== pw || target.height !== ph) {
+      target.width = pw;
+      target.height = ph;
+    }
+    if (canvas.transferToImageBitmap) {
+      target._bitmap ??= target.getContext("bitmaprenderer");
+      target._bitmap.transferFromImageBitmap(canvas.transferToImageBitmap());
+    } else {
+      target._2d ??= target.getContext("2d");
+      target._2d.clearRect(0, 0, pw, ph);
+      target._2d.drawImage(canvas, 0, 0);
+    }
   }
 
   // Scroll views

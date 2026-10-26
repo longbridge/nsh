@@ -31,6 +31,7 @@ jni.workspace = true
 nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine.workspace = true
 nsh-base = { workspace = true, features = ["highlight"] }
+nsh-shader.workspace = true
 serde_json.workspace = true
 rustc-hash.workspace = true
 ttf-parser.workspace = true

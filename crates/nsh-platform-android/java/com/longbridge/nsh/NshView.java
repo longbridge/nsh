@@ -864,6 +864,16 @@ public class NshView extends FrameLayout {
         if (handle != 0) Native.frame(handle);
     };
 
+    /**
+     * A shader view's new frame, called by libnsh on the UI thread during
+     * {@link Native#tick}: {@code pixels} (null for an empty frame) are only
+     * valid during the call.
+     */
+    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height) {
+        View v = mounter.view(id);
+        if (v instanceof Box) ((Box) v).shaderFrame(pixels, width, height);
+    }
+
     /** JS waits for a display frame (`requestAnimationFrame`). */
     void requestJsFrame() {
         main.post(() -> Choreographer.getInstance().postFrameCallback(jsFrame));

@@ -619,8 +619,8 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// A pad inside 8 points of padding. A press writes where it was in the
 /// pad and in the window.
 mod press_point {
-    use nsh_core::prelude::*;
     use nsh_base::input;
+    use nsh_core::prelude::*;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {

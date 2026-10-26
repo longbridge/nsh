@@ -27,6 +27,7 @@ log.workspace = true
 nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine = { workspace = true, features = ["net"] }
 nsh-base = { workspace = true, features = ["highlight"] }
+nsh-shader.workspace = true
 windows.workspace = true
 windows-core.workspace = true
 windows-numerics.workspace = true

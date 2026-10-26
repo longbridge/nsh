@@ -210,6 +210,12 @@ host_element! {
 }
 
 host_element! {
+    /// A view whose box a shader draws under its children (`<shader>`, TS:
+    /// `Shader` of `nsh`), made by [`shader`] ([`crate::shader`]).
+    ShaderView
+}
+
+host_element! {
     /// A web page (`<webview>`), made by [`web_view`].
     WebView
 }
@@ -234,6 +240,7 @@ host_element! {
 }
 
 impl ParentElement for Overlay {}
+impl ParentElement for ShaderView {}
 impl ParentElement for Scroll {}
 impl ParentElement for Stack {}
 impl ParentElement for Screen {}
@@ -347,6 +354,78 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 }
 
 crate::static_reactive!(Painter: Painter, Drawing);
+
+/// A view whose box `shader` draws, under its children (a bound one draws
+/// the new program when it changes): compile it once with
+/// [`Shader::compile`](crate::shader::Shader::compile) and set its
+/// uniforms with [`ShaderView::uniform`].
+pub fn shader(shader: impl IntoReactive<crate::shader::Shader>) -> ShaderView {
+    ShaderView(ElNode::new(Tag::Shader)).bind_prop(shader, |s| Prop::Shader(Some(s)))
+}
+
+crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
+crate::static_reactive!(
+    crate::shader::UniformValue: crate::shader::UniformValue,
+    f32,
+    i32,
+    Color,
+    Hsla,
+    [f32; 2],
+    [f32; 3],
+    [f32; 4],
+    Vec<crate::shader::UniformValue>
+);
+
+impl ShaderView {
+    /// Sets the member `name` of the shader's `struct Uniforms`: a number,
+    /// a color or a list (a vector, an array of `vec4f`). A bound value sets
+    /// it again when it changes; [`Self::animated_uniform`] moves one
+    /// natively.
+    pub fn uniform(
+        mut self,
+        name: &str,
+        value: impl IntoReactive<crate::shader::UniformValue>,
+    ) -> Self {
+        let name: Arc<str> = name.into();
+        self.0.bind_attr(value, move |attrs, value| {
+            let mut uniforms = attrs
+                .props
+                .iter()
+                .find_map(|p| match p {
+                    Prop::Uniforms(u) => Some(u.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            match uniforms.0.iter_mut().find(|(n, _)| *n == name) {
+                Some(entry) => entry.1 = value,
+                None => uniforms.0.push((name.clone(), value)),
+            }
+            set_in(&mut attrs.props, Prop::Uniforms(uniforms));
+        });
+        self
+    }
+
+    /// Binds the member `name` (a number, or a `vec3f` / `vec4f` color) to
+    /// the animated value `value`: the platform writes it on every frame it
+    /// changes and draws again, without the engine. One whose owner is gone
+    /// counts as 0.
+    pub fn animated_uniform(mut self, name: &str, value: &impl super::Animated) -> Self {
+        let value = match value.animated_node().live() {
+            Some(node) => {
+                let id = node.id();
+                self.0.attrs.bound.push(node);
+                crate::shader::UniformValue::Animated(id)
+            }
+            None => crate::shader::UniformValue::Number(0.0),
+        };
+        self.uniform(name, value)
+    }
+
+    /// Stops its clock (`nsh.time` keeps its value), or starts it again.
+    pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(paused, Prop::ShaderPaused)
+    }
+}
 
 /// A web view loading `url` (a bound one loads again when it changes).
 pub fn web_view(url: impl IntoReactive<String>) -> WebView {

@@ -1288,8 +1288,8 @@ fn set_prop(
     {
         return set_event(cx, p, event, value);
     }
-    // Native animation nodes these props use, and a `tooltip`'s element,
-    // stay alive with the view.
+    // Native animation nodes these props use (a shader's `uniforms`
+    // hold them inside), and a `tooltip`'s element, stay alive with the view.
     if let Some(&key) = [
         "style",
         "pan",
@@ -1298,6 +1298,7 @@ fn set_prop(
         "scrollValue",
         "pullValue",
         "stickyHeaderOffset",
+        "uniforms",
         "tooltip",
     ]
     .iter()

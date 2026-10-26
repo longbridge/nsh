@@ -62,6 +62,7 @@ final class Mounter {
     private static final int ACCESSIBILITY_LABEL = 32;
     private static final int APPEARANCE = 33;
     private static final int COMPONENT_PROP_SLOTS = 34;
+    private static final int SHADER = 35;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
@@ -516,6 +517,13 @@ final class Mounter {
                 case COMPONENT: {
                     int id = b.getInt();
                     component(id, string(objects, b.getInt()));
+                    break;
+                }
+                case SHADER: {
+                    // The layer stays in libnsh, which renders it (`shader.rs`).
+                    View v = views.get(b.getInt());
+                    boolean on = b.getInt() != 0;
+                    if (v instanceof Box) ((Box) v).setShader(on);
                     break;
                 }
                 case COMPONENT_PROP_SLOTS: {
