@@ -113,6 +113,10 @@ pub struct ClickEvent {
     pub shift: bool,
     /// Whether Meta is held.
     pub meta: bool,
+    /// Whether the view shows the document read-only (its `editable` prop
+    /// or the session's `setEditable`), which plugins cannot see in the
+    /// state.
+    pub read_only: bool,
 }
 
 /// What a plugin's view hooks get from the view. The view defines what it
