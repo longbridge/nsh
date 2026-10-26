@@ -67,7 +67,7 @@ function App() {
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
       >
-        <Grid y={[0, 1500, 3000]} class="stroke-border" style={{ strokeDasharray: "3 3" }} />
+        <Grid y={[0, 1500, 3000]} class="stroke-border" />
         <Area class="fill-chart-1/20" />
         <Line class="stroke-chart-1 stroke-2" />
       </Plot>
@@ -167,6 +167,11 @@ A chart is a plot, its marks and the app's own elements around them. Give the y 
 it: the labels then sit at the grid's values. The hover's cross line, dots and tooltip are the plot's parts, styled and
 filled by the app; the row's values go where the app shows them.
 
+Grids read best as solid hairlines with a firmer baseline, which leaves a dashed line free to mean a reference value
+(the opening price below). The dots take the color of the surface the chart sits on as their ring, so they cut out of
+the line, and the tooltip sits at the top of the plot: a `domain` with room above the highest value keeps it off the
+line.
+
 ```tsx
 import { signal, Text, View } from "nsh";
 import { Area, Grid, Line, Plot } from "nsh/base/plot";
@@ -193,18 +198,21 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
           appearGeneration={props.rows.length}
           motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
-          crossLineClass="w-px h-full bg-muted-foreground"
+          crossLineClass="w-px h-full bg-muted-foreground/50"
           dotClass="size-2.5 rounded-full border-2 border-card bg-chart-1"
           tooltipContent={
-            <View class="mt-1 rounded-md bg-popover px-2 py-1">
+            <View class="mt-1 flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+              <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
               <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
             </View>
           }
           onHoverChange={(index) => hovered.set(index)}
           class="h-48 flex-1"
         >
-          <Grid y={[props.low, middle(), props.high]} class="stroke-border" style={{ strokeDasharray: "3 3" }} />
+          <Grid y={[middle(), props.high]} class="stroke-border" />
           <Area class="fill-chart-1/15" />
+          <Grid y={[props.low]} class="stroke-muted-foreground/40" />
+          <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
           <Line class="stroke-chart-1 stroke-2" />
         </Plot>
         {/* The y axis' labels, at the grid's values (Text until an axis mark lands). */}

@@ -6,8 +6,11 @@ import { desktop, Log, Panel, Segmented, size, Split, tint, ui } from "./palette
 // look is the palette's (paint as styles: `stroke`, `fill`,
 // `strokeDasharray`). The y domain is the app's, so its labels sit at the
 // grid's values; the row under the pointer drives the value in the header,
-// and the plot's cross line and dot follow it natively. Numbers are tabular
-// and at the trailing edge.
+// and the plot's cross line, dot and tooltip follow it natively. Grid lines
+// are solid hairlines and the bottom one a firmer baseline; the one dashed
+// line is a reference, the opening price the change is measured from. The
+// tooltip is the time of the row, a tag over the x axis' labels, so it
+// never covers the line. Numbers are tabular and at the trailing edge.
 type Row = { minute: number; price: number };
 type Range = "1D" | "1W" | "1M";
 type Curve = "natural" | "linear" | "stepAfter";
@@ -22,10 +25,15 @@ const walk = (count: number, seed: number, start: number, step: number): Row[] =
     return { minute, price: Math.round(price * 100) / 100 };
   });
 };
-const RANGES: Record<Range, { rows: Row[]; ticks: string[] }> = {
-  "1D": { rows: walk(78, 7, 188, 1.2), ticks: ["9:30", "12:45", "16:00"] },
-  "1W": { rows: walk(35, 11, 181, 2.4), ticks: ["Mon", "Wed", "Fri"] },
-  "1M": { rows: walk(22, 5, 172, 3.6), ticks: ["Oct 1", "Oct 15", "Oct 31"] },
+// The time of each row: every five minutes of a session, seven an hour
+// apart each day of a week, and the trading days of October 2026.
+const clock = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const OCTOBER = Array.from({ length: 31 }, (_, d) => d + 1).filter((d) => (d + 3) % 7 !== 0 && (d + 3) % 7 !== 6);
+const RANGES: Record<Range, { rows: Row[]; ticks: string[]; period: string; time: (row: number) => string }> = {
+  "1D": { rows: walk(78, 7, 188, 1.2), ticks: ["9:30", "12:45", "16:00"], period: "Today", time: (i) => clock(570 + i * 5) },
+  "1W": { rows: walk(35, 11, 181, 2.4), ticks: ["Mon", "Wed", "Fri"], period: "Past week", time: (i) => `${DAYS[Math.floor(i / 7)]} ${clock(600 + (i % 7) * 60)}` },
+  "1M": { rows: walk(22, 5, 172, 3.6), ticks: ["Oct 1", "Oct 15", "Oct 30"], period: "Past month", time: (i) => `Oct ${OCTOBER[i]}` },
 };
 
 // The y domain: the rows' extent, rounded out to whole steps of 5.
@@ -40,6 +48,8 @@ function App() {
   const range = signal<Range>("1D");
   const curve = signal<Curve>("natural");
   const hovered = signal<number | null>(null);
+  // The last row hovered: the tooltip keeps it while it fades out.
+  const tipRow = signal(0);
   const events = signal<string[]>([]);
   const rows = () => RANGES[range()].rows;
   const [lo, hi] = [() => domain(rows())[0], () => domain(rows())[1]];
@@ -50,9 +60,13 @@ function App() {
     const at = hovered();
     return all[at != null && at < all.length ? at : all.length - 1];
   };
-  const change = () => shown().price - rows()[0].price;
+  const open = () => rows()[0].price;
+  const change = () => shown().price - open();
   const color = () => (change() >= 0 ? ui().up : ui().down);
+  // Signed figures: an explicit plus and a true minus.
+  const signed = (v: number, digits: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(digits)}`;
   const label = (v: number) => v.toFixed(0);
+  const height = desktop ? 200 : 180;
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>plot</Text>
@@ -80,24 +94,25 @@ function App() {
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={{ fontSize: size.label, fontWeight: "600", color: ui().text }}>NSH Labs</Text>
               <Text style={{ fontSize: size.detail, color: ui().muted }}>
-                {hovered() == null ? `Last · ${range()}` : `Row ${hovered()} of ${rows().length}`}
+                {`${RANGES[range()].period} · open ${open().toFixed(2)}`}
               </Text>
             </View>
             <View style={{ alignItems: "flex-end", gap: 2 }}>
               <Text style={{ fontSize: 20, fontWeight: "600", color: ui().text, ...num }}>{shown().price.toFixed(2)}</Text>
               <Text style={{ fontSize: size.detail, color: color(), ...num }}>
-                {`${change() >= 0 ? "+" : "−"}${Math.abs(change()).toFixed(2)}`}
+                {`${signed(change(), 2)} (${signed((change() / open()) * 100, 2)}%)`}
               </Text>
             </View>
           </View>
 
-          <View class="flex-row gap-2">
+          {/* Above the x axis' labels, so the tooltip covers them. */}
+          <View class="flex-row gap-2" style={{ zIndex: 1 }}>
             <Plot
               data={rows()}
               y="price"
               yScale={{ type: "linear", domain: [lo(), hi()] }}
               accessibilityLabel={`NSH Labs, ${range()}: from ${rows()[0].price.toFixed(2)} to ${rows()[rows().length - 1].price.toFixed(2)}`}
-              accessibilityValue={{ text: hovered() == null ? undefined : `Row ${hovered()}: ${shown().price.toFixed(2)}` }}
+              accessibilityValue={{ text: hovered() == null ? undefined : `${RANGES[range()].time(hovered()!)}: ${shown().price.toFixed(2)}` }}
               // Motion of the app's: the marks draw in for each range, the
               // hover fades and glides; reduced motion shows it all at once.
               appearGeneration={["1D", "1W", "1M"].indexOf(range())}
@@ -105,16 +120,26 @@ function App() {
               crossLineClass="w-px h-full"
               crossLineStyle={{ backgroundColor: ui().muted }}
               dotClass="size-2.5 rounded-full border-2"
-              dotStyle={{ backgroundColor: color(), borderColor: ui().page }}
+              // The ring is the card's color: the dot cuts out of the line.
+              dotStyle={{ backgroundColor: color(), borderColor: ui().card.backgroundColor }}
+              // The time of the row, at the foot of the cross line.
+              tooltipContent={
+                <View style={{ ...ui().raised, marginTop: height + 9, height: 20, paddingHorizontal: 6, borderRadius: 6, justifyContent: "center" }}>
+                  <Text style={{ fontSize: 11, color: ui().text, ...num }}>{RANGES[range()].time(Math.min(tipRow(), rows().length - 1))}</Text>
+                </View>
+              }
               onHoverChange={(index) => {
                 hovered.set(index);
+                if (index != null) tipRow.set(index);
                 const line = index == null ? "null: left the chart" : `${index}: ${rows()[index].price.toFixed(2)}`;
                 events.set([line, ...events()].slice(0, 5));
               }}
-              style={{ flex: 1, height: desktop ? 200 : 180 }}
+              style={{ flex: 1, height }}
             >
-              <Grid y={[lo(), (lo() + hi()) / 2, hi()]} style={{ stroke: ui().line, strokeDasharray: "3 3" }} />
-              <Area curve={curve()} style={{ fill: tint(color(), 0.12) }} />
+              <Grid y={[(lo() + hi()) / 2, hi()]} style={{ stroke: tint(ui().text, 0.08) }} />
+              <Area curve={curve()} style={{ fill: tint(color(), 0.1) }} />
+              <Grid y={[lo()]} style={{ stroke: tint(ui().text, 0.2) }} />
+              <Grid y={[open()]} style={{ stroke: ui().faint, strokeDasharray: "3 3" }} />
               <Line curve={curve()} style={{ stroke: color(), strokeWidth: 2 }} />
             </Plot>
             <View style={{ justifyContent: "space-between", marginVertical: -7, width: 28 }}>

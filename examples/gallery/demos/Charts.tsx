@@ -1,7 +1,7 @@
 import { List, signal, Text, View } from "nsh";
 import { Area, Grid, Line, Plot } from "nsh/base/plot";
 import { platform } from "nsh/device";
-import { Badge, Button, Caption, Card, colors, DemoPage, mono, toneColor } from "../ui";
+import { alpha, Button, Caption, Card, colors, DemoPage, finish, mono, toneColor } from "../ui";
 
 const pointer = platform.idiom === "desktop";
 const size = pointer ? { gap: 10, label: 14, detail: 12, switch: "small" as const } : { gap: 12, label: 15, detail: 13, switch: "regular" as const };
@@ -30,12 +30,53 @@ const TICKERS = Array.from({ length: 48 }, (_, n) => {
 });
 
 const count = (n: number) => n.toLocaleString("en-US");
+const WEEK_NAMES = ["Last week", "This week"];
+/** The top of the visitors' y scale: a step above the highest grid line,
+ * room for the tooltip. */
+const TOP = 3500;
+/** The width of the y axis' labels. */
+const AXIS = 24;
+
+/** A series' key, as its mark: a short line, dashed for the other week. */
+function Key(props: { dashed?: boolean }) {
+  return props.dashed ? (
+    <View style={{ width: 10, flexDirection: "row", gap: 2 }}>
+      <View style={{ width: 4, height: 1.5, backgroundColor: colors.muted }} />
+      <View style={{ width: 4, height: 1.5, backgroundColor: colors.muted }} />
+    </View>
+  ) : (
+    <View style={{ width: 10, height: 2, borderRadius: 1, backgroundColor: toneColor("accent") }} />
+  );
+}
+
+/** A legend entry: the key, then the series' name. */
+function LegendItem(props: { label: string; dashed?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Key dashed={props.dashed} />
+      <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
+    </View>
+  );
+}
+
+/** A value in the tooltip, after its series' key. */
+function TipValue(props: { value: string; dashed?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Key dashed={props.dashed} />
+      <Text style={{ fontSize: 12, color: props.dashed ? colors.muted : colors.text, fontVariant: ["tabular-nums"] }}>{props.value}</Text>
+    </View>
+  );
+}
 
 /**
  * Charts: `nsh/base/plot`'s `Plot` with `Line`, `Area` and `Grid`, drawn
- * natively from the app's rows: a week of visitors with the hover's cross
- * line, dots and tooltip gliding natively, and a list of sparklines that
- * draw in as their rows come.
+ * natively from the app's rows: a week of visitors over the other week
+ * (dashed), with a legend, compact y labels and the hover's cross line,
+ * dots and tooltip gliding natively, and a list of sparklines, each with a
+ * wash in its tone and its change beside it, that draw in as their rows
+ * come. Grid lines are hairlines with a firmer baseline; the tooltip floats
+ * in the room above the highest value, off the lines.
  */
 export function Charts() {
   const last = signal("—");
@@ -43,39 +84,65 @@ export function Charts() {
   function Visitors() {
     const week = signal(0);
     const hover = signal<number | null>(null);
+    // The last day hovered: the tooltip keeps it while it fades out.
+    const tip = signal(0);
     const rows = () => WEEKS[week()];
+    const other = () => WEEKS[1 - week()];
     const shown = () => rows()[hover() ?? rows().length - 1];
     return (
-      <Card icon="stocks" title="Visitors" subtitle="A line and an area with hover, grid lines and motion" right={<Badge label={week() === 0 ? "Last week" : "This week"} />}>
+      <Card icon="stocks" title="Visitors" subtitle="A week over the other, with hover, grid lines and motion">
         <Caption label={hover() == null ? `${shown().day}, the last day` : shown().day} note={`${count(shown().visitors)} visitors`} />
-        <Plot
-          data={rows()}
-          y="visitors"
-          yScale={{ type: "linear", domain: [0, 3000] }}
-          appearGeneration={week()}
-          motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 320, damping: 32 } }}
-          accessibilityLabel={`Visitors per day, from ${count(rows()[0].visitors)} on Monday to ${count(rows()[6].visitors)} on Sunday`}
-          accessibilityValue={{ text: hover() == null ? undefined : `${shown().day}, ${count(shown().visitors)} visitors` }}
-          crossLineClass="w-px h-full"
-          crossLineStyle={{ backgroundColor: colors.muted }}
-          dotClass="size-2.5 rounded-full border-2"
-          dotStyle={{ backgroundColor: toneColor("accent"), borderColor: colors.surface }}
-          tooltipContent={
-            <View style={{ marginTop: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.raised }}>
-              <Text style={{ fontSize: 12, color: colors.text, fontVariant: ["tabular-nums"] }}>{count(shown().visitors)}</Text>
-            </View>
-          }
-          onHoverChange={(index) => {
-            hover.set(index);
-            last.set(index == null ? "Plot: left" : `Plot: ${rows()[index].day}, ${count(rows()[index].visitors)}`);
-          }}
-          style={{ height: 160, marginTop: size.gap }}
-        >
-          <Grid y={[0, 1000, 2000, 3000]} style={{ stroke: colors.line }} />
-          <Area style={{ fill: toneColor("accent"), opacity: 0.16 }} />
-          <Line style={{ stroke: toneColor("accent"), strokeWidth: 2 }} />
-        </Plot>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+        {/* The key of each series mirrors its mark: a solid line, a dashed one. */}
+        <View style={{ flexDirection: "row", gap: 16, marginTop: 8 }}>
+          <LegendItem label={WEEK_NAMES[week()]} />
+          <LegendItem label={WEEK_NAMES[1 - week()]} dashed />
+        </View>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: size.gap }}>
+          <Plot
+            data={rows()}
+            y="visitors"
+            // Room above the highest week for the tooltip.
+            yScale={{ type: "linear", domain: [0, TOP] }}
+            appearGeneration={week()}
+            motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
+            accessibilityLabel={`Visitors per day, from ${count(rows()[0].visitors)} on Monday to ${count(rows()[6].visitors)} on Sunday`}
+            accessibilityValue={{
+              text: hover() == null ? undefined : `${shown().day}, ${count(shown().visitors)} visitors, ${count(other()[hover()!].visitors)} ${WEEK_NAMES[1 - week()].toLowerCase()}`,
+            }}
+            crossLineClass="w-px h-full"
+            crossLineStyle={{ backgroundColor: alpha(colors.text, 0.3) }}
+            // A dot per mark, the same for both weeks: hollow, in the text color.
+            dotClass="size-2.5 rounded-full border-2"
+            dotStyle={{ backgroundColor: colors.surface, borderColor: colors.text }}
+            tooltipContent={
+              <View style={{ ...finish.menu, marginTop: 4, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
+                <TipValue value={count(rows()[tip()].visitors)} />
+                <TipValue value={count(other()[tip()].visitors)} dashed />
+              </View>
+            }
+            onHoverChange={(index) => {
+              hover.set(index);
+              if (index != null) tip.set(index);
+              last.set(index == null ? "Plot: left" : `Plot: ${rows()[index].day}, ${count(rows()[index].visitors)}`);
+            }}
+            style={{ flex: 1, height: 160 }}
+          >
+            <Grid y={[1000, 2000, 3000]} style={{ stroke: colors.line }} />
+            <Area style={{ fill: alpha(toneColor("accent"), 0.12) }} />
+            <Grid y={[0]} style={{ stroke: colors.border }} />
+            <Line data={other()} y="visitors" style={{ stroke: colors.muted, strokeWidth: 1.5, strokeDasharray: "4 4" }} />
+            <Line style={{ stroke: toneColor("accent"), strokeWidth: 2 }} />
+          </Plot>
+          {/* The y axis' labels at the grid's values, compact. */}
+          <View style={{ width: AXIS, height: 160 }}>
+            {[0, 1000, 2000, 3000].map((v) => (
+              <Text style={{ position: "absolute", right: 0, top: (1 - v / TOP) * 160 - 8, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+                {v === 0 ? "0" : `${v / 1000}k`}
+              </Text>
+            ))}
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6, marginRight: AXIS + 8 }}>
           {DAYS.map((d) => (
             <Text style={{ fontSize: 12, color: colors.muted }}>{d}</Text>
           ))}
@@ -102,7 +169,11 @@ export function Charts() {
       <Card icon="stocks" title="Sparklines" subtitle="A plot per row of a list, drawn in as the row comes">
         <List each={TICKERS} keyExtractor={(t) => String(t.id)} estimatedItemSize={44} style={{ height: 44 * 6 }}>
           {(ticker) => {
-            const up = () => ticker().points[ticker().points.length - 1].price >= ticker().points[0].price;
+            const first = () => ticker().points[0].price;
+            const close = () => ticker().points[ticker().points.length - 1].price;
+            const up = () => close() >= first();
+            const tone = () => (up() ? "up" : "down");
+            const change = () => ((close() - first()) / first()) * 100;
             return (
               <View style={{ height: 44, flexDirection: "row", alignItems: "center", gap: size.gap }}>
                 <Text style={{ width: 64, fontSize: size.label, color: colors.text, fontFamily: mono }}>{ticker().symbol}</Text>
@@ -112,14 +183,20 @@ export function Charts() {
                   interactive={false}
                   appearGeneration={ticker().id}
                   motion={{ appear: { duration: 400, easing: "easeOut" } }}
-                  accessibilityLabel={`${ticker().symbol}, ${up() ? "up" : "down"}`}
+                  accessibilityLabel={`${ticker().symbol}, ${up() ? "up" : "down"} ${Math.abs(change()).toFixed(2)}%`}
                   style={{ flex: 1, height: 28 }}
                 >
-                  <Line style={{ stroke: toneColor(up() ? "up" : "down"), strokeWidth: 1.5 }} />
+                  {/* A faint wash under the line, in its tone. */}
+                  <Area style={{ fill: alpha(toneColor(tone()), 0.1) }} />
+                  <Line style={{ stroke: toneColor(tone()), strokeWidth: 1.5 }} />
                 </Plot>
-                <Text style={{ width: 64, fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>
-                  {ticker().points[ticker().points.length - 1].price.toFixed(2)}
-                </Text>
+                {/* The close over its change: an explicit plus, a true minus. */}
+                <View style={{ width: 72, alignItems: "flex-end", gap: 2 }}>
+                  <Text style={{ fontSize: size.label, color: colors.text, fontVariant: ["tabular-nums"] }}>{close().toFixed(2)}</Text>
+                  <Text style={{ fontSize: size.detail, color: toneColor(tone()), fontVariant: ["tabular-nums"] }}>
+                    {`${up() ? "+" : "−"}${Math.abs(change()).toFixed(2)}%`}
+                  </Text>
+                </View>
               </View>
             );
           }}

@@ -60,7 +60,7 @@ function App() {
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
       >
-        <Grid y={[0, 1500, 3000]} class="stroke-border" style={{ strokeDasharray: "3 3" }} />
+        <Grid y={[0, 1500, 3000]} class="stroke-border" />
         <Area class="fill-chart-1/20" />
         <Line class="stroke-chart-1 stroke-2" />
       </Plot>
@@ -143,6 +143,8 @@ plot 没有设置定义域时，`Line` 和 `Area` 绘制的数值（包括 area 
 
 一个图表由 plot、它的图形以及应用自己放在周围的元素组成。应用要给 y 轴加标签时，为 y 比例尺指定 `domain`，标签就能对齐网格线的数值。悬停的十字线、圆点和提示框是 plot 的部件，由应用设置样式和内容；该行的数值显示在应用想放的地方。
 
+网格线用实线细线、底部基线稍深时最清楚，虚线就可以专门表示参考值（下例中的开盘价）。圆点的描边用图表所在表面的颜色，从折线上“挖”出来；提示框位于 plot 顶部，`domain` 在最高值之上留出空间，提示框就不会盖住折线。
+
 ```tsx
 import { signal, Text, View } from "nsh";
 import { Area, Grid, Line, Plot } from "nsh/base/plot";
@@ -169,18 +171,21 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
           accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
           appearGeneration={props.rows.length}
           motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
-          crossLineClass="w-px h-full bg-muted-foreground"
+          crossLineClass="w-px h-full bg-muted-foreground/50"
           dotClass="size-2.5 rounded-full border-2 border-card bg-chart-1"
           tooltipContent={
-            <View class="mt-1 rounded-md bg-popover px-2 py-1">
+            <View class="mt-1 flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+              <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
               <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
             </View>
           }
           onHoverChange={(index) => hovered.set(index)}
           class="h-48 flex-1"
         >
-          <Grid y={[props.low, middle(), props.high]} class="stroke-border" style={{ strokeDasharray: "3 3" }} />
+          <Grid y={[middle(), props.high]} class="stroke-border" />
           <Area class="fill-chart-1/15" />
+          <Grid y={[props.low]} class="stroke-muted-foreground/40" />
+          <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
           <Line class="stroke-chart-1 stroke-2" />
         </Plot>
         {/* y 轴标签，放在网格线的数值处（坐标轴图形推出之前先用 Text）。 */}
