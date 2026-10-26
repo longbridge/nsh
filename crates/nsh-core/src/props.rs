@@ -104,6 +104,11 @@ pub enum AccessibilityRole {
     /// A group of a table's rows: its header, body or footer.
     #[prop(rename = "rowgroup")]
     RowGroup,
+    /// A list of options to choose from: a select's or combo box's popup.
+    Listbox,
+    /// An option of a listbox; `accessibilityState.selected` marks the chosen
+    /// one.
+    Option,
 }
 
 /// Whether a checkable element is checked (`accessibilityState.checked`).
