@@ -2,8 +2,8 @@ import { mount, signal, Text, View } from "nsh";
 import { Button, Dialog, SafeAreaView, Switch } from "nsh/base";
 import { button, buttonText, desktop, Inspector, Panel, Stage, tint, ui, wide } from "./palette";
 
-const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;
-const thumb = desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5";
+const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`;
+const thumb = desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5";
 
 function App() {
   const card = signal(false);

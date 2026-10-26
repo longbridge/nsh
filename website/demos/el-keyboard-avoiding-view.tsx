@@ -40,9 +40,9 @@ function App() {
             checked={enabled()}
             onChange={(next) => enabled.set(next)}
             class="flex-row items-center gap-2 px-1 active:opacity-70"
-            trackClass="w-9 rounded-full p-0.5 transition-colors"
+            trackClass="w-9 rounded-full p-0.5 transition-colors motion-reduce:transition-none"
             trackStyle={enabled() ? ui().accentFill : ui().inset}
-            thumbClass="size-4 rounded-full transition-transform checked:translate-x-4"
+            thumbClass="size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4"
             thumbStyle={enabled() ? { backgroundColor: ui().onAccent } : ui().raised}
           >
             <Text style={{ color: ui().text, fontSize: 13, fontWeight: "600" }}>enabled {String(enabled())}</Text>

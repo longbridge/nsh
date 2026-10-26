@@ -2,7 +2,7 @@
 // wide window the inbox and the open message side by side (master–detail).
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { createNavStack, NavPage, NavStack } from "nsh/base";
-import { button, buttonText, size, tint, ui, wide } from "./palette";
+import { button, buttonText, focusRing, hoverFill, size, tint, ui, wide } from "./palette";
 
 function Button(props: { title: string; variant?: "primary" | "secondary"; onPress: () => void }) {
   const kind = () => (props.variant !== "secondary" ? "primary" : "secondary");
@@ -24,7 +24,7 @@ function Header(props: { title: string; right?: JSX.Element }) {
     <View style={{ backgroundColor: ui().page, borderBottomWidth: 1, borderBottomColor: ui().line }} class="h-12 flex-row items-center px-2">
       <View class="w-20 flex-row">
         <If when={nav.routes().length > 1}>
-          <View role="button" accessibilityLabel="Back" onPress={() => nav.pop()} class="px-2 py-1 active:opacity-60">
+          <View role="button" accessibilityLabel="Back" onPress={() => nav.pop()} hoverStyle={hoverFill()} focusStyle={focusRing()} class="rounded-md px-2 py-1 active:opacity-60">
             <Text style={{ fontSize: 17, color: ui().accent }}>‹ Back</Text>
           </View>
         </If>
@@ -68,7 +68,7 @@ function Home() {
 function Detail(props: { id: number }) {
   const starred = signal(false);
   const star = () => (
-    <Text onPress={() => starred.set(!starred())} style={{ fontSize: 17, color: ui().accent }}>
+    <Text onPress={() => starred.set(!starred())} style={{ fontSize: 17, color: ui().accent }} hoverStyle={hoverFill()} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
       {starred() ? "★" : "☆"}
     </Text>
   );
@@ -93,6 +93,9 @@ function Inbox() {
     <Text
       onPress={() => starred.set(starred().includes(id) ? starred().filter((s) => s !== id) : [...starred(), id])}
       style={{ fontSize: 17, color: ui().accent }}
+      hoverStyle={hoverFill()}
+      focusStyle={focusRing()}
+      activeStyle={{ opacity: 0.7 }}
     >
       {starred().includes(id) ? "★" : "☆"}
     </Text>
@@ -107,7 +110,7 @@ function Inbox() {
               <View
                 role="button"
                 onPress={() => selected.set(id())}
-                hoverStyle={selected() === id() ? {} : { backgroundColor: tint(ui().text, 0.04) }}
+                hoverStyle={selected() === id() ? undefined : hoverFill()}
                 style={{
                   height: size.row + 12,
                   paddingHorizontal: 12,
@@ -116,6 +119,8 @@ function Inbox() {
                   gap: 2,
                   backgroundColor: selected() === id() ? tint(ui().accent, 0.14) : "transparent",
                 }}
+                focusStyle={focusRing()}
+                activeStyle={{ opacity: 0.7 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Text style={{ flex: 1, fontSize: size.label, fontWeight: "600", color: ui().text }}>{`Message ${id()}`}</Text>

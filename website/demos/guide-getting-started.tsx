@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { button, buttonText, desktop, ui } from "./palette";
+import { button, buttonText, desktop, focusRing, hoverFill, ui } from "./palette";
 
 // The app `nsh init` creates, with a reset button and a short history.
 
@@ -28,7 +28,7 @@ function App() {
       <If when={history().length > 0}>
         <Text style={{ fontSize: 13, color: ui().muted }}>Recent: {history().join(", ")}</Text>
       </If>
-      <View onPress={() => (count.set(0), history.set([]))} hitSlop={8}>
+      <View onPress={() => (count.set(0), history.set([]))} hitSlop={8} hoverStyle={hoverFill()} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
         <Text style={{ fontSize: 15, color: ui().accent }}>Reset</Text>
       </View>
     </View>

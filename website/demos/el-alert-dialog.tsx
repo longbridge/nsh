@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { AlertDialog, Button } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, hoverFill, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 type Options = Parameters<typeof AlertDialog.show>[0];
 
@@ -96,7 +96,7 @@ function App() {
           <View style={{ gap: 10 }}>
             <Each of={alerts}>
               {(a) => (
-                <Button onPress={() => show(a().options)} style={row()} activeStyle={{ opacity: 0.7 }}>
+                <Button onPress={() => show(a().options)} style={row()} activeStyle={{ opacity: 0.7 }} hoverStyle={hoverFill()} focusStyle={focusRing()}>
                   <Text style={{ color: a().danger ? ui().down : ui().text, fontSize: 16, fontWeight: "600" }}>{a().label}</Text>
                   <Text style={{ color: ui().muted, fontSize: 13 }}>{a().detail}</Text>
                 </Button>

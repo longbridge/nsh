@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, DockArea, type DockAreaLayout, type DockAreaRef } from "nsh/base";
-import { button, buttonText, desktop, Log, Panel, Split, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Log, Panel, Split, ui, wide } from "./palette";
 
 // The panels' keys and what each shows. The layout lists the keys; the app
 // renders a panel's content from its key, and the content moves with it.
@@ -116,7 +116,8 @@ function App() {
                   <Button
                     onPress={() => area.closePanel(tab.panel)}
                     accessibilityLabel={`Close ${titles[tab.panel]}`}
-                    class="rounded-sm px-1 hover:bg-muted"
+                    class="rounded-sm px-1 hover:bg-muted active:opacity-70"
+                    focusStyle={focusRing()}
                   >
                     <Text class="text-xs text-muted-foreground">×</Text>
                   </Button>

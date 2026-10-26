@@ -1,6 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
+import { reduceMotion } from "nsh/accessibility";
 import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh/animated";
-import { button, buttonText, desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 const TRACK = 250;
 // Read when they render, so they follow the theme.
@@ -67,12 +68,15 @@ function App() {
             opacity: on() ? 0.6 : 1,
             transform: [{ rotate: on() ? "45deg" : "0deg" }],
             transitionProperty: "all",
-            transitionDuration: 400,
+            transitionDuration: reduceMotion() ? 0 : 400,
             transitionTimingFunction: "ease-in-out",
           }}
+          hoverStyle={{ opacity: 0.88 }}
+          focusStyle={focusRing()}
+          activeStyle={{ opacity: 0.7 }}
         />
-        <View class="size-10 rounded-full border-4 animate-spin" style={{ borderColor: ui().border, borderTopColor: ui().accent }} />
-        <View class="size-10 rounded-full animate-pulse" style={{ backgroundColor: ui().up }} />
+        <View class="size-10 rounded-full border-4 animate-spin motion-reduce:animate-none" style={{ borderColor: ui().border, borderTopColor: ui().accent }} />
+        <View class="size-10 rounded-full animate-pulse motion-reduce:animate-none" style={{ backgroundColor: ui().up }} />
         <Text style={{ flex: 1, color: ui().muted, fontSize: 13 }}>
           {desktop ? "Click the square." : "Tap the square."} animate-spin / animate-pulse run natively.
         </Text>

@@ -1,5 +1,5 @@
 import { batch, cleanup, computed, context, effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
-import { button, buttonText, tint, ui, wide } from "./palette";
+import { button, buttonText, focusRing, tint, ui, wide } from "./palette";
 
 /** The accent's palette key: a key, not a colour, so it follows the theme. */
 type Swatch = "accent" | "info" | "up" | "violet";
@@ -111,6 +111,9 @@ function App() {
                 <View
                   onPress={() => accent.set(c())}
                   style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: ui()[c()], borderWidth: 3, borderColor: accent() === c() ? ui().text : "transparent" }}
+                  hoverStyle={{ opacity: 0.88 }}
+                  focusStyle={focusRing()}
+                  activeStyle={{ opacity: 0.7 }}
                 />
               )}
             </Each>
