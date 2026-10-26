@@ -200,7 +200,7 @@ Events:
 | `onSubmit` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
-| `onPaste` | `{ text, files, uris }` | The user pasted: text, images as `File`s, local files' URLs ([pasting](#pasting-images-and-files)). |
+| `onPaste` | `{ text, html, files, uris }` | The user pasted: text, its HTML (Linux, web), images as `File`s, local files' URLs ([pasting](#pasting-images-and-files)). |
 | `onCaretMove` | `{ bounds, pageBounds }` | The caret moved: where it is in the input and in the window ([the caret](#the-caret)). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
@@ -508,7 +508,8 @@ sends no event, so close the suggestions when it scrolls, or anchor them to the 
 ## Pasting images and files
 
 The paste event (`.on_paste(..)`, TSX `onPaste`) tells what the user pasted, from the keyboard's shortcut, a menu's
-Paste or a keyboard's image: `text`, `files` and `uris`. `files` are what the clipboard held as data, such as a
+Paste or a keyboard's image: `text`, `html`, `files` and `uris`. `html` is the same content with its formatting, as a
+browser, an office suite or a rich text editor copied it (on Linux and the web). `files` are what the clipboard held as data, such as a
 screenshot or an image copied from a page or another app: `File`s whose bytes the app can upload or show, named
 `image.png` (or the type it is). `uris` are the `file:` URLs of files copied in a file manager, as a file drop's.
 The platform reads the clipboard as the user pastes, and only then.

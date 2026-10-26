@@ -295,7 +295,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   could not place it (no layout yet). Rust: `on_caret_move` with a `CaretEvent`, and
   `overlay().anchor_bounds(...)`.
 
-- **Paste**: `onPaste` reports what the user pasted (`EventPayload::Paste`, `PasteEvent`): `text`, `files` (data on
+- **Paste**: `onPaste` reports what the user pasted (`EventPayload::Paste`, `PasteEvent`): `text`, `html` (the clipboard's `text/html`, read on Linux, UTF-8 or UTF-16 as Firefox
+  writes it, and on the web; `RichEditor` parses it into its schema), `files` (data on
   the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
   or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
@@ -311,7 +312,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   editors' paste (the clipboard's PNG or bitmap, `CF_HDROP`; GPUI's `ClipboardEntry::Image` / `ExternalPaths`);
   Linux: the `paste-clipboard` signal (stopped for `"report"`); web: the field's `paste` event (`preventDefault` for
   `"report"`; `clipboardData.files`' bytes handed to `nsh_paste` with a JSON header). `nsh test`'s
-  `app.paste(selector, { text, files, uris })` pastes as the user does (files are paths whose bytes are read):
+  `app.paste(selector, { text, html, files, uris })` pastes as the user does (files are paths whose bytes are read):
   headless, and on macOS and iOS through a pasteboard of the test's own (`TestStep::Paste`), the machine's
   clipboard untouched. `onPaste` is kind 64: `EventMask` has two words.
 

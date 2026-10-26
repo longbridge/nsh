@@ -98,7 +98,7 @@ covers [events] onCaretMove
 prop id:paste pasteBehavior report
 expect Pasted: none
 event id:paste onPaste text=hello
-expect Pasted: hello files 0 uris 0
+expect Pasted: hello html 0 files 0 uris 0
 covers [events] onPaste
 prop id:paste pasteBehavior report
 covers [props] pasteBehavior

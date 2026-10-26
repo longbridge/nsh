@@ -1163,6 +1163,14 @@ pub(crate) fn current_text(view: &NshView) -> Option<String> {
     Some(text)
 }
 
+/// Whether the input `view` inserts what is pasted (`pasteBehavior`).
+#[cfg(feature = "dev")]
+pub(crate) fn pastes_text(view: &NshView) -> bool {
+    view.state().input.clone().is_some_and(|input| {
+        input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert
+    })
+}
+
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = view.state().input.clone() else {
