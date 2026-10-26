@@ -2516,6 +2516,169 @@ fn a_base_collapsible_places_its_content_while_open() {
     );
 }
 
+const SLOT_TRIGGERS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Menu, MenuItem } from "nsh/base";
+import { Disclosure } from "test/ui";
+
+function App() {
+  const locked = signal(false);
+  const presses = signal(0);
+  return (
+    <View>
+      <Menu
+        trigger={
+          <View testID="menu" accessibilityLabel="File menu">
+            <Text>File</Text>
+          </View>
+        }
+      >
+        <MenuItem>
+          <Text>Open</Text>
+        </MenuItem>
+      </Menu>
+      <Disclosure
+        disabled={locked()}
+        trigger={
+          <View
+            testID="toggle"
+            class="w-[40px] h-[20px] bg-[#ffffff] active:bg-[#ff0000] focus:bg-[#00ff00] disabled:opacity-50"
+            onPress={() => presses.set(presses() + 1)}
+          >
+            <Text>Toggle</Text>
+          </View>
+        }
+      />
+      <View testID="lock" onPress={() => locked.set(!locked())} />
+      <Text>{`Presses: ${presses()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A Rust component's props on a slot a TSX app fills go to the app's
+/// element in it, live: `Menu`'s trigger says whether the menu is expanded
+/// as it opens and closes (its binding was read once), and a trigger the
+/// component makes a button takes its presses (the app's `onPress` too),
+/// its role, focus and `disabled` itself, so the app's own `active:`,
+/// `focus:` and `disabled:` classes on it follow them.
+#[test]
+fn a_slots_props_are_the_apps_elements_own_and_live() {
+    use nsh_core::{AccessibilityRole, ViewProps, tailwind::state};
+    let (engine, rx) = start(SLOT_TRIGGERS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Presses: 0"));
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (menu, toggle, lock) = (by_test_id("menu"), by_test_id("toggle"), by_test_id("lock"));
+    let props = |batches: &[MountBatch], view| -> Option<ViewProps> {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == view => Some((**props).clone()),
+                _ => None,
+            })
+    };
+    let expanded = |batches: &[MountBatch], view| {
+        props(batches, view).and_then(|p| p.accessibility.state.expanded)
+    };
+    let listens = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if *id == view => {
+                    Some(events.contains(EventKind::Press))
+                }
+                _ => None,
+            })
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+    let initial = std::slice::from_ref(&first);
+
+    // `Menu`'s trigger: the app's element, with its label, listening to
+    // presses, collapsed.
+    let trigger = props(initial, menu).unwrap();
+    assert_eq!(trigger.accessibility.label.as_deref(), Some("File menu"));
+    assert_eq!(trigger.accessibility.state.expanded, Some(false));
+    assert_eq!(listens(initial, menu), Some(true));
+    // It opens and closes, and says so each time.
+    press(menu);
+    let opened = until(&rx, |b| {
+        expanded(std::slice::from_ref(b), menu) == Some(true)
+    });
+    assert_eq!(expanded(&opened, menu), Some(true));
+    press(menu);
+    let closed = until(&rx, |b| {
+        expanded(std::slice::from_ref(b), menu) == Some(false)
+    });
+    assert_eq!(expanded(&closed, menu), Some(false));
+
+    // The disclosure's trigger: a focusable button, collapsed, listening
+    // to presses (the component's and the app's).
+    let trigger = props(initial, toggle).unwrap();
+    assert_eq!(trigger.accessibility.role, AccessibilityRole::Button);
+    assert_eq!(trigger.focusable, Some(true));
+    assert_eq!(trigger.accessibility.state.expanded, Some(false));
+    assert_eq!(listens(initial, toggle), Some(true));
+    assert_eq!(style(initial, toggle).background_color.0, 0xffff_ffff);
+    // A press: the component's listener and the app's both run.
+    press(toggle);
+    let after = until(&rx, |b| shows(b, "Presses: 1"));
+    assert_eq!(expanded(&after, toggle), Some(true));
+    // Pressed and focused: its own classes.
+    engine.control().set_states(toggle, state::PRESSED);
+    let pressed = until(&rx, |b| {
+        style(std::slice::from_ref(b), toggle).background_color.0 == 0xff00_00ff
+    });
+    assert_eq!(style(&pressed, toggle).background_color.0, 0xff00_00ff);
+    engine.control().set_states(toggle, state::FOCUSED);
+    let focused = until(&rx, |b| {
+        style(std::slice::from_ref(b), toggle).background_color.0 == 0x00ff_00ff
+    });
+    assert_eq!(style(&focused, toggle).background_color.0, 0x00ff_00ff);
+    engine.control().set_states(toggle, 0);
+    // Disabled by the component: its `disabled:` classes, no presses
+    // mounted, disabled for screen readers.
+    press(lock);
+    let locked = until(&rx, |b| {
+        props(std::slice::from_ref(b), toggle).is_some_and(|p| p.accessibility.state.disabled)
+    });
+    assert_eq!(style(&locked, toggle).opacity, 0.5);
+    assert_eq!(listens(&locked, toggle), Some(false));
+}
+
 const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Progress } from "nsh/base";
 
