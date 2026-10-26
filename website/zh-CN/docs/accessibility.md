@@ -68,7 +68,7 @@ view()
 - `"button"` 用于不是链接的可按压元素；`"link"` 用于跳转到内容。
 - `"header"` 用于分区标题：屏幕阅读器用户会在标题之间跳转来快速浏览页面。
 - `"switch"`、`"checkbox"`、`"radio"` 配合 `accessibilityState.checked`。
-- `"adjustable"` 用于滑块和步进器，配合 `accessibilityValue` 以及 `increment` / `decrement` 操作。
+- `"adjustable"` 用于滑块和步进器，配合 `accessibilityValue` 以及 `increment` / `decrement` 操作（[`Slider`](../elements/slider.md) 的每个滑块都是）。
 - `"image"` 用于有意义的图片，并加上标签；装饰性图片应当隐藏。
 
 ```rust tabs

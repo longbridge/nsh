@@ -68,7 +68,8 @@ The most useful ones:
 - `"button"` for anything pressable that is not a link; `"link"` for navigation to content.
 - `"header"` for section titles: screen reader users jump between headers to skim a screen.
 - `"switch"`, `"checkbox"`, `"radio"` with `accessibilityState.checked`.
-- `"adjustable"` for sliders and steppers, with `accessibilityValue` and the `increment` / `decrement` actions.
+- `"adjustable"` for sliders and steppers, with `accessibilityValue` and the `increment` / `decrement` actions
+  (each thumb of a [`Slider`](../elements/slider.md) is one).
 - `"image"` for meaningful images, with a label; decorative images should be hidden instead.
 
 ```rust tabs

@@ -7,7 +7,7 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Grid`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Grid`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
@@ -43,6 +43,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
   Sheet,
+  Slider,
   Submenu,
   Switch,
   Tab,
@@ -103,6 +104,9 @@ import type {
   StatusBar,
   RadioGroupProps,
   RadioProps,
+  SliderProps,
+  SliderScale,
+  SliderValue,
   StatusBarForeground,
   SwitchProps,
   TabProps,
@@ -131,6 +135,7 @@ import type {
 | [`Tab`](../elements/tabs.md)、[`Tabs`](../elements/tabs.md) | `tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表；选中哪一个由应用持有，内容也由应用显示。 |
 | [`Collapsible`](../elements/collapsible.md) | `collapsible()` | 内容可展开和收起的区域；`open` 和触发它的控件由应用持有。 |
 | [`Progress`](../elements/progress.md) | `progress()` | 进度条；`value`（0 到 100）和 `indeterminate` 由应用持有。 |
+| [`Slider`](../elements/slider.md) | `slider()` | 沿轨道选取一个值或两个值组成的范围；`value` 由应用持有（或由滑块从 `defaultValue` 起自己保存）。 |
 | [`ResizablePanelGroup`、`ResizablePanel`](../elements/resizable.md) | `h_resizable()`、`v_resizable()`、`resizable_panel()` | 并排或上下排列的面板，用户拖动它们之间的手柄调整大小。 |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区；它的布局是应用的数据。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
@@ -194,6 +199,13 @@ import type {
 线性进度条，没有外观：轨道里有一个指示条，指示条的宽度是轨道宽度的 `value` 百分比。`value`（0 到 100）和 `indeterminate`
 由应用持有；屏幕阅读器得到进度条角色、范围和数值，不确定时没有数值，此时指示条的宽度和动效由应用决定。见
 [Progress](../elements/progress.md)。
+
+### Slider
+
+沿轨道选取一个值或两个值组成的范围，没有外观：接收按压和拖动的轨道、轨道里映射数值的指示条，以及指示条上的范围和每个值一个的滑块。`value`（一个数字或
+`[start, end]`；也可以由滑块从 `defaultValue` 起自己保存）由应用持有，每个新值触发 `onChange`（从 `min` 起按 `step` 对齐），每次修改结束触发一次
+`onChangeEnd`；`scale` 让数值线性分布或按数量级分布，`axis` 决定轨道水平还是垂直。每个滑块对屏幕阅读器都是带自己数值的可调节元素，是键盘焦点的一站，
+并按 WAI-ARIA 的滑块按键移动。见 [Slider](../elements/slider.md)。
 
 ### Plot（`nsh/base/plot`）
 
@@ -386,6 +398,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [`BackHandler`](./nsh-mobile.md#backhandler)：`BackHandler` 及其他 Android 专用 API。

@@ -11,4 +11,5 @@ mod editor_languages;
 mod plot;
 mod resizable;
 mod sheet;
+mod slider;
 mod text_view;
