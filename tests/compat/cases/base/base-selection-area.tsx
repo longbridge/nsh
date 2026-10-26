@@ -1,10 +1,10 @@
 // A case of the API's test suite (docs/dev/compatibility.md):
-// `SelectionArea` of `nsh/base`, texts that select together: a plain
+// `SelectionArea` of `nsh`, texts that select together: a plain
 // `Text`, a `TextView` and a nested `SelectionArea` inside one area, a
 // `selectable={false}` label that stays out, and a text outside every
 // area. Its script checks which views are areas and what the texts carry.
-import { Text, View } from "nsh";
-import { SelectionArea, TextView } from "nsh/base";
+import { Text, View, SelectionArea } from "nsh";
+import { TextView } from "nsh/base";
 
 function App() {
   return (

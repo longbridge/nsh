@@ -302,7 +302,8 @@ fn variant_info_get_size_keeps_imported_dimensions_for_mismatched_variants() {
 #[test]
 fn shared_names_decode_as_their_elements_props() {
     use nsh_core::{NativeProps, WebSource, geometry::Points};
-    const APP: &str = r#"import { Input, mount, View, Video, WebView } from "nsh";
+    const APP: &str = r#"import { mount, View, Video, WebView } from "nsh";
+import { Input } from "nsh/base";
 import { Image } from "nsh/image";
 
 const logo = { url: "asset:/logo.png", size: { width: 10, height: 10 } };

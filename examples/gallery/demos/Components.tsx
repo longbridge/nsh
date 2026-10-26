@@ -1,9 +1,9 @@
-import { Input, type InputProps, type JSX, signal, Text, View, type YNode } from "nsh";
+import { type InputProps, type JSX, signal, Text, View, type YNode, KeyboardAvoidingView, SafeAreaView } from "nsh";
 import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 import { LayoutAnimation } from "nsh/animated";
 import { locale, pixelRatio, platform } from "nsh/device";
 import { InputAccessoryView } from "nsh/ios";
-import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView, safeArea, Sheet } from "nsh/base";
+import { Dialog, NavPage, safeArea, Sheet, Input } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";

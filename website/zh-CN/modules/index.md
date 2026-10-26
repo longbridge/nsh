@@ -9,10 +9,9 @@ order: 1
 NSH 应用用到的一切都从一小组模块导入。这些模块全部是原生的：响应式图、渲染器和每个模块都在运行时内部用 Rust 实现，打包器会把 `import ... from "nsh/..."` 原样保留为导入，而不会把代码复制进你的 bundle。你的 bundle 里只有你自己的代码。
 
 ```tsx
-import { mount, signal } from "nsh";
+import { mount, signal, SafeAreaView } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { windowSize } from "nsh/device";
-import { SafeAreaView } from "nsh/base";
 ```
 
 <a id="three-layers"></a>
@@ -37,8 +36,8 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 
 | 模块 | 导出 | 页面 |
 |---|---|---|
-| `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`、`ErrorBoundary`；原语 `View`、`Text`、`Scroll`、`Input`、[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)（以及 `Image.getSize`、`Image.prefetch`）、[`Canvas`](./nsh-canvas.md)（以及 `Path2D`、`CanvasRenderingContext2D`、`CanvasGradient`）、[`WebView`](./nsh-webview.md)、[`Video`](./nsh-video.md)；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
-| `nsh/base` | `Button`；`TextView`、`SelectionArea`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`SafeAreaView`、`safeArea`、`safeAreaInsets`；`AlertDialog`；`Keyboard`、`keyboardFrame`、`KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
+| `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`、`ErrorBoundary`；原语 `View`、`Text`、`Scroll`、[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)（以及 `Image.getSize`、`Image.prefetch`）、[`Canvas`](./nsh-canvas.md)（以及 `Path2D`、`CanvasRenderingContext2D`、`CanvasGradient`）、[`WebView`](./nsh-webview.md)、[`Video`](./nsh-video.md)；`SafeAreaView`、`KeyboardAvoidingView`、`SelectionArea`；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
+| `nsh/base` | `Button`、`Input`；`TextView`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`safeArea`、`safeAreaInsets`；`AlertDialog`；`Keyboard`、`keyboardFrame` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`、`AnimatedValue`、`AnimatedNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/device` | `windowSize`、`colorScheme`、`setColorScheme`、`fontScale`、`pixelRatio`、`locale`、`platform`、`openUrl` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
@@ -65,4 +64,4 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 
 ## 宿主元素
 
-宿主元素和其他一切一样是需要导入的组件：`View`、`Text`、`Scroll`、`Input`、`Image`、`List`、`Canvas`、`WebView` 和 `Video` 来自 `nsh`，基础组件（`Button`、`Dialog`、`NavStack`、`NavPage`、`SafeAreaView`、`KeyboardAvoidingView`）来自 `nsh/base`，`InputAccessoryView` 来自 `nsh/ios`。只有 `If` 和 `Each` 是全局组件。编译器会就地创建这些元素，所以导入在运行时没有任何开销。它们的属性见[元素](../elements/index.md)。
+宿主元素和其他一切一样是需要导入的组件：`View`、`Text`、`Scroll`、`Image`、`List`、`Canvas`、`WebView`、`Video`、`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh`，基础组件（`Button`、`Input`、`Dialog`、`NavStack`、`NavPage`）来自 `nsh/base`，`InputAccessoryView` 来自 `nsh/ios`。只有 `If` 和 `Each` 是全局组件。编译器会就地创建这些元素，所以导入在运行时没有任何开销。它们的属性见[元素](../elements/index.md)。

@@ -4,9 +4,12 @@
 
 use std::hash::{BuildHasher, RandomState};
 
-use nsh_base::{AvoidBehavior, dialog, keyboard_avoiding_view, safe_area_view};
-use nsh_core::ui::{
-    AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
+use nsh_base::dialog;
+use nsh_core::{
+    components::{AvoidBehavior, keyboard_avoiding_view, safe_area_view},
+    ui::{
+        AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
+    },
 };
 
 use crate::{

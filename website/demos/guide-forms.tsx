@@ -1,4 +1,5 @@
-import { Input, type JSX, mount, Scroll, signal, Text, View, type YNode } from "nsh";
+import { type JSX, mount, Scroll, signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 const field = () => ({ ...ui().inset, fontSize: 16, color: ui().text, placeholderColor: ui().faint, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 });

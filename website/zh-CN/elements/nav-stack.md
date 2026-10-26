@@ -330,8 +330,8 @@ fn edit_note(routes: Signal<Vec<u32>>) -> Screen {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
-import { AlertDialog, NavPage } from "nsh/base";
+import { signal } from "nsh";
+import { AlertDialog, NavPage, Input } from "nsh/base";
 
 function EditNote() {
   const text = signal("");

@@ -17,9 +17,9 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{keyboard_avoiding_view, selection_area};
 use nsh_core::{
     LayoutAnimation, Points, Size,
+    components::{keyboard_avoiding_view, selection_area},
     time::Instant,
     ui::{AccessibilityState, ScrollEvent, View, prelude::*},
 };

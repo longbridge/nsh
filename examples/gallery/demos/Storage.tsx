@@ -1,5 +1,5 @@
-import { Input, signal, Text, View } from "nsh";
-import { AlertDialog } from "nsh/base";
+import { signal, Text, View } from "nsh";
+import { AlertDialog, Input } from "nsh/base";
 import { Storage } from "nsh/storage";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, mono, radius, Row } from "../ui";

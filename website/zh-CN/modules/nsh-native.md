@@ -101,9 +101,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, signal, type YNode } from "nsh";
+import { mount, signal, type YNode, SafeAreaView } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/base";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],

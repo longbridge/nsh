@@ -727,7 +727,8 @@ fn alert_dialogs_resolve_with_the_action_chosen() {
 }
 
 const SAFE_AREA: &str = r#"import { mount, Text } from "nsh";
-import { KeyboardAvoidingView, SafeAreaView, safeArea } from "nsh/base";
+import { KeyboardAvoidingView, SafeAreaView } from "nsh";
+import { safeArea } from "nsh/base";
 
 mount(() => (
   <KeyboardAvoidingView style={{ flex: 1 }}>
@@ -1180,7 +1181,8 @@ fn picked_images_reach_js_as_files() {
     );
 }
 
-const INPUT_TRAITS: &str = r##"import { mount, Input, Text } from "nsh";
+const INPUT_TRAITS: &str = r##"import { mount, Text } from "nsh";
+import { Input } from "nsh/base";
 
 mount(() => (
   <>

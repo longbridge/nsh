@@ -84,7 +84,8 @@ fn Note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View, type YNode } from "nsh";
+import { signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/ios";
 
 function Note() {

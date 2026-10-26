@@ -310,10 +310,11 @@ fn set_part(out: &mut String, set: &SetDescription) {
 
 /// The declarations of what a set exports as the runtime makes it: the
 /// runtime's `values` and `types`, and the values nsh-js makes for it
-/// (`natives`: navigation's).
+/// (`natives`: `Input` and navigation's).
 fn reexports_part(out: &mut String, values: &[&str], types: &[&str], natives: &[&str]) {
     let made = crate::env::REEXPORTS
         .iter()
+        .chain(crate::env::ELEMENTS)
         .chain(crate::navigation::EXPORTS);
     let mut navigation = false;
     for item in made {

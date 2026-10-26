@@ -1,8 +1,8 @@
 ---
 title: SafeAreaView
 description: "The SafeAreaView component and the safeArea and safeAreaInsets accessors: content kept clear of the notch, the status bar, the home indicator and headers."
-order: 23
-group: base
+order: 10.6
+group: primitives
 demo: el-safe-area-view
 ---
 
@@ -14,7 +14,7 @@ navigation header and the Mac Catalyst title bar. It pads itself by the insets *
 insets, and elsewhere the surface's safe area. It has no look of its own; its background and padding are the app's.
 
 ```rust tabs
-use nsh_base::safe_area_view;
+use nsh_core::components::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 fn app() -> impl IntoElement {
@@ -27,8 +27,7 @@ fn app() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, Text } from "nsh";
-import { SafeAreaView } from "nsh/base";
+import { mount, Text, SafeAreaView } from "nsh";
 
 function App() {
   return (
@@ -58,7 +57,7 @@ By default all four edges are padded. Pass `edges` to pad only some of them, for
 bar of your own handles the bottom inset:
 
 ```rust tabs
-use nsh_base::{Edge, safe_area_view};
+use nsh_core::components::{Edge, safe_area_view};
 
 safe_area_view()
     .edges(vec![Edge::Top, Edge::Left, Edge::Right])

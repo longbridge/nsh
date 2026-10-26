@@ -1,5 +1,5 @@
-import { Input, mount, Scroll, signal, Text, View } from "nsh";
-import { Button, Keyboard, Switch, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
+import { mount, Scroll, signal, Text, View, KeyboardAvoidingView } from "nsh";
+import { Button, Keyboard, Switch, keyboardFrame, Input } from "nsh/base";
 import { desktop, tint, ui } from "./palette";
 
 function App() {

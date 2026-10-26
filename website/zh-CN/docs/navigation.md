@@ -350,10 +350,11 @@ nav_page()
 </NavPage>
 ```
 
-不显示标题栏的页面四周仍有系统栏；用 [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 给内容留出边距：
+不显示标题栏的页面四周仍有系统栏；用 [`SafeAreaView`](../modules/nsh.md#safeareaview) 给内容留出边距：
 
 ```rust tabs
-use nsh_base::{nav_page, safe_area_view};
+use nsh_base::nav_page;
+use nsh_core::components::safe_area_view;
 
 nav_page()
     .header_visible(false)
@@ -415,8 +416,8 @@ fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
-import { AlertDialog, NavPage } from "nsh/base";
+import { signal } from "nsh";
+import { AlertDialog, NavPage, Input } from "nsh/base";
 
 function EditNote() {
   const text = signal("");
@@ -586,7 +587,7 @@ function Editor() {
 
 ## 相关内容
 
-- [`nsh/base`](../modules/nsh-base.md)：`nav_stack`、`nav_page`、`dialog`、`createNavStack`、`NavStack`、`NavPage`、`Dialog` 和 `SafeAreaView` 参考。
+- [`nsh/base`](../modules/nsh-base.md)：`nav_stack`、`nav_page`、`dialog`、`createNavStack`、`NavStack`、`NavPage` 和 `Dialog` 参考；`SafeAreaView` 见 [`nsh`](../modules/nsh.md#safeareaview)。
 - 页面和对话框的[状态栏](../modules/nsh-base.md#status-bar)。
 - [`AlertDialog`](../modules/nsh-base.md#alertdialog)。
 - [`nsh/android`](../modules/nsh-android.md)：`BackHandler`。

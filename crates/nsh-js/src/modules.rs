@@ -239,14 +239,6 @@ const NSH: &[Item] = &[
         ),
     ),
     (
-        "Input",
-        Export::Value(|cx| dom::host_component(cx, "input", true)),
-        Ts::function(
-            "A native text input (UITextField / UITextView, EditText); `ref` has\n`focus()`, `blur()` and `setSelection(start, end)`.",
-            &["(props: InputProps): YNode"],
-        ),
-    ),
-    (
         "Overlay",
         Export::Value(|cx| dom::host_component(cx, "overlay", true)),
         Ts::function(

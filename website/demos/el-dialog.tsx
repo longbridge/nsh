@@ -1,5 +1,5 @@
-import { mount, signal, Text, View } from "nsh";
-import { Button, Dialog, SafeAreaView, Switch } from "nsh/base";
+import { mount, signal, Text, View, SafeAreaView } from "nsh";
+import { Button, Dialog, Switch } from "nsh/base";
 import { desktop, Inspector, Panel, size, Stage, tint, ui, wide } from "./palette";
 
 const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;

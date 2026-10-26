@@ -34,7 +34,8 @@ impl NativeComponent for Square {
 
 /// A component and, after it, a focused field.
 const FIELD_AFTER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { nativeComponent } from "nsh/native";
 
 const Square = nativeComponent<{}, {}>("test.square", { props: [], events: [] });
@@ -56,7 +57,8 @@ mount(App);
 /// composition is cancelled), "stale" on "hao" (dropped, as "好" is
 /// committed after it); the log becomes the text when "hao" ends.
 const COMPOSING_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("abcd");
@@ -312,7 +314,8 @@ impl NativeComponent for KeyLog {
 /// that takes the keyboard. `mod+k` fires while text is edited. `j` does
 /// not. The menu's `mod+z` and `mod+shift+n` still choose their items.
 const SHORTCUTS_OVER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
 import { keymap } from "nsh/keymap";
 import { nativeComponent } from "nsh/native";
@@ -434,7 +437,8 @@ fn desk() -> String {
 
 /// A field showing which desk `Whose` names, in the call and in a task.
 const WHOSE: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { nativeModule } from "nsh/native";
 
 interface WhoseApi {
@@ -545,7 +549,8 @@ mod rust_keys {
 fn js_and_rust_view(view_first: bool) -> String {
     format!(
         r#"
-import {{ Input, mount, signal, View }} from "nsh";
+import {{ mount, signal, View }} from "nsh";
+import {{ Input }} from "nsh/base";
 import {{ keymap }} from "nsh/keymap";
 import {{ Shortcut }} from "test/keys";
 
@@ -750,7 +755,8 @@ fn height_below_title_bar(cx: &mut VisualTestContext) -> f32 {
 /// and an application menu: File with New, Quit (the `quit` role, with a
 /// shortcut of its own) and Close (the `close` role).
 const OWNED_WINDOW: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -839,7 +845,8 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
 /// The app's height under an auto-hidden menu bar (and ` new` once File
 /// > New was chosen).
 const AUTO_HIDDEN_BAR: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -909,7 +916,8 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
 /// Two images from two asset directories: each reports its size, or why
 /// it did not load.
 const TWO_ASSET_ROOTS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Image } from "nsh/image";
 
 function App() {
@@ -1000,7 +1008,8 @@ fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut Tes
 }
 
 const MENU_OVER_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
 
 function App() {
@@ -1096,7 +1105,8 @@ fn wait_until_blurred(view: &Entity<AppView>, cx: &mut VisualTestContext) {
 /// carried: the field reads the modifier keys and click count of the last
 /// press.
 const PRESS_MODIFIERS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("none");

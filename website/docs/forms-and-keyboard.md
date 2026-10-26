@@ -38,7 +38,8 @@ fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoE
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Field(props: { label: string; value: string; onChange: (text: string) => void; masked?: boolean }) {
   const focused = signal(false);
@@ -93,7 +94,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const name = signal("");
@@ -320,7 +322,8 @@ pub fn sign_in() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, View, type YNode } from "nsh";
+import { mount, signal, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 
 function SignIn() {
   const email = signal("");
@@ -471,7 +474,8 @@ view()
 ```
 
 ```tsx tabs
-import { type Bounds, Input, Overlay, Text, View, signal } from "nsh";
+import { type Bounds, Overlay, Text, View, signal } from "nsh";
+import { Input } from "nsh/base";
 
 const draft = signal("");
 const end = signal(0);
@@ -529,7 +533,8 @@ input()
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
+import { signal } from "nsh";
+import { Input } from "nsh/base";
 
 const attachments = signal<File[]>([]);
 
@@ -607,10 +612,10 @@ The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none,
 
 ### Content outside scroll views: KeyboardAvoidingView
 
-A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh_base` (TSX: `nsh/base`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
+A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh` (Rust: `nsh_core::components::keyboard_avoiding_view()`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
+use nsh_core::components::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
@@ -650,8 +655,8 @@ pub fn chat_screen() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, Scroll, signal, View } from "nsh";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
+import { Scroll, signal, View, KeyboardAvoidingView } from "nsh";
+import { keyboardFrame, safeAreaInsets, Input } from "nsh/base";
 
 function ChatScreen() {
   const insets = safeAreaInsets();
@@ -697,7 +702,7 @@ In Rust each prop is a setter of `keyboard_avoiding_view()` (`.behavior(AvoidBeh
 | `enabled` | `boolean` | `true` | Avoid the keyboard. |
 | `offset` | `number` | `0` | Added to the keyboard's height while it shows (a tab bar below the view, say). |
 
-It assumes it reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and `KeyboardAvoidingView` has nothing to do. See [KeyboardAvoidingView](../modules/nsh-base.md#keyboardavoidingview).
+It assumes it reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and `KeyboardAvoidingView` has nothing to do. See [KeyboardAvoidingView](../modules/nsh.md#keyboardavoidingview).
 
 ### The keyboard accessor
 
@@ -762,7 +767,8 @@ pub fn note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View, type YNode } from "nsh";
+import { signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/ios";
 
 function Note() {
@@ -793,6 +799,6 @@ The bar is as wide as the window and as tall as its content. Input accessories a
 ## Related
 
 - [`Input`](../elements/input.md): the element reference.
-- [`KeyboardAvoidingView`](../modules/nsh-base.md#keyboardavoidingview) and [`Keyboard`](../modules/nsh-base.md#keyboard).
+- [`KeyboardAvoidingView`](../modules/nsh.md#keyboardavoidingview) and [`Keyboard`](../modules/nsh-base.md#keyboard).
 - [`nsh/ios`](../modules/nsh-ios.md): `InputAccessoryView`.
 - [Scrolling](./scrolling.md#scroll-views-and-the-keyboard): keyboard dismissal and taps in scroll views.

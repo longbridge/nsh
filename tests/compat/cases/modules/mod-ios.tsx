@@ -1,7 +1,8 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/ios` on
 // the headless runtime, which is iOS: `isAvailable` is true, and an
 // `InputAccessoryView` takes no room where it is placed. Its script checks each.
-import { Input, Text, View } from "nsh";
+import { Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { InputAccessoryView, isAvailable } from "nsh/ios";
 
 function App() {

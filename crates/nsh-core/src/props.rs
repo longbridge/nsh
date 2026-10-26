@@ -280,7 +280,7 @@ pub struct ViewProps {
     /// `focusable`: `Some(false)` keeps a view that takes presses out of
     /// the keyboard focus's stops (Tab); `None` is the default, a stop.
     pub focusable: Option<bool>,
-    /// The view is a selection area (`SelectionArea` of `nsh/base`): the
+    /// The view is a selection area (`SelectionArea` of `nsh`): the
     /// texts in its subtree that are not `selectable={false}` share one
     /// selection, from text to text ([`crate::selection`]); an area inside
     /// another is part of the outer one. Texts outside areas select alone.

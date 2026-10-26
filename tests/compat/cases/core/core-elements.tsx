@@ -4,7 +4,8 @@
 // its style puts it; `nativeModule` reading a UI set the engine has and one
 // it has not; `PanResponder`'s handlers spread on a view. Its script checks
 // each.
-import { Input, Scroll, Text, View } from "nsh";
+import { Scroll, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { PanResponder } from "nsh/gesture";
 import { Image } from "nsh/image";
 import { nativeComponent, nativeModule } from "nsh/native";

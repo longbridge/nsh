@@ -49,7 +49,7 @@
   Linux the UI font is the first of a list that GPUI can set in bold (GNOME's Adwaita Sans is variable: Noto Sans or
   DejaVu Sans take its place, with Adwaita Sans's ascent and descent, so lines are as tall as GTK's). Symbols that are
   text by default (♥, ✓) take a text font when the fallback would draw them as color emoji, so the text's color applies.
-- **Selection areas**: a view with `ViewProps::selection_area` (`SelectionArea` of `nsh/base`, a selectable
+- **Selection areas**: a view with `ViewProps::selection_area` (`SelectionArea` of `nsh`, a selectable
   `TextView`; set by components with `Element::selection_area`, the internal host prop `Prop::SelectionArea`) makes
   its texts select together, as a browser page's do: one selection from a place in one text to a place in another, in
   document order (the area's subtree, depth first), across paragraphs, views and `TextView`s. The model is

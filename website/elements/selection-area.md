@@ -1,8 +1,8 @@
 ---
 title: SelectionArea
 description: "The SelectionArea component: one selection across the texts inside it, across views, Text elements and TextViews, as a web page's texts select."
-order: 27
-group: base
+order: 10.8
+group: primitives
 demo: el-selection-area
 ---
 
@@ -12,10 +12,11 @@ demo: el-selection-area
 text to a place in another, across views, [`Text`](./text.md) elements and [`TextView`](./text-view.md)s, in reading
 order. Wrap a chat transcript in it and a selection can start in one message and end in the next; Copy puts the
 selected text on the clipboard, with texts side by side joined by a tab and the others by a line break. Rust makes one
-with `nsh_base::selection_area()`, TSX with `<SelectionArea>` from `nsh/base`.
+with `nsh_core::components::selection_area()`, TSX with `<SelectionArea>` from `nsh`.
 
 ```rust tabs
-use nsh_base::{selection_area, text_view};
+use nsh_base::text_view;
+use nsh_core::components::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn release_notes(notes: &'static str) -> impl IntoElement {
@@ -35,8 +36,8 @@ fn release_notes(notes: &'static str) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Text, View } from "nsh";
-import { SelectionArea, TextView } from "nsh/base";
+import { Text, View, SelectionArea } from "nsh";
+import { TextView } from "nsh/base";
 
 function ReleaseNotes(props: { notes: string }) {
   return (
@@ -52,7 +53,7 @@ function ReleaseNotes(props: { notes: string }) {
 }
 ```
 
-`SelectionArea` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. It is a view: its
+`SelectionArea` comes from [`nsh`](../modules/nsh.md#selectionarea), `nsh_core::components` in Rust. It is a view: its
 layout and look are the app's styles, and its content is its children. The selection itself is the platform's: the
 area draws nothing of its own.
 
@@ -62,7 +63,8 @@ A transcript in one area selects as one page: a drag starts in one reply and end
 of every message in between.
 
 ```rust tabs
-use nsh_base::{selection_area, text_view};
+use nsh_base::text_view;
+use nsh_core::components::selection_area;
 use nsh_core::ui::prelude::*;
 
 fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
@@ -77,8 +79,8 @@ fn transcript(replies: Signal<Vec<SharedString>>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Scroll } from "nsh";
-import { SelectionArea, TextView } from "nsh/base";
+import { Scroll, SelectionArea } from "nsh";
+import { TextView } from "nsh/base";
 
 <Scroll class="flex-1">
   <SelectionArea class="gap-4 p-4">

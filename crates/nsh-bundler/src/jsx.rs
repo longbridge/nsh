@@ -63,7 +63,7 @@ pub(crate) enum Compiled {
 }
 
 /// nsh's primitives, by their home (module, export), and what their tags
-/// compile to: `nsh`'s, `nsh/base`'s `Dialog` and `nsh/ios`'s
+/// compile to: `nsh`'s, `nsh/base`'s `Input` and `Dialog` and `nsh/ios`'s
 /// `InputAccessoryView`, then the modules that exported them before `nsh`
 /// did (deprecated, still compiled alike). The first home of a name is the
 /// one hints name.
@@ -71,13 +71,13 @@ pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "View", Compiled::Host("view")),
     ("nsh", "Text", Compiled::Host("text")),
     ("nsh", "Scroll", Compiled::Host("scroll")),
-    ("nsh", "Input", Compiled::Host("input")),
     ("nsh", "Overlay", Compiled::Host("overlay")),
     ("nsh", "Image", Compiled::Host("image")),
     ("nsh", "WebView", Compiled::Host("webview")),
     ("nsh", "Video", Compiled::Host("video")),
     ("nsh", "List", Compiled::List),
     ("nsh", "Canvas", Compiled::Component("canvas")),
+    ("nsh/base", "Input", Compiled::Host("input")),
     ("nsh/base", "Dialog", Compiled::Component("modal")),
     (
         "nsh/ios",
@@ -1560,7 +1560,7 @@ mod tests {
         assert!(err.contains("write <Each> (a global: no import)"), "{err}");
         let err = error("export const a = <safe-area-view />;");
         assert!(
-            err.contains(r#"write <SafeAreaView> and `import { SafeAreaView } from "nsh/base"`"#),
+            err.contains(r#"write <SafeAreaView> and `import { SafeAreaView } from "nsh"`"#),
             "{err}"
         );
         let err = error(
@@ -1814,14 +1814,15 @@ mod tests {
     fn imports_tags_use_stay_and_type_only_ones_go() {
         let code = flat(
             &compile(
-                r#"import { SafeAreaView, Edge, Edges } from "nsh/base";
+                r#"import { SafeAreaView, Edge } from "nsh";
+import { Edges } from "nsh/base";
             let r: Edges | undefined;
             export const a = <SafeAreaView ref={r} />;"#,
             )
             .unwrap(),
         );
         assert!(
-            code.contains(r#"import { SafeAreaView } from "nsh/base";"#),
+            code.contains(r#"import { SafeAreaView } from "nsh";"#),
             "{code}"
         );
         assert!(

@@ -1,5 +1,5 @@
-import { cleanup, signal, Text, View } from "nsh";
-import { SelectionArea, TextView, type TextViewImage } from "nsh/base";
+import { cleanup, signal, Text, View, SelectionArea } from "nsh";
+import { TextView, type TextViewImage } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 

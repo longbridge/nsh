@@ -6,7 +6,8 @@
 // the element's node) and `nativeID`, which names an `InputAccessoryView`
 // that an input's `ios.inputAccessoryViewID` shows over the keyboard. Its
 // script checks each.
-import { Input, Text, View, signal } from "nsh";
+import { Text, View, signal } from "nsh";
+import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/ios";
 
 function App() {

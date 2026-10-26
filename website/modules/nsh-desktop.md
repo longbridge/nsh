@@ -104,7 +104,8 @@ fn TitleBar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, Text, View } from "nsh";
+import { Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { titleBar, Window } from "nsh/desktop";
 
 Window.setTitleBar("hidden", 40); // a bar 40 points tall

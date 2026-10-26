@@ -346,10 +346,11 @@ nav_page()
 </NavPage>
 ```
 
-A page that shows no header still has the system bars around it; pad its content with [`SafeAreaView`](../modules/nsh-base.md#safeareaview):
+A page that shows no header still has the system bars around it; pad its content with [`SafeAreaView`](../modules/nsh.md#safeareaview):
 
 ```rust tabs
-use nsh_base::{nav_page, safe_area_view};
+use nsh_base::nav_page;
+use nsh_core::components::safe_area_view;
 
 nav_page()
     .header_visible(false)
@@ -409,8 +410,8 @@ fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
-import { AlertDialog, NavPage } from "nsh/base";
+import { signal } from "nsh";
+import { AlertDialog, NavPage, Input } from "nsh/base";
 
 function EditNote() {
   const text = signal("");
@@ -581,7 +582,7 @@ A tab bar is your own UI, drawn from primitives: a row of pressable views and a 
 
 ## Related
 
-- [`nsh/base`](../modules/nsh-base.md): the `nav_stack`, `nav_page`, `dialog`, `createNavStack`, `NavStack`, `NavPage`, `Dialog` and `SafeAreaView` reference.
+- [`nsh/base`](../modules/nsh-base.md): the `nav_stack`, `nav_page`, `dialog`, `createNavStack`, `NavStack`, `NavPage` and `Dialog` reference; [`nsh`](../modules/nsh.md#safeareaview) has `SafeAreaView`.
 - [The status bar](../modules/nsh-base.md#status-bar) of pages and dialogs.
 - [`AlertDialog`](../modules/nsh-base.md#alertdialog).
 - [`nsh/android`](../modules/nsh-android.md): `BackHandler`.

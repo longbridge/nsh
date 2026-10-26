@@ -432,8 +432,9 @@ fn screens_and_modals_build_their_content_once() {
 }
 
 const CHILDREN_SIBLINGS: &str = r#"
-import { Input, mount, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
+import { KeyboardAvoidingView } from "nsh";
 
 function Wrap(props: { children?: any }) {
   return <View>{props.children}</View>;
@@ -495,7 +496,8 @@ fn a_changing_child_leaves_its_siblings() {
 }
 
 const BRANCH_EXPRESSION: &str = r#"
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 const wide = signal(true);
 const saved = signal(false);
@@ -656,7 +658,8 @@ fn an_if_hands_its_function_child_the_value() {
 }
 
 const REFS: &str = r#"
-import { Input, mount, signal, Text, View, type YNode } from "nsh";
+import { mount, signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { Stepper, type StepperRef } from "test/ui";
 
 function Field(props: { ref?: (node: YNode) => void }) {
@@ -710,7 +713,8 @@ fn refs_reach_variables_signals_fields_and_functions() {
 }
 
 const CONTENT_SIZE: &str = r#"
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 const size = signal("none");
 mount(() => (
@@ -1208,7 +1212,8 @@ fn pages_place_their_header_without_a_native_one() {
     assert_eq!(config.header_height, px(44.0));
 }
 
-const INPUT_AND_LIST: &str = r#"import { mount, signal, Input, Text, View } from "nsh";
+const INPUT_AND_LIST: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { List } from "nsh";
 
 const items = signal<number[]>([]);

@@ -38,7 +38,8 @@ fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoE
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Field(props: { label: string; value: string; onChange: (text: string) => void; masked?: boolean }) {
   const focused = signal(false);
@@ -93,7 +94,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const name = signal("");
@@ -318,7 +320,8 @@ pub fn sign_in() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, View, type YNode } from "nsh";
+import { mount, signal, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 
 function SignIn() {
   const email = signal("");
@@ -463,7 +466,8 @@ view()
 ```
 
 ```tsx tabs
-import { type Bounds, Input, Overlay, Text, View, signal } from "nsh";
+import { type Bounds, Overlay, Text, View, signal } from "nsh";
+import { Input } from "nsh/base";
 
 const draft = signal("");
 const end = signal(0);
@@ -513,7 +517,8 @@ input()
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
+import { signal } from "nsh";
+import { Input } from "nsh/base";
 
 const attachments = signal<File[]>([]);
 
@@ -588,10 +593,10 @@ scroll()
 
 ### 滚动视图之外的内容：KeyboardAvoidingView
 
-固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh_base`（TSX：`nsh/base`）中的 `KeyboardAvoidingView` 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
+固定在页面底部的消息栏不在滚动视图中，没有东西会移动它。用 `nsh` 中的 `KeyboardAvoidingView`（Rust：`nsh_core::components::keyboard_avoiding_view()`） 包住页面：它会在底部让出与键盘等高的空间，并与键盘同步动画。
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
+use nsh_core::components::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
@@ -631,8 +636,8 @@ pub fn chat_screen() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, Scroll, signal, View } from "nsh";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
+import { Scroll, signal, View, KeyboardAvoidingView } from "nsh";
+import { keyboardFrame, safeAreaInsets, Input } from "nsh/base";
 
 function ChatScreen() {
   const insets = safeAreaInsets();
@@ -678,7 +683,7 @@ function ChatScreen() {
 | `enabled` | `boolean` | `true` | 是否避开键盘。 |
 | `offset` | `number` | `0` | 键盘显示时额外加到键盘高度上的值（比如视图下方还有一个标签栏）。 |
 
-它假定自己延伸到 surface 的底部，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，`KeyboardAvoidingView` 无事可做。见 [KeyboardAvoidingView](../modules/nsh-base.md#keyboardavoidingview)。
+它假定自己延伸到 surface 的底部，页面内容通常如此。在会为键盘缩小窗口的 Android 宿主上，窗口本身已经变小，`KeyboardAvoidingView` 无事可做。见 [KeyboardAvoidingView](../modules/nsh.md#keyboardavoidingview)。
 
 ### 键盘访问器
 
@@ -743,7 +748,8 @@ pub fn note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View, type YNode } from "nsh";
+import { signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/ios";
 
 function Note() {
@@ -774,6 +780,6 @@ function Note() {
 ## 相关内容
 
 - [`Input`](../elements/input.md)：元素参考。
-- [`KeyboardAvoidingView`](../modules/nsh-base.md#keyboardavoidingview) 与 [`Keyboard`](../modules/nsh-base.md#keyboard)。
+- [`KeyboardAvoidingView`](../modules/nsh.md#keyboardavoidingview) 与 [`Keyboard`](../modules/nsh-base.md#keyboard)。
 - [`nsh/ios`](../modules/nsh-ios.md)：`InputAccessoryView`。
 - [滚动](./scrolling.md#滚动视图与键盘)：滚动视图中的键盘收起与点击。

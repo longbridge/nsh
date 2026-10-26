@@ -57,8 +57,8 @@ mount(App);
 在 TSX 中，每个标签都使用 PascalCase，并指向作用域中的绑定：原语从 `nsh` 导入，基础组件从 `nsh/base` 导入。只有 `<If>` 和 `<Each>` 是无需导入的全局组件。`<view>` 这样的小写标签会导致构建错误，因为 TypeScript 只能对照每个名称一个的全局类型来检查它，`List`、`Each` 这类泛型组件就无法推断条目类型。编译器通过导入识别这些元素并就地创建原生视图，所以导入它们在运行时没有任何开销。参见 [JSX 与组件](../docs/jsx-and-components.md)。
 
 ```tsx
-import { Canvas, Image, Input, List, Overlay, Scroll, Text, Video, View, WebView } from "nsh";
-import { Button, Dialog, Menu, NavPage, NavStack, Popover, SafeAreaView, Sheet, Tooltip } from "nsh/base";
+import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeAreaView } from "nsh";
+import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
 > [!NOTE]
@@ -66,7 +66,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, SafeAreaView, Sheet, 
 
 ## 原语
 
-TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入。
+TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入（`SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea` 来自 `nsh_core::components`）。
 
 | 元素 | Rust | 原生视图（iOS / Android） | 页面 |
 |---|---|---|---|
@@ -74,12 +74,14 @@ TSX 从 `nsh` 导入，Rust 从 `nsh_core::ui::prelude` 导入。
 | `<Text>` | `text(content)` | CoreText 视图 / StaticLayout 视图 | [Text](./text.md) |
 | `<Image>` | `image(src)` | 带图片图层的视图 / 图片视图 | [Image](./image.md) |
 | `<Scroll>` | `scroll()` | UIScrollView / ScrollView | [Scroll](./scroll.md) |
-| `<Input>` | `input()` | UITextField 或 UITextView / EditText | [Input](./input.md) |
 | `<List>` | `virtual_list(count, \|at\| row)` | 复用单元格的 UIScrollView / ScrollView | [List](./list.md) |
 | `<Canvas>` | `canvas(painter)` | 回放 2D 绘制的视图 | [Canvas](./canvas.md) |
 | `<WebView>` | `web_view(url)`、`web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `video(url)` | AVPlayerLayer / TextureView 上的 MediaPlayer | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | 窗口（或所在对话框）之上的视图，相对锚点放置 | [Overlay](./overlay.md) |
+| `<SafeAreaView>` | `safe_area_view()` | 一个视图：让内容避开刘海、系统栏和主屏幕指示条 | [SafeAreaView](./safe-area-view.md) |
+| `<KeyboardAvoidingView>` | `keyboard_avoiding_view()` | 一个视图：让内容保持在软键盘之上 | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
+| `<SelectionArea>` | `selection_area()` | 一个视图：让其中的文字一起选择 | [SelectionArea](./selection-area.md) |
 | `<If>`、`<Each>` | `when(..)`、`each(..)`、`dynamic(..)` | 控制流：它们选出的元素 | [控制流](./control-flow.md) |
 | `<InputAccessoryView>`（`nsh/ios`） | `input_accessory_view(id)` | iOS 上键盘上方的工具栏 | [nsh/ios](../modules/nsh-ios.md) |
 
@@ -90,6 +92,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | 组件 | Rust | 作用 | 页面 |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
+| `<Input>` | `input()`（`nsh_core::ui::prelude`） | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Radio>`、`<RadioGroup>` | `nsh_base::radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组 | [Radio](./radio.md) |
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
@@ -98,15 +101,12 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
 | `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
-| `<SafeAreaView>` | `nsh_base::safe_area_view()` | 让内容避开刘海、系统栏和主屏幕指示条 | [SafeAreaView](./safe-area-view.md) |
-| `<KeyboardAvoidingView>` | `nsh_base::keyboard_avoiding_view()` | 让内容保持在软键盘之上 | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
 | `AlertDialog` | `nsh_base::alert_dialog()` | 系统的提示框和操作表 | [AlertDialog](./alert-dialog.md) |
 | `<TextView>` | `nsh_base::text_view()` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
 | `<Editor>` | `nsh_base::editor()` | 带高亮、多光标、折叠和搜索的代码编辑器 | [Editor](./editor.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | 两段文本之间或补丁中的改动，并排或合并显示 | [DiffView](./diff-view.md) |
 | `<Table>` 及其部件 | `nsh_base::table()`、`table_row()` 等 | 由应用写出行和单元格的表格，带有表格的角色 | [Table](./table.md) |
 | `<DataTable>` | `nsh_base::data_table()` | 行列数量不限的表格，可选择、排序，列可调整宽度和移动 | [DataTable](./data-table.md) |
-| `<SelectionArea>` | `nsh_base::selection_area()` | 让其中的文字一起选择 | [SelectionArea](./selection-area.md) |
 | `<Popover>` | `nsh_base::popover()` | 锚定在触发元素上、显示在一切之上的内容 | [Popover](./popover.md) |
 | `<Menu>`、`<ContextMenu>`、`<MenuItem>`、`<MenuSeparator>`、`<Submenu>` | `nsh_base::menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet | [Menu](./menu.md) |
 | `<Tooltip>` | `nsh_base::tooltip()` | 悬停或手指按住时显示在触发元素旁的提示 | [Tooltip](./tooltip.md) |
@@ -428,7 +428,8 @@ view()
 ```
 
 ```tsx tabs
-import { Input, View, type YNode } from "nsh";
+import { View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 
 let input!: YNode;
 <View onPress={() => input.focus()}>

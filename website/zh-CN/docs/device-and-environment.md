@@ -257,10 +257,10 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 - `safe_area()`（TSX：`safeArea()`）给出整个 surface 的 inset。
 - 组件的 `cx.insets()`（TSX：`safeAreaInsets()`）给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[对话框](../elements/dialog.md)中是对话框自己的。可能出现在多个地方的组件应该优先用它。
-- `nsh_base` 的 `safe_area_view()`（TSX：`nsh/base` 的 `SafeAreaView`）是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `.edges(vec![Edge::Top, Edge::Bottom])`、`edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
+- `nsh_core::components::safe_area_view()`（TSX：`nsh` 的 `SafeAreaView`）是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `.edges(vec![Edge::Top, Edge::Bottom])`、`edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
 
 ```rust tabs
-use nsh_base::{Edge, safe_area_view};
+use nsh_core::components::{Edge, safe_area_view};
 use nsh_core::ui::prelude::*;
 
 fn screen() -> impl IntoElement {
@@ -284,8 +284,8 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { SafeAreaView, safeAreaInsets } from "nsh/base";
+import { View, SafeAreaView } from "nsh";
+import { safeAreaInsets } from "nsh/base";
 
 function Screen() {
   return (
@@ -397,5 +397,5 @@ import { pixelRatio } from "nsh/device";
 - [`nsh/device`](../modules/nsh-device.md)：参考。
 - [平台特定代码](./platform-specific.md)：`platform.select`、平台属性与模块。
 - [无障碍](./accessibility.md)：屏幕阅读器与减少动态效果。
-- [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 与[状态栏](../modules/nsh-base.md#status-bar)。
+- [`SafeAreaView`](../modules/nsh.md#safeareaview) 与[状态栏](../modules/nsh-base.md#status-bar)。
 - [Tailwind](./tailwind.md)：`dark:`、断点与方向变体。

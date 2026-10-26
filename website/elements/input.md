@@ -1,8 +1,8 @@
 ---
 title: Input
 description: "The native text field: controlled and uncontrolled text, keyboards, autofill, selection, multiline inputs and focus."
-order: 6
-group: primitives
+order: 20.1
+group: base
 demo: el-input
 ---
 
@@ -10,7 +10,7 @@ demo: el-input
 
 `Input` is a native text field: a UITextField (single line) or UITextView (multiline) on iOS and Mac Catalyst, an
 EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own. Rust makes one
-with `input()`, TSX with `<Input>` from `nsh`.
+with `input()`, TSX with `<Input>` from `nsh/base`.
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -32,7 +32,8 @@ fn name_field() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
+import { signal } from "nsh";
+import { Input } from "nsh/base";
 
 function NameField() {
   const name = signal("");

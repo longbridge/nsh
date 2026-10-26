@@ -9,10 +9,9 @@ order: 1
 An NSH app imports everything it uses from a small set of modules. They are all native: the reactive graph, the renderer and every module are implemented in Rust inside the runtime, and the bundler keeps `import ... from "nsh/..."` as imports instead of copying code into your bundle. Your bundle only holds your own code.
 
 ```tsx
-import { mount, signal } from "nsh";
+import { mount, signal, SafeAreaView } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { windowSize } from "nsh/device";
-import { SafeAreaView } from "nsh/base";
 ```
 
 ## Three layers
@@ -35,8 +34,8 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 
 | Module | Exports | Page |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
-| `nsh/base` | `Button`; `TextView`, `SelectionArea`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `ErrorBoundary`; the primitives `View`, `Text`, `Scroll`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`; the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
+| `nsh/base` | `Button`, `Input`; `TextView`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform`, `openUrl` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
@@ -63,4 +62,4 @@ Reference pages that are not modules:
 
 ## Host elements
 
-The host elements are components imported like everything else: `View`, `Text`, `Scroll`, `Input`, `Image`, `List`, `Canvas`, `WebView` and `Video` from `nsh`, the base components (`Button`, `Dialog`, `NavStack`, `NavPage`, `SafeAreaView`, `KeyboardAvoidingView`) from `nsh/base`, `InputAccessoryView` from `nsh/ios`. Only `If` and `Each` are globals. The compiler makes the elements in place, so the imports cost nothing at run time. Their props are documented under [Elements](../elements/index.md).
+The host elements are components imported like everything else: `View`, `Text`, `Scroll`, `Image`, `List`, `Canvas`, `WebView`, `Video`, `SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh`, the base components (`Button`, `Input`, `Dialog`, `NavStack`, `NavPage`) from `nsh/base`, `InputAccessoryView` from `nsh/ios`. Only `If` and `Each` are globals. The compiler makes the elements in place, so the imports cost nothing at run time. Their props are documented under [Elements](../elements/index.md).

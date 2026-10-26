@@ -70,8 +70,8 @@ could not infer their item types. The compiler recognizes the elements through t
 views in place, so importing them costs nothing at run time. See [JSX and components](../docs/jsx-and-components.md).
 
 ```tsx
-import { Canvas, Image, Input, List, Overlay, Scroll, Text, Video, View, WebView } from "nsh";
-import { Button, Dialog, Menu, NavPage, NavStack, Popover, SafeAreaView, Sheet, Tooltip } from "nsh/base";
+import { Canvas, Image, List, Overlay, Scroll, Text, Video, View, WebView, SafeAreaView } from "nsh";
+import { Button, Dialog, Menu, NavPage, NavStack, Popover, Sheet, Tooltip, Input } from "nsh/base";
 ```
 
 > [!NOTE]
@@ -80,7 +80,7 @@ import { Button, Dialog, Menu, NavPage, NavStack, Popover, SafeAreaView, Sheet, 
 
 ## Primitives
 
-Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust.
+Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust (`SafeAreaView`, `KeyboardAvoidingView` and `SelectionArea` from `nsh_core::components`).
 
 | Element | Rust | Native view (iOS / Android) | Page |
 |---|---|---|---|
@@ -88,12 +88,14 @@ Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust.
 | `<Text>` | `text(content)` | CoreText view / StaticLayout view | [Text](./text.md) |
 | `<Image>` | `image(src)` | a view with an image layer / an image view | [Image](./image.md) |
 | `<Scroll>` | `scroll()` | UIScrollView / ScrollView | [Scroll](./scroll.md) |
-| `<Input>` | `input()` | UITextField or UITextView / EditText | [Input](./input.md) |
 | `<List>` | `virtual_list(count, \|at\| row)` | UIScrollView / ScrollView with recycled cells | [List](./list.md) |
 | `<Canvas>` | `canvas(painter)` | a view replaying a 2D drawing | [Canvas](./canvas.md) |
 | `<WebView>` | `web_view(url)`, `web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `video(url)` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
 | `<Overlay>` | `overlay()` | a view on top of the window (or the dialog it is in), placed against an anchor | [Overlay](./overlay.md) |
+| `<SafeAreaView>` | `safe_area_view()` | a view: pads its content clear of notches, bars and the home indicator | [SafeAreaView](./safe-area-view.md) |
+| `<KeyboardAvoidingView>` | `keyboard_avoiding_view()` | a view: keeps its content above the software keyboard | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
+| `<SelectionArea>` | `selection_area()` | a view: makes the texts inside it select together | [SelectionArea](./selection-area.md) |
 | `<If>`, `<Each>` | `when(..)`, `each(..)`, `dynamic(..)` | control flow: the elements they choose | [Control flow](./control-flow.md) |
 | `<InputAccessoryView>` (`nsh/ios`) | `input_accessory_view(id)` | a bar over the keyboard on iOS | [nsh/ios](../modules/nsh-ios.md) |
 
@@ -105,6 +107,7 @@ and take their look from the app.
 | Component | Rust | What it does | Page |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
+| `<Input>` | `input()` (`nsh_core::ui::prelude`) | The native text input (UITextField or UITextView / EditText) | [Input](./input.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Radio>`, `<RadioGroup>` | `nsh_base::radio()`, `radio_group()` | One option of a set the user picks one of, and the set | [Radio](./radio.md) |
 | `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
@@ -113,15 +116,12 @@ and take their look from the app.
 | `<Progress>` | `nsh_base::progress()` | A progress bar: how far a task is, or that it is under way | [Progress](./progress.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<NavStack>`, `<NavPage>` | `nsh_base::nav_stack()`, `nsh_base::nav_page()` | Native navigation: a stack of pages with the platform's header and back gestures | [NavStack](./nav-stack.md) |
-| `<SafeAreaView>` | `nsh_base::safe_area_view()` | Pads its content clear of notches, bars and the home indicator | [SafeAreaView](./safe-area-view.md) |
-| `<KeyboardAvoidingView>` | `nsh_base::keyboard_avoiding_view()` | Keeps its content above the software keyboard | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
 | `AlertDialog` | `nsh_base::alert_dialog()` | The system's alert and action sheet | [AlertDialog](./alert-dialog.md) |
 | `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
 | `<Editor>` | `nsh_base::editor()` | A code editor with highlighting, several carets, folding and search | [Editor](./editor.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
 | `<Table>` and its parts | `nsh_base::table()`, `table_row()`, ... | A table of the app's own rows and cells, with a table's roles | [Table](./table.md) |
 | `<DataTable>` | `nsh_base::data_table()` | A table of rows and columns of any number, selectable, sortable, with resizable and movable columns | [DataTable](./data-table.md) |
-| `<SelectionArea>` | `nsh_base::selection_area()` | Makes the texts inside it select together | [SelectionArea](./selection-area.md) |
 | `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
 | `<Menu>`, `<ContextMenu>`, `<MenuItem>`, `<MenuSeparator>`, `<Submenu>` | `nsh_base::menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones | [Menu](./menu.md) |
 | `<Tooltip>` | `nsh_base::tooltip()` | A hint next to its trigger, on hover or a held finger | [Tooltip](./tooltip.md) |
@@ -478,7 +478,8 @@ view()
 ```
 
 ```tsx tabs
-import { Input, View, type YNode } from "nsh";
+import { View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 
 let input!: YNode;
 <View onPress={() => input.focus()}>

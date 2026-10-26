@@ -5,7 +5,8 @@
 // bar does not show with the title bar hidden, the bar's buttons open its
 // menus with `Menu.popup` (the shortcuts work everywhere).
 
-import { effect, Input, mount, signal, Text, View } from "nsh";
+import { effect, mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { colorScheme, platform } from "nsh/device";
 import { Menu, type MenuItem, titleBar, Window } from "nsh/desktop";
 

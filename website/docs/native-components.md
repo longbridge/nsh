@@ -41,7 +41,7 @@ closure of one, sent again when it changes), `.on_native_event(..)` hears its ev
 for the name with the props and events it uses.
 
 ```rust tabs
-use nsh_base::safe_area_view;
+use nsh_core::components::safe_area_view;
 use nsh_core::ui::prelude::*;
 use serde_json::json;
 
@@ -81,9 +81,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, signal, Text, type YNode } from "nsh";
+import { mount, signal, Text, type YNode, SafeAreaView } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/base";
 
 /** The host app's badge: a label it draws, sized to its text. */
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {

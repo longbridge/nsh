@@ -380,8 +380,8 @@ try app.loadBundle(at: bundledURL)
 - **线程。** `NshAppView` 隔离在 main actor 上。`NshTrust`、`NshPackage` 和 `NshComponentContext` 是线程安全的。JS
   引擎运行在自己的线程上；主线程从不等待它。
 - **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
-- **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中使用 [`nsh/base`](../modules/nsh-base.md#safeareaview) 中的
-  `SafeAreaView` 或 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
+- **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中使用 [`nsh`](../modules/nsh.md#safeareaview) 的
+  `SafeAreaView` 或 [`nsh/base`](../modules/nsh-base.md#safe-areas) 的 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
 
 ## 另请参阅

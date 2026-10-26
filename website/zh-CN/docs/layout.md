@@ -244,7 +244,7 @@ Tailwind 的断点（`sm:`、`md:` 等）以及 `portrait:` / `landscape:` 不�
 
 ## 安全区域
 
-根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。把页面包在 `nsh_base` 的 [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 中（Rust 中为 `safe_area_view()`，TSX 中从 `nsh/base` 导入），它会按安全区域的 inset 为内容加内边距；也可以在 Rust 中用 `safe_area()`、在 TSX 中用 `safeArea()` / `safeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
+根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。把页面包在 `nsh` 的 [`SafeAreaView`](../modules/nsh.md#safeareaview) 中（Rust 中为 `nsh_core::components::safe_area_view()`），它会按安全区域的 inset 为内容加内边距；也可以在 Rust 中用 `safe_area()`、在 TSX 中用 `safeArea()` / `safeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
 
 ## 从右到左
 

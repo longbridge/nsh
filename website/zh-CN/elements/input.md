@@ -1,14 +1,14 @@
 ---
 title: Input
 description: 原生文本输入框：受控与非受控文本、键盘、自动填充、选区、多行输入和焦点。
-order: 6
-group: primitives
+order: 20.1
+group: base
 demo: el-input
 ---
 
 # Input
 
-`Input` 是原生文本输入框：iOS 和 Mac Catalyst 上是 UITextField（单行）或 UITextView（多行），Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理。Rust 用 `input()` 创建，TSX 用从 `nsh` 导入的 `<Input>`。
+`Input` 是原生文本输入框：iOS 和 Mac Catalyst 上是 UITextField（单行）或 UITextView（多行），Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理。Rust 用 `input()` 创建，TSX 用从 `nsh/base` 导入的 `<Input>`。
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -30,7 +30,8 @@ fn name_field() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
+import { signal } from "nsh";
+import { Input } from "nsh/base";
 
 function NameField() {
   const name = signal("");

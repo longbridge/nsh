@@ -2138,7 +2138,7 @@ pub enum Prop {
     /// closes a popover). Default true.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
-    /// The view is a selection area (`SelectionArea` of `nsh/base`): the
+    /// The view is a selection area (`SelectionArea` of `nsh`): the
     /// texts in it share one selection ([`crate::selection`]); set by
     /// components (`Element::selection_area`).
     #[prop(js = "selectionArea", internal)]

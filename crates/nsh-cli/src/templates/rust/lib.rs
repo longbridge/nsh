@@ -2,7 +2,8 @@
 //! and `cargo run` mount.
 
 use nsh_core::ui::prelude::*;
-use nsh_base::{safe_area_view, theme};
+use nsh_base::theme;
+use nsh_core::components::safe_area_view;
 
 /// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
 /// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").

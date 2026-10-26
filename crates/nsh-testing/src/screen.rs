@@ -196,7 +196,7 @@ struct View {
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
-    /// A selection area (`SelectionArea` of `nsh/base`): its texts share
+    /// A selection area (`SelectionArea` of `nsh`): its texts share
     /// one selection.
     selection_area: bool,
     /// The interaction states it tracks (`TrackStates`: pressed, hovered).
@@ -1137,7 +1137,7 @@ impl Screen {
     }
 
     /// Whether the view `selector` names is in a selection area (it or a
-    /// view around it is one: `SelectionArea` of `nsh/base`, a selectable
+    /// view around it is one: `SelectionArea` of `nsh`, a selectable
     /// `TextView`); an error when none or several match.
     pub fn in_selection_area(&self, selector: &str) -> Result<bool, String> {
         let parsed = Selector::parse(selector)?;

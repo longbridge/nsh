@@ -1,5 +1,5 @@
-import { mount, signal, Text, View } from "nsh";
-import { type Edge, SafeAreaView, safeArea, safeAreaInsets } from "nsh/base";
+import { mount, signal, Text, View, type Edge, SafeAreaView } from "nsh";
+import { safeArea, safeAreaInsets } from "nsh/base";
 import { desktop, size, tint, ui } from "./palette";
 
 const EDGES: Edge[] = ["top", "right", "bottom", "left"];

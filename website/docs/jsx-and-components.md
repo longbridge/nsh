@@ -332,7 +332,8 @@ fn search() -> impl IntoElement {
 
 ```tsx tabs
 import type { YNode } from "nsh";
-import { Input, Text, View } from "nsh";
+import { Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Search() {
   let input: YNode | undefined;
@@ -365,7 +366,8 @@ In Rust, a parent calls the setters of the props it needs and the rest keep thei
 In TSX, spread an object of props onto an element or a component with `{...props}`. Getters stay getters, so spread props keep following what they read. To take some props for yourself and pass the rest on, use `split`:
 
 ```tsx
-import { Input, type InputProps, split, Text, View } from "nsh";
+import { type InputProps, split, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Field(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);

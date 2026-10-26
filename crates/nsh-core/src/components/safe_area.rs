@@ -1,6 +1,6 @@
 //! `SafeAreaView`: content kept clear of system UI and headers.
 
-use nsh_core::ui::prelude::*;
+use crate::ui::prelude::*;
 
 /// The props of [`SafeAreaView`].
 #[derive(Debug, Clone, PartialEq, Props)]

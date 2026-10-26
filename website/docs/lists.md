@@ -312,7 +312,7 @@ const shown = hidden.mul(-1).add(56);
 `inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
+use nsh_core::components::keyboard_avoiding_view;
 
 #[derive(Clone, PartialEq)]
 struct Message {
@@ -403,8 +403,8 @@ pub fn chat() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, List, mount, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { List, mount, signal, Text, View, KeyboardAvoidingView } from "nsh";
+import { Input } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 

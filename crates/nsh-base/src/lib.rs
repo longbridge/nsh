@@ -5,8 +5,7 @@
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
 //! with a table's semantics (`Table` and its parts), toasts (`Toast`,
-//! `ToastStack`, `ToastManager`), safe areas,
-//! selection areas,
+//! `ToastStack`, `ToastManager`), text input (`Input`), safe area insets,
 //! the system's dialogs and the software keyboard, and the theme's semantic
 //! tokens (`Theme`, as `gpui-base`'s).
 //!
@@ -32,8 +31,6 @@ mod popup;
 mod progress;
 mod radio;
 mod resizable;
-mod safe_area;
-mod selection_area;
 mod sheet;
 mod switch;
 mod syntax;
@@ -80,10 +77,7 @@ pub use crate::{
         EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, EditorToken,
         editor,
     },
-    keyboard::{
-        AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
-        KeyboardAvoidingViewProps, keyboard_avoiding_view,
-    },
+    keyboard::Keyboard,
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
@@ -106,8 +100,6 @@ pub use crate::{
         ResizeHandleProps, ResizeHandleState, h_resizable, resizable_panel, resizable_panel_group,
         resize_handle, v_resizable,
     },
-    safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
-    selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
     sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
     switch::{Switch, SwitchElement, SwitchEvent, SwitchProps, switch},
     table::{
@@ -149,9 +141,6 @@ pub fn registry() -> Registry {
         .register::<Popover>()
         .register::<Sheet>()
         .register::<Tooltip>()
-        .register::<SafeAreaView>()
-        .register::<KeyboardAvoidingView>()
-        .register::<SelectionArea>()
         .register::<Checkbox>()
         .register::<Collapsible>()
         .register::<DataTable>()
@@ -183,8 +172,9 @@ pub fn registry() -> Registry {
         .module::<TextView>()
         // The environment's accessors and hooks, as they are.
         .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &["Edges"])
-        // Navigation: made by `nsh-js` (`navigation.rs`), declared by hand.
-        .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack"])
+        // Navigation and `Input`: made by `nsh-js` (`navigation.rs`,
+        // `env.rs`), declared by hand.
+        .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack", "Input"])
         // The theme: the app's over the default, as design tokens.
         .tokens_from(tokens_of);
     registry
@@ -215,7 +205,6 @@ mod tests {
                 "DiffView",
                 "DockArea",
                 "Editor",
-                "KeyboardAvoidingView",
                 "Menu",
                 "MenuItem",
                 "MenuSeparator",
@@ -225,8 +214,6 @@ mod tests {
                 "RadioGroup",
                 "ResizablePanel",
                 "ResizablePanelGroup",
-                "SafeAreaView",
-                "SelectionArea",
                 "Sheet",
                 "Submenu",
                 "Switch",

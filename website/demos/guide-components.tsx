@@ -1,4 +1,5 @@
-import { Input, type InputProps, type JSX, mount, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { type InputProps, type JSX, mount, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { desktop, size, tint, ui, wide } from "./palette";
 
 /** A component: a function of its props, run once. */

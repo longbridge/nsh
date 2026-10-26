@@ -1,5 +1,5 @@
-import { Input, mount, Scroll, signal, Text, View } from "nsh";
-import { SelectionArea, TextView } from "nsh/base";
+import { mount, Scroll, signal, Text, View, SelectionArea } from "nsh";
+import { TextView, Input } from "nsh/base";
 import { platform } from "nsh/device";
 import { ui } from "./palette";
 

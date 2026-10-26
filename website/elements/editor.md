@@ -233,8 +233,8 @@ its query.
 The find bar is the app's own:
 
 ```tsx
-import { Input, signal, Text, View } from "nsh";
-import { Button, Editor, type EditorRef, type EditorSearchResult } from "nsh/base";
+import { signal, Text, View } from "nsh";
+import { Button, Editor, type EditorRef, type EditorSearchResult, Input } from "nsh/base";
 
 function Find(props: { source: string; onChange: (value: string) => void }) {
   let editor!: EditorRef;

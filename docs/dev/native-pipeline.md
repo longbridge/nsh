@@ -73,8 +73,8 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - **Tags** are PascalCase and name bindings by normal scoping: every tag is imported or local, except `<If when else>`
   and `<Each of key>`, globals (`dom.rs` `install_globals`) a binding of the same name shadows. A tag naming one of
   `jsx::PRIMITIVES` imported from its module (alias-aware: `import { View as V } from "nsh"`) compiles to what it is,
-  with no component call: `View`, `Text`, `Scroll`, `Input`, `Overlay`, `Image`, `WebView`, `Video` (`nsh`) to
-  their host elements made in place, `List` to `nsh:rt`'s `list`, `If` / `Each` to `cond` / `each`; `Canvas`,
+  with no component call: `View`, `Text`, `Scroll`, `Overlay`, `Image`, `WebView`, `Video` (`nsh`) and `Input`
+  (`nsh/base`) to their host elements made in place, `List` to `nsh:rt`'s `list`, `If` / `Each` to `cond` / `each`; `Canvas`,
   `Dialog` (`nsh/base`) and `InputAccessoryView` are native components that do more than make their element (the
   drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. Imported from the modules
   they were first exported from (`nsh/image`, `nsh/list`, `nsh/canvas`, `nsh/webview`, `nsh/video`, deprecated), they

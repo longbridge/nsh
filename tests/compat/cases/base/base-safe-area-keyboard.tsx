@@ -7,16 +7,14 @@
 // and `KeyboardAvoidingView`, which makes no room while no keyboard shows,
 // whatever its `behavior` and `offset`. Its
 // script checks each.
-import { Text, View, signal } from "nsh";
+import { Text, View, signal, KeyboardAvoidingView, SafeAreaView } from "nsh";
 import {
   Button,
   Dialog,
   type Edges,
   Keyboard,
-  KeyboardAvoidingView,
   NavPage,
   NavStack,
-  SafeAreaView,
   createNavStack,
   keyboardFrame,
   safeArea,

@@ -1,4 +1,5 @@
-//! The runtime's modules written in Rust: `nsh/android`'s `Toast`,
+//! The runtime's modules written in Rust: `nsh`'s `SafeAreaView`,
+//! `KeyboardAvoidingView` and `SelectionArea`, `nsh/android`'s `Toast`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, all of
 //! `nsh/image`, `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
@@ -57,6 +58,11 @@ pub fn registries() -> &'static [Registry] {
         storage.module::<storage::Storage>();
         let mut desktop = Registry::runtime("nsh/desktop");
         desktop.module::<desktop::Window>();
+        // `nsh`'s primitives written in Rust; the rest of `nsh` is `nsh-js`'s.
+        let mut nsh = Registry::runtime("nsh");
+        nsh.register::<crate::components::SafeAreaView>()
+            .register::<crate::components::KeyboardAvoidingView>()
+            .register::<crate::components::SelectionArea>();
         let mut mobile = Registry::runtime("nsh/mobile");
         mobile.register::<crate::mobile::TabBar>();
         let mut os = Registry::runtime("os");
@@ -77,6 +83,7 @@ pub fn registries() -> &'static [Registry] {
         let mut host = Registry::runtime("nsh/host");
         host.module::<host::Host>();
         vec![
+            nsh,
             android,
             accessibility,
             device,

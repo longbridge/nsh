@@ -13,7 +13,8 @@ Dialog 在应用其余内容之上、在它自己的原生窗口层中呈现内�
 Dialog 负责行为，外观交给应用：它的样式设定弹出层（包含子元素的视图）的样式，在 TSX 中 `backdropClass` / `backdropStyle` 在它后面加一层背景。
 
 ```rust tabs
-use nsh_base::{button, dialog, safe_area_view};
+use nsh_base::{button, dialog};
+use nsh_core::components::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// 白色文字的蓝色按钮。
@@ -55,8 +56,8 @@ fn example() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View } from "nsh";
-import { Button, Dialog, SafeAreaView } from "nsh/base";
+import { signal, Text, View, SafeAreaView } from "nsh";
+import { Button, Dialog } from "nsh/base";
 
 function Example() {
   const open = signal(false);

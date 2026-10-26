@@ -2,8 +2,8 @@
 // `Ledger` and the class `Account` all come from the app's crate
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
-import { type JSX, mount, Scroll, signal, Text, View } from "nsh";
-import { Button as BaseButton, SafeAreaView } from "nsh/base";
+import { type JSX, mount, Scroll, signal, Text, View, SafeAreaView } from "nsh";
+import { Button as BaseButton } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
 // Each object owns an instance kept in Rust.

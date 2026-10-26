@@ -1,5 +1,5 @@
-import { Input, mount, signal, Text, View } from "nsh";
-import { Editor, type EditorDiagnostic, type EditorRef, type EditorSearchResult } from "nsh/base";
+import { mount, signal, Text, View } from "nsh";
+import { Editor, type EditorDiagnostic, type EditorRef, type EditorSearchResult, Input } from "nsh/base";
 import { desktop, Log, Panel, Segmented, Split, size, ui, wide } from "./palette";
 
 const SAMPLES = {

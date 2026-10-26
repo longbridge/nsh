@@ -76,7 +76,8 @@ The two templates make the same app, a counter:
 
 ```rust tabs
 // src/lib.rs
-use nsh_base::{safe_area_view, theme};
+use nsh_base::theme;
+use nsh_core::components::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// The crate's UI set: what a TSX entry may import from `my-app/native`.
@@ -124,8 +125,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 // App.tsx
-import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/base";
+import { mount, signal, Text, View, SafeAreaView } from "nsh";
 
 function App() {
   const count = signal(0);
@@ -149,8 +149,8 @@ mount(App);
 In Rust:
 
 - **`use nsh_core::ui::prelude::*`** brings the primitives (`view()`, `text()`, `scroll()`, `input()`, `image()`, ...),
-  [signals](./reactivity.md) and the typed style methods; **`nsh_base`** has the unstyled base components
-  ([`safe_area_view()`](../modules/nsh-base.md#safeareaview), `button()`, the keyboard, dialogs) and `theme()`, the colors and
+  [signals](./reactivity.md) and the typed style methods; **`nsh_core::components`** has `safe_area_view()`; **`nsh_base`** has the unstyled base components
+  (`button()`, the keyboard, dialogs) and `theme()`, the colors and
   radii the app's components draw with ([Theme](./rust.md#theme)).
 - **`#[component] pub fn App()`** is a component: a function that runs **once** and returns its elements.
   `nsh.json`'s `"root": "App"` names it, and `nsh run` mounts it. `signal(0_u32)` makes a value that changes over time.
@@ -173,7 +173,7 @@ In TSX:
 - **`function App()`** is a component that runs **once**. **`{count()}`** reads the signal inside JSX: the compiler
   sees a call and makes this text follow the signal.
 - **`<View onPress>`** is a native view that reacts to presses; `active:` classes are its style while pressed. `View`,
-  `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from `nsh`; only
+  `Text`, `Image`, `Scroll` and the other [host elements](../elements/index.md) are imported from `nsh` (`Input` from `nsh/base`); only
   `If` and `Each` need no import.
 - **`class`** takes [Tailwind](./tailwind.md) classes; `style={{ … }}` takes an object of camelCase style
   properties, with numbers in points. `bg-background`, `bg-primary`, `text-primary-foreground` and

@@ -1,6 +1,6 @@
 //! `SelectionArea`: texts that select together, across views.
 
-use nsh_core::ui::prelude::*;
+use crate::ui::prelude::*;
 
 /// The props of [`SelectionArea`].
 #[derive(Debug, Clone, PartialEq, Props)]

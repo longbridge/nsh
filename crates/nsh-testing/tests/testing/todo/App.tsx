@@ -1,4 +1,5 @@
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { Storage } from "nsh/storage";
 
 function App() {

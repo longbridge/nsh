@@ -60,9 +60,9 @@ mod tests {
         let code = super::compile_module(
             "App.tsx",
             "import { mount, signal, View } from \"nsh\";\n\
-             import { SafeAreaView } from \"nsh/base\";\n\
+             import { Button } from \"nsh/base\";\n\
              const n: number = 1;\n\
-             function App() { const c = signal(n); return <SafeAreaView><View onPress={() => c.set(2)} /></SafeAreaView>; }\n\
+             function App() { const c = signal(n); return <Button><View onPress={() => c.set(2)} /></Button>; }\n\
              mount(App);\n",
             &[nsh_base::registry().into()],
         )

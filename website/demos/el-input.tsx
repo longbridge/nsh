@@ -1,4 +1,5 @@
-import { Input, type JSX, mount, signal, Text, View, type YNode } from "nsh";
+import { type JSX, mount, signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 import { Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 function App() {

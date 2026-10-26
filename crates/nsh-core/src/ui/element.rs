@@ -840,7 +840,7 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
-    /// Makes the view a selection area (`SelectionArea` of `nsh/base`):
+    /// Makes the view a selection area (`SelectionArea` of `nsh`):
     /// the texts in it that are not `selectable={false}` share one
     /// selection, from text to text ([`crate::selection`]).
     fn selection_area(mut self, area: impl IntoReactive<bool>) -> Self {

@@ -1,8 +1,8 @@
-import { effect, Input, type JSX, Scroll, signal, Text, View } from "nsh";
+import { effect, type JSX, Scroll, signal, Text, View, SafeAreaView } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { BackHandler } from "nsh/android";
 import { platform } from "nsh/device";
-import { AlertDialog, Dialog, NavPage, SafeAreaView, safeAreaInsets } from "nsh/base";
+import { AlertDialog, Dialog, NavPage, safeAreaInsets, Input } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { Appear, Badge, Button, Card, colors, DemoPage, Figure, finish, header, hint, IconTile, Inset, isDark, mono, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";

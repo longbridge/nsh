@@ -328,7 +328,8 @@ fn search() -> impl IntoElement {
 
 ```tsx tabs
 import type { YNode } from "nsh";
-import { Input, Text, View } from "nsh";
+import { Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Search() {
   let input: YNode | undefined;
@@ -361,7 +362,8 @@ ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./r
 在 TSX 中，用 `{...props}` 把一个 props 对象展开到元素或组件上。getter 仍然是 getter，所以展开的 props 会继续跟随它们读取的内容。要取出一部分 props 自己用、把其余的传下去，使用 `split`：
 
 ```tsx
-import { Input, type InputProps, split, Text, View } from "nsh";
+import { type InputProps, split, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Field(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);

@@ -17,7 +17,8 @@ The dialog owns its behavior and leaves its look to the app: its styles style th
 children), and in TSX `backdropClass` / `backdropStyle` add a backdrop behind it.
 
 ```rust tabs
-use nsh_base::{button, dialog, safe_area_view};
+use nsh_base::{button, dialog};
+use nsh_core::components::safe_area_view;
 use nsh_core::ui::prelude::*;
 
 /// A blue button with a white label.
@@ -59,8 +60,8 @@ fn example() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View } from "nsh";
-import { Button, Dialog, SafeAreaView } from "nsh/base";
+import { signal, Text, View, SafeAreaView } from "nsh";
+import { Button, Dialog } from "nsh/base";
 
 function Example() {
   const open = signal(false);

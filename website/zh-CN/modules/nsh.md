@@ -6,10 +6,11 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll`、`Input` 和 `Overlay`，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、`token`、宿主元素 `View`、`Text`、`Scroll` 和 `Overlay`，视图 `SafeAreaView`、`KeyboardAvoidingView` 和 `SelectionArea`，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
-import { batch, cleanup, computed, context, effect, ErrorBoundary, Input, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
+import { batch, cleanup, computed, context, effect, ErrorBoundary, mount, Overlay, Scroll, signal, split, Text, token, untracked, View } from "nsh";
+import { Input } from "nsh/base";
 ```
 
 NSH 的响应式模型与 SolidJS 相同：组件函数只运行**一次**，界面中读取了 signal 的部分会在 signal 变化时就地更新。组件不会重新渲染，也没有虚拟 DOM。教程见[响应式](../docs/reactivity.md)。
@@ -202,7 +203,8 @@ function split<T extends object, K extends readonly (keyof T)[]>(
 把 props 对象拆成 `keys` 中列出的属性和其余属性。两部分都保持响应式：会变化的属性是 getter，`split` 会保留这些 getter。适用于组件自己处理一部分 props、把其余部分透传下去的场景。直接解构 props（`const { label } = props`）只会读取一次，之后的更新就丢失了。
 
 ```tsx
-import { Input, type InputProps, split, Text, View } from "nsh";
+import { type InputProps, split, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function LabeledInput(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);
@@ -263,17 +265,34 @@ import { effect, token } from "nsh";
 effect(() => console.log("primary is", token("primary"), "radius", token("radius")));
 ```
 
-## View、Text、Scroll、Input、Overlay
+## View、Text、Scroll、Overlay
 
 ```ts
 function View(props: ViewProps): YNode;
 function Text(props: TextProps): YNode;
 function Scroll(props: ScrollProps): YNode;
-function Input(props: InputProps): YNode;
 function Overlay(props: OverlayProps): YNode;
 ```
 
-`nsh` 导出的宿主元素，写作标签：`<View>`、`<Text>`、`<Scroll>`、`<Input>`、`<Overlay>`（把子元素显示在窗口之上，相对锚点放置：[Overlay](../elements/overlay.md)）。当标签通过导入（包括别名）指向它们之一时，编译器会就地创建原生视图，所以导入它们在运行时没有任何开销。它们也是普通的组件，可以作为值传递（`const Tag = inline ? Text : View`）。`nsh` 以同样的方式导出其他原语：[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)、[`Canvas`](./nsh-canvas.md)、[`WebView`](./nsh-webview.md) 和 [`Video`](./nsh-video.md)，各有自己的参考页面。它们的属性见[元素](../elements/index.md)。
+`nsh` 导出的宿主元素，写作标签：`<View>`、`<Text>`、`<Scroll>`、`<Overlay>`（把子元素显示在窗口之上，相对锚点放置：[Overlay](../elements/overlay.md)）。当标签通过导入（包括别名）指向它们之一时，编译器会就地创建原生视图，所以导入它们在运行时没有任何开销。它们也是普通的组件，可以作为值传递（`const Tag = inline ? Text : View`）。`nsh` 以同样的方式导出其他原语：[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)、[`Canvas`](./nsh-canvas.md)、[`WebView`](./nsh-webview.md) 和 [`Video`](./nsh-video.md)，各有自己的参考页面。它们的属性见[元素](../elements/index.md)。文本输入框 `Input` 来自 [`nsh/base`](./nsh-base.md#input)。
+
+<a id="safeareaview"></a>
+
+## SafeAreaView
+
+`SafeAreaView` 按自己渲染位置的边距为内容添加内边距：最近的页面的（标题栏下方）、最近的对话框的，否则为界面的安全区。Rust 用 `nsh_core::components::safe_area_view()` 创建（边用 `Edge` 表示）。边距本身 `safeArea()` 和 `safeAreaInsets()` 来自 [`nsh/base`](./nsh-base.md#safe-areas)。见 [SafeAreaView](../elements/safe-area-view.md)。
+
+<a id="keyboardavoidingview"></a>
+
+## KeyboardAvoidingView
+
+`KeyboardAvoidingView` 让它的内容保持在软键盘上方，并随键盘移动。Rust 用 `nsh_core::components::keyboard_avoiding_view()` 创建（行为用 `AvoidBehavior` 表示）。`Keyboard` 和 `keyboardFrame()` 来自 [`nsh/base`](./nsh-base.md#keyboard)。见 [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)。
+
+<a id="selectionarea"></a>
+
+## SelectionArea
+
+`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区按阅读顺序跨越视图、`Text` 元素和 `TextView`。Rust 用 `nsh_core::components::selection_area()` 创建。见 [SelectionArea](../elements/selection-area.md)。
 
 ## 类型
 

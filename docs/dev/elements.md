@@ -54,8 +54,8 @@ the app's own: drawn in TSX with views, classes, canvases and native animations,
 (UISwitch / SeekBar wrappers and the like), and do not add styled widgets or compositions of existing primitives to
 the runtime (buttons, section lists, touchables, drawers, ...). React Native is a reference for which capabilities
 exist, not an API to be compatible with. Components that need core or native support are primitives of their own
-(`List`, `Canvas`, `WebView`, `Video`, `Overlay`; in `nsh/base` `NavStack`, `Dialog`, `SafeAreaView`,
-`KeyboardAvoidingView`; `InputAccessoryView` in `nsh/ios`). Tags are PascalCase names
+(`List`, `Canvas`, `WebView`, `Video`, `Overlay`, `SafeAreaView`, `KeyboardAvoidingView`, `SelectionArea`; in
+`nsh/base` `Input`, `NavStack`, `Dialog`; `InputAccessoryView` in `nsh/ios`). Tags are PascalCase names
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
 (`native-pipeline.md`).

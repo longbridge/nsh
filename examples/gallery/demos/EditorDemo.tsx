@@ -1,4 +1,4 @@
-import { type Bounds, cleanup, computed, Input, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
+import { type Bounds, cleanup, computed, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
 import {
   Button,
   DockArea,
@@ -15,6 +15,7 @@ import {
   MenuItem,
   MenuSeparator,
   TextView,
+  Input,
 } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
 import { openUrl, platform, windowSize } from "nsh/device";

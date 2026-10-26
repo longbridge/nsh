@@ -1,8 +1,8 @@
 ---
 title: KeyboardAvoidingView
 description: "The KeyboardAvoidingView component, Keyboard.dismiss and the keyboard's height: content kept above the software keyboard, moving with it."
-order: 24
-group: base
+order: 10.7
+group: primitives
 demo: el-keyboard-avoiding-view
 ---
 
@@ -15,7 +15,7 @@ views, such as a message bar at the bottom of a chat screen; inputs inside a [sc
 the keyboard's height, for layouts of your own.
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
+use nsh_core::components::keyboard_avoiding_view;
 use nsh_core::ui::prelude::*;
 
 fn chat() -> impl IntoElement {
@@ -44,8 +44,8 @@ fn chat() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, Scroll, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { mount, Scroll, signal, Text, View, KeyboardAvoidingView } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const draft = signal("");
@@ -93,7 +93,7 @@ add to it with a positive value.
 The padding or margin is added to what the view's own style sets, so your padding stays.
 
 ```rust tabs
-use nsh_base::{AvoidBehavior, keyboard_avoiding_view};
+use nsh_core::components::{AvoidBehavior, keyboard_avoiding_view};
 use nsh_core::ui::prelude::*;
 
 fn sign_in() -> impl IntoElement {
@@ -182,8 +182,8 @@ fn message_bar() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, View } from "nsh";
-import { keyboardFrame, safeArea } from "nsh/base";
+import { View } from "nsh";
+import { keyboardFrame, safeArea, Input } from "nsh/base";
 
 function MessageBar() {
   const insets = safeArea();

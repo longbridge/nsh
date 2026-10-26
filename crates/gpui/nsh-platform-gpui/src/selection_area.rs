@@ -1,4 +1,4 @@
-//! Selection areas (`SelectionArea` of `nsh/base`: a view whose
+//! Selection areas (`SelectionArea` of `nsh`: a view whose
 //! `ViewProps::selection_area` is set): one selection across the texts of
 //! the view's subtree, from a point in one text to a point in another, as a
 //! browser selects across the elements of a page.

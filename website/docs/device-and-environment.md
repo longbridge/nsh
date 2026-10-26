@@ -257,10 +257,10 @@ Notches, the home indicator, the status bar, Android's navigation bar and the Ma
 
 - `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
 - A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
-- `safe_area_view()` from `nsh_base` (TSX: `SafeAreaView` from `nsh/base`) is a view padded by those insets (all edges by default, or `.edges(vec![Edge::Top, Edge::Bottom])`, `edges={["top", "bottom"]}`), on top of its own padding.
+- `nsh_core::components::safe_area_view()` (TSX: `SafeAreaView` from `nsh`) is a view padded by those insets (all edges by default, or `.edges(vec![Edge::Top, Edge::Bottom])`, `edges={["top", "bottom"]}`), on top of its own padding.
 
 ```rust tabs
-use nsh_base::{Edge, safe_area_view};
+use nsh_core::components::{Edge, safe_area_view};
 use nsh_core::ui::prelude::*;
 
 fn screen() -> impl IntoElement {
@@ -284,8 +284,8 @@ fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { SafeAreaView, safeAreaInsets } from "nsh/base";
+import { View, SafeAreaView } from "nsh";
+import { safeAreaInsets } from "nsh/base";
 
 function Screen() {
   return (
@@ -399,5 +399,5 @@ Horizontal scroll views and lists start at the right end in right-to-left layout
 - [`nsh/device`](../modules/nsh-device.md): the reference.
 - [Platform-specific code](./platform-specific.md): `platform.select`, platform props and modules.
 - [Accessibility](./accessibility.md): screen readers and reduced motion.
-- [`SafeAreaView`](../modules/nsh-base.md#safeareaview) and [the status bar](../modules/nsh-base.md#status-bar).
+- [`SafeAreaView`](../modules/nsh.md#safeareaview) and [the status bar](../modules/nsh-base.md#status-bar).
 - [Tailwind](./tailwind.md): `dark:`, breakpoint and orientation variants.

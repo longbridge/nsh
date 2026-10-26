@@ -1,9 +1,9 @@
-import { batch, cleanup, computed, effect, Input, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { batch, cleanup, computed, effect, List, Scroll, signal, Text, View, type ViewStyle, type YNode, KeyboardAvoidingView, SelectionArea } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { platform } from "nsh/device";
 import { Picker } from "nsh/picker";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, SelectionArea } from "nsh/base";
+import { keyboardFrame, safeAreaInsets, Input } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
 import { localReply, type Provider } from "./chat/local";

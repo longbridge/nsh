@@ -15,6 +15,7 @@ pub mod animation;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;
+pub mod components;
 mod core;
 mod css;
 mod css_named;

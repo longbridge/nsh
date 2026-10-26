@@ -7,8 +7,10 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::keyboard_avoiding_view;
-use nsh_core::ui::{LayoutAnimation, SubmitBehavior, prelude::*};
+use nsh_core::{
+    components::keyboard_avoiding_view,
+    ui::{LayoutAnimation, SubmitBehavior, prelude::*},
+};
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO, Meter, PressRole,

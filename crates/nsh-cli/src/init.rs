@@ -8,7 +8,7 @@ use anyhow::{Context as _, bail};
 use crate::ui;
 
 const APP: &str = r##"import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/base";
+import { SafeAreaView } from "nsh";
 
 function App() {
   const count = signal(0);
