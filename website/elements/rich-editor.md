@@ -52,13 +52,13 @@ The editor draws the document with the app's look: `classes` and `styles` style 
 `selection`, `placeholder`, `composition`, `selectedNode`, `listMarker`), its nodes by type (`nodes: { heading:
 "text-2xl font-bold", "heading[level=2]": "text-xl" }`) and its marks (`marks: { bold: "font-bold" }`). The items of
 lists whose node spec sets `extra.listMarker` to `"bullet"` or `"ordered"` (the starter schema's lists) show a marker
-in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `order`, placed in the item's indent.
+in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `order`, placed before the item, in the list's indent (`pl-6` on the list, as a browser indents `ul`).
 
 ```tsx
 <RichEditor
   editor={editor}
   classes={{
-    nodes: { heading: "text-2xl font-bold", list_item: "pl-6", code_block: "font-mono bg-muted p-3 rounded-md" },
+    nodes: { heading: "text-2xl font-bold", bullet_list: "pl-6", code_block: "font-mono bg-muted p-3 rounded-md" },
     marks: { bold: "font-bold", italic: "italic", code: "font-mono bg-muted" },
     listMarker: "text-muted-foreground",
   }}

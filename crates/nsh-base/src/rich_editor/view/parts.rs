@@ -48,7 +48,8 @@ pub struct RichEditorClasses {
     /// The marker of a list's item (`•`, `◦`, `▪` by depth, or `1.`), for
     /// lists whose node spec's `extra.listMarker` is `"bullet"` or
     /// `"ordered"`: placed in the indent before the item, its end against
-    /// it (the item's indent is its node classes').
+    /// it (in the list's indent, the list's node classes', as a browser
+    /// indents `ul`).
     #[prop(skip_none)]
     pub list_marker: Option<SharedString>,
     /// The nodes' boxes, by type name (`paragraph`) or by type and

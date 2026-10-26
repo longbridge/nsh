@@ -112,7 +112,7 @@ function MarkdownEditor() {
 const markClasses = {
   bold: "font-bold",
   italic: "italic",
-  code: "font-mono text-[0.9em] bg-muted rounded px-1",
+  code: "font-mono text-sm bg-muted rounded px-1",
   link: "text-primary underline",
   strike: "line-through",
 };
@@ -126,9 +126,8 @@ const markdownClasses = {
     "heading[level=3]": "text-lg font-semibold",
     blockquote: "border-l-2 border-border pl-3 text-muted-foreground",
     code_block: "font-mono text-sm bg-muted rounded-md p-3",
-    list_item: "pl-6",
-    bullet_list: "gap-1",
-    ordered_list: "gap-1",
+    bullet_list: "gap-1 pl-6",
+    ordered_list: "gap-1 pl-6",
     horizontal_rule: "h-px bg-border my-2",
   },
   marks: markClasses,

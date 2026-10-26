@@ -275,6 +275,9 @@ fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
                 .absolute()
                 .top(px(0.0))
                 .right(relative(1.0))
+                // A box wide enough for numbers, the marker at its end, as
+                // TextView places its markers.
+                .w(px(32.0))
                 .pe(px(6.0))
                 .text_right()
                 .pointer_events(PointerEvents::None),
