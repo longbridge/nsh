@@ -697,7 +697,9 @@ forgotten.
 A view JS made (`<Chip>` in TSX) is made when its host is first in the root's tree, so it is under the view that
 placed it: it adopts the owner of the nearest component above it (where that one places its JS children, else its
 own owner), and `use_context` and failures reach that far (`owner_above`, `adopt`). Until then it waits
-(`components.waiting`).
+(`components.waiting`). A component a Rust view passes as a nested component's content (`tabs().child(tab())`)
+joins that host as JS children do (`Instance::joined`) and waits the same way, so it reads the context of the view
+that places it, not only its maker's.
 
 JS allocates even node ids (from 2), the core odd ones (from 3), so both id spaces stay dense and never collide. JS
 never sees the made nodes; their events are the component's (below).

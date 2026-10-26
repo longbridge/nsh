@@ -15700,6 +15700,41 @@ mod rust_lazy_context {
         provider().child(consumer())
     }
 
+    #[derive(Clone, PartialEq, Props)]
+    struct GroupProps {
+        children: Children,
+    }
+
+    /// A provider whose children are not lazy: placed at once.
+    #[component]
+    fn Group(props: GroupProps) -> impl IntoElement {
+        provide_context("grouped");
+        view().child(props.children)
+    }
+
+    #[component]
+    fn GroupApp() -> impl IntoElement {
+        view().child(group().child(consumer()).child(consumer()))
+    }
+
+    #[test]
+    fn rust_children_of_a_nested_component_read_its_context() {
+        // The consumers are made by `GroupApp`'s view but placed by
+        // `Group`'s: they wait for it, and read what it provides.
+        let mut c = core();
+        c.mount_root(&Root::of::<GroupApp>());
+        let batch = c.commit().unwrap();
+        let texts: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["grouped", "grouped"]);
+    }
+
     #[test]
     fn rust_lazy_children_inherit_the_context_where_they_are_placed() {
         let mut c = core();

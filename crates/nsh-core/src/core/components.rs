@@ -161,6 +161,11 @@ pub(super) struct Instance {
     /// In a view: the owner where it places its JS children (a region's),
     /// which the components JS made among them are under.
     children_owner: Option<crate::element::Owner>,
+    /// It joined a host as its children (content a view passed a nested
+    /// component, `tabs().child(tab())`): its view waits, as one JS made
+    /// does, to be in the tree under where that host's view places it, so
+    /// it reads the context there.
+    joined: bool,
     /// The component its view's root is, made on this host (its alias,
     /// [`Core::alias`]): its view makes the host's node.
     rooted: Option<NodeId>,
@@ -269,6 +274,7 @@ impl Instance {
             row_index: None,
             lazy_wanted: None,
             children_owner: None,
+            joined: false,
             rooted: None,
             above: None,
             fills: Vec::new(),
@@ -1089,6 +1095,9 @@ impl<M: TextEngine> Core<M> {
                 if was_empty || place == Placement::Each {
                     self.components.mark(parent);
                 }
+                if let Some(joined) = self.components.instances.get_mut(&child) {
+                    joined.joined = true;
+                }
                 match place {
                     // Before its next JS sibling, else before what the
                     // view puts after the children.
@@ -1656,7 +1665,9 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Whether `host` is a component that runs once, made by JS (no owner
-    /// placed it), whose view is not made yet, out of the tree.
+    /// placed it) or passed by a view as a nested component's content
+    /// (`joined`), whose view is not made yet, out of the tree: the view
+    /// that places it gives its context.
     fn waits_for_tree(&self, host: NodeId) -> bool {
         let Some(inst) = self.components.instances.get(&host) else {
             return false;
@@ -1664,7 +1675,9 @@ impl<M: TextEngine> Core<M> {
         let Inner::Component(inner) = &inst.inner else {
             return false;
         };
-        inst.root.is_none() && !inner.failure_owner().is_live() && !self.id_in_tree(host)
+        inst.root.is_none()
+            && (inst.joined || !inner.failure_owner().is_live())
+            && !self.id_in_tree(host)
     }
 
     /// Whether node `id` is in the root's tree.
