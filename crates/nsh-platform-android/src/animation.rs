@@ -323,7 +323,7 @@ impl UiAnimation {
                     // The scroll view's (`sticky` below), never bound.
                     AnimationProp::StickyTop | AnimationProp::StickyLeft => {}
                     // Java hands it to the component when it changed.
-                    AnimationProp::ComponentProp(k) => match self.graph.eval(node) {
+                    AnimationProp::ComponentSlot(k) => match self.graph.eval(node) {
                         AnimationValue::Color(c) => out.extend_from_slice(&[
                             v,
                             COMPONENT_COLOR + k as f32,

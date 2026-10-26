@@ -36,7 +36,7 @@ public interface NshComponent {
      * @param name the prop
      * @param value the animated value
      */
-    default void setAnimatedProp(String name, double value) {
+    default void setAnimatedNumber(String name, double value) {
         setProp(name, value);
     }
 

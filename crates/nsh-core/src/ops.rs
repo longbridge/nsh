@@ -1811,7 +1811,7 @@ pub enum Prop {
     /// the value to the component on every frame it changes. `None` unbinds
     /// it; a value set with [`Prop::ComponentProp`] while bound is kept and
     /// sent once it is unbound.
-    ComponentPropAnimated(Arc<str>, Option<crate::animation::NodeId>),
+    ComponentPropBinding(Arc<str>, Option<crate::animation::NodeId>),
     /// A prop of a Rust component's host, decoded in the JS call into the
     /// prop's Rust type ([`crate::ui::PropSpec::decode`]); `None` resets it
     /// to its default.

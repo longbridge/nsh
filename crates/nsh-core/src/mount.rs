@@ -903,10 +903,10 @@ pub enum MountItem {
         name: Arc<str>,
     },
     /// The names of a registered native component's animated prop slots:
-    /// `names[n]` is [`AnimationProp::ComponentProp`]`(n)`. Sent before the
+    /// `names[n]` is [`AnimationProp::ComponentSlot`]`(n)`. Sent before the
     /// [`MountItem::AnimationBindings`] that use new slots; slots keep their
     /// name for the component's life.
-    ComponentBindings {
+    ComponentPropSlots {
         /// The container.
         id: NodeId,
         /// The name of each slot.

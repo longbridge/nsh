@@ -247,11 +247,11 @@ fn animated_props_bind_instead_of_crossing_as_json() {
     let id = native_id(&first);
     assert!(first.items.iter().any(|i| matches!(
         i,
-        MountItem::ComponentBindings { id: c, names } if *c == id && names.len() == 1 && &*names[0] == "progress"
+        MountItem::ComponentPropSlots { id: c, names } if *c == id && names.len() == 1 && &*names[0] == "progress"
     )));
     assert_eq!(
         bound_slots(&first, id),
-        Some(vec![nsh_core::animation::AnimationProp::ComponentProp(0)])
+        Some(vec![nsh_core::animation::AnimationProp::ComponentSlot(0)])
     );
     // Never as `{ "__av": n }`.
     assert!(
@@ -283,7 +283,7 @@ fn animated_component_prop_survives_rerender() {
         assert!(
             !batch.items.iter().any(|i| matches!(
                 i,
-                MountItem::AnimationBindings { id: c, .. } | MountItem::ComponentBindings { id: c, .. } if *c == id
+                MountItem::AnimationBindings { id: c, .. } | MountItem::ComponentPropSlots { id: c, .. } if *c == id
             )),
             "{:?}",
             batch.items

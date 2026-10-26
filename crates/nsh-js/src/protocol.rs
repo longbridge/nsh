@@ -358,7 +358,7 @@ pub(crate) fn decode_prop<'js>(
         if let Some(node) = animated_value(&value) {
             return Ok(Some(Op::SetProp {
                 id,
-                prop: Prop::ComponentPropAnimated(key.into(), Some(node)),
+                prop: Prop::ComponentPropBinding(key.into(), Some(node)),
             }));
         }
         let value = if value.is_undefined() {

@@ -1447,7 +1447,7 @@ impl Mounter {
                     host.push(&s.bindings, &self.animator);
                 }
             }
-            MountItem::ComponentBindings { id, names } => {
+            MountItem::ComponentPropSlots { id, names } => {
                 if let Some(Slot {
                     native: Native::Component(host),
                     ..

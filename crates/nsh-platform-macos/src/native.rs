@@ -646,17 +646,17 @@ pub(crate) fn has_component(surface: &Surface, id: NodeId) -> bool {
 /// components.
 pub(crate) fn component_animated(
     surface: &Surface,
-    moved: Vec<(NodeId, Arc<str>, nsh_core::animation::ComponentValue)>,
+    moved: Vec<(NodeId, Arc<str>, nsh_core::animation::AnimatedPropValue)>,
 ) {
-    use nsh_core::animation::ComponentValue;
+    use nsh_core::animation::AnimatedPropValue;
     for (id, name, value) in moved {
         // Taken out while the app's code runs, so it may reach the surface.
         let Some(mut component) = take_component(surface, id) else {
             continue;
         };
         match value {
-            ComponentValue::Number(n) => component.set_animated_number(&name, n),
-            ComponentValue::Color(argb) => component.set_animated_color(&name, argb),
+            AnimatedPropValue::Number(n) => component.set_animated_number(&name, n),
+            AnimatedPropValue::Color(argb) => component.set_animated_color(&name, argb),
             _ => {}
         }
         put_component(surface, id, component);

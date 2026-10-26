@@ -288,7 +288,7 @@ struct ComponentState {
     props: Vec<(Arc<str>, crate::JsonValue)>,
     /// Properties changed since the last commit.
     changed: Vec<Arc<str>>,
-    /// The names of its animated prop slots (`AnimationProp::ComponentProp`):
+    /// The names of its animated prop slots (`AnimationProp::ComponentSlot`):
     /// a name keeps its slot once given one.
     slots: Vec<Arc<str>>,
     /// The bound slots and their animation nodes. A bound prop's value in
@@ -3300,7 +3300,7 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            Prop::ComponentPropAnimated(name, value) => {
+            Prop::ComponentPropBinding(name, value) => {
                 if let Some(component) = node.component.as_mut() {
                     let slot = match component.slots.iter().position(|k| *k == name) {
                         Some(s) => Some(s as u16),
@@ -4232,13 +4232,13 @@ impl<M: TextEngine> Core<M> {
                         component
                             .bound
                             .iter()
-                            .map(|&(s, n)| (AnimationProp::ComponentProp(s), n)),
+                            .map(|&(s, n)| (AnimationProp::ComponentSlot(s), n)),
                     );
                 }
                 if let Some(component) = &node.component
                     && component.slots_changed.replace(false)
                 {
-                    self.mount.push(MountItem::ComponentBindings {
+                    self.mount.push(MountItem::ComponentPropSlots {
                         id,
                         names: component.slots.clone(),
                     });

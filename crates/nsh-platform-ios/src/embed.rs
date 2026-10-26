@@ -785,11 +785,11 @@ pub struct NshComponentCallbacks {
 }
 
 /// What nsh calls on a component when a prop bound to an animated value
-/// moves ([`nsh_app_register_component_animated`]); every function gets the
+/// moves ([`nsh_app_register_component_with_animation`]); every function gets the
 /// handle `create` returned.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct NshAnimatedComponentCallbacks {
+pub struct NshComponentAnimationCallbacks {
     /// Prop `name` moved to number `value`.
     pub set_number: unsafe extern "C" fn(component: *mut c_void, name: *const c_char, value: f64),
     /// Prop `name` moved to color `argb` (`0xAARRGGBB`).
@@ -803,7 +803,7 @@ pub struct NshComponentContext(crate::ComponentContext);
 struct CFactory {
     factory: *mut c_void,
     callbacks: NshComponentCallbacks,
-    animated: Option<NshAnimatedComponentCallbacks>,
+    animated: Option<NshComponentAnimationCallbacks>,
 }
 
 impl Drop for CFactory {
@@ -819,7 +819,7 @@ impl Drop for CFactory {
 struct CComponent {
     handle: *mut c_void,
     callbacks: NshComponentCallbacks,
-    animated: Option<NshAnimatedComponentCallbacks>,
+    animated: Option<NshComponentAnimationCallbacks>,
     view: objc2::rc::Retained<UIView>,
 }
 
@@ -856,7 +856,7 @@ impl crate::NativeComponent for CComponent {
             return self.set_prop(name, Some(&json));
         };
         let name = CString::new(name).unwrap_or_default();
-        // SAFETY: the contract of `nsh_app_register_component_animated`.
+        // SAFETY: the contract of `nsh_app_register_component_with_animation`.
         unsafe { (animated.set_number)(self.handle, name.as_ptr(), value) };
     }
 
@@ -865,7 +865,7 @@ impl crate::NativeComponent for CComponent {
             return self.set_prop(name, Some(&nsh_core::JsonValue::from(argb)));
         };
         let name = CString::new(name).unwrap_or_default();
-        // SAFETY: the contract of `nsh_app_register_component_animated`.
+        // SAFETY: the contract of `nsh_app_register_component_with_animation`.
         unsafe { (animated.set_color)(self.handle, name.as_ptr(), argb) };
     }
 }
@@ -905,12 +905,12 @@ pub unsafe extern "C" fn nsh_app_register_component(
 /// As [`nsh_app_register_component`]; `animated` must point to callbacks
 /// with the same contract.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_app_register_component_animated(
+pub unsafe extern "C" fn nsh_app_register_component_with_animation(
     app: *mut NshApp,
     name: *const c_char,
     factory: *mut c_void,
     callbacks: *const NshComponentCallbacks,
-    animated: *const NshAnimatedComponentCallbacks,
+    animated: *const NshComponentAnimationCallbacks,
 ) {
     // SAFETY: guaranteed by the caller.
     let animated = unsafe { animated.as_ref().copied() };
@@ -920,13 +920,13 @@ pub unsafe extern "C" fn nsh_app_register_component_animated(
 
 /// # Safety
 ///
-/// As [`nsh_app_register_component_animated`].
+/// As [`nsh_app_register_component_with_animation`].
 unsafe fn register_component(
     app: *mut NshApp,
     name: *const c_char,
     factory: *mut c_void,
     callbacks: *const NshComponentCallbacks,
-    animated: Option<NshAnimatedComponentCallbacks>,
+    animated: Option<NshComponentAnimationCallbacks>,
 ) {
     // SAFETY: guaranteed by the caller.
     let (app, name, callbacks) = unsafe { (&*app, CStr::from_ptr(name), *callbacks) };

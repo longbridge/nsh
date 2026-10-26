@@ -155,7 +155,7 @@ or a TSX `text={label()}` reads a signal, the new value is sent when the signal 
 | The element is created | Every own prop that is set, right after the component is made |
 | A prop's value changes | That prop with its new value |
 | A prop becomes `undefined` | That prop with no value (`nil` in Swift, `null` in Java) |
-| A prop bound to an animated value moves | `setAnimatedProp` / `setAnimatedColor`, on the frames it changes |
+| A prop bound to an animated value moves | `setAnimatedNumber` / `setAnimatedColor`, on the frames it changes |
 
 Props carry JSON values; keep the interface to data (functions and class instances stay in the app).
 
@@ -172,10 +172,10 @@ const pull = createAnimatedValue(0);
 </Scroll>
 ```
 
-The component receives numbers with `setAnimatedProp(name, value)` and colors with `setAnimatedColor(name, argb)`
+The component receives numbers with `setAnimatedNumber(name, value)` and colors with `setAnimatedColor(name, argb)`
 (`0xAARRGGBB`); by default both call `setProp` with the number, so a component that does not implement them still
 gets the value. Rust components implement `set_animated_number` and `set_animated_color`, and Rust code binds a prop
-with `native(name).animated_prop("progress", &value)`. Giving the prop a plain value again unbinds it and sends that
+with `native(name).bind_animated_prop("progress", &value)`. Giving the prop a plain value again unbinds it and sends that
 value. The web has no registered components.
 
 ## Events

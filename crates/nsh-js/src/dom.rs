@@ -617,6 +617,25 @@ pub(crate) fn retain(cx: *mut JsContext, node: JsValue, key: &'static str, value
     }
 }
 
+/// Whether the value the node keeps under `key` is an animated value.
+fn retains_animated(cx: *mut JsContext, p: *mut NodeData, key: &str) -> bool {
+    // SAFETY: live node data; the reader gets its own reference, so no
+    // borrow is held while it reads (a getter may run JS).
+    let kept = unsafe {
+        (*p).retained
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| qjs::JS_DupValue(cx, *v))
+    };
+    let Some(kept) = kept else {
+        return false;
+    };
+    // SAFETY: a context reference for the reader, which owns `kept`.
+    let kept =
+        unsafe { Value::from_raw(Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)), kept) };
+    crate::protocol::animated_value(&kept).is_some()
+}
+
 fn retain_in(
     cx: *mut JsContext,
     p: *mut NodeData,
@@ -1287,13 +1306,18 @@ fn set_prop(
         retain_in(cx, p, key.into(), value);
     }
     // A native component's prop may be an animated value (an object): kept
-    // under its own name until the prop changes or the view goes.
-    if name.starts_with('$') {
+    // under its own name until the prop changes or the view goes. Whether
+    // the value it replaces was one is read from what the node kept, so the
+    // binding goes whoever sets the prop (`nsh:rt`'s `prop` passes no
+    // previous value).
+    let was_bound = name.starts_with('$') && {
+        let bound = retains_animated(cx, p, name);
         retain_in(cx, p, name.to_owned().into(), value);
-    }
+        bound
+    };
     // SAFETY: a context reference for the decoder, which reads `value`.
     let js_cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
-    let v = unsafe { Value::from_raw(js_cx.clone(), qjs::JS_DupValue(cx, value)) };
+    let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
     // Decoding may run JS (getters): no borrow is held meanwhile.
     let mut warnings = crate::protocol::Warnings::deferred();
     // SAFETY: live node data.
@@ -1306,22 +1330,19 @@ fn set_prop(
     }
     // A native component's prop that was an animated value and is not any
     // more is unbound first (its new value is sent, not kept for later).
-    if let Ok(Some(Op::SetProp {
-        prop: nsh_core::Prop::ComponentProp(key, _),
-        ..
-    })) = &decoded
+    if was_bound
+        && let Ok(Some(Op::SetProp {
+            prop: nsh_core::Prop::ComponentProp(key, _),
+            ..
+        })) = &decoded
     {
-        // SAFETY: a context reference for the reader, which reads `prev`.
-        let was = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, prev)) };
-        if crate::protocol::animated_value(&was).is_some() {
-            dom(cx).push(
-                cx,
-                Op::SetProp {
-                    id,
-                    prop: nsh_core::Prop::ComponentPropAnimated(key.clone(), None),
-                },
-            )?;
-        }
+        dom(cx).push(
+            cx,
+            Op::SetProp {
+                id,
+                prop: nsh_core::Prop::ComponentPropBinding(key.clone(), None),
+            },
+        )?;
     }
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),
@@ -4180,6 +4201,50 @@ mod tests {
     }
 
     #[test]
+    fn component_prop_unbinds_when_set_to_a_value() {
+        let host = Host::new().unwrap();
+        // `prop` passes no previous value: the node knows it was bound.
+        host.eval_source(
+            r#"
+            import { element, prop } from "nsh:rt";
+            import { AnimatedValue } from "nsh/animated";
+            const n = element("native");
+            prop(n, "component", "com.example.thing");
+            prop(n, "$progress", new AnimatedValue(0));
+            prop(n, "$progress", 0.5);
+            prop(n, "$progress", 0.75);
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let props: Vec<_> = ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentPropBinding(name, node),
+                    ..
+                } if &**name == "progress" => Some(format!("bind {}", node.is_some())),
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentProp(name, value),
+                    ..
+                } if &**name == "progress" => Some(format!("{value:?}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            props,
+            [
+                "bind true",
+                "bind false",
+                "Some(Number(0.5))",
+                "Some(Number(0.75))"
+            ],
+            "{ops:?}"
+        );
+    }
+
+    #[test]
     fn component_prop_keeps_its_node() {
         use nsh_core::animation::AnimationOp;
         let host = Host::new().unwrap();
@@ -4202,7 +4267,7 @@ mod tests {
             first.iter().any(|o| matches!(
                 o,
                 Op::SetProp {
-                    prop: nsh_core::Prop::ComponentPropAnimated(name, Some(_)),
+                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)),
                     ..
                 } if &**name == "progress"
             )),

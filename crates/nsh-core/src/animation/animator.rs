@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
-use super::{AnimationProp, AnimationValue, ComponentValue, Finished, Graph, NodeId};
+use super::{AnimatedPropValue, AnimationProp, AnimationValue, Finished, Graph, NodeId};
 use crate::{
     Color, GestureValues, MAX_TRANSFORMS, MountItem,
     geometry::{Point, Points},
@@ -67,7 +67,7 @@ pub struct Animator {
     /// Native component view id -> the names of its animated prop slots.
     component_slots: FxHashMap<u32, Vec<Arc<str>>>,
     /// (view, slot) -> the value last written to the component.
-    component_values: FxHashMap<(u32, u16), ComponentValue>,
+    component_values: FxHashMap<(u32, u16), AnimatedPropValue>,
 }
 
 impl Animator {
@@ -76,7 +76,7 @@ impl Animator {
     pub fn apply(&mut self, item: &MountItem) {
         match item {
             MountItem::Animation(op) => self.graph.apply(op.clone(), &mut self.finished),
-            MountItem::ComponentBindings { id, names } => {
+            MountItem::ComponentPropSlots { id, names } => {
                 self.component_slots.insert(*id, names.clone());
             }
             MountItem::AnimationBindings { id, bindings } => {
@@ -85,7 +85,7 @@ impl Animator {
                     view != *id
                         || bindings
                             .iter()
-                            .any(|(p, _)| *p == AnimationProp::ComponentProp(slot))
+                            .any(|(p, _)| *p == AnimationProp::ComponentSlot(slot))
                 });
                 if bindings.is_empty() {
                     self.bindings.remove(id);
@@ -304,7 +304,7 @@ impl Animator {
                     // The scroll view's (`sticky_views`), never bound.
                     AnimationProp::StickyTop | AnimationProp::StickyLeft => {}
                     // The component's (`write_components`).
-                    AnimationProp::ComponentProp(_) => {}
+                    AnimationProp::ComponentSlot(_) => {}
                 }
             }
             set(view, values, canvas);
@@ -319,20 +319,20 @@ impl Animator {
     pub fn write_components<V: Copy>(
         &mut self,
         mut find: impl FnMut(u32) -> Option<V>,
-        mut set: impl FnMut(V, &str, ComponentValue),
+        mut set: impl FnMut(V, &str, AnimatedPropValue),
     ) {
         for (&id, bindings) in &self.bindings {
             let Some(names) = self.component_slots.get(&id) else {
                 continue;
             };
             for &(prop, node) in bindings {
-                let AnimationProp::ComponentProp(slot) = prop else {
+                let AnimationProp::ComponentSlot(slot) = prop else {
                     continue;
                 };
                 let Some(name) = names.get(slot as usize) else {
                     continue;
                 };
-                let value = ComponentValue::from(self.graph.eval(node));
+                let value = AnimatedPropValue::from(self.graph.eval(node));
                 if self.component_values.get(&(id, slot)) == Some(&value) {
                     continue;
                 }
@@ -363,7 +363,7 @@ mod tests {
         geometry::{Points, point, px},
     };
 
-    fn component_writes(a: &mut Animator) -> Vec<(u32, String, ComponentValue)> {
+    fn component_writes(a: &mut Animator) -> Vec<(u32, String, AnimatedPropValue)> {
         let mut out = Vec::new();
         a.write_components(Some, |id, name, value| {
             out.push((id, name.to_string(), value))
@@ -376,13 +376,13 @@ mod tests {
             node: 2,
             value,
         }));
-        a.apply(&MountItem::ComponentBindings {
+        a.apply(&MountItem::ComponentPropSlots {
             id: 4,
             names: vec!["progress".into()],
         });
         a.apply(&MountItem::AnimationBindings {
             id: 4,
-            bindings: vec![(AnimationProp::ComponentProp(0), 2)],
+            bindings: vec![(AnimationProp::ComponentSlot(0), 2)],
         });
     }
 
@@ -392,7 +392,7 @@ mod tests {
         bound_component(&mut a, 0.25);
         assert_eq!(
             component_writes(&mut a),
-            vec![(4, "progress".to_string(), ComponentValue::Number(0.25))]
+            vec![(4, "progress".to_string(), AnimatedPropValue::Number(0.25))]
         );
         // Unchanged: nothing.
         assert!(component_writes(&mut a).is_empty());
@@ -402,19 +402,19 @@ mod tests {
         }));
         assert_eq!(
             component_writes(&mut a),
-            vec![(4, "progress".to_string(), ComponentValue::Number(0.5))]
+            vec![(4, "progress".to_string(), AnimatedPropValue::Number(0.5))]
         );
     }
 
     #[test]
     fn component_color_is_argb() {
         assert_eq!(
-            ComponentValue::from(AnimationValue::Color(0x1122_3344)),
-            ComponentValue::Color(0x4411_2233)
+            AnimatedPropValue::from(AnimationValue::Color(0x1122_3344)),
+            AnimatedPropValue::Color(0x4411_2233)
         );
         assert_eq!(
-            ComponentValue::from(AnimationValue::Number(0.5)),
-            ComponentValue::Number(0.5)
+            AnimatedPropValue::from(AnimationValue::Number(0.5)),
+            AnimatedPropValue::Number(0.5)
         );
     }
 
@@ -441,7 +441,7 @@ mod tests {
         });
         a.apply(&MountItem::AnimationBindings {
             id: 4,
-            bindings: vec![(AnimationProp::ComponentProp(0), 2)],
+            bindings: vec![(AnimationProp::ComponentSlot(0), 2)],
         });
         assert_eq!(component_writes(&mut a).len(), 1);
     }

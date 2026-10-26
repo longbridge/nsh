@@ -66,7 +66,7 @@ const COMPONENT_PROPS: i32 = 30;
 const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
-const COMPONENT_BINDINGS: i32 = 34;
+const COMPONENT_PROP_SLOTS: i32 = 34;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -483,8 +483,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.string(name.to_string());
             }
-            MountItem::ComponentBindings { id, names } => {
-                e.int(COMPONENT_BINDINGS);
+            MountItem::ComponentPropSlots { id, names } => {
+                e.int(COMPONENT_PROP_SLOTS);
                 e.int(id as i32);
                 e.int(names.len() as i32);
                 for name in names {

@@ -174,10 +174,10 @@ impl Components {
 pub(crate) struct ComponentHost {
     pub(crate) container: objc2::rc::Retained<crate::native_view::NshView>,
     pub(crate) component: Option<Box<dyn NativeComponent>>,
-    /// The names of its animated prop slots (`MountItem::ComponentBindings`).
+    /// The names of its animated prop slots (`MountItem::ComponentPropSlots`).
     pub(crate) slots: Vec<std::sync::Arc<str>>,
     /// Slot -> the value last handed to the component.
-    handed: Vec<(u16, nsh_core::animation::ComponentValue)>,
+    handed: Vec<(u16, nsh_core::animation::AnimatedPropValue)>,
 }
 
 impl ComponentHost {
@@ -200,26 +200,26 @@ impl ComponentHost {
         )],
         animator: &crate::animation::Animator,
     ) {
-        use nsh_core::animation::{AnimationProp, ComponentValue};
+        use nsh_core::animation::{AnimatedPropValue, AnimationProp};
         let Some(component) = self.component.as_mut() else {
             return;
         };
         for &(prop, node) in bindings {
-            let AnimationProp::ComponentProp(slot) = prop else {
+            let AnimationProp::ComponentSlot(slot) = prop else {
                 continue;
             };
             let Some(name) = self.slots.get(slot as usize) else {
                 continue;
             };
-            let value = ComponentValue::from(animator.eval(node));
+            let value = AnimatedPropValue::from(animator.eval(node));
             match self.handed.iter_mut().find(|(s, _)| *s == slot) {
                 Some((_, v)) if *v == value => continue,
                 Some((_, v)) => *v = value,
                 None => self.handed.push((slot, value)),
             }
             match value {
-                ComponentValue::Color(argb) => component.set_animated_color(name, argb),
-                ComponentValue::Number(n) => component.set_animated_number(name, n),
+                AnimatedPropValue::Color(argb) => component.set_animated_color(name, argb),
+                AnimatedPropValue::Number(n) => component.set_animated_number(name, n),
                 _ => {}
             }
         }

@@ -751,10 +751,10 @@ export type NativeEventHandlers<E> = { [K in keyof E & string as `on${Capitalize
 
 /** The props of a native component: a view's (style, classes, layout,
  * accessibility, `ref`), its own `P` and handlers of its events `E`. Each
- * own prop may also be an animated value: the platform then pushes its
- * value (a number or a color) to the component on every frame it
- * changes, without JS. */
-export type NativeComponentProps<P, E> = Omit<ViewProps, "children"> & { [K in keyof P]: P[K] | AnimatedNode } & NativeEventHandlers<E>;
+ * number or string (color) prop may also be an animated value: the
+ * platform then pushes its value (a number or a color) to the component
+ * on every frame it changes, without JS. */
+export type NativeComponentProps<P, E> = Omit<ViewProps, "children"> & { [K in keyof P]: NonNullable<P[K]> extends number | string ? P[K] | AnimatedNode : P[K] } & NativeEventHandlers<E>;
 
 /** What a native component takes and emits. */
 export interface NativeComponentSpec<P, E> {

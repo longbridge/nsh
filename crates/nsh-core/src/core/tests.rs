@@ -11516,7 +11516,7 @@ mod views {
         fn view(_: AnimatedNativeHostProps, _: Scope<NoEvent>) -> impl IntoElement {
             let v = animated_value(0.5);
             crate::ui::native("test.native")
-                .animated_prop("progress", &v)
+                .bind_animated_prop("progress", &v)
                 .flex_1()
         }
     }
@@ -11531,7 +11531,7 @@ mod views {
         assert!(
             batch.items.iter().any(|i| matches!(
                 i,
-                MountItem::ComponentBindings { names, .. } if names.len() == 1 && &*names[0] == "progress"
+                MountItem::ComponentPropSlots { names, .. } if names.len() == 1 && &*names[0] == "progress"
             )),
             "{:#?}",
             batch.items
@@ -11539,7 +11539,7 @@ mod views {
         assert!(batch.items.iter().any(|i| matches!(
             i,
             MountItem::AnimationBindings { bindings, .. }
-                if bindings.iter().any(|(p, _)| *p == crate::animation::AnimationProp::ComponentProp(0))
+                if bindings.iter().any(|(p, _)| *p == crate::animation::AnimationProp::ComponentSlot(0))
         )));
         // The value lives with the element, though the view let go of it.
         assert!(!batch.items.iter().any(|i| matches!(
@@ -17860,7 +17860,7 @@ fn native_with_animated_prop(c: &mut Core<FakeEngine>, node: Option<crate::anima
     if let Some(node) = node {
         ops.push(Op::SetProp {
             id: 2,
-            prop: Prop::ComponentPropAnimated("progress".into(), Some(node)),
+            prop: Prop::ComponentPropBinding("progress".into(), Some(node)),
         });
     }
     apply(c, ops);
@@ -17876,7 +17876,7 @@ fn component_prop_op(name: &str, value: Option<crate::JsonValue>) -> Op {
 fn animated_prop_op(name: &str, node: Option<crate::animation::NodeId>) -> Op {
     Op::SetProp {
         id: 2,
-        prop: Prop::ComponentPropAnimated(name.into(), node),
+        prop: Prop::ComponentPropBinding(name.into(), node),
     }
 }
 
@@ -17896,7 +17896,7 @@ fn component_props_of(
 
 fn component_bindings_of(batch: &crate::mount::MountBatch) -> Option<Vec<Arc<str>>> {
     batch.items.iter().rev().find_map(|i| match i {
-        MountItem::ComponentBindings { id: 2, names } => Some(names.clone()),
+        MountItem::ComponentPropSlots { id: 2, names } => Some(names.clone()),
         _ => None,
     })
 }
@@ -17918,7 +17918,7 @@ fn component_prop_binds_to_animated_node() {
     let names = batch
         .items
         .iter()
-        .position(|i| matches!(i, MountItem::ComponentBindings { id: 2, .. }))
+        .position(|i| matches!(i, MountItem::ComponentPropSlots { id: 2, .. }))
         .unwrap();
     let bindings = batch
         .items
@@ -17929,7 +17929,7 @@ fn component_prop_binds_to_animated_node() {
     assert_eq!(component_bindings_of(&batch), Some(vec!["progress".into()]));
     assert_eq!(
         animation_bindings_of(&batch),
-        Some(vec![(AnimationProp::ComponentProp(0), 7)])
+        Some(vec![(AnimationProp::ComponentSlot(0), 7)])
     );
     assert!(
         component_props_of(&batch)
@@ -17994,7 +17994,7 @@ fn rebinding_reuses_the_slot() {
     assert_eq!(component_bindings_of(&batch), None);
     assert_eq!(
         animation_bindings_of(&batch),
-        Some(vec![(AnimationProp::ComponentProp(0), 8)])
+        Some(vec![(AnimationProp::ComponentSlot(0), 8)])
     );
 }
 
@@ -18027,7 +18027,7 @@ fn late_named_component_gets_bindings() {
     let batch = c.commit().unwrap();
     let at = |pred: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(pred).unwrap();
     let component = at(&|i| matches!(i, MountItem::Component { id: 2, .. }));
-    let names = at(&|i| matches!(i, MountItem::ComponentBindings { id: 2, .. }));
+    let names = at(&|i| matches!(i, MountItem::ComponentPropSlots { id: 2, .. }));
     let bindings = at(&|i| matches!(i, MountItem::AnimationBindings { id: 2, .. }));
     assert!(component < names && names < bindings);
 }

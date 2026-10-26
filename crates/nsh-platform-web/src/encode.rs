@@ -1267,7 +1267,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         // stays in Rust (`nsh_key`).
         // No registered native components on the web.
         MountItem::ComponentProps { .. }
-        | MountItem::ComponentBindings { .. }
+        | MountItem::ComponentPropSlots { .. }
         | MountItem::Keymap(_)
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }

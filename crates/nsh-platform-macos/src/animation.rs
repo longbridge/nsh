@@ -48,7 +48,7 @@ impl UiAnimation {
     pub(crate) fn write_components(
         &mut self,
         has: impl Fn(u32) -> bool,
-        mut set: impl FnMut(u32, &str, nsh_core::animation::ComponentValue),
+        mut set: impl FnMut(u32, &str, nsh_core::animation::AnimatedPropValue),
     ) {
         self.0.write_components(
             |id| has(id).then_some(id),

@@ -382,7 +382,7 @@ impl Mounter {
             // The animator's (`Surface::apply`).
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
-            | MountItem::ComponentBindings { .. } => {}
+            | MountItem::ComponentPropSlots { .. } => {}
         }
     }
 

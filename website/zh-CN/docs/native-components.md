@@ -147,7 +147,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 | 元素被创建 | 组件创建后立即收到所有已设置的自有 prop |
 | 某个 prop 的值变化 | 该 prop 及其新值 |
 | 某个 prop 变为 `undefined` | 该 prop，但没有值（Swift 中为 `nil`，Java 中为 `null`） |
-| 绑定到动画值的 prop 变化 | `setAnimatedProp` / `setAnimatedColor`，在值变化的那些帧 |
+| 绑定到动画值的 prop 变化 | `setAnimatedNumber` / `setAnimatedColor`，在值变化的那些帧 |
 
 Props 携带 JSON 值；接口只传数据（函数和类实例留在应用中）。
 
@@ -163,9 +163,9 @@ const pull = createAnimatedValue(0);
 </Scroll>
 ```
 
-组件通过 `setAnimatedProp(name, value)` 收到数值，通过 `setAnimatedColor(name, argb)` 收到颜色（`0xAARRGGBB`）；两者默认都以该数值调用
+组件通过 `setAnimatedNumber(name, value)` 收到数值，通过 `setAnimatedColor(name, argb)` 收到颜色（`0xAARRGGBB`）；两者默认都以该数值调用
 `setProp`，所以没有实现它们的组件也能收到值。Rust 组件实现 `set_animated_number` 和 `set_animated_color`，Rust 代码用
-`native(name).animated_prop("progress", &value)` 绑定 prop。重新给该 prop 一个普通值即解除绑定，并发送这个值。Web 上没有注册的原生组件。
+`native(name).bind_animated_prop("progress", &value)` 绑定 prop。重新给该 prop 一个普通值即解除绑定，并发送这个值。Web 上没有注册的原生组件。
 
 ## 事件
 

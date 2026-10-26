@@ -61,7 +61,7 @@ final class Mounter {
     private static final int OVERFLOW = 31;
     private static final int ACCESSIBILITY_LABEL = 32;
     private static final int APPEARANCE = 33;
-    private static final int COMPONENT_BINDINGS = 34;
+    private static final int COMPONENT_PROP_SLOTS = 34;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
@@ -518,7 +518,7 @@ final class Mounter {
                     component(id, string(objects, b.getInt()));
                     break;
                 }
-                case COMPONENT_BINDINGS: {
+                case COMPONENT_PROP_SLOTS: {
                     View v = views.get(b.getInt());
                     String[] names = new String[b.getInt()];
                     for (int i = 0; i < names.length; i++) names[i] = string(objects, b.getInt());

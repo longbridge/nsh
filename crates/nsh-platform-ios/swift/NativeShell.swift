@@ -434,7 +434,7 @@ public protocol NshComponent: AnyObject {
     func command(_ name: String, _ args: Any?)
     /// Prop `name`, bound to an animated value, moved to `value` (on the
     /// frames it changes, without JS).
-    func setAnimatedProp(_ name: String, _ value: Double)
+    func setAnimatedNumber(_ name: String, _ value: Double)
     /// Prop `name`, bound to an animated color, moved to `argb`
     /// (0xAARRGGBB).
     func setAnimatedColor(_ name: String, _ argb: UInt32)
@@ -443,10 +443,10 @@ public protocol NshComponent: AnyObject {
 extension NshComponent {
     /// Ignores commands.
     public func command(_ name: String, _ args: Any?) {}
-    /// `setProp` with the number.
-    public func setAnimatedProp(_ name: String, _ value: Double) { setProp(name, value) }
-    /// `setProp` with the color.
-    public func setAnimatedColor(_ name: String, _ argb: UInt32) { setProp(name, argb) }
+    /// `setProp` with the number, an `NSNumber` as JSON props have.
+    public func setAnimatedNumber(_ name: String, _ value: Double) { setProp(name, NSNumber(value: value)) }
+    /// `setProp` with the color (0xAARRGGBB), an `NSNumber`.
+    public func setAnimatedColor(_ name: String, _ argb: UInt32) { setProp(name, NSNumber(value: argb)) }
 }
 
 /// What a component tells its app: its events and its own size.
@@ -691,11 +691,11 @@ extension NshAppView {
                 Unmanaged<ComponentFactoryBox>.fromOpaque(factory!).release()
             }
         )
-        var animated = NshAnimatedComponentCallbacks(
+        var animated = NshComponentAnimationCallbacks(
             set_number: { component, name, value in
                 let box = Unmanaged<ComponentBox>.fromOpaque(component).takeUnretainedValue()
                 let name = String(cString: name)
-                MainActor.assumeIsolated { box.component.setAnimatedProp(name, value) }
+                MainActor.assumeIsolated { box.component.setAnimatedNumber(name, value) }
             },
             set_color: { component, name, argb in
                 let box = Unmanaged<ComponentBox>.fromOpaque(component).takeUnretainedValue()
@@ -703,6 +703,6 @@ extension NshAppView {
                 MainActor.assumeIsolated { box.component.setAnimatedColor(name, argb) }
             }
         )
-        nsh_app_register_component_animated(app, name, factory, &callbacks, &animated)
+        nsh_app_register_component_with_animation(app, name, factory, &callbacks, &animated)
     }
 }

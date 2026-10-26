@@ -677,7 +677,7 @@ pub(crate) fn has_component(surface: &Surface, id: NodeId) -> bool {
 /// components, delivered with the next frame as props are.
 pub(crate) fn component_animated(
     surface: &Surface,
-    moved: Vec<(NodeId, Arc<str>, nsh_core::animation::ComponentValue)>,
+    moved: Vec<(NodeId, Arc<str>, nsh_core::animation::AnimatedPropValue)>,
 ) {
     for (id, name, value) in moved {
         let Some(item) = component_item(surface, id) else {
@@ -696,7 +696,7 @@ pub(crate) fn component_animated(
 fn queue_animated(
     pending: &mut Vec<Pending>,
     name: Arc<str>,
-    value: nsh_core::animation::ComponentValue,
+    value: nsh_core::animation::AnimatedPropValue,
 ) {
     for p in pending.iter_mut() {
         if let Pending::Animated(queued, v) = p
@@ -754,7 +754,7 @@ enum Pending {
     Prop(Arc<str>, Option<JsonValue>),
     Command(Arc<str>, JsonValue),
     /// A bound prop that moved.
-    Animated(Arc<str>, nsh_core::animation::ComponentValue),
+    Animated(Arc<str>, nsh_core::animation::AnimatedPropValue),
 }
 
 impl ComponentItem {
@@ -788,10 +788,10 @@ impl ComponentItem {
                 Pending::Prop(name, value) => component.set_prop(name, value.as_ref(), window, cx),
                 Pending::Command(name, args) => component.command(name, args, window, cx),
                 Pending::Animated(name, value) => match *value {
-                    nsh_core::animation::ComponentValue::Number(n) => {
+                    nsh_core::animation::AnimatedPropValue::Number(n) => {
                         component.set_animated_number(name, n, window, cx)
                     }
-                    nsh_core::animation::ComponentValue::Color(argb) => {
+                    nsh_core::animation::AnimatedPropValue::Color(argb) => {
                         component.set_animated_color(name, argb, window, cx)
                     }
                     _ => {}
@@ -998,15 +998,19 @@ mod tests {
 
     #[test]
     fn animated_props_queue_their_latest_value() {
-        use nsh_core::animation::ComponentValue;
+        use nsh_core::animation::AnimatedPropValue;
         let mut pending = vec![Pending::Command("go".into(), JsonValue::Null)];
         for v in [0.1, 0.2, 0.3] {
-            queue_animated(&mut pending, "progress".into(), ComponentValue::Number(v));
+            queue_animated(
+                &mut pending,
+                "progress".into(),
+                AnimatedPropValue::Number(v),
+            );
         }
         queue_animated(
             &mut pending,
             "tint".into(),
-            ComponentValue::Color(0xff00_00ff),
+            AnimatedPropValue::Color(0xff00_00ff),
         );
         let animated: Vec<_> = pending
             .iter()
@@ -1018,8 +1022,8 @@ mod tests {
         assert_eq!(
             animated,
             [
-                ("progress".to_string(), ComponentValue::Number(0.3)),
-                ("tint".to_string(), ComponentValue::Color(0xff00_00ff)),
+                ("progress".to_string(), AnimatedPropValue::Number(0.3)),
+                ("tint".to_string(), AnimatedPropValue::Color(0xff00_00ff)),
             ]
         );
         assert_eq!(pending.len(), 3, "the command stays");
