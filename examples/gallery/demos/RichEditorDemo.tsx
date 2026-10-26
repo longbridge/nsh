@@ -233,7 +233,13 @@ function DocumentEditor() {
           }
         >
           <View testID="markdown-editor" style={{ minHeight: 280, paddingHorizontal: 20, paddingVertical: 16 }}>
-            <RichEditor editor={editor} placeholder="Write something…" style={{ flex: 1 }} classes={documentClasses} />
+            <RichEditor
+              editor={editor}
+              accessibilityLabel="Document"
+              placeholder="Write something…"
+              style={{ flex: 1 }}
+              classes={documentClasses}
+            />
           </View>
         </If>
         <View
