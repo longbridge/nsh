@@ -133,7 +133,7 @@ function Panel(props: { panel: string }) {
     case "preview":
       return (
         <View class="flex-1 items-center justify-center gap-3 p-4">
-          <IconTile name="spark" tint={colors.accent} />
+          <IconTile name="sparkles" tint={colors.accent} />
           <View class="items-center gap-0.5">
             <Text class="text-sm font-semibold text-foreground">Live preview</Text>
             <Text class="text-xs text-muted-foreground">Follows the editor beside it</Text>

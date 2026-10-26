@@ -30,7 +30,7 @@ function Specimen(props: { label: string; code?: string; first?: boolean; childr
 function Links() {
   const tapped = signal("nothing yet");
   return (
-    <Card icon="text" title="Spans and links" subtitle="Nested spans with presses of their own">
+    <Card icon="type" title="Spans and links" subtitle="Nested spans with presses of their own">
       <Text style={{ ...body(), fontSize: 16, lineHeight: 25 }} onPress={() => tapped.set("the sentence (not a link)")}>
         {"By continuing you agree to the "}
         <Text style={link()} onPress={() => tapped.set("Terms of service")} onLongPress={() => tapped.set("Terms (long press)")}>
@@ -92,7 +92,7 @@ function Inline() {
 
 function Fonts() {
   return (
-    <Card icon="styles" title="Type" subtitle="Custom fonts, weights, styles, spacing">
+    <Card icon="palette" title="Type" subtitle="Custom fonts, weights, styles, spacing">
       <Specimen label="Custom font" code="Pacifico-Regular.ttf" first>
         <Text style={{ fontFamily: pacifico, fontSize: 34, color: colors.accent, lineHeight: 52 }}>Custom fonts</Text>
       </Specimen>
@@ -185,7 +185,7 @@ function Scaling() {
 
 function Truncation() {
   return (
-    <Card icon="lists" title="Truncation" subtitle="numberOfLines and ellipsizeMode">
+    <Card icon="list" title="Truncation" subtitle="numberOfLines and ellipsizeMode">
       <Specimen label="Two lines, tail" code="numberOfLines={2}" first>
         <Text numberOfLines={2} style={body()}>
           {LOREM}
@@ -222,7 +222,7 @@ const ARABIC = "النص الأصلي يُنضَّد مرة واحدة على خ
 
 function Cjk() {
   return (
-    <Card icon="text" title="Chinese and Japanese" subtitle="Lines break between characters, never before closing punctuation">
+    <Card icon="type" title="Chinese and Japanese" subtitle="Lines break between characters, never before closing punctuation">
       <Specimen label="Chinese paragraph" first>
         <Text style={body()}>{CHINESE}</Text>
       </Specimen>
@@ -245,7 +245,7 @@ function Cjk() {
 
 function RightToLeft() {
   return (
-    <Card icon="text" title="Right to left" subtitle="Arabic and Hebrew, mixed with Latin text and numbers">
+    <Card icon="type" title="Right to left" subtitle="Arabic and Hebrew, mixed with Latin text and numbers">
       <Specimen label="Arabic paragraph" code={`writingDirection="rtl"`} first>
         <Text style={{ ...body(), writingDirection: "rtl" }}>{ARABIC}</Text>
       </Specimen>
@@ -269,7 +269,7 @@ function Alignment() {
   const paragraph =
     "Justified text spreads the spaces of every line across the box, except on the last line of a paragraph, which stays at its start.";
   return (
-    <Card icon="lists" title="Alignment" subtitle="textAlign in left-to-right and right-to-left text">
+    <Card icon="list" title="Alignment" subtitle="textAlign in left-to-right and right-to-left text">
       <Specimen label="Left" code={`textAlign="left"`} first>
         <Text style={{ ...body(), textAlign: "left" }}>{sentence}</Text>
       </Specimen>

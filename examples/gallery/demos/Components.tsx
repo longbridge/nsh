@@ -79,7 +79,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; onPress: 
             {props.note}
           </Text>
         </View>
-        <Icon name="chevron" size={14} tint={colors.faint} />
+        <Icon name="chevron-right" size={14} tint={colors.faint} />
       </View>
     </Press>
   );
@@ -102,7 +102,7 @@ function LayoutAnimations() {
     change();
   };
   return (
-    <Card icon="animation" title="Layout animation" subtitle="configureNext, then change the tree" right={<Badge label={`${items().length}`} />}>
+    <Card icon="activity" title="Layout animation" subtitle="configureNext, then change the tree" right={<Badge label={`${items().length}`} />}>
       <Segmented options={presets} value={preset()} onChange={(p) => preset.set(p)} size="small" />
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, minHeight: 56 }}>
         <Each of={items()}>
@@ -136,7 +136,7 @@ function LayoutAnimations() {
 function PressableSheet() {
   const sheet = signal(false);
   return (
-    <Card icon="components" title="Sheet" subtitle="A Tailwind active: variant opens it">
+    <Card icon="blocks" title="Sheet" subtitle="A Tailwind active: variant opens it">
       <View
         onPress={() => sheet.set(true)}
         role="button"
@@ -203,7 +203,7 @@ function PressFeedback() {
   const last = signal("None yet");
   const disabled = signal(false);
   return (
-    <Card icon="gestures" title="Press feedback" subtitle={hint("Drawn natively while the finger is down", "Drawn natively while the button is down")}>
+    <Card icon="hand" title="Press feedback" subtitle={hint("Drawn natively while the finger is down", "Drawn natively while the button is down")}>
       <View style={tile()} activeStyle={{ opacity: 0.4 }} onPress={() => last.set("Fading tile")}>
         <Tile title="Fades while pressed" note="activeStyle={{ opacity: 0.4 }}" />
       </View>
@@ -229,7 +229,7 @@ function Accessory() {
   const text = signal("");
   let input: YNode | undefined;
   return (
-    <Card icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
+    <Card icon="type" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
       <Field
         ref={(node) => (input = node)}
         value={text()}
@@ -277,7 +277,7 @@ function AvoidingPage() {
       <KeyboardAvoidingView behavior={behavior()} style={{ flex: 1, backgroundColor: tints.info }}>
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
-            <Card icon="form" title={`behavior="${behavior()}"`} subtitle="Focus the field at the bottom">
+            <Card icon="text-cursor-input" title={`behavior="${behavior()}"`} subtitle="Focus the field at the bottom">
               <Segmented options={behaviors} value={behavior()} onChange={(b) => behavior.set(b)} />
               <Text style={{ fontSize: 14, lineHeight: 20, color: colors.muted }}>{behaviorNote[behavior()]}</Text>
             </Card>
@@ -295,7 +295,7 @@ function ModalOptions() {
   const translucent = signal(false);
   return (
     <Card
-      icon="system"
+      icon="settings"
       title="Dialog options"
       subtitle="statusBarTranslucent, orientations"
       right={<Toggle value={translucent()} onChange={(v) => translucent.set(v)} label="statusBarTranslucent" />}
@@ -347,7 +347,7 @@ function PlatformInfo() {
   const announced = signal(0);
   let target: YNode | undefined;
   return (
-    <Card icon="spark" title="Platform" subtitle="platform, pixelRatio, announce" right={<Badge label={platform.os} tone="accent" />}>
+    <Card icon="sparkles" title="Platform" subtitle="platform, pixelRatio, announce" right={<Badge label={platform.os} tone="accent" />}>
       <View>
         <Each of={rows()}>
           {(row, i) => (
@@ -393,7 +393,7 @@ export function Components() {
         () => (
           <Card title="Keyboard avoidance" subtitle="Content outside scroll views" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow icon="form" title="KeyboardAvoidingView" note="padding / height" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
+              <LinkRow icon="text-cursor-input" title="KeyboardAvoidingView" note="padding / height" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
             </Inset>
           </Card>
         ),

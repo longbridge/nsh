@@ -117,7 +117,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
             {props.note}
           </Text>
         </View>
-        <Icon name="chevron" size={14} tint={colors.faint} />
+        <Icon name="chevron-right" size={14} tint={colors.faint} />
       </View>
     </Press>
   );
@@ -196,7 +196,7 @@ export function Form() {
       cards={[
         () => (
           <Card
-            icon="form"
+            icon="text-cursor-input"
             title="Keyboard"
             subtitle="keyboardDismissMode while dragging"
             right={<Badge label={`${Math.round(keyboardFrame().height)} pt`} tone={keyboardFrame().height > 0 ? "accent" : "neutral"} />}
@@ -387,8 +387,8 @@ export function Form() {
         () => (
           <Card title="More keyboards" subtitle="Sheets and bars that ride on the keyboard" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow first icon="components" title="Inputs in a sheet" note='presentation="pageSheet"' onPress={() => sheet.set(true)} />
-              <LinkRow icon="text" title="A message bar at the bottom" note="KeyboardAvoidingView" onPress={() => nav.push({ name: "page", page: MessageBar })} />
+              <LinkRow first icon="blocks" title="Inputs in a sheet" note='presentation="pageSheet"' onPress={() => sheet.set(true)} />
+              <LinkRow icon="type" title="A message bar at the bottom" note="KeyboardAvoidingView" onPress={() => nav.push({ name: "page", page: MessageBar })} />
             </Inset>
           </Card>
         ),

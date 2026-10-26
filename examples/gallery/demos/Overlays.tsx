@@ -52,7 +52,7 @@ export function Overlays() {
     const open = signal(false);
     let anchor: YNode | undefined;
     return (
-      <Card icon="components" title="Overlay" subtitle="A box that clips its content, with an overlay anchored inside it" right={<Badge label="nsh" />}>
+      <Card icon="blocks" title="Overlay" subtitle="A box that clips its content, with an overlay anchored inside it" right={<Badge label="nsh" />}>
         <View style={{ height: 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingHorizontal: 12 }}>
           <View ref={anchor} onPress={() => open.set(!open())} style={{ alignSelf: "flex-start" }}>
             <Trigger label={open() ? "Close" : "Open the overlay"} />
@@ -80,7 +80,7 @@ export function Overlays() {
 
   function Popovers() {
     return (
-      <Card icon="components" title="Popover" subtitle="Anchored to its trigger on every device">
+      <Card icon="blocks" title="Popover" subtitle="Anchored to its trigger on every device">
         <Popover
           offset={6}
           margin={8}
@@ -101,7 +101,7 @@ export function Overlays() {
     const hovered = signal(false);
     const pinned = signal(false);
     return (
-      <Card icon="text" title="Tooltip" subtitle={platform.idiom === "desktop" ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
+      <Card icon="type" title="Tooltip" subtitle={platform.idiom === "desktop" ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {/* A text: the core's bubble, drawn with the theme's popover tokens. */}
           <View tooltip="Saves the document">
@@ -134,7 +134,7 @@ export function Overlays() {
   function Sheets() {
     const open = signal(false);
     return (
-      <Card icon="components" title="Sheet" subtitle="A panel at the bottom, over a backdrop">
+      <Card icon="blocks" title="Sheet" subtitle="A panel at the bottom, over a backdrop">
         <Button label="Show the sheet" variant="secondary" onPress={() => open.set(true)} />
         <Sheet
           open={open()}
@@ -158,7 +158,7 @@ export function Overlays() {
   function Toasts() {
     let count = 0;
     return (
-      <Card icon="system" title="Toast" subtitle="The gallery's toasts, on ToastManager, ToastStack and Toast">
+      <Card icon="settings" title="Toast" subtitle="The gallery's toasts, on ToastManager, ToastStack and Toast">
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Button
             label="Copy the link"
@@ -185,7 +185,7 @@ export function Overlays() {
 
   function Last() {
     return (
-      <Card icon="system" title="Last event">
+      <Card icon="settings" title="Last event">
         <Text style={{ fontSize: 13, color: colors.text, fontFamily: mono }}>{last()}</Text>
       </Card>
     );

@@ -316,7 +316,7 @@ export function PageHeader(props: {
           class="hover:bg-hover active:bg-accent"
           style={{ height: 32, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 10, borderRadius: radius.control, cursor: "pointer" }}
         >
-          <Icon name="back" size={18} tint={tint()} />
+          <Icon name="chevron-left" size={18} tint={tint()} />
           <Text style={{ fontSize: 14, fontWeight: "500", color: tint() }}>Back</Text>
         </View>
       </If>
@@ -787,6 +787,83 @@ export function RoundButton(props: {
       </View>
     </Press>
   );
+}
+
+/** An item of a {@link ToggleGroup}: its icon, and the label screen readers say and its tooltip shows. */
+export type ToggleItem<T extends string> = { value: T; icon: IconName; label: string; disabled?: boolean };
+
+/**
+ * A row of icon toggles on one track (shadcn's toggle group): `single` keeps
+ * at most one pressed, `multiple` any. Each toggle is `nsh/base`'s `Button`,
+ * selected while pressed, so screen readers (and tests) read its state.
+ */
+export function ToggleGroup<T extends string>(props: {
+  type: "single" | "multiple";
+  items: readonly ToggleItem<T>[];
+  /** The pressed values. */
+  value: readonly T[];
+  /** The value pressed or released, and whether it is now pressed. */
+  onToggle: (value: T, pressed: boolean) => void;
+  testID?: string;
+}) {
+  return (
+    <View
+      testID={props.testID}
+      style={{ flexDirection: "row", padding: 2, gap: 2, borderRadius: 9, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.border }}
+    >
+      <Each of={props.items}>
+        {(item) => {
+          const pressed = () => props.value.includes(item().value);
+          return (
+            <View tooltip={item().label}>
+              <BaseButton
+                selected={pressed()}
+                disabled={item().disabled}
+                accessibilityLabel={item().label}
+                onPress={() => props.onToggle(item().value, !pressed())}
+                hoverStyle={item().disabled || pressed() ? undefined : { backgroundColor: colors.raised }}
+                focusStyle={focusRing(1)}
+                style={{
+                  width: 30,
+                  height: 28,
+                  borderRadius: 7,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: item().disabled ? 0.35 : 1,
+                  ...(pressed() ? { ...finish.pill, borderWidth: 1 } : { borderWidth: 1, borderColor: "transparent" }),
+                }}
+              >
+                <Icon name={item().icon} size={16} tint={pressed() ? colors.text : colors.muted} />
+              </BaseButton>
+            </View>
+          );
+        }}
+      </Each>
+    </View>
+  );
+}
+
+/** A square icon button for toolbars: its label is what screen readers say and its tooltip. */
+export function IconButton(props: { icon: IconName; label: string; disabled?: boolean; onPress: () => void }) {
+  return (
+    <View tooltip={props.label}>
+      <BaseButton
+        disabled={props.disabled}
+        accessibilityLabel={props.label}
+        onPress={props.onPress}
+        hoverStyle={props.disabled ? undefined : { backgroundColor: colors.raised }}
+        focusStyle={focusRing(1)}
+        style={{ width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", opacity: props.disabled ? 0.35 : 1 }}
+      >
+        <Icon name={props.icon} size={16} tint={colors.text} />
+      </BaseButton>
+    </View>
+  );
+}
+
+/** A thin vertical line between a toolbar's groups. */
+export function ToolbarSeparator() {
+  return <View style={{ width: 1, height: 20, marginHorizontal: 4, backgroundColor: colors.border }} />;
 }
 
 /** A titled card of controls (the demos' sections). */

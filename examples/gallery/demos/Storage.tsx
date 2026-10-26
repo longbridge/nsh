@@ -68,7 +68,7 @@ export function StorageDemo() {
 
   function Launches() {
     return (
-      <Card icon="storage" title="Launches" subtitle="Counted each time this demo opens" right={<Badge label="Kept" tone="up" />}>
+      <Card icon="database" title="Launches" subtitle="Counted each time this demo opens" right={<Badge label="Kept" tone="up" />}>
         <Figure value={launches() === null ? "–" : String(launches())} unit={launches() === 1 ? "opening" : "openings"} />
         <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>
           {`setItem("${LAUNCHES}", "${launches() ?? ""}")`}
@@ -80,7 +80,7 @@ export function StorageDemo() {
   function Note() {
     const hint = () => ({ idle: "", saving: "Saving…", saved: "Saved", failed: "Not saved" })[saved()];
     return (
-      <Card icon="form" title="Note" subtitle="Saved as you type, back when the demo opens again">
+      <Card icon="text-cursor-input" title="Note" subtitle="Saved as you type, back when the demo opens again">
         <View
           style={{
             borderRadius: radius.control,
@@ -123,7 +123,7 @@ export function StorageDemo() {
   function Keys() {
     const total = () => entries().reduce((sum, e) => sum + e.key.length + e.length, 0);
     return (
-      <Card icon="lists" title="Stored keys" subtitle="keys() and each value's length">
+      <Card icon="list" title="Stored keys" subtitle="keys() and each value's length">
         <If when={entries().length > 0} else={<Caption label="Nothing stored" />}>
           <View>
             <Each of={entries()}>

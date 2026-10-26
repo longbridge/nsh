@@ -95,12 +95,12 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
           style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent", opacity: props.disabled ? 0.35 : 1 }}
         >
           <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
-          <Icon name="chevron" size={14} tint={colors.faint} />
+          <Icon name="chevron-right" size={14} tint={colors.faint} />
         </View>
       }
       back={
         <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}>
-          <Icon name="back" size={14} tint={colors.accent} />
+          <Icon name="chevron-left" size={14} tint={colors.accent} />
           <Text style={{ fontSize: 14, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
         </View>
       }
@@ -196,7 +196,7 @@ export function Menus() {
     });
     const key = (k: string) => (platform.idiom === "desktop" ? keymap.label(k) : undefined);
     return (
-      <Card icon="lists" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
+      <Card icon="list" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip label="File" />}>
             <Item label="New document" shortcut={key("mod+alt+n")} onSelect={() => act("New document")} />
@@ -279,14 +279,14 @@ export function Menus() {
       </>
     );
     return (
-      <Card icon="photos" title="On the rows of a list" subtitle={platform.idiom === "desktop" ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
+      <Card icon="images" title="On the rows of a list" subtitle={platform.idiom === "desktop" ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
         <If when={files().length > 0} else={<Caption label="No files left" />}>
           <View>
             <Each of={files()} key={(f) => f.id}>
               {(file, i) => (
                 <ContextMenu margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed(file().name)} trigger={
                   <Row first={i() === 0}>
-                    <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
+                    <Icon name={file().starred ? "star" : "file-text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
                     <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
                     <Menu align="end" offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} trigger={
                       <View accessibilityLabel={`Actions for ${file().name}`} tooltip="More actions" hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingHorizontal: 8, height: 28, justifyContent: "center" }}>
@@ -311,7 +311,7 @@ export function Menus() {
     const placement = signal<"top" | "bottom" | "left" | "right">("bottom");
     const align = signal<"start" | "center" | "end">("start");
     return (
-      <Card icon="components" title="Where it goes" subtitle={platform.idiom === "desktop" ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
+      <Card icon="blocks" title="Where it goes" subtitle={platform.idiom === "desktop" ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
         <Segmented
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
@@ -338,7 +338,7 @@ export function Menus() {
   function LongList() {
     const zone = signal("UTC+8 Hong Kong");
     return (
-      <Card icon="scroll" title="A long menu" subtitle="Twenty choices in a menu that scrolls">
+      <Card icon="scroll-text" title="A long menu" subtitle="Twenty choices in a menu that scrolls">
         <Menu offset={4} margin={8} popupStyle={{ ...surface(), padding: 0 }} backdropStyle={backdrop} onOpenChange={changed("Time zone")} trigger={<Chip label={zone()} icon="search" />}>
           <Scroll style={{ maxHeight: platform.idiom === "desktop" ? 280 : 360 }} contentStyle={{ padding: 6 }}>
             <Each of={ZONES}>{(z) => <Item label={z()} mark={zone() === z() ? "check" : null} onSelect={() => zone.set(z())} />}</Each>
@@ -352,7 +352,7 @@ export function Menus() {
     const open = signal(false);
     keymap.bind("mod+shift+p", () => open.set(!open()));
     return (
-      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.idiom === "desktop" ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
+      <Card icon="sparkles" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.idiom === "desktop" ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
         <Menu
           open={open()}
           onOpenChange={(next, reason) => {
@@ -377,7 +377,7 @@ export function Menus() {
 
   function Events() {
     return (
-      <Card icon="system" title="Events" subtitle="onOpenChange with its reason, and what was chosen">
+      <Card icon="settings" title="Events" subtitle="onOpenChange with its reason, and what was chosen">
         <If when={events().length > 0} else={<Caption label="Open a menu" />}>
           <View style={{ gap: 4 }}>
             <Each of={events()}>

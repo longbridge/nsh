@@ -322,7 +322,7 @@ export function Avatar() {
         borderColor: colors.border,
       }}
     >
-      <Icon name="spark" size={14} tint={colors.accent} />
+      <Icon name="sparkles" size={14} tint={colors.accent} />
     </View>
   );
 }

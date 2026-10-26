@@ -475,7 +475,7 @@ export function EditorDemo() {
             <Tool label="Regular expression" name=".*" on={regex()} onPress={() => regex.set(!regex())} />
             <IconTool label="Previous match" icon="arrow-up" onPress={() => editor?.run("findPrevious")} />
             <IconTool label="Next match" icon="arrow-down" onPress={() => editor?.run("findNext")} />
-            <IconTool label="Close the find bar" icon="close" onPress={closeFind} />
+            <IconTool label="Close the find bar" icon="x" onPress={closeFind} />
           </View>
           <View class="flex-row items-center gap-0.5">
             <Input
@@ -655,7 +655,7 @@ export function EditorDemo() {
           backdropClass="bg-black/40"
           trigger={
             <View accessibilityLabel="Editor options" tooltip="Editor options" class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
-              <Icon name="sliders" size={16} tint={colors.muted} />
+              <Icon name="sliders-horizontal" size={16} tint={colors.muted} />
             </View>
           }
         >
@@ -821,7 +821,7 @@ export function EditorDemo() {
         <Text numberOfLines={1} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {typescript() && analyzing() ? "Analyzing…" : LANGUAGES.find((l) => l.value === language())!.label}
         </Text>
-        <IconTool label="Toggle problems" icon="diagnostics" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />
+        <IconTool label="Toggle problems" icon="triangle-alert" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />
       </View>
     </View>
   );

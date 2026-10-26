@@ -243,7 +243,7 @@ function Markdown() {
   const pressed = signal("nothing yet");
   const viewing = signal<TextViewImage | null>(null);
   return (
-    <Card icon="text" title="Markdown" subtitle="CommonMark and GitHub's: tables, tasks, alerts, footnotes, math, HTML">
+    <Card icon="type" title="Markdown" subtitle="CommonMark and GitHub's: tables, tasks, alerts, footnotes, math, HTML">
       <TextView
         markdown={MARKDOWN}
         selectable
@@ -262,7 +262,7 @@ function Markdown() {
 function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
-    <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
+    <Card icon="type" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
       <TextView html={HTML} selectable classes={links} onImagePress={(image) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
@@ -294,7 +294,7 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
-    <Card icon="components" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
+    <Card icon="blocks" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
         extensions={extensions}
@@ -355,7 +355,7 @@ function Streaming() {
     }, 40);
   };
   return (
-    <Card icon="chat" title="Streaming" subtitle="A reply as an AI model writes it, with a caret">
+    <Card icon="message-circle" title="Streaming" subtitle="A reply as an AI model writes it, with a caret">
       <TextView
         markdown={text()}
         options={{ streaming: streaming() }}
@@ -378,7 +378,7 @@ const ANSWER = `Every one with a native backend:
 /** Two documents and a plain text that select as one, around a label that stays out. */
 function Selection() {
   return (
-    <Card icon="text" title="SelectionArea" subtitle="One selection across texts and TextViews">
+    <Card icon="type" title="SelectionArea" subtitle="One selection across texts and TextViews">
       <SelectionArea class="gap-3">
         <TextView markdown={QUESTION} />
         <TextView markdown={ANSWER} />

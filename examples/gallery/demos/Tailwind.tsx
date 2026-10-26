@@ -91,7 +91,7 @@ function Stats() {
     { label: "Unknown classes", value: "0", note: "Checked at build", tone: "text-amber-600 dark:text-amber-400" },
   ];
   return (
-    <Card icon="stocks" title="Stat grid" subtitle="grid grid-cols-2 gap-2">
+    <Card icon="chart-candlestick" title="Stat grid" subtitle="grid grid-cols-2 gap-2">
       <View class="grid grid-cols-2 gap-2">
         <Each of={stats}>
           {(s) => (
@@ -124,7 +124,7 @@ function Buttons() {
   const count = signal(0);
   const busy = signal(false);
   return (
-    <Card icon="components" title="Buttons" subtitle="active: hover: transition disabled: bg-linear-to-b">
+    <Card icon="blocks" title="Buttons" subtitle="active: hover: transition disabled: bg-linear-to-b">
       <View
         onPress={() => count.set(count() + 1)}
         class={`h-11 flex-row items-center justify-center rounded-[10px] bg-zinc-900 dark:bg-zinc-100 ${finish.light} transition duration-150 active:scale-[0.97] active:opacity-90`}
@@ -162,7 +162,7 @@ function Cards() {
     "border border-rose-500 text-rose-600 dark:border-rose-400 dark:text-rose-400",
   ];
   return (
-    <Card icon="styles" title="Cards and badges" subtitle="group-active: ring-inset shadow-*">
+    <Card icon="palette" title="Cards and badges" subtitle="group-active: ring-inset shadow-*">
       <View class="group flex-row items-center gap-3 rounded-xl bg-linear-to-b from-white to-[#f2f2ee] p-3 shadow-md shadow-black/10 ring-1 ring-inset ring-black/5 dark:from-[#2d2f34] dark:to-[#222428] dark:shadow-black/40 dark:ring-white/10 transition-transform duration-200 active:scale-[0.98]">
         <Image src={logo} class="size-12 rounded-[10px]" />
         <View class="flex-1 gap-0.5">
@@ -186,7 +186,7 @@ function Cards() {
 
 function Layout() {
   return (
-    <Card icon="lists" title="Flex, grid, breakpoints" subtitle="flex-[2] col-span-2 row-span-2 sm:">
+    <Card icon="list" title="Flex, grid, breakpoints" subtitle="flex-[2] col-span-2 row-span-2 sm:">
       <View class="flex-row gap-2">
         <View class="h-10 flex-1 rounded-lg bg-sky-400/20" />
         <View class="h-10 flex-[2] rounded-lg bg-sky-400/50" />
@@ -237,7 +237,7 @@ function Colors() {
 function Shadows() {
   const sizes = ["shadow-sm", "shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl"];
   return (
-    <Card icon="spark" title="Shadows, rings, outlines" subtitle="shadow-* ring-* outline-* inset-shadow-*">
+    <Card icon="sparkles" title="Shadows, rings, outlines" subtitle="shadow-* ring-* outline-* inset-shadow-*">
       <View class="flex-row justify-between px-1 py-2">
         <Each of={sizes}>
           {(s) => (
@@ -278,7 +278,7 @@ function Gradients() {
     ["bg-conic from-red-500 via-green-500 to-red-500", "Conic"],
   ];
   return (
-    <Card icon="canvas" title="Gradients" subtitle="bg-linear-* bg-radial bg-conic">
+    <Card icon="pencil" title="Gradients" subtitle="bg-linear-* bg-radial bg-conic">
       <View class="flex-row justify-between">
         <Each of={kinds}>
           {(k) => (
@@ -295,7 +295,7 @@ function Gradients() {
 
 function Typography() {
   return (
-    <Card icon="text" title="Typography" subtitle="font-* tracking-* decoration-* line-clamp-*">
+    <Card icon="type" title="Typography" subtitle="font-* tracking-* decoration-* line-clamp-*">
       <Text class="text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-100">Display</Text>
       <Text class="text-lg font-light text-zinc-700 dark:text-zinc-300">Light, large and relaxed</Text>
       <Text class="font-serif text-lg italic text-zinc-700 dark:text-zinc-300">Serif italic</Text>
@@ -319,7 +319,7 @@ function Typography() {
 
 function Effects() {
   return (
-    <Card icon="photos" title="Filters and blur" subtitle="grayscale sepia blur backdrop-blur mix-blend">
+    <Card icon="images" title="Filters and blur" subtitle="grayscale sepia blur backdrop-blur mix-blend">
       <View class="flex-row justify-between">
         <Each of={["", "grayscale", "sepia", "blur-sm", "brightness-50"]}>
           {(f) => (
@@ -343,7 +343,7 @@ function Effects() {
 
 function Motion() {
   return (
-    <Card icon="animation" title="Animations and transforms" subtitle="animate-* rotate-* skew-* scale-*">
+    <Card icon="activity" title="Animations and transforms" subtitle="animate-* rotate-* skew-* scale-*">
       <View class="flex-row items-center justify-between px-1 py-2">
         <View class="items-center gap-2.5">
           <View class="size-8 rounded-lg bg-violet-500 animate-spin" />
@@ -376,7 +376,7 @@ function Motion() {
 function Lists() {
   const items = ["Inbox", "Drafts", "Sent", "Archive", "Trash"];
   return (
-    <Card icon="lists" title="Structural variants" subtitle="first: even: last: active:">
+    <Card icon="list" title="Structural variants" subtitle="first: even: last: active:">
       <View class="overflow-hidden rounded-xl border border-line">
         <Each of={items}>
           {(item) => (
@@ -394,7 +394,7 @@ function Lists() {
 
 function Inputs() {
   return (
-    <Card icon="form" title="Inputs" subtitle="focus: placeholder: caret-*">
+    <Card icon="text-cursor-input" title="Inputs" subtitle="focus: placeholder: caret-*">
       <Input
         placeholder="Focus me"
         class="h-11 rounded-[10px] border border-border bg-card px-3.5 inset-shadow-[0_1px_2px_rgba(20,20,10,0.07)] text-[15px] text-zinc-900 placeholder:text-zinc-400 caret-brand focus:border-brand focus:ring-2 focus:ring-brand-fill/40 dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)] dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:ring-brand-fill/25"

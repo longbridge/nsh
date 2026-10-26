@@ -5,9 +5,9 @@ import { expect, open, test } from "nsh/test";
 test("Tab and Shift-Tab indent list items, and the toolbar edits the shown editor", async () => {
   const app = await open("../App.tsx");
   await app.press("role:button[Rich editor]");
-  await app.waitFor("Tab indents an item");
+  await app.waitFor("Tab indents an item, Shift-Tab outdents it");
   // The caret in the second item: Tab nests it under the first.
-  await app.press("Tab indents an item");
+  await app.press("Tab indents an item, Shift-Tab outdents it");
   await app.keyboard.press("tab");
   await app.waitFor("◦");
   // Shift-Tab takes it back out.
@@ -19,5 +19,5 @@ test("Tab and Shift-Tab indent list items, and the toolbar edits the shown edito
   await app.waitFor("◦");
   await app.press("role:button[Undo]");
   await app.waitFor("◦", { state: "gone" });
-  expect(app.shows("Tab indents an item")).toBe(true);
+  expect(app.shows("Tab indents an item, Shift-Tab outdents it")).toBe(true);
 });

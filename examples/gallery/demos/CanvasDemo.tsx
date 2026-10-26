@@ -83,7 +83,7 @@ function Dial() {
   const angle = needle.interpolate({ inputRange: [0, 100], outputRange: [a0, a1] });
   const zone = () => (load() >= 85 ? "danger" : load() >= 60 ? "warn" : "up");
   return (
-    <Card icon="spark" title="Turbine 3 load" subtitle="Needle and sweep on one animated value">
+    <Card icon="sparkles" title="Turbine 3 load" subtitle="Needle and sweep on one animated value">
       <Canvas
         style={{ height: 230 }}
         draw={(cx, { width, height }) => {
@@ -197,7 +197,7 @@ function AreaChart() {
   const avg = () => Math.round(data().reduce((a, b) => a + b, 0) / data().length);
   return (
     <Card
-      icon="stocks"
+      icon="chart-candlestick"
       title="Relay throughput"
       subtitle="Area · average · hatching"
       right={<Button label="New" variant="secondary" onPress={() => (data.set(fresh()), sweep.replay())} />}
@@ -315,7 +315,7 @@ function Ridgeline() {
   const sweep = reveal(1400);
   return (
     <Card
-      icon="animation"
+      icon="activity"
       title="Footfall by hour"
       subtitle="Ridgeline, one curve a day"
       right={<Button label="Replay" variant="secondary" onPress={sweep.replay} />}
@@ -459,7 +459,7 @@ function Dumbbell() {
   play();
   return (
     <Card
-      icon="physics"
+      icon="atom"
       title="Route latency"
       subtitle="Dumbbell, before → after"
       right={<Button label="Replay" variant="secondary" onPress={play} />}
@@ -737,7 +737,7 @@ function Sketch() {
   const point = (e: GestureResponderEvent): [number, number] => [e.locationX, e.locationY];
   return (
     <Card
-      icon="gestures"
+      icon="hand"
       title="Sketch"
       subtitle={hint("Touch → draw from JS", "Drag → draw from JS")}
       right={<Button label="Clear" variant="secondary" disabled={strokes().length === 0} onPress={() => strokes.set([])} />}

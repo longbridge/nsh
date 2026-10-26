@@ -27,7 +27,7 @@ function Messaging() {
   const sent = signal(0);
   let web!: YNode;
   return (
-    <Card icon="media" title="Web view" subtitle="Inline HTML, with messages both ways">
+    <Card icon="circle-play" title="Web view" subtitle="Inline HTML, with messages both ways">
       <WebView ref={web} html={page()} style={{ height: 210, backgroundColor: colors.inset, ...frame() }} onMessage={(e) => message.set(e.data)} />
       <Caption label="From the page" note={message() || "—"} />
       <Caption label="To the page" note={sent() ? `hi #${sent()}` : "—"} />
@@ -60,7 +60,7 @@ function NavButton(props: { flip?: boolean; enabled: boolean; label: string; onP
           transform: props.flip ? [{ rotate: "180deg" }] : [],
         }}
       >
-        <Icon name="chevron" size={18} tint={colors.text} />
+        <Icon name="chevron-right" size={18} tint={colors.text} />
       </View>
     </Press>
   );
