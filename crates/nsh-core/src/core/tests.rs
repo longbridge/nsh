@@ -5042,6 +5042,34 @@ fn projected_states_style_a_part_without_its_accessibility() {
 }
 
 #[test]
+fn a_projected_focus_styles_a_part_as_focused() {
+    use crate::tailwind::state;
+    // A one-time-code input's cell: `focus:` while it takes the next
+    // character, though the focus is the input's.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "opacity-50 focus:opacity-100");
+    c.commit();
+    let projected = |states| Op::SetProp {
+        id: 2,
+        prop: Prop::ProjectedStates(states),
+    };
+    apply(&mut c, vec![projected(state::FOCUSED)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ViewProps { id: 2, .. })),
+        "{:?}",
+        batch.items
+    );
+    apply(&mut c, vec![projected(0)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {

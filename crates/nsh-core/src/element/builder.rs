@@ -1694,6 +1694,18 @@ pub trait Interactive: Element {
         });
         self
     }
+
+    /// Styles it as focused while `focused` holds (its `focus:` classes
+    /// and focus styles), as the part the keyboard is on inside a control
+    /// that keeps the focus itself: the cell of a one-time-code input that
+    /// takes the next character, the highlighted option of a list (NSH
+    /// has no active descendant). The platform's focus stays where it is.
+    fn project_focused(mut self, focused: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(focused, |a, focused| {
+            project(a, crate::tailwind::state::FOCUSED, focused)
+        });
+        self
+    }
 }
 
 /// Sets or clears `bit` of the states an element shows as a part.
