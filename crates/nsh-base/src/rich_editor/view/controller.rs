@@ -9,7 +9,6 @@ use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
     sync::Arc,
-    thread::ThreadId,
     time::Duration,
 };
 
@@ -194,27 +193,30 @@ impl Rv {
 
     /// Subscribes to the session and binds the keys while focused.
     fn connect(&self) {
-        let notified = self.notified;
-        let thread: ThreadId = std::thread::current().id();
-        // The view's signals live on the engine thread: changes made
-        // elsewhere reach it with the next change made there.
-        let id = self.session.subscribe(Arc::new(move |_| {
-            if std::thread::current().id() == thread {
-                notified.update(|n| *n += 1);
-            }
-        }));
-        let requests = self.notified;
+        // Sessions change inside JS's calls (`run`), on other threads and
+        // in the view's own handlers, where the components' graph may not
+        // be entered: subscribers only mark the change and wake a task,
+        // which writes the view's signals on the engine thread.
+        let wake = Wake::default();
+        let changed = wake.clone();
+        let id = self.session.subscribe(Arc::new(move |_| changed.wake()));
         let pending: Arc<std::sync::Mutex<Vec<ViewRequest>>> = Arc::default();
         let queue = pending.clone();
+        let requested = wake.clone();
         let hook = self.session.attach_view(Arc::new(move |request| {
-            if std::thread::current().id() == thread {
-                queue
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push(request);
-                requests.update(|n| *n += 1);
-            }
+            queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(request);
+            requested.wake();
         }));
+        let notified = self.notified;
+        spawn(async move {
+            loop {
+                wake.wait().await;
+                notified.update(|n| *n += 1);
+            }
+        });
         let session = self.session.clone();
         cleanup(move || {
             session.unsubscribe(id);
@@ -1401,5 +1403,36 @@ mod tests {
     #[test]
     fn words_skip_punctuation() {
         assert_eq!(word_bounds("hi, you"), [(0, 2), (4, 7)]);
+    }
+}
+
+/// A wake-up that any thread or call may signal and one task awaits:
+/// several signals before the task runs count as one.
+#[derive(Clone, Default)]
+struct Wake(Arc<std::sync::Mutex<(bool, Option<std::task::Waker>)>>);
+
+impl Wake {
+    fn wake(&self) {
+        let waker = {
+            let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            inner.0 = true;
+            inner.1.take()
+        };
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+
+    async fn wait(&self) {
+        std::future::poll_fn(|cx| {
+            let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            if std::mem::take(&mut inner.0) {
+                std::task::Poll::Ready(())
+            } else {
+                inner.1 = Some(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+        })
+        .await;
     }
 }

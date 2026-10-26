@@ -363,6 +363,10 @@ pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
     }
     if let Some(ty) = schema.node_type("list_item") {
         keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
+        // Tab indents and Shift-Tab outdents an item, as in documents
+        // editors; Mod-] and Mod-[ too, as ProseMirror's example setup.
+        keys.push(("Tab".into(), sink_list_item(ty.clone())));
+        keys.push(("Shift-Tab".into(), lift_list_item(ty.clone())));
         keys.push(("Mod-[".into(), lift_list_item(ty.clone())));
         keys.push(("Mod-]".into(), sink_list_item(ty)));
     }

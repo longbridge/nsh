@@ -38,7 +38,7 @@ import { Button, Card, colors } from "../ui";
 
 const DOC = `# Release notes
 
-Type **Markdown** as you go: \`# \` makes a heading, \`- \` a list, \`> \` a quote.
+Type **Markdown** as you go: \`#\` and a space makes a heading, \`-\` a list, \`>\` a quote.
 
 - Lists split on Enter
 - Tab indents an item
