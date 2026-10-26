@@ -51,7 +51,7 @@ export interface ButtonOptions {
   style?: object | (() => object);
 }
 
-const __read = <T>(v: T | (() => T)): T => (typeof v === "function" ? (v as () => T)() : v);
+const __read = <T,>(v: T | (() => T)): T => (typeof v === "function" ? (v as () => T)() : v);
 const __kind = (kind: ButtonKind, o?: ButtonOptions): ButtonKind => (__read<boolean | undefined>(o?.on) ? "accent" : kind);
 
 /** A button's props (spread them: `<Button {...button("primary")}>`): its
