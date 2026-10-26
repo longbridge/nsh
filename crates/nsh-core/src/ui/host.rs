@@ -1771,6 +1771,24 @@ impl Painter {
         )
     }
 
+    /// Fills the current path with the canvas view's background: its
+    /// `backgroundColor` and its `backgroundImage` gradients (`bg-*`,
+    /// `bg-linear-*` classes, the appearance's colors), positioned over
+    /// `area` (this drawing's coordinates) as over a box of that size. The
+    /// view then draws no background of its own: the background shows only
+    /// where the path fills, as CSS's `clip-path` shows a box's
+    /// ([`ViewPaint::Background`]). The canvas's state is kept around the
+    /// fill.
+    pub fn fill_background_from_view(self, area: Bounds<Points>) -> Self {
+        self.view_paint(
+            ViewPaint::Background {
+                area,
+                rule: FillRule::NonZero,
+            },
+            CanvasOp::Fill(None, FillRule::NonZero),
+        )
+    }
+
     fn view_paint(mut self, view: ViewPaint, placeholder: CanvasOp) -> Self {
         let at = self.drawing.ops.len() as u32;
         self.drawing.view_paints.push((at, view));

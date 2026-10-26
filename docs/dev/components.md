@@ -267,7 +267,9 @@ reasons: `reactive-components.md`.
   `.line_width_from_view()` and `.line_dash_from_view()` paint with the canvas view's `fill` / `stroke` /
   `strokeWidth` / `strokeDasharray` (inherited as CSS inherits them, `currentColor` its text color), which the core
   sets before the platform gets the drawing (`Drawing::view_paints`), so a component's shapes take the app's
-  `fill-*` / `stroke-*` classes and follow them and the appearance without being drawn again; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
+  `fill-*` / `stroke-*` classes and follow them and the appearance without being drawn again;
+  `.fill_background_from_view(area)` fills the current path with the canvas view's background (`bg-*`,
+  `bg-linear-*`: a gradient under a chart's line), which the view then draws only there; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
   in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(point, rule)` /
   `.is_point_in_stroke(point)` and, with a `Path2D`, `.path_contains(&path, point, rule)` /
   `.stroke_contains(&path, point)`, on a painter made by a function the drawing and the press handler both call, to

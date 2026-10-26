@@ -591,6 +591,13 @@ impl Node {
         if self.spare {
             style.hidden = true;
         }
+        // A canvas whose drawing fills with its background shows it there
+        // only (`Painter::fill_background_from_view`).
+        if self.kind == Kind::Canvas && self.drawing.as_ref().is_some_and(|d| d.paints_background())
+        {
+            style.background_color = crate::style::Color::TRANSPARENT;
+            style.clear_background_images();
+        }
         if style.transform.has_fractions() {
             let size = if self.frame.size.width.is_nan() {
                 Size::default()
@@ -1535,8 +1542,14 @@ impl<M: TextEngine> Core<M> {
                 if node.drawing.is_none() && drawing.ops.is_empty() && drawing.nodes.is_empty() {
                     return Ok(());
                 }
+                // Whether the view draws its background (it does not where
+                // the drawing fills with it).
+                let background_moved = node.drawing.as_ref().is_some_and(|d| d.paints_background())
+                    != drawing.paints_background();
                 node.drawing = Some(Arc::from(drawing));
-                let flags = dirty::CANVAS | if slots_changed { dirty::ANIMATION } else { 0 };
+                let flags = dirty::CANVAS
+                    | if slots_changed { dirty::ANIMATION } else { 0 }
+                    | if background_moved { dirty::VIEW } else { 0 };
                 self.mark(key, flags);
                 Ok(())
             }
@@ -2284,6 +2297,15 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         if view_changed {
             flags |= dirty::VIEW;
+            // A drawing filling with the view's background paints the new
+            // one.
+            if self.nodes[key as usize]
+                .drawing
+                .as_ref()
+                .is_some_and(|d| d.paints_background())
+            {
+                flags |= dirty::CANVAS;
+            }
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
@@ -4258,7 +4280,12 @@ impl<M: TextEngine> Core<M> {
                     drawing.clone()
                 } else {
                     let (paint, current) = self.resolved_paint(key);
-                    Arc::new(drawing.painted(&paint, current))
+                    let style = &node.view_style;
+                    let images = style
+                        .effects
+                        .as_deref()
+                        .map_or(&[][..], |e| &e.background_images[..]);
+                    Arc::new(drawing.painted(&paint, current, style.background_color, images))
                 };
                 self.mount.push(MountItem::Canvas { id, drawing });
             }

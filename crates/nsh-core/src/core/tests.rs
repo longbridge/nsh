@@ -9249,6 +9249,78 @@ mod painter {
         assert_eq!(plain.ops[2], CanvasOp::LineWidth(Num::Const(1.0)));
         assert_eq!(plain.ops[3], CanvasOp::LineDash([].into()));
     }
+
+    /// A canvas filling a shape with its view's background: a color and a
+    /// gradient, which the view does not draw behind it.
+    #[component]
+    fn BackgroundFilled() -> impl IntoElement {
+        use crate::{PatchValue, StyleDecl, StyleKey};
+        let set = |key, value: &str| StyleDecl::Set(key, PatchValue::Str(value.into()));
+        let area = bounds(point(px(0.0), px(0.0)), size(px(40.0), px(20.0)));
+        let p = Painter::new()
+            .begin_path()
+            .rect(area)
+            .fill_background_from_view(area);
+        canvas(p).inline_style(crate::ui::Style::from_decls([
+            set(StyleKey::BackgroundColor, "#00ff00"),
+            set(
+                StyleKey::BackgroundImage,
+                "linear-gradient(to bottom, #ff0000, #0000ff)",
+            ),
+        ]))
+    }
+
+    #[test]
+    fn drawings_fill_with_their_views_background() {
+        let mut c = core();
+        c.mount_root(&crate::ui::Root::new::<BackgroundFilled>(|| ()));
+        let batch = c.commit().unwrap();
+        let (canvas, drawing) = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Canvas { id, drawing } => Some((*id, drawing.clone())),
+                _ => None,
+            })
+            .unwrap();
+        // The fill: the color, then the gradient over the area, top to
+        // bottom.
+        let fills: Vec<_> = drawing
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                CanvasOp::FillStyle(paint) => Some(paint.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fills[0], Paint::Color(crate::style::Color(0x00ff_00ff)));
+        let Paint::Gradient(g) = &fills[1] else {
+            panic!("{fills:?}")
+        };
+        assert_eq!(
+            g.shape,
+            crate::canvas::GradientShape::Linear {
+                start: point(px(20.0), px(0.0)),
+                end: point(px(20.0), px(20.0)),
+            }
+        );
+        // The view draws no background of its own.
+        let style = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == canvas => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(style.background_color.is_transparent());
+        assert!(
+            style
+                .effects
+                .as_deref()
+                .is_none_or(|e| e.background_images.is_empty())
+        );
+    }
     /// A canvas that has drawn nothing and records an empty drawing (a
     /// component's canvas before its first layout) sends nothing; one
     /// that has drawn sends what it draws.
