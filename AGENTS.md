@@ -335,7 +335,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until 0.3.0, the first release recorded. A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0 is not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.

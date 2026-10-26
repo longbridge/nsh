@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "example-embed-gpui"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "fancy-regex"
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "gallery-native"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "env_logger",
  "log",
@@ -2881,7 +2881,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "html5ever",
  "imara-diff",
@@ -2903,7 +2903,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-bundler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dunce",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-dev"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3004,7 +3004,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -3026,7 +3026,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-ios-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-ios",
@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-ios-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3044,7 +3044,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-js"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "brotli",
  "flate2",
@@ -3069,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-linux",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-macos",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3107,7 +3107,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -3118,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -3132,7 +3132,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-android"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jni",
  "libc",
@@ -3149,7 +3149,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-ios"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -3174,7 +3174,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-linux"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "gtk4",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-macos"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "crossbeam-channel",
@@ -3223,7 +3223,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-base",
@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-windows"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-testing"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -3287,7 +3287,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-windows",
@@ -3296,7 +3296,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -5330,7 +5330,7 @@ dependencies = [
 
 [[package]]
 name = "rust-exports-native"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -7215,7 +7215,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
