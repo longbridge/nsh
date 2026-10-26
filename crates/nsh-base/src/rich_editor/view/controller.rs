@@ -25,7 +25,7 @@ use super::{
     geometry::{DOC, Geometry, Hit},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
-    session::{EditorSession, NodeViews, ViewRequest},
+    session::{EditorSession, NodeViews, ViewGeometry, ViewRequest},
 };
 use crate::rich_editor::{
     commands::base_keymap,
@@ -238,10 +238,17 @@ impl Rv {
                 notified.update(|n| *n += 1);
             }
         });
+        let geometry = self.session.attach_geometry(Arc::new(GeometryHandle {
+            thread: std::thread::current().id(),
+            geo: self.geo.clone(),
+            state: self.st.clone(),
+        }));
         let session = self.session.clone();
         cleanup(move || {
             session.unsubscribe(id);
             session.unsubscribe(hook);
+            session.unsubscribe(geometry);
+            session.set_focused(false);
         });
         let rv = self.clone();
         effect(move || {
@@ -451,7 +458,7 @@ impl Rv {
 
     /// Whether the document can be edited: the prop and every plugin.
     pub(crate) fn editable(&self) -> bool {
-        if !self.props.editable.get_untracked() {
+        if !self.props.editable.get_untracked() || !self.session.is_editable() {
             return false;
         }
         let state = self.session.state();
@@ -1530,6 +1537,7 @@ impl Rv {
             return;
         }
         self.focused.set(focused);
+        self.session.set_focused(focused);
         self.cx.emit(if focused {
             RichEditorEvent::Focus
         } else {
@@ -1993,5 +2001,64 @@ impl Wake {
             }
         })
         .await;
+    }
+}
+
+/// The view's geometry, answering the session's queries
+/// ([`ViewGeometry`]) in the content box's points. The geometry lives on
+/// the engine thread the view runs on; asked from any other, it answers
+/// nothing.
+struct GeometryHandle {
+    thread: std::thread::ThreadId,
+    geo: Rc<RefCell<Geometry>>,
+    state: Rc<RefCell<EditorState>>,
+}
+
+// SAFETY: the `Rc`s are only touched on `thread`, the engine thread that
+// made them (every method checks it first); other threads only move the
+// handle and drop the session's `Arc` of it, and the view, which owns the
+// other references, unregisters it on that thread before it goes.
+unsafe impl Send for GeometryHandle {}
+// SAFETY: as for `Send`: shared access reads the `Rc`s on `thread` only.
+unsafe impl Sync for GeometryHandle {}
+
+impl GeometryHandle {
+    fn here(&self) -> bool {
+        std::thread::current().id() == self.thread
+    }
+}
+
+impl ViewGeometry for GeometryHandle {
+    fn coords_at_pos(&self, pos: usize) -> Option<Bounds<Points>> {
+        if !self.here() {
+            return None;
+        }
+        self.geo.borrow().caret_rect(pos, Affinity::Downstream)
+    }
+
+    fn pos_at_coords(&self, point: Point<Points>) -> Option<usize> {
+        if !self.here() {
+            return None;
+        }
+        match self.geo.borrow().hit(point)? {
+            Hit::Text(pos, _) | Hit::Node(pos) => Some(pos),
+        }
+    }
+
+    fn selection_rect(&self) -> Option<Bounds<Points>> {
+        if !self.here() {
+            return None;
+        }
+        let (from, to) = {
+            let state = self.state.borrow();
+            (state.selection().from(), state.selection().to())
+        };
+        let geo = self.geo.borrow();
+        if from == to {
+            return geo.caret_rect(from, Affinity::Downstream);
+        }
+        geo.range_rects(from, to)
+            .into_iter()
+            .reduce(|a, b| a.union(&b))
     }
 }

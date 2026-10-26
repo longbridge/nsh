@@ -118,6 +118,22 @@ fn Features(props: FeaturesProps) -> impl IntoElement {
         }
     };
     let shown = signal(read());
+    // What the session answers about the view, asked on the engine thread
+    // after each change.
+    let answers = signal(String::new());
+    let asked = session.clone();
+    let ask = move || {
+        let caret = asked.coords_at_pos(asked.state().selection().head());
+        let back = caret.and_then(|b| {
+            asked.pos_at_coords(b.origin + nsh_core::geometry::point(px(0.0), b.size.height / 2.0))
+        });
+        format!(
+            "Geometry {} {:?} {}",
+            caret.is_some(),
+            back,
+            asked.is_focused()
+        )
+    };
     view()
         .child(
             view().test_id("editor").w(px(600.0)).h(px(400.0)).child(
@@ -138,12 +154,16 @@ fn Features(props: FeaturesProps) -> impl IntoElement {
                         classes
                     })
                     .size_full()
-                    .on_change(move |_: &_| shown.set(read())),
+                    .on_change(move |_: &_| {
+                        shown.set(read());
+                        answers.set(ask());
+                    }),
             ),
         )
         .child(text(move || format!("Json {}", shown.get().0)))
         .child(text(move || format!("Texts {}", shown.get().1)))
         .child(text(move || format!("Doc {:?}", shown.get().2)))
+        .child(text(move || answers.get()))
         .child(text("Ready"))
 }
 
@@ -243,4 +263,19 @@ fn an_image_node_renders_an_image() {
         true,
     );
     app.wait_for("label:A cat").unwrap();
+}
+
+#[test]
+fn the_session_answers_where_its_view_shows_it() {
+    let mut app = start_features(
+        json!({"type": "doc", "content": [{"type": "paragraph", "content": [
+            {"type": "text", "text": "ab"}
+        ]}]}),
+        true,
+    );
+    app.press("text:ab").unwrap();
+    app.type_text("id:editor", "c").unwrap();
+    // The caret's box, the position back at its left edge, and the focus.
+    app.wait_for("text:/^Geometry true Some\\(\\d\\) true$/")
+        .unwrap();
 }
