@@ -2679,6 +2679,117 @@ fn a_slots_props_are_the_apps_elements_own_and_live() {
     assert_eq!(listens(&locked, toggle), Some(false));
 }
 
+const POPUP_EVENTS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Menu, MenuItem, Popover } from "nsh/base";
+
+function App() {
+  const heard = signal<string[]>([]);
+  const hear = (what: string) => heard.set([...heard(), what]);
+  return (
+    <View>
+      <Menu
+        onOpenChange={(open, reason) => hear(`menu ${open} ${reason}`)}
+        onOpen={() => hear("menu open")}
+        onClose={() => hear("menu close")}
+        trigger={
+          <View testID="menu">
+            <Text>File</Text>
+          </View>
+        }
+      >
+        <MenuItem>
+          <Text>New</Text>
+        </MenuItem>
+      </Menu>
+      <Popover
+        onOpenChange={(open, reason) => hear(`popover ${open} ${reason}`)}
+        onOpen={() => hear("popover open")}
+        onClose={() => hear("popover close")}
+        trigger={
+          <View testID="popover">
+            <Text>Details</Text>
+          </View>
+        }
+      >
+        <Text>Body</Text>
+      </Popover>
+      <Text>{`Heard: ${heard().join(", ")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A popup reports a change of its open state before its lifecycle
+/// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
+/// there or all gone, also where that is at once (no motion).
+fn popups_report_their_open_change_first(environment: Environment) {
+    let (engine, rx) = start_in(POPUP_EVENTS, environment);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (menu, popover) = (by_test_id("menu"), by_test_id("popover"));
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+    let mut heard = vec![];
+    for (view, name) in [(menu, "menu"), (popover, "popover")] {
+        for (open, life) in [(true, "open"), (false, "close")] {
+            heard.push(format!("{name} {open} triggerPress"));
+            heard.push(format!("{name} {life}"));
+            let wanted = format!("Heard: {}", heard.join(", "));
+            press(view);
+            let batches = until(&rx, |b| shows(b, &wanted));
+            assert!(
+                batches.iter().any(|b| shows(b, &wanted)),
+                "{wanted}: {:?}",
+                batches
+                    .iter()
+                    .flat_map(|b| b.items.iter())
+                    .filter_map(|i| match i {
+                        MountItem::Text { text, .. } if text.text.starts_with("Heard") => {
+                            Some(text.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+/// On the desktops a menu's popup has no motion: it is open and gone in
+/// the turn that changes it.
+#[test]
+fn popups_report_their_open_change_first_on_the_desktops() {
+    popups_report_their_open_change_first(Environment {
+        os: nsh_engine::Os::Windows,
+        ..Environment::default()
+    });
+}
+
+/// On touch screens a menu is a sheet that comes in and goes: its
+/// lifecycle follows the motion, after the change.
+#[test]
+fn popups_report_their_open_change_first_on_touch_screens() {
+    popups_report_their_open_change_first(Environment::default());
+}
+
 const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Progress } from "nsh/base";
 
