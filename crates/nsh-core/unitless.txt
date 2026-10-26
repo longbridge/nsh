@@ -355,7 +355,6 @@ element::style::Styled::scale(scale)                                  # a scale 
 element::style::Styled::scale_x(scale)                                # a scale factor
 element::style::Styled::scale_y(scale)                                # a scale factor
 element::style::Styled::sepia(amount)                                 # a filter amount (1 leaves the image as it is)
-element::style::Styled::shadow_opacity(opacity)                       # an opacity, 0..1
 element::style::Styled::transform_step(amount)                        # a transform operand (any of its kinds' units)
 element::tokens::Tokens::number ->                                    # a design token: a generic number (a radius, a size, a ratio)
 element::tokens::Tokens::numbers ->                                   # a design token: a generic number (a radius, a size, a ratio)
