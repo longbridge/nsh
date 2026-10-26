@@ -172,7 +172,9 @@ The rules every demo follows, now and for the ones to come:
   "Layout patterns"): the subject on a stage that takes the room, beside an
   inspector column of about 300 points with its state, its event log and
   the options that tune it (`Split`, or `Stage` and `Inspector`, with
-  `Panel`, `Log` and `Segmented`). With a pointer (`desktop`, from
+  `Panel`, `Log` and `Segmented`; buttons and text fields are never styled by hand: spread `button(kind)` and
+  `field()` and give the label `buttonText(kind)`, so every demo shares one size, radius, hover, pressed, focus and
+  disabled treatment). With a pointer (`desktop`, from
   `platform.idiom === "desktop"`) it has desktop density (`size`: controls
   of 28 and 32 points, rows of 32 and 40): buttons as wide as their labels,
   never as wide as the stage, comparable numbers in tabular figures at the

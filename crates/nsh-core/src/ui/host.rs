@@ -35,6 +35,7 @@ use crate::{
 pub(crate) fn same_kind(a: &Prop, b: &Prop) -> bool {
     match (a, b) {
         (Prop::ComponentProp(a, _), Prop::ComponentProp(b, _)) => a == b,
+        (Prop::ComponentPropBinding(a, _), Prop::ComponentPropBinding(b, _)) => a == b,
         (Prop::RustProp(a, _), Prop::RustProp(b, _)) => a == b,
         _ => HostProps::same_kind(a, b),
     }
@@ -45,6 +46,7 @@ pub(crate) fn same_kind(a: &Prop, b: &Prop) -> bool {
 pub(crate) fn reset(prop: &Prop) -> Option<Prop> {
     match prop {
         Prop::ComponentProp(name, _) => Some(Prop::ComponentProp(name.clone(), None)),
+        Prop::ComponentPropBinding(name, _) => Some(Prop::ComponentPropBinding(name.clone(), None)),
         Prop::RustProp(name, _) => Some(Prop::RustProp(name, None)),
         _ => HostProps::reset(prop),
     }
@@ -1209,6 +1211,22 @@ impl NativeView {
         self.bind_prop(value, move |value| {
             Prop::ComponentProp(name.clone(), Some(value))
         })
+    }
+
+    /// Binds its prop `name` to an animated value: the platform hands the
+    /// value (a number or a color) to the component on every frame it
+    /// changes, with no engine work per frame (JS: an animated value given
+    /// to a `nativeComponent` prop). A value set with [`Self::prop`] under
+    /// that name waits until the binding goes.
+    pub fn bind_animated_prop(mut self, name: &str, value: &impl super::Animated) -> Self {
+        if let Some(node) = value.animated_node().live() {
+            set(
+                &mut self.0,
+                Prop::ComponentPropBinding(name.into(), Some(node.id())),
+            );
+            self.0.attrs.bound.push(node);
+        }
+        self
     }
 
     /// It emitted an event.

@@ -11529,6 +11529,52 @@ mod views {
         assert!(props, "its props reach it");
     }
 
+    /// A Rust component that binds a native component's prop.
+    #[derive(Default)]
+    struct AnimatedNativeHost;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AnimatedNativeHostProps {}
+
+    impl Component for AnimatedNativeHost {
+        type Props = AnimatedNativeHostProps;
+        type Event = NoEvent;
+
+        fn view(_: AnimatedNativeHostProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let v = animated_value(0.5);
+            crate::ui::native("test.native")
+                .bind_animated_prop("progress", &v)
+                .flex_1()
+        }
+    }
+
+    #[test]
+    fn native_view_binds_animated_prop() {
+        let mut c = core();
+        c.mount_root(&Root::new::<AnimatedNativeHost>(|| {
+            AnimatedNativeHostProps {}
+        }));
+        let batch = c.commit().unwrap();
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::ComponentPropSlots { names, .. } if names.len() == 1 && &*names[0] == "progress"
+            )),
+            "{:#?}",
+            batch.items
+        );
+        assert!(batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::AnimationBindings { bindings, .. }
+                if bindings.iter().any(|(p, _)| *p == crate::animation::AnimationProp::ComponentSlot(0))
+        )));
+        // The value lives with the element, though the view let go of it.
+        assert!(!batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Animation(crate::animation::AnimationOp::Release { .. })
+        )));
+    }
+
     /// A holder of its children as its view's root.
     #[derive(Default)]
     struct Tray;
@@ -17819,4 +17865,196 @@ fn span_test_ids_reuse_fitted_and_hidden_layouts() {
             counts
         );
     }
+}
+
+/// A native element with `component` and, optionally, a bound `progress`.
+fn native_with_animated_prop(c: &mut Core<FakeEngine>, node: Option<crate::animation::NodeId>) {
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::Native,
+        },
+        Op::SetProp {
+            id: 2,
+            prop: Prop::Component("com.example.thing".into()),
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    if let Some(node) = node {
+        ops.push(Op::SetProp {
+            id: 2,
+            prop: Prop::ComponentPropBinding("progress".into(), Some(node)),
+        });
+    }
+    apply(c, ops);
+}
+
+fn component_prop_op(name: &str, value: Option<crate::JsonValue>) -> Op {
+    Op::SetProp {
+        id: 2,
+        prop: Prop::ComponentProp(name.into(), value),
+    }
+}
+
+fn animated_prop_op(name: &str, node: Option<crate::animation::NodeId>) -> Op {
+    Op::SetProp {
+        id: 2,
+        prop: Prop::ComponentPropBinding(name.into(), node),
+    }
+}
+
+fn component_props_of(
+    batch: &crate::mount::MountBatch,
+) -> Vec<(Arc<str>, Option<crate::JsonValue>)> {
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ComponentProps { id: 2, props } => Some(props.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn component_bindings_of(batch: &crate::mount::MountBatch) -> Option<Vec<Arc<str>>> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::ComponentPropSlots { id: 2, names } => Some(names.clone()),
+        _ => None,
+    })
+}
+
+fn animation_bindings_of(
+    batch: &crate::mount::MountBatch,
+) -> Option<Vec<(AnimationProp, crate::animation::NodeId)>> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::AnimationBindings { id: 2, bindings } => Some(bindings.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn component_prop_binds_to_animated_node() {
+    let mut c = core();
+    native_with_animated_prop(&mut c, Some(7));
+    let batch = c.commit().unwrap();
+    let names = batch
+        .items
+        .iter()
+        .position(|i| matches!(i, MountItem::ComponentPropSlots { id: 2, .. }))
+        .unwrap();
+    let bindings = batch
+        .items
+        .iter()
+        .position(|i| matches!(i, MountItem::AnimationBindings { id: 2, .. }))
+        .unwrap();
+    assert!(names < bindings);
+    assert_eq!(component_bindings_of(&batch), Some(vec!["progress".into()]));
+    assert_eq!(
+        animation_bindings_of(&batch),
+        Some(vec![(AnimationProp::ComponentSlot(0), 7)])
+    );
+    assert!(
+        component_props_of(&batch)
+            .iter()
+            .all(|(k, _)| &**k != "progress")
+    );
+}
+
+#[test]
+fn static_value_hidden_while_bound() {
+    let mut c = core();
+    native_with_animated_prop(&mut c, None);
+    apply(
+        &mut c,
+        vec![component_prop_op("progress", Some(serde_json::json!(0.5)))],
+    );
+    c.commit().unwrap();
+    apply(&mut c, vec![animated_prop_op("progress", Some(7))]);
+    c.commit().unwrap();
+    // Set while bound: kept, not sent.
+    apply(
+        &mut c,
+        vec![component_prop_op("progress", Some(serde_json::json!(0.7)))],
+    );
+    // Nothing to send at all.
+    if let Some(batch) = c.commit() {
+        assert!(
+            component_props_of(&batch)
+                .iter()
+                .all(|(k, _)| &**k != "progress")
+        );
+    }
+    // Unbound: the kept value comes back.
+    apply(&mut c, vec![animated_prop_op("progress", None)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        component_props_of(&batch),
+        vec![("progress".into(), Some(serde_json::json!(0.7)))]
+    );
+    assert_eq!(animation_bindings_of(&batch), Some(vec![]));
+}
+
+#[test]
+fn unbind_without_static_sends_none() {
+    let mut c = core();
+    native_with_animated_prop(&mut c, Some(7));
+    c.commit().unwrap();
+    apply(&mut c, vec![animated_prop_op("progress", None)]);
+    let batch = c.commit().unwrap();
+    assert_eq!(component_props_of(&batch), vec![("progress".into(), None)]);
+    assert_eq!(animation_bindings_of(&batch), Some(vec![]));
+}
+
+#[test]
+fn rebinding_reuses_the_slot() {
+    let mut c = core();
+    native_with_animated_prop(&mut c, Some(7));
+    c.commit().unwrap();
+    apply(&mut c, vec![animated_prop_op("progress", Some(8))]);
+    let batch = c.commit().unwrap();
+    // Same table, no new names.
+    assert_eq!(component_bindings_of(&batch), None);
+    assert_eq!(
+        animation_bindings_of(&batch),
+        Some(vec![(AnimationProp::ComponentSlot(0), 8)])
+    );
+}
+
+#[test]
+fn late_named_component_gets_bindings() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Native,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            animated_prop_op("progress", Some(7)),
+        ],
+    );
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Component("com.example.thing".into()),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let at = |pred: &dyn Fn(&MountItem) -> bool| batch.items.iter().position(pred).unwrap();
+    let component = at(&|i| matches!(i, MountItem::Component { id: 2, .. }));
+    let names = at(&|i| matches!(i, MountItem::ComponentPropSlots { id: 2, .. }));
+    let bindings = at(&|i| matches!(i, MountItem::AnimationBindings { id: 2, .. }));
+    assert!(component < names && names < bindings);
 }

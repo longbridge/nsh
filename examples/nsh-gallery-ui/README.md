@@ -12,7 +12,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `segmented.tsx` | The segmented control shared by the gallery and demo inspectors |
 | `icons.tsx` | The common line icon set |
 | `data-table.ts` | Compact table spacing, resize separators, sort chevrons and selection feedback |
-| `palette.ts`, `demo.ts` | The documentation demos' palette adapter and stage, inspector, panel and log components |
+| `palette.ts`, `demo.ts` | The documentation demos' palette adapter, button/field state helpers, and stage, inspector, panel and log components |
 | `css.js` | CSS variables for the website, generated from the same theme and finish data |
 
 The gallery imports through `examples/gallery/ui.tsx`; that file keeps its navigation, sidebar state, branded
