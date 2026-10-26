@@ -314,7 +314,9 @@ touchscreens, a long press opens menus: handle `onLongPress` with the same funct
 
 On macOS and the web, Tab moves the keyboard focus between the views that take presses (and the inputs), Return or
 Space presses the focused view, and focus styles (`focus:`, `.focus(..)`) style it. A click presses a view without
-focusing it, so focus styles show for keyboard focus only.
+focusing it, so focus styles show for keyboard focus only. A ref's `focus()` moves the keyboard focus to such a view
+as Tab does (its focus styles show and `onFocus` fires), say to give it back to the trigger of a popup that closed, and
+`blur()` takes it off.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|

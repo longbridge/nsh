@@ -1823,10 +1823,8 @@ class Player {
       // `focus:` classes and `onFocus` follow the keyboard focus (the
       // browser draws a ring only then), not the focus a click would give.
       el.addEventListener("focus", () => {
-        if (!el.matches(":focus-visible")) return;
-        el._keyFocus = true;
-        this.setState(el, FOCUSED, true);
-        this.event(el._id, "onFocus");
+        if (!el._focusCall && !el.matches(":focus-visible")) return;
+        this.keyFocus(el);
       });
       el.addEventListener("blur", () => {
         this.setState(el, FOCUSED, false);
@@ -1836,6 +1834,31 @@ class Player {
       });
     }
     this.updateAria(el);
+  }
+
+  /** The keyboard focus reached pressable `el`: `focus:` and `onFocus`. */
+  keyFocus(el) {
+    el._keyFocus = true;
+    this.setState(el, FOCUSED, true);
+    this.event(el._id, "onFocus");
+  }
+
+  /** `focus()` on a pressable that is a stop of Tab: it takes the keyboard
+   * focus as Tab gives it, with the ring (`focusVisible`, where browsers
+   * take it) and `focus:` whatever the browser's heuristics decide after a
+   * click; one a click focused becomes keyboard focused. */
+  focusPressable(el) {
+    if (el.tabIndex !== 0) return;
+    if (document.activeElement === el) {
+      if (!el._keyFocus) this.keyFocus(el);
+      return;
+    }
+    el._focusCall = true;
+    try {
+      el.focus({ focusVisible: true });
+    } finally {
+      el._focusCall = false;
+    }
   }
 
   /** What touches on `el` leave to the browser: nothing on views with
@@ -3670,7 +3693,10 @@ class Player {
   op_cmd([, id, name, ...args]) {
     const el = this.view(id);
     switch (name) {
-      case "focus": el?._field?.focus(); break;
+      case "focus":
+        if (el?._field) el._field.focus();
+        else if (el?._pressable) this.focusPressable(el);
+        break;
       case "blur":
         if (el?._field) el._field.blur();
         else document.activeElement?.blur?.();

@@ -360,6 +360,8 @@ An input's ref has:
 | `blur()` | `blur()` | Unfocuses it. |
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
 
+On macOS and the web, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)).
+
 `dismiss_keyboard()` in Rust and `Keyboard.dismiss()` from `nsh/base` in TSX unfocus whichever input has focus:
 
 ```rust tabs

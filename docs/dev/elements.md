@@ -141,11 +141,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   popover, rows a list moves between with the arrow keys. A pressable hears `onFocus` / `onBlur` (`EventKind::Focus` /
   `Blur`, as inputs do) when the keyboard focus reaches and leaves it: AppKit's first responder, the browser's
   `:focus-visible`; the headless driver's Tab moves it the same way there. Inputs are always stops; `focusable` changes only views
-  that take presses (unlike React Native's, `true` makes nothing focusable that is not). Windows, Linux and GPUI move the focus between fields and
-  native components only so far.
+  that take presses (unlike React Native's, `true` makes nothing focusable that is not). A ref's `focus()` on a stop
+  moves the keyboard focus to it as Tab does (`focus:`, `onFocus`; a popup gives it back to its trigger), and `blur()`
+  takes it off: `Command::Focus` / `Blur` reach the platforms for any view, and AppKit makes the view first responder
+  (`input::focus_control`, past a field that edits), the browser focuses the element with `focusVisible` and treats
+  it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the headless driver moves its
+  focus (`focus_calls`); on a view that is not a stop (`focusable={false}`, disabled, hidden) it does nothing.
+  Windows, Linux and GPUI move the focus between fields and native components only so far, and leave `focus()` on
+  views that take presses to them; iOS and Android focus inputs only.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
-- **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also
+- **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
+  the keyboard focus: "Keyboard focus" above) and `scrollTo({ x, y, animated })` (use `ref`); lists also
   `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; `Keyboard.dismiss()`.
   Commands run after the commit's other mount items; list scrolls are resolved by the core with the current item sizes.
 - **`measure()`** (on any node's ref) resolves, once the turn's changes are laid out, to `{ bounds, pagePosition }`

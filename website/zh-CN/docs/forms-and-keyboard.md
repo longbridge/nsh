@@ -358,6 +358,8 @@ mount(SignIn);
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
 
+在 macOS 和 Web 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）。
+
 Rust 中的 `dismiss_keyboard()` 和 TSX 中 `nsh/base` 的 `Keyboard.dismiss()` 让当前拥有焦点的输入框失去焦点：
 
 ```rust tabs

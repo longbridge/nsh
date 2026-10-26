@@ -9,7 +9,7 @@
 //! the focused input takes the keys that edit it, and Escape goes back.
 
 use nsh_core::{
-    EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
+    Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, ROOT_ID,
     keymap::{Key, KeyMatch, Keystroke},
     platform::Os,
     tailwind::state::FOCUSED,
@@ -121,6 +121,58 @@ impl Headless {
             }
             self.set_focused_state(new, true);
             self.send(new, EventKind::Focus, EventPayload::None);
+        }
+    }
+
+    /// The app moved the focus (`focus()`, `blur()`) in `batch`, applied
+    /// with input `focused` focused before it: platforms tell the views as
+    /// when the user moves it. The screen applied the calls on inputs;
+    /// where Tab stops at views that take presses, a call on one of those
+    /// moves the keyboard focus as Tab does (the batch's last call counts).
+    pub(super) fn focus_calls(&mut self, batch: &MountBatch, focused: Option<NodeId>) {
+        let now = self.screen.focused();
+        if now != focused {
+            if let Some(old) = focused {
+                self.send(old, EventKind::Blur, EventPayload::None);
+            }
+            if let Some(new) = now {
+                // The pressable that had the keyboard focus loses it.
+                if let Some(key) = self.screen.key_focus() {
+                    self.screen.set_key_focus(None);
+                    self.set_focused_state(key, false);
+                    self.send(key, EventKind::Blur, EventPayload::None);
+                }
+                self.send(new, EventKind::Focus, EventPayload::None);
+            }
+        }
+        if !self.tabs_to_pressables() {
+            return;
+        }
+        let mut key = self.screen.key_focus();
+        let mut to = None;
+        for item in &batch.items {
+            let MountItem::Command { id, command } = item else {
+                continue;
+            };
+            let id = *id;
+            match command {
+                Command::Focus if self.screen.input(id).is_some() => {
+                    to = None;
+                    key = None;
+                }
+                Command::Focus if id != ROOT_ID && self.screen.tab_stops().contains(&id) => {
+                    to = Some(Some(id));
+                    key = Some(id);
+                }
+                Command::Blur if id != ROOT_ID && key == Some(id) => {
+                    to = Some(None);
+                    key = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(to) = to {
+            self.move_focus(to);
         }
     }
 

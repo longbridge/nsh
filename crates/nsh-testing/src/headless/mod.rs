@@ -584,17 +584,7 @@ impl Headless {
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
         self.screen.apply(batch);
-        // The app moved the focus (`focus()`, `blur()`): platforms tell the
-        // views as when the user moves it.
-        let now = self.screen.focused();
-        if now != focused {
-            if let Some(old) = focused {
-                self.send(old, EventKind::Blur, EventPayload::None);
-            }
-            if let Some(new) = now {
-                self.send(new, EventKind::Focus, EventPayload::None);
-            }
-        }
+        self.focus_calls(batch, focused);
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
