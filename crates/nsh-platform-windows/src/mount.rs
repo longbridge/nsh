@@ -81,7 +81,7 @@ impl Mounter {
     /// The batch is applied.
     pub(crate) fn end_batch(&mut self, surface: &Rc<Surface>) {
         self.layout_animation = None;
-        crate::selection_area::end_batch(surface);
+        crate::selectable_view::end_batch(surface);
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
     }
@@ -103,7 +103,7 @@ impl Mounter {
                 | MountItem::Delete { .. }
                 | MountItem::ViewProps { .. }
         ) {
-            crate::selection_area::tree_changed();
+            crate::selectable_view::tree_changed();
         }
         match item {
             MountItem::Create { id, kind } => {
@@ -367,7 +367,9 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
         }
         // What the item may change on screen is drawn again, whether or not
         // what applied it said so: a partial frame draws only that.
@@ -473,7 +475,8 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::Keymap(_)
         | MountItem::LayoutAnimation(_)
         | MountItem::Animation(_)
-        | MountItem::AnimationBindings { .. } => Redraw::Nothing,
+        | MountItem::AnimationBindings { .. }
+        | MountItem::ComponentPropSlots { .. } => Redraw::Nothing,
         MountItem::Frame { id, .. }
         | MountItem::ViewStyle { id, .. }
         | MountItem::Text { id, .. }

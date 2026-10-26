@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { button, buttonText, desktop, Inspector, Panel, Stage, ui, wide } from "./palette";
+import { button, buttonText, desktop, focusRing, Inspector, Panel, Stage, ui, wide } from "./palette";
 
 function App() {
   const presses = signal(0);
@@ -17,12 +17,14 @@ function App() {
         onPress={() => presses.update((n) => n + 1)}
         activeStyle={{ backgroundColor: ui().border }}
         style={{ ...ui().card, backgroundImage: "none", borderRadius: 16, padding: 16 }}
+        hoverStyle={{ opacity: 0.88 }}
+        focusStyle={focusRing()}
       >
         <Text style={{ color: ui().text, fontSize: wide() ? 14 : 16 }}>activeStyle background ({desktop ? "click" : "tap"} and hold)</Text>
       </View>
 
       <View class="flex-row gap-3">
-        <View class="flex-1 h-20 rounded-xl bg-[#ff6170] active:bg-[#d94d5b] items-center justify-center" onPress={() => {}}>
+        <View class="flex-1 h-20 rounded-xl bg-[#ff6170] hover:bg-[#ff7d89] active:bg-[#d94d5b] items-center justify-center" focusStyle={focusRing()} onPress={() => {}}>
           <Text class="text-[#13160c] font-semibold">active:</Text>
         </View>
         <View class="flex-1 h-20 rounded-xl bg-[#45d49a] items-center justify-center shadow-lg">

@@ -1,6 +1,6 @@
 import { Image, mount, signal, Text, View } from "nsh";
-import { windowSize } from "nsh/device";
-import { button, buttonText, ui } from "./palette";
+import { windowSize } from "nsh";
+import { button, buttonText, focusRing, ui } from "./palette";
 
 // The pictures are SVG `data:` URIs, so the demo needs no network. An app
 // would import a file next to it (`import hills from "./hills.png"`) or pass
@@ -63,6 +63,9 @@ function Segments<T extends string>(props: { options: readonly T[]; value: T; on
                 backgroundImage: on() ? ui().raised.backgroundImage : "none",
                 boxShadow: on() ? ui().raised.boxShadow : "none",
               }}
+              hoverStyle={{ opacity: 0.88 }}
+              focusStyle={focusRing()}
+              activeStyle={{ opacity: 0.7 }}
             >
               <Text style={{ fontWeight: "600", color: on() ? ui().text : ui().muted }}>{option()}</Text>
             </View>

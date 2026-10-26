@@ -2,8 +2,8 @@
 // back, dialogs, the clipboard, native animations, a dialog, images
 // that never load, and the keyboard focus a ref's `focus()` moves.
 import { Image, mount, signal, Text, View } from "nsh";
-import { Animated, createAnimatedValue } from "nsh/animated";
-import { Clipboard } from "nsh/clipboard";
+import { Animated, createAnimatedValue } from "nsh";
+import { Clipboard } from "nsh";
 import { AlertDialog, createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 
 type Route = { name: "home" } | { name: "detail" } | { name: "draft" };

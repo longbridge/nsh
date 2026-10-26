@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { button, buttonText, ui } from "./palette";
+import { button, buttonText, focusRing, ui } from "./palette";
 
 const LONG =
   "Text is typeset natively (CoreText on iOS, StaticLayout on Android) and measured on the engine thread, so the main thread only draws it.";
@@ -19,11 +19,11 @@ function App() {
           {", "}
           <Text style={{ fontStyle: "italic", color: ui().violet }}>italic</Text>
           {", and "}
-          <Text style={link()} onPress={() => tapped.set("the first link")}>
+          <Text style={link()} onPress={() => tapped.set("the first link")} hoverStyle={{ opacity: 0.88 }} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
             links
           </Text>
           {" that take presses of "}
-          <Text style={link()} onPress={() => tapped.set("the second link")}>
+          <Text style={link()} onPress={() => tapped.set("the second link")} hoverStyle={{ opacity: 0.88 }} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
             their own
           </Text>
           .

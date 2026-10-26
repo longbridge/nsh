@@ -3,7 +3,7 @@
 // order, removed and cleared, each call seeing the ones before it. Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 function App() {
   const state = signal("empty");

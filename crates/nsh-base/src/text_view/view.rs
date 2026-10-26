@@ -5,8 +5,9 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
+    element::{Renderer, Style, StyleRefinement},
     geometry::{DefiniteLength, Length},
-    ui::{Renderer, Style, StyleRefinement, prelude::*},
+    prelude::*,
 };
 
 use super::{
@@ -117,7 +118,7 @@ pub enum TextViewLinks {
     Report,
     /// It is reported, then a URL of another app or site (with a scheme:
     /// `https:`, `mailto:`, ...) opens outside the app
-    /// ([`nsh_core::ui::open_url`]); an anchor in the document (`#…`) is
+    /// ([`nsh_core::element::open_url`]); an anchor in the document (`#…`) is
     /// only reported.
     Open,
 }
@@ -236,8 +237,8 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .line_height(px(BODY_SIZE * BODY_LINE))
         .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
-        // a `SelectionArea`, the outer area's).
-        .selection_area(props.selectable)
+        // a `selectable` view, the outer one's).
+        .selectable(props.selectable)
         .map(|mut el| {
             if let Some(parts) = use_context::<TextViewParts>() {
                 let style = std::mem::take(el.style());
@@ -1391,7 +1392,7 @@ impl Cx {
                 .filter(|s| s.width > px(0.0) && s.height > px(0.0))
                 .map(|s| s.width / s.height)
         };
-        let el = nsh_core::ui::image(image.src.clone())
+        let el = nsh_core::element::image(image.src.clone())
             .resize_mode(ResizeMode::Contain)
             .label(SharedString::from(image.alt.clone()))
             .when_some(image.title.clone(), |el, title| el.hint(title));

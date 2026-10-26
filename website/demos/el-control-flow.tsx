@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { button, buttonText, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { button, buttonText, focusRing, hoverFill, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 interface Todo {
   id: number;
@@ -58,6 +58,9 @@ function App() {
                   borderColor: ui().accent,
                   backgroundColor: todo().done ? ui().accent : "transparent",
                 }}
+                hoverStyle={{ opacity: 0.88 }}
+                focusStyle={focusRing()}
+                activeStyle={{ opacity: 0.7 }}
               />
               <Text
                 style={{
@@ -70,7 +73,7 @@ function App() {
                 {index() + 1}. {todo().title}
               </Text>
               <If when={todo().done}>
-                <View onPress={() => remove(todo().id)} hitSlop={8}>
+                <View onPress={() => remove(todo().id)} hitSlop={8} hoverStyle={hoverFill()} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
                   <Text style={{ color: ui().down, fontSize: wide() ? 13 : undefined }}>Remove</Text>
                 </View>
               </If>
