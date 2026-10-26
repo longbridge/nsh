@@ -13349,6 +13349,49 @@ mod views {
         }
     }
 
+    /// Cells that show a code a text field tells screen readers already:
+    /// hidden from them until pressed.
+    #[derive(Default)]
+    struct Cells;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct CellsProps {}
+
+    impl Component for Cells {
+        type Props = CellsProps;
+        type Event = NoEvent;
+
+        fn view(_: CellsProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let hidden = signal(true);
+            view()
+                .size_10()
+                .test_id("cells")
+                .accessibility_elements_hidden(hidden)
+                .on_press(move || hidden.set(false))
+                .child(text("4"))
+        }
+    }
+
+    #[test]
+    fn an_element_hides_from_screen_readers_while_its_signal_holds() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Cells>(|| CellsProps {}));
+        let batch = c.commit().unwrap();
+        let hidden = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("cells") => {
+                    Some((*id, props.accessibility.hidden))
+                }
+                _ => None,
+            })
+        };
+        let (id, first) = hidden(&batch).expect("the cells' props");
+        assert!(first);
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(hidden(&batch), Some((id, false)));
+    }
+
     #[test]
     fn an_elements_accessibility_value_follows_its_signals() {
         let mut c = core();

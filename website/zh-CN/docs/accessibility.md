@@ -52,7 +52,7 @@ view()
 | `.accessibility_value(..)` | `accessibilityValue` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | | `accessibilityActions` | `{ name, label? }[]` | 提供给辅助技术的操作。 |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | 执行了某个操作（Rust：操作名称）。 |
-| | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
+| `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 视图（及其子树）是否暴露。 |
 | | `android={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | Android：视图的变化如何播报给 TalkBack。 |
 | `.test_id(..)` | `testID` | `string` | UI 测试用的标识（iOS 上的 accessibility identifier，Android 上的 resource id）；不会被朗读。 |

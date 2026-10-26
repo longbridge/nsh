@@ -1106,6 +1106,21 @@ pub trait Accessible: Element {
         self
     }
 
+    /// Hides it and everything inside it from assistive technologies
+    /// while `hidden` holds (TS: `accessibilityElementsHidden`): what a
+    /// control shows of a value that another element of it tells screen
+    /// readers already (a one-time-code input's cells, whose text field
+    /// says the code).
+    fn accessibility_elements_hidden(mut self, hidden: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(hidden, |a, hidden| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Hidden(hidden)),
+            )
+        });
+        self
+    }
+
     /// The actions assistive technologies offer on it (TS:
     /// `accessibilityActions`): `increment` and `decrement` for an
     /// adjustable element, `activate`, `longpress`, or the app's own with
