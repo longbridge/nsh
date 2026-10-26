@@ -402,21 +402,23 @@ fn a_composition_over_a_selection_replaces_it() {
 #[test]
 fn the_placeholder_shows_while_the_document_is_empty() {
     let mut app = start_configured(paragraphs(&[""]), Some("Write here"), true);
-    see(&mut app, "Write here");
+    see(&mut app, "\u{200b}Write here");
     app.type_text("id:editor", "a").unwrap();
     see(&mut app, &doc("a"));
     app.wait_for_gone("text:Write here", Duration::from_secs(5))
         .unwrap();
     keys(&mut app, &["backspace"]);
     see(&mut app, &doc(""));
-    see(&mut app, "Write here");
+    see(&mut app, "\u{200b}Write here");
 }
 
 #[test]
-fn the_placeholder_hides_with_two_empty_paragraphs() {
+fn the_placeholder_shows_in_the_current_empty_block() {
+    // Tiptap's placeholder (`showOnlyCurrent`): the empty block with the
+    // caret shows it, whatever else the document holds.
     let mut app = start_configured(paragraphs(&["", ""]), Some("Write here"), true);
     see(&mut app, "Sel 1-1");
-    assert!(!app.shows("Write here"));
+    see(&mut app, "\u{200b}Write here");
 }
 
 #[test]
@@ -454,7 +456,7 @@ fn typing_over_a_selected_atom_replaces_it_with_a_paragraph() {
     // fitting the text into a new default textblock.
     see(
         &mut app,
-        &tree(r#"doc(paragraph("before"), paragraph("x"))"#),
+        &tree(r#"doc(paragraph("before"), paragraph("x"), paragraph)"#),
     );
     see(&mut app, "Sel 10-10");
     assert!(!app.shows("Stock AAPL"));
@@ -471,8 +473,8 @@ fn backspace_on_a_selected_atom_deletes_it() {
     see(&mut app, "Sel 8-9");
     keys(&mut app, &["backspace"]);
     // ProseMirror: deleteSelection removes the selected node.
-    see(&mut app, "Types paragraph");
-    see(&mut app, &tree(r#"doc(paragraph("before"))"#));
+    see(&mut app, "Types paragraph,paragraph");
+    see(&mut app, &tree(r#"doc(paragraph("before"), paragraph)"#));
 }
 
 // Helpers.

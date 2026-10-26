@@ -17,7 +17,7 @@ use nsh_core::ui::prelude::*;
 
 use super::session::EditorSession;
 use crate::rich_editor::{
-    model::Node,
+    model::{Mark, Node},
     state::{ClickEvent, Decoration, KeyEvent},
 };
 
@@ -158,4 +158,15 @@ pub trait NodeView: Send + Sync {
     /// An element of the view is gone (its node was deleted, or it is made
     /// again).
     fn destroy(&self) {}
+}
+
+/// Native UI for the text under the marks of one type (a mention's chip,
+/// a link that previews on hover), after ProseMirror's `MarkView`.
+/// Registered by a plugin's `mark_views` as an `Arc<dyn MarkView>`, by the
+/// mark type's name; the outermost mark of a text with a view renders it.
+pub trait MarkView: Send + Sync {
+    /// The span of `text` under `mark`, in its textblock's text: a `text`
+    /// span holding `text` as it is (the caret and selection place
+    /// themselves by its characters), styled as the app likes.
+    fn create(&self, mark: &Mark, text: &str) -> AnyElement;
 }

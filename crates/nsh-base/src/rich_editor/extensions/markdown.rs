@@ -497,7 +497,7 @@ mod tests {
     fn bullet_lists() {
         for marker in ["-", "*", "+"] {
             let s = typed(&format!("{marker} item"));
-            assert_eq!(s.doc().child(0).ty().name(), "bullet_list", "{marker}");
+            assert_eq!(s.doc().child(0).ty().name(), "bulletList", "{marker}");
             assert_eq!(md(&s), "- item\n");
         }
     }
@@ -505,15 +505,15 @@ mod tests {
     #[test]
     fn ordered_list_keeps_its_start() {
         let s = typed("3. third");
-        assert_eq!(s.doc().child(0).ty().name(), "ordered_list");
-        assert_eq!(s.doc().child(0).attrs().get("order"), Some(&Value::from(3)));
+        assert_eq!(s.doc().child(0).ty().name(), "orderedList");
+        assert_eq!(s.doc().child(0).attrs().get("start"), Some(&Value::from(3)));
     }
 
     #[test]
     fn code_fence_with_language() {
         let s = typed("```rust fn");
         let block = s.doc().child(0);
-        assert_eq!(block.ty().name(), "code_block");
+        assert_eq!(block.ty().name(), "codeBlock");
         assert_eq!(block.attrs().get("language"), Some(&Value::from("rust")));
         assert_eq!(block.text_content(), "fn");
         // Rules do not fire inside code.
@@ -525,7 +525,7 @@ mod tests {
     fn horizontal_rules() {
         for rule in ["---", "***", "___"] {
             let s = typed(rule);
-            assert_eq!(s.doc().child(0).ty().name(), "horizontal_rule", "{rule}");
+            assert_eq!(s.doc().child(0).ty().name(), "horizontalRule", "{rule}");
             assert_eq!(s.doc().child(1).ty().name(), "paragraph");
         }
     }
@@ -627,7 +627,7 @@ mod tests {
             .clipboard_text_parser(&s, "# Title\n\n- **a**\n- b", &at, false)
             .unwrap();
         assert_eq!(slice.content.child(0).ty().name(), "heading");
-        assert_eq!(slice.content.child(1).ty().name(), "bullet_list");
+        assert_eq!(slice.content.child(1).ty().name(), "bulletList");
         assert_eq!((slice.open_start, slice.open_end), (1, 0));
         // Prose, a plain paste and a disabled option keep the text.
         assert!(

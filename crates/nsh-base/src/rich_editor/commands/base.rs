@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use super::{BoxCommand, Dispatch, chain_commands, command};
 use crate::rich_editor::{
-    model::{Attrs, ContentMatch, Fragment, MarkType, Node, NodeType, ResolvedPos, Slice},
+    model::{
+        Attrs, ContentMatch, Fragment, MarkType, Node, NodeType, ResolvedPos, Slice,
+        marks_kept_on_split,
+    },
     state::{
         AllSelection, EditorState, NodeSelection, Selection, SelectionRange, TextSelection,
         Transaction,
@@ -673,9 +676,11 @@ fn split_block_with(
     }
     let mut types: Vec<Option<(NodeType, Option<Attrs>)>> = Vec::new();
     let mut depth = from.depth;
-    let (split_depth, default_ty, at_end, at_start) = loop {
+    let (split_depth, default_ty, at_end, at_start, new_attrs) = loop {
         let node = from.node(depth);
         if node.is_block() {
+            // Tiptap's getSplittedAttributes: what the new block keeps.
+            let new_attrs = node.ty().split_attrs(node.attrs());
             let at_end = from.end(depth) == from.pos + (from.depth - depth);
             let at_start = from.start(depth) == from.pos - (from.depth - depth);
             let default_ty = from
@@ -686,13 +691,13 @@ fn split_block_with(
                 split_as.and_then(|split_as| split_as(&to.parent().clone(), at_end, &from));
             let ty = split_ty.or_else(|| {
                 if at_end {
-                    default_ty.clone().map(|ty| (ty, None))
+                    default_ty.clone().map(|ty| (ty, Some(new_attrs.clone())))
                 } else {
                     None
                 }
             });
             types.insert(0, ty);
-            break (depth, default_ty, at_end, at_start);
+            break (depth, default_ty, at_end, at_start, new_attrs);
         }
         if depth == 1 {
             return false;
@@ -707,7 +712,7 @@ fn split_block_with(
     let split_pos = tr.mapping.map(from.pos, 1);
     let mut can = can_split(tr.doc(), split_pos, types.len(), Some(&types));
     if !can {
-        types[0] = default_ty.clone().map(|ty| (ty, None));
+        types[0] = default_ty.clone().map(|ty| (ty, Some(new_attrs.clone())));
         can = can_split(tr.doc(), split_pos, types.len(), Some(&types));
     }
     if !can {
@@ -757,7 +762,7 @@ pub fn split_block_keep_marks(state: &EditorState, dispatch: Dispatch<'_>) -> bo
     });
     let mut keep = |mut tr: Transaction| {
         if let Some(marks) = &marks {
-            tr.ensure_marks(marks.clone());
+            tr.ensure_marks(marks_kept_on_split(marks));
         }
         dispatch(tr);
     };
@@ -1441,6 +1446,7 @@ pub fn base_keymap() -> Vec<(String, BoxCommand)> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::{super::test_util::*, *};
 
@@ -1489,7 +1495,7 @@ mod tests {
                 .is_none_or(|marks| bold.is_in_set(marks).is_none())
         );
         // Not where marks are not allowed: a code block.
-        let code = n(&s, "doc", vec![n(&s, "code_block", vec![t(&s, "x")])]);
+        let code = n(&s, "doc", vec![n(&s, "codeBlock", vec![t(&s, "x")])]);
         assert!(apply(&state(code, 2, 2), toggle.as_ref()).is_none());
     }
 
@@ -1542,6 +1548,8 @@ mod tests {
         let doc = n(&s, "doc", vec![p(&s, "ab")]);
         let mut level = Attrs::new();
         level.insert("level".into(), 2.into());
+        // All its attributes, as `has_markup` compares them whole (PM).
+        level.insert("textAlign".into(), serde_json::Value::Null);
         let heading = s.node_type("heading").unwrap();
         let set = set_block_type(heading.clone(), Some(level));
         let changed = apply(&state(doc.clone(), 2, 2), set.as_ref()).unwrap();
@@ -1550,5 +1558,112 @@ mod tests {
         let quote = wrap_in(s.node_type("blockquote").unwrap(), None);
         let wrapped = apply(&state(doc, 2, 2), quote.as_ref()).unwrap();
         assert_eq!(wrapped.doc().child(0).ty().name(), "blockquote");
+    }
+
+    // The starter schema whose paragraphs and list items have an `id` not
+    // kept on split and an `align` kept, and whose links are not kept.
+    fn split_schema() -> crate::rich_editor::model::Schema {
+        use crate::rich_editor::model::{AttrSpec, Schema};
+        let mut spec = crate::rich_editor::extensions::starter::schema_spec();
+        for (name, node) in spec.nodes.iter_mut() {
+            if name == "paragraph" || name == "listItem" {
+                let mut id = AttrSpec::default();
+                id.default = Some(serde_json::Value::Null);
+                id.keep_on_split = false;
+                let mut align = AttrSpec::default();
+                align.default = Some(serde_json::Value::Null);
+                node.attrs.push(("id".into(), id));
+                node.attrs.push(("align".into(), align));
+            }
+        }
+        for (name, mark) in spec.marks.iter_mut() {
+            if name == "link" {
+                mark.keep_on_split = false;
+            }
+        }
+        Schema::new(spec).unwrap()
+    }
+
+    fn split_attrs_json() -> Attrs {
+        [
+            ("id".to_owned(), serde_json::json!("x")),
+            ("align".to_owned(), serde_json::json!("center")),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn split_block_keeps_only_attributes_kept_on_split() {
+        let s = split_schema();
+        let para = s
+            .node(
+                "paragraph",
+                Some(split_attrs_json()),
+                Fragment::from(vec![t(&s, "ab")]),
+                vec![],
+            )
+            .unwrap();
+        let doc = n(&s, "doc", vec![para]);
+        let out = apply(&state(doc, 3, 3), &split_block).unwrap();
+        let second = out.doc().child(1);
+        assert_eq!(
+            second.attrs().get("align"),
+            Some(&serde_json::json!("center"))
+        );
+        assert_eq!(second.attrs().get("id"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn split_block_keep_marks_drops_marks_not_kept() {
+        let s = split_schema();
+        let bold = s.mark_type("bold").unwrap().create(None).unwrap();
+        let link = s
+            .mark_type("link")
+            .unwrap()
+            .create(Some(
+                [("href".to_owned(), serde_json::json!("a"))]
+                    .into_iter()
+                    .collect(),
+            ))
+            .unwrap();
+        let text = s.text("ab", vec![bold.clone(), link]);
+        let doc = n(&s, "doc", vec![n(&s, "paragraph", vec![text])]);
+        let out = apply(&state(doc, 3, 3), &split_block_keep_marks).unwrap();
+        let stored = out.stored_marks().expect("stored marks");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].ty().name(), "bold");
+    }
+
+    #[test]
+    fn split_list_item_gives_the_new_item_split_attributes() {
+        let s = split_schema();
+        let item_ty = ["listItem"].iter().find_map(|n| s.node_type(n)).unwrap();
+        let list_ty = ["bulletList"].iter().find_map(|n| s.node_type(n)).unwrap();
+        let item = item_ty
+            .create(
+                Some(split_attrs_json()),
+                Fragment::from(vec![p(&s, "ab")]),
+                vec![],
+            )
+            .unwrap();
+        let doc = n(
+            &s,
+            "doc",
+            vec![
+                list_ty
+                    .create(None, Fragment::from(vec![item]), vec![])
+                    .unwrap(),
+            ],
+        );
+        // At the end of "ab" (list 0, item 1, paragraph 2, text 3..5).
+        let split = crate::rich_editor::commands::split_list_item(item_ty.clone(), None);
+        let out = apply(&state(doc, 5, 5), split.as_ref()).unwrap();
+        let second = out.doc().child(0).child(1);
+        assert_eq!(
+            second.attrs().get("align"),
+            Some(&serde_json::json!("center"))
+        );
+        assert_eq!(second.attrs().get("id"), Some(&serde_json::Value::Null));
     }
 }

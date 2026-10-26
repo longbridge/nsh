@@ -91,7 +91,7 @@ function App() {
           textRule("->$", "→"),
           markRule("==([^=]+)==$", "code"),
           wrappingRule("^\\s*>>\\s$", "blockquote"),
-          textblockRule("^~~~$", "code_block"),
+          textblockRule("^~~~$", "codeBlock"),
         ]),
         markdown({ paste: true }),
         watch,
@@ -125,13 +125,13 @@ function App() {
       return `${wrapped} ${editor.isActive("blockquote")}`;
     });
     step("List", () => {
-      const listed = editor.run(wrapInList("bullet_list")) && editor.isActive("bullet_list");
-      const sink = editor.can(sinkListItem("list_item"));
-      editor.run(liftListItem("list_item"));
-      return `${listed} ${sink} ${editor.isActive("bullet_list")}`;
+      const listed = editor.run(wrapInList("bulletList")) && editor.isActive("bulletList");
+      const sink = editor.can(sinkListItem("listItem"));
+      editor.run(liftListItem("listItem"));
+      return `${listed} ${sink} ${editor.isActive("bulletList")}`;
     });
     step("Chain", () => `${editor.run(chain([selectAll(), insertText("Replaced")]))} ${editor.getText()}`);
-    step("First", () => `${editor.run(first([wrapInList("ordered_list"), selectAll()]))} ${editor.isActive("ordered_list")}`);
+    step("First", () => `${editor.run(first([wrapInList("orderedList"), selectAll()]))} ${editor.isActive("orderedList")}`);
     step("Filter", () => {
       const before = editor.revision;
       editor.dispatch({ steps: [{ stepType: "replace", from: 3, to: 3, slice: { content: [{ type: "text", text: "X" }] } }], meta: { block: true } });
@@ -167,13 +167,13 @@ function App() {
       return `${other.selection.type} ${other.textBetween(0, 3)}`;
     });
 
-    const rules = createRichEditor({ content: [{ type: "paragraph" }, { type: "horizontal_rule" }], plugins: [] });
+    const rules = createRichEditor({ content: [{ type: "paragraph" }, { type: "horizontalRule" }], plugins: [] });
     step("Node", () => `${rules.run(setNodeSelection(2))} ${rules.selection.type}`);
 
     const items = createRichEditor({ content: "- one", format: "markdown", plugins: [] });
     step("Items", () => {
       items.run(setTextSelection(6));
-      return `${items.run(splitListItem("list_item"))} ${items.can(sinkListItem("list_item"))}`;
+      return `${items.run(splitListItem("listItem"))} ${items.can(sinkListItem("listItem"))}`;
     });
 
     const taken = createRichEditor({ content: "a", plugins: [] });

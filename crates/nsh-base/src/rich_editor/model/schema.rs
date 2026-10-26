@@ -12,7 +12,8 @@ use std::{
 use serde_json::Value;
 
 use super::{
-    Attrs, Fragment, Mark, Node, ParseRule, Whitespace,
+    AttrParse, AttrRender, Attrs, DomOutputSpec, Fragment, Mark, Node, ParseRule, TextRender,
+    Whitespace,
     content::{self, ContentMatch, MatchState},
 };
 
@@ -83,7 +84,7 @@ impl AttrType {
 }
 
 /// An attribute of a node or mark type.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct AttrSpec {
     /// The value used when none is given; without one the attribute is
@@ -91,6 +92,34 @@ pub struct AttrSpec {
     pub default: Option<Value>,
     /// The type values must have. `null` also passes when it is the default.
     pub validate: Option<AttrType>,
+    /// Where the tag rules of its type read it from in HTML (Tiptap's
+    /// `parseHTML`); none reads the DOM attribute of its own name, as
+    /// Tiptap does, [`AttrParse::Skip`] nothing.
+    pub parse_html: Option<AttrParse>,
+    /// Where it is written in HTML, merged into the outer element its type
+    /// renders (Tiptap's `renderHTML`); none writes the DOM attribute of
+    /// its own name, as Tiptap does, [`AttrRender::Skip`] nothing (the
+    /// type's `to_dom` may still write it).
+    pub render_html: Option<AttrRender>,
+    /// Whether a node split in two keeps it in the second half (Tiptap's
+    /// `keepOnSplit`, default true).
+    pub keep_on_split: bool,
+    /// Whether it is rendered to HTML at all (Tiptap's `rendered`, default
+    /// true).
+    pub rendered: bool,
+}
+
+impl Default for AttrSpec {
+    fn default() -> Self {
+        Self {
+            default: None,
+            validate: None,
+            parse_html: None,
+            render_html: None,
+            keep_on_split: true,
+            rendered: true,
+        }
+    }
 }
 
 /// A node type's definition.
@@ -141,6 +170,12 @@ pub struct NodeSpec {
     /// How HTML becomes nodes of this type
     /// ([`DomParser`](crate::rich_editor::formats::DomParser)).
     pub parse_dom: Vec<ParseRule>,
+    /// How nodes of this type render as HTML (ProseMirror's `toDOM`); none
+    /// renders a `<div data-type="name">` (a `<span>` when inline).
+    pub to_dom: Option<DomOutputSpec>,
+    /// The text nodes of this type count as in plain text (Tiptap's
+    /// `renderText`); none counts their content.
+    pub render_text: Option<TextRender>,
     /// Free-form metadata for frameworks built on the kernel (unknown keys
     /// of the JSON form land here).
     pub extra: Attrs,
@@ -166,6 +201,8 @@ impl Default for NodeSpec {
             draggable: false,
             linebreak_replacement: false,
             parse_dom: Vec::new(),
+            to_dom: None,
+            render_text: None,
             extra: Attrs::new(),
         }
     }
@@ -189,6 +226,18 @@ pub struct MarkSpec {
     /// How HTML elements and styles become marks of this type
     /// ([`DomParser`](crate::rich_editor::formats::DomParser)).
     pub parse_dom: Vec<ParseRule>,
+    /// How marks of this type render as HTML (ProseMirror's `toDOM`); none
+    /// renders a `<span data-mark="name">`.
+    pub to_dom: Option<DomOutputSpec>,
+    /// Whether the caret can leave the mark at its end with the arrow key
+    /// (Tiptap's `exitable`).
+    pub exitable: bool,
+    /// Whether the mark carries on into a new block when a block is split
+    /// (Tiptap's `keepOnSplit`, default true).
+    pub keep_on_split: bool,
+    /// Whether its content is code (ProseMirror's mark spec `code`): input
+    /// rules and smart input leave it alone.
+    pub code: bool,
     /// Free-form metadata for frameworks built on the kernel (unknown keys
     /// of the JSON form land here).
     pub extra: Attrs,
@@ -203,6 +252,10 @@ impl Default for MarkSpec {
             group: None,
             spanning: true,
             parse_dom: Vec::new(),
+            to_dom: None,
+            exitable: false,
+            keep_on_split: true,
+            code: false,
             extra: Attrs::new(),
         }
     }
@@ -300,6 +353,8 @@ const NODE_KEYS: &[&str] = &[
     "draggable",
     "linebreakReplacement",
     "parseDOM",
+    "toDOM",
+    "renderText",
 ];
 const MARK_KEYS: &[&str] = &[
     "attrs",
@@ -308,6 +363,9 @@ const MARK_KEYS: &[&str] = &[
     "group",
     "spanning",
     "parseDOM",
+    "toDOM",
+    "exitable",
+    "keepOnSplit",
 ];
 
 /// `parseDOM`: an array of rule objects (`tag`, `style`, `priority`,
@@ -384,6 +442,13 @@ fn parse_dom_from_json(spec: &Value) -> Result<Vec<ParseRule>, SchemaError> {
         .collect()
 }
 
+fn to_dom_from_json(spec: &Value) -> Result<Option<DomOutputSpec>, SchemaError> {
+    match spec.get("toDOM") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => DomOutputSpec::from_json(v).map(Some),
+    }
+}
+
 fn attrs_from_json(spec: &Value) -> Result<Vec<(String, AttrSpec)>, SchemaError> {
     entries(spec.get("attrs"))?
         .into_iter()
@@ -401,7 +466,23 @@ fn attrs_from_json(spec: &Value) -> Result<Vec<(String, AttrSpec)>, SchemaError>
             };
             // `{"default": null}` is a default of null, unlike no `default`.
             let default = attr.as_object().and_then(|o| o.get("default")).cloned();
-            Ok((name, AttrSpec { default, validate }))
+            let place = |key: &str| match attr.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => Ok(Some(v)),
+            };
+            Ok((
+                name,
+                AttrSpec {
+                    default,
+                    validate,
+                    parse_html: place("parseHTML")?.map(AttrParse::from_json).transpose()?,
+                    render_html: place("renderHTML")?
+                        .map(AttrRender::from_json)
+                        .transpose()?,
+                    keep_on_split: bool_field(attr, "keepOnSplit", true)?,
+                    rendered: bool_field(attr, "rendered", true)?,
+                },
+            ))
         })
         .collect()
 }
@@ -409,9 +490,10 @@ fn attrs_from_json(spec: &Value) -> Result<Vec<(String, AttrSpec)>, SchemaError>
 impl SchemaSpec {
     /// Reads a spec from ProseMirror's shape:
     /// `{"nodes": {name: {content, marks, group, inline, atom, selectable,
-    /// isolating, code, defining, attrs: {name: {default, validate}},
-    /// parseDOM}}, "marks": {name: {attrs, inclusive, excludes, group,
-    /// spanning, parseDOM}},
+    /// isolating, code, defining, attrs: {name: {default, validate,
+    /// parseHTML, renderHTML, keepOnSplit, rendered}}, parseDOM, toDOM,
+    /// renderText}}, "marks": {name: {attrs, inclusive, excludes, group,
+    /// spanning, parseDOM, toDOM, exitable, keepOnSplit, code}},
     /// "topNode": name}`. `nodes` and `marks` may also be arrays of
     /// `[name, spec]` pairs, which keep their order whatever serde_json's
     /// features (objects are read in their iteration order).
@@ -447,6 +529,8 @@ impl SchemaSpec {
                     draggable: bool_field(n, "draggable", false)?,
                     linebreak_replacement: bool_field(n, "linebreakReplacement", false)?,
                     parse_dom: parse_dom_from_json(n)?,
+                    to_dom: to_dom_from_json(n)?,
+                    render_text: str_field(n, "renderText")?.map(TextRender::Template),
                     extra: extra(n, NODE_KEYS),
                 },
             ));
@@ -461,6 +545,12 @@ impl SchemaSpec {
                     group: str_field(m, "group")?,
                     spanning: bool_field(m, "spanning", true)?,
                     parse_dom: parse_dom_from_json(m)?,
+                    to_dom: to_dom_from_json(m)?,
+                    exitable: bool_field(m, "exitable", false)?,
+                    keep_on_split: bool_field(m, "keepOnSplit", true)?,
+                    // `code` stays in `extra` too, where earlier readers
+                    // look for it.
+                    code: bool_field(m, "code", false)?,
                     extra: extra(m, MARK_KEYS),
                 },
             ));
@@ -1055,6 +1145,21 @@ impl NodeType {
         check_attrs(&self.spec().attrs, attrs, "node", self.name())
     }
 
+    /// The attributes the second half of a node of this type with `attrs`
+    /// gets when it is split (Tiptap's `getSplittedAttributes`): those
+    /// with `keep_on_split`, the others back at their defaults.
+    pub fn split_attrs(&self, attrs: &Attrs) -> Attrs {
+        let kept: Attrs = self
+            .spec()
+            .attrs
+            .iter()
+            .filter(|(_, spec)| spec.keep_on_split)
+            .filter_map(|(name, _)| Some((name.clone(), attrs.get(name)?.clone())))
+            .collect();
+        self.compute_attrs(Some(&kept))
+            .unwrap_or_else(|_| attrs.clone())
+    }
+
     /// Whether `content` is valid content for it, its marks included.
     pub fn valid_content(&self, content: &Fragment) -> bool {
         match self
@@ -1390,10 +1495,29 @@ mod tests {
             s.top_node_type().spec().extra["x-ui"],
             json!({"icon": "doc"})
         );
-        assert_eq!(
-            s.mark_type("m").unwrap().spec().extra["keepOnSplit"],
-            json!(true)
-        );
+        assert!(s.mark_type("m").unwrap().spec().keep_on_split);
+        let tiptap = SchemaSpec::from_json(&json!({
+            "nodes": [["doc", {"content": "p+"}], ["p", {"content": "text*",
+                "attrs": {"id": {"default": null, "keepOnSplit": false}, "align": {"default": "left"}},
+                "toDOM": ["p", 0], "renderText": "x"}], ["text", {}]],
+            "marks": [["c", {"code": true, "exitable": true, "keepOnSplit": false, "toDOM": ["code", 0]}]]
+        }))
+        .unwrap();
+        let c = tiptap.mark_type("c").unwrap();
+        assert!(c.spec().code && c.spec().exitable && !c.spec().keep_on_split);
+        // `code` stays in `extra` for the readers that look there.
+        assert_eq!(c.spec().extra["code"], json!(true));
+        assert!(c.spec().to_dom.is_some());
+        let p = tiptap.node_type("p").unwrap();
+        assert!(p.spec().render_text.is_some() && p.spec().to_dom.is_some());
+        let mut attrs = Attrs::new();
+        attrs.insert("id".into(), json!("a"));
+        attrs.insert("align".into(), json!("right"));
+        let split = p.split_attrs(&attrs);
+        assert_eq!(split["id"], Value::Null);
+        assert_eq!(split["align"], json!("right"));
+        let m = tiptap.mark("c", None).unwrap();
+        assert!(crate::rich_editor::model::marks_kept_on_split(&[m]).is_empty());
         assert_eq!(s.linebreak_replacement().unwrap().name(), "br");
         assert_eq!(
             s.node_type("br").unwrap().spec().leaf_text.as_deref(),

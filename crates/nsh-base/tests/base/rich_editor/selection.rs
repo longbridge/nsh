@@ -182,15 +182,6 @@ fn mod_a_selects_everything() {
     see(&mut app, "Sel 2-2");
 }
 
-#[test]
-fn escape_selects_the_parent_node() {
-    let mut app = start(paragraphs(&["ab", "cd"]));
-    focus_start(&mut app);
-    keys(&mut app, &["down", "escape"]);
-    // ProseMirror's `selectParentNode`: the paragraph as a node.
-    see(&mut app, "Sel 4-8");
-}
-
 /// A paragraph, a `stock` atom, a paragraph: `ab` 1..3, the atom 4..5,
 /// `cd` 6..8.
 fn with_atom() -> Value {

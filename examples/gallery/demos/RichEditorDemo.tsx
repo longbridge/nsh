@@ -81,7 +81,7 @@ const WRAPS: ToggleItem<Wrap>[] = [
 /** What a block toggle runs: pressed sets that type, released goes back to text. */
 function blockCommand(block: Block, pressed: boolean): RichCommand {
   if (!pressed || block === "paragraph") return setBlockType("paragraph");
-  if (block === "code") return setBlockType("code_block");
+  if (block === "code") return setBlockType("codeBlock");
   return setBlockType("heading", { level: Number(block[1]) });
 }
 
@@ -89,7 +89,7 @@ const MARK_TYPES: Record<Mark, string> = { bold: "bold", italic: "italic", strik
 
 /** Takes the block out of `wrap`: a quote lifts, a list item leaves its list. */
 function unwrap(wrap: Wrap): RichCommand {
-  return wrap === "quote" ? lift() : liftListItem("list_item");
+  return wrap === "quote" ? lift() : liftListItem("listItem");
 }
 
 /**
@@ -99,7 +99,7 @@ function unwrap(wrap: Wrap): RichCommand {
  */
 function wrapCommand(wrap: Wrap, pressed: boolean, current: Wrap[]): RichCommand {
   if (!pressed) return unwrap(wrap);
-  const into = wrap === "quote" ? wrapIn("blockquote") : wrapInList(wrap === "bullet" ? "bullet_list" : "ordered_list");
+  const into = wrap === "quote" ? wrapIn("blockquote") : wrapInList(wrap === "bullet" ? "bulletList" : "orderedList");
   const out = current.filter((w) => w !== wrap).map(unwrap);
   return out.length ? chain([...out, into]) : into;
 }
@@ -121,14 +121,14 @@ function Toolbar(props: { editor: RichEditorSession; revision: number }) {
     editor.focus();
   };
   const block = (): Block[] => {
-    if (on("code_block")) return ["code"];
+    if (on("codeBlock")) return ["code"];
     for (const level of [1, 2, 3] as const) if (on("heading", { level })) return [`h${level}`];
     return on("paragraph") ? ["paragraph"] : [];
   };
   const marks = (): Mark[] => MARKS.map((m) => m.value).filter((m) => on(MARK_TYPES[m]));
   const wraps = (): Wrap[] => [
-    ...(on("bullet_list") ? (["bullet"] as const) : []),
-    ...(on("ordered_list") ? (["ordered"] as const) : []),
+    ...(on("bulletList") ? (["bullet"] as const) : []),
+    ...(on("orderedList") ? (["ordered"] as const) : []),
     ...(on("blockquote") ? (["quote"] as const) : []),
   ];
   const able = <T extends string>(items: ToggleItem<T>[], command: (value: T) => RichCommand) =>
@@ -158,9 +158,9 @@ function Toolbar(props: { editor: RichEditorSession; revision: number }) {
         value={wraps()}
         onToggle={(value, pressed) => run(wrapCommand(value, pressed, wraps()))}
       />
-      <IconButton icon="list-indent-decrease" label="Outdent" disabled={!can(liftListItem("list_item"))} onPress={() => run(liftListItem("list_item"))} />
-      <IconButton icon="list-indent-increase" label="Indent" disabled={!can(sinkListItem("list_item"))} onPress={() => run(sinkListItem("list_item"))} />
-      <IconButton icon="minus" label="Divider" disabled={!can(insertContent({ type: "horizontal_rule" }))} onPress={() => run(insertContent({ type: "horizontal_rule" }))} />
+      <IconButton icon="list-indent-decrease" label="Outdent" disabled={!can(liftListItem("listItem"))} onPress={() => run(liftListItem("listItem"))} />
+      <IconButton icon="list-indent-increase" label="Indent" disabled={!can(sinkListItem("listItem"))} onPress={() => run(sinkListItem("listItem"))} />
+      <IconButton icon="minus" label="Divider" disabled={!can(insertContent({ type: "horizontalRule" }))} onPress={() => run(insertContent({ type: "horizontalRule" }))} />
     </View>
   );
 }
@@ -185,10 +185,10 @@ const documentClasses = {
     "heading[level=2]": "text-2xl font-semibold tracking-tight",
     "heading[level=3]": "text-xl font-semibold",
     blockquote: "border-l-4 border-border pl-4 text-muted-foreground italic",
-    code_block: "font-mono text-sm bg-muted rounded-lg px-4 py-3",
-    bullet_list: "gap-1.5 pl-6",
-    ordered_list: "gap-1.5 pl-6",
-    horizontal_rule: "h-px bg-border my-3",
+    codeBlock: "font-mono text-sm bg-muted rounded-lg px-4 py-3",
+    bulletList: "gap-1.5 pl-6",
+    orderedList: "gap-1.5 pl-6",
+    horizontalRule: "h-px bg-border my-3",
   },
   marks: markClasses,
 };
@@ -284,7 +284,7 @@ const chatSchema = defineSchema({
     doc: { content: "paragraph+" },
     paragraph: { content: "inline*" },
     mention: { group: "inline", inline: true, atom: true, attrs: { id: {}, label: { default: "" } } },
-    hard_break: { group: "inline", inline: true, leafText: "\n", linebreakReplacement: true },
+    hardBreak: { group: "inline", inline: true, leafText: "\n", linebreakReplacement: true },
     text: { group: "inline" },
   },
   marks: { bold: {}, italic: {} },
@@ -324,7 +324,7 @@ function MessageText(props: { doc: RichNodeJSON; mine: boolean }) {
             const label = String(node.attrs?.label ?? "");
             return <Text style={{ fontWeight: "600", color: props.mine ? colors.onAccent : colors.info }}>{`@${label}`}</Text>;
           }
-          if (node.type === "hard_break") return <Text>{"\n"}</Text>;
+          if (node.type === "hardBreak") return <Text>{"\n"}</Text>;
           const marks = (node.marks ?? []).map((m) => m.type);
           return (
             <Text style={{ fontWeight: marks.includes("bold") ? "700" : undefined, fontStyle: marks.includes("italic") ? "italic" : undefined }}>
@@ -400,7 +400,7 @@ function ChatComposer() {
         "Mod-i": toggleMark("italic"),
         "Mod-z": undo(),
         "Shift-Mod-z": redo(),
-        "Shift-Enter": insertContent({ type: "hard_break" }),
+        "Shift-Enter": insertContent({ type: "hardBreak" }),
       }),
       baseKeymap(),
     ],

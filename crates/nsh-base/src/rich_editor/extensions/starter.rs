@@ -1,9 +1,10 @@
 //! A starter set of optional pieces, none of which the kernel needs: the
-//! nodes and marks of `prosemirror-schema-basic` with the lists of
-//! `prosemirror-schema-list` and common marks ([`nodes`], [`marks`],
-//! [`schema`]), and key bindings, input rules and plugins for them (after
-//! `prosemirror-example-setup`). An app takes the pieces it wants and adds
-//! its own; the commands take any schema's types.
+//! nodes and marks of Tiptap's StarterKit with its names (`bulletList`,
+//! `codeBlock`, `hardBreak`, ...), task lists, highlight, sub- and
+//! superscript, text styles and text alignment ([`nodes`], [`marks`],
+//! [`schema`]), and Tiptap's key bindings, input rules, paste rules and
+//! plugins for them. An app takes the pieces it wants and adds its own;
+//! the commands take any schema's types.
 
 use std::sync::Arc;
 
@@ -11,37 +12,132 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::{
+    clear_document::clear_document,
+    code_block::{CodeBlockOptions, code_block_keymap, fence_language},
+    core_keymap::core_keymap,
+    helpers::{set_hard_break, set_node, toggle_list, toggle_node, toggle_wrap, update_attribute},
     history::{HistoryOptions, history, redo, undo},
     input_rules::{
-        GetAttrs, InputRule, JoinPredicate, ellipsis, em_dash, input_rules as input_rules_plugin,
-        mark_input_rule, number, smart_quotes, textblock_type_input_rule, undo_input_rule,
-        wrapping_input_rule,
+        GetAttrs, InputMatch, InputRule, JoinPredicate, input_rules as input_rules_plugin,
+        mark_input_rule, node_input_rule, number, textblock_type_input_rule, wrapping_input_rule,
     },
-    keymap::keymap as keymap_plugin,
+    keymap::{keymap as keymap_plugin, normalize_key_name},
+    list_keymap::{ListKeymapOptions, list_keymap},
+    paste_rules::{PasteAction, PasteRule, paste_rules},
+    trailing_node::{TrailingNodeOptions, trailing_node},
+    typography::{TypographyOptions, typography},
 };
 use crate::rich_editor::{
     commands::{
-        BoxCommand, Dispatch, base_keymap, chain_commands, command, exit_code, join_down, join_up,
-        lift, lift_list_item, select_parent_node, set_block_type, sink_list_item, split_list_item,
-        toggle_mark, wrap_in, wrap_in_list,
+        BoxCommand, chain_commands, command, lift_list_item, sink_list_item, split_list_item,
+        toggle_mark,
     },
     model::{
-        AttrSpec, Attrs, ClearMark, DomElement, MarkSpec, NodeSpec, ParseRule, Schema, SchemaSpec,
-        Whitespace,
+        AttrParse, AttrRender, AttrSpec, Attrs, ClearMark, DomElement, DomOutputSpec, MarkSpec,
+        NodeSpec, ParseRule, Schema, SchemaSpec, TextRender, Whitespace,
     },
-    state::{EditorState, Plugin},
+    state::Plugin,
 };
 
 fn attr(default: Option<Value>) -> AttrSpec {
     AttrSpec {
         default,
+        // Each type's `to_dom` writes its attributes in their HTML form
+        // (`<h2>`, `class="language-x"`), as Tiptap's starter types do.
+        rendered: false,
         ..Default::default()
     }
+}
+
+// A null-default attribute read from and written to the style property
+// `property` (Tiptap's text style and highlight attributes).
+fn styled_attr(property: &str) -> AttrSpec {
+    AttrSpec {
+        default: Some(Value::Null),
+        parse_html: Some(AttrParse::Style(property.into())),
+        render_html: Some(AttrRender::Style(property.into())),
+        ..Default::default()
+    }
+}
+
+// Tiptap's `textAlign` global attribute: null by default, read from and
+// written as the `text-align` style.
+fn text_align() -> AttrSpec {
+    styled_attr("text-align")
 }
 
 /// The starter's node specs, each `(name, spec)`.
 pub mod nodes {
     use super::*;
+
+    /// A list of tasks (Tiptap's `taskList`).
+    pub fn task_list() -> (String, NodeSpec) {
+        (
+            "taskList".into(),
+            NodeSpec {
+                to_dom: Some(
+                    DomOutputSpec::tag("ul")
+                        .attr("data-type", "taskList")
+                        .hole(),
+                ),
+                parse_dom: vec![ParseRule {
+                    priority: Some(51),
+                    ..ParseRule::tag(r#"ul[data-type="taskList"]"#)
+                }],
+                content: Some("taskItem+".into()),
+                group: Some("block list".into()),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// A task: a paragraph, then any blocks, `checked` or not (Tiptap's
+    /// `taskItem`).
+    pub fn task_item() -> (String, NodeSpec) {
+        (
+            "taskItem".into(),
+            NodeSpec {
+                to_dom: Some(DomOutputSpec::render(|src| {
+                    let c = src
+                        .attr("checked")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    DomOutputSpec::tag("li")
+                        .attr("data-type", "taskItem")
+                        .attr("data-checked", c)
+                        .child(
+                            DomOutputSpec::tag("label")
+                                .child(DomOutputSpec::tag("input").attr("type", "checkbox").attr(
+                                    "checked",
+                                    if c {
+                                        Value::from("checked")
+                                    } else {
+                                        Value::Null
+                                    },
+                                ))
+                                .child(DomOutputSpec::tag("span")),
+                        )
+                        .child(DomOutputSpec::tag("div").hole())
+                })),
+                parse_dom: vec![
+                    ParseRule {
+                        priority: Some(51),
+                        ..ParseRule::tag(r#"li[data-type="taskItem"]"#)
+                    }
+                    .with_get_attrs(|input| {
+                        let checked = input.element()?.attr("data-checked") == Some("true");
+                        Some(attrs_of("checked", Value::Bool(checked)))
+                    }),
+                ],
+                content: Some("paragraph block*".into()),
+                defining: true,
+                attrs: vec![("checked".into(), attr(Some(Value::Bool(false))))],
+                // The editor's view draws its checkbox.
+                extra: [("render".to_owned(), Value::from("task"))].into(),
+                ..Default::default()
+            },
+        )
+    }
 
     /// The document: one block or more.
     pub fn doc() -> (String, NodeSpec) {
@@ -59,9 +155,11 @@ pub mod nodes {
         (
             "paragraph".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("p").hole()),
                 parse_dom: vec![ParseRule::tag("p")],
                 content: Some("inline*".into()),
                 group: Some("block".into()),
+                attrs: vec![("textAlign".into(), text_align())],
                 ..Default::default()
             },
         )
@@ -72,6 +170,7 @@ pub mod nodes {
         (
             "blockquote".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("blockquote").hole()),
                 parse_dom: vec![ParseRule::tag("blockquote")],
                 content: Some("block+".into()),
                 group: Some("block".into()),
@@ -84,8 +183,9 @@ pub mod nodes {
     /// A horizontal rule (a leaf block).
     pub fn horizontal_rule() -> (String, NodeSpec) {
         (
-            "horizontal_rule".into(),
+            "horizontalRule".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("hr")),
                 parse_dom: vec![ParseRule::tag("hr")],
                 group: Some("block".into()),
                 ..Default::default()
@@ -98,6 +198,10 @@ pub mod nodes {
         (
             "heading".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::render(|src| {
+                    let level = src.attr("level").and_then(Value::as_u64).unwrap_or(1);
+                    DomOutputSpec::tag(format!("h{}", level.clamp(1, 6))).hole()
+                })),
                 parse_dom: (1..=6)
                     .map(|level| {
                         ParseRule::tag(format!("h{level}"))
@@ -107,7 +211,10 @@ pub mod nodes {
                 content: Some("inline*".into()),
                 group: Some("block".into()),
                 defining: true,
-                attrs: vec![("level".into(), attr(Some(Value::from(1))))],
+                attrs: vec![
+                    ("level".into(), attr(Some(Value::from(1)))),
+                    ("textAlign".into(), text_align()),
+                ],
                 ..Default::default()
             },
         )
@@ -117,8 +224,17 @@ pub mod nodes {
     /// null).
     pub fn code_block() -> (String, NodeSpec) {
         (
-            "code_block".into(),
+            "codeBlock".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::render(|src| {
+                    let code = match src.attr("language").and_then(Value::as_str) {
+                        Some(lang) => {
+                            DomOutputSpec::tag("code").attr("class", format!("language-{lang}"))
+                        }
+                        None => DomOutputSpec::tag("code"),
+                    };
+                    DomOutputSpec::tag("pre").child(code.hole())
+                })),
                 parse_dom: vec![
                     ParseRule {
                         preserve_whitespace: Some(Whitespace::Full),
@@ -154,11 +270,18 @@ pub mod nodes {
         )
     }
 
-    /// An inline image with a `src`, an `alt` and a `title`.
+    /// An inline image with a `src`, an `alt`, a `title`, a `width` and a
+    /// `height`.
     pub fn image() -> (String, NodeSpec) {
         (
             "image".into(),
             NodeSpec {
+                to_dom: Some(
+                    DomOutputSpec::tag("img")
+                        .attr_of("src", "src")
+                        .attr_of("alt", "alt")
+                        .attr_of("title", "title"),
+                ),
                 parse_dom: vec![ParseRule::tag("img[src]").with_get_attrs(|input| {
                     let img = input.element()?;
                     let mut attrs = Attrs::new();
@@ -166,6 +289,8 @@ pub mod nodes {
                     attrs.insert("src".into(), get("src"));
                     attrs.insert("alt".into(), get("alt"));
                     attrs.insert("title".into(), get("title"));
+                    attrs.insert("width".into(), get("width"));
+                    attrs.insert("height".into(), get("height"));
                     Some(attrs)
                 })],
                 inline: true,
@@ -175,7 +300,11 @@ pub mod nodes {
                     ("src".into(), attr(None)),
                     ("alt".into(), attr(Some(Value::Null))),
                     ("title".into(), attr(Some(Value::Null))),
+                    ("width".into(), attr(Some(Value::Null))),
+                    ("height".into(), attr(Some(Value::Null))),
                 ],
+                // The editor's view draws it.
+                extra: [("render".to_owned(), Value::from("image"))].into(),
                 ..Default::default()
             },
         )
@@ -184,8 +313,10 @@ pub mod nodes {
     /// A line break in a textblock.
     pub fn hard_break() -> (String, NodeSpec) {
         (
-            "hard_break".into(),
+            "hardBreak".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("br")),
+                render_text: Some(TextRender::Template("\n".into())),
                 parse_dom: vec![ParseRule::tag("br")],
                 inline: true,
                 group: Some("inline".into()),
@@ -197,24 +328,33 @@ pub mod nodes {
         )
     }
 
-    /// A list with an `order` (its first number, default 1).
+    /// A list with a `start` (its first number, default 1).
     pub fn ordered_list() -> (String, NodeSpec) {
         (
-            "ordered_list".into(),
+            "orderedList".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::render(|src| {
+                    let start = src.attr("start");
+                    let start = start.and_then(Value::as_i64).filter(|&s| s != 1);
+                    DomOutputSpec::tag("ol").attr("start", start).hole()
+                })),
                 parse_dom: vec![ParseRule::tag("ol").with_get_attrs(|input| {
                     let start = input
                         .element()?
                         .attr("start")
                         .and_then(|s| s.trim().parse::<i64>().ok())
                         .unwrap_or(1);
-                    Some(attrs_of("order", Value::from(start)))
+                    Some(attrs_of("start", Value::from(start)))
                 })],
-                content: Some("list_item+".into()),
-                group: Some("block".into()),
-                attrs: vec![("order".into(), attr(Some(Value::from(1))))],
-                // The editor's view numbers its items from `order`.
-                extra: [("listMarker".to_owned(), Value::from("ordered"))].into(),
+                content: Some("listItem+".into()),
+                group: Some("block list".into()),
+                attrs: vec![("start".into(), attr(Some(Value::from(1))))],
+                // The editor's view numbers its items from `start`.
+                extra: [
+                    ("listMarker".to_owned(), Value::from("ordered")),
+                    ("listMarkerStart".to_owned(), Value::from("start")),
+                ]
+                .into(),
                 ..Default::default()
             },
         )
@@ -223,11 +363,12 @@ pub mod nodes {
     /// A bulleted list.
     pub fn bullet_list() -> (String, NodeSpec) {
         (
-            "bullet_list".into(),
+            "bulletList".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("ul").hole()),
                 parse_dom: vec![ParseRule::tag("ul")],
-                content: Some("list_item+".into()),
-                group: Some("block".into()),
+                content: Some("listItem+".into()),
+                group: Some("block list".into()),
                 // The editor's view marks its items with bullets.
                 extra: [("listMarker".to_owned(), Value::from("bullet"))].into(),
                 ..Default::default()
@@ -238,8 +379,9 @@ pub mod nodes {
     /// A list item: a paragraph, then any blocks.
     pub fn list_item() -> (String, NodeSpec) {
         (
-            "list_item".into(),
+            "listItem".into(),
             NodeSpec {
+                to_dom: Some(DomOutputSpec::tag("li").hole()),
                 parse_dom: vec![ParseRule::tag("li")],
                 content: Some("paragraph block*".into()),
                 defining: true,
@@ -253,12 +395,91 @@ pub mod nodes {
 pub mod marks {
     use super::*;
 
+    /// A highlight, with a `color` (default null; Tiptap's `highlight`).
+    pub fn highlight() -> (String, MarkSpec) {
+        (
+            "highlight".into(),
+            MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("mark").hole()),
+                parse_dom: vec![ParseRule::tag("mark")],
+                attrs: vec![("color".into(), styled_attr("background-color"))],
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Subscript, which excludes superscript.
+    pub fn subscript() -> (String, MarkSpec) {
+        (
+            "subscript".into(),
+            MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("sub").hole()),
+                parse_dom: vec![ParseRule::tag("sub")],
+                excludes: Some("superscript".into()),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Superscript, which excludes subscript.
+    pub fn superscript() -> (String, MarkSpec) {
+        (
+            "superscript".into(),
+            MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("sup").hole()),
+                parse_dom: vec![ParseRule::tag("sup")],
+                excludes: Some("subscript".into()),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Text styles: `color`, `fontFamily`, `fontSize` and `backgroundColor`
+    /// (each default null), written as a `<span style>` (Tiptap's
+    /// `textStyle`).
+    pub fn text_style() -> (String, MarkSpec) {
+        (
+            "textStyle".into(),
+            MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("span").hole()),
+                // Only spans carrying one of its styles: a span styled
+                // otherwise (`font-weight`) is no text style. Not
+                // consuming, so the other rules still read the span.
+                parse_dom: vec![ParseRule {
+                    priority: Some(101),
+                    consuming: Some(false),
+                    ..ParseRule::tag("span[style]").with_get_attrs(|input| {
+                        let el = input.element()?;
+                        ["color", "font-family", "font-size", "background-color"]
+                            .iter()
+                            .any(|p| el.style(p).is_some_and(|v| !v.trim().is_empty()))
+                            .then(Attrs::new)
+                    })
+                }],
+                attrs: vec![
+                    ("color".into(), styled_attr("color")),
+                    ("fontFamily".into(), styled_attr("font-family")),
+                    ("fontSize".into(), styled_attr("font-size")),
+                    ("backgroundColor".into(), styled_attr("background-color")),
+                ],
+                spanning: true,
+                ..Default::default()
+            },
+        )
+    }
+
     /// A link with an `href` and a `title`; text typed at its end is not
     /// linked.
     pub fn link() -> (String, MarkSpec) {
         (
             "link".into(),
             MarkSpec {
+                to_dom: Some(
+                    DomOutputSpec::tag("a")
+                        .attr_of("href", "href")
+                        .attr_of("title", "title")
+                        .hole(),
+                ),
                 parse_dom: vec![ParseRule::tag("a[href]").with_get_attrs(|input| {
                     let a = input.element()?;
                     let mut attrs = attrs_of("href", Value::from(a.attr("href")?));
@@ -273,6 +494,7 @@ pub mod marks {
                     ("title".into(), attr(Some(Value::Null))),
                 ],
                 inclusive: false,
+                exitable: true,
                 ..Default::default()
             },
         )
@@ -283,6 +505,7 @@ pub mod marks {
         (
             "italic".into(),
             MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("em").hole()),
                 parse_dom: vec![
                     ParseRule::tag("i"),
                     ParseRule::tag("em"),
@@ -302,6 +525,7 @@ pub mod marks {
         (
             "bold".into(),
             MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("strong").hole()),
                 parse_dom: vec![
                     ParseRule::tag("strong"),
                     // Google Docs wraps copied content in a `<b>` of normal
@@ -327,14 +551,19 @@ pub mod marks {
         )
     }
 
-    /// Inline code. Its spec's `extra` has `code: true`, which input rules
-    /// read as ProseMirror's mark spec `code`.
+    /// Inline code: it excludes every other mark (`excludes: "_"`), and the
+    /// caret can leave it at its end. Its spec's `extra` has `code: true`
+    /// too, for readers of the earlier form.
     pub fn code() -> (String, MarkSpec) {
         let mut extra = Attrs::new();
         extra.insert("code".into(), Value::Bool(true));
         (
             "code".into(),
             MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("code").hole()),
+                code: true,
+                excludes: Some("_".into()),
+                exitable: true,
                 parse_dom: vec![ParseRule::tag("code")],
                 extra,
                 ..Default::default()
@@ -347,6 +576,7 @@ pub mod marks {
         (
             "strike".into(),
             MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("s").hole()),
                 parse_dom: vec![
                     ParseRule::tag("s"),
                     ParseRule::tag("del"),
@@ -374,6 +604,7 @@ pub mod marks {
         (
             "underline".into(),
             MarkSpec {
+                to_dom: Some(DomOutputSpec::tag("u").hole()),
                 parse_dom: vec![
                     ParseRule::tag("u"),
                     ParseRule::style("text-decoration").with_get_attrs(|input| {
@@ -406,6 +637,8 @@ pub fn schema_spec() -> SchemaSpec {
             nodes::ordered_list(),
             nodes::bullet_list(),
             nodes::list_item(),
+            nodes::task_list(),
+            nodes::task_item(),
         ],
         marks: vec![
             marks::link(),
@@ -414,6 +647,10 @@ pub fn schema_spec() -> SchemaSpec {
             marks::code(),
             marks::strike(),
             marks::underline(),
+            marks::highlight(),
+            marks::subscript(),
+            marks::superscript(),
+            marks::text_style(),
         ],
         top_node: None,
     }
@@ -455,187 +692,215 @@ fn attrs_of(key: &str, value: Value) -> Attrs {
     attrs
 }
 
-/// Turns the empty code block the caret is in into the schema's default
-/// textblock (its first block type that takes text, a paragraph in the
-/// starter's) when it is the first child of its parent: after another block,
-/// `join_backward` deletes it instead.
-fn clear_empty_code_block(state: &EditorState, dispatch: Dispatch<'_>) -> bool {
-    let selection = state.selection();
-    let Some(cursor) = selection.cursor() else {
-        return false;
-    };
-    let parent = cursor.parent();
-    if !parent.ty().spec().code
-        || parent.content().size() > 0
-        || cursor.depth == 0
-        || cursor.index(cursor.depth - 1) > 0
-    {
-        return false;
-    }
-    let Some(paragraph) = cursor
-        .node(cursor.depth - 1)
-        .content_match_at(cursor.index(cursor.depth - 1))
-        .and_then(|m| m.default_type())
-        .filter(|ty| ty.is_textblock() && !ty.spec().code)
-    else {
-        return false;
-    };
-    if let Some(dispatch) = dispatch {
-        let mut tr = state.tr();
-        let pos = cursor.pos;
-        if tr.set_block_type(pos, pos, &paragraph, None).is_err() {
-            return false;
-        }
-        tr.scroll_into_view();
-        dispatch(tr);
-    }
-    true
+/// The keys bound to commands, by normalized name on both kinds of platform.
+fn key_id(name: &str) -> String {
+    format!(
+        "{}|{}",
+        normalize_key_name(name, false).unwrap_or_else(|_| name.to_owned()),
+        normalize_key_name(name, true).unwrap_or_else(|_| name.to_owned())
+    )
 }
 
-/// Key bindings for the starter's types that `schema` has, after
-/// `prosemirror-example-setup`: history (`Mod-z`, `Shift-Mod-z`, `Mod-y`
-/// off Apple platforms), marks (`Mod-b`, `Mod-i`, `Mod-u`, `` Mod-` ``),
-/// lists (`Shift-Ctrl-8`/`9`, Enter splits items, `Mod-[`/`Mod-]` lift and
-/// sink), blocks (`Shift-Ctrl-0` paragraph, `Shift-Ctrl-1`..`6` headings,
-/// `Shift-Ctrl-\` code, `Ctrl->` quote, `Mod-_` rule), `Mod-Enter` /
-/// `Shift-Enter` line breaks, Backspace undoing an input rule, `Escape`
-/// selecting the parent and `Alt-ArrowUp`/`Down` joining.
-pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
+/// Merges groups of bindings into one keymap, as Tiptap's keymap plugins
+/// stack: a key bound in several groups runs their commands in the order of
+/// the groups until one applies.
+pub fn merge_keymaps(groups: Vec<Vec<(String, BoxCommand)>>) -> Vec<(String, BoxCommand)> {
+    let mut order: Vec<(String, String, Vec<BoxCommand>)> = Vec::new();
+    for (name, command) in groups.into_iter().flatten() {
+        let id = key_id(&name);
+        match order.iter_mut().find(|(i, _, _)| i == &id) {
+            Some((_, _, commands)) => commands.push(command),
+            None => order.push((id, name, vec![command])),
+        }
+    }
+    order
+        .into_iter()
+        .map(|(_, name, mut commands)| {
+            let command = if commands.len() == 1 {
+                commands.remove(0)
+            } else {
+                chain_commands(commands)
+            };
+            (name, command)
+        })
+        .collect()
+}
+
+/// The keyboard shortcuts of Tiptap's extensions for the starter's types
+/// that `schema` has, without the core and list keymaps: history (`Mod-z`,
+/// `Shift-Mod-z`, `Mod-y`, `Mod-я`, `Shift-Mod-я`), marks (`Mod-b`,
+/// `Mod-i`, `Mod-u`, `Mod-Shift-s` strike, `Mod-e` code, `Mod-Shift-h`
+/// highlight, `Mod-,` subscript, `Mod-.` superscript), blocks (`Mod-Alt-0`
+/// paragraph, `Mod-Alt-1`..`6` headings, `Mod-Shift-b` quote,
+/// `Mod-Shift-7` / `8` / `9` ordered, bullet and task lists, `Mod-Alt-c`
+/// code block), `Mod-Shift-l` / `e` / `r` / `j` text alignment,
+/// `Mod-Enter` / `Shift-Enter` hard breaks, and list items' Enter, Tab and
+/// Shift-Tab.
+pub fn extension_keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
     let mut keys: Vec<(String, BoxCommand)> = vec![
         ("Mod-z".into(), command(undo)),
         ("Shift-Mod-z".into(), command(redo)),
-        // Backspace first takes back an input rule, then turns an empty
-        // code block into a paragraph (as Tiptap's code block does), so a
-        // second Backspace deletes it even with no block before to join.
-        (
-            "Backspace".into(),
-            chain_commands(vec![
-                command(undo_input_rule),
-                Arc::new(clear_empty_code_block),
-            ]),
-        ),
-        ("Alt-ArrowUp".into(), command(join_up)),
-        ("Alt-ArrowDown".into(), command(join_down)),
-        ("Mod-BracketLeft".into(), command(lift)),
-        ("Escape".into(), command(select_parent_node)),
+        ("Mod-y".into(), command(redo)),
+        ("Mod-я".into(), command(undo)),
+        ("Shift-Mod-я".into(), command(redo)),
     ];
-    // Ctrl-Y off Apple platforms; Cmd-Y redoes there too, harmlessly.
-    keys.push(("Mod-y".into(), command(redo)));
-    for (name, key) in [
-        ("bold", "Mod-b"),
-        ("italic", "Mod-i"),
-        ("underline", "Mod-u"),
-        ("code", "Mod-`"),
+    for (name, bindings) in [
+        ("bold", &["Mod-b", "Mod-B"][..]),
+        ("italic", &["Mod-i", "Mod-I"]),
+        ("underline", &["Mod-u", "Mod-U"]),
+        ("strike", &["Mod-Shift-s"]),
+        ("code", &["Mod-e"]),
+        ("highlight", &["Mod-Shift-h"]),
+        ("subscript", &["Mod-,"]),
+        ("superscript", &["Mod-."]),
     ] {
         if let Some(ty) = schema.mark_type(name) {
-            keys.push((key.into(), toggle_mark(ty, None, true)));
+            for key in bindings {
+                keys.push(((*key).into(), toggle_mark(ty.clone(), None, true)));
+            }
         }
     }
-    if let Some(ty) = schema.node_type("bullet_list") {
-        keys.push(("Shift-Ctrl-8".into(), wrap_in_list(ty, None)));
+    let paragraph = schema.node_type("paragraph");
+    if let Some(ty) = &paragraph {
+        keys.push(("Mod-Alt-0".into(), set_node(ty.clone(), None)));
     }
-    if let Some(ty) = schema.node_type("ordered_list") {
-        keys.push(("Shift-Ctrl-9".into(), wrap_in_list(ty, None)));
-    }
-    if let Some(ty) = schema.node_type("blockquote") {
-        keys.push(("Ctrl->".into(), wrap_in(ty, None)));
-    }
-    if let Some(ty) = schema.node_type("hard_break") {
-        let insert_break = command(move |state, dispatch| {
-            if let Some(dispatch) = dispatch {
-                let Ok(node) = ty.create(None, Default::default(), vec![]) else {
-                    return false;
-                };
-                let mut tr = state.tr();
-                tr.replace_selection_with(node, false);
-                tr.scroll_into_view();
-                dispatch(tr);
-            }
-            true
-        });
-        let line_break = chain_commands(vec![command(exit_code), insert_break]);
-        keys.push(("Mod-Enter".into(), line_break.clone()));
-        keys.push(("Shift-Enter".into(), line_break.clone()));
-        // On Apple platforms Mod-Enter is Cmd-Enter: Ctrl-Enter breaks too.
-        keys.push(("Ctrl-Enter".into(), line_break));
-    }
-    if let Some(ty) = schema.node_type("list_item") {
-        keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
-        // Tab indents and Shift-Tab outdents an item, as in documents
-        // editors; Mod-] and Mod-[ too, as ProseMirror's example setup.
-        keys.push(("Tab".into(), sink_list_item(ty.clone())));
-        keys.push(("Shift-Tab".into(), lift_list_item(ty.clone())));
-        keys.push(("Mod-[".into(), lift_list_item(ty.clone())));
-        keys.push(("Mod-]".into(), sink_list_item(ty)));
-    }
-    if let Some(ty) = schema.node_type("paragraph") {
-        keys.push(("Shift-Ctrl-0".into(), set_block_type(ty, None)));
-    }
-    if let Some(ty) = schema.node_type("code_block") {
-        keys.push(("Shift-Ctrl-\\".into(), set_block_type(ty, None)));
-    }
-    if let Some(ty) = schema.node_type("heading") {
+    if let (Some(ty), Some(paragraph)) = (schema.node_type("heading"), &paragraph) {
         for level in 1..=6 {
             keys.push((
-                format!("Shift-Ctrl-{level}"),
-                set_block_type(ty.clone(), Some(attrs_of("level", Value::from(level)))),
+                format!("Mod-Alt-{level}"),
+                toggle_node(
+                    ty.clone(),
+                    paragraph.clone(),
+                    Some(attrs_of("level", Value::from(level))),
+                ),
             ));
         }
     }
-    if let Some(ty) = schema.node_type("horizontal_rule") {
+    if let Some(ty) = schema.node_type("blockquote") {
+        keys.push(("Mod-Shift-b".into(), toggle_wrap(ty, None)));
+    }
+    for (list, item, key) in [
+        ("orderedList", "listItem", "Mod-Shift-7"),
+        ("bulletList", "listItem", "Mod-Shift-8"),
+        ("taskList", "taskItem", "Mod-Shift-9"),
+    ] {
+        if let (Some(list), Some(item)) = (schema.node_type(list), schema.node_type(item)) {
+            keys.push((key.into(), toggle_list(list, item, None)));
+        }
+    }
+    let aligned: Vec<_> = ["paragraph", "heading"]
+        .iter()
+        .filter_map(|name| schema.node_type(name))
+        .collect();
+    for (key, align) in [
+        ("Mod-Shift-l", "left"),
+        ("Mod-Shift-e", "center"),
+        ("Mod-Shift-r", "right"),
+        ("Mod-Shift-j", "justify"),
+    ] {
         keys.push((
-            "Mod-_".into(),
-            command(move |state, dispatch| {
-                if let Some(dispatch) = dispatch {
-                    let Ok(node) = ty.create(None, Default::default(), vec![]) else {
-                        return false;
-                    };
-                    let mut tr = state.tr();
-                    tr.replace_selection_with(node, false);
-                    tr.scroll_into_view();
-                    dispatch(tr);
-                }
-                true
-            }),
+            key.into(),
+            update_attribute(aligned.clone(), "textAlign", Value::from(align)),
         ));
     }
+    if let Some(ty) = schema.node_type("hardBreak") {
+        let line_break = set_hard_break(ty, true);
+        keys.push(("Mod-Enter".into(), line_break.clone()));
+        keys.push(("Shift-Enter".into(), line_break));
+    }
+    if let Some(ty) = schema.node_type("listItem") {
+        keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
+        keys.push(("Tab".into(), sink_list_item(ty.clone())));
+        keys.push(("Shift-Tab".into(), lift_list_item(ty)));
+    }
+    if let Some(ty) = schema.node_type("taskItem") {
+        // Tiptap's task items are not nested by default: no Tab.
+        keys.push(("Enter".into(), split_list_item(ty.clone(), None)));
+        keys.push(("Shift-Tab".into(), lift_list_item(ty)));
+    }
     keys
+}
+
+/// All of the starter's key bindings for `schema`, Tiptap's StarterKit's
+/// with its task lists, highlight, sub- and superscript and text alignment,
+/// merged in Tiptap's order (later extensions first, the core last): the
+/// list keymap ([`list_keymap`]), the extensions' shortcuts
+/// ([`extension_keymap`]), the code block's ([`code_block_keymap`]), and
+/// the core's ([`core_keymap`]).
+pub fn keymap(schema: &Schema) -> Vec<(String, BoxCommand)> {
+    let mut groups = vec![
+        list_keymap(&ListKeymapOptions::default()),
+        extension_keymap(schema),
+    ];
+    if let Some(ty) = schema.node_type("codeBlock") {
+        groups.push(code_block_keymap(
+            &ty,
+            schema.node_type("paragraph"),
+            &CodeBlockOptions::default(),
+        ));
+    }
+    groups.push(core_keymap());
+    merge_keymaps(groups)
 }
 
 fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid expression")
 }
 
-/// Markdown-style input rules for the starter's types that `schema` has:
-/// `# `..`###### ` headings, `> ` quotes, `- ` / `* ` / `+ ` bullet lists,
-/// `1. ` ordered lists, ```` ``` ```` code blocks, `**bold**`, `*italic*`,
-/// `` `code` `` and `~~strike~~`, smart quotes, `...` and `--`.
+// Tiptap's expressions refuse delimiters around nothing but white space
+// (`(?!\s+\*\*)`), which the `regex` crate cannot say.
+fn not_blank(found: &InputMatch) -> bool {
+    found
+        .groups
+        .last()
+        .and_then(|g| g.as_ref())
+        .is_some_and(|(_, text)| !text.trim().is_empty())
+}
+
+/// Tiptap's input rules for the starter's types that `schema` has, after
+/// the typography rules: `#`..`######` + space headings, `> ` quotes,
+/// `- ` / `* ` / `+ ` bullet lists, `1. ` ordered lists (their `start`),
+/// `[ ] ` / `[x] ` task lists, ```` ```lang ```` / `~~~lang` code blocks
+/// (on space or Enter), `---` / `___ ` / `*** ` rules, `![alt](src
+/// "title")` images, and `**bold**` / `__bold__`, `*italic*` / `_italic_`,
+/// `~~strike~~`, `` `code` `` and `==highlight==`.
 pub fn input_rules(schema: &Schema) -> Plugin {
     input_rules_plugin(input_rule_list(schema))
 }
 
-/// The rules of [`input_rules`], for an app to add to.
+/// The rules of [`input_rules`] with Tiptap's default typography, for an
+/// app to add to.
 pub fn input_rule_list(schema: &Schema) -> Vec<InputRule> {
-    let mut rules = smart_quotes();
-    rules.push(ellipsis());
-    rules.push(em_dash());
+    let mut rules = typography(&TypographyOptions::default());
+    rules.extend(type_rules(schema));
+    rules
+}
+
+/// The rules of [`input_rules`] without typography.
+pub fn type_rules(schema: &Schema) -> Vec<InputRule> {
+    let mut rules = Vec::new();
     if let Some(ty) = schema.node_type("blockquote") {
         rules.push(wrapping_input_rule(regex(r"^\s*>\s$"), ty, None, None));
     }
-    if let Some(ty) = schema.node_type("ordered_list") {
+    if let Some(ty) = schema.node_type("bulletList") {
+        rules.push(wrapping_input_rule(
+            regex(r"^\s*([-+*])\s$"),
+            ty,
+            None,
+            None,
+        ));
+    }
+    if let Some(ty) = schema.node_type("orderedList") {
         let get_attrs: GetAttrs =
-            Arc::new(|found| found.group(1).map(|order| attrs_of("order", number(order))));
+            Arc::new(|found| found.group(1).map(|start| attrs_of("start", number(start))));
         let join: JoinPredicate = Arc::new(|found, node| {
-            let order = found
-                .group(1)
-                .and_then(|order| order.parse::<u64>().ok())
-                .unwrap_or(0);
+            let wanted = found.group(1).and_then(|n| n.parse::<u64>().ok());
             let start = node
                 .attrs()
-                .get("order")
+                .get("start")
                 .and_then(Value::as_u64)
                 .unwrap_or(1);
-            node.child_count() as u64 + start == order
+            wanted == Some(node.child_count() as u64 + start)
         });
         rules.push(wrapping_input_rule(
             regex(r"^(\d+)\.\s$"),
@@ -644,55 +909,145 @@ pub fn input_rule_list(schema: &Schema) -> Vec<InputRule> {
             Some(join),
         ));
     }
-    if let Some(ty) = schema.node_type("bullet_list") {
+    if let Some(ty) = schema.node_type("taskItem") {
+        let get_attrs: GetAttrs = Arc::new(|found| {
+            let checked = found
+                .groups
+                .last()
+                .and_then(|g| g.as_ref())
+                .is_some_and(|(_, t)| t == "x");
+            Some(attrs_of("checked", Value::Bool(checked)))
+        });
         rules.push(wrapping_input_rule(
-            regex(r"^\s*([-+*])\s$"),
+            regex(r"^\s*(\[([( |x])?\])\s$"),
             ty,
-            None,
+            Some(get_attrs),
             None,
         ));
     }
-    if let Some(ty) = schema.node_type("code_block") {
-        rules.push(textblock_type_input_rule(regex("^```$"), ty, None));
+    if let Some(ty) = schema.node_type("codeBlock") {
+        for fence in ["```", "~~~"] {
+            let get_attrs: GetAttrs =
+                Arc::new(|found| Some(attrs_of("language", fence_language(found.group(1)))));
+            rules.push(textblock_type_input_rule(
+                regex(&format!(r"^{fence}([a-z]+)?[\s\n]$")),
+                ty.clone(),
+                Some(get_attrs),
+            ));
+        }
     }
     if let Some(ty) = schema.node_type("heading") {
+        for level in 1..=6 {
+            rules.push(textblock_type_input_rule(
+                regex(&format!(r"^(#{{1,{level}}})\s$")),
+                ty.clone(),
+                Some(Arc::new(move |_| {
+                    Some(attrs_of("level", Value::from(level)))
+                })),
+            ));
+        }
+    }
+    if let Some(ty) = schema.node_type("horizontalRule") {
+        rules.push(node_input_rule(
+            regex(r"^(?:---|\u{2014}-|___\s|\*\*\*\s)$"),
+            ty,
+            None,
+        ));
+    }
+    if let Some(ty) = schema.node_type("image") {
         let get_attrs: GetAttrs = Arc::new(|found| {
-            found
-                .group(1)
-                .map(|hashes| attrs_of("level", Value::from(hashes.len())))
+            let group = |i| found.group(i).map_or(Value::Null, Value::from);
+            let mut attrs = attrs_of("src", group(3));
+            attrs.insert("alt".into(), group(2));
+            attrs.insert("title".into(), group(4));
+            Some(attrs)
         });
-        rules.push(textblock_type_input_rule(
-            regex(r"^(#{1,6})\s$"),
+        rules.push(node_input_rule(
+            regex(r#"(?:^|\s)(!\[(.+|:?)\]\((\S+)(?:(?:\s+)["'](\S+)["'])?\))$"#),
             ty,
             Some(get_attrs),
         ));
     }
-    if let Some(ty) = schema.mark_type("bold") {
-        rules.push(mark_input_rule(regex(r"\*\*([^*]+)\*\*$"), ty, None));
-    }
-    if let Some(ty) = schema.mark_type("italic") {
-        rules.push(mark_input_rule(
-            regex(r"(?:^|[^*])(\*([^*]+)\*)$"),
-            ty,
-            None,
-        ));
-    }
+    let mut mark = |name: &str, pattern: &str| {
+        if let Some(ty) = schema.mark_type(name) {
+            rules.push(mark_input_rule(regex(pattern), ty, None).accepting(not_blank));
+        }
+    };
+    mark("bold", r"(?:^|\s)(\*\*([^*]+)\*\*)$");
+    mark("bold", r"(?:^|\s)(__([^_]+)__)$");
+    mark("italic", r"(?:^|\s)(\*([^*]+)\*)$");
+    mark("italic", r"(?:^|\s)(_([^_]+)_)$");
+    mark("strike", r"(?:^|\s)(~~([^~]+)~~)$");
+    mark("highlight", r"(?:^|\s)(==([^=]+)==)$");
     if let Some(ty) = schema.mark_type("code") {
-        rules.push(mark_input_rule(regex(r"`([^`]+)`$"), ty, None));
+        // Tiptap's finder: the backticks alone (the character before stays),
+        // not after another backtick.
+        rules.push(
+            mark_input_rule(regex("`([^`]+)`$"), ty, None).with_finder(|text| {
+                let captures = regex("`([^`]+)`$").captures(text)?;
+                let start = captures.get(0)?.start();
+                if text[..start].ends_with('`') {
+                    return None;
+                }
+                Some(InputMatch::from_captures(text, &captures))
+            }),
+        );
     }
-    if let Some(ty) = schema.mark_type("strike") {
-        rules.push(mark_input_rule(regex(r"~~([^~]+)~~$"), ty, None));
+    rules
+}
+
+// Tiptap's paste expressions refuse a match followed by white space and
+// the delimiter again (`(?!\s+\*\*)`).
+fn not_followed_by(delimiter: &'static str) -> impl Fn(&str, usize, &InputMatch) -> bool {
+    move |text, start, found| {
+        let rest = &text[start + found.text.len()..];
+        let trimmed = rest.trim_start();
+        not_blank(found) && !(trimmed.len() < rest.len() && trimmed.starts_with(delimiter))
+    }
+}
+
+/// Tiptap's paste rules for the starter's marks that `schema` has:
+/// `**bold**` / `__bold__`, `*italic*` / `_italic_`, `~~strike~~`,
+/// `` `code` `` and `==highlight==` in pasted text.
+pub fn paste_rule_list(schema: &Schema) -> Vec<PasteRule> {
+    let mut rules = Vec::new();
+    let mut mark = |name: &str, pattern: &str, delimiter: &'static str| {
+        if let Some(ty) = schema.mark_type(name) {
+            rules.push(PasteRule::regex(
+                regex(pattern),
+                not_followed_by(delimiter),
+                PasteAction::Mark(ty, None),
+            ));
+        }
+    };
+    mark("bold", r"(?:^|\s)(\*\*([^*]+)\*\*)", "**");
+    mark("bold", r"(?:^|\s)(__([^_]+)__)", "__");
+    mark("italic", r"(?:^|\s)(\*([^*]+)\*)", "*");
+    mark("italic", r"(?:^|\s)(_([^_]+)_)", "_");
+    mark("strike", r"(?:^|\s)(~~([^~]+)~~)", "~~");
+    mark("highlight", r"(?:^|\s)(==([^=]+)==)", "==");
+    if let Some(ty) = schema.mark_type("code") {
+        rules.push(PasteRule::regex(
+            regex("`([^`]+)`"),
+            |text, start, found| {
+                !text[..start].ends_with('`') && !text[start + found.text.len()..].starts_with('`')
+            },
+            PasteAction::Mark(ty, None),
+        ));
     }
     rules
 }
 
 /// The starter's plugins for `schema`, in the order they run: its input
-/// rules, its keymap, the base keymap and the history.
+/// rules, its paste rules, its keymap ([`keymap`]), Tiptap's
+/// `clearDocument` and `trailingNode` plugins and the history.
 pub fn plugins(schema: &Schema) -> Vec<Plugin> {
     vec![
         input_rules(schema),
+        paste_rules(paste_rule_list(schema)),
         keymap_plugin(keymap(schema)),
-        keymap_plugin(base_keymap()),
+        clear_document(),
+        trailing_node(TrailingNodeOptions::default()),
         history(HistoryOptions::default()),
     ]
 }

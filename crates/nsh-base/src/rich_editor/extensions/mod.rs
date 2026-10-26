@@ -6,20 +6,28 @@
 //! bindings and rules for it. None of it is built in: an editor takes the
 //! pieces it wants, or its own.
 
+pub mod clear_document;
+pub mod code_block;
+pub mod core_keymap;
+pub(crate) mod helpers;
 pub mod history;
 pub mod input_rules;
 pub mod keymap;
+pub mod list_keymap;
 pub mod markdown;
+pub mod paste_rules;
 pub mod starter;
+pub mod trailing_node;
+pub mod typography;
 
 pub use history::{
     HistoryOptions, HistoryState, close_history, history, history_key, history_state,
     is_history_transaction, redo, redo_depth, redo_no_scroll, undo, undo_depth, undo_no_scroll,
 };
 pub use input_rules::{
-    GetAttrs, InCode, InputMatch, InputRule, InputRuleHandler, InputRulesState, JoinPredicate,
-    ellipsis, em_dash, input_rules, mark_input_rule, smart_quotes, textblock_type_input_rule,
-    undo_input_rule, wrapping_input_rule,
+    GetAttrs, InCode, InputFinder, InputMatch, InputRule, InputRuleHandler, InputRulesState,
+    JoinPredicate, ellipsis, em_dash, input_rules, mark_input_rule, node_input_rule, smart_quotes,
+    textblock_type_input_rule, undo_input_rule, wrapping_input_rule,
 };
 pub use keymap::{
     Keymap, KeymapError, KeymapOptions, keymap, keymap_plugin, keymap_with, normalize_key_name,

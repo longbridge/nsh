@@ -30,11 +30,12 @@ use crate::rich_editor::{
     commands::base_keymap,
     extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
     formats::{DomParser, slice_from_text, slice_to_text},
-    model::{Node, SchemaSpec, Slice},
+    model::{Fragment, Mark, Node, SchemaSpec, Slice},
     state::{
-        Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, KeyEvent, NodeSelection,
-        Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
+        Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
+        NodeSelection, Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
     },
+    transform::drop_point,
 };
 
 /// The sink is emptied once it holds this many bytes (and no composition
@@ -76,7 +77,7 @@ pub(crate) fn slot_id(id: u64) -> u64 {
 }
 
 /// A press being dragged.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Drag {
     /// The selection's anchor.
     anchor: usize,
@@ -84,6 +85,21 @@ struct Drag {
     shift: Point<Points>,
     /// The scroll offset at the press.
     scroll: Points,
+    /// Set when the press started inside the selection (or on a draggable
+    /// node): the drag moves what is selected rather than selecting.
+    moving: Option<Moving>,
+}
+
+/// What a drag that started inside the selection carries
+/// (prosemirror-view's `Dragging`).
+#[derive(Debug, Clone)]
+struct Moving {
+    /// The selection's content.
+    slice: Slice,
+    /// Whether the source is deleted (a move, not a copy).
+    moved: bool,
+    /// What a release without a drag selects: a caret at the press.
+    click: Option<Selection>,
 }
 
 /// What the native input that takes typed text holds.
@@ -124,7 +140,10 @@ pub(crate) struct Rv {
     pub(crate) sink_value: Signal<String>,
     sink: Rc<RefCell<Sink>>,
     next_composition: Rc<Cell<i64>>,
-    drag: Rc<Cell<Option<Drag>>>,
+    drag: Rc<RefCell<Option<Drag>>>,
+    /// Where a drag that moves the selection would drop it (the drop
+    /// cursor).
+    pub(crate) drop_at: Signal<Option<usize>>,
     /// The x Up and Down keep to.
     goal_x: Rc<Cell<Option<Points>>>,
     /// The node a node selection holds, as last told to its view.
@@ -174,6 +193,7 @@ impl Rv {
             sink: Rc::default(),
             next_composition: Rc::new(Cell::new(1)),
             drag: Rc::default(),
+            drop_at: signal(None),
             goal_x: Rc::default(),
             selected: Rc::default(),
             input: element_ref(),
@@ -467,6 +487,17 @@ impl Rv {
             return;
         }
         let state = self.session.state();
+        // At a gap cursor, the default textblock comes first (as
+        // prosemirror-gapcursor's `beforeinput`), then the text.
+        if state.selection().is_gap_cursor() {
+            if let Some(mut tr) = fill_gap(&state) {
+                tr.insert_text(text, None, None);
+                tr.set_origin(TransactionOrigin::Input);
+                tr.scroll_into_view();
+                self.dispatch(tr);
+            }
+            return;
+        }
         let (from, to) = (state.selection().from(), state.selection().to());
         if self.some_hook(&state, |p, d| {
             p.handle_text_input(&state, from, to, text, d)
@@ -574,6 +605,25 @@ impl Rv {
             return;
         }
         let editable = self.editable();
+        let plain = !(event.mod_key || event.ctrl || event.alt || event.meta || event.shift);
+        if editable && plain {
+            // Enter at a gap cursor opens a textblock there.
+            if event.key == "Enter"
+                && state.selection().is_gap_cursor()
+                && let Some(mut tr) = fill_gap(&state)
+            {
+                tr.scroll_into_view();
+                self.dispatch(tr);
+                self.after_key(event);
+                return;
+            }
+            // Tiptap's exitable marks: ArrowRight at the end of one at its
+            // textblock's end leaves the mark, not the place.
+            if event.key == "ArrowRight" && self.exit_mark(&state) {
+                self.after_key(event);
+                return;
+            }
+        }
         if editable {
             if self.some_hook(&state, |p, d| p.handle_key_down(&state, event, d)) {
                 self.after_key(event);
@@ -665,6 +715,29 @@ impl Rv {
         true
     }
 
+    /// Leaves an exitable mark the caret is at the end of, at the end of
+    /// its textblock (Tiptap's `Mark.handleExit`): the mark is removed
+    /// from the stored marks, so what is typed next is outside it.
+    fn exit_mark(&self, state: &EditorState) -> bool {
+        let Some(cursor) = state.selection().cursor() else {
+            return false;
+        };
+        if cursor.pos != cursor.end(cursor.depth) || !cursor.parent().inline_content() {
+            return false;
+        }
+        let marks = state
+            .stored_marks()
+            .map(<[Mark]>::to_vec)
+            .unwrap_or_else(|| cursor.marks());
+        let Some(mark) = marks.iter().find(|m| mark_exitable(m)) else {
+            return false;
+        };
+        let mut tr = state.tr();
+        tr.remove_stored_mark(mark);
+        self.dispatch(tr);
+        true
+    }
+
     fn after_key(&self, event: &KeyEvent) {
         if !matches!(event.key.as_str(), "ArrowUp" | "ArrowDown") {
             self.goal_x.set(None);
@@ -698,6 +771,12 @@ impl Rv {
         let vertical = matches!(m.unit, Unit::Line | Unit::Page);
         if !vertical {
             self.goal_x.set(None);
+        }
+        if !m.extend
+            && matches!(m.unit, Unit::Char | Unit::Line)
+            && let Some(gap) = self.gap_step(&doc, &sel, m)
+        {
+            return self.set_selection(gap, true);
         }
         // Without Shift a range collapses to its side first.
         if !m.extend && !sel.empty() && m.unit == Unit::Char {
@@ -768,6 +847,63 @@ impl Rv {
             }
         };
         self.set_selection(next, true);
+    }
+
+    /// prosemirror-gapcursor's arrow handler: from the edge of a textblock
+    /// (its last or first line, for Up and Down), a selected node or a gap
+    /// cursor, the next place a gap cursor can stand, if it comes before
+    /// any other selection.
+    fn gap_step(&self, doc: &Node, sel: &Selection, m: Move) -> Option<Selection> {
+        let dir = m.dir;
+        let mut start = if dir > 0 {
+            sel.resolved_to().clone()
+        } else {
+            sel.resolved_from().clone()
+        };
+        let mut must_move = sel.empty();
+        if sel.as_text().is_some() {
+            if start.depth == 0 || !self.end_of_textblock(sel, m) {
+                return None;
+            }
+            must_move = false;
+            let edge = if dir > 0 {
+                start.after(start.depth)
+            } else {
+                start.before(start.depth)
+            };
+            start = doc.resolve(edge).ok()?;
+        } else if sel.is_all() {
+            return None;
+        }
+        GapCursor::find_from(&start, dir, must_move).map(GapCursor::create)
+    }
+
+    /// Whether the head is at its textblock's edge toward the move: its
+    /// end or start (graphemes), its last or first line (lines).
+    fn end_of_textblock(&self, sel: &Selection, m: Move) -> bool {
+        let head = sel.resolved_head();
+        if !head.parent().inline_content() {
+            return false;
+        }
+        match m.unit {
+            Unit::Char => {
+                if m.dir > 0 {
+                    head.pos == head.end(head.depth)
+                } else {
+                    head.pos == head.start(head.depth)
+                }
+            }
+            _ => match self.geo.borrow().line_index(head.pos, sel.affinity()) {
+                Some((index, count)) => {
+                    if m.dir > 0 {
+                        index + 1 == count
+                    } else {
+                        index == 0
+                    }
+                }
+                None => true,
+            },
+        }
     }
 
     /// One grapheme toward `dir` from the head, out of the textblock at
@@ -1041,6 +1177,47 @@ impl Rv {
         if self.click_hooks(&state, pos, &click, clicks) {
             return;
         }
+        let shift = Point::new(at.x - page.x, at.y - page.y);
+        let scroll = self.scroll_y.get_untracked();
+        // A press inside the selection (or on a draggable node) may drag
+        // it somewhere else, as prosemirror-view's: it selects only when
+        // released without a drag.
+        if clicks == 1
+            && !modifiers.shift
+            && self.editable()
+            && let Some((selection, click_sel)) = self.drag_source(&state, hit)
+        {
+            if !selection.eq(state.selection()) {
+                self.set_selection(selection.clone(), false);
+            }
+            let copy = if matches!(os(), Os::MacOs | Os::Ios) {
+                modifiers.alt
+            } else {
+                modifiers.ctrl
+            };
+            *self.drag.borrow_mut() = Some(Drag {
+                anchor: selection.anchor(),
+                shift,
+                scroll,
+                moving: Some(Moving {
+                    slice: selection.content(),
+                    moved: !copy,
+                    click: click_sel,
+                }),
+            });
+            return;
+        }
+        // A press on a container's own area (its padding, a list item's
+        // marker), off its children's text, selects the container.
+        if clicks == 1
+            && !modifiers.shift
+            && let Some(p) = self.container_at(at)
+            && let Some(node) = doc.node_at(p)
+            && NodeSelection::is_selectable(&node)
+        {
+            self.set_selection(NodeSelection::create(&doc, p), false);
+            return;
+        }
         let selection = match (hit, clicks) {
             (Hit::Node(p), _) => {
                 let Some(node) = doc.node_at(p) else { return };
@@ -1074,11 +1251,101 @@ impl Rv {
         };
         let anchor = selection.anchor();
         self.set_selection(selection, false);
-        self.drag.set(Some(Drag {
+        *self.drag.borrow_mut() = Some(Drag {
             anchor,
-            shift: Point::new(at.x - page.x, at.y - page.y),
-            scroll: self.scroll_y.get_untracked(),
-        }));
+            shift,
+            scroll,
+            moving: None,
+        });
+    }
+
+    /// What a press at `hit` drags, if it starts a drag of the selection:
+    /// the selection to drag (the pressed draggable node's, else the
+    /// current one) and what a release without a drag selects.
+    fn drag_source(&self, state: &EditorState, hit: Hit) -> Option<(Selection, Option<Selection>)> {
+        let sel = state.selection();
+        let doc = state.doc();
+        match hit {
+            Hit::Node(p) => {
+                if sel.as_node().is_some() && sel.from() == p {
+                    return Some((sel.clone(), None));
+                }
+                let node = doc.node_at(p)?;
+                (node.ty().spec().draggable && NodeSelection::is_selectable(&node))
+                    .then(|| (NodeSelection::create(doc, p), None))
+            }
+            Hit::Text(p, side) => {
+                if sel.empty()
+                    || sel.is_all()
+                    || sel.is_gap_cursor()
+                    || p <= sel.from()
+                    || p >= sel.to()
+                {
+                    return None;
+                }
+                let at = doc.resolve(p).ok()?;
+                Some((
+                    sel.clone(),
+                    Some(TextSelection::with_affinity(at.clone(), at, side).into()),
+                ))
+            }
+        }
+    }
+
+    /// The container block whose own area (not its children's) `at` is
+    /// on: where it starts. A point in a container's indent beside one of
+    /// its children (a list item's marker) is that child's.
+    fn container_at(&self, at: Point<Points>) -> Option<usize> {
+        let tree = self.tree.borrow();
+        let geo = self.geo.borrow();
+        let inside = |id: u64| -> Option<Bounds<Points>> {
+            let origin = geo.origin(id)?;
+            let (_, frame) = geo.frames.get(&id)?;
+            Some(Bounds::new(origin, frame.size))
+        };
+        let contains = |b: &Bounds<Points>| {
+            at.x >= b.origin.x
+                && at.x < b.origin.x + b.size.width
+                && at.y >= b.origin.y
+                && at.y < b.origin.y + b.size.height
+        };
+        let mut parent = DOC;
+        let mut found: Option<usize> = None;
+        loop {
+            let children = tree.children.get(&parent)?;
+            let mut next = None;
+            for item in children {
+                if let Some(b) = inside(item.id)
+                    && contains(&b)
+                {
+                    next = Some(item);
+                    break;
+                }
+            }
+            let Some(item) = next else {
+                // Beside a child, in the indent before it.
+                if found.is_some() {
+                    for item in children {
+                        if let Some(b) = inside(item.id)
+                            && at.y >= b.origin.y
+                            && at.y < b.origin.y + b.size.height
+                            && at.x < b.origin.x
+                        {
+                            return Some(item.pos);
+                        }
+                    }
+                }
+                return found;
+            };
+            let container = !item.node.is_textblock()
+                && !geo.atoms.contains_key(&item.id)
+                && tree.children.contains_key(&item.id);
+            if !container {
+                return None;
+            }
+            found = Some(item.pos);
+            parent = item.id;
+        }
     }
 
     /// The plugins' click hooks of a `clicks`-fold press at `pos`: each
@@ -1135,7 +1402,9 @@ impl Rv {
 
     /// The pointer dragged to `page` (root): the selection extends there.
     pub(crate) fn drag_to(&self, page: Point<Points>) {
-        let Some(drag) = self.drag.get() else { return };
+        let Some(drag) = self.drag.borrow().clone() else {
+            return;
+        };
         let scrolled = self.scroll_y.get_untracked() - drag.scroll;
         let at = Point::new(page.x + drag.shift.x, page.y + drag.shift.y + scrolled);
         let hit = self.geo.borrow().hit(at);
@@ -1143,6 +1412,14 @@ impl Rv {
             Some(Hit::Text(p, _) | Hit::Node(p)) => p,
             None => return,
         };
+        if let Some(moving) = &drag.moving {
+            let state = self.session.state();
+            let target = drop_point(state.doc(), pos, &moving.slice).unwrap_or(pos);
+            if self.drop_at.get_untracked() != Some(target) {
+                self.drop_at.set(Some(target));
+            }
+            return;
+        }
         let state = self.session.state();
         let doc = state.doc();
         let (Ok(a), Ok(h)) = (doc.resolve(drag.anchor), doc.resolve(pos)) else {
@@ -1158,8 +1435,70 @@ impl Rv {
         self.dispatch(tr);
     }
 
+    /// The press ended: a drag that moves the selection drops it where
+    /// the drop cursor is, or selects as a press when it never moved.
     pub(crate) fn release(&self) {
-        self.drag.set(None);
+        let drag = self.drag.borrow_mut().take();
+        let target = self.drop_at.get_untracked();
+        if target.is_some() {
+            self.drop_at.set(None);
+        }
+        let Some(Drag {
+            moving: Some(moving),
+            ..
+        }) = drag
+        else {
+            return;
+        };
+        match target {
+            Some(target) => self.drop(&moving.slice, target, moving.moved),
+            None => {
+                if let Some(click) = moving.click {
+                    self.set_selection(click, false);
+                }
+            }
+        }
+    }
+
+    /// Drops `slice` at `pos` (prosemirror-view's drop): the plugins'
+    /// `handle_drop` first, else the source deleted when `moved` and the
+    /// slice inserted, selected (origin `Drop`, meta `uiEvent: "drop"`).
+    pub(crate) fn drop(&self, slice: &Slice, pos: usize, moved: bool) {
+        if !self.editable() {
+            return;
+        }
+        let state = self.session.state();
+        if self.some_hook(&state, |p, d| p.handle_drop(&state, slice, pos, moved, d)) {
+            return;
+        }
+        if let Some(tr) = drop_transaction(&state, slice, pos, moved) {
+            self.dispatch(tr);
+        }
+        self.focus();
+    }
+
+    /// A horizontal line at block position `pos` (a gap cursor, a drop
+    /// between blocks): along the top of the block starting there, else
+    /// the bottom of the block ending there; as wide as that block.
+    pub(crate) fn block_edge_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        let tree = self.tree.borrow();
+        let geo = self.geo.borrow();
+        let blocks = || tree.children.values().flatten();
+        let place = |id: u64| -> Option<Bounds<Points>> {
+            let origin = geo.origin(id)?;
+            let (_, frame) = geo.frames.get(&id)?;
+            Some(Bounds::new(origin, frame.size))
+        };
+        if let Some(b) = blocks().filter(|b| b.pos == pos).find_map(|b| place(b.id)) {
+            return Some(Bounds::new(b.origin, Size::new(b.size.width, px(0.0))));
+        }
+        let b = blocks()
+            .filter(|b| b.pos + b.node.node_size() == pos)
+            .find_map(|b| place(b.id))?;
+        Some(Bounds::new(
+            Point::new(b.origin.x, b.origin.y + b.size.height),
+            Size::new(b.size.width, px(0.0)),
+        ))
     }
 
     /// Block `pos`'s top left in the content box.
@@ -1196,7 +1535,8 @@ impl Rv {
             RichEditorEvent::Blur
         });
         if !focused {
-            self.drag.set(None);
+            self.drag.borrow_mut().take();
+            self.drop_at.set(None);
         }
         self.restart_blink();
     }
@@ -1395,6 +1735,86 @@ fn base_keymap_for(mac: bool) -> Vec<(String, crate::rich_editor::commands::BoxC
     }
 }
 
+/// Whether a mark leaves at the end of its textblock with ArrowRight
+/// (Tiptap's `exitable`).
+pub(crate) fn mark_exitable(mark: &Mark) -> bool {
+    mark.ty().spec().exitable
+}
+
+/// The transaction inserting the default textblock at a gap cursor (the
+/// types the parent's content needs around text there), with the caret in
+/// it.
+pub(crate) fn fill_gap(state: &EditorState) -> Option<Transaction> {
+    let from = state.selection().resolved_from().clone();
+    let wrapping = from
+        .parent()
+        .content_match_at(from.index(from.depth))?
+        .find_wrapping(&state.schema().text_type())?;
+    let mut fragment = Fragment::empty();
+    for ty in wrapping.iter().rev() {
+        fragment = Fragment::from(ty.create_and_fill(None, fragment, Vec::new())?);
+    }
+    let mut tr = state.tr();
+    tr.replace(from.pos, from.pos, Slice::new(fragment, 0, 0))
+        .ok()?;
+    let inside = tr.doc().resolve(from.pos + 1).ok()?;
+    tr.set_selection(Selection::near(&inside, 1));
+    Some(tr)
+}
+
+/// prosemirror-view's drop of `slice` at `insert`: the selection deleted
+/// first when `moved`, the slice inserted where `insert` maps to (a single
+/// closed node as that node), then selected; `None` when nothing changes.
+pub(crate) fn drop_transaction(
+    state: &EditorState,
+    slice: &Slice,
+    insert: usize,
+    moved: bool,
+) -> Option<Transaction> {
+    let mut tr = state.tr();
+    if moved {
+        tr.delete_selection();
+    }
+    let pos = tr.mapping.map(insert, 1);
+    let single = (slice.open_start == 0 && slice.open_end == 0 && slice.content.child_count() == 1)
+        .then(|| slice.content.first_child().cloned())
+        .flatten();
+    let before = tr.doc().clone();
+    match &single {
+        Some(node) => {
+            tr.replace_range_with(pos, pos, node.clone()).ok()?;
+        }
+        None => {
+            tr.replace_range(pos, pos, slice.clone()).ok()?;
+        }
+    }
+    if *tr.doc() == before {
+        return None;
+    }
+    let at = tr.doc().resolve(pos).ok()?;
+    let selection = match &single {
+        Some(node)
+            if NodeSelection::is_selectable(node)
+                && at.node_after().is_some_and(|n| n.same_markup(node)) =>
+        {
+            NodeSelection::new(at).into()
+        }
+        _ => {
+            let mut end = tr.mapping.map(insert, 1);
+            if let Some(last) = tr.mapping.maps.last() {
+                last.for_each(|_, _, _, new_to| end = new_to);
+            }
+            let end = tr.doc().resolve(end).ok()?;
+            TextSelection::between(&at, &end, None)
+        }
+    };
+    tr.set_selection(selection);
+    tr.set_origin(TransactionOrigin::Drop);
+    tr.set_meta("uiEvent", Value::from("drop"));
+    tr.scroll_into_view();
+    Some(tr)
+}
+
 /// A textblock's content as text: its texts, and U+FFFC for each inline
 /// leaf, so offsets are the content's.
 pub(crate) fn inline_text(block: &Node) -> String {
@@ -1487,6 +1907,55 @@ mod tests {
         assert_eq!(b, [0, 1, 3, 7, 8]);
         assert_eq!(next_boundary(text, 1), Some(3));
         assert_eq!(prev_boundary(text, 7), Some(3));
+    }
+
+    fn state_of(json: serde_json::Value) -> EditorState {
+        let schema = starter::schema();
+        let doc = schema.node_from_json(&json).unwrap();
+        EditorState::create(EditorStateConfig::new(schema).doc(doc)).unwrap()
+    }
+
+    fn para(t: &str) -> serde_json::Value {
+        serde_json::json!({"type": "paragraph", "content": [{"type": "text", "text": t}]})
+    }
+
+    #[test]
+    fn a_drop_moves_the_selection_and_selects_it() {
+        let state =
+            state_of(serde_json::json!({"type": "doc", "content": [para("abcd"), para("xy")]}));
+        // Select "bc" (2..4) and drop it after "x" (8).
+        let mut tr = state.tr();
+        tr.set_selection(TextSelection::create(state.doc(), 2, Some(4)));
+        let state = state.apply(tr).unwrap();
+        let slice = state.selection().content();
+        let tr = drop_transaction(&state, &slice, 8, true).unwrap();
+        assert_eq!(
+            tr.doc()
+                .text_between(0, tr.doc().content().size(), Some("|"), None),
+            "ad|xbcy"
+        );
+        assert_eq!((tr.selection().from(), tr.selection().to()), (6, 8));
+        assert_eq!(tr.get_meta("uiEvent"), Some(&Value::from("drop")));
+        // A copy keeps the source.
+        let tr = drop_transaction(&state, &slice, 8, false).unwrap();
+        assert_eq!(
+            tr.doc()
+                .text_between(0, tr.doc().content().size(), Some("|"), None),
+            "abcd|xbcy"
+        );
+    }
+
+    #[test]
+    fn filling_a_gap_inserts_the_default_textblock() {
+        let state =
+            state_of(serde_json::json!({"type": "doc", "content": [{"type": "horizontalRule"}]}));
+        let mut tr = state.tr();
+        tr.set_selection(GapCursor::create(state.doc().resolve(1).unwrap()));
+        let state = state.apply(tr).unwrap();
+        let tr = fill_gap(&state).unwrap();
+        assert_eq!(tr.doc().child_count(), 2);
+        assert!(tr.doc().child(1).is_textblock());
+        assert_eq!(tr.selection().head(), 2);
     }
 
     #[test]

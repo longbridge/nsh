@@ -25,23 +25,23 @@ pub struct MarkdownNames {
     pub heading_level: String,
     /// Block quotes (`blockquote`).
     pub blockquote: String,
-    /// Fenced and indented code (`code_block`).
+    /// Fenced and indented code (`codeBlock`).
     pub code_block: String,
     /// The code block's language attribute (`language`).
     pub code_language: String,
-    /// Thematic breaks (`horizontal_rule`).
+    /// Thematic breaks (`horizontalRule`).
     pub horizontal_rule: String,
-    /// Hard line breaks (`hard_break`).
+    /// Hard line breaks (`hardBreak`).
     pub hard_break: String,
     /// Images (`image`, attributes `src`, `alt`, `title`).
     pub image: String,
-    /// Bullet lists (`bullet_list`).
+    /// Bullet lists (`bulletList`).
     pub bullet_list: String,
-    /// Ordered lists (`ordered_list`).
+    /// Ordered lists (`orderedList`).
     pub ordered_list: String,
-    /// The ordered list's first number attribute (`order`).
+    /// The ordered list's first number attribute (`start`).
     pub list_start: String,
-    /// List items (`list_item`).
+    /// List items (`listItem`).
     pub list_item: String,
     /// Strong emphasis (`bold`).
     pub strong: String,
@@ -62,15 +62,15 @@ impl Default for MarkdownNames {
             heading: "heading".into(),
             heading_level: "level".into(),
             blockquote: "blockquote".into(),
-            code_block: "code_block".into(),
+            code_block: "codeBlock".into(),
             code_language: "language".into(),
-            horizontal_rule: "horizontal_rule".into(),
-            hard_break: "hard_break".into(),
+            horizontal_rule: "horizontalRule".into(),
+            hard_break: "hardBreak".into(),
             image: "image".into(),
-            bullet_list: "bullet_list".into(),
-            ordered_list: "ordered_list".into(),
-            list_start: "order".into(),
-            list_item: "list_item".into(),
+            bullet_list: "bulletList".into(),
+            ordered_list: "orderedList".into(),
+            list_start: "start".into(),
+            list_item: "listItem".into(),
             strong: "bold".into(),
             emphasis: "italic".into(),
             code: "code".into(),
@@ -760,15 +760,15 @@ mod tests {
             doc.child(3).attrs().get("language"),
             Some(&Value::from("rust"))
         );
-        assert_eq!(doc.child(4).ty().name(), "horizontal_rule");
+        assert_eq!(doc.child(4).ty().name(), "horizontalRule");
     }
 
     #[test]
     fn lists_round_trip() {
         let (doc, out) = round_trip("- a\n- b\n  - nested\n\n3. three\n4. four\n");
         assert_eq!(out, "- a\n\n- b\n\n  - nested\n\n3. three\n4. four\n");
-        assert_eq!(doc.child(0).ty().name(), "bullet_list");
-        assert_eq!(doc.child(1).attrs().get("order"), Some(&Value::from(3)));
+        assert_eq!(doc.child(0).ty().name(), "bulletList");
+        assert_eq!(doc.child(1).attrs().get("start"), Some(&Value::from(3)));
     }
 
     #[test]
@@ -784,7 +784,7 @@ mod tests {
     fn hard_breaks_round_trip() {
         let (doc, out) = round_trip("one\\\ntwo\n");
         assert_eq!(out, "one\\\ntwo\n");
-        assert_eq!(doc.child(0).child(1).ty().name(), "hard_break");
+        assert_eq!(doc.child(0).child(1).ty().name(), "hardBreak");
     }
 
     #[test]

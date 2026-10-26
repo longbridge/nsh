@@ -18,9 +18,9 @@ pub use plugin::{
     ClickEvent, KeyEvent, Plugin, PluginKey, PluginSpec, PluginState, ViewCx, ViewFactory,
 };
 pub use selection::{
-    Affinity, AllSelection, CustomBookmark, CustomSelection, NodeSelection, Selection,
-    SelectionBookmark, SelectionFromJson, SelectionKind, SelectionRange, SelectionRegistry,
-    TextSelection,
+    Affinity, AllSelection, CustomBookmark, CustomSelection, GAP_CURSOR, GapCursor, NodeSelection,
+    Selection, SelectionBookmark, SelectionFromJson, SelectionKind, SelectionRange,
+    SelectionRegistry, TextSelection,
 };
 pub use transaction::{ADD_TO_HISTORY, APPENDED_TRANSACTION, Transaction, TransactionOrigin};
 

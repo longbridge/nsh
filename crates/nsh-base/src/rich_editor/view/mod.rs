@@ -25,16 +25,19 @@ mod parts;
 mod render;
 mod session;
 
+use std::collections::BTreeMap;
+
 use nsh_core::ui::prelude::*;
 use serde_json::Value;
 
 use self::controller::Rv;
 pub use self::{
-    node_view::{NodeView, NodeViewCx, NodeViewEvent},
+    node_view::{MarkView, NodeView, NodeViewCx, NodeViewEvent},
     parts::{PartStyles, RichEditorClasses, RichEditorStyles},
     session::{
-        DispatchTransaction, EditorSession, NodeViews, SESSION_TS_TYPE, SessionJs, Subscriber,
-        SubscriptionId, ViewRequest, set_session_js,
+        DispatchTransaction, EditorSession, EventListener, NodeViews, SESSION_TS_TYPE,
+        SessionEvent, SessionEventKind, SessionJs, Subscriber, SubscriptionId, ViewGeometry,
+        ViewRequest, set_session_js,
     },
 };
 use crate::rich_editor::state::EditorState;
@@ -62,8 +65,32 @@ pub struct RichEditorProps {
     /// read-only too. A read-only editor still selects and copies.
     #[prop(default = true)]
     pub editable: Prop<bool>,
-    /// Shown while the document is one empty textblock.
+    /// Shown in an empty textblock (Tiptap's placeholder extension): the
+    /// one the selection is in, at the document's top level, while the
+    /// document can be edited (`showOnlyCurrent`, `includeChildren`,
+    /// `showOnlyWhenEditable`), in the block's own typography and the
+    /// `placeholder` part.
     pub placeholder: Prop<Option<SharedString>>,
+    /// Placeholders by node type name (`{ heading: "Heading", paragraph:
+    /// "Write…" }`), over `placeholder` for the blocks of those types.
+    pub placeholders: Prop<Option<BTreeMap<String, String>>>,
+    /// Placeholders show only while the document can be edited (default
+    /// true).
+    #[prop(default = true)]
+    pub show_only_when_editable: Prop<bool>,
+    /// Only the empty block the selection's anchor is in shows its
+    /// placeholder (default true); `false`: every empty block.
+    #[prop(default = true)]
+    pub show_only_current: Prop<bool>,
+    /// Empty blocks nested in others (in quotes, list items) show
+    /// placeholders too (default false: the document's top level only).
+    #[prop(default)]
+    pub include_children: Prop<bool>,
+    /// Which blocks around the selection take the `focusedNode` part while
+    /// the editor has the focus (Tiptap's focus extension): `"all"` (the
+    /// default: every block the selection is in), `"deepest"` (the
+    /// innermost) or `"shallowest"` (the top-level one).
+    pub focus_mode: Prop<Option<SharedString>>,
     /// The editor takes the focus when it appears.
     #[prop(default)]
     pub auto_focus: Prop<bool>,

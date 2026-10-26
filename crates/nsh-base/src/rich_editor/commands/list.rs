@@ -9,7 +9,7 @@ use super::{
     command,
 };
 use crate::rich_editor::{
-    model::{Attrs, Fragment, Node, NodeRange, NodeType, Slice},
+    model::{Attrs, Fragment, Node, NodeRange, NodeType, Slice, marks_kept_on_split},
     state::{EditorState, Selection, Transaction},
     transform::{ReplaceAroundStep, can_join, can_split, find_wrapping, lift_target},
 };
@@ -222,14 +222,17 @@ pub fn split_list_item(item_ty: NodeType, item_attrs: Option<Attrs>) -> BoxComma
         };
         let mut tr = state.tr();
         let _ = tr.delete(from.pos, to.pos);
-        let types = next_ty.map(|next_ty| {
-            vec![
-                item_attrs
-                    .clone()
-                    .map(|attrs| (item_ty.clone(), Some(attrs))),
-                Some((next_ty, None)),
-            ]
-        });
+        // Tiptap's splitListItem: the new item (and the new block at the
+        // item's end) get the attributes kept on split, the rest their
+        // defaults.
+        let item_attrs = item_attrs
+            .clone()
+            .unwrap_or_else(|| item_ty.split_attrs(grand_parent.attrs()));
+        let parent = from.parent();
+        let types = Some(vec![
+            Some((item_ty.clone(), Some(item_attrs))),
+            next_ty.map(|next_ty| (next_ty, Some(parent.ty().split_attrs(parent.attrs())))),
+        ]);
         if !can_split(tr.doc(), from.pos, 2, types.as_deref()) {
             return false;
         }
@@ -471,7 +474,7 @@ pub fn split_list_item_keep_marks(item_ty: NodeType, item_attrs: Option<Attrs>) 
         });
         let mut keep = |mut tr: Transaction| {
             if let Some(marks) = &marks {
-                tr.ensure_marks(marks.clone());
+                tr.ensure_marks(marks_kept_on_split(marks));
             }
             dispatch(tr);
         };
@@ -484,18 +487,18 @@ mod tests {
     use super::{super::test_util::*, *};
 
     fn list(s: &crate::rich_editor::model::Schema, items: Vec<Node>) -> Node {
-        n(s, "bullet_list", items)
+        n(s, "bulletList", items)
     }
 
     fn item(s: &crate::rich_editor::model::Schema, content: Vec<Node>) -> Node {
-        n(s, "list_item", content)
+        n(s, "listItem", content)
     }
 
     #[test]
     fn wrap_in_list_wraps_each_block_in_an_item() {
         let s = schema();
         let doc = n(&s, "doc", vec![p(&s, "a"), p(&s, "b")]);
-        let wrap = wrap_in_list(s.node_type("bullet_list").unwrap(), None);
+        let wrap = wrap_in_list(s.node_type("bulletList").unwrap(), None);
         let wrapped = apply(&state(doc, 1, 5), wrap.as_ref()).unwrap();
         let expected = n(
             &s,
@@ -511,7 +514,7 @@ mod tests {
     #[test]
     fn sink_and_lift_list_items() {
         let s = schema();
-        let item_ty = s.node_type("list_item").unwrap();
+        let item_ty = s.node_type("listItem").unwrap();
         // <ul><li>a</li><li>b|</li></ul>; "b" starts at 8.
         let doc = n(
             &s,
@@ -555,7 +558,7 @@ mod tests {
     #[test]
     fn split_list_item_makes_a_new_item() {
         let s = schema();
-        let item_ty = s.node_type("list_item").unwrap();
+        let item_ty = s.node_type("listItem").unwrap();
         let doc = n(&s, "doc", vec![list(&s, vec![item(&s, vec![p(&s, "ab")])])]);
         let split = apply(
             &state(doc, 4, 4),

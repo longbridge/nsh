@@ -39,13 +39,13 @@ mount(App);
 
 ## 样式
 
-编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `order` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。
+编辑器以应用的外观绘制文档：`classes` 和 `styles` 设置它的各个部件（`root`、`content`、`caret`、`selection`、`placeholder`、`composition`、`selectedNode`、`listMarker`），按类型设置节点（`nodes: { heading: "text-2xl font-bold", "heading[level=2]": "text-xl" }`），以及设置标记（`marks: { bold: "font-bold" }`）。节点规格把 `extra.listMarker` 设为 `"bullet"` 或 `"ordered"` 的列表（starter schema 的列表）中，每一项都在 `listMarker` 部件中显示标记：按层级显示 `•`、`◦`、`▪`，或从列表的 `start` 开始编号，放在列表项之前、列表的缩进中（如浏览器缩进 `ul`，在列表上设置 `pl-6`）。
 
 ```tsx
 <RichEditor
   editor={editor}
   classes={{
-    nodes: { heading: "text-2xl font-bold", bullet_list: "pl-6", code_block: "font-mono bg-muted p-3 rounded-md" },
+    nodes: { heading: "text-2xl font-bold", bulletList: "pl-6", codeBlock: "font-mono bg-muted p-3 rounded-md" },
     marks: { bold: "font-bold", italic: "italic", code: "font-mono bg-muted" },
     listMarker: "text-muted-foreground",
   }}
@@ -72,7 +72,7 @@ const schema = defineSchema({
 const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 ```
 
-`RichSchema` 读写文档：`parse(content, format?)`（默认纯文本，也可以是 `"markdown"` 或 JSON）、`parseMarkdown(markdown)`、`serialize(doc, format?)`（默认 Markdown，也可以是 `"text"`、`"json"`）以及 `check(doc)`，它返回填好属性默认值的文档。`nodes`、`marks` 和 `topNode` 列出它的类型。Markdown 对应起步 schema 的名称（`paragraph`、`heading`、`blockquote`、`code_block`、`bullet_list`、`ordered_list`、`list_item`、`bold`、`italic`、`code`、`link`、`strike`）。
+`RichSchema` 读写文档：`parse(content, format?)`（默认纯文本，也可以是 `"markdown"` 或 JSON）、`parseMarkdown(markdown)`、`serialize(doc, format?)`（默认 Markdown，也可以是 `"text"`、`"json"`）以及 `check(doc)`，它返回填好属性默认值的文档。`nodes`、`marks` 和 `topNode` 列出它的类型。Markdown 对应起步 schema 的名称（`paragraph`、`heading`、`blockquote`、`codeBlock`、`bulletList`、`orderedList`、`listItem`、`bold`、`italic`、`code`、`link`、`strike`）。
 
 ## 命令
 
@@ -96,7 +96,7 @@ const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 
 ```tsx
 editor.run(chain([setBlockType("heading", { level: 1 }), toggleMark("bold")]));
-const canIndent = editor.can(sinkListItem("list_item"));
+const canIndent = editor.can(sinkListItem("listItem"));
 ```
 
 ## 会话

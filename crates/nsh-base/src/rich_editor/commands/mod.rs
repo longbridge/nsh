@@ -10,7 +10,10 @@
 //! position in the document.
 
 pub mod base;
+pub mod helpers;
 pub mod list;
+pub mod registry;
+pub mod tiptap;
 
 use std::sync::Arc;
 
@@ -23,14 +26,21 @@ pub use base::{
     set_block_type, split_block, split_block_as, split_block_keep_marks, toggle_mark,
     toggle_mark_with, wrap_in,
 };
+pub use helpers::{
+    MarkRange, NodeEmptyOptions, ParentNode, can_join_items_at, find_parent_node,
+    find_parent_node_closest_to_pos, get_attributes, get_mark_attributes, get_mark_range,
+    get_marks_between, get_node_attributes, get_text_between, is_active, is_at_end_of_node,
+    is_at_start_of_node, is_node_empty, object_includes, selection_to_insertion_end,
+};
 pub use list::{
     lift_list_item, sink_list_item, split_list_item, split_list_item_keep_marks, wrap_in_list,
     wrap_range_in_list,
 };
+pub use registry::{CommandFactory, CommandRegistry};
 
 use crate::rich_editor::{
     model::{Attrs, MarkType, NodeType},
-    state::{EditorState, Transaction},
+    state::{EditorState, Selection, Transaction},
 };
 
 /// Where a command hands its transaction; `None` asks only whether the
@@ -65,6 +75,75 @@ pub fn chain_commands(commands: Vec<BoxCommand>) -> BoxCommand {
             }
         }
         false
+    })
+}
+
+/// Runs `commands` in turn, each on the state the ones before left, and
+/// dispatches their steps (with the transactions plugins appended to
+/// them) as one transaction: applies only when every one does (Tiptap's
+/// `chain`, all or nothing).
+pub fn chain(commands: Vec<BoxCommand>) -> BoxCommand {
+    command(move |state: &EditorState, dispatch: Dispatch<'_>| {
+        let mut current = state.clone();
+        let mut whole = state.tr();
+        for command in &commands {
+            let mut made: Option<Transaction> = None;
+            if !command(&current, Some(&mut |tr| made = Some(tr))) {
+                return false;
+            }
+            let Some(tr) = made else { continue };
+            let (selection_set, stored_set, scrolled) = (
+                tr.selection_set(),
+                tr.stored_marks_set(),
+                tr.scrolled_into_view(),
+            );
+            let selection = tr.selection().to_json();
+            let stored = tr.stored_marks().map(<[_]>::to_vec);
+            let meta: Vec<(String, serde_json::Value)> = tr
+                .meta_entries()
+                .map(|(k, v)| (k.to_owned(), v.clone()))
+                .collect();
+            let Ok((next, applied)) = current.apply_transaction(tr) else {
+                return false;
+            };
+            if applied.is_empty() {
+                return false;
+            }
+            for tr in &applied {
+                for step in &tr.steps {
+                    if whole.step(step.boxed_clone()).is_err() {
+                        return false;
+                    }
+                }
+            }
+            if selection_set || applied.len() > 1 {
+                let json = if applied.len() > 1 {
+                    next.selection().to_json()
+                } else {
+                    selection
+                };
+                match Selection::from_json(whole.doc(), &json) {
+                    Ok(selection) => {
+                        whole.set_selection(selection);
+                    }
+                    Err(_) => return false,
+                }
+            }
+            if stored_set {
+                whole.set_stored_marks(stored);
+            }
+            for (key, value) in meta {
+                whole.set_meta(&key, value);
+            }
+            if scrolled {
+                whole.scroll_into_view();
+            }
+            current = next;
+        }
+        if let Some(dispatch) = dispatch {
+            dispatch(whole);
+        }
+        true
     })
 }
 

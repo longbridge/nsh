@@ -42,8 +42,73 @@ use super::{
     formats::{DocFormat, MarkdownFormat, MarkdownNames, PlainTextFormat},
     model::{Node, Schema, SchemaSpec},
     state::{EditorState, EditorStateConfig, PluginKey, Selection, Transaction, TransactionOrigin},
-    view::{EditorSession, NodeViews, SessionJs, SubscriptionId, set_session_js},
+    view::{
+        EditorSession, NodeViews, SessionEvent, SessionEventKind, SessionJs, SubscriptionId,
+        set_session_js,
+    },
 };
+
+fn attrs_json(attrs: &super::model::Attrs) -> JsonValue {
+    JsonValue::Object(attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+}
+
+fn rect_json(b: &nsh_core::ui::prelude::Bounds<nsh_core::ui::prelude::Points>) -> JsonValue {
+    serde_json::json!({
+        "x": b.origin.x.0,
+        "y": b.origin.y.0,
+        "width": b.size.width.0,
+        "height": b.size.height.0,
+    })
+}
+
+// Event listeners are the engine thread's (`Rc`), the session's listeners
+// `Send + Sync`: they hold a key into this thread's table; only the
+// thread that made one reaches its function, and dropping the last handle
+// there releases it.
+thread_local! {
+    static EVENT_HOOKS: std::cell::RefCell<std::collections::HashMap<u64, Callback<JsonValue>>> =
+        std::cell::RefCell::default();
+}
+
+static NEXT_EVENT_HOOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct EventHook {
+    id: u64,
+    thread: std::thread::ThreadId,
+}
+
+impl EventHook {
+    fn new(listener: Callback<JsonValue>) -> Self {
+        let id = NEXT_EVENT_HOOK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        EVENT_HOOKS.with(|hooks| hooks.borrow_mut().insert(id, listener));
+        Self {
+            id,
+            thread: std::thread::current().id(),
+        }
+    }
+
+    fn post(&self, payload: JsonValue) {
+        if std::thread::current().id() != self.thread {
+            return;
+        }
+        let listener = EVENT_HOOKS.with(|hooks| hooks.borrow().get(&self.id).cloned());
+        if let Some(listener) = listener {
+            listener.post(payload);
+        }
+    }
+}
+
+impl Drop for EventHook {
+    fn drop(&mut self) {
+        if std::thread::current().id() == self.thread {
+            let _ = EVENT_HOOKS.try_with(|hooks| {
+                if let Ok(mut hooks) = hooks.try_borrow_mut() {
+                    hooks.remove(&self.id);
+                }
+            });
+        }
+    }
+}
 
 /// Registers the classes and functions of `nsh/base`'s rich text editor,
 /// and how its sessions cross to the `RichEditor` view's `editor` prop.
@@ -398,9 +463,150 @@ impl RichEditorSession {
 
     /// Whether the mark or node type `name` is active at the selection
     /// (with `attrs`, for nodes: `isActive("heading", { level: 2 })`).
-    pub(crate) fn is_active(&self, name: String, attrs: Option<AttrsJson>) -> Result<bool, String> {
+    pub(crate) fn is_active(
+        &self,
+        name: Option<String>,
+        attrs: Option<AttrsJson>,
+    ) -> Result<bool, String> {
         let attrs = commands::attrs_of(&attrs)?;
-        Ok(self.session.is_active(&name, attrs))
+        Ok(self.session.is_active(name.as_deref(), attrs))
+    }
+
+    /// The attributes of the node or mark type `name` at the selection
+    /// (`{}` when there is none).
+    pub(crate) fn get_attributes(&self, name: String) -> JsonValue {
+        attrs_json(&self.session.get_attributes(&name))
+    }
+
+    /// The range `{ from, to }` of the text marked `name` around `pos`
+    /// (with `attrs`, else the first such mark's), or `null`.
+    pub(crate) fn get_mark_range(
+        &self,
+        pos: usize,
+        name: String,
+        attrs: Option<AttrsJson>,
+    ) -> Result<Option<JsonValue>, String> {
+        let state = self.session.state();
+        let ty = state
+            .schema()
+            .mark_type(&name)
+            .ok_or_else(|| format!("the schema has no mark type `{name}`"))?;
+        let at = state.doc().resolve(pos).map_err(|e| e.to_string())?;
+        let attrs = commands::attrs_of(&attrs)?;
+        Ok(
+            crate::rich_editor::commands::get_mark_range(&at, &ty, attrs.as_ref())
+                .map(|(from, to)| serde_json::json!({ "from": from, "to": to })),
+        )
+    }
+
+    /// The innermost node of type `name` around the selection's start (or
+    /// around `pos`): `{ pos, start, depth, node }`, or `null`.
+    pub(crate) fn find_parent_node(&self, name: String, pos: Option<usize>) -> Option<JsonValue> {
+        let state = self.session.state();
+        let at = match pos {
+            Some(pos) => state.doc().resolve(pos).ok()?,
+            None => state.selection().resolved_from().clone(),
+        };
+        crate::rich_editor::commands::find_parent_node_closest_to_pos(&at, &|n| {
+            n.ty().name() == name
+        })
+        .map(|found| {
+            serde_json::json!({
+                "pos": found.pos,
+                "start": found.start,
+                "depth": found.depth,
+                "node": found.node.to_json(),
+            })
+        })
+    }
+
+    /// The node right after `pos`, as JSON, or `null`.
+    pub(crate) fn node_at(&self, pos: usize) -> Option<NodeJson> {
+        self.session
+            .state()
+            .doc()
+            .node_at(pos)
+            .map(|node| NodeJson(node.to_json()))
+    }
+
+    /// Position `pos` resolved: `{ pos, depth, parentOffset, parent,
+    /// index, start, end, marks }` (`parent` its parent's type), or `null`
+    /// out of the document.
+    pub(crate) fn resolve(&self, pos: usize) -> Option<JsonValue> {
+        let state = self.session.state();
+        let at = state.doc().resolve(pos).ok()?;
+        Some(serde_json::json!({
+            "pos": at.pos,
+            "depth": at.depth,
+            "parentOffset": at.parent_offset,
+            "parent": at.parent().ty().name(),
+            "index": at.index(at.depth),
+            "start": at.start(at.depth),
+            "end": at.end(at.depth),
+            "marks": at.marks().iter().map(|m| m.to_json()).collect::<Vec<_>>(),
+        }))
+    }
+
+    /// The caret's box `{ x, y, width, height }` at `pos` in the view
+    /// showing the editor, or `null` when none does.
+    pub(crate) fn coords_at_pos(&self, pos: usize) -> Option<JsonValue> {
+        self.session.coords_at_pos(pos).map(|b| rect_json(&b))
+    }
+
+    /// The document position at `{ x, y }` in the view showing the
+    /// editor, or `null`.
+    pub(crate) fn pos_at_coords(&self, coords: JsonValue) -> Option<usize> {
+        let x = coords.get("x")?.as_f64()? as f32;
+        let y = coords.get("y")?.as_f64()? as f32;
+        self.session
+            .pos_at_coords(nsh_core::ui::prelude::point(px(x), px(y)))
+    }
+
+    /// The box around the selection in the view showing the editor, or
+    /// `null`.
+    pub(crate) fn selection_rect(&self) -> Option<JsonValue> {
+        self.session.selection_rect().map(|b| rect_json(&b))
+    }
+
+    /// Whether a view of the editor has the keyboard focus.
+    #[getter]
+    pub(crate) fn is_focused(&self) -> bool {
+        self.session.is_focused()
+    }
+
+    /// Whether the user may edit the document in the views.
+    #[getter]
+    pub(crate) fn is_editable(&self) -> bool {
+        self.session.is_editable()
+    }
+
+    /// Lets the user edit the document in the views, or not.
+    pub(crate) fn set_editable(&self, editable: bool) {
+        self.session.set_editable(editable);
+    }
+
+    /// Calls `listener` with the payload of every `event` (`update`,
+    /// `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`) after
+    /// it happens, in JS's next turn; returns what `off` takes.
+    pub(crate) fn on(
+        &mut self,
+        event: String,
+        listener: Callback<JsonValue>,
+    ) -> Result<f64, String> {
+        let kind = SessionEventKind::from_name(&event)
+            .ok_or_else(|| format!("no editor event `{event}`"))?;
+        let handle = EventHook::new(listener);
+        let id = self.session.on(
+            kind,
+            Arc::new(move |event: &SessionEvent| handle.post(event.payload.clone())),
+        );
+        self.subscriptions.push((id, id));
+        Ok(id as f64)
+    }
+
+    /// Stops calling a listener `on` added.
+    pub(crate) fn off(&mut self, id: f64) {
+        self.unsubscribe(id);
     }
 
     /// Dispatches a transaction (steps against the current document, as
@@ -430,7 +636,7 @@ impl RichEditorSession {
             .apply_transaction(tr)
             .map_err(|e| e.to_string())?;
         if !applied.is_empty() {
-            session.update_state(state);
+            session.commit(state, &applied);
         }
         Ok(())
     }
@@ -457,7 +663,7 @@ impl RichEditorSession {
                     if let Ok((state, applied)) = session.state().apply_transaction(tr)
                         && !applied.is_empty()
                     {
-                        session.update_state(state);
+                        session.commit(state, &applied);
                     }
                     return;
                 };
@@ -616,6 +822,14 @@ impl RichEditorSession {
     }
 }
 
+fn named(name: &str, args: JsonValue) -> RichCommand {
+    RichCommand::named(name, args)
+}
+
+fn attrs_value(attrs: Option<AttrsJson>) -> JsonValue {
+    attrs.map_or(JsonValue::Null, |a| a.0)
+}
+
 // --- The functions -----------------------------------------------------------
 
 /// The rich text editor's functions.
@@ -678,8 +892,18 @@ impl RichEditorApi {
 
     /// Adds the mark `name` (with `attrs`) to the selection, or removes it
     /// where present; at a cursor, toggles it for the text typed next.
-    pub(crate) fn toggle_mark(name: String, attrs: Option<AttrsJson>) -> RichCommand {
-        RichCommand::about(RichCommandName::ToggleMark, name, attrs)
+    /// With `options` (`{ extendEmptyMarkRange }`), Tiptap's `toggleMark`:
+    /// removes it when active with `attrs`, from the whole marked text
+    /// around a cursor when `extendEmptyMarkRange`.
+    pub(crate) fn toggle_mark(
+        name: String,
+        attrs: Option<AttrsJson>,
+        options: Option<JsonValue>,
+    ) -> RichCommand {
+        RichCommand {
+            args: options.filter(JsonValue::is_object),
+            ..RichCommand::about(RichCommandName::ToggleMark, name, attrs)
+        }
     }
 
     /// Adds the mark `name` (with `attrs`) to the selection.
@@ -687,9 +911,14 @@ impl RichEditorApi {
         RichCommand::about(RichCommandName::SetMark, name, attrs)
     }
 
-    /// Removes the marks of type `name` from the selection.
-    pub(crate) fn unset_mark(name: String) -> RichCommand {
-        RichCommand::about(RichCommandName::UnsetMark, name, None)
+    /// Removes the marks of type `name` from the selection; with
+    /// `{ extendEmptyMarkRange: true }`, from the whole marked text around
+    /// a cursor.
+    pub(crate) fn unset_mark(name: String, options: Option<JsonValue>) -> RichCommand {
+        RichCommand {
+            args: options.filter(JsonValue::is_object),
+            ..RichCommand::about(RichCommandName::UnsetMark, name, None)
+        }
     }
 
     /// Makes the selected textblocks nodes of type `name` (with `attrs`):
@@ -705,7 +934,7 @@ impl RichEditorApi {
     }
 
     /// Wraps the selected blocks in a list of type `name`
-    /// (`wrapInList("bullet_list")`).
+    /// (`wrapInList("bulletList")`).
     pub(crate) fn wrap_in_list(name: String, attrs: Option<AttrsJson>) -> RichCommand {
         RichCommand::about(RichCommandName::WrapInList, name, attrs)
     }
@@ -798,10 +1027,164 @@ impl RichEditorApi {
         }
     }
 
-    /// A command without parameters by name: `command("splitBlock")`,
-    /// `command("joinBackward")`, `command("exitCode")`, ...
-    pub(crate) fn command(name: RichCommandName) -> RichCommand {
-        RichCommand::plain(name)
+    /// A command by name, with its arguments: `command("splitBlock")`,
+    /// `command("toggleList", { listName: "bulletList", itemName:
+    /// "listItem" })`, and the commands extensions register.
+    pub(crate) fn command(name: String, args: Option<JsonValue>) -> RichCommand {
+        RichCommand::named(name, args.unwrap_or(JsonValue::Null))
+    }
+
+    /// Turns the selected textblocks into `name` (with `attrs`), clearing
+    /// lists and wrappers around them first when needed (Tiptap's
+    /// `setNode`).
+    pub(crate) fn set_node(name: String, attrs: Option<AttrsJson>) -> RichCommand {
+        named(
+            "setNode",
+            serde_json::json!({ "name": name, "attrs": attrs_value(attrs) }),
+        )
+    }
+
+    /// Turns the selected textblocks into `name`, or into `toggleName` when
+    /// they are `name` already: `toggleNode("heading", "paragraph", { level:
+    /// 2 })`.
+    pub(crate) fn toggle_node(
+        name: String,
+        toggle_name: String,
+        attrs: Option<AttrsJson>,
+    ) -> RichCommand {
+        named(
+            "toggleNode",
+            serde_json::json!({ "name": name, "toggleName": toggle_name, "attrs": attrs_value(attrs) }),
+        )
+    }
+
+    /// Lifts the selection out of a node of `name` when one is active,
+    /// else wraps it in one (`toggleWrap("blockquote")`).
+    pub(crate) fn toggle_wrap(name: String, attrs: Option<AttrsJson>) -> RichCommand {
+        named(
+            "toggleWrap",
+            serde_json::json!({ "name": name, "attrs": attrs_value(attrs) }),
+        )
+    }
+
+    /// Toggles a list of `listName` with items of `itemName`: lifts it off,
+    /// turns another list into one, or wraps the selection; joins it with
+    /// lists of its type next to it.
+    pub(crate) fn toggle_list(
+        list_name: String,
+        item_name: String,
+        keep_marks: Option<bool>,
+        attrs: Option<AttrsJson>,
+    ) -> RichCommand {
+        named(
+            "toggleList",
+            serde_json::json!({
+                "listName": list_name,
+                "itemName": item_name,
+                "keepMarks": keep_marks.unwrap_or(false),
+                "attrs": attrs_value(attrs),
+            }),
+        )
+    }
+
+    /// Turns the selected blocks into paragraphs, out of what wraps them.
+    pub(crate) fn clear_nodes() -> RichCommand {
+        named("clearNodes", JsonValue::Null)
+    }
+
+    /// Removes every mark from the selection.
+    pub(crate) fn unset_all_marks() -> RichCommand {
+        named("unsetAllMarks", JsonValue::Null)
+    }
+
+    /// Extends the selection over the text marked `name` (with `attrs`)
+    /// around it (before editing a link, say).
+    pub(crate) fn extend_mark_range(name: String, attrs: Option<AttrsJson>) -> RichCommand {
+        named(
+            "extendMarkRange",
+            serde_json::json!({ "name": name, "attrs": attrs_value(attrs) }),
+        )
+    }
+
+    /// Merges `attrs` into the nodes or marks of type `name` in the
+    /// selection.
+    pub(crate) fn update_attributes(name: String, attrs: AttrsJson) -> RichCommand {
+        named(
+            "updateAttributes",
+            serde_json::json!({ "name": name, "attrs": attrs.0 }),
+        )
+    }
+
+    /// Resets the attributes `attrs` (a name or names) of the nodes or
+    /// marks of type `name` in the selection to their defaults.
+    pub(crate) fn reset_attributes(name: String, attrs: JsonValue) -> RichCommand {
+        named(
+            "resetAttributes",
+            serde_json::json!({ "name": name, "attrs": attrs }),
+        )
+    }
+
+    /// Deletes the innermost node of type `name` around the selection.
+    pub(crate) fn delete_node(name: String) -> RichCommand {
+        named("deleteNode", serde_json::json!({ "name": name }))
+    }
+
+    /// Deletes the empty node the selection is in.
+    pub(crate) fn delete_current_node() -> RichCommand {
+        named("deleteCurrentNode", JsonValue::Null)
+    }
+
+    /// Deletes `range` (`{ from, to }`).
+    pub(crate) fn delete_range(range: JsonValue) -> RichCommand {
+        named("deleteRange", range)
+    }
+
+    /// Inserts `content` (ProseMirror JSON, or text) at `position` (a
+    /// position or `{ from, to }`); `options.updateSelection` (true) puts
+    /// the cursor after it.
+    pub(crate) fn insert_content_at(
+        position: JsonValue,
+        content: JsonValue,
+        options: Option<JsonValue>,
+    ) -> RichCommand {
+        named(
+            "insertContentAt",
+            serde_json::json!({ "position": position, "content": content, "options": options }),
+        )
+    }
+
+    /// Moves `range` (`{ from, to }`) to `targetPos`.
+    pub(crate) fn cut(range: JsonValue, target_pos: usize) -> RichCommand {
+        named(
+            "cut",
+            serde_json::json!({ "range": range, "targetPos": target_pos }),
+        )
+    }
+
+    /// Sets the transaction's meta `key` to `value`.
+    pub(crate) fn set_meta(key: String, value: JsonValue) -> RichCommand {
+        named("setMeta", serde_json::json!({ "key": key, "value": value }))
+    }
+
+    /// Scrolls the selection into view.
+    pub(crate) fn scroll_into_view() -> RichCommand {
+        named("scrollIntoView", JsonValue::Null)
+    }
+
+    /// Joins the list item the selection is in with the one before.
+    pub(crate) fn join_item_backward() -> RichCommand {
+        named("joinItemBackward", JsonValue::Null)
+    }
+
+    /// Joins the list item the selection is in with the one after.
+    pub(crate) fn join_item_forward() -> RichCommand {
+        named("joinItemForward", JsonValue::Null)
+    }
+
+    /// Moves the selection to `position` (`"start"`, `"end"`, `"all"`, a
+    /// position; where it is when left out) and focuses the editor's view.
+    pub(crate) fn focus(position: Option<JsonValue>) -> RichCommand {
+        named("focus", serde_json::json!({ "position": position }))
     }
 
     /// Runs `commands` one after another as one transaction, on the state
@@ -942,7 +1325,7 @@ impl RichEditorApi {
     }
 
     /// A rule making the textblock a node of type `name` when its start
-    /// matches (`textblockRule("^```$", "code_block")`).
+    /// matches (`textblockRule("^```$", "codeBlock")`).
     pub(crate) fn textblock_rule(
         pattern: String,
         name: String,
@@ -1029,9 +1412,29 @@ mod tests {
         assert!(run(&session, select));
         let bold = RichCommand::about(RichCommandName::ToggleMark, "bold".into(), None);
         assert!(run(&session, bold));
-        assert!(session.is_active("bold", None));
+        assert!(session.is_active(Some("bold"), None));
         assert!(run(&session, RichCommand::plain(RichCommandName::Undo)));
-        assert!(!session.is_active("bold", None));
+        assert!(!session.is_active(Some("bold"), None));
+        // Named commands, by Tiptap's names.
+        assert!(run(
+            &session,
+            RichCommand::named(
+                "setNode",
+                serde_json::json!({"name": "heading", "attrs": {"level": 2}})
+            )
+        ));
+        assert!(session.is_active(Some("heading"), None));
+        assert!(run(
+            &session,
+            RichCommand::named("splitBlock", JsonValue::Null)
+        ));
+        assert!(
+            resolve(
+                &RichCommand::named("nope", JsonValue::Null),
+                &session.state().schema().clone()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1064,7 +1467,7 @@ mod tests {
             command: RichCommandName::Chain,
             commands: Some(vec![
                 RichCommand::plain(RichCommandName::SelectAll),
-                RichCommand::about(RichCommandName::SinkListItem, "list_item".into(), None),
+                RichCommand::about(RichCommandName::SinkListItem, "listItem".into(), None),
             ]),
             ..RichCommand::default()
         };

@@ -23,8 +23,8 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde_json::Value;
 
 use crate::rich_editor::model::{
-    AttrType, Attrs, ContentMatch, DomElement, DomNode, Fragment, Mark, MarkType, Node, NodeType,
-    ParseRule, ResolvedPos, RuleInput, Schema, Slice, Whitespace,
+    AttrParse, AttrType, Attrs, ContentMatch, DomElement, DomNode, Fragment, Mark, MarkType, Node,
+    NodeType, ParseRule, ResolvedPos, RuleInput, Schema, Slice, Whitespace,
 };
 
 /// Elements that are blocks in HTML: content around them is not inline.
@@ -376,6 +376,7 @@ impl DomParser {
             } else {
                 r.rule.attrs.clone()
             };
+            let attrs = parsed_attrs(&r.target, dom, attrs);
             if !target_accepts(&r.target, attrs.as_ref()) {
                 continue;
             }
@@ -436,6 +437,88 @@ fn target_accepts(target: &Target, attrs: Option<&Attrs>) -> bool {
     }
 }
 
+/// `attrs` with the target's attributes read from `dom` as Tiptap's
+/// `injectExtensionAttributesToParseRule` does: each attribute from its
+/// `parse_html` place, by default the DOM attribute of its own name
+/// ([`AttrParse::Skip`] opts out); values found override the rule's,
+/// absent ones leave them.
+fn parsed_attrs(target: &Target, dom: &DomElement, attrs: Option<Attrs>) -> Option<Attrs> {
+    let specs = match target {
+        Target::Node(ty) => ty.spec().attrs.as_slice(),
+        Target::Mark(ty) => ty.spec().attrs.as_slice(),
+        Target::None => return attrs,
+    };
+    let mut out = attrs;
+    for (name, spec) in specs {
+        let raw = match &spec.parse_html {
+            None => dom.attr(name).map(str::to_owned),
+            Some(AttrParse::Attribute(a)) => dom.attr(a).map(str::to_owned),
+            Some(AttrParse::Style(p)) => dom.style(p),
+            Some(AttrParse::Skip) => None,
+        };
+        let Some(raw) = raw else { continue };
+        let value = match spec.validate {
+            Some(kind @ (AttrType::Number | AttrType::Boolean)) => typed_value(kind, &raw),
+            _ => Some(value_from_string(&raw)),
+        };
+        if let Some(value) = value {
+            out.get_or_insert_with(Attrs::new)
+                .insert(name.clone(), value);
+        }
+    }
+    out
+}
+
+/// A DOM value as Tiptap's `fromString` reads it: `"true"` / `"false"` as
+/// booleans, text matching `/^[+-]?(?:\d*\.)?\d+$/` as a number, other
+/// text as it is.
+fn value_from_string(raw: &str) -> Value {
+    match raw {
+        "true" => return Value::Bool(true),
+        "false" => return Value::Bool(false),
+        _ => {}
+    }
+    let body = raw.strip_prefix(['+', '-']).unwrap_or(raw);
+    let (int, frac) = match body.split_once('.') {
+        Some((int, frac)) => (int, Some(frac)),
+        None => (body, None),
+    };
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    let numeric = match frac {
+        Some(frac) => digits(int) && !frac.is_empty() && digits(frac),
+        None => !int.is_empty() && digits(int),
+    };
+    if !numeric {
+        return Value::from(raw);
+    }
+    if frac.is_none()
+        && let Ok(n) = raw.trim_start_matches('+').parse::<i64>()
+    {
+        return Value::from(n);
+    }
+    let lead = raw.trim_start_matches('+');
+    let lead = match lead.strip_prefix('-') {
+        Some(rest) if rest.starts_with('.') => format!("-0{rest}"),
+        _ if lead.starts_with('.') => format!("0{lead}"),
+        _ => lead.to_owned(),
+    };
+    lead.parse::<f64>()
+        .map_or_else(|_| Value::from(raw), Value::from)
+}
+
+/// `raw` typed as an attribute of `kind` validates it; none for a number
+/// that does not parse.
+fn typed_value(kind: AttrType, raw: &str) -> Option<Value> {
+    Some(match kind {
+        AttrType::Number => match raw.trim().parse::<i64>() {
+            Ok(n) => Value::from(n),
+            Err(_) => Value::from(raw.trim().parse::<f64>().ok()?),
+        },
+        AttrType::Boolean => Value::Bool(raw != "false"),
+        _ => Value::from(raw),
+    })
+}
+
 /// The attributes `attrs_from` reads from `dom`, typed as the target's
 /// attribute specs validate them, over the rule's fixed `base`.
 fn attrs_from_dom(
@@ -458,16 +541,8 @@ fn attrs_from_dom(
             .iter()
             .find(|(n, _)| n == name)
             .and_then(|(_, s)| s.validate);
-        let value = match kind {
-            Some(AttrType::Number) => match raw.trim().parse::<i64>() {
-                Ok(n) => Value::from(n),
-                Err(_) => match raw.trim().parse::<f64>() {
-                    Ok(f) => Value::from(f),
-                    Err(_) => continue,
-                },
-            },
-            Some(AttrType::Boolean) => Value::Bool(raw != "false"),
-            _ => Value::from(raw),
+        let Some(value) = typed_value(kind.unwrap_or_default(), raw) else {
+            continue;
         };
         attrs.insert(name.clone(), value);
     }
@@ -1513,6 +1588,25 @@ fn close_slice(slice: Slice, open_start: usize, open_end: usize) -> Slice {
         );
     }
     slice
+}
+
+#[cfg(test)]
+mod from_string_tests {
+    use super::*;
+
+    #[test]
+    fn from_string_is_tiptaps() {
+        assert_eq!(value_from_string("+1"), Value::from(1));
+        assert_eq!(value_from_string("-2"), Value::from(-2));
+        assert_eq!(value_from_string(".5"), Value::from(0.5));
+        assert_eq!(value_from_string("-.5"), Value::from(-0.5));
+        assert_eq!(value_from_string("1.25"), Value::from(1.25));
+        assert_eq!(value_from_string("1e5"), Value::from("1e5"));
+        assert_eq!(value_from_string("1."), Value::from("1."));
+        assert_eq!(value_from_string(" 1"), Value::from(" 1"));
+        assert_eq!(value_from_string("true"), Value::Bool(true));
+        assert_eq!(value_from_string(""), Value::from(""));
+    }
 }
 
 #[cfg(test)]

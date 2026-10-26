@@ -23,17 +23,22 @@ mod node;
 mod resolved;
 mod schema;
 mod slice;
+mod to_dom;
 
 pub use content::ContentMatch;
 pub use dom::{ClearMark, DomElement, DomNode, GetAttrs, ParseRule, RuleInput, Whitespace};
 pub use fragment::Fragment;
-pub use mark::Mark;
+pub use mark::{Mark, marks_kept_on_split};
 pub use node::{ChildInfo, Node, NodeVisitor, ReplaceError};
 pub use resolved::{NodeRange, PosError, ResolvedPos};
 pub use schema::{
     AttrSpec, AttrType, MarkSpec, MarkType, NodeSpec, NodeType, Schema, SchemaError, SchemaSpec,
 };
 pub use slice::Slice;
+pub use to_dom::{
+    AttrParse, AttrRender, DomAttrValue, DomOutputSpec, DomRender, DomSource, TextRender,
+    attr_value_text,
+};
 
 /// The attributes of a node or a mark: JSON values by name.
 pub type Attrs = BTreeMap<String, Value>;

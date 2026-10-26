@@ -124,6 +124,16 @@ impl Mark {
     }
 }
 
+/// The marks of `marks` that carry on into a new block when a block is
+/// split (their type's `keep_on_split`, Tiptap's `keepOnSplit`).
+pub fn marks_kept_on_split(marks: &[Mark]) -> Vec<Mark> {
+    marks
+        .iter()
+        .filter(|m| m.ty().spec().keep_on_split)
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn attrs_from_json(value: Option<&Value>) -> Result<Option<Attrs>, SchemaError> {
     match value {
         None | Some(Value::Null) => Ok(None),

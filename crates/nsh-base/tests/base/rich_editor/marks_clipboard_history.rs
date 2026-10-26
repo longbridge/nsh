@@ -122,8 +122,8 @@ fn mod_b_twice_at_the_caret_cancels() {
     see(&mut app, "Bold 0");
 }
 
-// The starter's `code` mark sets no `excludes` (as prosemirror-schema-basic's),
-// so a code mark beside bold is not tested here.
+// The starter's `code` mark excludes every other mark (Tiptap's
+// `excludes: "_"`). Typed blocks get the trailing paragraph after them.
 
 // Markdown input rules.
 
@@ -132,8 +132,8 @@ fn hashes_and_a_space_make_headings() {
     for hashes in ["#", "##", "###"] {
         let mut app = start(paragraphs(&[""]));
         typed(&mut app, &format!("{hashes} Title"));
-        tree(&mut app, r#"doc(heading("Title"))"#);
-        see(&mut app, "Types heading");
+        tree(&mut app, r#"doc(heading("Title"), paragraph)"#);
+        see(&mut app, "Types heading,paragraph");
     }
 }
 
@@ -141,7 +141,7 @@ fn hashes_and_a_space_make_headings() {
 fn a_greater_than_sign_makes_a_quote() {
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "> q");
-    tree(&mut app, r#"doc(blockquote(paragraph("q")))"#);
+    tree(&mut app, r#"doc(blockquote(paragraph("q")), paragraph)"#);
 }
 
 #[test]
@@ -149,7 +149,10 @@ fn a_dash_or_a_star_makes_a_bullet_list() {
     for bullet in ["-", "*"] {
         let mut app = start(paragraphs(&[""]));
         typed(&mut app, &format!("{bullet} a"));
-        tree(&mut app, r#"doc(bullet_list(list_item(paragraph("a"))))"#);
+        tree(
+            &mut app,
+            r#"doc(bulletList(listItem(paragraph("a"))), paragraph)"#,
+        );
     }
 }
 
@@ -157,31 +160,37 @@ fn a_dash_or_a_star_makes_a_bullet_list() {
 fn a_number_makes_an_ordered_list_from_that_number() {
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "1. a");
-    tree(&mut app, r#"doc(ordered_list(list_item(paragraph("a"))))"#);
+    tree(
+        &mut app,
+        r#"doc(orderedList(listItem(paragraph("a"))), paragraph)"#,
+    );
     see(&mut app, "1.");
 
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "3. a");
-    tree(&mut app, r#"doc(ordered_list(list_item(paragraph("a"))))"#);
+    tree(
+        &mut app,
+        r#"doc(orderedList(listItem(paragraph("a"))), paragraph)"#,
+    );
     see(&mut app, "3.");
 }
 
 #[test]
 fn a_fence_makes_a_code_block_where_rules_do_not_fire() {
     let mut app = start(paragraphs(&[""]));
-    typed(&mut app, "```");
-    see(&mut app, "Types code_block");
+    typed(&mut app, "``` ");
+    see(&mut app, "Types codeBlock,paragraph");
     typed(&mut app, "# **b** - ");
-    tree(&mut app, r##"doc(code_block("# **b** - "))"##);
+    tree(&mut app, r##"doc(codeBlock("# **b** - "), paragraph)"##);
     see(&mut app, "Bold 0");
 }
 
 #[test]
-fn three_dashes_type_an_em_dash_and_a_dash() {
+fn three_dashes_make_a_horizontal_rule() {
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "---");
-    // ProseMirror: example-setup has no horizontal rule rule; `--` is an em dash.
-    tree(&mut app, "doc(paragraph(\"\u{2014}-\"))");
+    // `--` is an em dash first; Tiptap's rule takes `—-` as `---`.
+    tree(&mut app, "doc(horizontalRule, paragraph)");
 }
 
 #[test]
@@ -207,16 +216,16 @@ fn delimiters_typed_around_text_make_marks() {
 fn backspace_right_after_a_rule_restores_the_typed_text() {
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "# ");
-    see(&mut app, "Types heading");
+    see(&mut app, "Types heading,paragraph");
     keys(&mut app, &["backspace"]);
-    tree(&mut app, r##"doc(paragraph("# "))"##);
+    tree(&mut app, r##"doc(paragraph("# "), paragraph)"##);
     see(&mut app, "Sel 3-3");
 
     let mut app = start(paragraphs(&[""]));
     typed(&mut app, "- ");
-    see(&mut app, "Types bullet_list");
+    see(&mut app, "Types bulletList,paragraph");
     keys(&mut app, &["backspace"]);
-    tree(&mut app, r##"doc(paragraph("- "))"##);
+    tree(&mut app, r##"doc(paragraph("- "), paragraph)"##);
     see(&mut app, "Sel 3-3");
 }
 
@@ -236,14 +245,14 @@ fn pasted_markdown_becomes_blocks_and_marks() {
     paste(&mut app, "# T\n\n- **a**\n- b");
     tree(
         &mut app,
-        r#"doc(heading("T"), bullet_list(list_item(paragraph(bold("a"))), list_item(paragraph("b"))))"#,
+        r#"doc(heading("T"), bulletList(listItem(paragraph(bold("a"))), listItem(paragraph("b"))), paragraph)"#,
     );
 }
 
 #[test]
 fn a_paste_into_a_list_item_stays_in_it() {
     let mut app = start(json!({"type": "doc", "content": [
-        {"type": "bullet_list", "content": [item("a", None)]}
+        {"type": "bulletList", "content": [item("a", None)]}
     ]}));
     focus(&mut app);
     keys(&mut app, &["ctrl+end"]);
@@ -252,16 +261,16 @@ fn a_paste_into_a_list_item_stays_in_it() {
     // ProseMirror: the open paragraphs fit into the item's paragraph.
     tree(
         &mut app,
-        r#"doc(bullet_list(list_item(paragraph("ax"), paragraph("y"))))"#,
+        r#"doc(bulletList(listItem(paragraph("ax"), paragraph("y"))), paragraph)"#,
     );
 }
 
 #[test]
 fn a_paste_into_a_code_block_keeps_the_raw_text() {
-    let mut app = start(json!({"type": "doc", "content": [{"type": "code_block"}]}));
+    let mut app = start(json!({"type": "doc", "content": [{"type": "codeBlock"}]}));
     focus(&mut app);
     paste(&mut app, "# T\n- **a**");
-    tree(&mut app, r##"doc(code_block("# T\n- **a**"))"##);
+    tree(&mut app, r##"doc(codeBlock("# T\n- **a**"), paragraph)"##);
     see(&mut app, "Bold 0");
 }
 
@@ -282,7 +291,7 @@ fn pasted_html_keeps_its_formatting() {
     );
     tree(
         &mut app,
-        r#"doc(heading("Title"), paragraph("some ", bold("bold")), bullet_list(list_item(paragraph("b"))))"#,
+        r#"doc(heading("Title"), paragraph("some ", bold("bold")), bulletList(listItem(paragraph("b"))), paragraph)"#,
     );
 }
 
@@ -310,10 +319,10 @@ fn pasted_inline_html_merges_into_the_paragraph() {
 
 #[test]
 fn html_pasted_into_a_code_block_is_its_text() {
-    let mut app = start(json!({"type": "doc", "content": [{"type": "code_block"}]}));
+    let mut app = start(json!({"type": "doc", "content": [{"type": "codeBlock"}]}));
     focus(&mut app);
     paste_html(&mut app, "a *b*", "<p>a <b>b</b></p>");
-    tree(&mut app, r#"doc(code_block("a *b*"))"#);
+    tree(&mut app, r#"doc(codeBlock("a *b*"), paragraph)"#);
 }
 
 #[test]
@@ -405,16 +414,19 @@ fn a_pause_starts_a_new_undo_group() {
 #[test]
 fn undo_takes_back_an_enter_in_a_list() {
     let mut app = start(json!({"type": "doc", "content": [
-        {"type": "bullet_list", "content": [item("a", None)]}
+        {"type": "bulletList", "content": [item("a", None)]}
     ]}));
     focus(&mut app);
     keys(&mut app, &["ctrl+end", "enter"]);
     tree(
         &mut app,
-        r#"doc(bullet_list(list_item(paragraph("a")), list_item(paragraph)))"#,
+        r#"doc(bulletList(listItem(paragraph("a")), listItem(paragraph)), paragraph)"#,
     );
     keys(&mut app, &["mod+z"]);
-    tree(&mut app, r#"doc(bullet_list(list_item(paragraph("a"))))"#);
+    tree(
+        &mut app,
+        r#"doc(bulletList(listItem(paragraph("a"))), paragraph)"#,
+    );
     see(&mut app, "Sel 4-4");
 }
 

@@ -18,7 +18,7 @@ use serde_json::Value;
 use super::{
     controller::{BlockItem, Rv, slot_id},
     geometry::{DOC, InlineMap, Run},
-    node_view::{NodeView, NodeViewCx},
+    node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
 };
 use crate::{
@@ -31,6 +31,9 @@ use crate::{
 
 /// The caret's width.
 const CARET_WIDTH: f32 = 2.0;
+
+/// The gap cursor's width (prosemirror-gapcursor's).
+const GAP_WIDTH: f32 = 20.0;
 
 /// `el` with part `part`'s classes and style.
 fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
@@ -116,7 +119,8 @@ fn content(rv: Rv) -> impl IntoElement {
     .on_responder_terminate(move |_: &ResponderEvent| end.release())
     .child(selection_rects(rv.clone()))
     .child(blocks(rv.clone(), DOC))
-    .child(placeholder(rv.clone()))
+    .child(gap_cursor(rv.clone()))
+    .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
     .child(composition(rv))
 }
@@ -145,6 +149,7 @@ fn blocks(rv: Rv, parent: u64) -> AnyElement {
 enum Kind {
     View(Arc<dyn NodeView>),
     Text,
+    Image,
     Atom,
     Container,
 }
@@ -156,6 +161,11 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     let kind = match rv.node_view(first.node.ty().name()) {
         Some(v) => Kind::View(v),
         None if first.node.is_textblock() => Kind::Text,
+        None if (first.node.is_leaf() || first.node.is_atom())
+            && render_kind(&first.node) == Some("image") =>
+        {
+            Kind::Image
+        }
         None if first.node.is_leaf() || first.node.is_atom() => Kind::Atom,
         None => Kind::Container,
     };
@@ -167,11 +177,15 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
             let it = item.get();
             class_rv.deco_rev.get();
             let selected = node_selected(&class_rv, &it);
+            let focused = node_focused(&class_rv, &it);
             let decorations = node_decoration_classes(&class_rv, &it);
             props.classes.with(|c| {
                 let mut list = parts::node_classes(c, &it.node);
                 list.extend(decorations);
                 if selected && let Some(s) = c.part(Part::SelectedNode) {
+                    list.push(s.to_string());
+                }
+                if focused && let Some(s) = c.part(Part::FocusedNode) {
                     list.push(s.to_string());
                 }
                 parts::join(list)
@@ -180,9 +194,13 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         .inline_style(move || {
             let it = item.get();
             let selected = node_selected(&style_rv, &it);
+            let focused = node_focused(&style_rv, &it);
             props.styles.with(|s| {
                 let mut list = parts::node_styles(s, &it.node);
                 if selected && let Some(style) = s.part(Part::SelectedNode) {
+                    list.push(style.clone());
+                }
+                if focused && let Some(style) = s.part(Part::FocusedNode) {
                     list.push(style.clone());
                 }
                 parts::merge(&list)
@@ -193,13 +211,115 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         Some(_) => wrapper.relative().child(marker(rv.clone(), item)),
         None => wrapper,
     };
-    match kind {
-        Kind::View(view) => wrapper
-            .child(node_view_block(rv, item, view))
-            .into_element(),
-        Kind::Text => wrapper.child(text_block(rv, item, id)).into_element(),
-        Kind::Atom => wrapper.into_element(),
-        Kind::Container => wrapper.child(blocks(rv, id)).into_element(),
+    let task = render_kind(&first.node) == Some("task");
+    let content = match kind {
+        Kind::View(view) => Some(node_view_block(rv.clone(), item, view).into_element()),
+        Kind::Text => Some(text_block(rv.clone(), item, id).into_element()),
+        Kind::Image => Some(dynamic(move || image_of(&item.get().node)).into_element()),
+        Kind::Atom => None,
+        Kind::Container => Some(blocks(rv.clone(), id).into_element()),
+    };
+    // A task item is a row: its checkbox, then its content (Tiptap's
+    // `<label><input></label><div>`), so the checkbox is inside the item
+    // and takes presses.
+    if task {
+        return wrapper
+            .flex_row()
+            .child(task_checkbox(rv, item))
+            .child(view().flex_1().min_w(px(0.0)).children(content))
+            .into_element();
+    }
+    wrapper.children(content).into_element()
+}
+
+/// How the view renders a node without a node view: its spec's
+/// `extra.render` (`"image"`: an `Image` of its `src`; `"task"`: a task
+/// item with a checkbox of its `checked`).
+fn render_kind(node: &Node) -> Option<&str> {
+    node.ty().spec().extra.get("render")?.as_str()
+}
+
+/// An image node's `Image`: its `src`, `alt` (what screen readers say)
+/// and, when set, its `width` and `height` in points.
+fn image_of(node: &Node) -> AnyElement {
+    let attrs = node.attrs();
+    let src = attrs.get("src").and_then(Value::as_str).unwrap_or_default();
+    let mut el = image(src.to_owned());
+    if let Some(alt) = attrs.get("alt").and_then(Value::as_str) {
+        el = el.label(alt.to_owned());
+    }
+    let number = |key: &str| {
+        attrs.get(key).and_then(|v| {
+            v.as_f64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
+    };
+    if let Some(w) = number("width") {
+        el = el.w(px(w as f32));
+    }
+    if let Some(h) = number("height") {
+        el = el.h(px(h as f32));
+    }
+    el.into_element()
+}
+
+/// A task item's checkbox, before the item's content: unstyled
+/// (`taskCheckbox` part); a press sets the item's `checked` (an
+/// `AttrStep`), disabled while the document cannot be edited.
+fn task_checkbox(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
+    let props = rv.props;
+    let checked = move || {
+        item.get()
+            .node
+            .attrs()
+            .get("checked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let press_rv = rv.clone();
+    // The part is the checkbox's box; the checkbox fills it.
+    view()
+        .app_class(move || props.classes.with(|c| c.part(Part::TaskCheckbox).cloned()))
+        .inline_style(move || {
+            props
+                .styles
+                .with(|s| s.part(Part::TaskCheckbox).cloned().unwrap_or_default())
+        })
+        .child(
+            crate::checkbox()
+                .checked(checked)
+                .disabled(move || !props.editable.get())
+                .on_change(move |next: &bool| press_rv.set_checked(item.get_untracked().pos, *next))
+                .size_full(),
+        )
+}
+
+/// Whether the block takes the `focusedNode` part: the editor has the
+/// focus and the selection is in the block, as `focusMode` picks
+/// (Tiptap's focus extension).
+fn node_focused(rv: &Rv, it: &BlockItem) -> bool {
+    if !rv.focused.get() || !rv.props.editable.get() {
+        return false;
+    }
+    rv.sel_rev.get();
+    let mode = rv.props.focus_mode.get();
+    let state = rv.st.borrow();
+    let sel = state.selection();
+    let (from, to) = (sel.from(), sel.to());
+    let end = it.pos + it.node.node_size();
+    let inside = if from == to {
+        it.pos < from && end > from
+    } else {
+        it.pos < to && end > from
+    };
+    if !inside {
+        return false;
+    }
+    let depth = |pos: usize| state.doc().resolve(pos).map(|r| r.depth).unwrap_or(0);
+    match mode.as_deref() {
+        Some("shallowest") => depth(it.pos) == 0,
+        Some("deepest") => depth(it.pos) + 1 == depth(from).max(1),
+        _ => true,
     }
 }
 
@@ -242,7 +362,7 @@ fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
                 .extra
                 .get("listMarkerStart")
                 .and_then(Value::as_str)
-                .unwrap_or("order");
+                .unwrap_or("start");
             let start = list.attrs().get(attr).and_then(Value::as_i64).unwrap_or(1);
             Some(format!("{}.", start + at.index(at.depth) as i64))
         }
@@ -540,6 +660,11 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
         }
         inline
     });
+    let ph_rv = rv.clone();
+    let placeholder = computed(move || {
+        let it = item.get();
+        placeholder_text(&ph_rv, &it)
+    });
     let (frame_rv, lines_rv, spans_rv) = (rv.clone(), rv.clone(), rv);
     text("")
         .on_layout(move |b: &Bounds<Points>| frame_rv.set_text_frame(id, owner, *b))
@@ -551,8 +676,55 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
         .child(dynamic(move || {
             let inline = content.get();
             let start = item.get_untracked().pos + 1;
-            spans(&spans_rv, inline.pieces, start)
+            let mut list = spans(&spans_rv, inline.pieces.clone(), start);
+            if inline.pieces == [Piece::Filler]
+                && let Some(label) = placeholder.get()
+            {
+                list.push(
+                    part(
+                        text(label).text_color(move || theme().muted_foreground),
+                        &spans_rv,
+                        Part::Placeholder,
+                    )
+                    .into_element(),
+                );
+            }
+            list
         }))
+}
+
+/// The placeholder of an empty textblock that shows one (Tiptap's
+/// placeholder extension: `placeholders` by type, else `placeholder`;
+/// while editable, in the anchor's block, at the top level, unless the
+/// flags say otherwise).
+fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
+    let props = rv.props;
+    if !it.node.is_textblock() || it.node.content().size() != 0 {
+        return None;
+    }
+    if props.show_only_when_editable.get() && !props.editable.get() {
+        return None;
+    }
+    let label = props
+        .placeholders
+        .with(|m| m.as_ref().and_then(|m| m.get(it.node.ty().name()).cloned()))
+        .or_else(|| props.placeholder.get().map(|s| s.to_string()))?;
+    let include_children = props.include_children.get();
+    let only_current = props.show_only_current.get();
+    if only_current {
+        rv.sel_rev.get();
+    }
+    let state = rv.st.borrow();
+    if !include_children && state.doc().resolve(it.pos).ok()?.depth != 0 {
+        return None;
+    }
+    if only_current {
+        let anchor = state.selection().anchor();
+        if anchor < it.pos || anchor > it.pos + it.node.node_size() {
+            return None;
+        }
+    }
+    Some(label)
 }
 
 /// The spans of a textblock's pieces.
@@ -566,6 +738,12 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
                 marks,
                 classes,
             } => {
+                if let Some((mark, view)) = marks
+                    .iter()
+                    .find_map(|m| rv.mark_view(m.ty().name()).map(|v| (m, v)))
+                {
+                    return view.create(mark, &t);
+                }
                 let style_marks = marks.clone();
                 text(t)
                     .app_class(move || {
@@ -630,6 +808,9 @@ fn leaf(rv: &Rv, node: Node, pos: usize) -> AnyElement {
         let el = view.create(&cx, &node);
         cleanup(move || view.destroy());
         return styled(view_box()).child(el).into_element();
+    }
+    if render_kind(&node) == Some("image") {
+        return styled(view_box()).child(image_of(&node)).into_element();
     }
     match node.ty().spec().leaf_text.as_deref() {
         Some(t) if utf16_len(t) == 1 => {
@@ -771,36 +952,68 @@ fn selection_rects(rv: Rv) -> impl IntoElement {
     })
 }
 
-/// The placeholder, while the document is one empty textblock.
-fn placeholder(rv: Rv) -> impl IntoElement {
+/// The gap cursor: a horizontal caret at the gap, blinking as the caret.
+fn gap_cursor(rv: Rv) -> impl IntoElement {
+    let (blink, focused) = (rv.blink, rv.focused);
     dynamic(move || {
-        rv.doc_rev.get();
+        rv.sel_rev.get();
         rv.layout_rev.get();
-        let text_ = rv.props.placeholder.get()?;
-        let at = {
+        rv.doc_rev.get();
+        let pos = {
             let state = rv.st.borrow();
-            let doc = state.doc();
-            let only = doc.child_count() == 1
-                && doc.child(0).is_textblock()
-                && doc.child(0).content().size() == 0;
-            if !only {
-                return None;
-            }
-            rv.geo
-                .borrow()
-                .caret_rect(1, Default::default())
-                .map(|b| b.origin)
-                .unwrap_or_default()
+            let sel = state.selection();
+            sel.is_gap_cursor().then(|| sel.head())?
+        };
+        let line = rv.block_edge_rect(pos)?;
+        Some(part(
+            rect(Bounds::new(
+                Point::new(line.origin.x, line.origin.y - px(CARET_WIDTH / 2.0)),
+                Size::new(px(GAP_WIDTH), px(CARET_WIDTH)),
+            ))
+            .bg(move || theme().foreground)
+            .opacity(move || {
+                if focused.get() && blink.get() {
+                    1.0_f32
+                } else {
+                    0.0
+                }
+            }),
+            &rv,
+            Part::GapCursor,
+        ))
+    })
+}
+
+/// The drop cursor, while a drag moves the selection: a caret where the
+/// drop lands in text, else a line between the blocks there.
+fn drop_cursor(rv: Rv) -> impl IntoElement {
+    dynamic(move || {
+        let pos = rv.drop_at.get()?;
+        rv.layout_rev.get();
+        let in_text = {
+            let state = rv.st.borrow();
+            state
+                .doc()
+                .resolve(pos)
+                .is_ok_and(|r| r.parent().inline_content())
+        };
+        let b = if in_text {
+            let c = rv.geo.borrow().caret_rect(pos, Default::default())?;
+            Bounds::new(
+                Point::new(c.origin.x - px(CARET_WIDTH / 2.0), c.origin.y),
+                Size::new(px(CARET_WIDTH), c.size.height),
+            )
+        } else {
+            let line = rv.block_edge_rect(pos)?;
+            Bounds::new(
+                Point::new(line.origin.x, line.origin.y - px(CARET_WIDTH / 2.0)),
+                Size::new(line.size.width, px(CARET_WIDTH)),
+            )
         };
         Some(part(
-            text(text_.to_string())
-                .absolute()
-                .left(Length::from(at.x))
-                .top(Length::from(at.y))
-                .pointer_events(PointerEvents::None)
-                .text_color(move || theme().muted_foreground),
+            rect(b).bg(move || theme().foreground),
             &rv,
-            Part::Placeholder,
+            Part::DropCursor,
         ))
     })
 }
@@ -946,6 +1159,42 @@ impl Rv {
         text.owner = Some(owner);
         drop(geo);
         self.layout_rev.update(|r| *r += 1);
+    }
+
+    /// Sets the `checked` attribute of the task item at `pos`.
+    fn set_checked(&self, pos: usize, checked: bool) {
+        if !self.editable() {
+            return;
+        }
+        let state = self.session.state();
+        if state.doc().node_at(pos).is_none() {
+            return;
+        }
+        let mut tr = state.tr();
+        if tr
+            .set_node_attribute(pos, "checked", Value::Bool(checked))
+            .is_ok()
+        {
+            tr.set_origin(crate::rich_editor::state::TransactionOrigin::User);
+            if let Err(e) = self.session.dispatch(tr) {
+                log::warn!("RichEditor: a transaction was refused: {e}");
+            }
+        }
+    }
+
+    /// The mark view of type `name`: a plugin's.
+    fn mark_view(&self, name: &str) -> Option<Arc<dyn MarkView>> {
+        let state = self.st.borrow();
+        for plugin in state.plugins() {
+            for (n, factory) in plugin.mark_views() {
+                if n == name
+                    && let Some(view) = factory.downcast_ref::<Arc<dyn MarkView>>()
+                {
+                    return Some(view.clone());
+                }
+            }
+        }
+        None
     }
 
     /// Textblock `id`'s lines.

@@ -180,6 +180,43 @@ editor.dispatchTransaction = (tr) => editor.applyTransaction(tr);
 - Methods that may run JS hooks (`run`, `dispatch`, `setContent`, ...) take `this: Instance<Self>` rather than a
   borrow, so a hook calling the editor again (`applyTransaction` from `dispatchTransaction`) is not re-entrant.
 
+## Extensions: the Tiptap layer (planned, in progress)
+
+The kernel is ProseMirror; the layer apps and third parties build with is Tiptap's: an **extension** contributes, in
+one unit, to the schema (node and mark types, attributes on other types), the commands, the keymap, input and paste
+rules, plugins, node views and Markdown, ordered by priority. NSH keeps Tiptap's names and semantics and changes one
+thing: logic is Rust, JS describes.
+
+- **`Extension`** (`extensions/extension.rs`): `name`, `kind` (`Extension`, `Node`, `Mark`), `priority` (100 by
+  default; higher first, as Tiptap's `sortExtensions`), `options` (JSON, merged by `configure`), child extensions
+  (`addExtensions`), and two stages, as Tiptap's `ExtensionManager`:
+  - the schema stage, from the options: its node or mark spec, `global_attributes` (`addGlobalAttributes`: attributes
+    with their parse and render forms added to other types), `extend_node_schema` extras;
+  - the runtime stage, from the options and the built `Schema`: named commands (`addCommands`), keyboard shortcuts,
+    input rules, paste rules, plugins, node views, Markdown parse and serialize forms, storage.
+  `configure(options)` and `extend(overrides)` return new extensions; both are data merges.
+- **`ExtensionManager`** resolves the list (flattened, sorted, duplicate names rejected), builds the schema from the
+  schema stage (the first `topNode` extension's node is the document; Tiptap's names: `doc`, `paragraph`, `text`,
+  `heading`, `blockquote`, `bulletList`, `orderedList` with `start`, `listItem`, `taskList`, `taskItem`,
+  `codeBlock`, `hardBreak`, `horizontalRule`, `image`, `bold`, `italic`, `strike`, `underline`, `code`, `link`,
+  `highlight`, `subscript`, `superscript`, `textStyle`), then the runtime parts in priority order: keymaps first
+  to last, rules, plugins, the command table.
+- **Commands** are named (`toggleHeading`, `setLink`, ...) with JSON arguments: an extension's `commands` map a name
+  to a Rust factory `fn(args) -> BoxCommand`. JS runs them as data, `command("toggleHeading", { level: 2 })` (or the
+  typed helpers `nsh/base` exports), composes them with `chain` / `first`, and asks `can`. Commands never take a JS
+  closure: one would run QuickJS on the input path. App crates add extensions, and so commands, plugins and node views
+  in Rust, through their UI set (`#[native_module]`), which registers them by name for JS to use.
+- **Queries** are native: `isActive(name, attrs)`, `getAttributes`, `getMarkRange`, `findParentNode`, `coordsAtPos`,
+  `posAtCoords`, `selectionRect`; JS reads them on the revision it subscribes to.
+- **Events**: `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
+  `delete`, `destroy`, posted to JS after the fact.
+- **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
+  (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
+- **JS face**: `createRichEditor({ extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] } }), Link,
+  Mention.configure({ suggestion: { char: "@" } })], content })`. Built-in extensions are exported values carrying
+  their name and options; `defineExtension({...})` declares one as data (types, attributes, keymap bindings to
+  commands, rules). `schema` + `plugins` stay the kernel-level way to make an editor.
+
 ## Phases
 
 1. The headless kernel: model, transform, state, commands, history, keymaps, input rules, the starter schema, formats.

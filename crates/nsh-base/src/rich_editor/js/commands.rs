@@ -9,11 +9,11 @@ use nsh_core::{JsonValue, ui::prelude::*};
 
 use super::json::{AttrsJson, Content};
 use crate::rich_editor::{
-    commands::{self as cmd, BoxCommand, Dispatch, command},
+    commands::{self as cmd, BoxCommand, CommandRegistry, Dispatch, command},
     extensions::{history, input_rules},
     formats::{DocFormat, MarkdownFormat, MarkdownNames, slice_from_text},
     model::{Attrs, Fragment, Node, Schema, Slice},
-    state::{EditorState, NodeSelection, Selection, TextSelection, Transaction},
+    state::{EditorState, NodeSelection, TextSelection},
     transform::MarkMatch,
 };
 
@@ -100,6 +100,9 @@ pub(crate) enum RichCommandName {
     /// Runs the first of `commands` that applies (ProseMirror's
     /// `chainCommands`).
     First,
+    /// Runs the command registered as `name` (Tiptap's names: `toggleList`,
+    /// `setNode`, ... and the ones extensions add) with `args`.
+    Command,
 }
 
 /// A command as data, made by `toggleMark`, `setBlockType`, `chain`, ...:
@@ -138,6 +141,9 @@ pub(crate) struct RichCommand {
     /// The commands `chain` and `first` run.
     #[prop(skip_none)]
     pub(crate) commands: Option<Vec<RichCommand>>,
+    /// A named command's arguments, as an object.
+    #[prop(skip_none)]
+    pub(crate) args: Option<JsonValue>,
 }
 
 /// A format documents are read from and written to.
@@ -154,6 +160,16 @@ pub(crate) enum RichFormat {
 }
 
 impl RichCommand {
+    /// The command registered as `name`, with `args`.
+    pub(crate) fn named(name: impl Into<String>, args: JsonValue) -> Self {
+        Self {
+            command: RichCommandName::Command,
+            name: Some(name.into()),
+            args: Some(args),
+            ..Self::default()
+        }
+    }
+
     /// A command without parameters.
     pub(crate) fn plain(command: RichCommandName) -> Self {
         Self {
@@ -236,9 +252,36 @@ pub(crate) fn doc_of(
     Ok(doc)
 }
 
-/// `command` resolved against `schema`: the kernel's command it runs.
+/// `command` resolved against `schema` with the built-in named commands.
 pub(crate) fn resolve(command: &RichCommand, schema: &Schema) -> Result<BoxCommand, String> {
+    resolve_with(command, schema, &CommandRegistry::builtin())
+}
+
+/// `command` resolved against `schema`: the kernel's command it runs, named
+/// commands from `registry`.
+pub(crate) fn resolve_with(
+    command: &RichCommand,
+    schema: &Schema,
+    registry: &CommandRegistry,
+) -> Result<BoxCommand, String> {
     use RichCommandName as N;
+    // The marks' commands with arguments (`extendEmptyMarkRange`) are
+    // Tiptap's, from the registry.
+    if let (N::ToggleMark | N::SetMark | N::UnsetMark, Some(JsonValue::Object(args))) =
+        (command.command, &command.args)
+    {
+        let mut args = args.clone();
+        args.insert("name".into(), command.name.clone().into());
+        if let Some(attrs) = &command.attrs {
+            args.insert("attrs".into(), attrs.0.clone());
+        }
+        let name = match command.command {
+            N::ToggleMark => "toggleMark",
+            N::SetMark => "setMark",
+            _ => "unsetMark",
+        };
+        return registry.make(name, &JsonValue::Object(args), schema);
+    }
     let name = || {
         command
             .name
@@ -407,8 +450,13 @@ pub(crate) fn resolve(command: &RichCommand, schema: &Schema) -> Result<BoxComma
                 true
             })
         }
-        N::Chain => chain(resolve_all(command, schema)?),
-        N::First => cmd::chain_commands(resolve_all(command, schema)?),
+        N::Chain => cmd::chain(resolve_all(command, schema, registry)?),
+        N::First => cmd::chain_commands(resolve_all(command, schema, registry)?),
+        N::Command => registry.make(
+            &name()?,
+            command.args.as_ref().unwrap_or(&JsonValue::Null),
+            schema,
+        )?,
     })
 }
 
@@ -418,13 +466,17 @@ fn command_fn(
     command(f)
 }
 
-fn resolve_all(command: &RichCommand, schema: &Schema) -> Result<Vec<BoxCommand>, String> {
+fn resolve_all(
+    command: &RichCommand,
+    schema: &Schema,
+    registry: &CommandRegistry,
+) -> Result<Vec<BoxCommand>, String> {
     command
         .commands
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(|c| resolve(c, schema))
+        .map(|c| resolve_with(c, schema, registry))
         .collect()
 }
 
@@ -452,51 +504,4 @@ fn set_mark(
         dispatch(tr);
     }
     true
-}
-
-/// Runs `commands` in turn, each on the state the ones before made, and
-/// dispatches their steps as one transaction: applies only when all do.
-pub(crate) fn chain(commands: Vec<BoxCommand>) -> BoxCommand {
-    command(move |state: &EditorState, dispatch: Dispatch<'_>| {
-        let mut current = state.clone();
-        let mut whole = state.tr();
-        for command in &commands {
-            let mut made: Option<Transaction> = None;
-            if !command(&current, Some(&mut |tr| made = Some(tr))) {
-                return false;
-            }
-            let Some(tr) = made else { continue };
-            for step in &tr.steps {
-                if whole.step(step.boxed_clone()).is_err() {
-                    return false;
-                }
-            }
-            if tr.selection_set() {
-                let json = tr.selection().to_json();
-                match Selection::from_json(whole.doc(), &json) {
-                    Ok(selection) => {
-                        whole.set_selection(selection);
-                    }
-                    Err(_) => return false,
-                }
-            }
-            if tr.stored_marks_set() {
-                whole.set_stored_marks(tr.stored_marks().map(<[_]>::to_vec));
-            }
-            for (key, value) in tr.meta_entries() {
-                whole.set_meta(key, value.clone());
-            }
-            if tr.scrolled_into_view() {
-                whole.scroll_into_view();
-            }
-            current = match current.apply(tr) {
-                Ok(next) => next,
-                Err(_) => return false,
-            };
-        }
-        if let Some(dispatch) = dispatch {
-            dispatch(whole);
-        }
-        true
-    })
 }

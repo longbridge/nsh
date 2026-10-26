@@ -52,13 +52,13 @@ The editor draws the document with the app's look: `classes` and `styles` style 
 `selection`, `placeholder`, `composition`, `selectedNode`, `listMarker`), its nodes by type (`nodes: { heading:
 "text-2xl font-bold", "heading[level=2]": "text-xl" }`) and its marks (`marks: { bold: "font-bold" }`). The items of
 lists whose node spec sets `extra.listMarker` to `"bullet"` or `"ordered"` (the starter schema's lists) show a marker
-in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `order`, placed before the item, in the list's indent (`pl-6` on the list, as a browser indents `ul`).
+in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list's `start`, placed before the item, in the list's indent (`pl-6` on the list, as a browser indents `ul`).
 
 ```tsx
 <RichEditor
   editor={editor}
   classes={{
-    nodes: { heading: "text-2xl font-bold", bullet_list: "pl-6", code_block: "font-mono bg-muted p-3 rounded-md" },
+    nodes: { heading: "text-2xl font-bold", bulletList: "pl-6", codeBlock: "font-mono bg-muted p-3 rounded-md" },
     marks: { bold: "font-bold", italic: "italic", code: "font-mono bg-muted" },
     listMarker: "text-muted-foreground",
   }}
@@ -92,8 +92,8 @@ const editor = createRichEditor({ schema, doc: schema.parse("Hello") });
 A `RichSchema` reads and writes documents: `parse(content, format?)` (plain text by default, `"markdown"`, or JSON),
 `parseMarkdown(markdown)`, `serialize(doc, format?)` (Markdown by default, `"text"`, `"json"`) and `check(doc)`, which
 returns the document with its attribute defaults filled in. `nodes`, `marks` and `topNode` name its types. Markdown
-maps to the starter schema's names (`paragraph`, `heading`, `blockquote`, `code_block`, `bullet_list`,
-`ordered_list`, `list_item`, `bold`, `italic`, `code`, `link`, `strike`).
+maps to the starter schema's names (`paragraph`, `heading`, `blockquote`, `codeBlock`, `bulletList`,
+`orderedList`, `listItem`, `bold`, `italic`, `code`, `link`, `strike`).
 
 ## Commands
 
@@ -120,7 +120,7 @@ at the selection (`isActive("heading", { level: 2 })`).
 
 ```tsx
 editor.run(chain([setBlockType("heading", { level: 1 }), toggleMark("bold")]));
-const canIndent = editor.can(sinkListItem("list_item"));
+const canIndent = editor.can(sinkListItem("listItem"));
 ```
 
 ## The session

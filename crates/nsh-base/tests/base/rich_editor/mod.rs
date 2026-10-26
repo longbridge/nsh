@@ -4,10 +4,13 @@
 //! pastes as blocks, a node view renders an atom, undo takes typing
 //! back, and lists' items show their markers.
 
+mod commands;
 mod marks_clipboard_history;
 mod selection;
 mod structure;
+mod tiptap;
 mod typing;
+mod view_features;
 
 use std::sync::Arc;
 
@@ -214,8 +217,8 @@ fn markdown_pastes_as_blocks() {
     let mut paste = PasteEvent::default();
     paste.text = "# Title\n\n- item".into();
     app.paste("id:editor", &paste).unwrap();
-    see(&mut app, "Types heading,bullet_list");
-    see(&mut app, &doc("Title|item"));
+    see(&mut app, "Types heading,bulletList,paragraph");
+    see(&mut app, &doc("Title|item|"));
 }
 
 #[test]
@@ -247,15 +250,15 @@ fn item(text: &str, nested: Option<Value>) -> Value {
     let mut content =
         vec![json!({"type": "paragraph", "content": [{"type": "text", "text": text}]})];
     content.extend(nested);
-    json!({"type": "list_item", "content": content})
+    json!({"type": "listItem", "content": content})
 }
 
 #[test]
 fn list_items_show_their_markers() {
-    let nested = json!({"type": "bullet_list", "content": [item("inner", None)]});
+    let nested = json!({"type": "bulletList", "content": [item("inner", None)]});
     let mut app = start(json!({"type": "doc", "content": [
-        {"type": "bullet_list", "content": [item("one", Some(nested)), item("two", None)]},
-        {"type": "ordered_list", "attrs": {"order": 3}, "content": [item("three", None), item("four", None)]},
+        {"type": "bulletList", "content": [item("one", Some(nested)), item("two", None)]},
+        {"type": "orderedList", "attrs": {"start": 3}, "content": [item("three", None), item("four", None)]},
     ]}));
     see(&mut app, "•");
     see(&mut app, "◦");

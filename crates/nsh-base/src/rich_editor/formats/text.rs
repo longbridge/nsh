@@ -1,4 +1,5 @@
-//! Plain text: one textblock per line, and the clipboard's text.
+//! Plain text: one textblock per line, and the clipboard's text. Types
+//! with a `render_text` (Tiptap's `renderText`) count as its text.
 
 use super::{DocFormat, FormatError};
 use crate::rich_editor::model::{Fragment, Node, ResolvedPos, Schema, Slice};
@@ -75,11 +76,22 @@ fn fragment_text(fragment: &Fragment) -> String {
 fn collect_lines(fragment: &Fragment, lines: &mut Vec<String>, inline: &mut Option<String>) {
     for i in 0..fragment.child_count() {
         let child = fragment.child(i);
-        if let Some(text) = child.text() {
+        if let Some(render) = &child.ty().spec().render_text {
+            // A type's own text (Tiptap's `renderText`) stands for the
+            // node and its content.
+            let text = render.text(child);
+            if child.is_inline() {
+                inline.get_or_insert_with(String::new).push_str(&text);
+            } else {
+                flush(lines, inline);
+                lines.push(text);
+            }
+        } else if let Some(text) = child.text() {
             inline.get_or_insert_with(String::new).push_str(text);
         } else if child.is_inline() {
-            // Inline leaves: a line break (any type named `*break*`)
-            // keeps its meaning, others (images, mentions) have no text.
+            // Inline leaves without `render_text`: a line break (any type
+            // named `*break*`) keeps its meaning, others (images,
+            // mentions) have no text.
             let line = inline.get_or_insert_with(String::new);
             if child.ty().name().contains("break") {
                 line.push('\n');
@@ -152,6 +164,7 @@ pub fn slice_from_text(schema: &Schema, text: &str, context: &ResolvedPos) -> Sl
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::rich_editor::extensions::starter;
@@ -175,6 +188,76 @@ mod tests {
             .unwrap();
         let text = PlainTextFormat::default().serialize(&doc).unwrap();
         assert_eq!(text, "Title\nquoted\na\nb");
+    }
+
+    #[test]
+    fn render_text_replaces_a_node() {
+        use crate::rich_editor::model::{NodeSpec, Schema, SchemaSpec, TextRender};
+        let mut spec = SchemaSpec::default();
+        spec.nodes = vec![
+            (
+                "doc".into(),
+                NodeSpec {
+                    content: Some("block+".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "paragraph".into(),
+                NodeSpec {
+                    content: Some("inline*".into()),
+                    group: Some("block".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mention".into(),
+                NodeSpec {
+                    inline: true,
+                    group: Some("inline".into()),
+                    attrs: vec![("id".into(), Default::default())],
+                    render_text: Some(TextRender::Template("@{id} {{x}}".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "rule".into(),
+                NodeSpec {
+                    group: Some("block".into()),
+                    render_text: Some(TextRender::new(|_| "---".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "text".into(),
+                NodeSpec {
+                    group: Some("inline".into()),
+                    ..Default::default()
+                },
+            ),
+        ];
+        let schema = Schema::new(spec).unwrap();
+        let mut attrs = crate::rich_editor::model::Attrs::new();
+        attrs.insert("id".into(), "ann".into());
+        let mention = schema
+            .node("mention", Some(attrs), Fragment::empty(), vec![])
+            .unwrap();
+        let p = schema
+            .node(
+                "paragraph",
+                None,
+                Fragment::from(vec![schema.text("hi ", vec![]), mention]),
+                vec![],
+            )
+            .unwrap();
+        let rule = schema
+            .node("rule", None, Fragment::empty(), vec![])
+            .unwrap();
+        let doc = schema
+            .node("doc", None, Fragment::from(vec![p, rule]), vec![])
+            .unwrap();
+        let text = PlainTextFormat::default().serialize(&doc).unwrap();
+        assert_eq!(text, "hi @ann {x}\n---");
     }
 
     #[test]

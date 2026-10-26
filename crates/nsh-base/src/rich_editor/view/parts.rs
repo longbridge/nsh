@@ -35,10 +35,27 @@ pub struct RichEditorClasses {
     /// The background of selected text (the theme's selection color).
     #[prop(skip_none)]
     pub selection: Option<SharedString>,
-    /// The placeholder, shown while the document is one empty textblock
-    /// (in the theme's `muted-foreground`).
+    /// The placeholder, a span after the empty textblock's (empty) text,
+    /// in the block's typography (in the theme's `muted-foreground`).
     #[prop(skip_none)]
     pub placeholder: Option<SharedString>,
+    /// The gap cursor, a horizontal caret between blocks where no text can
+    /// go (20 points wide, 2 high, the caret's color).
+    #[prop(skip_none)]
+    pub gap_cursor: Option<SharedString>,
+    /// Where a dragged selection drops: a caret in text, a line between
+    /// blocks (in the caret's color).
+    #[prop(skip_none)]
+    pub drop_cursor: Option<SharedString>,
+    /// The checkbox of a task item (a node whose spec's `extra.render` is
+    /// `"task"`, with a `checked` attribute): the item is a row of the
+    /// checkbox and its content; a `Checkbox` with no look.
+    #[prop(skip_none)]
+    pub task_checkbox: Option<SharedString>,
+    /// A block the selection is in while the editor has the focus (after
+    /// its node's classes), as `focusMode` picks them.
+    #[prop(skip_none)]
+    pub focused_node: Option<SharedString>,
     /// What an input method is composing at the caret (underlined).
     #[prop(skip_none)]
     pub composition: Option<SharedString>,
@@ -82,6 +99,18 @@ pub struct RichEditorStyles {
     /// The placeholder.
     #[prop(skip_none)]
     pub placeholder: Option<PartStyle>,
+    /// The gap cursor.
+    #[prop(skip_none)]
+    pub gap_cursor: Option<PartStyle>,
+    /// The drop cursor.
+    #[prop(skip_none)]
+    pub drop_cursor: Option<PartStyle>,
+    /// A task item's checkbox.
+    #[prop(skip_none)]
+    pub task_checkbox: Option<PartStyle>,
+    /// A block the selection is in, while focused.
+    #[prop(skip_none)]
+    pub focused_node: Option<PartStyle>,
     /// What an input method is composing.
     #[prop(skip_none)]
     pub composition: Option<PartStyle>,
@@ -141,6 +170,10 @@ pub(crate) enum Part {
     Composition,
     SelectedNode,
     ListMarker,
+    GapCursor,
+    DropCursor,
+    TaskCheckbox,
+    FocusedNode,
 }
 
 impl RichEditorClasses {
@@ -154,6 +187,10 @@ impl RichEditorClasses {
             Part::Composition => self.composition.as_ref(),
             Part::SelectedNode => self.selected_node.as_ref(),
             Part::ListMarker => self.list_marker.as_ref(),
+            Part::GapCursor => self.gap_cursor.as_ref(),
+            Part::DropCursor => self.drop_cursor.as_ref(),
+            Part::TaskCheckbox => self.task_checkbox.as_ref(),
+            Part::FocusedNode => self.focused_node.as_ref(),
         }
     }
 }
@@ -169,6 +206,10 @@ impl RichEditorStyles {
             Part::Composition => &self.composition,
             Part::SelectedNode => &self.selected_node,
             Part::ListMarker => &self.list_marker,
+            Part::GapCursor => &self.gap_cursor,
+            Part::DropCursor => &self.drop_cursor,
+            Part::TaskCheckbox => &self.task_checkbox,
+            Part::FocusedNode => &self.focused_node,
         };
         style.as_ref().map(|s| &s.0)
     }

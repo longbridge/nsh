@@ -352,6 +352,15 @@ impl Geometry {
         Some(Hit::Text(geo.start + geo.map.to_doc(t), affinity))
     }
 
+    /// The line `pos` shows on in its textblock, and how many lines the
+    /// textblock has.
+    pub(crate) fn line_index(&self, pos: usize, affinity: Affinity) -> Option<(usize, usize)> {
+        let id = self.text_at(pos)?;
+        let geo = self.texts.get(&id)?;
+        let t = geo.map.to_text(pos - geo.start);
+        Some((line_of(&geo.lines, t, affinity)?, geo.lines.len()))
+    }
+
     /// The start or end of the line `pos` shows on.
     pub(crate) fn line_edge(&self, pos: usize, affinity: Affinity, end: bool) -> Option<usize> {
         let id = self.text_at(pos)?;

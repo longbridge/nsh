@@ -58,7 +58,7 @@ fn paragraphs() {
 fn headings_and_rules() {
     assert_eq!(
         parse("<h1>a</h1><h3>b</h3><hr><blockquote><p>q</p></blockquote>"),
-        r#"doc(heading{level=1}("a"), heading{level=3}("b"), horizontal_rule, blockquote(paragraph("q")))"#
+        r#"doc(heading{level=1}("a"), heading{level=3}("b"), horizontalRule, blockquote(paragraph("q")))"#
     );
 }
 
@@ -119,7 +119,7 @@ fn whitespace_collapses() {
 fn pre_keeps_whitespace() {
     assert_eq!(
         parse("<pre><code class=\"language-rust\">fn  main() {\n    x\n}</code></pre>"),
-        r#"doc(code_block{language="rust"}("fn  main() {\n    x\n}"))"#
+        r#"doc(codeBlock{language="rust"}("fn  main() {\n    x\n}"))"#
     );
 }
 
@@ -127,7 +127,7 @@ fn pre_keeps_whitespace() {
 fn line_breaks() {
     assert_eq!(
         parse("<p>a<br>b</p>"),
-        r#"doc(paragraph("a", hard_break, "b"))"#
+        r#"doc(paragraph("a", hardBreak, "b"))"#
     );
 }
 
@@ -148,7 +148,7 @@ fn links_and_images() {
 fn lists() {
     assert_eq!(
         parse("<ol start=\"3\"><li>a</li><li><p>b</p><ul><li>c</li></ul></li></ol>"),
-        r#"doc(ordered_list{order=3}(list_item(paragraph("a")), list_item(paragraph("b"), bullet_list(list_item(paragraph("c"))))))"#
+        r#"doc(orderedList{start=3}(listItem(paragraph("a")), listItem(paragraph("b"), bulletList(listItem(paragraph("c"))))))"#
     );
 }
 
@@ -156,7 +156,7 @@ fn lists() {
 fn sublist_directly_in_list() {
     assert_eq!(
         parse("<ul><li>a</li><ul><li>b</li></ul><li>c</li></ul>"),
-        r#"doc(bullet_list(list_item(paragraph("a"), bullet_list(list_item(paragraph("b")))), list_item(paragraph("c"))))"#
+        r#"doc(bulletList(listItem(paragraph("a"), bulletList(listItem(paragraph("b")))), listItem(paragraph("c"))))"#
     );
 }
 
@@ -228,7 +228,7 @@ fn clipboard_slice_fits_its_context() {
     let slice = parser.parse_with_context("<li>a</li><li>b</li>", &at);
     assert_eq!(
         show_fragment(&slice.content),
-        r#"ordered_list{order=1}(list_item(paragraph("a")), list_item(paragraph("b")))"#
+        r#"orderedList{start=1}(listItem(paragraph("a")), listItem(paragraph("b")))"#
     );
     assert!(slice.content.size() > 0);
 
