@@ -10,12 +10,13 @@ import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
 let app: App;
-beforeEach(async () => {
-  // A mouse to hover with, and a manual clock for the stream's ticks.
-  app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {} });
+/** The Charts page with a mouse to hover with and a manual clock for the stream's ticks. */
+const start = async (reducedMotion = false) => {
+  app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {}, reducedMotion });
   await app.press("role:button[Charts]");
   await app.waitFor("Live price");
-});
+};
+beforeEach(() => start());
 
 /** The live price's figure: the text right after the stream's state. */
 const price = () => {
@@ -23,11 +24,18 @@ const price = () => {
   return texts[texts.findIndex((t) => t === "LIVE" || t === "PAUSED") + 1];
 };
 
-/** Tabs on, pressing Right at each stop, until `shown` is on screen: the first plot that reads it out has the focus. */
+/**
+ * Tabs on, pressing Right at each stop, until `shown` is on screen: the
+ * first plot that reads it out has the focus. With reduced motion: in a
+ * desktop window a step waits for the page to settle, which the live
+ * price's pulse never does, and the window's sidebar comes first in its
+ * Tab order.
+ */
 const tabTo = async (shown: string) => {
+  await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(60);
+    expect(++tabs).toBeLessThan(80);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
@@ -81,7 +89,7 @@ test("Tab reaches the drawdown, whose arrow keys move the day it reads out", asy
   await app.keyboard.press("escape");
   await app.waitFor("at a high");
   expect(app.texts()).toContain("DAY 120");
-});
+}, 60000);
 
 test("the capacity rings show each period's load", async () => {
   expect(app.texts()).toContain("49%");
@@ -113,7 +121,7 @@ test("the donut's slices step with the arrow keys once Tab reaches it", async ()
   // Escape clears the hover: the total is back in the hole.
   await app.keyboard.press("escape");
   await app.waitFor("TOTAL");
-});
+}, 60000);
 
 test("bars stand in bands side by side or stacked, a value over each", async () => {
   // A value over each bar, the last month's total in the readout.
