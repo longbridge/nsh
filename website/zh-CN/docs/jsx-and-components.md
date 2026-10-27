@@ -375,7 +375,7 @@ function Field(props: InputProps & { label: string }) {
   );
 }
 
-<Field label="Email" value={email()} onChange={(t) => email.set(t)} keyboardType="email-address" />
+<Field label="Email" value={email()} onChange={({ value }) => email.set(value)} keyboardType="email-address" />
 ```
 
 `split(props, keys)` 返回 `[picked, rest]`，两者都仍然读取原始的 props（而解构 `{ label, ...rest } = props` 会把每个 prop 都读取一次）。JSX 中靠后的元素 props 会覆盖靠前的。

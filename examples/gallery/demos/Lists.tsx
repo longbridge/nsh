@@ -315,7 +315,7 @@ function Chat() {
       >
         <Input
           value={draft()}
-          onChange={(v) => draft.set(v)}
+          onChange={({ value }) => draft.set(value)}
           onSubmit={send}
           submitBehavior="submit"
           placeholder="Message"

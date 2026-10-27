@@ -56,7 +56,7 @@ function App() {
         </Card>
 
         <Card title="split, spread and ref">
-          <Field label="Your name" placeholder="Type here" value={name()} onChange={(t) => name.set(t)} ref={(node) => (nameInput = node)} />
+          <Field label="Your name" placeholder="Type here" value={name()} onChange={({ value }) => name.set(value)} ref={(node) => (nameInput = node)} />
           <Text style={{ color: ui().text }}>{name() ? `Hello, ${name()}!` : "Nobody yet."}</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <View onPress={() => nameInput?.focus()} {...button("accent")}>

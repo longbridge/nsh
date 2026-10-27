@@ -448,7 +448,7 @@ function Chat() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8 }}>
         <Input
           value={draft()}
-          onChange={(t) => draft.set(t)}
+          onChange={({ value }) => draft.set(value)}
           onSubmit={send}
           multiline
           submitBehavior="submit"

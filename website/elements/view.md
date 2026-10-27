@@ -163,15 +163,15 @@ view()
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onPress` | `.on_press` | none | A tap ended inside the view. |
-| `onLongPress` | `.on_long_press` | none | The finger stayed down for `delayLongPress` (500 ms). |
-| `onPressDown` / `onPressUp` | `.on_press_down` / `.on_press_up` | none | A finger went down / lifted or left. |
+| `onPress` | `.on_press` | `PressEvent` (none in Rust) | A tap ended inside the view. |
+| `onLongPress` | `.on_long_press` | `PressEvent` (none in Rust) | The finger stayed down for `delayLongPress` (500 ms). |
+| `onPressDown` / `onPressUp` | `.on_press_down` / `.on_press_up` | `PressEvent` (none in Rust) | A finger went down / lifted or left. |
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | The mouse came over the view (or a view inside it) / left it or the window ([hover](./index.md#hover)); `onMouseLeave`'s is where it was last. |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | The mouse moved over the view (or a view inside it), with or without a button down, or a modifier key was pressed or released while it rests there with none down: `position`, `pagePosition` (`Point`s), `modifiers` and `pressedButton` (`"left"`, `"right"`, `"middle"`, `"back"`, `"forward"` or `null`); at most once a frame. |
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | The secondary button was pressed over the view ([context menus](./index.md#context-menus)). |
 | `onFileDragEnter` / `onFileDragLeave` | `.on_file_drag_enter` / `.on_file_drag_leave` | none | A local-file drag entered / left the active desktop destination. |
 | `onFileDrop` | `.on_file_drop` | `{ uris: string[] }` (`FileDropEvent`) | Local files or directories were dropped on the desktop destination. |
-| `onLayout` | `.on_layout` | `Bounds` (`Bounds<Points>`) | The frame relative to the parent changed. |
+| `onLayout` | `.on_layout` | `{ bounds }` (`Bounds<Points>`) | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | A drag bound with `pan` started / ended; `cancelled` is true when the system cancels it. |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start` / `.on_rotation_end` | `{ rotation, velocity }` | A rotation bound with `rotation` started / ended. |

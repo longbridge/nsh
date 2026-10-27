@@ -134,11 +134,11 @@ interface ViewabilityConfig {
 | 事件 | 数据 | 时机 |
 |---|---|---|
 | `onScroll` | `ScrollEvent`：`{ offset, contentSize, size, zoomScale }` | 滚动过程中。 |
-| `onScrollDragStart` | `{ x, y }` | 开始拖动。 |
-| `onScrollDragEnd` | `{ x, y }` | 手指抬起。 |
-| `onMomentumStart` | `{ x, y }` | 拖动后开始惯性滑动。 |
-| `onMomentumEnd` | `{ x, y }` | 惯性滑动结束（被新的拖动打断时也会触发）。 |
-| `onScrollEnd` | `{ x, y }` | 滚动停止。 |
+| `onScrollDragStart` | `{ offset }` | 开始拖动。 |
+| `onScrollDragEnd` | `{ offset }` | 手指抬起。 |
+| `onMomentumStart` | `{ offset }` | 拖动后开始惯性滑动。 |
+| `onMomentumEnd` | `{ offset }` | 惯性滑动结束（被新的拖动打断时也会触发）。 |
+| `onScrollEnd` | `{ offset }` | 滚动停止。 |
 
 列表也接受所有元素通用的属性（[通用属性](../elements/index.md)）。
 

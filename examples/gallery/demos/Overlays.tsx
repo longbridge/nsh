@@ -107,7 +107,7 @@ export function Overlays(props: { show: OverlayKind }) {
           offset={6}
           margin={8}
           popupStyle={popup()}
-          onOpenChange={(open, reason) => {
+          onOpenChange={({ open, reason }) => {
             shown.set(open);
             last.set(`popover ${open ? "opened" : "closed"} (${reason})`);
           }}
@@ -137,7 +137,7 @@ export function Overlays(props: { show: OverlayKind }) {
             tooltip={
               <Tooltip
                 open={pinned() || hovered()}
-                onOpenChange={(open, reason) => {
+                onOpenChange={({ open, reason }) => {
                   hovered.set(open);
                   last.set(`tooltip ${open ? "shown" : "hidden"} (${reason})`);
                 }}
@@ -163,7 +163,7 @@ export function Overlays(props: { show: OverlayKind }) {
         <Button label="Show the sheet" variant="secondary" selected={open()} onPress={() => open.set(true)} />
         <Sheet
           open={open()}
-          onOpenChange={(next, reason) => {
+          onOpenChange={({ open: next, reason }) => {
             open.set(next);
             last.set(`sheet ${next ? "opened" : "closed"} (${reason})`);
           }}

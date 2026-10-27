@@ -85,7 +85,7 @@ function Home() {
         <Press label="Focus it" onPress={() => target?.focus()} />
         <Text>{`Key focus: ${keyFocus()}`}</Text>
         <Press label="Sheet" onPress={() => sheet.set(true)} />
-        <Dialog open={sheet()} onOpenChange={(open) => sheet.set(open)} onOpen={() => shown.set(shown() + 1)}>
+        <Dialog open={sheet()} onOpenChange={({ open }) => sheet.set(open)} onOpen={() => shown.set(shown() + 1)}>
           <Text>In the sheet</Text>
         </Dialog>
       </View>

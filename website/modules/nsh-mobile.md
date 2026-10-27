@@ -90,7 +90,7 @@ function App() {
           { title: "Stats", icon: platform.select({ ios: "chart.bar", android: "ic_stats" }) },
         ]}
         selectedIndex={section()}
-        onChange={(index) => section.set(index)}
+        onChange={({ index }) => section.set(index)}
         class="absolute inset-x-0 bottom-0"
       />
     </View>
@@ -101,7 +101,7 @@ mount(App);
 ```
 
 `TabBar` comes from `nsh/mobile`, `nsh_core::mobile` in Rust. The selection is the app's: a
-tap reports `onChange` with the tab's index, the bar shows the choice at once, as the system's does, and the app shows
+tap reports `onChange` with the tab's index (`{ index }`), the bar shows the choice at once, as the system's does, and the app shows
 that section and passes the index back as `selectedIndex`. Its height is the system's where the style leaves it open.
 In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected_index(..)`), a listener per event
 (`.on_change(..)`) and the typed style methods; `TabBarItem::new(title).icon(name)` makes a tab.
@@ -127,7 +127,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 
 | Event | Rust | Description |
 |---|---|---|
-| `onChange` | `.on_change(\|index: &u32\| ..)` | The user chose a tab: its index. The bar shows the choice at once; the app shows the tab's content and sets `selectedIndex`. |
+| `onChange` | `.on_change(\|index: &u32\| ..)` | The user chose a tab: `{ index }`, its index. The bar shows the choice at once; the app shows the tab's content and sets `selectedIndex`. |
 
 ### Platform notes
 
@@ -213,7 +213,7 @@ function Note() {
       <Input
         ref={(n) => (input = n)}
         value={text()}
-        onChange={(v) => text.set(v)}
+        onChange={({ value }) => text.set(value)}
         placeholder="Write a note"
         ios={{ inputAccessoryViewID: "note-bar" }}
       />

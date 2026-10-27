@@ -488,10 +488,10 @@ x.spring(200, { stiffness: 180, damping: 8 });   // 晃动
 x.spring(200, { stiffness: 400, damping: 30 });  // 干脆，不过冲
 
 // 以拖动的松手速度滑行到停止。
-<View pan={{ x }} onPanEnd={(e) => x.decay({ velocity: e.velocityX })} />
+<View pan={{ x }} onPanEnd={(e) => x.decay({ velocity: e.velocity.x })} />
 
 // 留在轨道上、在两端柔和反弹的滑行。
-x.decay({ velocity: e.velocityX, clamp: [0, 300], bounce: 0.3 });
+x.decay({ velocity: e.velocity.x, clamp: [0, 300], bounce: 0.3 });
 
 // 值现在在哪里（它在 UI 线程上运动，所以结果是异步的）。
 const where = await x.getValue();

@@ -255,7 +255,7 @@ function Search() {
         ref={(node) => (input = node)}
         {...field({ style: { paddingLeft: 26 } })}
         value={query()}
-        onChange={(v) => query.set(v)}
+        onChange={({ value }) => query.set(value)}
         onKeyPress={(e) => e.key === "Escape" && query.set("")}
         placeholder={`Search demos  ${keymap.label("mod+k")}`}
         accessibilityLabel="Search demos"

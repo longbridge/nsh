@@ -399,7 +399,7 @@ export function Slider(props: {
   const low = () => props.value < props.floor;
   return (
     <View
-      onLayout={(e) => width.set(e.size.width)}
+      onLayout={(e) => width.set(e.bounds.size.width)}
       {...track((x) => pick(x))}
       role="adjustable"
       accessibilityLabel={props.label}

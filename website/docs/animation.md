@@ -488,10 +488,10 @@ x.spring(200, { stiffness: 180, damping: 8 });   // wobbly
 x.spring(200, { stiffness: 400, damping: 30 });  // stiff, no overshoot
 
 // A fling that coasts to a stop, from a pan's release velocity.
-<View pan={{ x }} onPanEnd={(e) => x.decay({ velocity: e.velocityX })} />
+<View pan={{ x }} onPanEnd={(e) => x.decay({ velocity: e.velocity.x })} />
 
 // A fling that stays on its track and bounces softly off its ends.
-x.decay({ velocity: e.velocityX, clamp: [0, 300], bounce: 0.3 });
+x.decay({ velocity: e.velocity.x, clamp: [0, 300], bounce: 0.3 });
 
 // Where a value is now (it moves on the UI thread, so the answer is async).
 const where = await x.getValue();

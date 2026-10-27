@@ -109,7 +109,7 @@ function StatusBarCard() {
         open={open()}
         animation="fade"
         statusBar={{ foreground: foreground(), hidden: barHidden(), animated: true }}
-        onOpenChange={(o) => open.set(o)}
+        onOpenChange={({ open: o }) => open.set(o)}
         style={{ flex: 1 }}
       >
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16, backgroundColor: backdrop() }}>
@@ -304,18 +304,18 @@ function Shortcuts() {
   const on = signal(false);
   const last = signal("");
   keymap.bind({
-    "mod+k": (k) => {
+    "mod+k": ({ keystroke }) => {
       count.set(count() + 1);
-      last.set(k);
+      last.set(keystroke);
     },
-    "mod+shift+l": (k) => {
+    "mod+shift+l": ({ keystroke }) => {
       on.set(!on());
-      last.set(k);
+      last.set(keystroke);
     },
   });
-  keymap.bind("mod+backspace", (k) => {
+  keymap.bind("mod+backspace", ({ keystroke }) => {
     count.set(0);
-    last.set(k);
+    last.set(keystroke);
   }, { when: "notEditing" });
   const keys: [string, string][] = [
     [keymap.label("mod+k"), "Counts"],

@@ -276,7 +276,7 @@ Animated GIF, WebP and APNG files play automatically, as assets or from URLs. Th
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start(..)` | | Loading starts |
 | `onProgress` | `.on_progress(..)` | `{ loaded, total }` in bytes (`total` 0 when unknown) | During a download, at most every 100 ms |
-| `onLoad` | `.on_load(..)` | `{ width, height }` | The image is ready; the source's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)) |
+| `onLoad` | `.on_load(..)` | `{ size }` | The image is ready; the source's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)) |
 | `onError` | `.on_error(..)` | `{ message }` (a `&str` in Rust) | Loading or decoding failed |
 | `onLoadEnd` | `.on_load_end(..)` | | After `onLoad` or `onError` |
 
@@ -295,7 +295,7 @@ const status = signal("loading…");
 
 <Image
   src={url}
-  onLoad={(e) => status.set(`${e.width}×${e.height}`)}
+  onLoad={({ size }) => status.set(`${size.width}×${size.height}`)}
   onError={(e) => status.set(e.message)}
   style={{ width: 90, height: 60 }}
 />

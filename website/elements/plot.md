@@ -64,7 +64,7 @@ function App() {
         y="visitors"
         yScale={{ type: "linear", domain: [0, 3000] }}
         accessibilityLabel="Visitors per day, highest on Thursday"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         crossLineClass="w-px h-full bg-border"
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
@@ -110,7 +110,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `index: number \| null` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), or of the [pie](#pie-and-arc)'s slice under it; `null` once it leaves the plot (over a pie, its slices). |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), or of the [pie](#pie-and-arc)'s slice under it; `null` once it leaves the plot (over a pie, its slices). |
 
 `Scale` is `{ type: "point" } | { type: "linear"; domain?: [number, number] } | { type: "band"; paddingInner?;
 paddingOuter?; maxBandWidth?; bandCount?; groupPadding? }`. A `domain` is the extent of its two values, in either
@@ -262,7 +262,7 @@ export function Seats(props: { plans: Plan[] }) {
         accessibilityValue={{ text: shown() && `${shown()!.name}, ${shown()!.seats} seats, ${share(shown()!.seats)}` }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 400, damping: 32 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="size-44"
       >
         {/* A donut with 2-point gaps (0.025 of a turn at its 80-point rim). */}
@@ -467,7 +467,7 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
             <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
           </View>
         }
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mr-10 mb-6 h-48"
       >
         <Grid y={[middle(), props.high]} class="stroke-border" />
@@ -525,7 +525,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         appearGeneration={props.stacked ? 1 : 0}
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />

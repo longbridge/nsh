@@ -125,7 +125,7 @@ function PressableSheet() {
       <Caption label="Scales and darkens while pressed" note="active:scale-[0.97]" />
       <Sheet
         open={sheet()}
-        onOpenChange={(open) => sheet.set(open)}
+        onOpenChange={({ open }) => sheet.set(open)}
         backdropStyle={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         popupStyle={{
           gap: 16,
@@ -210,7 +210,7 @@ function Accessory() {
       <Field
         ref={(node) => (input = node)}
         value={text()}
-        onChange={(v) => text.set(v)}
+        onChange={({ value }) => text.set(value)}
         placeholder="Focus me"
         ios={{ inputAccessoryViewID: "counter" }}
       />
@@ -295,7 +295,7 @@ function ModalOptions() {
         animation="slide"
         android={{ statusBarTranslucent: translucent() }}
         ios={{ supportedOrientations: ["portrait", "landscape"] }}
-        onOpenChange={(open) => visible.set(open)}
+        onOpenChange={({ open }) => visible.set(open)}
         style={{ flex: 1 }}
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>

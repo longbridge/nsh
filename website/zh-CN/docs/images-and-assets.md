@@ -267,7 +267,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start(..)` | | 开始加载 |
 | `onProgress` | `.on_progress(..)` | `{ loaded, total }`，单位为字节（未知时 `total` 为 0） | 下载过程中，最多每 100 ms 一次 |
-| `onLoad` | `.on_load(..)` | `{ width, height }` | 图片就绪；源图的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)） |
+| `onLoad` | `.on_load(..)` | `{ size }` | 图片就绪；源图的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)） |
 | `onError` | `.on_error(..)` | `{ message }`（Rust 中为 `&str`） | 加载或解码失败 |
 | `onLoadEnd` | `.on_load_end(..)` | | 在 `onLoad` 或 `onError` 之后 |
 
@@ -286,7 +286,7 @@ const status = signal("loading…");
 
 <Image
   src={url}
-  onLoad={(e) => status.set(`${e.width}×${e.height}`)}
+  onLoad={({ size }) => status.set(`${size.width}×${size.height}`)}
   onError={(e) => status.set(e.message)}
   style={{ width: 90, height: 60 }}
 />

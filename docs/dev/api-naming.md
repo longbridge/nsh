@@ -50,11 +50,11 @@ go elsewhere under these rules rather than into them.
 
 ## Conventions
 
-- **Open state**: `open` + `onOpenChange(open, reason)`, `defaultOpen` when uncontrolled (`Dialog::open`,
+- **Open state**: `open` + `onOpenChange({ open, reason })`, `defaultOpen` when uncontrolled (`Dialog::open`,
   `Dialog::on_open_change`, `Popover::default_open`). The reason is the variant that closed it (`DialogChangeReason`).
   Never `visible` / `onRequestClose`. *open/close* is an overlay's state, *show/hide* a transient request, *expand /
   collapse* structure (*guides*).
-- **Value state**: `value` + `onChange(next)`, `defaultValue` when uncontrolled (`Slider::default_value`,
+- **Value state**: `value` + `onChange({ value })` (the field named as the prop: `onChange({ checked })`), `defaultValue` when uncontrolled (`Slider::default_value`,
   `Switch::on_change`); a second value of one component is `on<Value>Change` (`onSelectionChange`).
 - **Dismissal flags**: `closeOn<Trigger>`, positive, default `true` (`Dialog::close_on_escape`,
   `Dialog::close_on_backdrop_press`). Escape is also Android's back button. A flag is read natively when the user
@@ -89,7 +89,7 @@ go elsewhere under these rules rather than into them.
 - **Geometry**: shapes are GPUI's, the types Rust already has (`nsh_core::geometry`, `geometry.md`), exported by
   `nsh` with the same fields: `Point { x, y }`, `Size { width, height }`, `Bounds { origin: Point, size: Size }`,
   `Edges { top, right, bottom, left }` (decided by the user, 2026-10-21). A position and an extent together are a
-  `Bounds` (`onLayout(bounds)`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
+  `Bounds` (`onLayout({ bounds })`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
   (`safeArea()`, `hitSlop`, `contentInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
   together, `<prefix>Width` / `<prefix>X` fields or another name for one shape (`Insets`).
 - **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
@@ -117,8 +117,8 @@ go elsewhere under these rules rather than into them.
   value-first `on<Value>Change(next, details?)`). Never several positional arguments, a bare value, or a data type
   of the API passed as the payload itself (`onImagePress({ image })`, not `onImagePress(image)`: an event's later
   field must not land on `TextViewImage`). An event with nothing to report passes nothing; it can gain an object
-  later. Only the responder callbacks keep React Native's `(e, gestureState)`. Existing events are being brought to
-  this rule (item 3 of the API review).
+  later. Only the responder callbacks keep React Native's `(e, gestureState)`. The elements' events, the
+  components' and `keymap.bind`'s handlers follow it (2026-10-27, item 3 of the API review).
 - **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
   registered while a component renders goes away with the component (`keymap.bind`); never React Native's
   `{ remove() }`. An app reads a setting of the system through its accessor (`reduceMotion()`), which is also how it
@@ -211,6 +211,8 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
 | `ViewabilityConfig` `itemVisiblePercentThreshold`, `viewAreaCoveragePercentThreshold` (0 to 100) | `itemVisibleThreshold`, `viewAreaCoverageThreshold` (0 to 1) | Units | IntersectionObserver's `threshold` |
 | **Every element** | | | |
+| Rust components' events with values: `onChange(checked)`, `onOpenChange(open, reason)`, `onPanelActiveChange(panel, active)`, `onHoverChange(index)`, … | one object: `onChange({ checked })`, `onOpenChange({ open, reason })`, `onPanelActiveChange({ panel, active })`, `onHoverChange({ index })` | Payloads | `#[derive(Event)]` names the fields after `#[args(..)]`; `#[args(event)]` passes an event object as it is; Dialog's `onOpenChange` too (2026-10-27) |
+| Input `onChange(text)` | `onChange({ value })` | Payloads | The field is the prop's name (2026-10-27) |
 | Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's name, as `scrollbar`; replaces the 2026-10-20 row keeping it |
 | `HoverEvent` (`onHoverMove`) `locationX` / `locationY`, `pageX` / `pageY`, `altKey` / `ctrlKey` / `metaKey` / `shiftKey` | `{ position: Point; pagePosition: Point; modifiers: Modifiers }` | Points | GPUI `MouseMoveEvent`; new types `Point`, `Modifiers` in `nsh`. Now `MouseEvent`, below |
 | `onHoverIn: () => void` | `onMouseEnter: (e: MouseEvent) => void` | Begin and end | Decided by the user (2026-10-27): the DOM's `mouseenter` and GPUI's names, as `onFileDragEnter`; replaces the 2026-10-21 decision keeping React Native's name. Rust `on_mouse_enter` |
@@ -218,18 +220,25 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `onHoverMove(e: HoverEvent)` (no button down) and `onMouseMove(e: Point)` (button down too) | one `onMouseMove(e: MouseEvent)` | Payloads | The DOM's `mousemove`, GPUI's `on_mouse_move`: every move over the view, with or without a button down (`e.pressedButton`), and a modifier key changing while the mouse rests there; one object, as every event. Rust `on_mouse_move` |
 | `HoverEvent` (type) | `MouseEvent` `{ position; pagePosition; modifiers; pressedButton: MouseButton \| null }`, `MouseButton` `"left" \| "right" \| "middle" \| "back" \| "forward"` | Points | GPUI's `MouseMoveEvent` and `MouseButton`; the payload of all three mouse events. `hoverStyle` and `hover:` keep CSS's name |
 | `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
-| `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout(bounds: Bounds)` | Geometry | `LayoutEvent` dropped; next `onLayout({ bounds })` (Payloads, 2026-10-27) |
+| `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout({ bounds }: { bounds: Bounds })` | Geometry | `LayoutEvent` dropped; `onLayout(bounds)` first, one object since 2026-10-27 (Payloads, below) |
 | `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
-| `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events' `{ x, y }` is the offset's `Point` already |
+| `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events pass `{ offset: Point }` (Payloads, 2026-10-27, below) |
 | `OverlayPosition` `{ placement, x, y, width, height, availableWidth, availableHeight }` | `{ placement; bounds: Bounds; available: Size }` | Geometry | |
 | `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |
 | `Insets` (type) | `Edges` | Geometry | `safeArea()`, `safeAreaInsets()`; `hitSlop` / `contentInset` take `number \| Partial<Edges>` / `Partial<Edges>` |
 | `contentOffset`, `Overlay` `anchor`, `Menu.popup`'s `at` | typed `Partial<Point>` / `Point` | Geometry | Same fields |
 | `nsh/desktop` `WindowFrame` `{ x, y, width, height, animated, anchorTop }` | `{ origin?: Partial<Point>; size?: Partial<Size>; animated; anchorTop }` | Geometry | |
-| `windowSize()`, `ImageSize`, Image `onLoad`, `onContentSizeChange` | typed `Size` | Geometry | Same fields; pixel sizes are `PixelSize` (next row) |
+| `windowSize()`, `ImageSize`, Image `onLoad`, `onContentSizeChange` | typed `Size` (the events' as `{ size }`) | Geometry | Same fields; pixel sizes are `PixelSize` (next row); Image `onLoad({ size })` and `onContentSizeChange({ size })` since 2026-10-27 (below) |
 | `ImageSize`, Image and Video `onLoad`'s, `ClipboardImage`'s and `PickedImage`'s `Size` (pixels) | `PixelSize` | Units | Same fields; `Size` is points |
 | `PanResponder` `vx` / `vy` (points per millisecond), `keyboardFrame().duration` (seconds) | points per second, milliseconds | Units | |
 | `ImageAsset` / `ClipboardImage` `{ url, width, height }`, Video `onLoad` `{ duration, width, height }` | `{ url; size: Size }`, `{ duration; size: Size }` | Geometry | |
+| `onLayout(bounds: Bounds)` | `onLayout({ bounds }: { bounds: Bounds })` | Payloads | Decided by the user (2026-10-27): one object, as every event; Canvas's too. Rust `on_layout(\|b: &Bounds<Points>\| ..)` unchanged |
+| `onScrollDragStart`, `onScrollDragEnd`, `onMomentumStart`, `onMomentumEnd`, `onScrollEnd` `(e: Point)` | `(e: { offset: Point })` | Payloads | 2026-10-27: the field named as `ScrollEvent`'s `offset`; `onScroll` unchanged |
+| Image `onLoad(size: PixelSize)` | `onLoad({ size }: { size: PixelSize })` | Payloads | 2026-10-27, as Video's `onLoad({ duration, size })` |
+| Input `onContentSizeChange(size: Size)` | `onContentSizeChange({ size }: { size: Size })` | Payloads | 2026-10-27 |
+| `PanEvent` `translationX` / `translationY`, `velocityX` / `velocityY`, `valueX` / `valueY` | `translation: Point`, `velocity: Point`, `value?: Partial<Point>` | Points | 2026-10-27: `e.velocity.x`, `e.value?.y`; `cancelled` stays |
+| `onPress`, `onLongPress`, `onPressDown`, `onPressUp` `(e?: PressEvent)` | `(e: PressEvent)` | Payloads | 2026-10-27: always passed; where the backend does not know the pointer, at the view's origin with no keys and one click |
+| `keymap.bind` handlers `(keystroke: string)` | `({ keystroke }: { keystroke: string })` | Payloads | 2026-10-27: one object, as every event |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
@@ -287,7 +296,7 @@ and `Input`'s React Native names follow the rules as well.
 | `Alert`, `ActionSheet` | `AlertDialog` | `alert_dialog.rs` `AlertDialog` | Below |
 | **Modal** | | | |
 | `visible` | `open` (default `true`) | `dialog.rs` `Dialog::open` (default `true` in `Dialog::new`) | |
-| `onRequestClose` | `onCancel()` (the attempt) + `onOpenChange(false, reason)` (it closed) | `Dialog::on_cancel`, `Dialog::on_open_change`, `DialogChangeReason` | `reason`: `"backdropPress" \| "cancel" \| "swipe"`; `"swipe"` (an iOS / phone browser sheet pulled down) has no precedent |
+| `onRequestClose` | `onCancel()` (the attempt) + `onOpenChange({ open: false, reason })` (it closed) | `Dialog::on_cancel`, `Dialog::on_open_change`, `DialogChangeReason` | `reason`: `"backdropPress" \| "cancel" \| "swipe"`; `"swipe"` (an iOS / phone browser sheet pulled down) has no precedent |
 | `dismissible` | `closeOnEscape`, `closeOnBackdropPress`, `closeOnSwipe` (default `true` each) | `Dialog::close_on_escape`, `Dialog::close_on_backdrop_press` | `closeOnSwipe` by analogy. Default flips: today nothing closes natively |
 | `onShow` | `onOpen` | `DialogTrigger::on_open` | After the entrance transition |
 | `onDismiss` | `onClose` | `Dialog::on_close`, `Sheet::on_close` | Also when the app removed it |
@@ -339,7 +348,7 @@ and `Input`'s React Native names follow the rules as well.
 | `selectionColor` (Input, Text) | style key `selectionColor` (the highlight), class `selection:text-*` | CSS `::selection` | |
 | `cursorColor` (Input) | style key `caretColor`, class `caret-*` | CSS `caret-color` | |
 | `editable` | `readonly` (`editable={false}` = `readonly`) | *guides* "readonly"; `gpui-component` `Input::readonly` | `disabled` (no focus, `disabled:` classes) stays separate |
-| `onChangeText(text)` | `onChange(text)` | `InputEvent::Change`; `on_change` observes (*guides*) | |
+| `onChangeText(text)` | `onChange({ value })` (was `onChange(text)` until 2026-10-27) | `InputEvent::Change`; `on_change` observes (*guides*) | |
 | `onSubmitEditing` | `onSubmit` | `InputEvent::PressEnter` (not followed) | The return key, whatever `returnKeyType` shows: on a phone it says Done / Search / Go, not Enter; HTML's `submit` |
 | `secureTextEntry` | `masked` | `gpui-component` `Input::masked` | |
 | `multiline` | unchanged | `Input::multi_line` (not followed) | One word, as `readonly` |
@@ -365,18 +374,18 @@ and `Input`'s React Native names follow the rules as well.
 | `Switch::tab_index`, `tab_stop`, `track_focus` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
 | **Checkbox** (`nsh/base`) | | | |
 | `Checkbox::state(CheckboxState)` (`Unchecked`, `Checked`, `Indeterminate`) | `checked`, `indeterminate` (booleans) | `checkbox.rs` `Checkbox::checked`, `Checkbox::indeterminate` | The two builders `gpui-base` also has, as props; props have no order, so `indeterminate` wins while it holds (as `checked(true).indeterminate(true)` does). No `CheckboxState` type |
-| `Checkbox::on_change(CheckboxState, &ClickEvent, ..)` | `onChange(checked: boolean)` | `CheckboxState::activated` | The next state is never indeterminate (`true` from unchecked and indeterminate, `false` from checked), so it is a boolean, as `Switch`'s |
+| `Checkbox::on_change(CheckboxState, &ClickEvent, ..)` | `onChange({ checked: boolean })` | `CheckboxState::activated` | The next state is never indeterminate (`true` from unchecked and indeterminate, `false` from checked), so it is a boolean, as `Switch`'s |
 | `CheckboxIndicator` (a component the app nests in `Checkbox`, given `state` and `disabled`, with children) | `indicatorClass` / `indicatorStyle` of `Checkbox`, its children the `indicator` slot | `checkbox.rs` `CheckboxIndicator`; `Switch`'s `trackClass`; `NavPage`'s `header` slot with `headerClass` / `headerStyle` | A part, as `Switch`'s track: `Checkbox` renders the indicator, then its children, and shows its `checked`, `indeterminate` and `disabled` to it (`Interactive::project_checked` / `project_indeterminate` / `project_disabled`); the indicator's children (the mark) are a slot named after the part |
 | `CheckboxIndicatorStyles` `checked`, `indeterminate`, `disabled` | `checked:` / `indeterminate:` / `disabled:` in `indicatorClass`; Rust `.checked(..)` / `.indeterminate(..)` / `.disabled_style(..)` in `indicator_style` | `CheckboxStyles::checked` → `checkedStyle` | As `Switch`'s parts |
 | `Checkbox::role(RoleOverride)` | `role` (default `"checkbox"`) | `Button::role` | `RoleOverride::Presentational` is `role="none"` |
 | `Checkbox::tab_index`, `tab_stop`, `track_focus` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
 | **Radio** (`nsh/base`) | | | |
-| `Radio::on_change(bool, &ClickEvent, ..)` | `onChange(checked: boolean)` | `radio.rs` `Radio::on_change` | Only an unchecked, enabled radio reports, and always `true`: a radio cannot uncheck itself |
+| `Radio::on_change(bool, &ClickEvent, ..)` | `onChange({ checked: boolean })` | `radio.rs` `Radio::on_change` | Only an unchecked, enabled radio reports, and always `true`: a radio cannot uncheck itself |
 | `Radio::set_position(position, size)` | (left out) | | NSH's accessibility state has no position in a set yet; added when every platform can carry it |
 | `Radio::id`, `tab_index`, `tab_stop`, `track_focus` | (left out) | | Identity is the element's; the keyboard focus follows the view tree, as `Button`'s does |
 | `RadioGroup::axis(Axis)` | (left out) | `radio_group.rs` (`aria_orientation`); `gpui-shell`'s `axis` ("semantic only") | It sets only the orientation screen readers hear, which NSH's accessibility layer does not carry yet; the layout is the app's `class` (`flex-row`) |
 | `accessibility_label` on a `RadioGroup` (`gpui-shell`, any element) | (left out) | | A labelled container is one element on iOS, which would hide the radios inside it; added with a container that keeps its children elements |
-| No keys in `RadioGroup` (`radio_group.rs`; its page says "arrow keys among enabled choices"), every radio its own Tab stop | `RadioGroup` is one Tab stop (the checked radio, else the first enabled); Down / Right and Up / Left move to the next / previous enabled radio, around the ends, and check it (`onChange(true)`); Space checks the focused one | WAI-ARIA APG radio group; `roving.rs` | `gpui-base` has none in code; `nsh-base` owns the behavior since NSH has no styled layer. No props: the radios reach their group through context, a radio outside one stays a stop of its own. Both pairs of arrows move, whatever the layout, as the pattern has it, so `axis` stays left out |
+| No keys in `RadioGroup` (`radio_group.rs`; its page says "arrow keys among enabled choices"), every radio its own Tab stop | `RadioGroup` is one Tab stop (the checked radio, else the first enabled); Down / Right and Up / Left move to the next / previous enabled radio, around the ends, and check it (`onChange({ checked: true })`); Space checks the focused one | WAI-ARIA APG radio group; `roving.rs` | `gpui-base` has none in code; `nsh-base` owns the behavior since NSH has no styled layer. No props: the radios reach their group through context, a radio outside one stays a stop of its own. Both pairs of arrows move, whatever the layout, as the pattern has it, so `axis` stays left out |
 | **Tabs** (`nsh/base`) | | | |
 | `Tab::on_click(&ClickEvent, ..)` | `onPress()` | `tabs.rs` `Tab::on_click`; `Button`'s `onPress` | Press, not click (above), as `Button`'s; every press reports, the selected tab's included, as `Tab::on_click` does |
 | `Tab::set_position(position, size)` | (left out) | | As `Radio::set_position`: NSH's accessibility state has no position in a set yet |
@@ -391,10 +400,10 @@ and `Input`'s React Native names follow the rules as well.
 | The indicator's width (the app's, from its own copy of the value) | `value` percent of the track's width while determinate; an app's `w-*` / `width` on the indicator wins | `gpui-component`'s `Progress` (`progress/progress.rs`: the indicator `.w(relative(value / 100))`) | The progress bar renders the indicator, so it sizes it by the value it already has; while `indeterminate` the width is the app's |
 | `Progress::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
 | **Slider** (`nsh/base`) | | | |
-| `SliderState` (an entity the app holds: `default_value`, `set_value`, `value`) passed to `Slider::new(&state)` | `value` (controlled) + `onChange(next)`, `defaultValue` (uncontrolled) | `slider.rs:170`, `:266`, `:273`; Value state | The app owns the value, as every control's; `defaultValue` as `SliderState::default_value` |
+| `SliderState` (an entity the app holds: `default_value`, `set_value`, `value`) passed to `Slider::new(&state)` | `value` (controlled) + `onChange({ value })`, `defaultValue` (uncontrolled) | `slider.rs:170`, `:266`, `:273`; Value state | The app owns the value, as every control's; `defaultValue` as `SliderState::default_value` |
 | `SliderValue::Single(f32)` / `Range(f32, f32)` | `number \| [number, number]` (`SliderValue`; Rust `f64`) | `slider.rs:29-32` | JS's numbers are `f64`: an `f32` `0.1` reaches JS as `0.10000000149011612` |
-| `SliderEvent::Change` on every pointer update (the same value again included) | `onChange(value)` when the value changes | `slider.rs:16-17`, `:391` | A move within one step reports nothing |
-| `SliderEvent::Release` | `onChangeEnd(value)` | `slider.rs:18-19`, `:411-417`; Begin and end | The change's phase, `<act>End`: it also ends a key's or a screen reader's change, where nothing is released; once per pointer gesture that set a value, as `handle_release` |
+| `SliderEvent::Change` on every pointer update (the same value again included) | `onChange({ value })` when the value changes | `slider.rs:16-17`, `:391` | A move within one step reports nothing |
+| `SliderEvent::Release` | `onChangeEnd({ value })` | `slider.rs:18-19`, `:411-417`; Begin and end | The change's phase, `<act>End`: it also ends a key's or a screen reader's change, where nothing is released; once per pointer gesture that set a value, as `handle_release` |
 | `Slider::axis(Axis)`, `horizontal()`, `vertical()` | `axis: "horizontal" \| "vertical"` (default `"horizontal"`), read when made | `slider.rs:463-476` | As `ResizablePanelGroup`'s `axis`; a vertical slider has `min` at the bottom (`slider.rs:370`) |
 | `SliderTrack`, `SliderIndicator`, `SliderThumb` (components the app nests, given the state) | `trackClass` / `trackStyle`, `indicatorClass` / `indicatorStyle`, `thumbClass` / `thumbStyle` of `Slider` | `slider.rs:564`, `:742`, `:799`; `Switch`'s `trackClass` | Parts, as `Switch`'s: the track takes the presses, the indicator is the rail the values map onto (its bounds, `slider.rs:783-793`), the thumbs sit on it centered on their values |
 | The filled stretch (`gpui-component`'s plain `div` in the indicator) | `rangeClass` / `rangeStyle` | `gpui-component` `slider.rs:304-315` | No `gpui-base` part: parts take no children in NSH, so the slider places it (from `min` to the thumb, between a range's thumbs); named after what it shows, Radix's `Range` |
@@ -409,7 +418,7 @@ and `Input`'s React Native names follow the rules as well.
 | `gpui-component`'s thumb ring (a spring on hover and press) | `hover:`, `active:` (while dragged), `focus:` on `thumbClass`; `group-*` from the track | `gpui-component` `slider.rs:14-82` | The look and its motion are the app's (`transition-*`, `motion-reduce:`); `gpui-base` has none |
 | `gpui-component` `Slider::reverse()` | (left out) | `gpui-component` `slider.rs:141` | A look of the styled layer: the app's `rangeClass` |
 | **NumberInput** (`nsh/base`) | | | |
-| `InputState` (an entity the app holds: its text, `.step(..)`, `.min(..)`, `.max(..)`) passed to `NumberInput::new(&state)` | `value: number \| null` (controlled) + `onChange(value)`, `defaultValue` (uncontrolled); `step`, `min`, `max` props | `number_input.rs:159`; `input/base/state.rs:12036`, `:12046`, `:12056`; Value state | The app owns the value, as every control's. The text is the field's: the user's text stays while it reads as the value the input holds (`1.`, `2.50`, `-`), and the field shows a value the app sets that it did not report; an edit the app does not take goes when the field is left. `null` is an empty field, so a controlled input is one the app gave a number (from then on its `null` empties the field) |
+| `InputState` (an entity the app holds: its text, `.step(..)`, `.min(..)`, `.max(..)`) passed to `NumberInput::new(&state)` | `value: number \| null` (controlled) + `onChange({ value })`, `defaultValue` (uncontrolled); `step`, `min`, `max` props | `number_input.rs:159`; `input/base/state.rs:12036`, `:12046`, `:12056`; Value state | The app owns the value, as every control's. The text is the field's: the user's text stays while it reads as the value the input holds (`1.`, `2.50`, `-`), and the field shows a value the app sets that it did not report; an edit the app does not take goes when the field is left. `null` is an empty field, so a controlled input is one the app gave a number (from then on its `null` empties the field) |
 | `InputEvent::Change` (the text) | `onChange(value: number \| null)` when the number the field reads as changes | `input/base/state.rs:132-137` | The app wants the number: `null` while the text reads as none (empty, `-`, `.`); `1.` after `1` reports nothing. While typing it may be outside `min` / `max` (1 on the way to 15 with `min` 10), as `gpui-base` allows (`state.rs:3923-3926`) |
 | `InputEvent::Focus`, `Blur`, `PressEnter` (of the app's `InputState`) | `onFocus()`, `onBlur()`, `onSubmit(value)` | `input/base/state.rs:132-137`; `Input`'s `onFocus` / `onBlur` / `onSubmit` | The field is the component's own `Input`, which the app does not hold, so its events are the component's; `onSubmit` carries the value held to the range, `Input`'s name for Enter |
 | `clamp_number_value` on blur (only with `min` / `max`; unparsable text kept) | the same on blur and on Enter, reported by `onChange` | `input/base/state.rs:3927-3954` | Enter commits a field as leaving it does (a phone's return key leaves it anyway) |
@@ -448,7 +457,7 @@ and `Input`'s React Native names follow the rules as well.
 | `Area::y0(f32)` (one value for every row) | `y0` also takes a key of the rows or the app's function `(d, index) => number` (`AreaY0`: `number \| RowAccessor`): a bottom value per row, the area a band | `shape/area.rs:56`; d3's `area().y0(accessor)` | A range (a day's low to its high, a forecast's fan) is an area between two series; d3's `y0` takes a constant or an accessor, as here. The bottom edge is traced back with the area's `curve` (d3's area traces its `y0` line in reverse with the same curve); a row without either value is skipped, as d3's `defined`; the hover dot stays on the top edge |
 | `Curve::StepAfter` (the last step ends short of the last point) | the step reaches every point | `plot/mod.rs:230`, `shape/area.rs` `path` | `d3.curveStepAfter`, the curve's reference |
 | `Plot::id` (opts in to hover) + `Plot::interactive` (default true) | `interactive` (default true) | `plot/mod.rs:140`, `:149` | Every element has its identity; `interactive={false}` is a sparkline's: no hover tracking or parts |
-| `tooltip_state(cursor)` → `TooltipState { index, cross_line, dots }` | `onHoverChange(index)`; the parts `crossLineClass` / `crossLineStyle`, `dotClass` / `dotStyle` (one per mark) | `plot/mod.rs:179`, `hover.rs:19` | The styled layer's tooltip overlay in gpui-base draws them; NSH has no styled layer, so they are parts the app styles, positioned natively |
+| `tooltip_state(cursor)` → `TooltipState { index, cross_line, dots }` | `onHoverChange({ index })`; the parts `crossLineClass` / `crossLineStyle`, `dotClass` / `dotStyle` (one per mark) | `plot/mod.rs:179`, `hover.rs:19` | The styled layer's tooltip overlay in gpui-base draws them; NSH has no styled layer, so they are parts the app styles, positioned natively |
 | `TooltipState::dots`, one per series, each painted in its series' color (`gpui-component`'s `Dot::fill(color(i))`, as `Line::dot_fill` / `dot_stroke` paint a line's own dots) | a mark's `hoverDot` part: `hoverDotClass` / `hoverDotStyle` on `Line` and `Area`, each replacing the plot's `dotClass` / `dotStyle` (the default of the marks that set none) for that mark's dot; `hidden` shows none | `hover.rs:25`; `shape/line.rs:103-114`; `gpui-component` `chart/area_chart.rs:575-581`, `plot/tooltip.rs:191` `Dot` | Each series' dot differs (its color), so the mark styles it, where its stroke is set. Not `Line`'s `dotClass`: those are the dots on every point (`dot`), sized for a line at rest, and an `Area` has none; the hover's dot is a part of its own (`hoverDot`), the plot's `dot` part its default. The class and the style replace the plot's separately (a mark's color over the plot's size and ring); a class list is not merged, as Tailwind gives two `bg-*` of one list no order |
 | `Plot::tooltip` | `tooltipContent` (a slot) | `plot/mod.rs:215` | Every view has a `tooltip` prop (the platform's tooltip text), so the slot takes the next name |
 | `Plot::tooltip(state, cursor, bounds)` placing the box (`gpui-component`'s `Tooltip::new(cursor, within)`: beside the cursor, flipped toward the middle near each edge; `Tooltip::gap`) | `tooltipPlacement: "top" \| "pointer"` (`TooltipPlacement`, default `"top"`: at the top, centered on the cross line) and `tooltipOffset` (points, default 0); `"top"` kept between the plot's left and right edges (its offset from the top the app's, a tag under the plot too), `"pointer"` inside the plot | `plot/mod.rs:205-224`; `gpui-component` `plot/tooltip.rs:290-294`, `:585-605`; `positioner.rs:145` `Positioner::offset` | `placement` and `offset` are the positioner's words (`Popover`, `Tooltip`); the values are where the tooltip goes, not a side (`Placement`'s `"top"` is the plot's top edge here, `"pointer"` the cursor's place). Placed natively: the layout puts it on its side of a point, the animator moves the point with the cross line's glide and clamps it from the plot's and the tooltip's sizes, so no JS runs as the pointer moves |
@@ -513,5 +522,5 @@ and `Input`'s React Native names follow the rules as well.
 | `onCancel` | | `Dialog::on_cancel`, `actions::Cancel` (Escape in `Popover`) | Escape and the Android back button, as for dialogs |
 | `Popover`, `Tooltip`, `Sheet` (`nsh/base`) | | `popover.rs`, `tooltip.rs`, `sheet.rs` | Parts as `Dialog`'s: `popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`; `trigger` and `content` slots |
 | `Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu` (`nsh/base`) | | `gpui-component` `PopupMenu`, `ContextMenu` (`gpui-base` has no menu) | `MenuItem::on_select` as `PopupMenu`'s items; `Submenu`'s `back` slot is the row a sheet shows above its items |
-| `onOpenChange(open, reason)` of the popups | | `Popover::on_open_change`, `DialogChangeReason` | `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`, `"select"`, `"hover"`, `"longPress"`, `"contextMenu"`; every request of the user, controlled or not |
+| `onOpenChange({ open, reason })` of the popups | | `Popover::on_open_change`, `DialogChangeReason` | `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`, `"select"`, `"hover"`, `"longPress"`, `"contextMenu"`; every request of the user, controlled or not |
 | `onOpen`, `onClose`, `onCancel` of the popups | | `DialogTrigger::on_open`, `Dialog::on_close`, `Dialog::on_cancel` | One set with `Dialog`'s (`Popover`, `Menu`, `ContextMenu`, `Sheet`; `Tooltip` without `onCancel`): `onOpen` / `onClose` once it is all there / gone, whoever changed `open`; `onCancel` for each attempt of the user to close it (Escape or back, a press outside or on the backdrop), whether or not its `closeOn<Trigger>` let it close |

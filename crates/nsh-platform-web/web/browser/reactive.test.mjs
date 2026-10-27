@@ -296,7 +296,7 @@ test("canvas records paths and gradients through the shared Rust decoder", { ski
     const gradient=cx.createLinearGradient(0,0,10,10);gradient.addColorStop(0,"red");gradient.addColorStop(1,"blue");
     cx.fillStyle=gradient;cx.fill(path);hit=cx.isPointInPath(path,5,5);cx.save();cx.lineWidth=4;cx.restore();
   }});});
-  f.dom.event(f.values.nodeIds.get(node),"onLayout",{size:{width:20,height:20}});
+  f.dom.event(f.values.nodeIds.get(node),"onLayout",{bounds:{origin:{x:0,y:0},size:{width:20,height:20}}});
   assert.equal(f.invoke(602,[[999],null,0,0,undefined,false]),false);
   assert.equal(hit,true);assert.equal(context.lineWidth,1);assert.equal(context.canvas.width,20);
   assert.ok(context instanceof canvas.CanvasRenderingContext2D);
@@ -572,7 +572,7 @@ test("Rust component event callbacks retain their error boundary owner", { skip:
       return node;
     } });
   });
-  components.component(values.nodeIds.get(node), "change", 1, false);
+  components.component(values.nodeIds.get(node), "change", 1);
   const read = value => typeof value === "function" ? read(value()) : value;
   assert.equal(read(output), "component event");
   dispose(); close();

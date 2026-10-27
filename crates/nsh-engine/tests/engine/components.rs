@@ -1390,7 +1390,7 @@ import { TextField } from "test/ui";
 const name = signal("Ada");
 mount(() => (
   <View>
-    <TextField value={name()} onChange={(v: string) => name.set(v)} />
+    <TextField value={name()} onChange={({ value }: { value: string }) => name.set(value)} />
     <Text>{`name ${name()}`}</Text>
   </View>
 ));
@@ -1706,7 +1706,7 @@ function App() {
         testID="wifi"
         checked={on()}
         checkedStyle={{ backgroundColor: "#0000ff" }}
-        onChange={(next) => {
+        onChange={({ checked: next }) => {
           changes.set([...changes(), next]);
           on.set(next);
         }}
@@ -1718,7 +1718,7 @@ function App() {
         testID="locked"
         checked
         accessibilityLabel="Locked"
-        onChange={(next) => changes.set([...changes(), next])}
+        onChange={({ checked: next }) => changes.set([...changes(), next])}
         {...parts}
       />
       <Switch testID="off" checked disabled {...parts} />
@@ -1877,7 +1877,7 @@ function App() {
         indeterminate={some() && !all()}
         checkedStyle={{ backgroundColor: "#0000ff" }}
         indeterminateStyle={{ backgroundColor: "#ffff00" }}
-        onChange={(next) => {
+        onChange={({ checked: next }) => {
           changes.set([...changes(), next]);
           all.set(next);
         }}
@@ -1890,7 +1890,7 @@ function App() {
         testID="kept"
         checked
         accessibilityLabel="Kept"
-        onChange={(next) => changes.set([...changes(), next])}
+        onChange={({ checked: next }) => changes.set([...changes(), next])}
         {...parts}
       />
       <Checkbox testID="off" checked disabled role="menuitem" {...parts} />
@@ -2041,7 +2041,7 @@ function App() {
       accessibilityLabel={label}
       class="group flex-row disabled:opacity-50"
       checkedStyle={{ backgroundColor: "#0000ff" }}
-      onChange={(next) => {
+      onChange={({ checked: next }) => {
         changes.set([...changes(), `${value}:${next}`]);
         plan.set(value);
       }}
@@ -2387,7 +2387,7 @@ function App() {
       testID={value}
       checked={plan() === value}
       disabled={disabled}
-      onChange={(next) => {
+      onChange={({ checked: next }) => {
         say(`radio ${value}:${next}`);
         plan.set(value);
       }}
@@ -2909,7 +2909,7 @@ function App() {
   return (
     <View>
       <Menu
-        onOpenChange={(open, reason) => hear(`menu ${open} ${reason}`)}
+        onOpenChange={({ open, reason }) => hear(`menu ${open} ${reason}`)}
         onOpen={() => hear("menu open")}
         onClose={() => hear("menu close")}
         trigger={
@@ -2923,7 +2923,7 @@ function App() {
         </MenuItem>
       </Menu>
       <Popover
-        onOpenChange={(open, reason) => hear(`popover ${open} ${reason}`)}
+        onOpenChange={({ open, reason }) => hear(`popover ${open} ${reason}`)}
         onOpen={() => hear("popover open")}
         onClose={() => hear("popover close")}
         trigger={
@@ -3255,8 +3255,8 @@ function App() {
       <Slider
         testID="price"
         value={price()}
-        onChange={(next) => price.set(next as [number, number])}
-        onChangeEnd={(next) => ended.set(`end ${next}`)}
+        onChange={({ value: next }) => price.set(next as [number, number])}
+        onChangeEnd={({ value: next }) => ended.set(`end ${next}`)}
         accessibilityLabel="Maximum price"
         startAccessibilityLabel="Minimum price"
         class="w-[200px]"
@@ -3444,7 +3444,7 @@ function App() {
       <Select
         items={items}
         value={value()}
-        onChange={(next) => {
+        onChange={({ value: next }) => {
           changes.set([...changes(), next]);
           value.set(next);
         }}
@@ -3634,7 +3634,7 @@ function App() {
     <View>
       <NumberInput
         value={quantity()}
-        onChange={(next) => quantity.set(next)}
+        onChange={({ value }) => quantity.set(value)}
         min={0}
         max={10}
         step={0.5}
@@ -3777,7 +3777,7 @@ function App() {
         length={4}
         groups={2}
         value={code()}
-        onChange={(next) => code.set(next)}
+        onChange={({ value }) => code.set(value)}
         onComplete={({ value }) => completes.set([...completes(), value])}
         accessibilityLabel="Code"
         class="flex-row w-[200px] h-[40px]"
@@ -3961,7 +3961,7 @@ function App() {
         { title: "Stats", icon: "chart.bar" },
       ]}
       selectedIndex={selected()}
-      onChange={(index: number) => selected.set(index)}
+      onChange={({ index }: { index: number }) => selected.set(index)}
     />
   );
 }
@@ -4069,7 +4069,7 @@ const selected = signal<number | undefined>(0);
 const items = signal([{ title: "Records" }, { title: "Stats" }]);
 mount(() => <View>
   <TabBar items={items()} selectedIndex={selected()}
-    onChange={(index) => {
+    onChange={({ index }) => {
       selected.set(index);
       items.set([{ title: "Records" }, { title: "Statistics" }]);
     }} />
@@ -4151,7 +4151,7 @@ function App() {
         accessibilityLabel="Price"
         class="w-[200px] h-[100px] stroke-[#ff0000]"
         style={{ color: "#0000ff" }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
       >
         <Grid y={[0, 20, 40]} class="stroke-[#00ff00]" style={{ strokeDasharray: "2 2" }} />
         <Area class="fill-[#0000ff]/50" curve="linear" />
@@ -4636,7 +4636,7 @@ function App() {
         crossLineClass="w-px bg-[#999999]"
         dotClass="size-2 rounded-full bg-[#3366ff]"
         tooltipContent={<Text>tip</Text>}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 200, height: 100 }}
       >
         <Line dot dotClass="size-1" />
@@ -4785,7 +4785,7 @@ function App() {
         tooltipContent={<View testID="tip" style={{ width: 60, height: 20 }} />}
         tooltipPlacement={placement()}
         tooltipOffset={8}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 200, height: 100 }}
       >
         <Area curve="linear" backgroundClass="bg-linear-to-b from-[#ff0000] to-transparent" hoverDotClass="hidden" />
@@ -5003,7 +5003,7 @@ function App() {
         testID="plot"
         data={rows}
         accessibilityLabel="Shares"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 200, height: 100 }}
       >
         <Arc innerRadius="50%" class="fill-[#999999]" />
@@ -5259,7 +5259,7 @@ function App() {
         y="v"
         appearGeneration={1}
         motion={{ appear: { duration: 300 }, enter: { duration: 120 }, pointer: { stiffness: 300, damping: 30 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 100, height: 100 }}
       >
         <Pie hoverLift={4} />
@@ -5674,7 +5674,7 @@ function App() {
         xScale={{ type: "band", paddingInner: 0.25, paddingOuter: 0.125 }}
         yScale={{ type: "linear", domain: [-20, 60] }}
         crossLineClass="w-full bg-[#eeeeee]"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 300, height: 80 }}
       >
         <Bar value="a" class="fill-[#ff0000]" cornerRadii={{ topLeft: 2, topRight: 2 }} inactiveOpacity={0.4} label="a" />
@@ -5871,7 +5871,7 @@ function App() {
         xScale={{ type: "band" }}
         appearGeneration={1}
         motion={{ appear: { duration: 300, easing: "easeOut" }, enter: { duration: 120 }, pointer: { stiffness: 300, damping: 30 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         style={{ width: 300, height: 100 }}
       >
         <Bar stagger={0.5} inactiveOpacity={0.3} label="v" />

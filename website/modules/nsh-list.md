@@ -135,11 +135,11 @@ interface ViewabilityConfig {
 | Event | Payload | When |
 |---|---|---|
 | `onScroll` | `ScrollEvent`: `{ offset, contentSize, size, zoomScale }` | While scrolling. |
-| `onScrollDragStart` | `{ x, y }` | A drag starts. |
-| `onScrollDragEnd` | `{ x, y }` | The finger lifts. |
-| `onMomentumStart` | `{ x, y }` | A glide starts after the drag. |
-| `onMomentumEnd` | `{ x, y }` | The glide ends (also when a new drag catches it). |
-| `onScrollEnd` | `{ x, y }` | Scrolling came to rest. |
+| `onScrollDragStart` | `{ offset }` | A drag starts. |
+| `onScrollDragEnd` | `{ offset }` | The finger lifts. |
+| `onMomentumStart` | `{ offset }` | A glide starts after the drag. |
+| `onMomentumEnd` | `{ offset }` | The glide ends (also when a new drag catches it). |
+| `onScrollEnd` | `{ offset }` | Scrolling came to rest. |
 
 Lists also take the props every element takes ([common props](../elements/index.md)).
 

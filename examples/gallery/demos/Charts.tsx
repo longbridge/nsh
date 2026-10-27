@@ -189,7 +189,7 @@ function Live() {
               <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text, fontVariant: ["tabular-nums"] }}>{fixed(points()[tip()].price)}</Text>
             </View>
           }
-          onHoverChange={(index) => {
+          onHoverChange={({ index }) => {
             hover.set(index);
             if (index != null) tip.set(index);
           }}
@@ -341,7 +341,7 @@ function Depth() {
               <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text, fontVariant: ["tabular-nums"] }}>{count(shown().bid ?? shown().ask ?? 0)}</Text>
             </View>
           }
-          onHoverChange={(index) => {
+          onHoverChange={({ index }) => {
             hover.set(index);
             if (index != null) tip.set(index);
           }}
@@ -419,7 +419,7 @@ function Drawdown() {
   // Which plot the pointer is over: the other one marks the day itself.
   const over = signal<"equity" | "water" | null>(null);
   const shown = () => EQUITY[hover() ?? EQUITY.length - 1];
-  const follow = (which: "equity" | "water") => (index: number | null) => {
+  const follow = (which: "equity" | "water") => ({ index }: { index: number | null }) => {
     hover.set(index);
     over.set(index == null ? null : which);
   };
@@ -650,7 +650,7 @@ function Revenue() {
           accessibilityValue={{ text: shown() && `${shown()!.name}: ${money(shown()!.revenue)}, ${portion(shown()!.revenue)}` }}
           appearGeneration={1}
           motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 450, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 420, damping: 40 } }}
-          onHoverChange={(index) => hover.set(index)}
+          onHoverChange={({ index }) => hover.set(index)}
           focusStyle={{ ...focusRing(4), borderRadius: RING / 2 }}
           style={{ width: RING, height: RING }}
         >
@@ -769,7 +769,7 @@ function Sales() {
           // The band of the month under the pointer: a faint tint over it.
           crossLineClass="w-full h-full"
           crossLineStyle={{ backgroundColor: alpha(colors.text, 0.05) }}
-          onHoverChange={(index) => hover.set(index)}
+          onHoverChange={({ index }) => hover.set(index)}
           focusStyle={focusRing(4)}
           style={{ height: SALES_HEIGHT, marginRight: AXIS + 8, marginBottom: BELOW }}
         >

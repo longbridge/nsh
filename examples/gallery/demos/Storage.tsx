@@ -35,7 +35,7 @@ export function StorageDemo() {
     await refresh();
   })();
 
-  const write = (text: string) => {
+  const write = ({ value: text }: { value: string }) => {
     note.set(text);
     saved.set("saving");
     (text ? Storage.setItem(NOTE, text) : Storage.removeItem(NOTE)).then(

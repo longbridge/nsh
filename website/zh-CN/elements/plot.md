@@ -55,7 +55,7 @@ function App() {
         y="visitors"
         yScale={{ type: "linear", domain: [0, 3000] }}
         accessibilityLabel="每天的访客数，周四最多"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         crossLineClass="w-px h-full bg-border"
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
@@ -97,7 +97,7 @@ mount(App);
 
 | 事件 | Rust | 参数 | 触发时机 |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `index: number \| null` | 指针移到另一行上：沿 x 轴（只有 y 轴有条带时沿 y 轴）离指针最近的那一行的序号，或指针下[饼图](#pie-and-arc)扇区所在行的序号；指针离开 plot（在饼图上为离开它的扇区）后为 `null`。 |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | 指针移到另一行上：沿 x 轴（只有 y 轴有条带时沿 y 轴）离指针最近的那一行的序号，或指针下[饼图](#pie-and-arc)扇区所在行的序号；指针离开 plot（在饼图上为离开它的扇区）后为 `null`。 |
 
 `Scale` 是 `{ type: "point" } | { type: "linear"; domain?: [number, number] } | { type: "band"; paddingInner?; paddingOuter?; maxBandWidth?; bandCount?; groupPadding? }`。`domain` 取两个值构成的范围，顺序不限；只有一个值的定义域会把它放在中间。`band` 比例尺的选项见 [Bar](#bar)。
 
@@ -225,7 +225,7 @@ export function Seats(props: { plans: Plan[] }) {
         accessibilityValue={{ text: shown() && `${shown()!.name}，${shown()!.seats} 个席位，${share(shown()!.seats)}` }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 400, damping: 32 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="size-44"
       >
         {/* 扇区之间留 2 点的间隙（外缘 80 点处为一圈的 0.025）。 */}
@@ -397,7 +397,7 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
             <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
           </View>
         }
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mr-10 mb-6 h-48"
       >
         <Grid y={[middle(), props.high]} class="stroke-border" />
@@ -450,7 +450,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         appearGeneration={props.stacked ? 1 : 0}
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />

@@ -115,7 +115,7 @@ function App() {
           <Each of={menus()}>
             {(menu) => (
               <View
-                onLayout={(e) => (buttons[menu().label] = { x: e.origin.x, width: e.size.width })}
+                onLayout={(e) => (buttons[menu().label] = { x: e.bounds.origin.x, width: e.bounds.size.width })}
                 onPress={() => {
                   const label = menu().label;
                   opened.set(label);
