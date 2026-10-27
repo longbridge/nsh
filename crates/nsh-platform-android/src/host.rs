@@ -1798,7 +1798,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_states(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     if let Some(control) = host.control() {
-        control.set_states(id as u32, states as u8);
+        control.set_states(id as u32, states as u16);
     }
 }
 

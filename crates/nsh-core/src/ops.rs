@@ -2131,6 +2131,10 @@ pub enum Prop {
     /// `indeterminateStyle`: the style while `accessibilityState.checked`
     /// is mixed (a checkbox's `indeterminate`), and not disabled.
     IndeterminateStyle(Option<std::rc::Rc<StylePatch>>),
+    /// `expandedStyle`: the style while `accessibilityState.expanded` (a
+    /// `Popover`'s or `Menu`'s trigger while its popup is open), and not
+    /// disabled.
+    ExpandedStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`
@@ -2138,7 +2142,7 @@ pub enum Prop {
     /// presses away: the control announces and handles them. Set by
     /// components (`Interactive::project_checked`, `project_indeterminate`,
     /// `project_disabled`), never by JS.
-    ProjectedStates(u8),
+    ProjectedStates(u16),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
     HeaderStyle(Option<std::rc::Rc<StylePatch>>),

@@ -69,6 +69,9 @@ export interface StateStyleProps<S = ViewStyle> {
   /** While `accessibilityState.checked` is `"mixed"` (`indeterminate:`):
    * a checkbox that is neither checked nor unchecked. */
   indeterminateStyle?: StyleProp<S>;
+  /** While `accessibilityState.expanded` is `true` (`aria-expanded:`): a
+   * `Popover`'s or `Menu`'s trigger while its popup is open. */
+  expandedStyle?: StyleProp<S>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */

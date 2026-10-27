@@ -188,6 +188,11 @@ impl Linear {
         };
         Some(self.range[0] + ratio as f32 * (self.range[1] - self.range[0]))
     }
+
+    /// The extent of its domain, `[lo, hi]`.
+    pub(crate) fn domain(&self) -> [f64; 2] {
+        [self.start, self.start + self.diff]
+    }
 }
 
 /// Bands laid out across a range (`ScaleBand`, over row indices), as

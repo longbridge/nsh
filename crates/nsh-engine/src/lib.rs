@@ -894,7 +894,7 @@ enum Message {
     RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<Points>),
     Frame,
-    States(NodeId, u8),
+    States(NodeId, u16),
     FontsChanged,
     Remount,
     /// An event of a request (by the hop it is for: events of a hop the
@@ -1053,7 +1053,7 @@ impl EngineControl {
     /// track ([`nsh_core::MountItem::TrackStates`]; bits of
     /// [`nsh_core::tailwind::state`]). Class styles that depend on them
     /// (`active:`, `hover:`, `focus:`) update without JS.
-    pub fn set_states(&self, id: NodeId, states: u8) {
+    pub fn set_states(&self, id: NodeId, states: u16) {
         let _ = self.tx.send(Message::States(id, states));
     }
 

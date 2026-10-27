@@ -29,7 +29,7 @@ fn inline_color(patch: &StylePatch) -> Option<Color> {
 }
 
 /// The states the platform reports ([`Core::set_states`]).
-const REPORTED: u8 = state::PRESSED | state::HOVERED | state::FOCUSED;
+const REPORTED: u16 = state::PRESSED | state::HOVERED | state::FOCUSED;
 
 /// The `class` and `classList` props as set.
 #[derive(Debug, Default)]
@@ -56,6 +56,8 @@ pub(super) enum Part {
     Checked,
     /// `indeterminateStyle`.
     Indeterminate,
+    /// `expandedStyle`.
+    Expanded,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -64,7 +66,7 @@ pub(super) enum Part {
 
 impl Part {
     /// The state bits and rank of a state style.
-    fn state(self) -> Option<(u8, crate::tailwind::Key)> {
+    fn state(self) -> Option<(u16, crate::tailwind::Key)> {
         Some(match self {
             Part::Active => (state::PRESSED, rank::ACTIVE),
             Part::Hover => (state::HOVERED, rank::HOVER),
@@ -73,6 +75,7 @@ impl Part {
             Part::Selected => (state::SELECTED, rank::SELECTED),
             Part::Checked => (state::CHECKED, rank::CHECKED),
             Part::Indeterminate => (state::INDETERMINATE, rank::INDETERMINATE),
+            Part::Expanded => (state::EXPANDED, rank::EXPANDED),
             _ => return None,
         })
     }
@@ -83,8 +86,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<std::rc::Rc<ClassList>>,
-    /// The state styles, by [`Part`] (the first seven).
-    states: [Option<std::rc::Rc<StylePatch>>; 7],
+    /// The state styles, by [`Part`] (the first eight).
+    states: [Option<std::rc::Rc<StylePatch>>; 8],
     /// The state styles as rules (none without any).
     state_rules: Option<std::rc::Rc<ClassList>>,
     /// The inline styles of the other parts.
@@ -94,7 +97,7 @@ pub(super) struct NodeParts {
 }
 
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 7] = [
+const STATE_PARTS: [Part; 8] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
@@ -102,6 +105,7 @@ const STATE_PARTS: [Part; 7] = [
     Part::Selected,
     Part::Checked,
     Part::Indeterminate,
+    Part::Expanded,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -160,13 +164,13 @@ impl<M: TextEngine> Core<M> {
     /// The platform reports interaction states of view `id` (`active:`,
     /// `hover:`, `focus:`): state bits for the states it
     /// tracks ([`MountItem::TrackStates`]); see [`crate::tailwind::state`].
-    pub fn set_states(&mut self, id: NodeId, states: u8) {
+    pub fn set_states(&mut self, id: NodeId, states: u16) {
         let Ok(key) = self.key(id) else { return };
         self.set_node_states(key, states);
     }
 
     /// [`Self::set_states`] by key.
-    fn set_node_states(&mut self, key: Key, states: u8) {
+    fn set_node_states(&mut self, key: Key, states: u16) {
         let held = self.held_pressed() == Some(key);
         let node = &mut self.nodes[key as usize];
         let mut new = node.states & !REPORTED | states & REPORTED;
@@ -294,6 +298,21 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// `expanded` of `key`'s accessibility state: the `aria-expanded:`
+    /// variant (a `Popover`'s or `Menu`'s trigger while its popup is open).
+    pub(super) fn set_expanded(&mut self, key: Key, expanded: bool) {
+        let node = &mut self.nodes[key as usize];
+        let before = node.states;
+        if expanded {
+            node.states |= state::EXPANDED;
+        } else {
+            node.states &= !state::EXPANDED;
+        }
+        if node.states != before {
+            self.states_changed(key);
+        }
+    }
+
     /// `checked` of `key`'s accessibility state is mixed: the
     /// `indeterminate:` variant.
     pub(super) fn set_indeterminate(&mut self, key: Key, indeterminate: bool) {
@@ -311,7 +330,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The states `key` shows as a part of a control: its classes and
     /// state styles read them, its events and accessibility do not.
-    pub(super) fn set_projected_states(&mut self, key: Key, states: u8) {
+    pub(super) fn set_projected_states(&mut self, key: Key, states: u16) {
         let node = &mut self.nodes[key as usize];
         if node.projected != states {
             node.projected = states;
@@ -868,7 +887,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The states of the nearest ancestor of `key` that is group `name`.
-    fn group_states(&self, key: Key, name: &str) -> u8 {
+    fn group_states(&self, key: Key, name: &str) -> u16 {
         let mut k = self.nodes[key as usize].parent;
         while k != NO_KEY {
             let node = &self.nodes[k as usize];
