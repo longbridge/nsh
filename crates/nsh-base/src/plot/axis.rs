@@ -262,51 +262,63 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     axis.child(when(
         move || plot.is_sized() && has_line(),
         move || {
-            view()
-                .absolute()
-                .style_with(move |s| side().line(s))
-                .child(view().flex_none().app_class(line_class).inline_style(line_style))
+            view().absolute().style_with(move |s| side().line(s)).child(
+                view()
+                    .flex_none()
+                    .app_class(line_class)
+                    .inline_style(line_style),
+            )
         },
     ))
     .child(when(
         move || plot.is_sized() && has_ticks(),
         move || {
-            each(indices, |i| *i, move |i, _| {
-                let i = i.get_untracked();
-                view()
-                    .absolute()
-                    .w(px(0.0))
-                    .h(px(0.0))
-                    .items_center()
-                    .style_with(move |s| side().tick(s, at(i)))
-                    .child(view().flex_none().app_class(tick_class).inline_style(tick_style))
-            })
+            each(
+                indices,
+                |i| *i,
+                move |i, _| {
+                    let i = i.get_untracked();
+                    view()
+                        .absolute()
+                        .w(px(0.0))
+                        .h(px(0.0))
+                        .items_center()
+                        .style_with(move |s| side().tick(s, at(i)))
+                        .child(
+                            view()
+                                .flex_none()
+                                .app_class(tick_class)
+                                .inline_style(tick_style),
+                        )
+                },
+            )
         },
     ))
     .child(when(
         move || plot.is_sized(),
         move || {
-            each(indices, |i| *i, move |i, _| {
-                let i = i.get_untracked();
-                let content = move || {
-                    labels
-                        .with(|l| l.get(i).map(|l| l.text.clone()))
-                        .unwrap_or_default()
-                };
-                // The anchor spans the room around the tick, the window
-                // inside it aligns the label toward the tick's end of
-                // the plot, and the label's own automatic margins center
-                // it on the tick while it fits: CSS's automatic margins
-                // are none when the label is wider than its room, so it
-                // starts at the plot's end it is near rather than
-                // passing it.
-                view()
-                    .absolute()
-                    .style_with(move |s| side().anchor(s, at(i)))
-                    .child(
-                        view()
-                            .style_with(move |s| side().window(s, at(i)))
-                            .child(
+            each(
+                indices,
+                |i| *i,
+                move |i, _| {
+                    let i = i.get_untracked();
+                    let content = move || {
+                        labels
+                            .with(|l| l.get(i).map(|l| l.text.clone()))
+                            .unwrap_or_default()
+                    };
+                    // The anchor spans the room around the tick, the window
+                    // inside it aligns the label toward the tick's end of
+                    // the plot, and the label's own automatic margins center
+                    // it on the tick while it fits: CSS's automatic margins
+                    // are none when the label is wider than its room, so it
+                    // starts at the plot's end it is near rather than
+                    // passing it.
+                    view()
+                        .absolute()
+                        .style_with(move |s| side().anchor(s, at(i)))
+                        .child(
+                            view().style_with(move |s| side().window(s, at(i))).child(
                                 view()
                                     .flex_none()
                                     .style_with(move |s| side().label(s))
@@ -316,8 +328,9 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                                             .inline_style(move || label_style.get().0),
                                     ),
                             ),
-                    )
-            })
+                        )
+                },
+            )
         },
     ))
 }
@@ -415,8 +428,13 @@ impl Side {
     fn forward(&self) -> bool {
         matches!(
             (self.placement, self.labels),
-            (AxisPlacement::Bottom | AxisPlacement::Right, AxisLabelPlacement::Outside)
-                | (AxisPlacement::Top | AxisPlacement::Left, AxisLabelPlacement::Inside)
+            (
+                AxisPlacement::Bottom | AxisPlacement::Right,
+                AxisLabelPlacement::Outside
+            ) | (
+                AxisPlacement::Top | AxisPlacement::Left,
+                AxisLabelPlacement::Inside
+            )
         )
     }
 
@@ -670,14 +688,14 @@ fn tick_spec(start: f64, stop: f64, count: f64) -> (f64, f64, f64) {
 /// d3's `ticks(lo, hi, count)`: about `count` values of 1, 2 or 5 times a
 /// power of ten inside `lo..=hi`, from the lowest.
 fn linear_ticks(lo: f64, hi: f64, count: f64) -> Vec<f64> {
-    if !(count > 0.0) || !lo.is_finite() || !hi.is_finite() {
+    if count.is_nan() || count <= 0.0 || !lo.is_finite() || !hi.is_finite() {
         return Vec::new();
     }
     if lo == hi {
         return vec![lo];
     }
     let (i1, i2, inc) = tick_spec(lo, hi, count);
-    if !(i2 >= i1) {
+    if i2.is_nan() || i1.is_nan() || i2 < i1 {
         return Vec::new();
     }
     (0..=(i2 - i1) as usize)
@@ -695,7 +713,7 @@ fn linear_ticks(lo: f64, hi: f64, count: f64) -> Vec<f64> {
 /// `precisionFixed(tickStep(lo, hi, count))`): as many as the step needs.
 /// A domain of one value writes what the value needs, up to six.
 fn precision(lo: f64, hi: f64, count: f64) -> usize {
-    if lo == hi || !(count > 0.0) {
+    if lo == hi || count.is_nan() || count <= 0.0 {
         return (0..6)
             .find(|&p| {
                 let scale = 10f64.powi(p as i32);
@@ -758,8 +776,14 @@ mod tests {
         assert_eq!(linear_ticks(0.0, 1.0, 2.0), [0.0, 0.5, 1.0]);
         assert_eq!(linear_ticks(0.0, 1.0, 1.0), [0.0, 1.0]);
         assert_eq!(linear_ticks(0.0, 10.0, 2.0), [0.0, 5.0, 10.0]);
-        assert_eq!(linear_ticks(-10.0, 10.0, 4.0), [-10.0, -5.0, 0.0, 5.0, 10.0]);
-        assert_eq!(linear_ticks(0.0, 100.0, 5.0), [0.0, 20.0, 40.0, 60.0, 80.0, 100.0]);
+        assert_eq!(
+            linear_ticks(-10.0, 10.0, 4.0),
+            [-10.0, -5.0, 0.0, 5.0, 10.0]
+        );
+        assert_eq!(
+            linear_ticks(0.0, 100.0, 5.0),
+            [0.0, 20.0, 40.0, 60.0, 80.0, 100.0]
+        );
         // Inside a domain whose ends are not ticks.
         assert_eq!(linear_ticks(40.9, 41.7, 4.0), [41.0, 41.2, 41.4, 41.6]);
         assert_eq!(linear_ticks(0.0, 130.0, 4.0), [0.0, 50.0, 100.0]);
@@ -802,7 +826,9 @@ mod tests {
         );
         let linear = ScaleTicks::Linear([0.0, 100.0]);
         assert_eq!(
-            &*linear.ticks(None, Some(&[-1.0, 0.0, 50.0, 100.0, 101.0])).values,
+            &*linear
+                .ticks(None, Some(&[-1.0, 0.0, 50.0, 100.0, 101.0]))
+                .values,
             [0.0, 50.0, 100.0]
         );
     }

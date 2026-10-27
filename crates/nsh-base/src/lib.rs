@@ -264,7 +264,12 @@ mod tests {
             .iter()
             .map(|s| s.export.clone())
             .collect();
-        assert_eq!(plot, ["Arc", "Area", "Bar", "Grid", "Line", "Pie", "Plot"]);
+        assert_eq!(
+            plot,
+            [
+                "Arc", "Area", "Bar", "Grid", "Line", "Pie", "Plot", "PlotAxis"
+            ]
+        );
     }
 
     /// Every export TS sees has a doc comment (the declarations show it).
