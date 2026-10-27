@@ -2,7 +2,8 @@
 //!
 //! The engine owns a [`nsh_core::Core`] on a dedicated thread and runs one
 //! app ([`App`]): a Rust app's root component, or a JS bundle in a QuickJS
-//! VM (`nsh_js::Host`, feature `js`). Each wake-up (input event, timer,
+//! VM (`nsh_js::Host`, feature `js-core`; `js` adds the standard modules
+//! `zlib` and `crypto`). Each wake-up (input event, timer,
 //! resize) runs the app's code (component tasks; JS and its microtasks),
 //! applies what JS committed, lays out, and hands one [`MountBatch`] to the
 //! platform through a [`MountSink`]. The platform thread never blocks on
@@ -22,7 +23,7 @@ mod script;
 pub mod shader;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 mod symbolicate;
 
 // The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
@@ -59,10 +60,10 @@ pub use nsh_core::{
     storage::{StorageBackend, StorageChange},
     time::Clock,
 };
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub use nsh_js::BYTECODE_VERSION;
 /// Signed packages, release-key certificates, revocations and trust stores.
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
@@ -111,7 +112,7 @@ const HOVER_MOVE_INTERVAL: Duration = Duration::from_millis(8);
 pub enum App {
     /// A Rust app: its root component, mounted as the surface's content.
     Rust(Root),
-    /// A JS app (feature `js`).
+    /// A JS app (feature `js-core`).
     Js(Bundle),
 }
 
@@ -409,7 +410,7 @@ impl Bundle {
     }
 }
 
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 impl Bundle {
     /// The bundle of a verified package: its bytecode when it was compiled
     /// for this runtime (else its source), its source map and its declared
@@ -457,7 +458,7 @@ fn read_app_id(path: &std::path::Path) -> Option<String> {
 }
 
 /// A verified package, unpacked ([`load_package`], [`verify_package`]).
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 #[derive(Debug)]
 pub struct LoadedPackage {
     /// Its bundle.
@@ -474,7 +475,7 @@ pub struct LoadedPackage {
 /// `assets_root` (`<root>/<app id>/<package hash>/`, once per package) and
 /// records its build (older builds of the app are refused from now on):
 /// [`verify_package`], then [`accept_package`].
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub fn load_package(
     trust: &mut nsh_package::TrustStore,
     bytes: &[u8],
@@ -492,7 +493,7 @@ pub fn load_package(
 /// decided the package is healthy (its first frame drawn, no fatal error for
 /// a while) calls [`accept_package`]; if it fails before, the app can go
 /// back to the package it ran before, which still verifies.
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub fn verify_package(
     trust: &nsh_package::TrustStore,
     bytes: &[u8],
@@ -529,7 +530,7 @@ pub fn verify_package(
 /// stack) to the app source position `source_map` (the bundle's) gives,
 /// as the engine does with a bundle's own map: for stacks reported by
 /// packages published without their map (`nsh symbolicate`).
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub fn symbolicate(source_map: &str, text: &str) -> String {
     symbolicate::Symbolicator::new(Some(source_map.into())).rewrite(text)
 }
@@ -537,7 +538,7 @@ pub fn symbolicate(source_map: &str, text: &str) -> String {
 /// Records the build of `package` ([`verify_package`]) in `trust`: older
 /// builds of its app are refused from now on. Refused if the package or its
 /// release key was revoked since it was verified.
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 pub fn accept_package(
     trust: &mut nsh_package::TrustStore,
     package: &LoadedPackage,
@@ -760,7 +761,7 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
 }
 
 /// Native hosts choose these anchors before any application JavaScript runs.
-#[cfg(feature = "js")]
+#[cfg(feature = "js-core")]
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
@@ -1370,9 +1371,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
-        #[cfg(feature = "js")]
+        #[cfg(feature = "js-core")]
         let system_tx = tx.clone();
-        #[cfg(feature = "js")]
+        #[cfg(feature = "js-core")]
         let host_bridge = config.host.bridge(tx.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
@@ -1528,7 +1529,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
-                #[cfg(feature = "js")]
+                #[cfg(feature = "js-core")]
                 let system = {
                     script::SystemConfig {
                         access: (*access).clone(),
@@ -1545,7 +1546,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         host: Rc::new(host_bridge),
                     }
                 };
-                #[cfg(not(feature = "js"))]
+                #[cfg(not(feature = "js-core"))]
                 let system = script::SystemConfig;
                 let (script, eval_us) = Script::start(
                     bundle,

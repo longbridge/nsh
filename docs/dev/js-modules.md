@@ -115,7 +115,10 @@ keeps their imports) and the loader: `buffer`, `console`, `crypto`, `fs/promises
 `process`, `url`, `websocket` and `zlib`. Only these names import: `node:buffer` and the Node modules outside the
 catalog (`fs`, `events`, `assert`, `util`, `string_decoder`, `child_process`, ...) are refused (tests:
 `nsh-js` `tests/standard/imports.rs`, which also checks that each module's runtime exports are its declared ones).
-The loader asks the module table first (typed registries own their names), then `standard::load`.
+The loader asks the module table first (typed registries own their names), then `standard::load`. `zlib` and
+`crypto` (with the global `crypto`) are features of `nsh-js` of those names, on by default and with `nsh-engine`'s `js`
+(which every native platform enables); a runtime built without them (`nsh-engine`'s `js-core`, the web runtime's
+`std-zlib` / `std-crypto` off) refuses to load them, and their code is not in its binary.
 
 | Module | Where | Exports |
 |---|---|---|

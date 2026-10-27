@@ -32,7 +32,8 @@ nsh-package = { version = "0.3.0", path = "crates/nsh-package" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
 nsh-base = { version = "0.3.0", path = "crates/nsh-base", default-features = false }
 nsh-macros = { version = "0.3.0", path = "crates/nsh-macros" }
-nsh-js = { version = "0.3.0", path = "crates/nsh-js" }
+# Without `zlib` and `crypto`: what enables the VM picks them (`nsh-engine`'s `js`, the web runtime).
+nsh-js = { version = "0.3.0", path = "crates/nsh-js", default-features = false }
 nsh-engine = { version = "0.3.0", path = "crates/nsh-engine", default-features = false }
 nsh-bundler = { version = "0.3.0", path = "crates/nsh-bundler", default-features = false }
 nsh-platform-ios = { version = "0.3.0", path = "crates/nsh-platform-ios", default-features = false }
@@ -176,7 +177,8 @@ rquickjs = { package = "quickjs-jit", version = "=0.14.1", default-features = fa
 
 # The standard modules `buffer`, `crypto`, `path`, `url` and `zlib` (all targets): LLRT d9fd873e,
 # vendored by quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
-quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "crypto", "path", "zlib", "zlib-zstd"] }
+# `crypto` and `zlib` are `nsh-js`'s features of those names.
+quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "path"] }
 getrandom-stdlib = { package = "getrandom", version = "0.4", default-features = false }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }

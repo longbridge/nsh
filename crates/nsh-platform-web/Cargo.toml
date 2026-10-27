@@ -12,11 +12,15 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
+default = ["js", "std-zlib", "std-crypto"]
 # JS apps (`nsh_start`, bundles, hot updates, chunks) on QuickJS. Without
 # it the module runs a Rust app only (`nsh_start_rust`, `rust_app!`) and
 # links no QuickJS.
-js = ["nsh-engine/js", "dep:nsh-js", "dep:rquickjs"]
+js = ["nsh-engine/js-core", "dep:nsh-js", "dep:rquickjs"]
+# The standard modules `zlib` and `crypto` (with the global `crypto`) for
+# JS apps: 0.56 and 0.35 MB of the gzipped module.
+std-zlib = ["js", "nsh-js/zlib"]
+std-crypto = ["js", "nsh-js/crypto"]
 # The playground's build (`nsh-playground.wasm`): also compiles TSX in the
 # page (`nsh_compile`; nsh's JSX compiler, no rolldown), about 3 MB more.
 compiler = ["js", "dep:nsh-bundler"]
