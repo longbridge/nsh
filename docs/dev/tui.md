@@ -102,15 +102,34 @@ consumed by a frame, and the performance HUD stops scheduling after its idle upd
 immediate deadline. The maximum sleep remains 16 ms; headless hosts use the same loop and sleep contract.
 
 The host integration binary has private-PTY regressions for each stop signal, partial input, hangup with and
-without a controlling terminal, closed stdin, and shutdown with a full output queue. They require exit within
-one second after a signal or hangup and check restoration on a non-controlling PTY, which remains queryable
-after child exit. Kernel `PENDIN` bookkeeping is excluded from the termios comparison. Startup has its own
-ten-second deadline. Failed tests close their private PTY before killing and reaping the child, so full output
-cannot deadlock the test cleanup. Host stderr is retained in the failure diagnostic.
+without a controlling terminal, closed stdin, and shutdown with a full output queue. The default parallel
+runner starts each lifecycle scenario in a separate copy of that test binary, selecting only that scenario.
+Each worker has a new session, no controlling terminal, null input and a private log. Each host then gets its
+own new session and PTY; inherited signal masks and ignored termination/job-control signals are reset before
+exec. The test process never changes its own session, terminal or signal handlers.
+
+The worker opens PTYs and launches hosts sequentially within its scenario, so parallel scenarios share neither
+PTY descriptors nor fork-time descriptor setup. The retained probe opens the slave independently, with
+`O_NOCTTY | O_NONBLOCK`: host restoration cannot change the probe's blocking mode. Reads drain a bounded batch,
+fill writes have a one-second deadline, and cleanup closes the master, kills the owned child and polls for
+reaping with a one-second bound rather than blocking in `wait()`.
+
+Exit is still required within one second of a signal or hangup. Startup has a separate ten-second deadline.
+A 45-second worker watchdog covers the whole scenario, kills and reaps its registered hosts, then ends the
+worker if the scenario stops making progress. The parallel runner also enforces a 50-second worker limit.
+Deliberately blocked and panicking scenarios verify that cleanup leaves no live host. Fixtures and captured
+stderr belong to the scenario's private directory and are removed even when its worker times out.
+
+Restoration is inspected on a non-controlling PTY, which remains queryable after child exit; kernel `PENDIN`
+bookkeeping is excluded from the termios comparison. Workers validate session/process-group identity and retain
+host stderr in failure messages. Their successful output, including benchmark readings, is forwarded to the
+outer test so `--nocapture` retains its usual meaning.
+
+Use each worktree's own default `target` directory. The suite itself uses the default parallel runner:
 
 ```sh
-CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test -p nsh-tui-host --test host lifecycle -- --test-threads=1
-CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
+cargo test -p nsh-tui-host
+cargo test --release -p nsh-tui-host --test host bench_terminal_ -- --ignored --nocapture --test-threads=1
 ```
 
 See [idle CPU measurement](performance.md#terminal-idle-cpu) for the sample window and pending results.

@@ -414,10 +414,12 @@ commit timings and mount-item counts. An unchanged workload and profile are esse
 ## Terminal idle CPU
 
 ```sh
-CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
+cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
 ```
 
-This ignored benchmark starts the actual host binary on a private 100 × 24 PTY with a static Text app. It
+This ignored benchmark runs in an isolated scenario process and starts the actual host binary on a private
+100 × 24 PTY with a static Text app. The scenario watchdog and runner deadline cover setup and cleanup; their
+process costs are outside the sampled host PID. It
 runs once with the monitor hidden and once with `--fps`, lets startup and the idle HUD update settle for two
 seconds, then measures five seconds. CPU is the child's user + system CPU time divided by elapsed wall time
 (percent of one core), read through `proc_pid_rusage` on macOS or `/proc/<pid>/stat` on Linux. It reports terminal
