@@ -14,10 +14,11 @@
 // the plot's layout, its role, label and value, the tooltip's text, where
 // the layout puts the tooltip, the hover's dots, the bars' labels and the
 // cross line on a band, and what it reports. A `Pie` (`value`,
-// `startAngle`, `endAngle`, `innerRadius`, `outerRadius`) over an `Arc`
-// reports the slice under the pointer, none in its hole, outside its ring
-// or past its last angle; its hole closes with `motion.update`, the pointer
-// finding the new ring at once.
+// `startAngle`, `endAngle`, `innerRadius`, `outerRadius`, `cornerRadius`)
+// over an `Arc` reports the slice under the pointer, none in its hole,
+// outside its ring or past its last angle; its hole closes with
+// `motion.update`, the pointer finding the new ring at once. A gauge
+// `Arc` draws round corners (`cornerRadius`).
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
 
@@ -124,7 +125,8 @@ function App() {
 }
 
 /** Shares of 1, 1 and 2 over the lower half of a ring from 20 to 40 (the
- * largest circle of a 100 by 100 plot is 50), from 3 o'clock to 9. */
+ * largest circle of a 100 by 100 plot is 50), from 3 o'clock to 9; a
+ * gauge with round corners over the upper right, from 42 to 48. */
 function PieCase() {
   const slice = signal<number | null>(null);
   const hole = signal(true);
@@ -139,6 +141,7 @@ function PieCase() {
         style={{ width: 100, height: 100 }}
       >
         <Arc innerRadius={hole() ? "40%" : 0} outerRadius="80%" class="fill-[#eeeeee]" />
+        <Arc testID="gauge" endAngle={Math.PI / 2} innerRadius={42} outerRadius={48} cornerRadius={3} />
         <Pie
           value="share"
           startAngle={Math.PI / 2}
@@ -146,6 +149,7 @@ function PieCase() {
           innerRadius={hole() ? "40%" : 0}
           outerRadius="80%"
           padAngle={0.02}
+          cornerRadius={2}
           sliceClass={(_, i) => (i === 0 ? "fill-[#3366ff]" : "fill-[#99aaff]")}
           sliceStyle={{ stroke: "#ffffff", strokeWidth: 2 }}
           hoverLift={4}

@@ -243,142 +243,429 @@ impl Ring {
     }
 }
 
-/// The ring's appear: the angles sweep from `from`, each `from + (angle -
-/// from) * reveal`, `reveal` the appear's eased progress
-/// (`gpui-component`'s pie, `chart/pie_chart.rs:318-334`).
+/// A radial mark's shape at a moment: its radii, in points, and the angles
+/// it spans (pie angles, `lo` before `hi`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Shape {
+    inner: f32,
+    outer: f32,
+    lo: f32,
+    hi: f32,
+}
+
+impl Shape {
+    /// The sector of `ring` from `start` to `end`, either way round.
+    fn new(ring: Ring, start: f32, end: f32) -> Self {
+        Shape {
+            inner: ring.inner,
+            outer: ring.outer,
+            lo: start.min(end),
+            hi: start.max(end),
+        }
+    }
+
+    /// The shape `t` of the way from `self` to `to`.
+    fn lerp(&self, to: &Shape, t: f32) -> Shape {
+        let at = |a: f32, b: f32| a + (b - a) * t;
+        Shape {
+            inner: at(self.inner, to.inner),
+            outer: at(self.outer, to.outer),
+            lo: at(self.lo, to.lo),
+            hi: at(self.hi, to.hi),
+        }
+    }
+}
+
+/// A radial mark's move to the shape it draws: from `from`, as far as
+/// `progress` has gone (0 to 1, on the platform's animator). The appear
+/// sweeps the angles from the ring's start, each `start + (angle - start)
+/// * progress` (`gpui-component`'s pie, `chart/pie_chart.rs:318-334`);
+/// `motion.update` moves the radii from the app's last ones.
 #[derive(Clone, Copy)]
-struct Sweep {
-    reveal: AnimatedNode,
-    from: f32,
+struct Motion {
+    progress: AnimatedNode,
+    from: Shape,
 }
 
-/// `max(n, 0)` on the platform's animator.
-fn above_zero(n: AnimatedNode) -> AnimatedNode {
-    n.interpolate(&[0.0, 1.0e4], &[0.0, 1.0e4])
+impl Motion {
+    /// The appear's sweep to `to` from `start` (the mark's first angle).
+    fn sweep(progress: AnimatedNode, to: Shape, start: f32) -> Self {
+        Motion {
+            progress,
+            from: Shape {
+                lo: start,
+                hi: start,
+                ..to
+            },
+        }
+    }
+
+    /// How a mark of `to` moves now: it sweeps in while the plot appears,
+    /// else it moves from the radii of `morph` while that runs.
+    fn of(
+        plot: PlotContext,
+        to: Shape,
+        start: f32,
+        morph: Option<(Ring, AnimatedValue)>,
+    ) -> Option<Self> {
+        if plot.appearing.get() {
+            return Some(Self::sweep(plot.appear.progress(), to, start));
+        }
+        morph.map(|(from, t)| Motion {
+            progress: *t.node(),
+            from: Shape {
+                inner: from.inner,
+                outer: from.outer,
+                ..to
+            },
+        })
+    }
 }
 
-/// Records an annular sector of `ring` from `start` to `end` (pie angles),
-/// its outer edge `lift` past the ring's (a lifted slice), `pad` between
-/// it and its neighbours. The gaps keep the
-/// width the pad makes at the rim at every radius: each edge runs parallel
-/// to its radial, offset by half that width, so a gap is a band of even
-/// width rather than a wedge closing at the center. Where a slice is too
-/// narrow to reach the hole (or there is none) its edges meet in a point
-/// short of the center; a slice narrower than its pad draws nothing. A
-/// whole turn takes no pad, as d3's. While `sweep` runs the angles move
-/// with it; while `morph` runs the radii move from its ring's to `ring`'s.
-/// `None`: nothing to draw.
+/// A pair of corners of a slice, one at each of its edges (d3's
+/// `cornerTangents`, `arc.js`): circles of `radius` (0: a sharp corner)
+/// whose centers lie `distance` from the ring's center, `angle` in from
+/// the slice's edges. The rim (or the hole's edge) between them runs where
+/// they touch it, `distance + radius` out (`distance - radius` inside).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Corner {
+    radius: f32,
+    distance: f32,
+    angle: f32,
+}
+
+/// What a slice draws (d3's `arc` with `cornerRadius`): its angles, and
+/// its corners at the rim and at the hole. Without a corner radius the
+/// corners are sharp: at the rim `padAngle / 2` in from the slice's
+/// angles, inside where [`Edges::inner`] puts the inner edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Outline {
+    lo: f32,
+    hi: f32,
+    outer: Corner,
+    inner: Corner,
+}
+
+impl Outline {
+    /// The outline of `shape`, `pad` between it and its neighbours, its
+    /// corners rounded by up to `corner` (`None`: narrower than its pad,
+    /// nothing to draw). As d3 does, a corner is at most half the ring's
+    /// thickness, and smaller where the slice has no angle for it: the two
+    /// corners at the rim (or at the hole) touch on the slice's middle
+    /// rather than overlap. A whole turn has no corners.
+    fn new(shape: Shape, pad: f32, corner: f32) -> Option<Self> {
+        let Shape { lo, hi, .. } = shape;
+        let span = hi - lo;
+        let r1 = shape.outer;
+        if r1 < EPSILON || span < EPSILON {
+            return None;
+        }
+        let edges = Edges::new(shape.inner, r1, pad);
+        let (r0, h) = (edges.r0, edges.h);
+        // The sine of half the slice: its edges meet `h / half` out.
+        let half = (span / 2.0).sin();
+        if span < PI && r1 * half <= h {
+            return None;
+        }
+        let rc = match span >= TAU - EPSILON {
+            true => 0.0,
+            false => corner.min((r1 - r0) / 2.0).min((r1 - h) / 2.0).max(0.0),
+        };
+        // The largest corner whose circle fits between the edges and the
+        // rim: its center on the slice's middle (`(r1 - rc) * half = h +
+        // rc`, d3's `(r1 - lc) / (kc + 1)`).
+        let rc1 = match span < PI {
+            true => rc.min((r1 * half - h) / (1.0 + half)).max(0.0),
+            false => rc,
+        };
+        let d1 = r1 - rc1;
+        let outer = Corner {
+            radius: rc1,
+            distance: d1,
+            angle: ((h + rc1) / d1).min(1.0).asin().min(span / 2.0),
+        };
+        let (radius, off) = edges.inner(span);
+        // On the hole: round its corners too, the circle outside it
+        // (`(r0 + rc) * half = h + rc`, d3's `(r0 - lc) / (kc - 1)`).
+        let inner = match rc > 0.0 && r0 > h && radius == r0 {
+            true => {
+                let rc0 = match span < PI {
+                    true => rc.min((r0 * half - h) / (1.0 - half)).max(0.0),
+                    false => rc,
+                };
+                let d0 = r0 + rc0;
+                Corner {
+                    radius: rc0,
+                    distance: d0,
+                    angle: ((h + rc0) / d0).min(1.0).asin().min(span / 2.0),
+                }
+            }
+            false => Corner {
+                radius: 0.0,
+                distance: radius,
+                angle: off,
+            },
+        };
+        Some(Outline {
+            lo,
+            hi,
+            outer,
+            inner,
+        })
+    }
+
+    /// What a moving slice narrower than its pad draws: a point on the
+    /// middle of its rim.
+    fn point(shape: Shape) -> Self {
+        let middle = Corner {
+            radius: 0.0,
+            distance: shape.outer,
+            angle: (shape.hi - shape.lo).max(0.0) / 2.0,
+        };
+        Outline {
+            lo: shape.lo,
+            hi: shape.hi,
+            outer: middle,
+            inner: middle,
+        }
+    }
+
+    fn is_rounded(&self) -> bool {
+        self.outer.radius > 0.0 || self.inner.radius > 0.0
+    }
+}
+
+/// A number of a drawing: a constant, or one the animator moves.
+#[derive(Clone, Copy)]
+enum Var {
+    Const(f32),
+    Node(AnimatedNode),
+}
+
+impl Var {
+    fn add(&self, other: &Var) -> Var {
+        match (self, other) {
+            (Var::Const(a), Var::Const(b)) => Var::Const(a + b),
+            (Var::Node(a), Var::Const(b)) | (Var::Const(b), Var::Node(a)) => Var::Node(a.add(*b)),
+            (Var::Node(a), Var::Node(b)) => Var::Node(a.add(b)),
+        }
+    }
+
+    fn sub(&self, other: &Var) -> Var {
+        match (self, other) {
+            (Var::Const(a), Var::Const(b)) => Var::Const(a - b),
+            (Var::Node(a), Var::Const(b)) => Var::Node(a.sub(*b)),
+            (Var::Const(a), Var::Node(b)) => Var::Node(b.mul(-1.0).add(*a)),
+            (Var::Node(a), Var::Node(b)) => Var::Node(a.sub(b)),
+        }
+    }
+
+    fn mul(&self, other: &Var) -> Var {
+        match (self, other) {
+            (Var::Const(a), Var::Const(b)) => Var::Const(a * b),
+            (Var::Node(a), Var::Const(b)) | (Var::Const(b), Var::Node(a)) => Var::Node(a.mul(*b)),
+            (Var::Node(a), Var::Node(b)) => Var::Node(a.mul(b)),
+        }
+    }
+}
+
+impl From<&Var> for CanvasArg {
+    fn from(v: &Var) -> Self {
+        match v {
+            Var::Const(n) => (*n).into(),
+            Var::Node(n) => n.into(),
+        }
+    }
+}
+
+/// The outlines of a slice over its motion (one at rest): each number of
+/// its drawing is a constant, or the animator's piecewise-linear map of
+/// the motion's progress through the numbers of the sampled outlines, so
+/// angles, radii and corners move together and no JS runs per frame.
+struct Outlines {
+    progress: Option<AnimatedNode>,
+    ts: Vec<f32>,
+    all: Vec<Outline>,
+}
+
+impl Outlines {
+    /// The outline of `to`, or of its moves under `motion`, sampled
+    /// densely near the start where a sweep opens a slice from nothing
+    /// (`None`: nothing to draw at rest).
+    fn new(to: Shape, pad: f32, corner: f32, motion: Option<Motion>) -> Option<Self> {
+        Some(match motion {
+            None => Outlines {
+                progress: None,
+                ts: vec![1.0],
+                all: vec![Outline::new(to, pad, corner)?],
+            },
+            Some(Motion { progress, from }) => {
+                let (ts, all) = (0..=MOTION_SAMPLES)
+                    .map(|i| {
+                        let t = (i as f32 / MOTION_SAMPLES as f32).powi(2);
+                        let shape = from.lerp(&to, t);
+                        let outline = Outline::new(shape, pad, corner)
+                            .unwrap_or_else(|| Outline::point(shape));
+                        (t, outline)
+                    })
+                    .unzip();
+                Outlines {
+                    progress: Some(progress),
+                    ts,
+                    all,
+                }
+            }
+        })
+    }
+
+    /// `f` of the outlines: a constant where it does not move.
+    fn num(&self, f: impl Fn(&Outline) -> f32) -> Var {
+        let out: Vec<f32> = self.all.iter().map(f).collect();
+        match self.progress {
+            Some(t) if out.iter().any(|v| *v != out[0]) => Var::Node(t.interpolate(&self.ts, &out)),
+            _ => Var::Const(out[0]),
+        }
+    }
+
+    /// An arc's start and its end `len` past it (`len` never below 0, so
+    /// the canvas never takes a sliver for a whole turn the other way).
+    fn angles(
+        &self,
+        start: impl Fn(&Outline) -> f32,
+        len: impl Fn(&Outline) -> f32,
+        ccw: bool,
+    ) -> (Var, Var) {
+        let start = self.num(|o| start(o) + SCREEN);
+        let len = self.num(|o| len(o).max(0.0));
+        let end = match ccw {
+            true => start.sub(&len),
+            false => start.add(&len),
+        };
+        (start, end)
+    }
+
+    /// The center of a corner `distance` out at `angle` (pie angles) from
+    /// `center`, pushed out by `lift` along the way there.
+    fn corner_center(
+        &self,
+        center: Point<Points>,
+        angle: impl Fn(&Outline) -> f32 + Copy,
+        distance: impl Fn(&Outline) -> f32 + Copy,
+        lift: Option<AnimatedNode>,
+    ) -> (Var, Var) {
+        let x = self.num(|o| center.x.0 + distance(o) * (angle(o) + SCREEN).cos());
+        let y = self.num(|o| center.y.0 + distance(o) * (angle(o) + SCREEN).sin());
+        match lift {
+            None => (x, y),
+            Some(lift) => {
+                let lift = Var::Node(lift);
+                let cos = self.num(|o| (angle(o) + SCREEN).cos());
+                let sin = self.num(|o| (angle(o) + SCREEN).sin());
+                (x.add(&lift.mul(&cos)), y.add(&lift.mul(&sin)))
+            }
+        }
+    }
+}
+
+/// The canvas's angle of a pie angle's 0: 3 o'clock is the canvas's 0.
+const SCREEN: f32 = -FRAC_PI_2;
+
+/// The samples of a moving slice's outline.
+const MOTION_SAMPLES: usize = 64;
+
+/// Records an annular sector of `to` (pie angles) around `center`, its
+/// outer edge `lift` past the ring's (a lifted slice), `pad` between it
+/// and its neighbours, its corners rounded by up to `corner`. The gaps
+/// keep the width the pad makes at the rim at every radius: each edge runs
+/// parallel to its radial, offset by half that width, so a gap is a band
+/// of even width rather than a wedge closing at the center. Where a slice
+/// is too narrow to reach the hole (or there is none) its edges meet in a
+/// point short of the center; a slice narrower than its pad draws nothing.
+/// A whole turn takes no pad and no corners, as d3's. While `motion` runs
+/// the shape moves from its `from`. `None`: nothing to draw.
 #[allow(clippy::too_many_arguments)]
 fn sector(
     p: Painter,
-    ring: Ring,
+    center: Point<Points>,
+    to: Shape,
     lift: Option<AnimatedNode>,
-    start: f32,
-    end: f32,
     pad: f32,
-    sweep: Option<Sweep>,
-    morph: Option<(Ring, AnimatedValue)>,
+    corner: f32,
+    motion: Option<Motion>,
 ) -> Option<Painter> {
-    let (lo, hi) = (start.min(end), start.max(end));
-    let span = hi - lo;
-    let r1 = ring.outer;
-    if r1 < EPSILON || span < EPSILON {
-        return None;
-    }
-    let pad = match span >= TAU - EPSILON {
+    let pad = match to.hi - to.lo >= TAU - EPSILON {
         true => 0.0,
         false => pad.clamp(0.0, PI),
     };
-    let edges = Edges::new(ring.inner, r1, pad);
-    let (cx, cy) = (ring.center.x.0, ring.center.y.0);
-    // The appear draws the ring it ends on.
-    let morph = morph.filter(|_| sweep.is_none());
-    let rim = match morph {
-        Some((from, t)) if from.outer != r1 => Some(t.interpolate(&[0.0, 1.0], &[from.outer, r1])),
-        _ => None,
+    let o = Outlines::new(to, pad, corner, motion)?;
+    let (cx, cy) = (center.x.0, center.y.0);
+    let lifted = |v: Var| match lift {
+        Some(lift) => v.add(&Var::Node(lift)),
+        None => v,
     };
-    let outer: CanvasArg = match (rim, lift) {
-        (None, None) => r1.into(),
-        (None, Some(lift)) => (&lift.add(r1)).into(),
-        (Some(rim), None) => (&rim).into(),
-        (Some(rim), Some(lift)) => (&rim.add(&lift)).into(),
-    };
-    // The canvas's angles: 0 at 3 o'clock.
-    let screen = -FRAC_PI_2;
+    let span = |o: &Outline| o.hi - o.lo;
     let p = p.begin_path();
-    let p = match sweep {
-        None => {
-            let (a0, a1) = (lo + pad / 2.0, hi - pad / 2.0);
-            if a1 - a0 <= 0.0 {
-                return None;
-            }
-            let p = p.arc(cx, cy, outer, a0 + screen, a1 + screen);
-            match morph {
-                None => {
-                    let (radius, off) = edges.inner(span);
-                    p.arc_counterclockwise(cx, cy, radius, hi - off + screen, lo + off + screen)
-                }
-                Some((from, t)) => {
-                    // The inner edge of the ring in between, sampled: it
-                    // turns from a point into an arc as the hole opens.
-                    let lerp = |a: f32, b: f32, k: f32| a + (b - a) * k;
-                    let (ts, (radii, offs)): (Vec<f32>, (Vec<f32>, Vec<f32>)) = (0..=MORPH_SAMPLES)
-                        .map(|i| {
-                            let k = i as f32 / MORPH_SAMPLES as f32;
-                            let edges = Edges::new(
-                                lerp(from.inner, ring.inner, k),
-                                lerp(from.outer, r1, k),
-                                pad,
-                            );
-                            (k, edges.inner(span))
-                        })
-                        .unzip();
-                    let radius = t.interpolate(&ts, &radii);
-                    let off = t.interpolate(&ts, &offs);
-                    p.arc_counterclockwise(
-                        cx,
-                        cy,
-                        &radius,
-                        &off.mul(-1.0).add(hi + screen),
-                        &off.add(lo + screen),
-                    )
-                }
-            }
-        }
-        Some(Sweep { reveal, from }) => {
-            // An angle at the sweep's progress.
-            let at = |a: f32, plus: f32| reveal.mul(a - from).add(from + plus + screen);
-            let a0 = at(lo, pad / 2.0);
-            // Never past its start (a slice narrower than its pad, early).
-            let a1 = a0.add(&above_zero(reveal.mul(span).sub(pad)));
-            let p = p.arc(cx, cy, outer, &a0, &a1);
-            // The inner edge as the slice opens, sampled densely where it
-            // turns from a point into an arc.
-            let (ts, (radii, offs)): (Vec<f32>, (Vec<f32>, Vec<f32>)) = (0..=SWEEP_SAMPLES)
-                .map(|i| {
-                    let t = (i as f32 / SWEEP_SAMPLES as f32).powi(2);
-                    (t, edges.inner(span * t))
-                })
-                .unzip();
-            let radius = reveal.interpolate(&ts, &radii);
-            let off = reveal.interpolate(&ts, &offs);
-            p.arc_counterclockwise(
-                cx,
-                cy,
-                &radius,
-                &at(hi, 0.0).sub(&off),
-                &at(lo, 0.0).add(&off),
-            )
-        }
-    };
+    if !o.all.iter().any(Outline::is_rounded) {
+        let rim = lifted(o.num(|o| o.outer.distance));
+        let (a0, a1) = o.angles(
+            |o| o.lo + o.outer.angle,
+            |o| span(o) - 2.0 * o.outer.angle,
+            false,
+        );
+        let p = p.arc(cx, cy, &rim, &a0, &a1);
+        let (a0, a1) = o.angles(
+            |o| o.hi - o.inner.angle,
+            |o| span(o) - 2.0 * o.inner.angle,
+            true,
+        );
+        let radius = o.num(|o| o.inner.distance);
+        return Some(
+            p.arc_counterclockwise(cx, cy, &radius, &a0, &a1)
+                .close_path(),
+        );
+    }
+    // Clockwise around the slice: the corner at its start's rim, the rim,
+    // the corner at its end's; the corner at its end's hole, the hole's
+    // edge back, the corner at its start's. Each corner turns from its
+    // edge (a quarter turn off the edge's radial) to the circle it meets.
+    let outer_radius = o.num(|o| o.outer.radius);
+    let inner_radius = o.num(|o| o.inner.radius);
+    let (x, y) = o.corner_center(center, |o| o.lo + o.outer.angle, |o| o.outer.distance, lift);
+    let (a0, a1) = o.angles(|o| o.lo - FRAC_PI_2, |o| FRAC_PI_2 + o.outer.angle, false);
+    let p = p.arc(&x, &y, &outer_radius, &a0, &a1);
+    let rim = lifted(o.num(|o| o.outer.distance + o.outer.radius));
+    let (a0, a1) = o.angles(
+        |o| o.lo + o.outer.angle,
+        |o| span(o) - 2.0 * o.outer.angle,
+        false,
+    );
+    let p = p.arc(cx, cy, &rim, &a0, &a1);
+    let (x, y) = o.corner_center(center, |o| o.hi - o.outer.angle, |o| o.outer.distance, lift);
+    let (a0, a1) = o.angles(
+        |o| o.hi - o.outer.angle,
+        |o| FRAC_PI_2 + o.outer.angle,
+        false,
+    );
+    let p = p.arc(&x, &y, &outer_radius, &a0, &a1);
+    let (x, y) = o.corner_center(center, |o| o.hi - o.inner.angle, |o| o.inner.distance, None);
+    let (a0, a1) = o.angles(|o| o.hi + FRAC_PI_2, |o| FRAC_PI_2 - o.inner.angle, false);
+    let p = p.arc(&x, &y, &inner_radius, &a0, &a1);
+    let hole = o.num(|o| o.inner.distance - o.inner.radius);
+    let (a0, a1) = o.angles(
+        |o| o.hi - o.inner.angle,
+        |o| span(o) - 2.0 * o.inner.angle,
+        true,
+    );
+    let p = p.arc_counterclockwise(cx, cy, &hole, &a0, &a1);
+    let (x, y) = o.corner_center(center, |o| o.lo + o.inner.angle, |o| o.inner.distance, None);
+    let (a0, a1) = o.angles(
+        |o| o.lo + o.inner.angle + PI,
+        |o| FRAC_PI_2 - o.inner.angle,
+        false,
+    );
+    let p = p.arc(&x, &y, &inner_radius, &a0, &a1);
     Some(p.close_path())
 }
-
-/// The samples of the inner edge of a sweeping slice.
-const SWEEP_SAMPLES: usize = 48;
-
-/// The samples of the inner edge of a slice changing its radii.
-const MORPH_SAMPLES: usize = 32;
 
 /// A radial mark's move to new radii (`motion.update`): the radii it moves
 /// from, while it runs, and how far it has gone, on the platform's
@@ -529,6 +816,12 @@ pub struct PieProps {
     /// `"100%"` by default, half the plot's smaller side.
     #[prop(default = DefiniteLength::Fraction(Percentage(1.0)))]
     pub outer_radius: Prop<DefiniteLength>,
+    /// The radius of each slice's corners, in points (d3's
+    /// `arc.cornerRadius`): 0 by default, sharp. As d3's, at most half the
+    /// ring's thickness and smaller on a slice too narrow for two whole
+    /// corners; the corners follow the pad's parallel edges.
+    #[prop(default)]
+    pub corner_radius: Prop<Points>,
     /// The Tailwind classes of each slice, the `slice` part: the same on
     /// every slice (`"stroke-card stroke-2"`), or a function of the
     /// slice's row and its index that gives each its own
@@ -564,12 +857,13 @@ pub struct PieProps {
 /// and its tooltip follows the pointer; that slice grows by `hoverLift`
 /// and the others fade by `hoverDim`, on the platform's animator with the
 /// plot's motion. The ring sweeps in from its first slice with the plot's
-/// appear. Its values take no part in the plot's scales.
+/// appear; `cornerRadius` rounds each slice's corners. Its values take no
+/// part in the plot's scales.
 #[component]
 pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Pie");
     let (start, end, pad) = (props.start_angle, props.end_angle, props.pad_angle);
-    let (inner, outer) = (props.inner_radius, props.outer_radius);
+    let (inner, outer, corner) = (props.inner_radius, props.outer_radius, props.corner_radius);
     let (lift, dim) = (props.hover_lift, props.hover_dim);
     let Some(plot) = plot else {
         return layer_of(None);
@@ -643,21 +937,17 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 };
                 let ring = ring.get();
                 let lift = lifts.then(|| lifted.mul(&plot.fade).mul(lift.get().0));
-                let sweep = plot.appearing.get().then(|| Sweep {
-                    reveal: plot.appear.progress(),
-                    from: start.get().0,
-                });
-                let morph = morph.ring(plot.size.get());
+                let to = Shape::new(ring, slice.start, slice.end);
+                let motion = Motion::of(plot, to, start.get().0, morph.ring(plot.size.get()));
                 paint(p, |p| {
                     sector(
                         p,
-                        ring,
+                        ring.center,
+                        to,
                         lift,
-                        slice.start,
-                        slice.end,
                         pad.get().0,
-                        sweep,
-                        morph,
+                        corner.get().0,
+                        motion,
                     )
                 })
             })
@@ -709,6 +999,12 @@ pub struct ArcProps {
     /// the plot holds; `"100%"` by default.
     #[prop(default = DefiniteLength::Fraction(Percentage(1.0)))]
     pub outer_radius: Prop<DefiniteLength>,
+    /// The radius of its corners, in points (d3's `arc.cornerRadius`): 0
+    /// by default, sharp. As d3's, at most half the ring's thickness and
+    /// smaller where the arc is too short for two whole corners; half the
+    /// thickness gives round caps. A whole ring has none.
+    #[prop(default)]
+    pub corner_radius: Prop<Points>,
 }
 
 /// An arc of a [`Plot`](super::Plot) (`gpui-base`'s `Arc`, painting one
@@ -717,12 +1013,13 @@ pub struct ArcProps {
 /// track and its value, or a ring behind a pie. It fills with its `fill`
 /// (`fill-*`; `currentColor` where none is set) and strokes with its
 /// `stroke` (none where none is set), as CSS inherits them from the plot,
-/// and sweeps in from `startAngle` with the plot's appear. It is a shape,
-/// not a row: the pointer over it finds nothing.
+/// and sweeps in from `startAngle` with the plot's appear; `cornerRadius`
+/// rounds its corners. It is a shape, not a row: the pointer over it finds
+/// nothing.
 #[component]
 pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Arc");
-    let (start, end) = (props.start_angle, props.end_angle);
+    let (start, end, corner) = (props.start_angle, props.end_angle, props.corner_radius);
     let (inner, outer) = (props.inner_radius, props.outer_radius);
     let ring = move |plot: PlotContext| Ring::of(plot.size.get(), inner.get(), outer.get());
     let morph = plot.map(|plot| Morph::new(plot, inner, outer));
@@ -735,13 +1032,12 @@ pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         move |p, _| {
             let Some(plot) = plot else { return p };
             let ring = ring(plot);
-            let sweep = plot.appearing.get().then(|| Sweep {
-                reveal: plot.appear.progress(),
-                from: start.get().0,
-            });
+            let (start, end) = (start.get().0, end.get().0);
+            let to = Shape::new(ring, start, end);
             let morph = morph.and_then(|m| m.ring(plot.size.get()));
+            let motion = Motion::of(plot, to, start, morph);
             paint(p, |p| {
-                sector(p, ring, None, start.get().0, end.get().0, 0.0, sweep, morph)
+                sector(p, ring.center, to, None, 0.0, corner.get().0, motion)
             })
         },
     )
@@ -753,7 +1049,7 @@ mod tests {
 
     use nsh_core::geometry::{AbsoluteLength, DefiniteLength, Percentage, point, px, size};
 
-    use super::{Edges, Ring, Slice, arcs};
+    use super::{Edges, Outline, Ring, Shape, Slice, arcs};
 
     fn slice(index: u32, start: f32, end: f32) -> Slice {
         Slice { index, start, end }
@@ -780,6 +1076,56 @@ mod tests {
         assert_eq!(r, 60.0);
         assert!((60.0 * off.sin() - h).abs() < 1e-3);
         assert_eq!(Edges::new(60.0, 100.0, 0.0).inner(1.0), (60.0, 0.0));
+    }
+
+    /// d3's `arc.cornerRadius`: each corner's circle touches the slice's
+    /// edge (`h` from its radial with a pad) and the rim or the hole; the
+    /// radius is at most half the ring's thickness, and on a narrow slice
+    /// the two corners meet on its middle. A whole ring has none.
+    #[test]
+    fn corners_touch_the_edges_and_are_clamped_as_d3_clamps_them() {
+        let shape = |inner: f32, outer: f32, span: f32| Shape {
+            inner,
+            outer,
+            lo: 0.0,
+            hi: span,
+        };
+        // Room for the whole radius: its circle `rc` from the edge and the
+        // rim, and from the hole.
+        let pad: f32 = 0.1;
+        let h = 100.0 * (pad / 2.0).sin();
+        let o = Outline::new(shape(60.0, 100.0, PI), pad, 6.0).unwrap();
+        assert_eq!(o.outer.radius, 6.0);
+        assert_eq!(o.outer.distance, 94.0);
+        assert!((94.0 * o.outer.angle.sin() - (h + 6.0)).abs() < 1e-3);
+        assert_eq!(o.inner.radius, 6.0);
+        assert_eq!(o.inner.distance, 66.0);
+        assert!((66.0 * o.inner.angle.sin() - (h + 6.0)).abs() < 1e-3);
+        // At most half the ring's thickness: round caps.
+        let o = Outline::new(shape(80.0, 100.0, PI), 0.0, 40.0).unwrap();
+        assert_eq!((o.outer.radius, o.inner.radius), (10.0, 10.0));
+        assert_eq!((o.outer.distance, o.inner.distance), (90.0, 90.0));
+        // A narrow slice: the corners meet on its middle, rim and hole.
+        let o = Outline::new(shape(60.0, 100.0, 0.2), 0.0, 20.0).unwrap();
+        let half = 0.1f32.sin();
+        assert!((o.outer.radius - 100.0 * half / (1.0 + half)).abs() < 1e-3);
+        assert!((o.outer.angle - 0.1).abs() < 1e-5);
+        assert!((o.inner.radius - 60.0 * half / (1.0 - half)).abs() < 1e-3);
+        assert!((o.inner.angle - 0.1).abs() < 1e-5);
+        // A whole ring has no corners; no radius draws sharp ones, where
+        // `Edges` puts them.
+        let o = Outline::new(shape(60.0, 100.0, TAU), 0.0, 10.0).unwrap();
+        assert!(!o.is_rounded());
+        let o = Outline::new(shape(0.0, 100.0, PI / 3.0), pad, 0.0).unwrap();
+        let (meet, off) = Edges::new(0.0, 100.0, pad).inner(PI / 3.0);
+        assert_eq!((o.inner.distance, o.inner.angle), (meet, off));
+        assert!((o.outer.angle - pad / 2.0).abs() < 1e-6);
+        // A pie's corners at the rim only: its edges meet short of the
+        // center.
+        let o = Outline::new(shape(0.0, 100.0, PI / 3.0), pad, 8.0).unwrap();
+        assert_eq!((o.outer.radius, o.inner.radius), (8.0, 0.0));
+        // Narrower than its pad: nothing.
+        assert!(Outline::new(shape(0.0, 100.0, 0.05), pad, 8.0).is_none());
     }
 
     /// `gpui-base`'s `test_pie` and `test_pie_zero_values`

@@ -1208,12 +1208,17 @@ expect slice null
 tap id:hole
 event id:pie onHoverMove position.x=57 position.y=53
 expect slice 0
+# The gauge's corners are round (`cornerRadius`): its outline starts on
+# its first corner, inside the rim, rather than on the rim at 12 o'clock.
+nodrawing id:gauge fill path(arc 50 50 48 -1.5707964...
 covers [nsh/base/plot] Pie
 covers [nsh/base/plot] Arc
 covers [props] Pie.startAngle
 covers [props] Pie.endAngle
 covers [props] Pie.innerRadius
 covers [props] Pie.outerRadius
+covers [props] Pie.cornerRadius
+covers [props] Arc.cornerRadius
 covers [props] Plot.motion
 covers [nsh/base/plot] Plot
 covers [nsh/base/plot] Line

@@ -276,6 +276,7 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie`、`Arc` | `startAngle`、`endAngle` | `.start_angle(..)`、`.end_angle(..)` | `number`（弧度） | `0`、`2 * Math.PI` | 第一个扇区开始和最后一个扇区结束的位置（arc 的两端）：从 12 点钟方向顺时针的弧度。`endAngle` 小于 `startAngle` 时，饼图的扇区反向排列。 |
 | `Pie` | `padAngle` | `.pad_angle(..)` | `number`（弧度） | `0` | 相邻扇区在外缘处的间隔角度。每条间隙在各个半径上都保持这个宽度（约 `padAngle * outerRadius` 点），两边平行，所以在圆心或空洞处与外缘处一样宽；太窄而到不了圆心的扇区在两边相交处收尾。只有一个扇区的饼图没有间隙。 |
 | `Pie`、`Arc` | `innerRadius`、`outerRadius` | `.inner_radius(..)`、`.outer_radius(..)` | ``number \| `${number}%` `` | `0`、`"100%"` | 空洞和外缘的半径：点数，或 plot 能容纳的最大圆（其较短边的一半）的百分比。 |
+| `Pie`、`Arc` | `cornerRadius` | `.corner_radius(..)` | `number` | `0` | 每个扇区（arc）圆角的半径，单位为点，同 d3 的 `arc.cornerRadius`：每个圆角都是一个与边和外缘或空洞边缘相切的圆，间隙的平行边也一样。它最大为圆环厚度的一半，此时 arc 两端是圆头；扇区太窄、放不下两个完整圆角时，两个圆角在扇区中线相接。完整的圆环只保留它的圆形边缘。 |
 | `Pie` | `sliceClass` | `.slice_class(..)` | `string \| (d: T, index: number) => string` | 无 | 每个扇区的类（`fill-*`、`stroke-*`）：所有扇区相同，或扇区所在行及其序号的函数；数据行或函数变化时，每行调用一次。 |
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有扇区的样式，优先于它们的类（`fill`、`stroke`、`strokeWidth`）。 |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | 指针下的扇区比其他扇区大出的距离，单位为点：按 plot 的 `pointer` 弹簧变化，随悬停淡入淡出。 |

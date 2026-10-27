@@ -527,8 +527,8 @@ const RING_GAP = 5;
 
 /**
  * Capacity as rings: a track per resource and over it the share in use,
- * sweeping in from 12 o'clock, again for each period; the average in the
- * middle and the figures beside, in the rings' colors.
+ * with round caps, sweeping in from 12 o'clock, again for each period;
+ * the average in the middle and the figures beside, in the rings' colors.
  */
 function Capacity() {
   const period = signal<Period>("now");
@@ -555,7 +555,13 @@ function Capacity() {
             <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} style={{ fill: alpha(toneColor(r.tone), 0.13) }} />
           ))}
           {RESOURCES.map((r, i) => (
-            <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} endAngle={share(r) * 2 * Math.PI} style={{ fill: toneColor(r.tone) }} />
+            <Arc
+              innerRadius={radii[i].inner}
+              outerRadius={radii[i].outer}
+              endAngle={share(r) * 2 * Math.PI}
+              cornerRadius={RING_WIDTH / 2}
+              style={{ fill: toneColor(r.tone) }}
+            />
           ))}
           <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, pointerEvents: "none" }}>
             <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{`${fixed(average() * 100, 0)}%`}</Text>
@@ -602,10 +608,11 @@ const RING = pointer ? 168 : 176;
 const RIM = RING / 2 - 8;
 
 /**
- * Revenue by region as a donut: 2-point gaps of even width, the hovered
- * slice lifted and the others dimmed, its value in the hole, a legend with
- * tabular figures at the trailing edge whose hovered row stands out; it
- * closes into a pie, the hole's radius moving on `motion.update`.
+ * Revenue by region as a donut: 2-point gaps of even width, softly rounded
+ * corners, the hovered slice lifted and the others dimmed, its value in
+ * the hole, a legend with tabular figures at the trailing edge whose
+ * hovered row stands out; it closes into a pie, the hole's radius moving
+ * on `motion.update`.
  */
 function Revenue() {
   const hover = signal<number | null>(null);
@@ -629,6 +636,7 @@ function Revenue() {
             innerRadius={donut() ? RIM * 0.62 : 0}
             outerRadius={RIM}
             padAngle={2 / RIM}
+            cornerRadius={3}
             sliceClass={(_, i) => FILLS[i % FILLS.length]}
             hoverLift={6}
             hoverDim={0.64}

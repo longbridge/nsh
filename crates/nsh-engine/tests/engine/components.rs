@@ -4738,6 +4738,82 @@ fn base_plot_pie_radii_move_with_the_update_motion() {
     assert!(edges.iter().all(|e| e.1.is_some()), "{edges:?}");
 }
 
+const BASE_PLOT_ARC_CORNERS: &str = r##"import { mount, Text, View } from "nsh";
+import { Arc, Plot } from "nsh/base/plot";
+
+function App() {
+  return (
+    <View>
+      <Plot testID="plot" data={[{ v: 1 }]} y="v" style={{ width: 100, height: 100 }}>
+        <Arc endAngle={Math.PI / 2} innerRadius={30} outerRadius={50} cornerRadius={20} />
+        <Arc endAngle={0.2} innerRadius={30} outerRadius={50} cornerRadius={10} />
+        <Arc innerRadius={30} outerRadius={50} cornerRadius={10} />
+      </Plot>
+      <Text>ready</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `cornerRadius` (d3's `arc.cornerRadius`): an arc's corners are circles
+/// touching its edges and the rim or the hole, at most half the ring's
+/// thickness (round caps: the corners at the rim and at the hole are one
+/// circle) and, on a short arc, only as large as its angle leaves room
+/// for, the two corners meeting on its middle. A whole ring has none.
+#[test]
+fn base_plot_arc_corners_are_rounded_and_clamped() {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let (_engine, rx) = start(BASE_PLOT_ARC_CORNERS);
+    let mut all = until(&rx, |b| shows(b, "ready"));
+    all.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&all);
+    let arcs: Vec<Vec<DrawnArc>> = drawings.iter().map(|(_, d)| drawn_arcs(&d.ops)).collect();
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let at = |arc: &DrawnArc, x: f32, y: f32| near(arc.0.0, x) && near(arc.0.1, y);
+    // The quarter from 12 o'clock: corners of 10 (half of 50 - 30, not
+    // 20), their centers on the ring's middle, 40 out.
+    let quarter = arcs
+        .iter()
+        .find(|a| a.len() == 6 && a[1].1 == Some(50.0) && !near(a[1].2.0, a[1].2.1))
+        .unwrap_or_else(|| panic!("a rounded quarter: {arcs:?}"));
+    let a = (10.0f32 / 40.0).asin();
+    assert!(
+        at(&quarter[0], 50.0 + 40.0 * a.sin(), 50.0 - 40.0 * a.cos()),
+        "{quarter:?}"
+    );
+    assert_eq!(quarter[0].1, Some(10.0));
+    assert!(near(quarter[0].2.0, -PI) && near(quarter[0].2.1, -FRAC_PI_2 + a));
+    // The rim between the corners, then the hole's edge back.
+    assert!(near(quarter[1].2.0, a - FRAC_PI_2) && near(quarter[1].2.1, -a));
+    assert_eq!((quarter[4].1, quarter[4].3), (Some(30.0), true));
+    assert!(near(quarter[4].2.0, -a) && near(quarter[4].2.1, a - FRAC_PI_2));
+    // Round caps: the corners at the rim and at the hole are one circle.
+    assert!(at(&quarter[3], quarter[2].0.0, quarter[2].0.1));
+    assert!(at(&quarter[5], quarter[0].0.0, quarter[0].0.1));
+    // A short arc (0.2): the corners only as large as its angle leaves
+    // room for, meeting on its middle, the rim between them none.
+    let half = 0.1f32.sin();
+    let short = arcs
+        .iter()
+        .find(|a| a.len() == 6 && a[1].1 == Some(50.0) && near(a[1].2.0, a[1].2.1))
+        .unwrap_or_else(|| panic!("a short rounded arc: {arcs:?}"));
+    assert!(
+        near(short[0].1.unwrap(), 50.0 * half / (1.0 + half)),
+        "{short:?}"
+    );
+    assert!(
+        near(short[3].1.unwrap(), 30.0 * half / (1.0 - half)),
+        "{short:?}"
+    );
+    // The whole ring: no corners, its two edges only.
+    assert!(
+        arcs.iter().any(|a| a.len() == 2 && a[0].1 == Some(50.0)),
+        "{arcs:?}"
+    );
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 
