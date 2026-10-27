@@ -29,7 +29,7 @@ pub(crate) trait Driver: Send {
     /// Drops local files (`file:` URLs) on what `selector` names.
     fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
         let _ = (selector, uris);
-        Err("`dropFiles` runs headless only for now: run the test without `--target`".into())
+        Err("`dropFiles` runs headless and on Linux for now".into())
     }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
@@ -452,6 +452,12 @@ impl Driver for Remote {
     }
     fn drop_held(&mut self) -> Result<(), String> {
         self.action(TestStep::Drop)
+    }
+    fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
+        self.action(TestStep::DropFiles {
+            selector: selector.into(),
+            uris,
+        })
     }
     fn hold_keys(&mut self, keys: &str, down: bool) -> Result<(), String> {
         self.action(TestStep::HoldKeys {

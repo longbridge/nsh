@@ -454,6 +454,13 @@ pub enum TestStep {
     },
     /// Lets go of the pointer `DragAndHold` left down (`app.drop`).
     Drop,
+    /// Drops local files on a view (`app.dropFiles`).
+    DropFiles {
+        /// Where.
+        selector: String,
+        /// Their `file:` URLs.
+        uris: Vec<String>,
+    },
     /// Goes back as the user does (`app.back`).
     Back,
     /// Lets the app run (`app.wait`).

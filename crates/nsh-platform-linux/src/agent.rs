@@ -187,6 +187,15 @@ impl Native for LinuxNative {
         Ok(())
     }
 
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        match self.on_main(move |s| crate::file_drop::drop_uris(s, x, y, uris)) {
+            Some(true) => Ok(()),
+            Some(false) => Err("no view there listens to `onFileDrop`".into()),
+            None => Err("the window is gone".into()),
+        }
+    }
+
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
         self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)))

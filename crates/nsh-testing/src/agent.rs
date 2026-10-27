@@ -976,6 +976,12 @@ pub trait Native: Send + Sync {
         let _ = (from, to);
         Err("`dragAndHold` runs headless and on Linux for now".into())
     }
+    /// Drops local files (`file:` URLs) at `at`, as a file manager's drag
+    /// does.
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let _ = (at, uris);
+        Err("`dropFiles` runs headless and on Linux for now".into())
+    }
     /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
     fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
         let _ = at;
@@ -1267,6 +1273,11 @@ impl Agent {
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
             TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
             TestStep::Drop => done(self.drop_held()),
+            TestStep::DropFiles { selector, uris } => done(
+                self.find(&selector, "view", PickTarget::View)
+                    .and_then(|(_, at)| self.native.drop_files(at, uris))
+                    .and_then(|()| self.settled()),
+            ),
             TestStep::HoldKeys { keys, down } => done(
                 self.native
                     .hold_keys(&keys, down)
