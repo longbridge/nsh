@@ -138,7 +138,8 @@ nsh package App.tsx --target web --run
 | `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
-| `nsh.<digest>.wasm` | Rust 应用：引擎、组件和你的 crate（整个 Rust gallery 为 3.3 MB，brotli 后 0.75 MB）。TSX 应用：引擎、核心、运行时的模块和不含编译器的 QuickJS（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB） |
+| `nsh.<digest>.wasm` | Rust 应用：引擎、组件和你的 crate（整个 Rust gallery 为 3.3 MB，brotli 后 0.75 MB）。TSX 应用：引擎、核心、运行时的模块和不含编译器的 QuickJS（约 14.2 MB，gzip 后 4.3 MB，brotli 后 3.1 MB） |
+| `nsh-syntaxes.<digest>.bin` | 代码高亮用的语法定义（bat 的语法集：0.92 MB，brotli 后 0.8 MB），代码块、`Editor` 或 `DiffView` 第一次显示某种语言的代码时下载 |
 | `nsh-bindgen.<digest>.js` | 应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时所需的 wasm-bindgen 胶水代码，已压缩 |
 | `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
 | `app.<digest>.nshc` | TSX 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
@@ -192,7 +193,8 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 | 文件 | 内容 |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | 已发布应用使用的运行时（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB；用 `web` profile 构建），播放器和示例应用共用 |
+| `gallery/nsh.<digest>.wasm` | 已发布应用使用的运行时（约 14.2 MB，gzip 后 4.3 MB，brotli 后 3.1 MB；用 `web` profile 构建），播放器和示例应用共用 |
+| `gallery/nsh-syntaxes.<digest>.bin` | 运行时高亮代码用的语法定义，演示第一次显示某种语言的代码时下载 |
 | `nsh-playground.wasm` | 同上，另含 NSH 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
 | `gallery/nsh.<digest>.js` | DOM 运行时（已压缩）：加载 wasm，应用批次，把输入转成事件 |
 | `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.nshc` |
@@ -226,7 +228,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
 player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
 
-`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）；运行字节码时，发布模式还要传入加固脚本的字节码（`harden`，即 `harden.<digest>.nshc` 的字节）。`nsh package --target web` 写出的页面都用到了。
+`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`data` 把运行时第一次需要时才下载的文件映射到 URL（`syntaxes`：`nsh-syntaxes.<digest>.bin`；默认是 `nsh.js` 旁边的 `nsh-<name>.bin`），`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）；运行字节码时，发布模式还要传入加固脚本的字节码（`harden`，即 `harden.<digest>.nshc` 的字节）。`nsh package --target web` 写出的页面都用到了。
 
 `run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
 

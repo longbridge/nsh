@@ -112,6 +112,16 @@ pub(crate) fn package(
         "nsh.wasm",
         &fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?,
     )?;
+    // What the runtime fetches when it first needs it: the syntaxes it
+    // highlights code with, which every page would download otherwise.
+    let mut data = serde_json::Map::new();
+    if let Some(path) = &runtime.syntaxes {
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        data.insert(
+            "syntaxes".into(),
+            site.add(runtime::SYNTAXES, &bytes)?.into(),
+        );
+    }
     // The wasm-bindgen glue of a runtime whose crates call JS through
     // wasm-bindgen (`crate::bindgen`).
     let glue = runtime
@@ -175,6 +185,7 @@ pub(crate) fn package(
         "capabilities": built.capabilities_json(),
         "rust": built.rust_root,
         "assets": assets,
+        "data": data,
         "fonts": fonts,
         "chunkFonts": chunk_fonts,
         "chunks": chunks,
@@ -300,6 +311,8 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
     let js = read(&runtime.js)?;
     let wasm = read(&runtime.wasm)?;
     let glue = runtime.glue.as_deref().map(read).transpose()?;
+    // `nsh.js` fetches the syntaxes next to itself when code is highlighted.
+    let syntaxes = runtime.syntaxes.as_deref().map(read).transpose()?;
     // The snippets the glue imports, at the paths it imports them by.
     let snippets = match &runtime.glue {
         Some(path) => crate::bindgen::snippets(path)?
@@ -341,6 +354,9 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
         files.push((crate::bindgen::GLUE.to_owned(), glue));
     }
     files.extend(snippets);
+    if let Some(syntaxes) = syntaxes {
+        files.push((runtime::SYNTAXES.to_owned(), syntaxes));
+    }
     Ok((page, files))
 }
 
@@ -827,6 +843,45 @@ mod tests {
     }
 
     #[test]
+    fn the_dev_host_serves_the_syntaxes_next_to_nsh_js() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-syntaxes-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let syntaxes = dir.join(runtime::SYNTAXES);
+        fs::write(&syntaxes, "dump").unwrap();
+        let runtime = WebRuntime {
+            wasm: dir.join("nsh-dev.wasm"),
+            js: dir.join("nsh.js"),
+            glue: None,
+            syntaxes: Some(syntaxes),
+        };
+        fs::write(&runtime.js, "js").unwrap();
+        fs::write(&runtime.wasm, "one").unwrap();
+        let (_, files) = dev_host(&runtime, false).unwrap();
+        let (_, bytes) = files
+            .iter()
+            .find(|(p, _)| p == "nsh-syntaxes.bin")
+            .expect("the syntaxes are served");
+        assert_eq!(bytes, b"dump");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The syntaxes copied from the workspace's two-face are a dump that
+    /// the web runtime's syntect reads (`nsh-base`'s `syntax.rs`).
+    #[test]
+    fn the_syntaxes_file_is_a_dump_syntect_reads() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-dump-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
+        let path = runtime::write_syntaxes(&manifest, &dir).unwrap();
+        let set: syntect::parsing::SyntaxSet =
+            syntect::dumps::from_uncompressed_data(&fs::read(path).unwrap()).unwrap();
+        for language in ["rs", "tsx", "json"] {
+            assert!(set.find_syntax_by_token(language).is_some(), "{language}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_dev_page_knows_its_runtime() {
         let dir = std::env::temp_dir().join(format!("nsh-web-dev-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -834,6 +889,7 @@ mod tests {
             wasm: dir.join("nsh-dev.wasm"),
             js: dir.join("nsh.js"),
             glue: None,
+            syntaxes: None,
         };
         fs::write(&runtime.js, "js").unwrap();
         fs::write(&runtime.wasm, "one").unwrap();
@@ -874,6 +930,7 @@ mod tests {
             wasm: dir.join("nsh-dev.wasm"),
             js: dir.join("nsh.js"),
             glue: None,
+            syntaxes: None,
         };
         fs::write(&runtime.js, "js").unwrap();
         fs::write(&runtime.wasm, "one").unwrap();

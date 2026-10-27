@@ -125,12 +125,18 @@ browser wants them.
 | images (`bounce.gif`, `logo@2x.png`, `spinner.webp`) | 16.1 KB | 6.0 KB | 5.6 KB |
 | icons 180 / 192 / 512 px | 114 KB | 89.4 KB | 86.9 KB |
 
+The syntaxes code is highlighted with are a file of their own, `nsh-syntaxes.<digest>.bin` (0.92 MB, 0.83 MB
+gzipped, 0.80 MB with brotli: two-face's dump compresses each syntax already), fetched the first time a `TextView`
+code block, an `Editor` or a `DiffView` highlights a language (`nsh_core::runtime_data`, the page's `data`; Text View
+and Editor in the gallery). Kept in the module, they made every first load 0.83 MB larger gzipped: on 2026-10-27 the
+gallery's `nsh.wasm` went from 15.09 MB (5.16 MB gzipped, 3.92 MB with brotli) to 14.17 MB (4.33 MB, 3.12 MB).
+
 The app's own share of the first load went from 676 KB (195 KB with brotli) to 91 KB (24 KB). The wasm is now nearly all of the first load. `nsh.js` is minified at package time
 (`nsh_bundler::minify_module`: oxc's minifier, local names mangled, property names kept, since the mounter looks its
 `op_<name>` methods up by name); the dev host serves it as it is. Published sites carry no source maps.
 
-The website's player (`cargo xtask web`) loads the published gallery's `nsh.<digest>.js` and `nsh.<digest>.wasm`
-(`play/gallery/`) rather than copies of its own, so the site deploys one runtime, the parser-free one: its demos are
+The website's player (`cargo xtask web`) loads the published gallery's `nsh.<digest>.js`, `nsh.<digest>.wasm` and
+`nsh-syntaxes.<digest>.bin` (`play/gallery/`) rather than copies of its own, so the site deploys one runtime, the parser-free one: its demos are
 bytecode (`demos/<name>.nshc`, fetched as bytes; `astro dev` compiles one on request, `website/src/lib/play-dev.js`).
 Only the playground has a second wasm (`nsh-playground.wasm`, with the compiler).
 
@@ -142,7 +148,8 @@ interpreter is about 10% slower, and QuickJS is the slowest link. `nsh-platform-
 `disable-assertions` (QuickJS' internal `assert`s, which check its own invariants: 37 KB, and a little faster); the
 native platforms keep them.
 
-Published apps' runtime has no QuickJS parser ("Two runtimes"): 0.17 MB, 40 KB with brotli. The runtime carries no
+Published apps' runtime has no QuickJS parser ("Two runtimes"): 0.17 MB, 40 KB with brotli. The syntaxes are a
+file the page fetches when code is first highlighted ("What a published app downloads"): 0.83 MB gzipped. The runtime carries no
 declaration text (the documentation and TypeScript of the specs, which only make
 `.nsh/types`: `docs/dev/tooling.md`): 69 KB, 20 KB with brotli.
 
@@ -176,7 +183,8 @@ behaves as a published one. A change to the app's crate then rebuilds that crate
 a link argument of its own (nsh's `.cargo/config.toml` may not apply where the app builds, and target-wide `rustflags`
 would rebuild every dependency instead of sharing nsh's builds). The kinds build to
 `target/wasm32-unknown-unknown/{web,web-dev}/nsh_app_<package>_web.wasm` and are copied to
-`.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`; `nsh.js` is nsh's. Everything else (bundling, bytecode, the
+`.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`, beside the syntaxes (`nsh-syntaxes.bin`, written again only
+after the workspace's `Cargo.lock` changes, so a rebuild does not wait for `cargo metadata`); `nsh.js` is nsh's. Everything else (bundling, bytecode, the
 crate's assets, the dev server) already knows the set, from its description (`docs/dev/tooling.md`).
 
 `web::ui_sets` (the sets the runtime serves, which `package` checks the app's imports against and the dev page sends

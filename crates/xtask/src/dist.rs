@@ -11,6 +11,7 @@
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
 //! dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          the web runtimes (published apps', the dev host's)
+//! dist/nsh/runtime/web/nsh-syntaxes.bin                       the syntaxes they fetch to highlight code
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
 //! ```
@@ -154,6 +155,12 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     copy(
         &root.join("crates/nsh-platform-web/web/nsh.js"),
         &out.join("runtime/web/nsh.js"),
+    )?;
+    // The syntaxes the web runtime leaves out and fetches when it first
+    // highlights code: two-face's dump, as this workspace resolves it.
+    copy(
+        &package_dir(&root, "two-face")?.join("generated/syntaxes-fancy-newlines.bin"),
+        &out.join("runtime/web/nsh-syntaxes.bin"),
     )?;
 
     // Android runtimes. Windows machines often have no Android SDK: the
@@ -324,6 +331,42 @@ pub(crate) fn cargo(args: &[&str], what: &str) -> anyhow::Result<()> {
 /// Windows).
 fn exe(name: &str) -> String {
     format!("{name}{}", env::consts::EXE_SUFFIX)
+}
+
+/// The directory of package `name` as the workspace at `root` resolves
+/// it (`cargo metadata`).
+fn package_dir(root: &Path, name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let output = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .current_dir(root)
+        .args(["metadata", "--format-version", "1"])
+        .output()
+        .context("run cargo metadata")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "cargo metadata: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+    let mut found = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["name"].as_str() == Some(name));
+    let package = found
+        .next()
+        .with_context(|| format!("the workspace resolves no {name}"))?;
+    anyhow::ensure!(
+        found.next().is_none(),
+        "the workspace resolves several versions of {name}"
+    );
+    let manifest = package["manifest_path"]
+        .as_str()
+        .context("cargo metadata: a package without manifest_path")?;
+    Ok(Path::new(manifest)
+        .parent()
+        .context("a manifest without directory")?
+        .to_path_buf())
 }
 
 pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
