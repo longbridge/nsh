@@ -100,6 +100,11 @@ pub trait ViewGeometry: Send + Sync {
     fn pos_at_coords(&self, point: Point<Points>) -> Option<usize>;
     /// The box around the selection.
     fn selection_rect(&self) -> Option<Bounds<Points>>;
+    /// The box of the block starting at `pos`, as it is laid out.
+    fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        let _ = pos;
+        None
+    }
     /// A content point less the same point in the root view, now (its
     /// scrolling included), once the pointer has been over the content.
     fn page_shift(&self) -> Option<Point<Points>> {
@@ -554,6 +559,20 @@ impl EditorSession {
         let geometry = self.geometry()?;
         let shift = geometry.page_shift()?;
         let b = geometry.coords_at_pos(pos)?;
+        Some(Bounds::new(
+            Point::new(b.origin.x - shift.x, b.origin.y - shift.y),
+            b.size,
+        ))
+    }
+
+    /// The box of the block starting at `pos` in the root view (page
+    /// coordinates, as ProseMirror's `nodeDOM(pos).getBoundingClientRect()`
+    /// gives the window's): where to place what goes around a table or an
+    /// image.
+    pub fn page_node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        let geometry = self.geometry()?;
+        let shift = geometry.page_shift()?;
+        let b = geometry.node_rect(pos)?;
         Some(Bounds::new(
             Point::new(b.origin.x - shift.x, b.origin.y - shift.y),
             b.size,

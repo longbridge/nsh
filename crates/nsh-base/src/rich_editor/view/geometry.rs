@@ -198,6 +198,32 @@ impl Geometry {
         ))
     }
 
+    /// The drawn caret at `pos`: as tall as the line's glyphs (ascender
+    /// and descender), centred in the line's leading, as a browser draws
+    /// it, rather than the whole line box [`Self::caret_rect`] gives.
+    pub(crate) fn caret_glyph_rect(
+        &self,
+        pos: usize,
+        affinity: Affinity,
+    ) -> Option<Bounds<Points>> {
+        let b = self.caret_rect(pos, affinity)?;
+        let id = self.text_at(pos)?;
+        let (_, geo) = self.text_box(id)?;
+        let t = geo.map.to_text(pos - geo.start);
+        let Some(line) = line_of(&geo.lines, t, affinity).map(|i| &geo.lines[i]) else {
+            return Some(b);
+        };
+        let glyphs = line.ascender + line.descender;
+        if glyphs <= px(0.0) || glyphs >= line.height {
+            return Some(b);
+        }
+        let top = b.origin.y + (line.height - glyphs) * 0.5;
+        Some(Bounds::new(
+            Point::new(b.origin.x, top),
+            Size::new(px(0.0), glyphs),
+        ))
+    }
+
     /// The boxes covering `from..to`, one per line of each textblock it
     /// crosses (through a line's end where it goes on).
     pub(crate) fn range_rects(&self, from: usize, to: usize) -> Vec<Bounds<Points>> {

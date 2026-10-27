@@ -589,6 +589,13 @@ impl RichEditorSession {
         self.session.page_coords_at_pos(pos).map(|b| rect_json(&b))
     }
 
+    /// The box `{ x, y, width, height }` of the block starting at `pos` in
+    /// page coordinates (ProseMirror's `nodeDOM(pos)` measured in the
+    /// window's), or `null` before the pointer has been over the editor.
+    pub(crate) fn page_node_rect(&self, pos: usize) -> Option<JsonValue> {
+        self.session.page_node_rect(pos).map(|b| rect_json(&b))
+    }
+
     /// The document position at the page point `{ x, y }` (ProseMirror's
     /// `posAtCoords` in the window's coordinates), or `null`.
     pub(crate) fn pos_at_page_coords(&self, page: JsonValue) -> Option<usize> {

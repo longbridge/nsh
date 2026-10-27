@@ -37,7 +37,7 @@ use crate::{
 };
 
 /// The caret's width.
-const CARET_WIDTH: f32 = 2.0;
+const CARET_WIDTH: f32 = 1.5;
 
 /// The gap cursor's width (prosemirror-gapcursor's).
 const GAP_WIDTH: f32 = 20.0;
@@ -1159,7 +1159,7 @@ fn caret(rv: Rv) -> impl IntoElement {
         if !empty_text {
             return None;
         }
-        let b = rv.caret_rect()?;
+        let b = rv.caret_glyph_rect()?;
         Some(part(
             rect(Bounds::new(
                 Point::new(b.origin.x - px(CARET_WIDTH / 2.0), b.origin.y),

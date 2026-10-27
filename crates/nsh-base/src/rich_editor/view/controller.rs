@@ -287,6 +287,7 @@ impl Rv {
         let geometry = self.session.attach_geometry(Arc::new(GeometryHandle {
             thread: std::thread::current().id(),
             geo: self.geo.clone(),
+            tree: self.tree.clone(),
             state: self.st.clone(),
             pointer: self.pointer.clone(),
             scrolled: self.scrolled.clone(),
@@ -2048,6 +2049,15 @@ impl Rv {
         self.geo.borrow().caret_rect(sel.head(), sel.affinity())
     }
 
+    /// The caret as drawn: the glyphs' height of its line.
+    pub(crate) fn caret_glyph_rect(&self) -> Option<Bounds<Points>> {
+        let state = self.st.borrow();
+        let sel = state.selection();
+        self.geo
+            .borrow()
+            .caret_glyph_rect(sel.head(), sel.affinity())
+    }
+
     /// The box around the selection in the content box: its cells' (a
     /// cell selection), its text's lines, else the caret's box.
     pub(crate) fn selection_box(&self) -> Option<Bounds<Points>> {
@@ -2655,6 +2665,7 @@ impl Wake {
 struct GeometryHandle {
     thread: std::thread::ThreadId,
     geo: Rc<RefCell<Geometry>>,
+    tree: Rc<RefCell<Tree>>,
     state: Rc<RefCell<EditorState>>,
     pointer: Rc<Cell<Option<PageOffset>>>,
     scrolled: Rc<Cell<Points>>,
@@ -2723,5 +2734,17 @@ impl ViewGeometry for GeometryHandle {
             return None;
         }
         GeometryHandle::page_shift(self)
+    }
+
+    fn node_rect(&self, pos: usize) -> Option<Bounds<Points>> {
+        if !self.here() {
+            return None;
+        }
+        let tree = self.tree.borrow();
+        let geo = self.geo.borrow();
+        let b = tree.children.values().flatten().find(|b| b.pos == pos)?;
+        let origin = geo.origin(b.id)?;
+        let (_, frame) = geo.frames.get(&b.id)?;
+        Some(Bounds::new(origin, frame.size))
     }
 }
