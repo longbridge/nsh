@@ -415,12 +415,13 @@ impl Headless {
 
     /// The step `hover(<selector>)`: the mouse comes over the middle of the
     /// view `selector` names, as on a desktop (`open`'s `platform`): the
-    /// views under it that it left hear `onHoverOut` (from the inside out),
-    /// those it came over `onHoverIn` (from the outside in) and take their
-    /// `hover:` styles, and the ones listening to `onHoverMove` hear where
-    /// it is. A browser has one whatever its width (the web in the phone
-    /// idiom included); an iOS or Android phone or tablet has none: there
-    /// it fails.
+    /// views under it that it left hear `onMouseLeave` (from the inside
+    /// out), those it came over `onMouseEnter` (from the outside in) and
+    /// take their `hover:` styles, and the hovered ones hear `onMouseMove`
+    /// (from the inside out), each with where the mouse is now in it and
+    /// no button down (the mouse never presses here). A browser has one
+    /// whatever its width (the web in the phone idiom included); an iOS or
+    /// Android phone or tablet has none: there it fails.
     pub fn hover(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("hover({selector})"));
@@ -450,7 +451,7 @@ impl Headless {
             {
                 control.set_states(id, states);
             }
-            self.send(id, EventKind::HoverOut, EventPayload::None);
+            self.send(id, EventKind::MouseLeave, self.mouse_at(id, at));
         }
         for id in entered {
             if let Some(states) =
@@ -459,20 +460,26 @@ impl Headless {
             {
                 control.set_states(id, states);
             }
-            self.send(id, EventKind::HoverIn, EventPayload::None);
+            self.send(id, EventKind::MouseEnter, self.mouse_at(id, at));
         }
         for id in views {
-            let origin = self
-                .screen
-                .bounds_in_root(id)
-                .map_or(Point::default(), |b| b.origin);
-            let event = nsh_core::HoverEvent {
-                position: point(at.x - origin.x, at.y - origin.y),
-                page_position: at,
-                modifiers: nsh_core::keymap::Modifiers::default(),
-            };
-            self.send(id, EventKind::HoverMove, EventPayload::Hover(event));
+            self.send(id, EventKind::MouseMove, self.mouse_at(id, at));
         }
         self.done()
+    }
+
+    /// The mouse at `at` in the root, as view `id` hears it: where it is in
+    /// the view, no modifier keys and no button down.
+    fn mouse_at(&self, id: NodeId, at: Point<Points>) -> EventPayload {
+        let origin = self
+            .screen
+            .bounds_in_root(id)
+            .map_or(Point::default(), |b| b.origin);
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            point(at.x - origin.x, at.y - origin.y),
+            at,
+            nsh_core::keymap::Modifiers::default(),
+            None,
+        ))
     }
 }

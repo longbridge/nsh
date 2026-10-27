@@ -1282,7 +1282,7 @@ opt-level = 3
                  bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\
                  browser = [\"nsh-platform-web/browser\"]\n\
                  # The development host's: what `nsh test --target web` asks about.\n\
-                 dev = [\"nsh-platform-web/dev\"]\n\n\
+                 dev = [\"nsh-platform-web/dev\", \"nsh-platform-web/base-full\", \"nsh-platform-web/std-zlib\", \"nsh-platform-web/std-crypto\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\nnsh-platform-web = {}\n",
                 self.bin("web"),
@@ -1420,6 +1420,7 @@ opt-level = 3
                 } => source.join("crates/nsh-platform-web/web/nsh.js"),
                 Nsh::Registry => out.join("nsh.js"),
             },
+            syntaxes: crate::runtime::syntaxes_in(&out),
         };
         if !build {
             return Ok((runtime.wasm.exists() && runtime.js.exists()).then_some(runtime));
@@ -1434,7 +1435,9 @@ opt-level = 3
         // nor hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Browser => &["--features", "browser"],
+            crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => {
+                &["--features", "browser"]
+            }
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -1469,37 +1472,18 @@ opt-level = 3
             fs::copy(&js, &runtime.js)
                 .with_context(|| format!("copy {} to {}", js.display(), runtime.js.display()))?;
         }
+        // The syntaxes the module leaves out, as this workspace resolves them.
+        runtime.syntaxes = Some(crate::runtime::write_syntaxes(
+            &self.workspace.join("Cargo.toml"),
+            &out,
+        )?);
         Ok(Some(runtime))
     }
 
     /// The directory Cargo unpacked nsh's crate `name` (from crates.io, at
     /// [`VERSION`]) into for the workspace, as `cargo metadata` reports it.
     fn registry_crate(&self, name: &str) -> anyhow::Result<PathBuf> {
-        let output = Command::new(cargo())
-            .args(["metadata", "--format-version", "1", "--manifest-path"])
-            .arg(self.workspace.join("Cargo.toml"))
-            .output()
-            .context("run cargo metadata")?;
-        if !output.status.success() {
-            bail!(
-                "cargo metadata of {}:\n{}",
-                self.workspace.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        let metadata: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
-        metadata["packages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["name"].as_str() == Some(name) && p["version"].as_str() == Some(VERSION))
-            .and_then(|p| {
-                Path::new(p["manifest_path"].as_str()?)
-                    .parent()
-                    .map(Path::to_path_buf)
-            })
-            .with_context(|| format!("the workspace resolves no {name} {VERSION}"))
+        crate::runtime::package_dir(&self.workspace.join("Cargo.toml"), name, Some(VERSION))
     }
 
     /// The workspace of the app's GPUI development host
@@ -2184,7 +2168,7 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
     match kind {
-        crate::runtime::WebKind::Browser => "web",
+        crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => "web",
         crate::runtime::WebKind::Dev => "web-dev",
     }
 }

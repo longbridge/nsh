@@ -292,8 +292,8 @@ report it:
   when released past `ScrollBehavior::refreshes`) takes it, and the press under it is cancelled once it moves away;
 - `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
-  (`Screen::set_hovered`), `input::hover_changes` says which hear `HoverOut` and `HoverIn` (with their `HOVERED` state
-  reported, `EngineControl::set_states`), and the hovered views hear `HoverMove`;
+  (`Screen::set_hovered`), `input::hover_changes` says which hear `MouseLeave` and `MouseEnter` (with their `HOVERED`
+  state reported, `EngineControl::set_states`), and the hovered views hear `MouseMove` (no button down);
 - `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
   nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
   `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a

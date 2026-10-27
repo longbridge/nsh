@@ -570,7 +570,7 @@ impl<M: TextEngine> Core<M> {
             .collect();
         for key in hints {
             match kind {
-                EventKind::HoverIn => self.hint_wait(key),
+                EventKind::MouseEnter => self.hint_wait(key),
                 _ => self.unhint(key),
             }
         }

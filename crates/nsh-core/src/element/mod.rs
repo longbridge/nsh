@@ -117,7 +117,8 @@ pub use self::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
         ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive,
         IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig, ListElement,
-        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
+        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, TextPartStyle, View,
+        image, text, view,
     },
     call::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
@@ -190,13 +191,13 @@ pub use crate::geometry::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
     BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
-    EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, HoverEvent, KeyboardAppearance,
+    EllipsizeMode, EventKind, EventPayload, HeaderSystemItem, KeyboardAppearance,
     KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation,
     LayoutCurve, LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation,
-    ModalPresentation, PanActivation, PasteBehavior, PasteEvent, PastedFile, PointerEvents,
-    PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig,
-    StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow, TouchEvent, TransformKind,
-    TransformOrigin, Viewability,
+    ModalPresentation, MouseButton, MouseEvent, PanActivation, PasteBehavior, PasteEvent,
+    PastedFile, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
+    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TextShadow,
+    TouchEvent, TransformKind, TransformOrigin, Viewability,
     animation::{
         Curve, EaseMode, Easing, Extrapolate, Keyframe, KeyframeTiming, MotionChannel, MotionKind,
         MotionPreset, MotionSpec, Output as AnimationOutput, PlaybackDirection, StaggerFrom,

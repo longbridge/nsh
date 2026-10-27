@@ -12,15 +12,23 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
-# Published TSX evaluated by the browser, without QuickJS in WebAssembly.
-browser = ["nsh-engine/browser", "dep:sha2", "dep:sha1", "dep:md-5", "dep:hmac", "dep:crc32fast", "dep:crc32c", "dep:flate2", "dep:brotli", "dep:zstd", "dep:url"]
+default = ["js", "base-full", "std-zlib", "std-crypto"]
+# Every part of nsh/base; otherwise only its core controls are registered.
+base-full = []
+# Published TSX evaluated by the browser, with every base and standard module.
+browser = ["browser-core", "base-full", "std-zlib", "std-crypto"]
+# The browser host with core base components; used by the lite runtime.
+browser-core = ["nsh-engine/browser", "dep:url"]
 # Ownership fixtures for actual-Wasm bridge tests, never used by packaging.
 browser-tests = ["browser"]
 # JS apps (`nsh_start`, bundles, hot updates, chunks) on QuickJS. Without
 # it the module runs a Rust app only (`nsh_start_rust`, `rust_app!`) and
 # links no QuickJS.
-js = ["nsh-engine/js", "dep:nsh-js", "dep:rquickjs"]
+js = ["nsh-engine/js-core", "dep:nsh-js", "dep:rquickjs"]
+# The standard modules `zlib` and `crypto` (with its globals) for
+# JS apps: 0.56 and 0.35 MB of the gzipped module.
+std-zlib = ["nsh-js?/zlib", "dep:flate2", "dep:brotli", "dep:zstd"]
+std-crypto = ["nsh-js?/crypto", "dep:sha2", "dep:sha1", "dep:md-5", "dep:hmac", "dep:crc32fast", "dep:crc32c"]
 # The playground's build (`nsh-playground.wasm`): also compiles TSX in the
 # page (`nsh_compile`; nsh's JSX compiler, no rolldown), about 3 MB more.
 compiler = ["js", "dep:nsh-bundler"]

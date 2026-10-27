@@ -99,34 +99,37 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
   is mounted (no press, no feedback; a secondary click goes on to the nearest enabled listener around it).
-- **`onMouseMove`** (any element; macOS, Linux, Windows, GPUI and web) reports actual mouse movement,
-  including with a button down. Each listening view under the pointer hears `{ x, y }` in its own coordinates
-  (points), innermost out. Rust's `.on_mouse_move` receives `Point<Points>`. The engine retains the latest move
-  per view per frame and flushes it before later non-motion events. Content updates and scrolling re-pick hover
-  state independently; they do not synthesize mouse motion. Touch and pen movement use the touch APIs.
-- **`onHoverIn` / `onHoverOut` / `onHoverMove`** (any element) tell JS, after the fact, that the mouse came over a view,
-  left it, or moved over it with no button down. On the desktops they follow the same hover tracking as `hover:`
-  classes: the views along the chain under the mouse (innermost first) whose classes read `HOVERED` or that listen to
-  any of the three are the hovered ones, so ancestors hear `onHoverIn` too, as with CSS `:hover` and the DOM's
-  `pointerenter`; a handler alone makes its view take part (`input.rs` `hoverable`, the view's mounted event mask), and
-  a view that does not listen gets no event. When the set changes, the views left hear `onHoverOut` from the inside
-  out, then the views entered `onHoverIn` from the outside in; then each hovered view with `onHoverMove` hears where
-  the mouse is (`EventPayload::Hover`, JS `{ position, pagePosition, modifiers }`: the `Point` in the view, its transforms undone,
-  the `Point` in the root view as touches have it, the modifier keys as GPUI's `Modifiers`). A modifier key pressed or
-  released while the mouse rests is a move to where it is with the new modifiers, so a view hears Control or Command
-  come and go under a still mouse (an `Editor`'s definition link): Linux from the root's key events, macOS from a
-  local `flagsChanged` monitor (installed once a view hears hover moves), Windows from the modifiers' `WM_KEYDOWN` /
-  `WM_KEYUP`, GPUI from `on_modifiers_changed`, the web from `keydown` / `keyup` of `Control`, `Alt`, `Shift` and
-  `Meta` (`nsh.js` `modifiersChanged`). The mouse leaving the window (while no button is down on
-  macOS) unhovers everything; on macOS and GPUI hover is picked again after every batch (on macOS also after every
-  scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one that arrives there
-  `onHoverIn`; on Linux and Windows that waits for the next mouse move. Moves with a button down are touches
-  (`onTouchMove`, the responder), not hovers, and touches never hover. The web uses the browser's `pointerenter` /
-  `pointerleave` / `pointermove` of mice (`nsh.js` `installHover`); iOS a `UIHoverGestureRecognizer` per view (iPad
-  pointers, Mac Catalyst's mouse), Android the view's hover listener (mice, styluses): there each view is tracked by
-  the system, not along a chain. The engine merges moves (`State::hover_moves`): the latest per view, delivered at most
-  once per `HOVER_MOVE_INTERVAL` (8 ms) and always before the next other event, so a view hears where the mouse went
-  before it hears it leave; mice report up to 1000 moves a second, and a crosshair needs one per frame.
+- **`onMouseEnter` / `onMouseLeave` / `onMouseMove`** (any element; the DOM's `mouseenter` / `mouseleave` / `mousemove`,
+  GPUI's `MouseMoveEvent`) tell JS, after the fact, that the mouse came over a view, left it, or moved over it, with or
+  without a button down. All three pass a `MouseEvent` (`EventPayload::Mouse`, JS `{ position, pagePosition, modifiers,
+  pressedButton }`: the `Point` in the view, its transforms undone, the `Point` in the root view as touches have it, the
+  modifier keys as GPUI's `Modifiers`, and the button held down as GPUI's `MouseButton`, `"left"` / `"right"` /
+  `"middle"` / `"back"` / `"forward"`, or `null`); `onMouseLeave`'s is where the mouse was last. Rust's
+  `.on_mouse_enter` / `.on_mouse_leave` / `.on_mouse_move` receive `&MouseEvent`. On the desktops they follow the same
+  hover tracking as `hover:` classes: the views along the chain under the mouse (innermost first) whose classes read
+  `HOVERED` or that listen to any of the three are the hovered ones, so ancestors hear `onMouseEnter` too, as with CSS
+  `:hover` and the DOM's `mouseenter`; a handler alone makes its view take part (`input.rs` `hoverable`, the view's
+  mounted event mask), and a view that does not listen gets no event. When the set changes, the views left hear
+  `onMouseLeave` from the inside out, then the views entered `onMouseEnter` from the outside in; then the views under
+  the mouse and the views around them that listen to `onMouseMove` hear where it is, from the inside out (the move that
+  brings the mouse into a view is its first, after its `onMouseEnter`). There is one path for moves: on the desktops and
+  the web a drag (a button down) is also a touch (`onTouchMove`, the responder) and its moves reach `onMouseMove` with
+  `pressedButton` set, so a view that shows hover-only feedback ignores those; iOS's and Android's hover reports the
+  pointer with no button down. A modifier key pressed or released while the mouse rests with no button down is a move to
+  where it is with the new modifiers, so a view hears Control or Command come and go under a still mouse (an `Editor`'s
+  definition link): Linux from the root's key events, macOS from a local `flagsChanged` monitor (installed once a view
+  hears mouse moves), Windows from the modifiers' `WM_KEYDOWN` / `WM_KEYUP`, GPUI from `on_modifiers_changed`, the web
+  from `keydown` / `keyup` of `Control`, `Alt`, `Shift` and `Meta` (`nsh.js` `modifiersChanged`). The mouse leaving the
+  window (while no button is down on macOS) unhovers everything; on macOS and GPUI hover is picked again after every
+  batch (on macOS also after every scroll), so a view removed or moved from under a still mouse hears `onMouseLeave` and
+  one that arrives there `onMouseEnter`; on Linux and Windows that waits for the next mouse move. Content updates and
+  scrolling pick hover again without making up mouse moves; touches never hover, and touch and pen moves use the touch
+  APIs. The web uses the browser's `pointerenter` / `pointerleave` of mice (`nsh.js` `installMouse`) and the root's
+  `pointermove` (`mouseMoved`); iOS a `UIHoverGestureRecognizer` per view (iPad pointers, Mac Catalyst's mouse), Android
+  the view's hover listener (mice, styluses): there each view is tracked by the system, not along a chain. The engine
+  merges moves (`State::mouse_moves`): the latest per view, delivered at most once per `MOUSE_MOVE_INTERVAL` (8 ms) and
+  always before the next other event, so a view hears where the mouse went before it hears it leave; mice report up to
+  1000 moves a second, and a crosshair needs one per frame.
 - **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
   macOS, in GPUI on macOS too; the browser's `contextmenu`, which its keyboard menu key raises too). The platform
   decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
@@ -366,11 +369,11 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
 - **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
   JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),
-  its anchor (its parent, the nearest node with a layout, when it has none) listens to `onHoverIn` / `onHoverOut` and
+  its anchor (its parent, the nearest node with a layout, when it has none) listens to `onMouseEnter` / `onMouseLeave` and
   touches (`Node::overlay_watched`'s `watch::HINT` bit, mounted with the events JS asked for, hover also while the view
-  is disabled). `onHoverIn` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
+  is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
-  for out of its root view). `onHoverOut`, a touch down whose path holds the anchor, or the hint leaving the view hide
+  for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
   it. The overlay hears what the pointer asks for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`), and
   `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
   is controlled or not). Touch screens never watch: a hint shows there only when `open` says so. The overlay should

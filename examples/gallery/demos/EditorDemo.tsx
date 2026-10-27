@@ -697,11 +697,11 @@ export function EditorDemo() {
         {(card) => (
           <Overlay anchor={card().anchor} placement="top" align="start" offset={4} margin={8}>
             <View
-              onHoverIn={() => {
+              onMouseEnter={() => {
                 overCard = true;
                 clearTimeout(closeTimer);
               }}
-              onHoverOut={() => {
+              onMouseLeave={() => {
                 overCard = false;
                 closeSoon();
               }}

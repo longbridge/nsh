@@ -3352,6 +3352,145 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
     assert!(after.iter().any(|b| shows(b, "Price 21-75")));
 }
 
+const BASE_NUMBER_INPUT: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { NumberInput } from "nsh/base";
+
+function App() {
+  const quantity = signal<number | null>(2);
+  return (
+    <View>
+      <NumberInput
+        value={quantity()}
+        onChange={(next) => quantity.set(next)}
+        min={0}
+        max={10}
+        step={0.5}
+        accessibilityLabel="Quantity"
+        decrementButton={<Text>Less</Text>}
+        incrementButton={<Text>More</Text>}
+        class="flex-row"
+        inputClass="w-[100px] h-[30px]"
+        incrementButtonClass="size-[30px]"
+        decrementButtonClass="size-[30px]"
+      />
+      <Text>{`Quantity ${quantity()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `NumberInput` from TSX: its field is a spin button for
+/// screen readers with its label and value, whose increment steps it (the
+/// field's text follows the app's value); an edit that is no number goes
+/// back natively, one that is reaches the app; the step buttons, hidden
+/// from screen readers and no stops of Tab, step it too.
+#[test]
+fn a_base_number_input_steps_its_field_and_refuses_text_that_is_no_number() {
+    use nsh_core::{AccessibilityRole, AccessibilityValue};
+    let (engine, rx) = start(BASE_NUMBER_INPUT);
+    let first = until(&rx, |b| shows(b, "Quantity 2"));
+    let items = || first.iter().flat_map(|b| &b.items);
+    let field = items()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: nsh_core::ViewKind::Input,
+            } => Some(*id),
+            _ => None,
+        })
+        .expect("the field");
+    let props_of = |batches: &[MountBatch], view: u32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+                _ => None,
+            })
+    };
+    let props = props_of(&first, field).expect("the field's props");
+    assert_eq!(props.accessibility.role, AccessibilityRole::Spinbutton);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Quantity"));
+    let value = |now: f32| AccessibilityValue {
+        min: Some(0.0),
+        max: Some(10.0),
+        now: Some(now),
+        text: Some(format!("{now}").into()),
+    };
+    assert_eq!(props.accessibility.value, Some(value(2.0)));
+    let text_of = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| &b.items)
+            .filter_map(|i| match i {
+                MountItem::InputValue { id, text, count } if *id == field => {
+                    Some((text.clone(), *count))
+                }
+                _ => None,
+            })
+            .next_back()
+    };
+    assert_eq!(text_of(&first).map(|(t, _)| t).as_deref(), Some("2"));
+    let control = engine.control();
+
+    // A screen reader's increment: a step, which the app takes.
+    control.dispatch_event(
+        field,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    let after = until(&rx, |b| shows(b, "Quantity 2.5"));
+    assert_eq!(text_of(&after).map(|(t, _)| t).as_deref(), Some("2.5"));
+    assert_eq!(
+        props_of(&after, field).and_then(|p| p.accessibility.value),
+        Some(value(2.5))
+    );
+
+    // A letter: the field goes back to its number, based on that edit.
+    control.dispatch_event(
+        field,
+        EventKind::ChangeText,
+        EventPayload::Text {
+            text: "2.5a".into(),
+            count: 1,
+        },
+    );
+    let after = until(&rx, |b| text_of(std::slice::from_ref(b)).is_some());
+    assert_eq!(text_of(&after), Some(("2.5".to_owned(), 1)));
+    // A number: the app hears it, and nothing goes back.
+    control.dispatch_event(
+        field,
+        EventKind::ChangeText,
+        EventPayload::Text {
+            text: "7".into(),
+            count: 2,
+        },
+    );
+    let after = until(&rx, |b| shows(b, "Quantity 7"));
+    assert_eq!(text_of(&after), None);
+
+    // The step buttons: hidden from screen readers, no Tab stops; the
+    // increment (after the field) steps.
+    let buttons: Vec<u32> = items()
+        .filter_map(|i| match i {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(buttons.len(), 2, "a button each way");
+    for &button in &buttons {
+        let props = props_of(&first, button).expect("the button's props");
+        assert!(props.accessibility.hidden);
+        assert_eq!(props.focusable, Some(false));
+    }
+    control.dispatch_event(buttons[1], EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| shows(b, "Quantity 7.5"));
+    assert_eq!(text_of(&after).map(|(t, _)| t).as_deref(), Some("7.5"));
+}
+
 const TAB_BAR: &str = r##"import { mount, signal } from "nsh";
 import { TabBar } from "nsh/mobile";
 
@@ -3580,7 +3719,7 @@ mount(App);
 #[test]
 fn a_base_plot_draws_its_marks_from_the_rows() {
     use nsh_core::{
-        AccessibilityRole, Color, HoverEvent,
+        AccessibilityRole, Color,
         canvas::{CanvasOp, Num, Paint, PathOp},
     };
     let (engine, rx) = start(BASE_PLOT);
@@ -3689,20 +3828,24 @@ fn a_base_plot_draws_its_marks_from_the_rows() {
     let hover = |x: f32| {
         engine.control().dispatch_event(
             plot.0,
-            EventKind::HoverMove,
-            EventPayload::Hover(HoverEvent {
-                position: nsh_core::geometry::point(px(x), px(10.0)),
-                ..Default::default()
-            }),
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(10.0)),
+                nsh_core::geometry::point(px(x), px(10.0)),
+                Default::default(),
+                None,
+            )),
         )
     };
     hover(90.0);
     until(&rx, |b| shows(b, "hover 1"));
     hover(160.0);
     until(&rx, |b| shows(b, "hover 2"));
-    engine
-        .control()
-        .dispatch_event(plot.0, EventKind::HoverOut, EventPayload::None);
+    engine.control().dispatch_event(
+        plot.0,
+        EventKind::MouseLeave,
+        EventPayload::Mouse(nsh_core::MouseEvent::default()),
+    );
     until(&rx, |b| shows(b, "hover null"));
 
     // New rows: the marks drawn again, in one batch, nothing for the grid
@@ -4039,11 +4182,13 @@ fn base_plot_moves_natively_with_its_motion() {
     let hover = |x: f32| {
         engine.control().dispatch_event(
             plot,
-            EventKind::HoverMove,
-            EventPayload::Hover(nsh_core::HoverEvent {
-                position: nsh_core::geometry::point(px(x), px(10.0)),
-                ..Default::default()
-            }),
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(10.0)),
+                nsh_core::geometry::point(px(x), px(10.0)),
+                Default::default(),
+                None,
+            )),
         )
     };
     // Entering: the parts placed at once, then faded in over 120 ms; the
@@ -4064,9 +4209,11 @@ fn base_plot_moves_natively_with_its_motion() {
     assert!(springs(&glided) > 0);
     assert!(plot_drawings(&glided).is_empty());
     // Leaving: faded out over 80 ms.
-    engine
-        .control()
-        .dispatch_event(plot, EventKind::HoverOut, EventPayload::None);
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseLeave,
+        EventPayload::Mouse(nsh_core::MouseEvent::default()),
+    );
     let left = until(&rx, |b| shows(b, "hover null"));
     assert!(timings(&left).contains(&(0.0, 80.0)));
 
@@ -4130,7 +4277,7 @@ mount(App);
 #[test]
 fn base_plot_marks_have_parts_of_their_own_and_the_tooltip_stays_inside() {
     use nsh_core::{
-        Color, HoverEvent,
+        Color,
         animation::Animator,
         canvas::{CanvasOp, GradientShape, Paint},
         geometry::point,
@@ -4205,11 +4352,13 @@ fn base_plot_marks_have_parts_of_their_own_and_the_tooltip_stays_inside() {
     let hover = |x: f32, y: f32| {
         engine.control().dispatch_event(
             plot,
-            EventKind::HoverMove,
-            EventPayload::Hover(HoverEvent {
-                position: point(px(x), px(y)),
-                ..Default::default()
-            }),
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
         )
     };
     // The tooltip: the view around the app's content, and the point it is
@@ -4396,7 +4545,7 @@ fn base_plot_pie_draws_a_slice_per_row_and_follows_the_pointer() {
     use std::f32::consts::{FRAC_PI_2, PI};
 
     use nsh_core::{
-        Color, HoverEvent,
+        Color,
         animation::{AnimationValue, Animator},
         canvas::{CanvasOp, FillRule, Paint},
         geometry::point,
@@ -4501,11 +4650,13 @@ fn base_plot_pie_draws_a_slice_per_row_and_follows_the_pointer() {
     let hover = |x: f32, y: f32| {
         engine.control().dispatch_event(
             plot,
-            EventKind::HoverMove,
-            EventPayload::Hover(HoverEvent {
-                position: point(px(x), px(y)),
-                ..Default::default()
-            }),
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
         )
     };
     // What the animator shows of a slice: its opacity and its rim.
@@ -4594,7 +4745,6 @@ mount(App);
 #[test]
 fn base_plot_pie_sweeps_in_and_lifts_on_the_pointer_spring() {
     use nsh_core::{
-        HoverEvent,
         animation::{AnimationOp, Driver},
         geometry::point,
     };
@@ -4621,11 +4771,13 @@ fn base_plot_pie_sweeps_in_and_lifts_on_the_pointer_spring() {
     // The second row's slice, past 3 o'clock: it lifts on the spring.
     engine.control().dispatch_event(
         plot,
-        EventKind::HoverMove,
-        EventPayload::Hover(HoverEvent {
-            position: point(px(30.0), px(60.0)),
-            ..Default::default()
-        }),
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            point(px(30.0), px(60.0)),
+            point(px(30.0), px(60.0)),
+            Default::default(),
+            None,
+        )),
     );
     let mut over = until(&rx, |b| shows(b, "hover 1"));
     over.extend(until(&rx, |_| false));
@@ -4965,7 +5117,7 @@ fn bar_rects(ops: &[nsh_core::canvas::CanvasOp]) -> Vec<[f32; 4]> {
 #[test]
 fn base_plot_bars_stand_in_bands_and_stack() {
     use nsh_core::{
-        Color, HoverEvent,
+        Color,
         canvas::{CanvasOp, Num, Paint, PathOp},
     };
     let (engine, rx) = start(BASE_PLOT_BARS);
@@ -5077,11 +5229,13 @@ fn base_plot_bars_stand_in_bands_and_stack() {
     let plot = test_view(&all, "bars");
     engine.control().dispatch_event(
         plot,
-        EventKind::HoverMove,
-        EventPayload::Hover(HoverEvent {
-            position: nsh_core::geometry::point(px(160.0), px(10.0)),
-            ..Default::default()
-        }),
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            nsh_core::geometry::point(px(160.0), px(10.0)),
+            nsh_core::geometry::point(px(160.0), px(10.0)),
+            Default::default(),
+            None,
+        )),
     );
     let hovered = until(&rx, |b| shows(b, "hover 1"));
     assert!(plot_drawings(&hovered).is_empty());
@@ -5178,11 +5332,13 @@ fn base_plot_bars_grow_and_fade_natively() {
     let plot = test_view(&batches, "plot");
     engine.control().dispatch_event(
         plot,
-        EventKind::HoverMove,
-        EventPayload::Hover(nsh_core::HoverEvent {
-            position: nsh_core::geometry::point(px(150.0), px(10.0)),
-            ..Default::default()
-        }),
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            nsh_core::geometry::point(px(150.0), px(10.0)),
+            nsh_core::geometry::point(px(150.0), px(10.0)),
+            Default::default(),
+            None,
+        )),
     );
     let entered = until(&rx, |b| shows(b, "hover 1"));
     assert!(plot_drawings(&entered).is_empty());

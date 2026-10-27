@@ -86,6 +86,7 @@
         glue: app.glue,
         host: app.host ? { call: (name, args) => host.call(name, args) } : undefined,
         assets: app.assets,
+        data: app.data,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
         prepareChunk: (id) => Promise.all((app.chunkFonts[id] ?? []).map(loadFont)),
         // A release shows no error box; an app that could not start says so.
