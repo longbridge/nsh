@@ -17,8 +17,8 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRin
  */
 const size =
   platform.idiom === "desktop"
-    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, switch: "small" as const }
-    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
+    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, clear: 16, switch: "small" as const }
+    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, clear: 20, switch: "regular" as const };
 const pointer = platform.idiom === "desktop";
 
 /** A control's row: the control and its label, the whole row pressable. */
@@ -423,6 +423,8 @@ export function Controls() {
         ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
         : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
     const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+    /** The clear button's inset from the trigger's end: centered where the chevron's lane is. */
+    const clearInset = 10 + size.check / 4 - size.clear / 2;
     /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
     function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
       return (
@@ -434,7 +436,7 @@ export function Controls() {
             height: size.line,
             paddingLeft: 10,
             // Room for the clear button, which goes over the trigger's end in place of the chevron.
-            paddingRight: props.clearable ? size.line : 10,
+            paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
             borderRadius: radius.control,
             borderWidth: 1,
             borderColor: props.open ? colors.faint : colors.border,
@@ -557,8 +559,8 @@ export function Controls() {
               cleanable
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - 24) / 2, right: (size.line - 24) / 2, width: 24, height: 24 }}
-              clearButton={<Icon name="close" size={14} tint={colors.muted} />}
+              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
               trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
