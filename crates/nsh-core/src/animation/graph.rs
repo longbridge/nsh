@@ -72,6 +72,9 @@ enum Node {
         output: Output,
         extrapolate: (Extrapolate, Extrapolate),
         easing: Easing,
+        /// Its breakpoints ascend (none below the one before, no NaN):
+        /// a segment is found by bisection.
+        ascending: bool,
     },
     DiffClamp {
         input: NodeId,
@@ -427,6 +430,7 @@ impl Graph {
                 node,
                 Node::Interpolate {
                     input,
+                    ascending: input_range.windows(2).all(|w| w[0] <= w[1]),
                     input_range,
                     output,
                     extrapolate: (extrapolate_left, extrapolate_right),
@@ -884,12 +888,14 @@ impl Graph {
                 output,
                 extrapolate,
                 easing,
+                ascending,
             })) => interpolate(
                 self.eval_depth(*input, depth + 1).number(),
                 input_range,
                 output,
                 *extrapolate,
                 *easing,
+                *ascending,
             ),
             Some(Some(Node::DiffClamp {
                 input,
@@ -951,12 +957,15 @@ fn output_len(output: &Output) -> usize {
     }
 }
 
+/// `x` through breakpoints `input` to `output`; `ascending` when the
+/// breakpoints ascend, so that the segment is found by bisection.
 fn interpolate(
     x: f32,
     input: &[f32],
     output: &Output,
     (left, right): (Extrapolate, Extrapolate),
     easing: Easing,
+    ascending: bool,
 ) -> AnimationValue {
     let n = input.len().min(output_len(output));
     if n == 0 {
@@ -975,10 +984,16 @@ fn interpolate(
         };
     }
     // Segment containing x (or the edge segment when extending).
-    let seg = input[..n]
-        .windows(2)
-        .position(|w| x <= w[1])
-        .unwrap_or(n - 2);
+    // The first segment whose end is at or past `x`: by bisection where the
+    // breakpoints ascend (the same one), else one by one.
+    let seg = if ascending && !x.is_nan() {
+        input[1..n].partition_point(|&v| v < x).min(n - 2)
+    } else {
+        input[..n]
+            .windows(2)
+            .position(|w| x <= w[1])
+            .unwrap_or(n - 2)
+    };
     let (a, b) = (input[seg], input[seg + 1]);
     let t = if b == a { 0.0 } else { (x - a) / (b - a) };
     // The curve applies within the range (extended segments stay linear).
@@ -1009,6 +1024,18 @@ fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
 mod tests {
     use super::*;
     use crate::animation::ops::{Driver, Easing};
+
+    /// [`super::interpolate`], its breakpoints' order found.
+    fn interpolate(
+        x: f32,
+        input: &[f32],
+        output: &Output,
+        extrapolate: (Extrapolate, Extrapolate),
+        easing: Easing,
+    ) -> AnimationValue {
+        let ascending = input.windows(2).all(|w| w[0] <= w[1]);
+        super::interpolate(x, input, output, extrapolate, easing, ascending)
+    }
 
     const CLAMP: (Extrapolate, Extrapolate) = (Extrapolate::Clamp, Extrapolate::Clamp);
 
@@ -1052,6 +1079,120 @@ mod tests {
         assert_eq!(
             interpolate(0.5, &[0.0, 1.0], &colors, CLAMP, Easing::Linear),
             AnimationValue::Color(0x8000_00ff)
+        );
+    }
+
+    #[test]
+    fn bisection_finds_the_segment_a_scan_finds() {
+        // Ascending breakpoints with jumps (equal neighbours), read at and
+        // between each, past both ends and at no number, every way they
+        // extrapolate.
+        let input = [-3.0, -1.0, -1.0, 0.0, 0.5, 0.5, 0.5, 2.0, 7.0, 7.0];
+        let output = Output::Numbers((0..input.len()).map(|i| (i * i) as f32).collect());
+        let sides = [
+            Extrapolate::Clamp,
+            Extrapolate::Extend,
+            Extrapolate::Identity,
+        ];
+        let mut xs: Vec<f32> = input.to_vec();
+        xs.extend(input.windows(2).map(|w| (w[0] + w[1]) / 2.0));
+        xs.extend([
+            -10.0,
+            10.0,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -0.0,
+        ]);
+        for left in sides {
+            for right in sides {
+                for &x in &xs {
+                    for n in 2..=input.len() {
+                        let (input, output) = (&input[..n], &output);
+                        let [a, b] = [true, false].map(|ascending| {
+                            super::interpolate(
+                                x,
+                                input,
+                                output,
+                                (left, right),
+                                Easing::EaseInOut,
+                                ascending,
+                            )
+                        });
+                        assert!(
+                            format!("{a:?}") == format!("{b:?}"),
+                            "at {x} of {n}: {a:?} against {b:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn breakpoints_out_of_order_are_read_one_by_one() {
+        let mut finished = Vec::new();
+        let mut g = of_value(1.5);
+        g.apply(
+            AnimationOp::CreateInterpolate {
+                node: 3,
+                input: 1,
+                input_range: vec![0.0, 2.0, 1.0, 3.0],
+                output: Output::Numbers(vec![0.0, 20.0, 10.0, 30.0]),
+                extrapolate_left: Extrapolate::Clamp,
+                extrapolate_right: Extrapolate::Clamp,
+                easing: Easing::Linear,
+            },
+            &mut finished,
+        );
+        // The first segment reaching 1.5 is 0..2, as before.
+        assert_eq!(g.eval(3), AnimationValue::Number(15.0));
+    }
+
+    /// A graph of value 1 (`value`).
+    fn of_value(value: f32) -> Graph {
+        let mut g = Graph::default();
+        g.apply(AnimationOp::CreateValue { node: 1, value }, &mut Vec::new());
+        g
+    }
+
+    /// Interpolations of many breakpoints, as tracks of a long vector
+    /// animation: `cargo test --release -p nsh-core bench_interpolate --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_interpolate_many_breakpoints() {
+        let mut finished = Vec::new();
+        let mut g = of_value(0.0);
+        let n = 2_000;
+        for k in 0..200u32 {
+            g.apply(
+                AnimationOp::CreateInterpolate {
+                    node: 3 + 2 * k,
+                    input: 1,
+                    input_range: (0..n).map(|i| i as f32 / n as f32).collect(),
+                    output: Output::Numbers(
+                        (0..n).map(|i| ((i + k as usize) % 7) as f32).collect(),
+                    ),
+                    extrapolate_left: Extrapolate::Clamp,
+                    extrapolate_right: Extrapolate::Clamp,
+                    easing: Easing::Linear,
+                },
+                &mut finished,
+            );
+        }
+        let frames = 600;
+        let start = std::time::Instant::now();
+        let mut sum = 0.0;
+        for f in 0..frames {
+            g.set(1, f as f32 / frames as f32, &mut finished);
+            for k in 0..200 {
+                sum += g.eval(3 + 2 * k).number();
+            }
+        }
+        println!(
+            "200 interpolations of {n} breakpoints: {:?} a frame ({sum})",
+            start.elapsed() / frames
         );
     }
 
