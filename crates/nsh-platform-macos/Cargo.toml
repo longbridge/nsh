@@ -19,6 +19,12 @@ js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
 dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
 
+[[test]]
+name = "macos"
+path = "tests/macos/main.rs"
+harness = false
+required-features = ["js"]
+
 [dependencies]
 log.workspace = true
 

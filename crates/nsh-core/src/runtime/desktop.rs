@@ -4,7 +4,10 @@
 
 use crate::{
     Command, ROOT_ID,
-    desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
+    desktop::{
+        DesktopCommand, MenuBarMode, TitleBarStyle, WindowBackgroundAppearance, WindowFrame,
+        WindowLevel,
+    },
     element::{JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
@@ -110,6 +113,19 @@ impl Window {
     /// Elsewhere the level is left to the host and the window manager.
     pub(crate) fn set_level(level: WindowLevel, cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::SetLevel(level));
+    }
+
+    /// What shows behind the window's content: `"blurred"` shows the
+    /// desktop and the windows behind it, blurred, through every part of
+    /// the window that the app does not paint (macOS; give the root view
+    /// a transparent background). `"opaque"`, the default, gives the window
+    /// its own background back. Every app starts opaque. Other platforms
+    /// keep their opaque window.
+    pub(crate) fn set_background_appearance(
+        appearance: WindowBackgroundAppearance,
+        cx: &mut ModuleCx,
+    ) {
+        desktop(cx, DesktopCommand::SetBackgroundAppearance(appearance));
     }
 
     /// Brings the window to the front of its level and focuses it (the app

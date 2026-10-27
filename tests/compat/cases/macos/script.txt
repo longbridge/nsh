@@ -170,3 +170,11 @@ expect Input available: false
 tap id:send
 expect Sent input
 covers [nsh] WebView
+# window-background
+tap id:case-window-background
+expect Background: opaque
+tap id:blurred
+expect Background: blurred
+tap id:opaque
+expect Background: opaque
+covers [nsh/desktop] Window

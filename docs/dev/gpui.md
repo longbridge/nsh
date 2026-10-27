@@ -267,7 +267,8 @@ and Windows.
 ### Programmatic window frame and level
 
 The host chooses window bounds and level when opening a GPUI window.
-`Window.setFrame` and `Window.setLevel` commands leave those host settings intact.
+`Window.setFrame`, `Window.setLevel` and `Window.setBackgroundAppearance` commands leave
+those host settings intact: the embedding app sets GPUI's window background appearance itself.
 
 `Window.orderFront` activates a standalone window through a main-thread
 window update, including while it is minimized and no frames are drawn. macOS

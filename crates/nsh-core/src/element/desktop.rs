@@ -20,7 +20,7 @@ use super::{Owner, cleanup, menus::MenuHandler, task::Answer};
 use crate::{
     desktop::{
         self, DesktopCommand, MenuAction, MenuBarMode, MenuRole, Shortcut, TitleBarStyle,
-        WindowFrame, WindowLevel,
+        WindowBackgroundAppearance, WindowFrame, WindowLevel,
     },
     geometry::{Edges, Point, Points},
     keymap::When,
@@ -105,6 +105,17 @@ pub fn set_frame(frame: WindowFrame) {
 /// [`WindowLevel::Normal`] restores the normal level.
 pub fn set_level(level: WindowLevel) {
     super::desktop_command(DesktopCommand::SetLevel(level));
+}
+
+/// What shows behind the window's content (TS:
+/// `Window.setBackgroundAppearance`).
+/// [`WindowBackgroundAppearance::Blurred`] shows the desktop and the
+/// windows behind the window, blurred, where the app paints nothing
+/// (macOS); [`WindowBackgroundAppearance::Opaque`], the default, gives
+/// the window its own background back. Other platforms keep their opaque
+/// window.
+pub fn set_background_appearance(appearance: WindowBackgroundAppearance) {
+    super::desktop_command(DesktopCommand::SetBackgroundAppearance(appearance));
 }
 
 /// Brings the window to the front of its level and focuses it; the app

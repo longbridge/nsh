@@ -322,9 +322,12 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Minimize => push(surface, Op::Minimize),
         DesktopCommand::ToggleMaximize => push(surface, Op::ToggleMaximize),
         DesktopCommand::ToggleFullScreen => push(surface, Op::ToggleFullScreen),
-        // GPUI's window bounds are chosen when the window opens, and it
-        // has no window levels.
-        DesktopCommand::SetFrame(_) | DesktopCommand::SetLevel(_) => {}
+        // GPUI's window bounds are chosen when the window opens, it has no
+        // window levels, and the embedding app owns the window's
+        // background (GPUI's `set_background_appearance`).
+        DesktopCommand::SetFrame(_)
+        | DesktopCommand::SetLevel(_)
+        | DesktopCommand::SetBackgroundAppearance(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.

@@ -9,6 +9,7 @@ import DesktopProps from "./desktop-props";
 import ModStandardSystem from "./mod-standard-system";
 import ModStandardFiles from "./mod-standard-files";
 import WebSendInput from "./web-send-input";
+import WindowBackground from "./window-background";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-dock": BaseDock,
@@ -17,6 +18,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-standard-files": ModStandardFiles,
   "mod-access-denied": ModAccessDenied,
   "web-send-input": WebSendInput,
+  "window-background": WindowBackground,
 };
 const shown = signal("");
 
