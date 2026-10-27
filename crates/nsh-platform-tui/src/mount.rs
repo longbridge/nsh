@@ -14,6 +14,8 @@ pub(crate) struct Mounter {
     pub(crate) exit: bool,
     pub(crate) page_backgrounds: Vec<Color>,
     pub(crate) scrolled: Vec<NodeId>,
+    pub(crate) dirty_stacks: Vec<NodeId>,
+    pub(crate) dirty_screens: Vec<NodeId>,
     unhandled: HashSet<Discriminant<MountItem>>,
     placeholders: HashSet<String>,
 }
@@ -27,6 +29,8 @@ impl Default for Mounter {
             exit: false,
             page_backgrounds: Vec::new(),
             scrolled: Vec::new(),
+            dirty_stacks: Vec::new(),
+            dirty_screens: Vec::new(),
             unhandled: HashSet::new(),
             placeholders: HashSet::new(),
         };
@@ -50,10 +54,35 @@ impl Mounter {
         self.views.get_mut(id as usize)?.as_mut()
     }
 
+    fn children_changed(&mut self, parent: NodeId) {
+        if self
+            .get(parent)
+            .is_some_and(|view| view.kind == ViewKind::Stack)
+            && !self.dirty_stacks.contains(&parent)
+        {
+            self.dirty_stacks.push(parent);
+        }
+        if self
+            .get(parent)
+            .is_some_and(|view| view.kind == ViewKind::Screen)
+            && !self.dirty_screens.contains(&parent)
+        {
+            self.dirty_screens.push(parent);
+        }
+    }
+
     fn detach(&mut self, id: NodeId) {
-        let parent = self.get_mut(id).and_then(|v| v.parent.take());
-        if let Some(parent) = parent.and_then(|p| self.get_mut(p)) {
-            parent.children.retain(|&child| child != id);
+        let parent = self.get_mut(id).and_then(|view| {
+            if matches!(view.kind, ViewKind::Screen | ViewKind::HeaderItem) {
+                view.concealed = true;
+            }
+            view.parent.take()
+        });
+        if let Some(parent) = parent {
+            if let Some(view) = self.get_mut(parent) {
+                view.children.retain(|&child| child != id);
+            }
+            self.children_changed(parent);
         }
     }
 
@@ -65,6 +94,8 @@ impl Mounter {
         self.unhandled.clear();
         self.placeholders.clear();
         self.scrolled.clear();
+        self.dirty_stacks.clear();
+        self.dirty_screens.clear();
         self.page_backgrounds.clear();
     }
 
@@ -74,7 +105,13 @@ impl Mounter {
                 MountItem::Create { id, kind } => {
                     if !matches!(
                         kind,
-                        ViewKind::View | ViewKind::Text | ViewKind::Native | ViewKind::Scroll
+                        ViewKind::View
+                            | ViewKind::Text
+                            | ViewKind::Native
+                            | ViewKind::Scroll
+                            | ViewKind::Stack
+                            | ViewKind::Screen
+                            | ViewKind::HeaderItem
                     ) && self.placeholders.insert(format!("{kind:?}"))
                     {
                         log::warn!("terminal: {kind:?} shown as a placeholder");
@@ -96,6 +133,7 @@ impl Mounter {
                         .and_then(|b| siblings.iter().position(|&id| id == b))
                         .unwrap_or(siblings.len());
                     siblings.insert(index, child);
+                    self.children_changed(parent);
                 }
                 MountItem::Remove { id } => self.detach(id),
                 MountItem::Delete { id } => {
@@ -194,6 +232,14 @@ impl Mounter {
                         }
                     }
                 }
+                MountItem::ScreenConfig { id, config } => {
+                    if let Some(screen) = self.get_mut(id).and_then(|view| view.screen.as_mut()) {
+                        screen.config = *config;
+                        if !self.dirty_screens.contains(&id) {
+                            self.dirty_screens.push(id);
+                        }
+                    }
+                }
                 MountItem::Appearance { appearance } => self.appearance = Some(appearance),
                 MountItem::Component { id, name } => {
                     let component = self.components.get(name.as_ref()).map(|factory| factory());
@@ -233,6 +279,7 @@ impl Mounter {
                 }
             }
         }
+        crate::navigation::end_batch(self);
         self.page_backgrounds.clear();
         collect_page_backgrounds(&self.views, ROOT_ID, &mut self.page_backgrounds);
     }

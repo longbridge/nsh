@@ -4,6 +4,9 @@ use crate::NativeComponent;
 
 pub(crate) struct NshView {
     pub(crate) kind: ViewKind,
+    pub(crate) concealed: bool,
+    pub(crate) stack: Option<Box<nsh_core::navigation::Stack>>,
+    pub(crate) screen: Option<Box<crate::navigation::Screen>>,
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
     pub(crate) frame: Bounds<Points>,
@@ -20,6 +23,9 @@ impl NshView {
     pub(crate) fn new(kind: ViewKind) -> Self {
         Self {
             kind,
+            concealed: matches!(kind, ViewKind::Screen | ViewKind::HeaderItem),
+            stack: (kind == ViewKind::Stack).then(Default::default),
+            screen: (kind == ViewKind::Screen).then(Default::default),
             parent: None,
             children: Vec::new(),
             frame: Default::default(),

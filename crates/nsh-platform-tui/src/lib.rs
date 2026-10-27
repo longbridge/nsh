@@ -10,6 +10,7 @@ mod geometry;
 mod input;
 mod mount;
 mod native;
+mod navigation;
 mod render;
 #[cfg(feature = "run-app")]
 mod run;

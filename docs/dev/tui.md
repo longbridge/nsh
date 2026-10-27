@@ -116,6 +116,24 @@ The attached tree's page colors are collected after each complete mount batch, b
 matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
 remain transparent. The Emacs Key scheme, Minibuffer and mouse-capture changes are separate interaction work.
 
+## Navigation stacks
+
+Each stack keeps the core's `navigation::Stack`. Inserts, moves and removals mark the affected stack; after the
+whole mount batch, `Stack::reconcile` selects its top screen. Every other screen is concealed: drawing and hit
+testing skip its subtree. The app can remove the top screen to reveal the previous one. Pushes and app-driven
+removals settle immediately, with no transition frames. Stacks and screens clip their children to their bounds
+and draw the app's own styles, with no placeholder box.
+
+A screen keeps its `ScreenConfig`. Of its header items, only the node named by `header_view` is visible; the
+native left, right and title slots stay concealed. The selected header is kept above the app's content, including
+content inserted later. Header items draw their children directly, without a placeholder.
+
+Before drawing, attached, visible screens report their stack's point size and zero insets. A screen's
+`navigation::Reported::update` suppresses unchanged reports; a change sends `set_root_size`, and an inset change
+also sends the core's Insets event. A hidden screen, including one inside a concealed outer screen, is not
+reported until it becomes visible. Returning by key, modal presentation and `onDismiss` remain in the rest of the
+navigation ticket.
+
 ## Scroll content
 
 A Scroll draws its children within its viewport, using the current content offset; it starts at zero. The view's
@@ -144,10 +162,11 @@ animations remain in the rest of the scrolling ticket.
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
 | Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
 | Scroll | Children translated by the current offset and clipped to the viewport |
+| Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
-positions and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+positions, top screens and their headers, and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 

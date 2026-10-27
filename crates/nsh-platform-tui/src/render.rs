@@ -63,7 +63,7 @@ impl Painter<'_> {
             return;
         };
         let opacity = opacity * view.style.opacity;
-        if view.style.hidden || opacity <= 0.0 {
+        if view.concealed || view.style.hidden || opacity <= 0.0 {
             return;
         }
         let bounds = CellBounds::new(
@@ -91,7 +91,11 @@ impl Painter<'_> {
             });
         }
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
-        let children_clip = if view.style.overflow_hidden || view.kind == ViewKind::Scroll {
+        let children_clip = if view.style.overflow_hidden
+            || matches!(
+                view.kind,
+                ViewKind::Scroll | ViewKind::Stack | ViewKind::Screen
+            ) {
             visible
         } else {
             clip
@@ -211,7 +215,12 @@ impl Painter<'_> {
                 component.render(visible, self.buffer);
             } else if !matches!(
                 view.kind,
-                ViewKind::View | ViewKind::Text | ViewKind::Scroll
+                ViewKind::View
+                    | ViewKind::Text
+                    | ViewKind::Scroll
+                    | ViewKind::Stack
+                    | ViewKind::Screen
+                    | ViewKind::HeaderItem
             ) {
                 let title = view
                     .component_name

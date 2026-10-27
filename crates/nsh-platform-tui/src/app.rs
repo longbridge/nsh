@@ -329,6 +329,9 @@ impl AppView {
         if let Some(root) = self.tree.get_mut(ROOT_ID) {
             root.frame = Bounds::new(Default::default(), size);
         }
+        if let Some(engine) = &self.surface.engine {
+            crate::navigation::report_shown(&mut self.tree, &engine.control());
+        }
         render::draw(
             &mut self.tree,
             buffer,
