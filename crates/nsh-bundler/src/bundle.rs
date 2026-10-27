@@ -904,6 +904,21 @@ mod tests {
     }
 
     #[test]
+    fn media_imports_are_packaged_urls() {
+        let dir = app("media");
+        std::fs::write(dir.join("clip.mp4"), [0, 255, 0, 128]).unwrap();
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import clip from './clip.mp4'; export default clip;",
+        )
+        .unwrap();
+        let bundle = bundle_app(&dir, false);
+        assert_eq!(bundle.assets, [PathBuf::from("clip.mp4")]);
+        assert!(bundle.code.contains("asset:/clip.mp4"), "{}", bundle.code);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn hot_bundles_keep_optional_native_imports_deferred() {
         let dir = app("hot-native-imports");
         std::fs::write(
