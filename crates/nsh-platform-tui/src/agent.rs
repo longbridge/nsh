@@ -269,7 +269,8 @@ impl Native for TuiNative {
     }
 
     fn animating(&self) -> bool {
-        false
+        self.on_view(|view, _| view.tree.animator.animating())
+            .unwrap_or(false)
     }
 
     fn screenshot(&self) -> Result<Vec<u8>, String> {

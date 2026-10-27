@@ -91,11 +91,22 @@ pub(crate) fn draw(
     visible: Rect,
     cells: CellSize,
     opacity: f32,
+    projection: crate::animation::Projection,
 ) {
     if visible.is_empty() {
         return;
     }
     let mut replay = Replay::new(canvas, buffer, bounds, visible, cells, opacity);
+    let m = projection.matrix.0;
+    replay.base = [
+        m[0] as f32,
+        m[1] as f32,
+        m[4] as f32,
+        m[5] as f32,
+        m[12] as f32,
+        m[13] as f32,
+    ];
+    replay.state.matrix = replay.base;
     for op in &canvas.drawing.ops {
         replay.op(op);
     }
@@ -358,6 +369,7 @@ struct Replay<'a> {
     /// The visible Cells' offset from the canvas's first Cell.
     offset: [i32; 2],
     opacity: f32,
+    base: Matrix,
     state: State,
     saved: Vec<State>,
     path: Outline,
@@ -404,6 +416,7 @@ impl<'a> Replay<'a> {
             cells,
             offset,
             opacity,
+            base: IDENTITY,
             state: State::default(),
             saved: Vec::new(),
             path: Outline::default(),
@@ -586,7 +599,9 @@ impl<'a> Replay<'a> {
                 self.transform([cos, sin, -sin, cos, 0.0, 0.0]);
             }
             CanvasOp::Transform(m) => self.transform(m.map(|n| self.n(n))),
-            CanvasOp::SetTransform(m) => self.state.matrix = m.map(|n| self.n(n)),
+            CanvasOp::SetTransform(m) => {
+                self.state.matrix = multiply(self.base, m.map(|n| self.n(n)))
+            }
             CanvasOp::BeginPath => self.path = Outline::default(),
             CanvasOp::Path(op) => {
                 let matrix = self.state.matrix;

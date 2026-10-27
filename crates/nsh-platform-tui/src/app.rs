@@ -686,6 +686,7 @@ impl AppView {
         if let Some(engine) = &self.surface.engine {
             crate::navigation::report_shown(&mut self.tree, &engine.control());
         }
+        self.surface.animate(&mut self.tree);
         render::draw(
             &mut self.tree,
             buffer,
