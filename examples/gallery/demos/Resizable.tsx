@@ -50,7 +50,7 @@ export function Resizable() {
           onPress={() => shown.set(!shown())}
           selected={shown()}
           accessibilityLabel={shown() ? "Hide the console" : "Show the console"}
-          class="rounded-md border border-border px-3 py-1.5 active:opacity-70 selected:bg-muted"
+          class="rounded-md border border-border px-3 py-1.5 hover:bg-muted/60 active:opacity-70 selected:bg-muted"
         >
           <Text class="text-[13px] font-medium text-foreground">Console</Text>
         </Button>

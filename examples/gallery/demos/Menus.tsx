@@ -119,10 +119,16 @@ function Separator() {
 }
 
 /** What opens a menu: a quiet menu bar title (`bar`), else a raised button. */
-function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: boolean }) {
+function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: boolean; open?: boolean }) {
+  // Open: selected, as the shared `Button`'s `selected` (a menu bar title
+  // keeps the hover's accent fill, a raised button its pressed look).
+  const look = () =>
+    props.bar
+      ? { borderColor: "transparent", backgroundColor: props.open ? token("accent") : "transparent" }
+      : { backgroundColor: colors.raised, ...(props.open ? finish.pressed : finish.raised) };
   return (
     <View
-      hoverStyle={props.bar ? { backgroundColor: alpha(colors.text, 0.06) } : finish.hover}
+      hoverStyle={props.open ? undefined : props.bar ? { backgroundColor: alpha(colors.text, 0.06) } : finish.hover}
       activeStyle={props.bar ? { backgroundColor: alpha(colors.text, 0.1) } : finish.pressed}
       style={{
         flexDirection: "row",
@@ -134,7 +140,7 @@ function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: b
         paddingHorizontal: props.bar ? 10 : pointer ? 10 : 14,
         borderRadius: pointer ? 7 : 10,
         borderWidth: 1,
-        ...(props.bar ? { borderColor: "transparent" } : { backgroundColor: colors.raised, ...finish.raised }),
+        ...look(),
         transitionProperty: "background-color, border-color, box-shadow",
         transitionDuration: 120,
       }}
@@ -167,7 +173,14 @@ type File = { id: number; name: string; starred: boolean };
 export function Menus() {
   const events = signal<string[]>([]);
   const log = (what: string) => events.set([what, ...events()].slice(0, 6));
-  const changed = (menu: string) => (open: boolean, reason: OpenChangeReason) => log(`${menu} ${open ? "opened" : "closed"} · ${reason}`);
+  // The menu shown: its trigger shows as selected while it is open.
+  const shown = signal<string | null>(null);
+  const isOpen = (menu: string) => shown() === menu;
+  const changed = (menu: string) => (open: boolean, reason: OpenChangeReason) => {
+    if (open) shown.set(menu);
+    else if (shown() === menu) shown.set(null);
+    log(`${menu} ${open ? "opened" : "closed"} · ${reason}`);
+  };
 
   function MenuBar() {
     const history = signal<string[]>([]);
@@ -206,7 +219,7 @@ export function Menus() {
     return (
       <Card icon="lists" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
         <View style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip bar label="File" />}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip bar label="File" open={isOpen("File")} />}>
             <Item label="New document" shortcut={key("mod+alt+n")} onSelect={() => act("New document")} />
             <Item label="New window" onSelect={() => act("New window")} />
             <SubmenuOf label="Open recent">
@@ -230,7 +243,7 @@ export function Menus() {
             <Separator />
             <Item label="Delete document" danger onSelect={() => act("Delete document")} />
           </Menu>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Edit")} trigger={<Chip bar label="Edit" />}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Edit")} trigger={<Chip bar label="Edit" open={isOpen("Edit")} />}>
             <Item label={history().length ? `Undo ${history().at(-1)}` : "Undo"} shortcut={key("mod+alt+z")} disabled={history().length === 0} onSelect={undo} />
             <Item label={undone().length ? `Redo ${undone().at(-1)}` : "Redo"} shortcut={key("mod+alt+shift+z")} disabled={undone().length === 0} onSelect={redo} />
             <Separator />
@@ -239,7 +252,7 @@ export function Menus() {
             <Item label="Copy" onSelect={() => act("Copy")} />
             <Item label="Paste" onSelect={() => act("Paste")} />
           </Menu>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("View")} trigger={<Chip bar label="View" />}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("View")} trigger={<Chip bar label="View" open={isOpen("View")} />}>
             <Label text="Show" />
             <Item label="Sidebar" mark={sidebar() ? "check" : null} keepOpen onSelect={() => sidebar.set(!sidebar())} />
             <Item label="Status bar" mark={statusBar() ? "check" : null} keepOpen onSelect={() => statusBar.set(!statusBar())} />
@@ -296,8 +309,21 @@ export function Menus() {
                   <Row first={i() === 0}>
                     <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
                     <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
-                    <Menu align="end" offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} trigger={
-                      <View accessibilityLabel={`Actions for ${file().name}`} tooltip={<Tip label="More actions" />} hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingHorizontal: 8, height: 28, justifyContent: "center" }}>
+                    <Menu align="end" offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed(`${file().name} ⋯`)} trigger={
+                      <View
+                        accessibilityLabel={`Actions for ${file().name}`}
+                        tooltip={<Tip label="More actions" />}
+                        hitSlop={8}
+                        hoverStyle={hovered()}
+                        activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
+                        style={{
+                          paddingHorizontal: 8,
+                          height: 28,
+                          justifyContent: "center",
+                          borderRadius: 6,
+                          backgroundColor: isOpen(`${file().name} ⋯`) ? token("accent") : "transparent",
+                        }}
+                      >
                         <Text style={{ fontSize: 18, color: colors.muted }}>⋯</Text>
                       </View>
                     }>
@@ -333,7 +359,7 @@ export function Menus() {
           onChange={(v) => align.set(v)}
         />
         <View style={{ alignItems: "center", paddingVertical: 24 }}>
-          <Menu placement={placement()} align={align()} offset={6} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Placed")} trigger={<Chip label={`${placement()} · ${align()}`} />}>
+          <Menu placement={placement()} align={align()} offset={6} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Placed")} trigger={<Chip label={`${placement()} · ${align()}`} open={isOpen("Placed")} />}>
             <Item label="One" onSelect={() => log("chose One")} />
             <Item label="Two" onSelect={() => log("chose Two")} />
             <Item label="Three" onSelect={() => log("chose Three")} />
@@ -347,7 +373,7 @@ export function Menus() {
     const zone = signal("UTC+8 Hong Kong");
     return (
       <Card icon="scroll" title="A long menu" subtitle="Twenty choices in a menu that scrolls">
-        <Menu offset={4} margin={8} popupStyle={{ ...surface(), padding: 0 }} backdropStyle={backdrop} onOpenChange={changed("Time zone")} trigger={<Chip label={zone()} icon="search" />}>
+        <Menu offset={4} margin={8} popupStyle={{ ...surface(), padding: 0 }} backdropStyle={backdrop} onOpenChange={changed("Time zone")} trigger={<Chip label={zone()} icon="search" open={isOpen("Time zone")} />}>
           <Scroll style={{ maxHeight: platform.idiom === "desktop" ? 280 : 360 }} contentStyle={{ padding: 6 }}>
             <Each of={ZONES}>{(z) => <Item label={z()} mark={zone() === z() ? "check" : null} onSelect={() => zone.set(z())} />}</Each>
           </Scroll>
@@ -371,7 +397,7 @@ export function Menus() {
           margin={8}
           popupStyle={surface()}
           backdropStyle={backdrop}
-          trigger={<Chip label="Commands" icon="plus" />}
+          trigger={<Chip label="Commands" icon="plus" open={open()} />}
         >
           <Label text="Commands" />
           <Item label="New note" onSelect={() => log("ran New note")} />

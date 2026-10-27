@@ -1,5 +1,5 @@
 import type { JSX, ViewStyle } from "nsh";
-import { effect, Text, View } from "nsh";
+import { effect, Text, token, View } from "nsh";
 import { reduceMotion } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
@@ -57,6 +57,9 @@ export function Press(props: {
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; checked?: boolean; disabled?: boolean };
   hitSlop?: number;
+  /** Under the pointer (default: a slight dim, whatever its children
+   * draw; when the look is on `style`, pass the look's own hover). */
+  hoverStyle?: ViewStyle;
   children: JSX.Element;
 }) {
   const s = createAnimatedValue(1);
@@ -65,6 +68,7 @@ export function Press(props: {
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       disabled={props.disabled}
+      hoverStyle={props.disabled ? undefined : (props.hoverStyle ?? { opacity: 0.86 })}
       onPressDown={() => s.spring(props.scale ?? 0.97, motion.press)}
       onPressUp={() => s.spring(1, motion.press)}
       role={props.role ?? "button"}
@@ -295,6 +299,9 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
         minHeight: density.row,
+        // Room above and below for two-line rows (a title and a note) and
+        // their icon tiles, so nothing touches the lines between rows.
+        paddingVertical: 8,
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
@@ -325,6 +332,10 @@ export function Button(props: {
   /** Grows to share a row with its siblings. */
   flex?: number;
   size?: "small" | "regular";
+  /** Shown as chosen: what it opens is open (a menu's or a popover's
+   * trigger), or it is on. A ghost button keeps the hover's `accent` fill, a
+   * raised one its pressed look, a filled one its pressed shade. */
+  selected?: boolean;
   onPress: () => void;
 }) {
   const small = () => props.size === "small";
@@ -337,12 +348,14 @@ export function Button(props: {
   const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : colors.text);
   const look = (): ViewStyle =>
     props.color
-      ? { backgroundColor: props.color, borderColor: "transparent" }
+      ? { backgroundColor: props.color, borderColor: "transparent", opacity: props.selected ? 0.88 : 1 }
       : variant() === "ghost"
-        ? { backgroundColor: "transparent", borderColor: "transparent" }
+        ? { backgroundColor: props.selected ? token("accent") : "transparent", borderColor: "transparent" }
         : filled()
-          ? finish.accent
-          : finish.raised;
+          ? { ...finish.accent, opacity: props.selected ? 0.88 : 1 }
+          : props.selected
+            ? finish.pressed
+            : finish.raised;
   return (
     <BaseButton
       onPress={props.onPress}
@@ -350,7 +363,8 @@ export function Button(props: {
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.label}
-      hoverStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
+      selected={props.selected}
+      hoverStyle={props.disabled || props.selected ? undefined : props.color || filled() ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
       activeStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.88 } : finish.pressed}
       focusStyle={focusRing()}
       style={{
@@ -364,8 +378,8 @@ export function Button(props: {
         alignItems: "center",
         justifyContent: "center",
         gap: pointer ? 6 : 8,
-        ...look(),
         opacity: props.disabled ? 0.4 : 1,
+        ...look(),
         transform: [{ scale }],
         transitionProperty: "background-color, border-color, box-shadow, opacity",
         transitionDuration: 120,
@@ -390,20 +404,25 @@ export function RoundButton(props: {
   const size = props.size ?? (pointer ? 28 : 40);
   const primary = () => (props.variant ?? "primary") === "primary";
   return (
-    <Press onPress={props.onPress} disabled={props.disabled} scale={0.92} accessibilityLabel={props.label}>
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          ...(primary() ? finish.accent : finish.raised),
-        }}
-      >
-        <Icon name={props.icon} size={size * 0.42} tint={primary() ? colors.onLight : colors.text} />
-      </View>
+    <Press
+      onPress={props.onPress}
+      disabled={props.disabled}
+      scale={0.92}
+      accessibilityLabel={props.label}
+      hoverStyle={primary() ? { opacity: 0.94 } : finish.hover}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+        ...(primary() ? finish.accent : finish.raised),
+        transitionProperty: "background-color, border-color, box-shadow, opacity",
+        transitionDuration: 120,
+      }}
+    >
+      <Icon name={props.icon} size={size * 0.42} tint={primary() ? colors.onLight : colors.text} />
     </Press>
   );
 }

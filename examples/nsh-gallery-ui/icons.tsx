@@ -63,7 +63,11 @@ export type IconName =
   | "menu"
   | "dock"
   | "header"
-  | "terminal";
+  | "terminal"
+  | "popover"
+  | "tooltip"
+  | "sheet"
+  | "button";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -86,6 +90,25 @@ const circle = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, f
 };
 
 const glyphs: Record<IconName, Draw> = {
+  popover: (c) => {
+    rect(c, 3, 3, 14, 9, 2.5);
+    line(c, [8, 12, 10, 14.5, 12, 12]);
+    rect(c, 7, 16, 6, 2, 1);
+  },
+  tooltip: (c) => {
+    rect(c, 3, 4, 14, 8, 2.5);
+    line(c, [8.5, 12, 10, 14, 11.5, 12]);
+    line(c, [6.5, 8, 13.5, 8]);
+  },
+  sheet: (c) => {
+    rect(c, 2.5, 3, 15, 14, 2.5);
+    line(c, [2.5, 10, 17.5, 10]);
+    line(c, [8.5, 12.5, 11.5, 12.5]);
+  },
+  button: (c) => {
+    rect(c, 2.5, 6, 15, 8, 3);
+    line(c, [7, 10, 13, 10]);
+  },
   checkbox: (c) => {
     rect(c, 3.5, 3.5, 13, 13, 3);
     line(c, [6.5, 10, 9, 12.5, 13.5, 7.5]);

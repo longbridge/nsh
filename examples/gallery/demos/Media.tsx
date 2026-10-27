@@ -45,21 +45,23 @@ function Messaging() {
 /** A round icon button, 44 pt. */
 function NavButton(props: { flip?: boolean; enabled: boolean; label: string; onPress: () => void }) {
   return (
-    <Press onPress={props.onPress} disabled={!props.enabled} accessibilityLabel={props.label} hitSlop={4}>
-      <View
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: colors.raised,
-          ...finish.raised,
-          borderWidth: 1,
-          borderColor: colors.border,
-          alignItems: "center",
-          justifyContent: "center",
-          transform: props.flip ? "rotate(180deg)" : "none",
-        }}
-      >
+    <Press
+      onPress={props.onPress}
+      disabled={!props.enabled}
+      accessibilityLabel={props.label}
+      hitSlop={4}
+      hoverStyle={finish.hover}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 1,
+        ...finish.raised,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <View style={{ transform: props.flip ? "rotate(180deg)" : "none" }}>
         <Icon name="chevron" size={18} tint={colors.text} />
       </View>
     </Press>

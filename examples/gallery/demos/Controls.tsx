@@ -62,11 +62,12 @@ function Divider(props: { show: boolean }) {
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
 
-/** The fill of a box or ring that is on, and of one that is off. */
+/** The fill of a box or ring that is on (the main button's citrus finish:
+ * its darker olive edge and lit top), and of one that is off. */
 const fill = (on: boolean) =>
   on
-    ? { backgroundColor: colors.accentFill, borderColor: colors.accentFill, boxShadow: finish.chip.boxShadow }
-    : { backgroundColor: colors.field, borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow };
+    ? { ...finish.light }
+    : { backgroundColor: colors.field, backgroundImage: "none", borderColor: colors.fieldBorder, boxShadow: finish.field.boxShadow };
 
 type Mark = "check" | "dash" | null;
 

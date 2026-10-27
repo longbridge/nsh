@@ -18,7 +18,12 @@ export function Segmented<T extends string>(props: {
   const pointer = platform.idiom === "desktop";
   // Where each segment lies in the track, as the tabs report it.
   const spans = signal<{ x: number; width: number }[]>([]);
-  const index = () => Math.max(0, props.options.findIndex((o) => o.value === props.value));
+  // The segment pressed, until the app has the value: the thumb moves in a
+  // commit of its own, so the layout animation springs it alone and what
+  // the value shows (a page's content) appears at once in the next one.
+  const pending = signal<T | null>(null);
+  const selected = () => pending() ?? props.value;
+  const index = () => Math.max(0, props.options.findIndex((o) => o.value === selected()));
   // The track's border and padding: the thumb is placed inside the border
   // (an absolute child's containing block is the padding box), the tabs'
   // origins are from the border's outer edge.
@@ -64,10 +69,17 @@ export function Segmented<T extends string>(props: {
       <Each of={props.options}>
         {(option, i) => (
           <Tab
-            selected={props.value === option().value}
+            selected={selected() === option().value}
             onPress={() => {
-              if (!reduceMotion()) LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-              props.onChange(option().value);
+              const value = option().value;
+              if (value === selected()) return;
+              if (reduceMotion()) return props.onChange(value);
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+              pending.set(value);
+              setTimeout(() => {
+                pending.set(null);
+                props.onChange(value);
+              }, 0);
             }}
             onLayout={(b) => measure(i(), b.origin.x, b.size.width)}
             style={{
@@ -83,7 +95,7 @@ export function Segmented<T extends string>(props: {
                 numberOfLines: 1,
                 fontSize: pointer ? 12 : props.size === "small" ? 13 : 14,
                 fontWeight: "500",
-                color: props.value === option().value ? colors.text : colors.muted,
+                color: selected() === option().value ? colors.text : colors.muted,
               }}
             >
               {option().label}

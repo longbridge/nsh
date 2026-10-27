@@ -29,6 +29,7 @@ test("the Text View demo shows Markdown, HTML and extensions, and streams", asyn
   await app.press("role:tab[Extensions]");
   await app.waitFor("HEADS UP");
   await app.press("role:tab[Streaming]");
+  await app.waitFor("Stream it");
   await app.press("Stream it");
   await app.clock.runFor(10_000);
   expect(app.shows("That's it. Ping me if anything looks off.")).toBe(true);
