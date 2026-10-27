@@ -2461,6 +2461,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
         host: env.host,
+        screen_color: env.screen_color,
     }
 }
 

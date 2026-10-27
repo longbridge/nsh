@@ -510,6 +510,9 @@ pub(super) struct Components {
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
     next_url_open: u32,
+    /// Colors being picked on the screen, by request id: their answers.
+    screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
+    next_screen_color: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -597,6 +600,8 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             next_url_open: 0,
+            screen_colors: FxHashMap::default(),
+            next_screen_color: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -4699,6 +4704,19 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
             }
+            Action::PickScreenColor(answer) => {
+                if !self.components.environment.screen_color {
+                    answer.borrow_mut().deliver(None);
+                    return;
+                }
+                let id = self.components.next_screen_color;
+                self.components.next_screen_color = id.wrapping_add(1);
+                self.components.screen_colors.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickScreenColor { id },
+                });
+            }
         }
     }
 
@@ -4959,6 +4977,16 @@ impl<M: TextEngine> Core<M> {
                     _ => false,
                 };
                 self.answer_open_url(request as u32, opened);
+                true
+            }
+            EventKind::ScreenColor if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let color = number("color").map(|packed| crate::Color(packed as u32).into());
+                if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
+                    answer.borrow_mut().deliver(color);
+                }
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

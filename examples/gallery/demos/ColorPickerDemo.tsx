@@ -1,7 +1,7 @@
 import { signal, Text, View } from "nsh";
-import { type ColorChannel, ColorArea, ColorField, ColorPicker, ColorSlider, type ColorSpace, ColorSwatch } from "nsh/base";
+import { type ColorChannel, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, type ColorSpace, ColorSwatch } from "nsh/base";
 import { platform } from "nsh";
-import { Card, colors, DemoPage, focusRing, mono, Segmented } from "../ui";
+import { Card, colors, DemoPage, focusRing, Icon, mono, Segmented } from "../ui";
 
 // `nsh/base`'s `ColorPicker` holds the color and its parts read and change
 // it; the layout and every look are the app's. A color picked on the
@@ -148,20 +148,40 @@ export function ColorPickerDemo() {
               <Channel space={space()} channel={c.channel} label={c.label} name={`${space().toUpperCase()} ${names[c.channel]}`} />
             ))
           }
-          <ColorField
-            accessibilityLabel="Color"
-            placeholder="#rrggbb, rgb(), hsl(), oklch() or a name"
-            style={{
-              height: 32,
-              paddingHorizontal: 10,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: colors.field,
-            }}
-            class="text-[13px] font-mono text-foreground"
-            focusStyle={focusRing()}
-          />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <ColorField
+              accessibilityLabel="Color"
+              placeholder="#rrggbb, rgb(), hsl(), oklch() or a name"
+              style={{
+                flex: 1,
+                height: 32,
+                paddingHorizontal: 10,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.field,
+              }}
+              class="text-[13px] font-mono text-foreground"
+              focusStyle={focusRing()}
+            />
+            {/* The system's eyedropper (macOS, browsers with one); hidden where there is none. */}
+            <ColorEyeDropper
+              accessibilityLabel="Pick a color from the screen"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: colors.border,
+                backgroundColor: colors.field,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              class="disabled:hidden active:opacity-70"
+            >
+              <Icon name="pipette" size={16} tint={colors.text} />
+            </ColorEyeDropper>
+          </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {palette.map((c) => (
               <ColorSwatch

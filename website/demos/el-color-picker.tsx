@@ -1,11 +1,12 @@
 import { mount, signal, Text, View } from "nsh";
-import { type ColorChannel, ColorArea, ColorField, ColorPicker, ColorSlider, type ColorSpace, ColorSwatch } from "nsh/base";
-import { desktop, field, Log, Segmented, Split, ui } from "./palette";
+import { type ColorChannel, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, type ColorSpace, ColorSwatch } from "nsh/base";
+import { desktop, field, Icon, Log, Segmented, Split, ui } from "./palette";
 
 // `ColorPicker` holds the color; its parts, laid out and styled here, read
 // and change it: the saturation and brightness area, the hue and alpha
 // sliders, a row per channel of the space picked (its slider and its
-// number), the color typed in any CSS form, and a palette of swatches.
+// number), the color typed in any CSS form, the browser's eyedropper where
+// it has one, and a palette of swatches.
 const thumb = "rounded-full border-2 border-white";
 const thumbStyle = { boxShadow: "0 0 0 1px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.3)" };
 const spaces = ["rgb", "hsl", "hsb", "oklch"] as const;
@@ -84,7 +85,19 @@ function App() {
                 </View>
               ))
             }
-            <ColorField accessibilityLabel="Color" placeholder="#rrggbb, rgb(), hsl(), oklch() or a name" {...field()} />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <ColorField
+                accessibilityLabel="Color"
+                placeholder="#rrggbb, rgb(), hsl(), oklch() or a name"
+                {...field({ style: { flex: 1 } })}
+              />
+              <ColorEyeDropper
+                accessibilityLabel="Pick a color from the screen"
+                class="disabled:hidden w-9 h-9 items-center justify-center rounded-md border border-border active:opacity-70"
+              >
+                <Icon name="pipette" size={16} tint={ui().text} />
+              </ColorEyeDropper>
+            </View>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {palette.map((c) => (
                 <ColorSwatch

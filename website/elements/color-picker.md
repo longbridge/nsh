@@ -1,6 +1,6 @@
 ---
 title: ColorPicker
-description: "The ColorPicker component and its parts: a color picked on a saturation and brightness area, on sliders of any channel of RGB, HSL, HSB or OKLCH and of the alpha, typed in any CSS form or chosen from swatches, with WAI-ARIA's keys and adjustable elements for screen readers, laid out and styled by the app."
+description: "The ColorPicker component and its parts: a color picked on a saturation and brightness area, on sliders of any channel of RGB, HSL, HSB or OKLCH and of the alpha, typed in any CSS form, chosen from swatches or picked on the screen with an eyedropper, with WAI-ARIA's keys and adjustable elements for screen readers, laid out and styled by the app."
 order: 20.86
 group: base
 demo: el-color-picker
@@ -10,7 +10,8 @@ demo: el-color-picker
 
 A color picker holds one color, and the parts inside it show and change it: a `ColorArea` of saturation and
 brightness, `ColorSlider`s of any channel of RGB, HSL, HSB or OKLCH and of the alpha, `ColorField`s that take the
-color as text or one channel as a number, and `ColorSwatch`es of preset colors. The app lays the parts out with its
+color as text or one channel as a number, `ColorSwatch`es of preset colors and a `ColorEyeDropper` that picks a color
+anywhere on the screen. The app lays the parts out with its
 own elements in between (a row per channel with its letter, the space picked with `Tabs`, the picker in a `Popover`),
 and styles each of them: the parts draw the colors of the channels, and every size, radius, border and shadow is the
 app's.
@@ -128,7 +129,7 @@ function App() {
 mount(App);
 ```
 
-`ColorPicker`, `ColorArea`, `ColorSlider`, `ColorField` and `ColorSwatch` come from [`nsh/base`](../modules/nsh-base.md),
+`ColorPicker`, `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` come from [`nsh/base`](../modules/nsh-base.md),
 the `nsh-base` crate in Rust. In Rust, `color_picker()` and its parts' functions make them with a setter per prop
 (`.channel(..)`, `.thumb_style(..)`), a listener method per event (`.on_change(..)`) and the typed style methods; the
 color is an `Hsla`, the spaces, channels and formats are `ColorSpace`, `ColorChannel` and `ColorFormat`.
@@ -231,6 +232,19 @@ form.
 | `children` | `.child(..)` | `JSX.Element` | none | Content over the color: a check on the selected swatch (`group-selected:`). |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The swatch: its size, shape and border; its corners clip the color. |
 
+### ColorEyeDropper
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `disabled` | `.disabled(..)` | `boolean` | `false` | No presses. It is disabled too where the platform has no eyedropper. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say. |
+| `children` | `.child(..)` | `JSX.Element` | none | Its content: the app's icon or label. |
+| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The button. |
+
+A press shows the system's eyedropper: AppKit's color sampler on macOS, the browser's `EyeDropper` on the web (Chrome
+and Edge). The color picked becomes the picker's (`onChange`, then `onChangeEnd`); Escape picks none. Where the platform
+has no eyedropper the button is disabled, and `disabled:hidden` hides it there.
+
 ## Events
 
 | Event | Of | Rust | Payload | When |
@@ -238,6 +252,7 @@ form.
 | `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | The user changed the color. |
 | `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | The change ended. Once per change. |
 | `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `(color: string)` | The swatch was pressed; it works alone too, as a palette's chip. |
+| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `(color: string)` | The user picked a color on the screen; it works alone too. |
 
 In Rust, `ColorPickerEvent::Change(Hsla, SharedString)` and `ColorPickerEvent::ChangeEnd(Hsla, SharedString)` carry the
 color and its `formatted` text.
@@ -254,6 +269,7 @@ color and its `formatted` text.
 | The slider's thumb | the slider, centered on the value on the track | `thumbClass`, `thumbStyle` |
 | `ColorField` | the picker | `class`, `style` |
 | `ColorSwatch` | the picker, or alone | `class`, `style`, `selectedStyle` |
+| `ColorEyeDropper` | the picker, or alone | `class`, `style` |
 
 A slider's thumb is centered on the track's ends at the channel's ends. Padding on the slider of half the thumb's
 width (`h-6 justify-center px-2.5` around an `h-3` track) keeps the whole thumb inside the slider, where it takes
@@ -279,7 +295,7 @@ A swatch takes Space and Return. Each key reports `onChange` and then `onChangeE
 - The area's and each slider's thumb are adjustable elements (`"adjustable"`, a slider in the browser) with their
   label, value and range; screen readers' increment and decrement step them.
 - Each field is a text field with its label; each swatch a button, selected while it is the picker's color, named by
-  its color in hex unless `accessibilityLabel` names it.
+  its color in hex unless `accessibilityLabel` names it. The eyedropper is a button with the app's label.
 - While disabled, screen readers say the parts are dimmed, and they take no actions.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and actions in general.
@@ -289,4 +305,5 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and actions in g
 - Every platform draws what the app styles; the tracks' and the panel's colors are gradients drawn by the platform.
   Presses and drags are followed in the core, for a mouse, a pen or a finger, and a scroll view around the picker
   keeps its scrolling to drags that start elsewhere.
-- Picking a color from the screen is the app's own: set the picked color as `value`.
+- `ColorEyeDropper` picks with AppKit's color sampler on macOS and the browser's `EyeDropper` on the web; the color
+  arrives in sRGB.

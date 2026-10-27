@@ -1409,6 +1409,12 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             .num(*request)
             .str(url)
             .end(),
+        Command::PickScreenColor { id: request } => out
+            .item("cmd")
+            .num(id)
+            .str("pickScreenColor")
+            .num(*request)
+            .end(),
         Command::ReadClipboard {
             id: request,
             has_only,

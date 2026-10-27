@@ -77,14 +77,15 @@ pub use crate::{
     },
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
-    combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
     color_picker::{
-        ColorArea, ColorAreaElement, ColorAreaProps, ColorChannel, ColorField, ColorFieldElement,
-        ColorFieldProps, ColorFormat, ColorPicker, ColorPickerElement, ColorPickerEvent,
-        ColorPickerProps, ColorSlider, ColorSliderElement, ColorSliderProps, ColorSpace,
-        ColorSwatch, ColorSwatchElement, ColorSwatchEvent, ColorSwatchProps, color_area,
-        color_field, color_picker, color_slider, color_swatch,
+        ColorArea, ColorAreaElement, ColorAreaProps, ColorChannel, ColorEyeDropper,
+        ColorEyeDropperElement, ColorEyeDropperEvent, ColorEyeDropperProps, ColorField,
+        ColorFieldElement, ColorFieldProps, ColorFormat, ColorPicker, ColorPickerElement,
+        ColorPickerEvent, ColorPickerProps, ColorSlider, ColorSliderElement, ColorSliderProps,
+        ColorSpace, ColorSwatch, ColorSwatchElement, ColorSwatchEvent, ColorSwatchProps,
+        color_area, color_eye_dropper, color_field, color_picker, color_slider, color_swatch,
     },
+    combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
@@ -215,8 +216,8 @@ pub mod parts {
     use nsh_core::element::Registry;
 
     use crate::{
-        AlertDialog, Button, Calendar, Checkbox, Collapsible, ColorArea, ColorField, ColorPicker,
-        ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable,
+        AlertDialog, Button, Calendar, Checkbox, Collapsible, ColorArea, ColorEyeDropper,
+        ColorField, ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable,
         DatePicker, DiffView, DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput,
         OtpInput, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
         Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
@@ -265,6 +266,7 @@ pub mod parts {
             .register::<ColorSlider>()
             .register::<ColorField>()
             .register::<ColorSwatch>()
+            .register::<ColorEyeDropper>()
             .register::<Select>()
             .register::<NumberInput>()
             .register::<OtpInput>()
@@ -365,6 +367,7 @@ mod tests {
                 "Checkbox",
                 "Collapsible",
                 "ColorArea",
+                "ColorEyeDropper",
                 "ColorField",
                 "ColorPicker",
                 "ColorSlider",

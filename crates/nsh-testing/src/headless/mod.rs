@@ -257,6 +257,8 @@ pub struct Headless {
     dialogs: Dialogs,
     /// Who answers the picks.
     picks: Picks,
+    /// The color the user picks on the screen ([`Headless::on_screen_color`]).
+    screen_color: Option<nsh_core::Hsla>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -307,6 +309,7 @@ impl Headless {
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
             picks: Picks::Default,
+            screen_color: None,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -523,6 +526,15 @@ impl Headless {
         self.picks = Picks::Handler(Box::new(handler));
     }
 
+    /// The platform picks colors from the screen
+    /// ([`nsh_core::platform::Environment::screen_color`]), and the user
+    /// picks `color` whenever the app asks (`pick_screen_color`, a
+    /// `ColorEyeDropper`); `None` cancels.
+    pub fn on_screen_color(&mut self, color: Option<nsh_core::Hsla>) -> Result<(), String> {
+        self.screen_color = color;
+        self.set_environment("onScreenColor", |env| env.screen_color = true)
+    }
+
     /// Leaves the picks steps ask for to the caller: a step returns with
     /// one asked ([`Headless::pending_pick`]) until [`Headless::answer_pick`]
     /// answers it.
@@ -668,6 +680,14 @@ impl Headless {
                 ("opened", PayloadValue::Bool(true)),
             ];
             control.dispatch_event(ROOT_ID, EventKind::OpenUrl, EventPayload::Map(fields));
+        }
+        for id in self.screen.take_screen_colors() {
+            let mut fields = vec![("id", PayloadValue::Number(f64::from(id)))];
+            if let Some(color) = self.screen_color {
+                let packed = nsh_core::Color::from(color).0;
+                fields.push(("color", PayloadValue::Number(f64::from(packed))));
+            }
+            control.dispatch_event(ROOT_ID, EventKind::ScreenColor, EventPayload::Map(fields));
         }
         if self.screen.take_back_asked() {
             self.go_back(false);

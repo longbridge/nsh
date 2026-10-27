@@ -141,6 +141,8 @@ pub struct Screen {
     opened_urls: Vec<String>,
     /// The `openUrl` requests to answer.
     url_opens: Vec<u32>,
+    /// The screen colors asked for (`pick_screen_color`), to answer.
+    screen_colors: Vec<u32>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -529,6 +531,7 @@ impl Screen {
                 self.opened_urls.push(url.clone());
                 self.url_opens.push(*id);
             }
+            Command::PickScreenColor { id } => self.screen_colors.push(*id),
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
                 if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
@@ -989,6 +992,11 @@ impl Screen {
     /// the `openUrl` capability and the embedding app's URL handler.
     pub fn opened_urls(&self) -> &[String] {
         &self.opened_urls
+    }
+
+    /// The screen color requests to answer since the last call.
+    pub(crate) fn take_screen_colors(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.screen_colors)
     }
 
     /// The `openUrl` requests to answer since the last call.

@@ -1,6 +1,7 @@
 //! `ColorPicker` and its parts: a color picked on a saturation and
 //! brightness area, on sliders of any channel of RGB, HSL, HSB or OKLCH,
-//! typed in a field or chosen from swatches, with no look of its own
+//! typed in a field, chosen from swatches or picked on the screen with an
+//! eyedropper, with no look of its own
 //! (`gpui-base`'s `color_picker.rs`, the parts as React Aria's and ReUI's).
 //! The root holds the color; the parts inside it read and change it, laid
 //! out by the app.
@@ -114,7 +115,8 @@ pub struct ColorPickerProps {
     #[prop(default)]
     pub disabled: Prop<bool>,
     /// The parts ([`ColorArea`], [`ColorSlider`], [`ColorField`],
-    /// [`ColorSwatch`]) and whatever the app lays out between them.
+    /// [`ColorSwatch`], [`ColorEyeDropper`]) and whatever the app lays out
+    /// between them.
     pub children: Prop<Children>,
 }
 
@@ -950,5 +952,72 @@ pub fn ColorSwatch(props: ColorSwatchProps, cx: Scope<ColorSwatchEvent>) -> impl
                 .pointer_events(PointerEvents::None)
                 .bg(move || AdaptiveColor::from(shown())),
         )
+        .child(props.children)
+}
+
+/// The props of [`ColorEyeDropper`].
+#[derive(Debug, Clone, PartialEq, Props)]
+pub struct ColorEyeDropperProps {
+    /// No presses; `disabled:` styles apply. It is disabled too where the
+    /// platform picks no colors on the screen.
+    #[prop(default)]
+    pub disabled: Prop<bool>,
+    /// What screen readers say.
+    pub accessibility_label: Prop<Option<SharedString>>,
+    /// Its content: the app's icon or label.
+    pub children: Prop<Children>,
+}
+
+/// The events of a [`ColorEyeDropper`].
+#[derive(Debug, Clone, PartialEq, Event)]
+pub enum ColorEyeDropperEvent {
+    /// The user picked a color on the screen: the color, which a
+    /// [`ColorPicker`] around it has picked. Nothing when the user
+    /// cancelled.
+    #[args(color)]
+    Pick(Hsla),
+}
+
+/// A button that picks a color anywhere on the screen: a press shows the
+/// system's eyedropper (AppKit's color sampler on macOS, the browser's
+/// `EyeDropper`), and the color picked becomes the [`ColorPicker`]'s around
+/// it (`onChange`, then `onChangeEnd`). Where the platform has no
+/// eyedropper it is disabled: `disabled:hidden` hides it there. Its look
+/// and content are the app's.
+#[component]
+pub fn ColorEyeDropper(
+    props: ColorEyeDropperProps,
+    cx: Scope<ColorEyeDropperEvent>,
+) -> impl IntoElement {
+    let picker = use_context::<Picker>();
+    let picking = signal(false);
+    let disabled = move || {
+        props.disabled.get() || !can_pick_screen_color() || picker.is_some_and(|p| p.disabled())
+    };
+    view()
+        .disabled(disabled)
+        .accessible(true)
+        .role(AccessibilityRole::Button)
+        .optional_label(props.accessibility_label)
+        .on_press(move |_: &()| {
+            if untracked(disabled) || picking.get_untracked() {
+                return;
+            }
+            picking.set(true);
+            spawn(async move {
+                let color = pick_screen_color().await;
+                picking.set(false);
+                let Some(color) = color else {
+                    return;
+                };
+                if let Some(picker) = picker
+                    && !untracked(|| picker.disabled())
+                {
+                    picker.set(picker.now().follow(color));
+                    picker.end();
+                }
+                cx.emit(ColorEyeDropperEvent::Pick(color));
+            });
+        })
         .child(props.children)
 }

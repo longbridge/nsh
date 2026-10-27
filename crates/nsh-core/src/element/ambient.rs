@@ -70,6 +70,7 @@ struct EnvSignals {
     screen_reader: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    screen_color: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -94,6 +95,7 @@ impl EnvSignals {
                 screen_reader: part!(screen_reader),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                screen_color: part!(screen_color),
             }
         })
     }
@@ -459,6 +461,22 @@ pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
 /// `Clipboard.hasImage`).
 pub fn clipboard_has_image() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// Whether the platform lets the user pick a color on the screen
+/// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
+pub fn can_pick_screen_color() -> bool {
+    env(|e| e.screen_color)
+}
+
+/// The color the user picks anywhere on the screen (the system's color
+/// sampler, a browser's `EyeDropper`), to await in a task: `None` when the
+/// user cancelled or the platform has no sampler
+/// ([`can_pick_screen_color`]).
+pub fn pick_screen_color() -> Answer<Option<crate::Hsla>> {
+    let (answer, action) = super::services::pick_screen_color();
     act(action);
     answer
 }

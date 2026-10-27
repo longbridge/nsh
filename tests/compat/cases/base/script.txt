@@ -1619,6 +1619,11 @@ drawing below:below:id:check fillRect 0 0 10 10
 drawing below:below:id:check fillRect 10 10 10 10
 nodrawing below:below:id:check fillRect 10 0...
 prop id:preview accessibilityLabel #ff0000
+# The eyedropper: a button with the app's content, disabled with no
+# eyedropper on the platform.
+prop label:Eyedropper role button
+prop label:Eyedropper accessibilityState disabled=true
+frame id:dropper 0 0 4 4
 # A press picks the swatch's color: reported in `format`, then the
 # change's end.
 tap label:Blue
@@ -1678,6 +1683,7 @@ covers [nsh/base] ColorArea
 covers [nsh/base] ColorSlider
 covers [nsh/base] ColorField
 covers [nsh/base] ColorSwatch
+covers [nsh/base] ColorEyeDropper
 covers [props] value
 covers [props] defaultValue
 covers [props] disabled

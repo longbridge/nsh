@@ -13,10 +13,12 @@
 // or a channel's number (`channel`, `colorSpace`, `format`, `placeholder`);
 // `ColorSwatch`, a preset a press picks (`color`, `selectedStyle`, its
 // `checkerboardColor` and `checkerboardSize`, `onPress`) or, without a
-// color, the picker's own. Each control is an adjustable element or a field
+// color, the picker's own; `ColorEyeDropper`, a button picking a color on
+// the screen, disabled where the platform has no eyedropper (as headless
+// runs). Each control is an adjustable element or a field
 // for screen readers (`accessibilityLabel`).
 import { Text, View, signal } from "nsh";
-import { ColorArea, ColorField, ColorPicker, ColorSlider, ColorSwatch } from "nsh/base";
+import { ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch } from "nsh/base";
 
 function App() {
   const color = signal("#ff0000");
@@ -93,6 +95,9 @@ function App() {
             <View testID="check" style={{ width: 4, height: 4 }} />
           </ColorSwatch>
           <ColorSwatch testID="preview" class="w-[20px] h-[20px]" />
+          <ColorEyeDropper accessibilityLabel="Eyedropper" class="w-[20px] h-[20px]" onPick={value => color.set(value)}>
+            <View testID="dropper" style={{ width: 4, height: 4 }} />
+          </ColorEyeDropper>
         </View>
       </ColorPicker>
       <Text>{`Color ${color()}`}</Text>

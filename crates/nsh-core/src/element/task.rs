@@ -99,6 +99,9 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Lets the user pick a color on the screen; the color (none when
+    /// cancelled or not supported) resolves the slot.
+    PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.

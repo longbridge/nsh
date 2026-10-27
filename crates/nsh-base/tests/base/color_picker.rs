@@ -1,11 +1,12 @@
 //! `ColorPicker`: its parts change one color, which the app owns; a swatch
 //! picks its color, a field reads any CSS form when it is submitted, a
 //! slider's drag reports each color then the end once, and a channel's
-//! field keeps the number typed; a disabled picker takes none of it.
+//! field keeps the number typed, an eyedropper picks a color on the screen
+//! where the platform has one; a disabled picker takes none of it.
 
 use nsh_base::{
-    ColorChannel, ColorFormat, ColorPickerEvent, ColorSpace, color_area, color_field, color_picker,
-    color_slider, color_swatch,
+    ColorChannel, ColorFormat, ColorPickerEvent, ColorSpace, color_area, color_eye_dropper,
+    color_field, color_picker, color_slider, color_swatch,
 };
 use nsh_core::{Size, element::Root, geometry::point, prelude::*};
 use nsh_engine::EngineConfig;
@@ -89,6 +90,11 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                         .color(Some(rgb(0xff0000).into()))
                         .accessibility_label("Red")
                         .size(px(20.0)),
+                )
+                .child(
+                    color_eye_dropper()
+                        .accessibility_label("Pick from screen")
+                        .size(px(20.0)),
                 ),
         )
         .child(text(move || format!("Ends {}", ends.get().join(", "))))
@@ -150,4 +156,21 @@ fn a_disabled_picker_takes_no_changes() {
     app.drag("label:Alpha", point(px(-300.0), px(0.0))).unwrap();
     app.settle();
     assert!(app.shows("Unchanged"));
+}
+
+#[test]
+fn an_eyedropper_picks_a_color_on_the_screen_where_the_platform_has_one() {
+    let mut app = start(ColorFormat::Hex, false);
+    // No eyedropper on this platform: disabled.
+    assert!(!app.screen().enabled("label:Pick from screen").unwrap());
+    app.on_screen_color(Some(rgb(0x22c55e).into())).unwrap();
+    assert!(app.screen().enabled("label:Pick from screen").unwrap());
+    app.press("label:Pick from screen").unwrap();
+    app.wait_for("text:Ends #22c55e").unwrap();
+    // Cancelled: nothing changes.
+    app.on_screen_color(None).unwrap();
+    app.press("label:Pick from screen").unwrap();
+    app.settle();
+    assert!(app.shows("Ends #22c55e"));
+    assert!(!app.shows("#22c55e, "));
 }

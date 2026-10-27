@@ -7,7 +7,7 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、带 `ColorArea`、`ColorSlider`、`ColorField` 和 `ColorSwatch` 部件的 `ColorPicker`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、`Select`、`Combobox`、`Calendar`、`TimeField`、`DatePicker`）、应用自己外观的滚动条（`Scrollbar`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、带 `ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 部件的 `ColorPicker`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、`Select`、`Combobox`、`Calendar`、`TimeField`、`DatePicker`）、应用自己外观的滚动条（`Scrollbar`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
@@ -26,6 +26,7 @@ import {
   Checkbox,
   Collapsible,
   ColorArea,
+  ColorEyeDropper,
   ColorField,
   ColorPicker,
   ColorSlider,
@@ -184,7 +185,7 @@ import type {
 | [`NumberInput`](../elements/number-input.md) | `number_input()` | 在输入框里输入、或用按钮和按键步进的数字；`value` 由应用持有（或由输入框从 `defaultValue` 起自己保存）。 |
 | [`Scrollbar`](../elements/scrollbar.md) | `scrollbar()` | 为它指明的滚动视图或列表（`scroll`）提供应用自己外观的滚动条；滑块跟随内容，拖动和按压会滚动内容。 |
 | [`Slider`](../elements/slider.md) | `slider()` | 沿轨道选取一个值或两个值组成的范围；`value` 由应用持有（或由滑块从 `defaultValue` 起自己保存）。 |
-| [`ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch`](../elements/color-picker.md) | `color_picker()`、`color_area()`、`color_slider()`、`color_field()`、`color_swatch()` | 颜色选择器及其部件：饱和度与明度区域、RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块、颜色或通道的输入框、色板；应用持有 `value`（或由选择器从 `defaultValue` 自己保存）。 |
+| [`ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch`、`ColorEyeDropper`](../elements/color-picker.md) | `color_picker()`、`color_area()`、`color_slider()`、`color_field()`、`color_swatch()`、`color_eye_dropper()` | 颜色选择器及其部件：饱和度与明度区域、RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块、颜色或通道的输入框、色板、吸管；应用持有 `value`（或由选择器从 `defaultValue` 自己保存）。 |
 | [`ResizablePanelGroup`、`ResizablePanel`](../elements/resizable.md) | `h_resizable()`、`v_resizable()`、`resizable_panel()` | 并排或上下排列的面板，用户拖动它们之间的手柄调整大小。 |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区；它的布局是应用的数据。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
@@ -291,7 +292,7 @@ import type {
 滚动条，无需逐个放置；单个视图可以通过 `scrollbar` 属性使用自己的主题。见 [Scrollbar](../elements/scrollbar.md)。
 ### ColorPicker
 
-不带外观的颜色选择器：根组件持有颜色，内部部件显示并修改它，布局由应用决定。`ColorArea` 是 HSB 的饱和度与明度，`ColorSlider` 调节 RGB、HSL、HSB 或 OKLCH 的任一通道或透明度（水平或垂直），`ColorField` 以任意 CSS 形式接受颜色或以数字接受一个通道，`ColorSwatch` 是按下即选中的预设颜色或当前颜色的预览。应用持有 `value`（或由选择器从 `defaultValue` 自己保存），`onChange` 和 `onChangeEnd` 报告颜色及按 `format` 写出的文本；颜色在每个空间中的通道值按用户设置保留。滑块和区域的拇指是屏幕阅读器的可调节元素，也是键盘焦点的一站。见 [ColorPicker](../elements/color-picker.md)。
+不带外观的颜色选择器：根组件持有颜色，内部部件显示并修改它，布局由应用决定。`ColorArea` 是 HSB 的饱和度与明度，`ColorSlider` 调节 RGB、HSL、HSB 或 OKLCH 的任一通道或透明度（水平或垂直），`ColorField` 以任意 CSS 形式接受颜色或以数字接受一个通道，`ColorSwatch` 是按下即选中的预设颜色或当前颜色的预览，`ColorEyeDropper` 是在屏幕上取色的按钮（macOS、Web）。应用持有 `value`（或由选择器从 `defaultValue` 自己保存），`onChange` 和 `onChangeEnd` 报告颜色及按 `format` 写出的文本；颜色在每个空间中的通道值按用户设置保留。滑块和区域的拇指是屏幕阅读器的可调节元素，也是键盘焦点的一站。见 [ColorPicker](../elements/color-picker.md)。
 
 ### OtpInput
 

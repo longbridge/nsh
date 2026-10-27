@@ -1,6 +1,6 @@
 ---
 title: ColorPicker
-description: "ColorPicker 组件及其部件：在饱和度与明度区域上、在 RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块上选取颜色，以任意 CSS 形式输入，或从色板中挑选；支持 WAI-ARIA 按键，对屏幕阅读器是可调节元素；布局和样式由应用决定。"
+description: "ColorPicker 组件及其部件：在饱和度与明度区域上、在 RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块上选取颜色，以任意 CSS 形式输入、从色板中挑选，或用吸管在屏幕上取色；支持 WAI-ARIA 按键，对屏幕阅读器是可调节元素；布局和样式由应用决定。"
 order: 20.86
 group: base
 demo: el-color-picker
@@ -9,7 +9,7 @@ demo: el-color-picker
 # ColorPicker
 
 颜色选择器持有一个颜色，放在其中的部件显示并修改它：饱和度与明度的 `ColorArea`，RGB、HSL、HSB 或 OKLCH 任一通道及透明度的
-`ColorSlider`，以文本接受整个颜色或以数字接受一个通道的 `ColorField`，以及预设颜色的 `ColorSwatch`。应用用自己的元素排布这些部件（每个通道一行，带上字母；用
+`ColorSlider`，以文本接受整个颜色或以数字接受一个通道的 `ColorField`，预设颜色的 `ColorSwatch`，以及在屏幕任意位置取色的 `ColorEyeDropper`。应用用自己的元素排布这些部件（每个通道一行，带上字母；用
 `Tabs` 切换色彩空间；把选择器放进 `Popover`），并为每个部件设置样式：部件绘制通道的颜色，尺寸、圆角、边框和阴影都由应用决定。
 
 ```rust tabs
@@ -125,7 +125,7 @@ function App() {
 mount(App);
 ```
 
-`ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField` 和 `ColorSwatch` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中即
+`ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中即
 `nsh-base` crate。Rust 中 `color_picker()` 及各部件的函数创建它们，每个 prop 有一个 setter（`.channel(..)`、`.thumb_style(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法；颜色是
 `Hsla`，色彩空间、通道和格式分别是 `ColorSpace`、`ColorChannel` 和 `ColorFormat`。
 
@@ -220,6 +220,18 @@ mount(App);
 | `children` | `.child(..)` | `JSX.Element` | 无 | 叠在颜色上的内容：选中色板上的对勾（`group-selected:`）。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 色板的尺寸、形状和边框；颜色按其圆角裁剪。 |
 
+### ColorEyeDropper
+
+| Prop | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不接受按压。平台没有吸管时也处于禁用状态。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器读出的内容。 |
+| `children` | `.child(..)` | `JSX.Element` | 无 | 按钮的内容：应用的图标或文字。 |
+| `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 按钮本身。 |
+
+按下时显示系统的吸管：macOS 上是 AppKit 的取色器，Web 上是浏览器的 `EyeDropper`（Chrome 和 Edge）。取到的颜色成为选择器的颜色（先报告
+`onChange`，再报告 `onChangeEnd`）；按 Escape 则不取色。平台没有吸管时按钮处于禁用状态，用 `disabled:hidden` 即可在这些平台上隐藏它。
+
 ## 事件
 
 | 事件 | 所属 | Rust | 参数 | 时机 |
@@ -227,6 +239,7 @@ mount(App);
 | `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | 用户修改了颜色。 |
 | `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | 一次修改结束，每次修改只报一次。 |
 | `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `(color: string)` | 色板被按下；色板也可以单独使用，作为调色板的色块。 |
+| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `(color: string)` | 用户在屏幕上取到了颜色；吸管也可以单独使用。 |
 
 Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::ChangeEnd(Hsla, SharedString)` 携带颜色及其
 `formatted` 文本。
@@ -243,6 +256,7 @@ Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::C
 | 滑块的拇指 | 滑块内，以轨道上的数值为中心 | `thumbClass`、`thumbStyle` |
 | `ColorField` | 选择器内 | `class`、`style` |
 | `ColorSwatch` | 选择器内，或单独使用 | `class`、`style`、`selectedStyle` |
+| `ColorEyeDropper` | 选择器内，或单独使用 | `class`、`style` |
 
 通道两端的值对应轨道两端，滑块的拇指以这两端为中心。给滑块留出半个拇指宽度的内边距（`h-3` 轨道外用 `h-6 justify-center px-2.5`），拇指就完整地留在滑块内，两端都能接受按压。部件显示的状态：拖动时拇指的
 `active:`，有键盘焦点时的 `focus:`，色板的 `selected:`，以及每个部件的 `disabled:`。
@@ -264,7 +278,7 @@ Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::C
 ## 无障碍
 
 - 区域和每个滑块的拇指都是可调节元素（`"adjustable"`，浏览器中为 slider），带有标签、数值和范围；屏幕阅读器的增加、减少操作会逐步调节它们。
-- 每个字段是带标签的文本框；每个色板是按钮，是选择器当前颜色时为选中状态，未设置 `accessibilityLabel` 时以十六进制颜色命名。
+- 每个字段是带标签的文本框；每个色板是按钮，是选择器当前颜色时为选中状态，未设置 `accessibilityLabel` 时以十六进制颜色命名。吸管是带应用所给标签的按钮。
 - 禁用时，屏幕阅读器会说明部件已变暗，部件不接受任何操作。
 
 标签、角色和操作的通用说明见[无障碍](../docs/accessibility.md)。
@@ -272,4 +286,4 @@ Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::C
 ## 平台说明
 
 - 每个平台都绘制应用设置的样式；轨道和面板的颜色是平台绘制的渐变。按压和拖动由核心跟踪，鼠标、触控笔和手指都适用；外层的滚动视图只处理从别处开始的拖动。
-- 从屏幕取色由应用自己实现：把取到的颜色设为 `value` 即可。
+- `ColorEyeDropper` 在 macOS 上使用 AppKit 的取色器，在 Web 上使用浏览器的 `EyeDropper`；取到的颜色为 sRGB。
