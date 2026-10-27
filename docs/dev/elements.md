@@ -192,7 +192,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `none` views are not entered). Views whose children stay inside pay nothing; transforms that move a child out are
   not covered. What must show above everything whatever clips it (a popover, a menu) is an `<Overlay>` (below). Nested `<Text>` spans with press handlers
   are links: the core lists them in `AttributedText::links` (UTF-16 ranges) and the block's press recognizer routes a press to
-  the span under the finger (CoreText `CTLineGetStringIndexForPosition` / `Layout.getOffsetForHorizontal`).
+  the span under the finger (CoreText `CTLineGetStringIndexForPosition` / `Layout.getOffsetForHorizontal`). The web
+  draws a link's characters as runs of their own (`split_at_links`), each naming its link, and a press on one goes to the
+  link (`nsh.js` `linkPress`), its position in the text, as elsewhere.
 - **Raw touches and the responder system**: `onTouchStart/Move/End/Cancel` (+ `Capture`), `onStartShouldSetResponder`,
   `onMoveShouldSetResponder` (+ `Capture`), `onResponderGrant/Reject/Start/Move/End/Release/Terminate/TerminationRequest`, and
   `PanResponder.create` on top. A node with any of them listens to `onTouch` natively; one tracker per root view (surface,

@@ -106,6 +106,76 @@ impl WebTextEngine {
         self.width(&run.font, run.numeric.as_ref(), text)
     }
 
+    /// `pieces` cut where a link starts or ends, each with the innermost
+    /// link it is in, so a link draws as runs of its own (a press on them
+    /// goes to it). Words are cut after line breaking, which they keep.
+    fn split_at_links(
+        &self,
+        pieces: Vec<Part>,
+        styles: &[RunStyle],
+        links: &[(u32, u32)],
+    ) -> Vec<Part> {
+        let link_at = |index: u32| {
+            links
+                .iter()
+                .enumerate()
+                .filter(|(_, (start, end))| index >= *start && index < *end)
+                .min_by_key(|(_, (start, end))| end - start)
+                .and_then(|(i, _)| u16::try_from(i).ok())
+        };
+        let mut out = Vec::with_capacity(pieces.len());
+        for mut piece in pieces {
+            if piece.ellipsis {
+                out.push(piece);
+                continue;
+            }
+            piece.link = link_at(piece.start);
+            if piece.kind != AtomKind::Text {
+                out.push(piece);
+                continue;
+            }
+            let run = &styles[piece.style as usize];
+            loop {
+                let len = piece.text.encode_utf16().count() as u32;
+                let end = piece.start + len;
+                let Some(cut) = links
+                    .iter()
+                    .flat_map(|&(s, e)| [s, e])
+                    .filter(|&b| b > piece.start && b < end)
+                    .min()
+                else {
+                    break;
+                };
+                let mut units = 0;
+                let byte = piece
+                    .text
+                    .char_indices()
+                    .find(|(_, c)| {
+                        let at = units;
+                        units += c.len_utf16() as u32;
+                        piece.start + at >= cut
+                    })
+                    .map_or(piece.text.len(), |(i, _)| i);
+                let rest = piece.text.split_off(byte);
+                let width = self.run_width(run, &piece.text)
+                    + run.style.letter_spacing.0 * piece.text.chars().count() as f32;
+                let next = Part {
+                    text: rest,
+                    width: (piece.width - width).max(0.0),
+                    start: cut,
+                    link: link_at(cut),
+                    ..piece
+                };
+                out.push(Part {
+                    width,
+                    ..std::mem::replace(&mut piece, next)
+                });
+            }
+            out.push(piece);
+        }
+        out
+    }
+
     fn metrics(&self, font: &Arc<str>, size: f32) -> (f32, f32) {
         if let Some(&m) = self.metrics.borrow().get(font) {
             return m;
@@ -262,6 +332,9 @@ pub(crate) struct Prepared {
     ellipsize: EllipsizeMode,
     no_wrap: bool,
     rtl: bool,
+    /// The UTF-16 ranges of the text's links (`AttributedText::links`), in
+    /// their order: runs split where a link starts or ends.
+    links: Box<[(u32, u32)]>,
 }
 
 /// One drawn run.
@@ -272,6 +345,10 @@ pub(crate) struct Run {
     pub(crate) y: f32,
     pub(crate) text: String,
     pub(crate) style: u16,
+    /// Offset of its first character (UTF-16 units).
+    pub(crate) start: u32,
+    /// The innermost link it is in: an index into `AttributedText::links`.
+    pub(crate) link: Option<u16>,
     /// What follows the run when the text is copied: the line's break (a
     /// newline, or the spaces a wrap dropped) after its last run.
     pub(crate) after: String,
@@ -378,6 +455,8 @@ struct Part {
     /// The `…` of a truncated last line, which is drawn but belongs to no
     /// offset.
     ellipsis: bool,
+    /// The innermost link it is in ([`Run::link`]).
+    link: Option<u16>,
 }
 
 impl WebTextEngine {
@@ -646,6 +725,7 @@ impl TextEngine for WebTextEngine {
             ellipsize: text.ellipsize,
             no_wrap: text.no_wrap,
             rtl: text.writing_direction.unwrap_or(text.rtl),
+            links: text.links.iter().map(|l| (l.start, l.end)).collect(),
         }
     }
 
@@ -705,6 +785,7 @@ impl TextEngine for WebTextEngine {
                     kind: a.kind,
                     start: a.start,
                     ellipsis: false,
+                    link: None,
                 })
                 .collect();
             let mut width = line.width;
@@ -734,8 +815,12 @@ impl TextEngine for WebTextEngine {
                     kind: AtomKind::Text,
                     start: 0,
                     ellipsis: true,
+                    link: None,
                 });
                 width += ellipsis;
+            }
+            if !prepared.links.is_empty() {
+                pieces = self.split_at_links(pieces, &styles, &prepared.links);
             }
             let free = (size.width.0 - width).max(0.0);
             let align = match prepared.align {
@@ -762,6 +847,7 @@ impl TextEngine for WebTextEngine {
                     kind,
                     start,
                     ellipsis,
+                    link,
                 } = part;
                 let s = &styles[style as usize];
                 let attachment = matches!(kind, AtomKind::Attachment(..));
@@ -792,7 +878,7 @@ impl TextEngine for WebTextEngine {
                 let len = text.len();
                 let index = runs.len();
                 let (run, byte) = match runs.last_mut() {
-                    Some(r) if merge && r.style == style => {
+                    Some(r) if merge && r.style == style && r.link == link => {
                         let byte = r.text.len();
                         r.text.push_str(&text);
                         (index.saturating_sub(1), byte)
@@ -803,6 +889,8 @@ impl TextEngine for WebTextEngine {
                             y: baseline - s.ascent,
                             text,
                             style,
+                            start,
+                            link,
                             after: String::new(),
                         });
                         (index, 0)

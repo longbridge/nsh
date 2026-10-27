@@ -904,6 +904,25 @@ class Player {
       }
       case "viewport":
         return [window.innerWidth, window.innerHeight];
+      case "text_bounds": {
+        // Characters `start..end` of a text view: their first box (on their
+        // first line), as the other platforms answer.
+        const el = this.views.get(query.id);
+        if (!el?.isConnected) return null;
+        for (const run of el.querySelectorAll(":scope > .nsh-run")) {
+          const node = run.firstChild;
+          if (!node || run._start == null) continue;
+          const from = Math.max(query.start - run._start, 0);
+          const to = Math.min(query.end - run._start, node.length);
+          if (from >= to) continue;
+          const range = document.createRange();
+          range.setStart(node, from);
+          range.setEnd(node, to);
+          const r = range.getBoundingClientRect();
+          return [r.left, r.top, r.width, r.height];
+        }
+        return null;
+      }
       case "input_text": {
         const field = this.views.get(query.id)?._field;
         return field ? field.value : null;
@@ -1689,7 +1708,7 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds, links]) {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
@@ -1701,12 +1720,17 @@ class Player {
         `border-radius:${r}px;background:${color}`;
       frag.append(box);
     }
-    for (const [x, y, text, style, after] of runs) {
+    // Nested texts that take presses: `[node, events]`, which runs name.
+    const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
+    for (const [x, y, text, style, start, link, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
       span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
       span.textContent = text;
+      // Where its characters are in the text (UTF-16, as JS strings).
+      span._start = start;
+      if (link != null) span._link = spans[link];
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
@@ -5265,7 +5289,7 @@ class Player {
     const p = {
       x, y, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
-      press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
+      press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       // What presses report: the modifier keys at the press and its clicks.
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       clicks: e.pointerType === "mouse" ? this.clickCount(x, y) : 1,
@@ -5289,6 +5313,20 @@ class Player {
     // A field in a draggable view still takes focus: preventing the default
     // keeps the browser from focusing it.
     if ((p.scroll || p.pan) && !isField) e.preventDefault();
+  }
+
+  /** The press target of a press on a link's run in text view `view`: the
+   * link's node, its events, placed as the text (as on the other
+   * platforms, a link's press reports positions in its text). */
+  linkPress(target, view) {
+    const link = target?.closest?.(".nsh-run")?._link;
+    if (!link || !PRESS_EVENTS.some((n) => link.events.has(n))) return null;
+    return {
+      _id: link.node,
+      _events: link.events,
+      _props: view._props,
+      getBoundingClientRect: () => view.getBoundingClientRect(),
+    };
   }
 
   pressIn(p) {
