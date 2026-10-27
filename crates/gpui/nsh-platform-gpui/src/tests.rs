@@ -177,6 +177,7 @@ fn windows(cx: &mut TestAppContext) {
     menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx);
     presses_carry_where_the_pointer_was(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
+    mouse_events_carry_the_position_button_and_modifiers(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
@@ -1241,6 +1242,83 @@ fn presses_carry_the_modifier_keys_and_click_count(cx: &mut TestAppContext) {
         &view,
         cx,
         "ctrl false shift false alt false meta false clicks 2",
+    );
+}
+
+/// A pad 100 × 40 at (10, 10) over a focused field that shows the pad's
+/// last `onMouseEnter`, `onMouseMove` and `onMouseLeave`: where the mouse
+/// was in the pad and the window, the button held and Shift.
+const MOUSE_EVENTS: &str = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+
+const show = (name, e) =>
+  `${name} ${Math.round(e.position.x)} ${Math.round(e.position.y)} in ${Math.round(e.pagePosition.x)} ${Math.round(e.pagePosition.y)} ${e.pressedButton} ${e.modifiers.shift}`;
+
+function App() {
+  const enter = signal("-");
+  const move = signal("-");
+  const leave = signal("-");
+  return (
+    <View style={{ flex: 1 }}>
+      <View
+        onMouseEnter={(e) => enter.set(show("enter", e))}
+        onMouseMove={(e) => move.set(show("move", e))}
+        onMouseLeave={(e) => leave.set(show("leave", e))}
+        style={{ marginLeft: 10, marginTop: 10, width: 100, height: 40 }}
+      />
+      <Input autoFocus value={`${enter()} | ${move()} | ${leave()}`} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn mouse_events_carry_the_position_button_and_modifiers(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", MOUSE_EVENTS, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "- | - | -");
+    let none = gpui::Modifiers::default();
+    // The move that brings the mouse in enters the pad and moves over it.
+    cx.simulate_mouse_move(gpui::point(gpui::px(30.0), gpui::px(25.0)), None, none);
+    wait_for(
+        &view,
+        cx,
+        "enter 20 15 in 30 25 null false | move 20 15 in 30 25 null false | -",
+    );
+    // Moves with a button down are moves too, with the button.
+    cx.simulate_mouse_move(
+        gpui::point(gpui::px(40.0), gpui::px(30.0)),
+        gpui::MouseButton::Left,
+        none,
+    );
+    wait_for(
+        &view,
+        cx,
+        "enter 20 15 in 30 25 null false | move 30 20 in 40 30 left false | -",
+    );
+    cx.simulate_mouse_move(gpui::point(gpui::px(50.0), gpui::px(30.0)), None, none);
+    wait_for(
+        &view,
+        cx,
+        "enter 20 15 in 30 25 null false | move 40 20 in 50 30 null false | -",
+    );
+    // A modifier key changing while the mouse rests is a move where it is.
+    cx.simulate_modifiers_change(gpui::Modifiers::shift());
+    wait_for(
+        &view,
+        cx,
+        "enter 20 15 in 30 25 null false | move 40 20 in 50 30 null true | -",
+    );
+    cx.simulate_modifiers_change(none);
+    cx.simulate_mouse_move(gpui::point(gpui::px(120.0), gpui::px(30.0)), None, none);
+    wait_for(
+        &view,
+        cx,
+        "enter 20 15 in 30 25 null false | move 40 20 in 50 30 null false | leave 110 20 in 120 30 null false",
     );
 }
 

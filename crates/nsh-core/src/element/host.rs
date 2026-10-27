@@ -765,6 +765,14 @@ impl Screen {
         self.bind_prop(shown, |v| Prop::Screen(ScreenProp::HeaderVisible(v)))
     }
 
+    /// Whether the system tab bar leaves while this page is on top (default
+    /// false), moving with the transition (iOS and Android).
+    pub fn hides_bottom_bar_when_pushed(self, hides: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(hides, |v| {
+            Prop::Screen(ScreenProp::HidesBottomBarWhenPushed(v))
+        })
+    }
+
     /// A large title (iOS); the content scrolls under the header.
     pub fn header_large_title(self, large: impl IntoReactive<bool>) -> Self {
         self.bind_prop(large, |v| Prop::Screen(ScreenProp::HeaderLargeTitle(v)))

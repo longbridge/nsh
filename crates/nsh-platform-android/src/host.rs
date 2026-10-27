@@ -1157,14 +1157,16 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
     }
 }
 
-/// `onHoverMove` of view `id` (see `Native.hover`).
+/// A mouse event of view `id` (see `Native.mouse`): `onMouseEnter`,
+/// `onMouseMove` or `onMouseLeave`.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-extern "system" fn Java_com_longbridge_nsh_Native_hover(
+extern "system" fn Java_com_longbridge_nsh_Native_mouse(
     _: JNIEnv<'_>,
     _: JClass<'_>,
     handle: jlong,
     id: jint,
+    kind: jint,
     x: jfloat,
     y: jfloat,
     page_x: jfloat,
@@ -1173,22 +1175,29 @@ extern "system" fn Java_com_longbridge_nsh_Native_hover(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let event = nsh_core::HoverEvent {
-        position: point(px(x), px(y)),
-        page_position: point(px(page_x), px(page_y)),
-        modifiers: nsh_core::keymap::Modifiers {
-            ctrl: modifiers & 1 != 0,
-            alt: modifiers & 2 != 0,
-            shift: modifiers & 4 != 0,
-            cmd: modifiers & 8 != 0,
-        },
+    let Some(kind) = encode::kind_from(kind).filter(|k| {
+        matches!(
+            k,
+            EventKind::MouseEnter | EventKind::MouseMove | EventKind::MouseLeave
+        )
+    }) else {
+        return;
     };
+    let modifiers = nsh_core::keymap::Modifiers {
+        ctrl: modifiers & 1 != 0,
+        alt: modifiers & 2 != 0,
+        shift: modifiers & 4 != 0,
+        cmd: modifiers & 8 != 0,
+    };
+    // Android's hover events only come with no button down.
+    let event = nsh_core::MouseEvent::new(
+        point(px(x), px(y)),
+        point(px(page_x), px(page_y)),
+        modifiers,
+        None,
+    );
     if let Some(control) = host.control() {
-        control.dispatch_event(
-            id as NodeId,
-            EventKind::HoverMove,
-            EventPayload::Hover(event),
-        );
+        control.dispatch_event(id as NodeId, kind, EventPayload::Mouse(event));
     }
 }
 

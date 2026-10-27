@@ -466,9 +466,10 @@ let editor!: EditorRef;
 
 ### Hovers and presses
 
-- `onHover(event)`: the mouse rests over a character (desktops and the web). `event` has its `position`, its UTF-16
-  `offset`, the `range` of its word, the pointer's `pagePosition`, the word's `pageBounds`, the `modifiers` held and
-  the `diagnostics` there, whose messages the app shows. Moving to another word reports the next hover at once.
+- `onHover(event)`: the mouse rests over a character with no button down (desktops and the web; a drag selects
+  text). `event` has its `position`, its UTF-16 `offset`, the `range` of its word, the pointer's `pagePosition`, the
+  word's `pageBounds`, the `modifiers` held and the `diagnostics` there, whose messages the app shows. Moving to
+  another word reports the next hover at once.
 - `onHoverEnd()`: the mouse left the word or the editor, or the text changed or scrolled under it.
 - `onTextPress(event)`: a character was pressed, after the editor placed its caret: `{ position, offset, range,
   pagePosition, modifiers, clicks }`.

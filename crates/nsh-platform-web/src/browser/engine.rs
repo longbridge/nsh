@@ -78,6 +78,8 @@ impl Host for Runtime {
     }
     fn deliver(&self, event: JsEvent) {
         match event {
+            // The engine delivers these directly to the core's installed listener.
+            JsEvent::LayoutListener { .. } => {}
             JsEvent::Event(id, event, payload) => self.dispatch_event(id, event, &payload),
             JsEvent::Reply { call, result } => {
                 let result = result.and_then(|value| {
