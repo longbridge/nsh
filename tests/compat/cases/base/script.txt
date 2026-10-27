@@ -1259,6 +1259,9 @@ event id:spark onMouseMove position.x=90 position.y=10
 tap id:more
 expect rows 5
 expect hovered null
+# A band (`y0` a field, a function of the row): its rows decoded, the
+# app's label.
+prop id:band accessibilityLabel Band
 # A pie: the slice under the pointer, its row's index. Its angles run
 # clockwise from 12 o'clock: from 3 o'clock (`startAngle`) to 9
 # (`endAngle`), the third row's share the half after 6 o'clock, the
@@ -1311,6 +1314,7 @@ covers [props] Line.hoverDotClass
 covers [props] Line.hoverDotStyle
 covers [props] Area.hoverDotClass
 covers [props] Area.hoverDotStyle
+covers [props] Area.y0
 covers [props] Plot.interactive
 covers [events] Plot.onHoverChange
 # Bars on a band scale laid out for 4 bands of 100 (`paddingInner` 0.2,
@@ -1899,6 +1903,7 @@ expect Node: true node
 expect Items: true true
 expect Takeover: true 1 ba
 expect Empty: true
+expect Page: null null ab
 expect Error: thrown
 expect Keys: none
 # The subscriber hears the changes in JS's next turn.
@@ -1944,6 +1949,57 @@ covers [nsh/base] unsetMark
 covers [nsh/base] wrapIn
 covers [nsh/base] wrapInList
 covers [nsh/base] wrappingRule
+
+# base-rich-editor-tables
+tap id:case-base-rich-editor-tables
+tap text:RunTables
+expect Insert: true *|*/|
+expect AddRow: true *|*/|/|
+expect AddColumn: true *|*|*/||/||
+expect Select: true cell
+expect Merge: true *(2,1)|*/||/||
+expect Split: true *|*|*/||/||
+expect MergeOrSplit: true true *|*|*/||/||
+expect DeleteRow: true ||/||
+expect Headers: true *|*|*/|| true true
+expect Cells: true true true
+expect Move: true true false
+expect Sizes: true true [120] 40
+expect Attribute: true
+expect Navigate: true true
+expect Fix: false
+expect DeleteTable: true none
+expect Markdown: *a|*b/c|d 3
+expect Text: "a\tb\nc\td"
+expect Configure: true
+covers [nsh/base] TableKit
+covers [nsh/base] RichTable
+covers [nsh/base] RichTableRow
+covers [nsh/base] RichTableHeader
+covers [nsh/base] RichTableCell
+covers [nsh/base] insertTable
+covers [nsh/base] addColumnBefore
+covers [nsh/base] addColumnAfter
+covers [nsh/base] deleteColumn
+covers [nsh/base] addRowBefore
+covers [nsh/base] addRowAfter
+covers [nsh/base] deleteRow
+covers [nsh/base] deleteTable
+covers [nsh/base] mergeCells
+covers [nsh/base] splitCell
+covers [nsh/base] mergeOrSplit
+covers [nsh/base] toggleHeaderColumn
+covers [nsh/base] toggleHeaderRow
+covers [nsh/base] toggleHeaderCell
+covers [nsh/base] setCellAttribute
+covers [nsh/base] goToNextCell
+covers [nsh/base] goToPreviousCell
+covers [nsh/base] fixTables
+covers [nsh/base] setCellSelection
+covers [nsh/base] moveTableRow
+covers [nsh/base] moveTableColumn
+covers [nsh/base] setColumnWidth
+covers [nsh/base] setRowHeight
 
 # base-rich-editor-extensions
 tap id:case-base-rich-editor-extensions
@@ -2027,3 +2083,5 @@ absent BubbleMenu
 tap text:ToggleMenu
 expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
+expect CellA
+expect CellD

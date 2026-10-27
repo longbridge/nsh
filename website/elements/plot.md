@@ -126,12 +126,12 @@ name is read with no JS at all.
 |---|---|---|---|---|
 | `Line` | `y` | `string \| (d, index) => number` | the plot's `y` | What it draws: one point per row with a value, the rows without one skipped. |
 | `Line`, `Area` | `data`, `x` | `T[]`, `string \| (d, index) => number` | the plot's rows | Rows of a series of its own (other x values), placed on the plot's scales by its own `x` (a row's index without). |
-| `Line`, `Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | How it connects its points: a smooth curve, straight segments, or steps that hold each value until the next row. |
+| `Line`, `Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | How it connects its points: a smooth curve, straight segments, or steps that hold each value until the next row. An area's bottom edge follows the same curve. |
 | `Line` | `dot`, `dotClass`, `dotStyle` | `boolean`, `string`, `StyleProp<ViewStyle>` | `false` | A dot on every point: a view centered on it, its size, background and border the app's. |
 | `Line`, `Area` | `hoverDotClass`, `hoverDotStyle` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point at the row under the pointer: each series' dot in its own color. Each replaces the plot's for this mark (a mark's color over the plot's size and ring); `hidden` shows none. |
-| `Area` | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its shape (from its first point to its last, from its highest point to its baseline) whose background (`bg-*`, `bg-linear-to-b from-… to-…`, `backgroundImage`) shows only inside the shape, under its `fill`. With one, `fill` is `none` where none is set. |
+| `Area` | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its shape (from its first point to its last, from its highest point to its baseline, or to its bottom edge's lowest point on a band) whose background (`bg-*`, `bg-linear-to-b from-… to-…`, `backgroundImage`) shows only inside the shape, under its `fill`. With one, `fill` is `none` where none is set. |
 | `Area` | `y1` | `string \| (d, index) => number` | the plot's `y` | What makes its top edge. |
-| `Area` | `y0` | `number` | the bottom edge | The value of its baseline on the y scale. |
+| `Area` | `y0` | `number \| string \| (d, index) => number` | the bottom edge | Its bottom edge: a number is a baseline on the y scale; a field or a function gives each row its own bottom value, which makes the area a band (a day's low to its high, a forecast's range). A row without a value at either edge is skipped. |
 | `Grid` | `x` | `number[]` | none | Where its vertical lines go, as values of the x scale (row indices on a `point` scale). |
 | `Grid` | `y` | `number[]` | none | Where its horizontal lines go, as values of the y scale. |
 
@@ -144,9 +144,20 @@ over those of the plot, as CSS inherits them:
 | `Area` | `fill` (over its `background` part); its top edge `stroke`, `strokeWidth`, `strokeDasharray` | `fill` `currentColor` (`none` beside a background); no stroke |
 | `Grid` | `stroke`, `strokeWidth`, `strokeDasharray` | `currentColor`, 1 wide, solid; each line on whole device pixels, so a thin one stays sharp |
 
-The values a `Line` or an `Area` draws, an area's `y0` too, make the y scale's domain when the plot has none; a grid's
-do not. A mark draws again only when what it draws changes (its rows, values, curve, the plot's size or scales, its
-paint); the pointer moves the hover's parts and never draws a mark again.
+The values a `Line` or an `Area` draws, an area's `y0` too (its baseline, or each row's bottom value), make the y
+scale's domain when the plot has none; a grid's do not. A mark draws again only when what it draws changes (its rows,
+values, curve, the plot's size or scales, its paint); the pointer moves the hover's parts and never draws a mark again.
+
+A band is an `Area` whose `y0` reads the rows: its top edge runs through `y1`, its bottom edge back through `y0`, both
+with the area's `curve`, and the appear draws both in from the leading edge. Its hover dot sits on the top edge; a
+`Line` over it marks the middle value:
+
+```tsx
+<Plot data={days} y="close">
+  <Area y1="high" y0="low" class="fill-chart-1/15" hoverDotClass="hidden" />
+  <Line class="stroke-chart-1 stroke-2" />
+</Plot>
+```
 
 `fill` is CSS's, as in a browser: a color. A gradient under a line is an area's background, the way a page shows a
 gradient in a shape (a box's `background-image` under `clip-path`): `backgroundClass="bg-linear-to-b from-chart-1/20

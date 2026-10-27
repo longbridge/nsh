@@ -433,6 +433,34 @@ pub enum TestStep {
         /// The keystroke: `"mod+k"`, `"escape"`.
         keys: String,
     },
+    /// Holds modifier keys down, or lets go of them, for the pointer's
+    /// steps until then (`app.keyboard.down` / `up`).
+    HoldKeys {
+        /// The modifiers: `"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`,
+        /// joined by `+`.
+        keys: String,
+        /// Whether they go down (else up).
+        down: bool,
+    },
+    /// Drags as `Drag` does and keeps the pointer down
+    /// (`app.dragAndHold`), until `Drop`.
+    DragAndHold {
+        /// What to drag.
+        selector: String,
+        /// Rightwards.
+        x: f32,
+        /// Downwards.
+        y: f32,
+    },
+    /// Lets go of the pointer `DragAndHold` left down (`app.drop`).
+    Drop,
+    /// Drops local files on a view (`app.dropFiles`).
+    DropFiles {
+        /// Where.
+        selector: String,
+        /// Their `file:` URLs.
+        uris: Vec<String>,
+    },
     /// Goes back as the user does (`app.back`).
     Back,
     /// Lets the app run (`app.wait`).

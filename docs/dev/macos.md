@@ -251,7 +251,11 @@ events 16 ms apart of at most 20 points, ended), handed to the window, and the r
 current event (it keeps it from pages with `scrollable={false}`); typing posts key events through the application,
 as real keys, so key monitors see them; back is Escape, twice when a text field is focused (the first only leaves
 it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet. `dev.rs`'s `Tester` attaches
-the agent's model to the surface when the server says it runs a test session, before the first bundle.
+the agent's model to the surface when the server says it runs a test session, before the first bundle. A step ends
+once the app is quiet and no native animation runs (`Surface::animating`: the animation graph, the platform's own
+motion on the display link, batches waiting for a frame); a scroll indicator fading out after a scroll does not count
+(`Surface::cosmetic_frame`), so a key that scrolls the page (an arrow on a view that binds none) costs the scroll's
+200 ms rather than the indicator's second.
 
 ```sh
 ./target/debug/nsh test examples/gallery --target macos

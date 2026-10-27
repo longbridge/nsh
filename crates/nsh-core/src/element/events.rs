@@ -11,10 +11,14 @@ use crate::{
 };
 
 /// Local files or directories dropped on an element (`on_file_drop`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
 pub struct FileDropEvent {
     /// Absolute `file:` URLs in platform order; encoded filenames are preserved.
     pub uris: Vec<String>,
+    /// Where the files were let go, in the window's coordinates (TS:
+    /// `pagePosition`), on backends that know it (Linux).
+    pub page_position: Option<Point<Points>>,
 }
 
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
@@ -483,7 +487,17 @@ pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>
 
 pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
     match p {
-        EventPayload::FileDrop(uris) => Some(Cow::Owned(FileDropEvent { uris: uris.clone() })),
+        EventPayload::FileDrop(uris) => Some(Cow::Owned(FileDropEvent {
+            uris: uris.clone(),
+            page_position: None,
+        })),
+        EventPayload::FileDropAt {
+            uris,
+            page_position,
+        } => Some(Cow::Owned(FileDropEvent {
+            uris: uris.clone(),
+            page_position: Some(*page_position),
+        })),
         _ => None,
     }
 }

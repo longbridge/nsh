@@ -55,6 +55,8 @@ function Figures(props: { children: JSX.Element }) {
 }
 
 const LIVE_POINTS = 60;
+/** The ticks the live price's channel spans: each tick's high and low of the last ten. */
+const CHANNEL = 10;
 const LIVE_HEIGHT = 176;
 /** The gutter right of the live plot: the y labels and the last price's tag. */
 const GUTTER = 58;
@@ -79,25 +81,30 @@ const clock = (t: number) => {
 /**
  * A minute of a price, a tick a second: the newest point is the plot's
  * right edge, its dot breathing while the stream runs, its price tagged in
- * the gutter at its height. The y domain holds still while the window fits
- * in it and re-fits only when the price leaves it or uses too little of it,
- * so the grid does not jump with every tick; a re-fit glides, the line and
- * the grid on the plot's `motion.update`, the gutter's labels and the
- * newest dot with a layout animation of the same length.
+ * the gutter at its height, inside a channel of each tick's high and low
+ * over the last ten (an area whose `y0` is a field of each row: a band).
+ * The y domain holds still while the window fits in it and re-fits only
+ * when the price leaves it or uses too little of it, so the grid does not
+ * jump with every tick; a re-fit glides, the line, the band and the grid
+ * on the plot's `motion.update`, the gutter's labels and the newest dot
+ * with a layout animation of the same length.
  */
 function Live() {
   const next = random(29);
   let t = 0;
   let price = OPEN;
+  const recent: number[] = [];
   const step = () => {
     price = Math.max(1, price + (next() - 0.485) * 0.16);
     t += 1;
-    return { t, price: Math.round(price * 100) / 100 };
+    const rounded = Math.round(price * 100) / 100;
+    recent.push(rounded);
+    if (recent.length > CHANNEL) recent.shift();
+    return { t, price: rounded, high: Math.max(...recent), low: Math.min(...recent) };
   };
   const points = signal(Array.from({ length: LIVE_POINTS }, step));
-  const fit = (rows: { price: number }[]): [number, number] => {
-    const values = rows.map((r) => r.price);
-    const [lo, hi] = [Math.min(...values), Math.max(...values)];
+  const fit = (rows: { high: number; low: number }[]): [number, number] => {
+    const [lo, hi] = [Math.min(...rows.map((r) => r.low)), Math.max(...rows.map((r) => r.high))];
     const pad = Math.max(0.2, (hi - lo) * 0.3);
     return [Math.floor((lo - pad) * 10) / 10, Math.ceil((hi + pad) * 10) / 10];
   };
@@ -109,8 +116,7 @@ function Live() {
     if (!running()) return;
     const rows = [...points().slice(1), step()];
     const [lo, hi] = domain();
-    const values = rows.map((r) => r.price);
-    const [min, max] = [Math.min(...values), Math.max(...values)];
+    const [min, max] = [Math.min(...rows.map((r) => r.low)), Math.max(...rows.map((r) => r.high))];
     const refit = min < lo || max > hi || max - min < (hi - lo) * 0.3;
     if (refit && !reduceMotion()) LayoutAnimation.configureNext(refitLayout);
     points.set(rows);
@@ -127,7 +133,7 @@ function Live() {
   const low = () => Math.min(...points().map((p) => p.price));
   const breathing = () => running() && !reduceMotion();
   return (
-    <Card icon="stocks" title="Live price" subtitle="A tick a second, the last price tagged at its height">
+    <Card icon="stocks" title="Live price" subtitle="A tick a second in its ten-second range, the last price tagged at its height">
       <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={{ flex: 1, gap: 6 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -188,6 +194,8 @@ function Live() {
           {/* The open: a faint dashed reference, while it is in view. */}
           <Grid y={OPEN > domain()[0] && OPEN < domain()[1] ? [OPEN] : []} style={{ stroke: alpha(colors.text, 0.28), strokeDasharray: "2 4" }} />
           <Area backgroundStyle={wash(toneColor(tone()), 0.2)} hoverDotClass="hidden" />
+          {/* The channel: each tick's high and low of the ten before it, the line running inside. */}
+          <Area y1="high" y0="low" style={{ fill: alpha(toneColor(tone()), 0.12) }} hoverDotClass="hidden" />
           <Line style={{ stroke: toneColor(tone()), strokeWidth: 1.75 }} hoverDotStyle={{ backgroundColor: toneColor(tone()), borderColor: colors.inset }} />
           {/* The newest point: a dot ringed in the inset's color, its halo breathing. */}
           <View style={{ position: "absolute", left: "100%", top: y(last()), width: 0, height: 0, pointerEvents: "none" }}>

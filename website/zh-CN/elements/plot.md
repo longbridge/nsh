@@ -109,12 +109,12 @@ mount(App);
 |---|---|---|---|---|
 | `Line` | `y` | `string \| (d, index) => number` | plot 的 `y` | 要绘制的内容：每个有值的行对应一个点，没有值的行跳过。 |
 | `Line`、`Area` | `data`、`x` | `T[]`、`string \| (d, index) => number` | plot 的数据行 | 自己的一组数据行（x 值不同的系列），用自己的 `x` 放在 plot 的比例尺上（没有时用行的序号）。 |
-| `Line`、`Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | 点与点之间如何连接：平滑曲线、直线段，或保持每个值直到下一行的阶梯。 |
+| `Line`、`Area` | `curve` | `"natural" \| "linear" \| "stepAfter"` | `"natural"` | 点与点之间如何连接：平滑曲线、直线段，或保持每个值直到下一行的阶梯。area 的底边使用同一条曲线。 |
 | `Line` | `dot`、`dotClass`、`dotStyle` | `boolean`、`string`、`StyleProp<ViewStyle>` | `false` | 在每个点上显示圆点：以点为中心的视图，尺寸、背景和边框由应用决定。 |
 | `Line`、`Area` | `hoverDotClass`、`hoverDotStyle` | `string`、`StyleProp<ViewStyle>` | plot 的 `dotClass`、`dotStyle` | 它的悬停圆点，位于它在指针下那一行的点上：每个系列的圆点用自己的颜色。两者分别替换 plot 上对应的值，只作用于这个图形（图形的颜色配合 plot 的尺寸和描边）；`hidden` 表示不显示。 |
-| `Area` | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：包围其形状的盒子（从第一个点到最后一个点，从最高点到基线），盒子的背景（`bg-*`、`bg-linear-to-b from-… to-…`、`backgroundImage`）只在形状内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
+| `Area` | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：包围其形状的盒子（从第一个点到最后一个点，从最高点到基线，带则到底边的最低点），盒子的背景（`bg-*`、`bg-linear-to-b from-… to-…`、`backgroundImage`）只在形状内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
 | `Area` | `y1` | `string \| (d, index) => number` | plot 的 `y` | 顶边使用的取值。 |
-| `Area` | `y0` | `number` | 底边 | 基线在 y 比例尺上的值。 |
+| `Area` | `y0` | `number \| string \| (d, index) => number` | 底边 | 它的底边：数字是 y 比例尺上的一条基线；字段名或函数为每一行给出自己的底值，area 由此成为一条带（一天的最低价到最高价、预测的区间）。任一边没有值的行会跳过。 |
 | `Grid` | `x` | `number[]` | 无 | 竖线的位置，取 x 比例尺上的值（`point` 比例尺上是行的序号）。 |
 | `Grid` | `y` | `number[]` | 无 | 横线的位置，取 y 比例尺上的值。 |
 
@@ -126,7 +126,16 @@ mount(App);
 | `Area` | `fill`（位于 `background` 部件之上）；顶边使用 `stroke`、`strokeWidth`、`strokeDasharray` | `fill` 为 `currentColor`（有背景时为 `none`）；没有描边 |
 | `Grid` | `stroke`、`strokeWidth`、`strokeDasharray` | `currentColor`，宽 1，实线；每条线都落在整数设备像素上，细线也保持清晰 |
 
-plot 没有设置定义域时，`Line` 和 `Area` 绘制的数值（包括 area 的 `y0`）构成 y 比例尺的定义域；grid 的数值不计入。图形只在要画的内容变化时重绘（数据行、取值、曲线、plot 的尺寸或比例尺、绘制属性）；指针只移动悬停部件，从不让图形重绘。
+plot 没有设置定义域时，`Line` 和 `Area` 绘制的数值（包括 area 的 `y0`：基线，或每一行的底值）构成 y 比例尺的定义域；grid 的数值不计入。图形只在要画的内容变化时重绘（数据行、取值、曲线、plot 的尺寸或比例尺、绘制属性）；指针只移动悬停部件，从不让图形重绘。
+
+带是 `y0` 读取数据行的 `Area`：顶边经过 `y1`，底边再经过 `y0` 回到起点，两条边都使用 area 的 `curve`，出现动画从起始边缘同时画出两条边。它的悬停圆点位于顶边；叠加一条 `Line` 标出中间的值：
+
+```tsx
+<Plot data={days} y="close">
+  <Area y1="high" y0="low" class="fill-chart-1/15" hoverDotClass="hidden" />
+  <Line class="stroke-chart-1 stroke-2" />
+</Plot>
+```
 
 `fill` 与浏览器中一样是 CSS 的 `fill`：一个颜色。折线下方的渐变是 area 的背景，就像网页在形状里显示渐变那样（盒子的 `background-image` 加上 `clip-path`）：`backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent"` 从 area 的最高点渐隐到基线，与任何视图的背景一样使用主题令牌和当前外观的颜色。
 
