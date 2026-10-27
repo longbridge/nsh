@@ -17,7 +17,11 @@ come from two places:
   module `AlertDialog`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
-  own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{button, …}`, make navigation and
+  own add `nsh_base::registry()` to it). `nsh_base::registry_of` makes it of some of its parts only
+  (`nsh_base::parts`: `core`, the controls, popups, toasts and alerts every app has, and one part per larger
+  component, `text_view`, `editor`, `diff`, `rich_editor`, `data_table`, `table`, `dock`, `resizable`, `plot`): a
+  runtime that registers fewer parts leaves the others' code out of its binary, as nothing else reaches it (Rust
+  builders make a component's instance without the registry). Rust apps use `nsh_base::{button, …}`, make navigation and
   dialogs with `nsh_base::{nav_stack, nav_page, dialog}` (on the core's `Stack`, `Screen` and `Modal` host
   elements, whose builders are hidden building blocks of these), and show system alerts with
   `nsh_base::alert_dialog()`. What goes in is behavior:

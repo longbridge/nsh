@@ -96,7 +96,8 @@ and the renames decided so far).
 - An unstyled base component (`nsh-base` is NSH's `gpui-base`, `architecture.md` "Layers"): behavior, state, focus,
   keyboard or accessibility a UI needs, or system UI (insets, the keyboard's avoidance, the status bar's setting, a
   dialog; controls such as a toggle, a slider or a popover as their behavior is written): a Rust component or
-  `#[module]` in `crates/nsh-base`, registered in `nsh_base::registry()` (`docs/dev/components.md`). It never styles
+  `#[module]` in `crates/nsh-base`, registered by one of `nsh_base::parts` (`core`, or a part of its own for a large
+  component), which `nsh_base::registry()` puts together (`docs/dev/components.md`). It never styles
   (no colors, paddings, radii, fonts or variants of its own), takes the app's styles, exposes its parts and reports
   changes of state the app owns.
 - A styled widget (a button with a look, a card, a list row): never in NSH, which has no `gpui-component`. Apps
