@@ -127,9 +127,9 @@ fn control_s_finds_text_forward_focuses_and_reveals_it_and_repeats_to_the_next_m
     assert_eq!(row(&terminal, BOTTOM_ROW).trim_end(), "/item 1");
     assert_eq!(reversed(&terminal), "item 1");
     for expected in [
-        "focus 10 offset 112",
+        "focus 10 offset 128",
         "focus 11 offset 128",
-        "focus 1 offset 16",
+        "focus 1 offset 0",
     ] {
         assert_eq!(view.handle(ctrl("s")), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, expected);
@@ -140,7 +140,7 @@ fn control_s_finds_text_forward_focuses_and_reveals_it_and_repeats_to_the_next_m
     assert!(row(&terminal, BOTTOM_ROW).starts_with("footer line"));
     assert_eq!(reversed(&terminal), "");
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 16 pressed 1");
+    draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 0 pressed 1");
 }
 
 #[test]

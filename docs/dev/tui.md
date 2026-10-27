@@ -386,7 +386,8 @@ position, top to bottom and left to right, and the order wraps at both ends. A s
 control (inclusive), at the search point, or at the first / last match when there is neither.
 
 A match moves keyboard focus to the nearest focusable view around it (a button's label focuses the button) and
-reveals the match's row in its surrounding Scrolls, innermost first. A match in other text clears focus and
+reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
+at the default scale) as focus traversal does. A match in other text clears focus and
 becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
 control after or before it in reading order.
 
