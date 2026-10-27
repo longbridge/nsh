@@ -1,4 +1,5 @@
-import { Canvas, type CanvasRenderingContext2D, cleanup, computed, Input, signal, Text, View } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, cleanup, computed, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import { Button, Card, colors, Field } from "./ui";
 
 // ─── Counter ────────────────────────────────────────────────────────────

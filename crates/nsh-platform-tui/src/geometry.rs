@@ -55,14 +55,25 @@ impl CellBounds {
         cells: CellSize,
         area: ratatui_core::layout::Rect,
     ) -> Self {
+        let left = i32::from(area.x).saturating_add(cell_edge(bounds.origin.x, cells.width()));
+        let top = i32::from(area.y).saturating_add(cell_edge(bounds.origin.y, cells.height()));
         Self {
-            left: i32::from(area.x) + (bounds.origin.x / cells.width()).round() as i32,
-            top: i32::from(area.y) + (bounds.origin.y / cells.height()).round() as i32,
-            right: i32::from(area.x)
-                + ((bounds.origin.x + bounds.size.width) / cells.width()).round() as i32,
-            bottom: i32::from(area.y)
-                + ((bounds.origin.y + bounds.size.height) / cells.height()).round() as i32,
+            left,
+            top,
+            right: left.saturating_add(cell_edge(bounds.size.width, cells.width())),
+            bottom: top.saturating_add(cell_edge(bounds.size.height, cells.height())),
         }
+    }
+
+    pub(crate) fn origin(
+        self,
+        cells: CellSize,
+        area: ratatui_core::layout::Rect,
+    ) -> nsh_core::Point<Points> {
+        nsh_core::Point::new(
+            cells.width() * self.left.saturating_sub(i32::from(area.x)) as f32,
+            cells.height() * self.top.saturating_sub(i32::from(area.y)) as f32,
+        )
     }
 
     pub(crate) fn clipped(self, clip: ratatui_core::layout::Rect) -> ratatui_core::layout::Rect {
@@ -72,4 +83,9 @@ impl CellBounds {
         let bottom = self.bottom.clamp(i32::from(top), i32::from(clip.bottom())) as u16;
         ratatui_core::layout::Rect::new(left, top, right - left, bottom - top)
     }
+}
+
+// A half Cell belongs to the edge in the positive direction, including off-screen edges.
+fn cell_edge(value: Points, unit: Points) -> i32 {
+    (value / unit + 0.5).floor() as i32
 }

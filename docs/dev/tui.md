@@ -18,9 +18,10 @@ terminal. `--trace` includes the engine's timing logs, `--data-dir` selects its 
 
 ## Architecture
 
-- **The core lays out in points.** Taffy places each view. The backend rounds the left, top, right and bottom
-  edges separately to Cells; drawing and hit testing use those same edges. Text is measured on the grid on the
-  engine thread. Changing the area passed to `render` sends the new viewport and environment to the engine.
+- **The core lays out in points.** Taffy places each view. The backend projects its frame to Cells using the
+  rounding rule below; child frames, content boxes, drawing and hit testing share that projection. Text is measured
+  on the grid on the engine thread. Changing the area passed to `render` sends the new viewport and environment
+  to the engine.
 - **One engine per surface.** `app.rs` owns the public lifecycle and configuration. `surface.rs` carries complete
   `MountBatch` messages, structured errors and frame requests over a channel. Only rendering drains the inbox;
   `mount.rs` applies a whole batch before callbacks, drawing or input can observe it. Replacing or stopping an
@@ -58,6 +59,23 @@ runner are separate slices. The current environment uses desktop behavior and th
 One **Cell** is **8 × 16 points** by default. These are layout units, independent of the terminal font's physical
 pixel dimensions. `CellSize::new` accepts finite, positive typed dimensions; the same value is used for the text
 engine, viewport, drawing and input. CLI and app-file selection of the scale belongs to the terminal-idiom work.
+
+Every geometric projection uses **round-half-up**: `floor(points / points_per_cell + 0.5)`. A tie goes toward
+positive coordinates, including negative positions (`-0.5` becomes `0`). The embedding area's integer Cell origin
+is added after conversion. `geometry::CellBounds` is the common boundary for view frames and content boxes;
+input content boxes follow the same rule when the input renderer is added.
+
+A box first snaps its origin relative to its parent's snapped origin. Its right and bottom edges are then computed
+from that snapped origin plus its point width and height, using the same rounding rule. Children and content use
+this snapped origin, including when the parent is partly off screen; clipping happens afterward. Hit regions reuse
+the resulting visible rectangles, with the right and bottom edges exclusive. They never convert points again.
+
+For example, a box at y = 216pt snaps to row 14 (224pt). Its 40pt height places the bottom at 264pt, which rounds
+up to row 17: rows 14, 15 and 16 draw. With 12pt padding above and below one 16pt text row, the text starts at
+236pt and rounds to row 15, the middle row. Keeping an unrounded parent origin for text would instead put that
+label on row 14. This projection also keeps a box's Cell dimensions stable as its origin crosses a half Cell;
+it can change a sub-Cell gap, while layout remains the core's. Text measurement still counts the whole Cells that
+fit within a point width; that capacity calculation is separate from positioning edges.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Every line is one row at any font size. Wrapping prefers spaces, then breaks inside a word. Explicit newlines
