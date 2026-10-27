@@ -14,6 +14,8 @@ pub(crate) enum Action {
     PageUp,
     Start,
     End,
+    /// Opens the Minibuffer: forward (`true`) or backward.
+    Search(bool),
     Quit,
 }
 
@@ -54,6 +56,8 @@ pub(crate) fn terminal(stroke: Keystroke) -> Option<Action> {
             Key::Char('b') => Action::Left,
             Key::Char('g') => Action::Back,
             Key::Char('v') => Action::PageDown,
+            Key::Char('s') => Action::Search(true),
+            Key::Char('r') => Action::Search(false),
             Key::Char('c') => Action::Quit,
             _ => return None,
         });
