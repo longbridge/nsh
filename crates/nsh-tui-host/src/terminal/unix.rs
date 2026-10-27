@@ -54,6 +54,10 @@ pub(super) fn disconnected() -> io::Result<bool> {
     if !io::stdin().is_terminal() {
         return Ok(true);
     }
+    #[cfg(target_os = "macos")]
+    if input_at_eof()? {
+        return Ok(true);
+    }
     let mut fds = [libc::STDIN_FILENO, libc::STDOUT_FILENO].map(|fd| libc::pollfd {
         fd,
         events: 0,
@@ -66,6 +70,46 @@ pub(super) fn disconnected() -> io::Result<bool> {
     Ok(fds
         .iter()
         .any(|fd| fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0))
+}
+
+#[cfg(target_os = "macos")]
+fn input_at_eof() -> io::Result<bool> {
+    // macOS poll can omit HUP for a PTY without a controlling session. A readable
+    // raw-mode input with no queued bytes is EOF; inspect it without consuming input.
+    // SAFETY: zero is a valid empty fd_set and timeval; only stdin is added to the set.
+    let mut readable: libc::fd_set = unsafe { std::mem::zeroed() };
+    let mut timeout = libc::timeval {
+        tv_sec: 0,
+        tv_usec: 0,
+    };
+    // SAFETY: the initialized set and timeout remain valid throughout the nonblocking call.
+    let ready = unsafe {
+        libc::FD_SET(libc::STDIN_FILENO, &mut readable);
+        libc::select(
+            1,
+            &mut readable,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut timeout,
+        )
+    };
+    if ready < 0 {
+        let error = io::Error::last_os_error();
+        return if error.kind() == io::ErrorKind::Interrupted {
+            Ok(false)
+        } else {
+            Err(error)
+        };
+    }
+    if ready == 0 {
+        return Ok(false);
+    }
+    let mut queued: libc::c_int = 0;
+    // SAFETY: FIONREAD writes the number of queued bytes to the initialized integer.
+    if unsafe { libc::ioctl(libc::STDIN_FILENO, libc::FIONREAD as _, &mut queued) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(queued == 0)
 }
 
 pub(super) fn write(bytes: &[u8]) -> io::Result<usize> {
@@ -124,6 +168,14 @@ pub(super) fn restore(mut bytes: &[u8]) {
         let written =
             unsafe { libc::write(libc::STDOUT_FILENO, bytes.as_ptr().cast(), bytes.len()) };
         if written <= 0 {
+            if written < 0 && io::Error::last_os_error().kind() == io::ErrorKind::WouldBlock {
+                // macOS can wait for a full controlling PTY's output during process teardown,
+                // even after SIGKILL. Discard undeliverable output rather than waiting to close it.
+                // SAFETY: this session owns stdout; TCOFLUSH discards its pending terminal output.
+                unsafe {
+                    libc::tcflush(libc::STDOUT_FILENO, libc::TCOFLUSH);
+                }
+            }
             break;
         }
         bytes = &bytes[written as usize..];

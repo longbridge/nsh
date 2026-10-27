@@ -14,6 +14,7 @@ use std::{
 };
 
 const EXIT_TIMEOUT: Duration = Duration::from_secs(1);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Host {
     child: Child,
@@ -92,7 +93,9 @@ impl Host {
                 Stdio::null()
             })
             .stdout(Stdio::from(slave.try_clone().unwrap()))
-            .stderr(Stdio::null());
+            .stderr(Stdio::from(
+                File::create(directory.join("stderr.log")).unwrap(),
+            ));
         if fps {
             command.arg("--fps");
         }
@@ -119,7 +122,7 @@ impl Host {
 
     fn start(controlling: bool, fps: bool) -> Self {
         let mut host = Self::spawn(controlling, fps, true);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
         let mut output = Vec::new();
         loop {
             host.drain(&mut output);
@@ -172,8 +175,8 @@ impl Host {
         );
     }
 
-    fn wait(&mut self, drain_output: bool) -> (ExitStatus, Vec<u8>) {
-        let deadline = Instant::now() + EXIT_TIMEOUT;
+    fn wait(&mut self, drain_output: bool, timeout: Duration) -> (ExitStatus, Vec<u8>) {
+        let deadline = Instant::now() + timeout;
         let mut output = Vec::new();
         loop {
             if drain_output {
@@ -187,7 +190,9 @@ impl Host {
             }
             assert!(
                 Instant::now() < deadline,
-                "host did not exit within one second"
+                "host {} did not exit within {timeout:?}: {}",
+                self.child.id(),
+                fs::read_to_string(self.directory.join("stderr.log")).unwrap_or_default()
             );
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -197,6 +202,8 @@ impl Host {
 impl Drop for Host {
     fn drop(&mut self) {
         // Never leave a failed regression test's spinning host behind.
+        // A full PTY can delay process teardown on macOS; disconnect it before reaping.
+        drop(self.master.take());
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = fs::remove_dir_all(&self.directory);
@@ -217,16 +224,20 @@ fn termios(file: &File) -> libc::termios {
 #[test]
 fn signals_exit_the_host_and_restore_the_terminal() {
     for signal in [libc::SIGHUP, libc::SIGTERM, libc::SIGINT] {
-        let mut host = Host::start(true, false);
+        let mut host = Host::start(false, false);
         // Enter the input poll without supplying another byte.
         std::thread::sleep(Duration::from_millis(50));
         host.master.as_mut().unwrap().write_all(b"\x1b[").unwrap();
         std::thread::sleep(Duration::from_millis(50));
         host.signal(signal);
-        let (status, output) = host.wait(true);
+        let (status, output) = host.wait(true, EXIT_TIMEOUT);
         assert!(status.success(), "signal {signal}: {status}");
         let restored = termios(&host.slave);
-        assert_eq!(restored.c_lflag, host.original.c_lflag);
+        // PENDIN is kernel bookkeeping for input reprocessing after leaving raw mode.
+        assert_eq!(
+            restored.c_lflag & !libc::PENDIN,
+            host.original.c_lflag & !libc::PENDIN
+        );
         assert_eq!(restored.c_iflag, host.original.c_iflag);
         let output = String::from_utf8_lossy(&output);
         assert!(
@@ -246,7 +257,7 @@ fn terminal_hangup_exits_with_or_without_a_controlling_terminal() {
         let mut host = Host::start(controlling, false);
         std::thread::sleep(Duration::from_millis(50));
         drop(host.master.take());
-        let _ = host.wait(true);
+        let _ = host.wait(true, EXIT_TIMEOUT);
     }
 }
 
@@ -310,7 +321,7 @@ fn bench_terminal_idle_cpu() {
         let mut output = Vec::new();
         host.drain(&mut output);
         host.signal(libc::SIGTERM);
-        assert!(host.wait(true).0.success());
+        assert!(host.wait(true, EXIT_TIMEOUT).0.success());
         println!(
             "terminal idle: fps={fps}, CPU {percent:.3}% of one core, {} bytes over {:.3}s",
             output.len(),
@@ -324,41 +335,52 @@ fn bench_terminal_idle_cpu() {
 #[test]
 fn closed_standard_input_does_not_fall_back_to_the_controlling_terminal() {
     let mut host = Host::spawn(true, false, false);
-    assert!(!host.wait(true).0.success());
-    assert_eq!(termios(&host.slave).c_lflag, host.original.c_lflag);
+    assert!(!host.wait(true, STARTUP_TIMEOUT).0.success());
+    let error = fs::read_to_string(host.directory.join("stderr.log")).unwrap();
+    assert!(
+        error.contains("interactive terminal input is closed or redirected"),
+        "{error}"
+    );
 }
 
 #[test]
 fn shutdown_interrupts_a_full_terminal_output_queue() {
-    let mut host = Host::start(true, false);
-    // SAFETY: only this private PTY's open file description is changed, never the user's terminal.
-    unsafe {
-        let flags = libc::fcntl(host.slave.as_raw_fd(), libc::F_GETFL);
-        assert!(flags >= 0);
-        assert_eq!(
-            libc::fcntl(
-                host.slave.as_raw_fd(),
-                libc::F_SETFL,
-                flags | libc::O_NONBLOCK
-            ),
-            0
+    for controlling in [false, true] {
+        let mut host = Host::start(controlling, false);
+        // SAFETY: only this private PTY's open file description is changed, never the user's terminal.
+        unsafe {
+            let flags = libc::fcntl(host.slave.as_raw_fd(), libc::F_GETFL);
+            assert!(flags >= 0);
+            assert_eq!(
+                libc::fcntl(
+                    host.slave.as_raw_fd(),
+                    libc::F_SETFL,
+                    flags | libc::O_NONBLOCK
+                ),
+                0
+            );
+        }
+        loop {
+            match host.slave.write(&[b'x'; 8192]) {
+                Ok(0) => panic!("PTY unexpectedly closed"),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("fill PTY: {error}"),
+            }
+        }
+        host.master.as_mut().unwrap().write_all(b"\x08e").unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            host.child.try_wait().unwrap().is_none(),
+            "output backpressure must wait, not fail"
         );
-    }
-    loop {
-        match host.slave.write(&[b'x'; 8192]) {
-            Ok(0) => panic!("PTY unexpectedly closed"),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-            Err(error) => panic!("fill PTY: {error}"),
+        host.signal(libc::SIGTERM);
+        assert!(host.wait(false, EXIT_TIMEOUT).0.success());
+        if !controlling {
+            assert_eq!(
+                termios(&host.slave).c_lflag & !libc::PENDIN,
+                host.original.c_lflag & !libc::PENDIN
+            );
         }
     }
-    host.master.as_mut().unwrap().write_all(b"\x08e").unwrap();
-    std::thread::sleep(Duration::from_millis(100));
-    assert!(
-        host.child.try_wait().unwrap().is_none(),
-        "output backpressure must wait, not fail"
-    );
-    host.signal(libc::SIGTERM);
-    assert!(host.wait(false).0.success());
-    assert_eq!(termios(&host.slave).c_lflag, host.original.c_lflag);
 }

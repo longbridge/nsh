@@ -78,7 +78,8 @@ and Widget embedding keep the same layout API; full transport timings require `d
 
 On Unix, SIGHUP, SIGTERM and SIGINT request shutdown. The host checks the flag before and after input waits
 and while waiting for a full output queue. A disconnected stdin/stdout (`POLLHUP`, `POLLERR`, `POLLNVAL`),
-loss of the input TTY, or a read/write error ends the run loop. Interactive runs require a live terminal on
+loss of the input TTY, or a read/write error ends the run loop. On macOS, select readiness plus an empty
+input queue also detects EOF on PTYs whose poll does not report HUP. The check consumes no input. Interactive runs require a live terminal on
 stdin; `--headless` continues to accept redirected or closed input.
 
 The Unix session saves the descriptor flags and enables nonblocking input/output. It uses crossterm 0.29's
@@ -91,7 +92,8 @@ On macOS the reader uses select with microsecond waits. Neither path retries a f
 Terminal and OSC 52 writes share the cancellable output path, with buffered frame encoding. Output backpressure
 waits for writability in 16 ms slices and checks shutdown between waits; errors propagate. Once the loop ends,
 writer destructors stop writing. The session attempts mouse/alternate-screen/cursor restoration with nonblocking
-writes, restores raw-mode settings, then restores the original descriptor flags. Cleanup does not wait for a
+writes, discards undeliverable queued output if that write would block (macOS can otherwise wait in process
+teardown), restores raw-mode settings, then restores the original descriptor flags. Cleanup does not wait for a
 hung-up or full output queue. Signals do only an atomic store; cleanup runs on the host thread.
 
 `run_app` honors the remainder of a poll that returns `Idle` early, capped by the next frame deadline, so
@@ -101,7 +103,10 @@ immediate deadline. The maximum sleep remains 16 ms; headless hosts use the same
 
 The host integration binary has private-PTY regressions for each stop signal, partial input, hangup with and
 without a controlling terminal, closed stdin, and shutdown with a full output queue. They require exit within
-one second and check restoration where the terminal still exists. Each test kills and reaps its child on failure.
+one second after a signal or hangup and check restoration on a non-controlling PTY, which remains queryable
+after child exit. Kernel `PENDIN` bookkeeping is excluded from the termios comparison. Startup has its own
+ten-second deadline. Failed tests close their private PTY before killing and reaping the child, so full output
+cannot deadlock the test cleanup. Host stderr is retained in the failure diagnostic.
 
 ```sh
 CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test -p nsh-tui-host --test host lifecycle -- --test-threads=1
