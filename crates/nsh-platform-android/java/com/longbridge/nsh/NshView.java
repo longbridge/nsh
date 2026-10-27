@@ -601,7 +601,7 @@ public class NshView extends FrameLayout {
         boolean rescaled = d > 0 && d != density;
         if (rescaled) {
             density = d;
-            mounter.density = d;
+            mounter.setDensity(d);
         }
         publishEnvironment(getRootWindowInsets());
         int w = getWidth(), h = getHeight();
