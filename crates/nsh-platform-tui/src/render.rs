@@ -237,13 +237,13 @@ impl Painter<'_> {
             if outline.is_visible() {
                 let outset = outline.offset + outline.width;
                 let outline_bounds = CellBounds::new(
-                    Bounds::new(
-                        origin - Point::new(outset, outset),
+                    projection.bounds(Bounds::new(
+                        Point::new(-outset, -outset),
                         nsh_core::Size::new(
                             view.frame.size.width + outset * 2.0,
                             view.frame.size.height + outset * 2.0,
                         ),
-                    ),
+                    )),
                     self.cells,
                     self.area,
                 );

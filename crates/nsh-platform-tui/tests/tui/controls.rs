@@ -53,6 +53,36 @@ fn controls_draw_the_apps_focus_outline_without_changing_layout() {
 }
 
 #[component]
+fn ScaledOutline() -> impl IntoElement {
+    view().flex_1().child(
+        nsh_base::button()
+            .absolute()
+            .left(px(16.0))
+            .top(px(32.0))
+            .w(px(80.0))
+            .h(px(48.0))
+            .origin_top_left()
+            .scale(2.0)
+            .outline(px(2.0))
+            .outline_offset(px(-2.0))
+            .outline_color(nsh_core::color::rgb(0x123456))
+            .child(text("scaled")),
+    )
+}
+
+#[test]
+fn an_app_outline_follows_the_controls_transformed_bounds() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
+    view.load(App::Rust(Root::new::<ScaledOutline>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "scaled");
+    let corner = &terminal.backend().buffer()[(21, 7)];
+    assert_eq!(corner.symbol(), "┘");
+    assert_eq!(corner.fg, Color::Rgb(0x12, 0x34, 0x56));
+}
+
+#[component]
 fn ThinProgress() -> impl IntoElement {
     let value = signal(0.0f32);
     view()

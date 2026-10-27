@@ -384,7 +384,7 @@ above; unfocused surfaces ignore keys.
 
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
 state stays on a shared ancestor when moving backward between its controls. App-defined outlines draw as
-single-Cell strokes in the app's color, with their offset rounded to Cells and their hidden edges clipped.
+single-Cell strokes in the app's color, transformed with the control before Cell rounding and ancestor clipping.
 They take no layout space; text and children draw above the stroke when they share its Cells. This is a
 rendering rule for outlines the app sets, including focus outlines; the backend adds no outline of its own.
 The app and shared example UI own the appearance, while the backend projects their styles onto Cells.
@@ -448,7 +448,7 @@ indicators sized by the app. Page backgrounds retain the terminal-background pol
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. Slider dragging and
 hover feedback are the ticket-09 follow-up; the controls acceptance deliberately leaves them out until that
-pointer implementation merges. Decorative shadows (including Tailwind rings), gradients and transforms retain
+pointer implementation merges. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
 their documented degradation below; the gallery's outline-based control focus styles are rendered.
 
 ## Text fields
