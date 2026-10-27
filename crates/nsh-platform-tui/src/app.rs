@@ -430,9 +430,9 @@ impl AppView {
         let Some(stroke) = crate::key_scheme::keystroke(key, modifiers) else {
             return Handled::Ignored;
         };
-        let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control) {
-            Handled::Yes
-        } else if self.handle_field_key(key, stroke, &control) {
+        let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control)
+            || self.handle_field_key(key, stroke, &control)
+        {
             Handled::Yes
         } else if let Some(action) = crate::key_scheme::terminal(stroke) {
             self.keyboard
@@ -473,11 +473,13 @@ impl AppView {
             if field.edit(
                 action,
                 stroke.modifiers.shift,
-                config,
-                &mut self.kill,
-                self.clipboard.as_ref(),
-                id,
-                control,
+                crate::text_input::EditContext {
+                    config,
+                    kill: &mut self.kill,
+                    clipboard: self.clipboard.as_ref(),
+                    id,
+                    control,
+                },
             ) {
                 self.keyboard.focus(None, &mut self.tree, control);
             }

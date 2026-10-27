@@ -19,6 +19,14 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{geometry::CellBounds, key_scheme::EditAction};
 
+pub(crate) struct EditContext<'a> {
+    pub(crate) config: &'a InputConfig,
+    pub(crate) kill: &'a mut String,
+    pub(crate) clipboard: &'a dyn nsh_core::clipboard::ClipboardBackend,
+    pub(crate) id: NodeId,
+    pub(crate) control: &'a EngineControl,
+}
+
 #[derive(Default)]
 pub(crate) struct Field {
     pub(crate) model: Model,
@@ -148,17 +156,15 @@ impl Field {
     }
 
     /// Returns whether this action leaves the field.
-    pub(crate) fn edit(
-        &mut self,
-        action: EditAction,
-        extend: bool,
-        config: &InputConfig,
-        kill: &mut String,
-        clipboard: &dyn nsh_core::clipboard::ClipboardBackend,
-        id: NodeId,
-        control: &EngineControl,
-    ) -> bool {
+    pub(crate) fn edit(&mut self, action: EditAction, extend: bool, cx: EditContext<'_>) -> bool {
         use EditAction::*;
+        let EditContext {
+            config,
+            kill,
+            clipboard,
+            id,
+            control,
+        } = cx;
         let mut changed = false;
         let mut leave = false;
         if !matches!(action, Vertical(_)) {
