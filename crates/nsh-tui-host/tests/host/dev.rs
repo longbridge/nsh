@@ -141,8 +141,10 @@ fn hot_updates_keep_state_and_a_rejected_patch_loads_its_bundle() {
 }
 
 fn key(view: &mut AppView, name: &str, ctrl: bool) {
-    let mut modifiers = nsh_platform_tui::Modifiers::default();
-    modifiers.ctrl = ctrl;
+    let modifiers = nsh_platform_tui::Modifiers {
+        ctrl,
+        ..Default::default()
+    };
     view.handle(nsh_platform_tui::Input::Key {
         key: name.into(),
         modifiers,
