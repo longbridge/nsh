@@ -99,8 +99,11 @@ const icon = { url: "asset:/img.png", size: { width: 40, height: 30 }, scales: [
 const single = { url: "asset:/single.png", size: { width: 10, height: 10 } };
 const big = { url: "asset:/big.png", size: { width: 20, height: 20 }, scales: [1, 2, 4] };
 
+// At their own sizes, on whole points: layout rounds frames to device pixels,
+// so stretched to the width (292.5 points tall) they would move as the ratio
+// changes, which is not what these tests are about.
 mount(() => (
-  <View>
+  <View style={{ alignItems: "flex-start" }}>
     <Image src={icon} />
     <Image src={single} />
     <Image src={big} />

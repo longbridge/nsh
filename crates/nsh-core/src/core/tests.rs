@@ -16851,13 +16851,73 @@ fn image_scales_mount_the_variant_for_the_pixel_ratio() {
             )),
             "at {ratio}"
         );
-        // The size in points does not depend on the variant.
-        assert_eq!(
-            frame_of(&batch, 3).map(|f| f.size),
-            Some(crate::geometry::size_pt(40.0, 30.0)),
-            "at {ratio}"
+        // The size in points does not depend on the variant: 40 × 30, its
+        // edges on the device pixels of the ratio.
+        let size = frame_of(&batch, 3).expect("frame").size;
+        let pixel = 1.0 / ratio;
+        assert!(
+            (size.width.0 - 40.0).abs() <= pixel && (size.height.0 - 30.0).abs() <= pixel,
+            "at {ratio}: {size:?}"
         );
     }
+}
+
+#[test]
+fn rounding_lands_on_device_pixels() {
+    // At one pixel per point, Taffy's rounding to whole points.
+    for v in [0.0, 0.4, 0.5, 1.49, 120.6, -0.5] {
+        assert_eq!(super::round(v, 1.0), (v + 0.5).floor(), "{v}");
+    }
+    assert_eq!(super::ceil_to_pixel(Points(21.333_334), 1.0), Points(22.0));
+    // At 2.625: 21 points are 55.125 pixels, rounded up to 56.
+    let ratio = 2.625;
+    let up = super::ceil_to_pixel(Points(21.0), ratio);
+    assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
+    // 56 pixels measured stay 56, whatever `f32` makes of `56 / 2.625`.
+    let measured = Points(56.0 / ratio);
+    let up = super::ceil_to_pixel(measured, ratio);
+    assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
+    assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+}
+
+#[test]
+fn frames_stay_on_device_pixels_at_fractional_ratios() {
+    // A view 4 points down (10.5 pixels at 2.625) holding a child as tall as
+    // itself: rounded to whole points, the platform rounding each frame to
+    // pixels in its parent made the child 79 pixels in a 78 pixel parent.
+    let ratio = 2.625;
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = Vec::new();
+    for (id, parent) in [(2, ROOT_ID), (3, 2), (4, 3)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(2, &[("paddingTop", StyleValue::Number(4.0))]));
+    ops.push(style_op(3, &[("height", StyleValue::Number(30.0))]));
+    ops.push(style_op(4, &[("height", StyleValue::Number(30.0))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let pixels = |v: Points| v.0 * ratio;
+    let whole = |v: f32| (v - v.round()).abs() < 1.0e-3;
+    let outer = frame_of(&batch, 3).expect("outer frame");
+    let inner = frame_of(&batch, 4).expect("inner frame");
+    for v in [
+        outer.origin.y,
+        outer.size.height,
+        inner.origin.y,
+        inner.size.height,
+    ] {
+        assert!(whole(pixels(v)), "{} pixels", pixels(v));
+    }
+    assert_eq!(
+        pixels(outer.size.height).round(),
+        pixels(inner.size.height).round()
+    );
 }
 
 #[test]

@@ -844,6 +844,8 @@ impl<M: TextEngine> Core<M> {
         if ratio != environment.pixel_ratio {
             self.repick_images(ratio, environment.pixel_ratio);
         }
+        // Frames and text measurements are rounded to device pixels.
+        self.pixel_ratio_changed(environment.pixel_ratio);
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
