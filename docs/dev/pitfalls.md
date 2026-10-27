@@ -96,6 +96,16 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Bundler and toolchain
 
+- **Shared target directories can reuse another worktree's older API.** Cargo can mark a path crate `Fresh`
+  when its artifact was built in another checkout and the current checkout's source mtimes are older. In ticket
+  20, `cargo check` used metadata containing the terminal performance API while `cargo test` reused an rlib
+  whose dep-info did not even list `perf.rs`; both had the requested `dev` and `run-app` features. Check verbose
+  Cargo output and the selected artifact's dep-info before changing feature gates. The terminal platform and
+  host record `env!("CARGO_MANIFEST_DIR")` in an unused constant so Cargo tracks checkout identity as an input
+  for subsequent builds. This uses Cargo's existing variable and preserves the shared target and artifact names;
+  it does not add runtime state or a build setting. Older revisions without this input still need fresh artifacts
+  when switching checkouts.
+
 - **rquickjs must not enable the `full` feature.** It pulls in `dyn-load` (dlopen2), which does not compile for iOS / Catalyst. iOS targets
   have no prebuilt bindings and need the `bindgen` feature (and libclang).
 - **Use `oxc_sourcemap` 9.x** (matching rolldown / oxc 0.153): source maps are composed with rolldown's types, so never mix in

@@ -1,5 +1,8 @@
 //! Standalone terminal transport for the Native Shell development host.
 
+// Invalidate shared-target artifacts when changing worktrees, even when source mtimes are older.
+const _: &str = env!("CARGO_MANIFEST_DIR");
+
 use std::{cell::RefCell, io, path::PathBuf, rc::Rc};
 
 use clap::Parser;
