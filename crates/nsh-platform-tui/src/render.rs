@@ -10,7 +10,9 @@ use ratatui_widgets::{
     borders::{BorderType, Borders},
 };
 
-use crate::{CellSize, geometry::CellBounds, mount::Mounter, text::CellLayout};
+use crate::{
+    CellSize, animation::Projection, geometry::CellBounds, mount::Mounter, text::CellLayout,
+};
 
 pub(crate) struct Hit {
     pub(crate) node: NodeId,
@@ -48,6 +50,7 @@ pub(crate) fn draw(
 ) {
     hits.clear();
     geometry.clear();
+    tree.collect_page_backgrounds();
     let clip = area.intersection(buffer.area);
     let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
     let mut painter = Painter {
@@ -59,11 +62,11 @@ pub(crate) fn draw(
         cells,
         page_backgrounds: &page_backgrounds,
     };
-    painter.view(ROOT_ID, Point::default(), clip, 1.0, true, None);
+    painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
     for modal in modals {
         if crate::navigation::modal_visible(painter.tree, modal) {
-            painter.view(modal, Point::default(), clip, 1.0, true, None);
+            painter.view(modal, Projection::IDENTITY, clip, 1.0, true, None);
         }
     }
     tree.page_backgrounds = page_backgrounds;
@@ -73,7 +76,7 @@ impl Painter<'_> {
     fn view(
         &mut self,
         id: NodeId,
-        parent: Point<Points>,
+        parent: Projection,
         clip: Rect,
         opacity: f32,
         pointer: bool,
@@ -82,22 +85,26 @@ impl Painter<'_> {
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
-        let opacity = opacity * view.style.opacity;
+        let opacity = opacity
+            * view
+                .animated
+                .opacity
+                .unwrap_or(view.style.opacity)
+                .clamp(0.0, 1.0);
         if view.concealed || view.style.hidden || opacity <= 0.0 {
             return;
         }
-        let bounds = CellBounds::new(
-            Bounds::new(parent + view.frame.origin, view.frame.size),
-            self.cells,
-            self.area,
-        );
+        let projection = parent.view(view);
+        let frame = projection.bounds(Bounds::new(Point::default(), view.frame.size));
+        let bounds = CellBounds::new(frame, self.cells, self.area);
         let origin = bounds.origin(self.cells, self.area);
+        let projection = projection.snapped(origin - frame.origin);
         let visible = bounds.clipped(clip);
         self.geometry.push(Geometry {
             id,
             bounds,
             visible,
-            frame: Bounds::new(origin, view.frame.size),
+            frame: Bounds::new(origin, frame.size),
             scroll_origin: view
                 .scroll
                 .as_ref()
@@ -132,7 +139,10 @@ impl Painter<'_> {
             clip
         };
         if !visible.is_empty() {
-            let fill = view.style.background_color;
+            let fill = view
+                .animated
+                .background
+                .unwrap_or(view.style.background_color);
             if !fill.is_transparent() {
                 let page_background = self.page_backgrounds.contains(&fill);
                 if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
@@ -162,27 +172,31 @@ impl Painter<'_> {
                 }
             }
             let widths = &view.style.borders.widths;
+            let colors = view
+                .animated
+                .border_color
+                .map_or(view.style.borders.colors, |color| [color; 4]);
             let mut borders = Borders::NONE;
             if widths.top > Points::ZERO
-                && !view.style.borders.colors[0].is_transparent()
+                && !colors[0].is_transparent()
                 && bounds.top == i32::from(visible.y)
             {
                 borders |= Borders::TOP;
             }
             if widths.bottom > Points::ZERO
-                && !view.style.borders.colors[2].is_transparent()
+                && !colors[2].is_transparent()
                 && bounds.bottom == i32::from(visible.bottom())
             {
                 borders |= Borders::BOTTOM;
             }
             if widths.left > Points::ZERO
-                && !view.style.borders.colors[3].is_transparent()
+                && !colors[3].is_transparent()
                 && bounds.left == i32::from(visible.x)
             {
                 borders |= Borders::LEFT;
             }
             if widths.right > Points::ZERO
-                && !view.style.borders.colors[1].is_transparent()
+                && !colors[1].is_transparent()
                 && bounds.right == i32::from(visible.right())
             {
                 borders |= Borders::RIGHT;
@@ -196,7 +210,7 @@ impl Painter<'_> {
                 })
                 .render(visible, self.buffer);
             // Block chooses the corner symbols; each edge keeps its own wire color.
-            for (side, color) in view.style.borders.colors.iter().enumerate() {
+            for (side, color) in colors.iter().enumerate() {
                 let edge = match side {
                     0 if borders.contains(Borders::TOP) => {
                         Rect::new(visible.x, visible.y, visible.width, 1)
@@ -266,11 +280,8 @@ impl Painter<'_> {
             if let Some((layout, content)) = &view.text
                 && let Some(layout) = layout.downcast::<CellLayout>()
             {
-                let text_bounds = CellBounds::new(
-                    Bounds::new(origin + content.origin, content.size),
-                    self.cells,
-                    self.area,
-                );
+                let text_bounds =
+                    CellBounds::new(projection.bounds(*content), self.cells, self.area);
                 let text_area = text_bounds.clipped(visible);
                 let scroll = (
                     (i32::from(text_area.y) - text_bounds.top).clamp(0, u16::MAX as i32) as u16,
@@ -285,17 +296,43 @@ impl Painter<'_> {
                         .scroll(scroll)
                         .render(text_area, self.buffer);
                 }
+                if view.animated.color.is_some() || opacity < 1.0 {
+                    for y in text_area.y..text_area.bottom() {
+                        for x in text_area.x..text_area.right() {
+                            let cell = &mut self.buffer[(x, y)];
+                            let color = view.animated.color.or_else(|| match cell.fg {
+                                Color::Rgb(r, g, b) => Some(nsh_core::Color::rgba(r, g, b, 255)),
+                                _ => None,
+                            });
+                            if let Some(color) = color {
+                                cell.set_fg(blend(color, opacity, cell.bg));
+                            }
+                        }
+                    }
+                }
             }
             if let (Some(field), Some(config)) = (&mut view.field, &view.input) {
-                let content = CellBounds::new(
-                    Bounds::new(origin + field.content.origin, field.content.size),
-                    self.cells,
-                    self.area,
+                let content =
+                    CellBounds::new(projection.bounds(field.content), self.cells, self.area);
+                field.draw(
+                    config,
+                    content,
+                    visible,
+                    self.buffer,
+                    opacity,
+                    view.animated.color,
                 );
-                field.draw(config, content, visible, self.buffer, opacity);
             }
             if let Some(canvas) = &view.canvas {
-                crate::canvas::draw(canvas, self.buffer, bounds, visible, self.cells, opacity);
+                crate::canvas::draw(
+                    canvas,
+                    self.buffer,
+                    bounds,
+                    visible,
+                    self.cells,
+                    opacity,
+                    projection.snapped(Point::new(-origin.x, -origin.y)),
+                );
             }
             if let Some(component) = &mut view.component {
                 component.render(visible, self.buffer);
@@ -318,11 +355,12 @@ impl Painter<'_> {
                 Block::bordered().title(title).render(visible, self.buffer);
             }
         }
-        let child_origin = origin
-            - view
-                .scroll
-                .as_ref()
-                .map_or_else(Point::default, |scroll| scroll.origin());
+        let scroll_origin = view
+            .scroll
+            .as_ref()
+            .map_or_else(Point::default, |scroll| scroll.origin());
+        let child_projection =
+            projection.translated(Point::new(-scroll_origin.x, -scroll_origin.y));
         let children = view.children.len();
         for index in 0..children {
             let child = self.tree.get(id).unwrap().children[index];
@@ -335,7 +373,7 @@ impl Painter<'_> {
             }
             self.view(
                 child,
-                child_origin,
+                child_projection,
                 children_clip,
                 opacity,
                 children_pointer,
