@@ -1269,6 +1269,50 @@ covers [props] Bar.stack
 covers [props] Bar.label
 covers [props] Bar.labelClass
 covers [props] Bar.labelStyle
+# Axes along a plot of four bands (middles 25, 75, 125, 175) by 0 to 100:
+# each label centered on its tick in the room the tick has within the
+# plot's ends, as far on either side. Under it, 2 of the bands spread
+# from the first to the last, the app's text of each value and index.
+expect m0i0
+expect m3i1
+frame parent:parent:parent:text:m0i0 0 100 50 10
+frame parent:text:m0i0 15 0 20 10
+frame parent:parent:parent:text:m3i1 150 100 50 10
+frame parent:text:m3i1 15 0 20 10
+# Its tick marks (classes) at its two ticks on the edge, its line (a
+# style) along the whole edge, below the labels.
+frame below:parent:parent:parent:text:m0i0 175 100 0 0
+frame below:below:parent:parent:parent:text:m0i0 25 100 0 0
+frame below:below:below:parent:parent:parent:text:m0i0 0 100 200 0
+# Left of it: d3's text of the app's values, each against the edge,
+# centered on its tick, the ends' kept within the plot's top and bottom.
+frame parent:parent:parent:text:50 0 0 0 100
+frame parent:parent:text:50 -20 0 20 100
+frame parent:text:50 0 45 20 10
+frame parent:parent:text:100 -20 0 20 0
+frame parent:text:100 0 0 20 10
+frame parent:text:0 0 -10 20 10
+# Its tick marks (a style) at 100, 50 and 0, its line (classes).
+frame below:parent:parent:parent:text:0 0 0 0 0
+frame below:below:parent:parent:parent:text:0 0 50 0 0
+frame below:below:below:parent:parent:parent:text:0 0 100 0 0
+frame below:below:below:below:parent:parent:parent:text:0 0 0 0 100
+# Inside the right edge: above its grid line, against the edge.
+frame parent:parent:parent:text:in50 200 0 0 50
+frame parent:parent:text:in50 -30 0 30 50
+frame parent:text:in50 0 40 30 10
+covers [nsh/base/plot] PlotAxis
+covers [props] PlotAxis.placement
+covers [props] PlotAxis.labelPlacement
+covers [props] PlotAxis.ticks
+covers [props] PlotAxis.tickValues
+covers [props] PlotAxis.format
+covers [props] PlotAxis.labelClass
+covers [props] PlotAxis.labelStyle
+covers [props] PlotAxis.tickClass
+covers [props] PlotAxis.tickStyle
+covers [props] PlotAxis.lineClass
+covers [props] PlotAxis.lineStyle
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot and its marks Line, Area, Bar, Grid, Pie and Arc: charts drawn natively from the app's rows, with the scales of the axes, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie and Arc and its PlotAxis: charts drawn natively from the app's rows, with the scales of the axes and their labels, the row or slice under the pointer, motion and no look of their own."
 order: 20.9
 group: base
 demo: el-plot
@@ -11,13 +11,13 @@ demo: el-plot
 A plot is the frame of a chart: the rows of data it shows, the scales of its x and y axes, the pointer over it and its
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
 per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole) and
-an `Arc` between two angles. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
+an `Arc` between two angles; a `PlotAxis` labels an edge with the ticks of its scale. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
 hears of a new row, nothing more. The look is the app's: marks paint with CSS's paint properties of SVG shapes
 (`stroke-*`, `fill-*`), `currentColor` where none is set, an area or a bar shows a background (a gradient,
-`bg-linear-*`) inside its shape, and the hover's parts (each mark's dot among them) and the axis labels are the app's to style and
-fill.
+`bg-linear-*`) inside its shape, and the hover's parts (each mark's dot among them) and the axes' labels, tick marks and
+lines are the app's to style and fill.
 
 ```rust tabs
 use nsh_base::{
@@ -80,7 +80,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc` and `PlotAxis` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -205,7 +205,7 @@ The band scale lays out a band per row of the plot, in order, as d3's `scaleBand
 | Option | Default | Description |
 |---|---|---|
 | `paddingInner` | `0` | The gap between neighbouring bands, a share of each band's step (0 to 1). |
-| `paddingOuter` | `0` | The gap before the first band and after the last, a share of a step. Half of `paddingInner` puts the bands' middles at equal steps across the plot, under labels in equal cells. |
+| `paddingOuter` | `0` | The gap before the first band and after the last, a share of a step. Half of `paddingInner` puts the bands' middles at equal steps across the plot. |
 | `maxBandWidth` | none | The widest a band may be, in points: a few bands across a wide plot stay narrow, each in the middle of its place. |
 | `bandCount` | the rows | The bands the axis is laid out for when more than the rows: the rows take the leading ones and keep their width and place as rows come. |
 | `groupPadding` | `0` | The gap between the bars side by side in a band, a share of each bar's place. |
@@ -327,6 +327,62 @@ place along an axis: the cross line and the tooltip follow the pointer over it, 
 center is the app's own element laid over the plot (the hovered slice's value, or the total), and so is its legend,
 with each key in its slice's color.
 
+## PlotAxis
+
+A `PlotAxis` labels an edge of the plot with the ticks of the scale that edge carries: the bottom and top edges the x
+scale's, the left and right ones the y scale's, as d3's `axisBottom`, `axisTop`, `axisLeft` and `axisRight`. Its ticks
+come from the scale: round values on a `linear` one (1, 2 or 5 times a power of ten, inside the domain), rows on a
+`point` or `band` one. Its labels are texts the plot's layout places, so the app says what they read and how they
+look, and the layout puts them in place: each label is centered on its tick along the edge, and the first and last
+move inward just as far as they need to stay within the plot's ends.
+
+```tsx
+import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+const rows = [
+  { day: "Mon", visitors: 1820 },
+  { day: "Tue", visitors: 2140 },
+  { day: "Wed", visitors: 1960 },
+  { day: "Thu", visitors: 2480 },
+  { day: "Fri", visitors: 2310 },
+];
+
+<Plot data={rows} y="visitors" yScale={{ type: "linear", domain: [0, 3000] }} class="mb-6 ml-10 h-40">
+  <Grid y={[0, 1000, 2000, 3000]} class="stroke-border" />
+  <Area class="fill-chart-1/20" />
+  <Line class="stroke-chart-1 stroke-2" />
+  {/* 0, 1,000, 2,000 and 3,000 left of the plot; a day under each row. */}
+  <PlotAxis placement="left" ticks={3} labelClass="pr-2 text-xs tabular-nums text-muted-foreground" />
+  <PlotAxis
+    format={(i) => rows[i].day}
+    labelClass="pt-2 text-xs text-muted-foreground"
+    tickClass="h-1 w-px bg-border"
+    lineClass="h-px bg-border"
+  />
+</Plot>
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `placement` | `.placement(..)` | `"bottom" \| "top" \| "left" \| "right"` | `"bottom"` | The edge it runs along: the bottom and top edges carry the x scale's ticks, the left and right ones the y scale's. |
+| `labelPlacement` | `.label_placement(..)` | `"outside" \| "inside"` | `"outside"` | Where its labels sit: past the edge, in the room the app leaves around the plot, where they stay clear of the marks; or over the plot along the edge, so the plot keeps its whole size (beside a left or right edge, each label sits on its grid line's upper side). |
+| `ticks` | `.ticks(..)` | `number` | `10` on a `linear` scale, every row on the others | About how many ticks it takes: on a `linear` scale, round values inside the domain, about this many; on a `point` or `band` scale, this many rows spread evenly from the first to the last. |
+| `tickValues` | `.tick_values(..)` | `number[]` | none | The values of its ticks, in place of `ticks`: values of the scale, row indices on a `point` or `band` scale (`[0, 3, 6]` labels every third row). The values inside the domain each get a tick. |
+| `format` | `.format(..)` | `(value: number, index: number) => string` | the value, with the decimals the step between ticks needs, thousands grouped | The text of each tick: the app's function of its value (a row's index on a `point` or `band` scale) and its index among the axis' ticks. |
+| `labelClass`, `labelStyle` | `.label_class(..)`, `.label_style(..)` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text per tick, its font, color and padding the app's; its padding toward the plot is its distance from the edge (`pt-2` under a bottom axis). |
+| `tickClass`, `tickStyle` | `.tick_class(..)`, `.tick_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The `tick` part: a view per tick on the edge, centered on its tick and reaching toward the labels (`h-1 w-px bg-border` under a bottom axis); shown once styled. |
+| `lineClass`, `lineStyle` | `.line_class(..)`, `.line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The `line` part: a view along the whole edge, on the labels' side (`h-px bg-border` under a bottom axis); shown once styled. |
+
+Outside, the labels sit in the plot's margin, as d3's axes sit in a chart's margins: the plot keeps the size the app
+gives it, and the app gives it a margin on the axis' side as deep as the labels (`mb-6` for `pt-2 text-xs` labels
+under it), or its parent padding there. Two axes on one edge each label their own values, in their own style: the
+ends of a range faint and its middle firmer.
+
+`format` is called once per tick when the ticks or the function change, in the next turn, never while the plot draws
+or follows the pointer: keep it pure (the same value, the same text). Without it, a tick reads as d3 writes it:
+`1,500`, `0.25`, `−2`. In Rust, `plot_axis()` makes an axis, its `format` a `TickFormat::from_fn(|value, index| ..)`.
+An axis takes no pointer, and screen readers hear the plot rather than its labels.
+
 ## Motion
 
 Motion is the app's, and none by default: everything shows at once. `motion` takes the timings of
@@ -350,9 +406,9 @@ keyframes, which an app can still play on the plot's view or on the elements aro
 
 ## Building charts
 
-A chart is a plot, its marks and the app's own elements around them. Give the y scale a `domain` when the app labels
-it: the labels then sit at the grid's values. The hover's cross line, dots and tooltip are the plot's parts, styled and
-filled by the app; the row's values go where the app shows them.
+A chart is a plot, its marks, its axes and the app's own elements around them. Give the y scale a `domain` and its axis
+the grid's values (`tickValues`): each label then sits at its grid line. The hover's cross line, dots and tooltip are
+the plot's parts, styled and filled by the app; the row's values go where the app shows them.
 
 Grids read best as solid hairlines with a firmer baseline, which leaves a dashed line free to mean a reference value
 (the opening price below). An area reads lighter as a wash that fades out toward its baseline than as a flat fill.
@@ -362,7 +418,7 @@ cuts out of its line, and the tooltip sits at the top of the plot, inside its ed
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Area, Grid, Line, Plot } from "nsh/base/plot";
+import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
 
 type Row = { time: string; price: number };
 
@@ -377,44 +433,44 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
         <Text class="flex-1 text-sm text-muted-foreground">{shown().time}</Text>
         <Text class="text-right text-xl font-semibold tabular-nums text-foreground">{shown().price.toFixed(2)}</Text>
       </View>
-      <View class="flex-row gap-2">
-        <Plot
-          data={props.rows}
-          y="price"
-          yScale={{ type: "linear", domain: [props.low, props.high] }}
-          accessibilityLabel={`Price, from ${props.rows[0].price} to ${props.rows[props.rows.length - 1].price}`}
-          accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
-          appearGeneration={props.rows.length}
-          motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
-          crossLineClass="w-px h-full bg-muted-foreground/50"
-          tooltipOffset={4}
-          tooltipContent={
-            <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
-              <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
-              <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
-            </View>
-          }
-          onHoverChange={(index) => hovered.set(index)}
-          class="h-48 flex-1"
-        >
-          <Grid y={[middle(), props.high]} class="stroke-border" />
-          {/* A wash that fades out toward the baseline. */}
-          <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
-          <Grid y={[props.low]} class="stroke-muted-foreground/40" />
-          <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
-          <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
-        </Plot>
-        {/* The y axis' labels, at the grid's values (Text until an axis mark lands). */}
-        <View class="-my-2 w-8 justify-between">
-          {[props.high, middle(), props.low].map((v) => (
-            <Text class="text-right text-xs tabular-nums text-muted-foreground">{v.toFixed(0)}</Text>
-          ))}
-        </View>
-      </View>
-      <View class="mr-10 flex-row justify-between">
-        <Text class="text-xs text-muted-foreground">{props.rows[0].time}</Text>
-        <Text class="text-xs text-muted-foreground">{props.rows[props.rows.length - 1].time}</Text>
-      </View>
+      <Plot
+        data={props.rows}
+        y="price"
+        yScale={{ type: "linear", domain: [props.low, props.high] }}
+        accessibilityLabel={`Price, from ${props.rows[0].price} to ${props.rows[props.rows.length - 1].price}`}
+        accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
+        appearGeneration={props.rows.length}
+        motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
+        crossLineClass="w-px h-full bg-muted-foreground/50"
+        tooltipOffset={4}
+        tooltipContent={
+          <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+            <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
+            <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
+          </View>
+        }
+        onHoverChange={(index) => hovered.set(index)}
+        class="mr-10 mb-6 h-48"
+      >
+        <Grid y={[middle(), props.high]} class="stroke-border" />
+        {/* A wash that fades out toward the baseline. */}
+        <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
+        <Grid y={[props.low]} class="stroke-muted-foreground/40" />
+        <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
+        <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
+        {/* The grid's values right of the plot, and the first and last times under it. */}
+        <PlotAxis
+          placement="right"
+          tickValues={[props.low, middle(), props.high]}
+          format={(v) => v.toFixed(0)}
+          labelClass="pl-2 text-xs tabular-nums text-muted-foreground"
+        />
+        <PlotAxis
+          tickValues={[0, props.rows.length - 1]}
+          format={(i) => props.rows[i].time}
+          labelClass="pt-2 text-xs text-muted-foreground"
+        />
+      </Plot>
     </View>
   );
 }
@@ -424,12 +480,12 @@ A bar chart reads best with the tips of its bars rounded and their bases square 
 topRight: 4 }}`; in a stack only on its top bar), a hair of room between the bars of a band (`groupPadding`), the
 bars of the other rows muted while one is hovered (`inactiveOpacity`) and its band tinted (`crossLineClass`), and
 the values in small tabular figures over the bars, with the total over a stack. With `paddingOuter` half of
-`paddingInner`, the bands' middles fall at equal steps, so the app's labels in equal cells sit under them; a
+`paddingInner`, the bands' middles fall at equal steps, and a `PlotAxis` centers each month under its band; a
 `maxBandWidth` keeps a few bars narrow in a wide card.
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Bar, Grid, Plot } from "nsh/base/plot";
+import { Bar, Grid, Plot, PlotAxis } from "nsh/base/plot";
 
 type Sale = { month: string; online: number; store: number };
 
@@ -452,7 +508,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
         onHoverChange={(index) => hovered.set(index)}
-        class="h-44"
+        class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />
         <Bar
@@ -475,13 +531,9 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
           labelClass="pb-1 text-[11px] tabular-nums text-muted-foreground"
           class="fill-chart-2"
         />
+        {/* A month centered under each band. */}
+        <PlotAxis format={(i) => props.rows[i].month} labelClass="pt-2 text-xs text-muted-foreground" />
       </Plot>
-      {/* A month under each band: equal cells, as the bands' middles. */}
-      <View class="flex-row">
-        {props.rows.map((r) => (
-          <Text class="flex-1 text-center text-xs text-muted-foreground">{r.month}</Text>
-        ))}
-      </View>
     </View>
   );
 }
@@ -491,8 +543,8 @@ A sparkline in a list row is a plot with `interactive={false}`: it draws its mar
 
 ## Accessibility
 
-- A plot is one element for screen readers, with the image role and the app's `accessibilityLabel`; its marks and the
-  hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
+- A plot is one element for screen readers, with the image role and the app's `accessibilityLabel`; its marks, its
+  axes' labels and the hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
   (the range, the highest value), and give `accessibilityValue` the words for the row under the pointer, so a screen
   reader says the value as it changes.
 - The row under the pointer is reported with `onHoverChange` on platforms with a pointer (desktops, the web, an iPad
@@ -518,3 +570,6 @@ See [Accessibility](../docs/accessibility.md) for labels and roles in general.
 - A pie draws each slice in its own canvas; the slice under the pointer is found in Rust from the slices' angles and
   radii, its lift is a radius and the others' fade an opacity the animator moves, and the appear's sweep moves the
   slices' angles the same way, so neither records a drawing again.
+- An axis' labels, tick marks and line are the platform's own texts and views, placed by the layout in Rust from the
+  plot's size and scales: they move with the marks when the plot's size changes, and a new domain writes the labels
+  again.

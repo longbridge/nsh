@@ -40,7 +40,8 @@ test("the live price ticks every second until it is paused", async () => {
 });
 
 test("the depth reads out the side under the pointer and changes its range", async () => {
-  expect(app.texts()).toContain("99.58");
+  // The ends' prices under the plot: its axis' labels, which the app writes.
+  await app.waitFor("99.58");
   await app.hover("label:/^Order book depth within 20 ticks/");
   await app.wait(100);
   expect(app.texts().some((t) => t.startsWith("BIDS ≥") || t.startsWith("ASKS ≤"))).toBe(true);

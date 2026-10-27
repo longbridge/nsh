@@ -5038,3 +5038,156 @@ fn base_plot_bars_grow_and_fade_natively() {
     assert!(drawings.iter().all(|(_, d)| !grows(d)));
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
 }
+
+const BASE_PLOT_AXIS: &str = r##"import { mount, signal, View } from "nsh";
+import { Bar, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr"];
+
+function App() {
+  const domain = signal<[number, number]>([0, 100]);
+  return (
+    <View style={{ padding: 40, gap: 40 }}>
+      <Plot testID="linear" data={[{ v: 0 }, { v: 100 }]} y="v" yScale={{ type: "linear", domain: domain() }} style={{ width: 200, height: 100 }}>
+        <Line />
+        <PlotAxis placement="left" ticks={5} labelStyle={{ width: 20, height: 10 }} tickClass="w-[4px] h-px" tickStyle={{ backgroundColor: "#ff0000" }} />
+        <PlotAxis placement="right" labelPlacement="inside" tickValues={[0, 50]} format={(v) => `${v}%`} labelStyle={{ width: 20, height: 10 }} />
+        <PlotAxis tickValues={[0, 1]} format={(v, i) => `r${v}#${i}`} labelStyle={{ width: 30, height: 10 }} lineClass="h-px" lineStyle={{ backgroundColor: "#00ff00" }} />
+      </Plot>
+      <Plot testID="band" data={[{ v: 1 }, { v: 2 }, { v: 3 }, { v: 4 }]} y="v" xScale={{ type: "band" }} style={{ width: 200, height: 100 }}>
+        <Bar />
+        <PlotAxis format={(v) => MONTHS[v]} labelStyle={{ width: 20, height: 10 }} />
+        <PlotAxis placement="top" ticks={2} format={(v) => `top ${MONTHS[v]}`} labelStyle={{ width: 40, height: 10 }} />
+      </Plot>
+      <View testID="domain" onPress={() => domain.set([0, 10])} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base/plot`'s `PlotAxis` (`gpui-base`'s `PlotAxis`, d3's axes): the
+/// ticks of the scale its edge carries (d3's nice values on a linear
+/// scale, about `ticks` of them; every band, or `ticks` of them spread
+/// from the first to the last; the app's `tickValues`, those outside the
+/// domain dropped), each labeled with the app's `format(value, index)`
+/// (d3's default text without one) and laid out by the plot's layout:
+/// centered on its tick along the edge, the first and last kept within
+/// the plot's ends, past the edge or (`labelPlacement="inside"`) above
+/// its grid line inside it; its tick marks and line on the labels' side
+/// of the edge. A new domain writes the labels again.
+#[test]
+fn base_plot_axis_labels_the_ticks_of_its_scale() {
+    use nsh_core::Color;
+    let (engine, rx) = start(BASE_PLOT_AXIS);
+    let mut all = until(&rx, |b| shows(b, "top Apr"));
+    all.extend(until(&rx, |_| false));
+    let parent_of = |all: &[MountBatch], child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // A view's frame in the plot `plot`'s coordinates.
+    let within = |all: &[MountBatch], id: u32, plot: u32| {
+        let f = frame_of(all, id).unwrap();
+        let (mut x, mut y) = (f.origin.x.0, f.origin.y.0);
+        let mut at = parent_of(all, id);
+        while at != plot {
+            let f = frame_of(all, at).unwrap();
+            x += f.origin.x.0;
+            y += f.origin.y.0;
+            at = parent_of(all, at);
+        }
+        (x, y, f.size.width.0, f.size.height.0)
+    };
+    let label = |all: &[MountBatch], text: &str, plot: &str| {
+        let id = all
+            .iter()
+            .rev()
+            .find_map(|b| text_ids(b, text))
+            .expect(text);
+        let (x, y, ..) = within(all, id, test_view(all, plot));
+        (x, y)
+    };
+    let near = |all: &[MountBatch], text: &str, plot: &str, (x, y): (f32, f32)| {
+        let (lx, ly) = label(all, text, plot);
+        assert!(
+            (lx - x).abs() <= 0.5 && (ly - y).abs() <= 0.5,
+            "{text} at ({lx}, {ly}), not ({x}, {y})"
+        );
+    };
+
+    // Left, outside: d3's ticks of 0 to 100, about 5 (a step of 20),
+    // written as d3 writes them; each right of the edge's left, centered
+    // on its tick, the ends kept within the plot's top and bottom.
+    near(&all, "100", "linear", (-20.0, 0.0));
+    near(&all, "80", "linear", (-20.0, 15.0));
+    near(&all, "60", "linear", (-20.0, 35.0));
+    near(&all, "40", "linear", (-20.0, 55.0));
+    near(&all, "20", "linear", (-20.0, 75.0));
+    near(&all, "0", "linear", (-20.0, 90.0));
+    // Its tick marks: one per tick, from the edge toward the labels.
+    let red = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .filter_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0xff00_00ff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(red.len(), 6);
+    let linear = test_view(&all, "linear");
+    for &tick in &red {
+        let (x, _, w, h) = within(&all, tick, linear);
+        assert_eq!((x, w, h), (-4.0, 4.0, 1.0));
+    }
+    // Right, inside: the app's values and texts, above each grid line,
+    // against the right edge.
+    near(&all, "0%", "linear", (180.0, 90.0));
+    near(&all, "50%", "linear", (180.0, 40.0));
+    // Bottom: the app's function of each value and index, the first and
+    // last labels kept within the plot's ends; the line along the edge.
+    near(&all, "r0#0", "linear", (0.0, 100.0));
+    near(&all, "r1#1", "linear", (170.0, 100.0));
+    let green = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x00ff_00ff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the line");
+    assert_eq!(within(&all, green, linear), (0.0, 100.0, 200.0, 1.0));
+
+    // A band scale: every band's middle (25, 75, 125, 175); on top, 2 of
+    // them, the first and the last, above the edge.
+    near(&all, "Jan", "band", (15.0, 100.0));
+    near(&all, "Feb", "band", (65.0, 100.0));
+    near(&all, "Mar", "band", (115.0, 100.0));
+    near(&all, "Apr", "band", (165.0, 100.0));
+    near(&all, "top Jan", "band", (5.0, -10.0));
+    near(&all, "top Apr", "band", (155.0, -10.0));
+    assert!(!all.iter().any(|b| shows(b, "top Feb")));
+
+    // A new domain: d3's ticks of 0 to 10, the right axis' 50 outside it.
+    let domain = test_view(&all, "domain");
+    engine
+        .control()
+        .dispatch_event(domain, EventKind::Press, EventPayload::None);
+    all.extend(until(&rx, |b| shows(b, "10")));
+    all.extend(until(&rx, |_| false));
+    near(&all, "10", "linear", (-20.0, 0.0));
+    near(&all, "4", "linear", (-20.0, 55.0));
+    near(&all, "0%", "linear", (180.0, 90.0));
+}

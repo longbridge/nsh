@@ -17,9 +17,11 @@
 // `startAngle`, `endAngle`, `innerRadius`, `outerRadius`) over an `Arc`
 // reports the slice under the pointer, none in its hole, outside its ring
 // or past its last angle; its hole closes with `motion.update`, the pointer
-// finding the new ring at once.
+// finding the new ring at once. `PlotAxis`es (`placement`,
+// `labelPlacement`, `ticks`, `tickValues`, `format`, the `label`, `tick`
+// and `line` parts) lay their labels out along a plot's edges.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -119,6 +121,7 @@ function App() {
         <Bar value="w" label={(d: Sale) => `x${d.w}`} labelClass="h-[14px] w-[30px]" cornerRadii={2} />
       </Plot>
       <PieCase />
+      <AxisCase />
     </View>
   );
 }
@@ -155,6 +158,28 @@ function PieCase() {
       <Text>{`slice ${slice()}`}</Text>
       <View testID="hole" onPress={() => hole.set(false)} style={{ height: 20 }} />
     </View>
+  );
+}
+
+/** Axes on a plot of four bands by 0 to 100: two months under it, the
+ * app's text of each; d3's text of the app's values left of it, and one
+ * inside its right edge. Each axis styles one of its tick marks and line
+ * with classes and the other with a style. */
+function AxisCase() {
+  return (
+    <Plot
+      testID="axes"
+      data={[{ v: 10 }, { v: 20 }, { v: 30 }, { v: 40 }]}
+      y="v"
+      xScale={{ type: "band" }}
+      yScale={{ type: "linear", domain: [0, 100] }}
+      style={{ width: 200, height: 100, marginLeft: 30, marginBottom: 20 }}
+    >
+      <Bar />
+      <PlotAxis ticks={2} format={(v, i) => `m${v}i${i}`} labelClass="h-[10px]" labelStyle={{ width: 20 }} tickClass="h-[4px] w-px" lineStyle={{ height: 1 }} />
+      <PlotAxis placement="left" tickValues={[0, 50, 100]} labelStyle={{ width: 20, height: 10 }} tickStyle={{ width: 4, height: 1 }} lineClass="w-px" />
+      <PlotAxis placement="right" labelPlacement="inside" tickValues={[50]} format={(v) => `in${v}`} labelStyle={{ width: 30, height: 10 }} />
+    </Plot>
   );
 }
 
