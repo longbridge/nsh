@@ -59,9 +59,11 @@ pub(crate) fn starter(
     }
     if !matches!(
         target,
-        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui | Target::Tui
     ) {
-        anyhow::bail!("nsh test --target takes macos, linux, windows, gpui, web, ios or android");
+        anyhow::bail!(
+            "nsh test --target takes macos, linux, windows, gpui, tui, web, ios or android"
+        );
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::test_host(target.platform())?;
@@ -127,6 +129,15 @@ fn start(
         .arg("--data-dir")
         .arg(&data)
         .stdin(Stdio::null());
+    if target == Target::Tui {
+        command.arg("--headless");
+        command.arg("--log-file").arg(data.join("host.log"));
+        let config = crate::package::read_config(&entry).map_err(|e| e.to_string())?;
+        if let Some(cells) = config.tui.points_per_cell {
+            crate::run::parse_points_per_cell(&cells)?;
+            command.args(["--points-per-cell", &cells]);
+        }
+    }
     if fps {
         command.arg("--fps");
     }

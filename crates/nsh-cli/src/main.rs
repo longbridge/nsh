@@ -163,7 +163,8 @@ enum Command {
         junit: Option<PathBuf>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
-        /// (macos, linux, windows, gpui, web, ios and android; web runs them
+        /// (macos, linux, windows, gpui, tui, web, ios and android; tui uses
+        /// an in-memory terminal; web runs them
         /// in a headless Chrome, Edge or Chromium, ios in a simulator,
         /// android on the first device adb lists).
         #[arg(long, value_enum)]

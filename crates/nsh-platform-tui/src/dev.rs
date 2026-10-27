@@ -21,12 +21,17 @@ use ratatui_core::{
 };
 use ratatui_widgets::{clear::Clear, paragraph::Paragraph};
 
-use super::{AppOptions, AppView};
+use super::{AppOptions, AppView, agent};
 use crate::{Input, surface::Wake};
 
+pub(super) enum Message {
+    Event(Box<DevEvent>),
+    Test(agent::TestSession),
+}
+
 pub(super) struct DevSession {
-    _client: DevClient,
-    pub(super) inbox: crossbeam_channel::Receiver<DevEvent>,
+    _client: Arc<DevClient>,
+    pub(super) inbox: crossbeam_channel::Receiver<Message>,
     running: Option<(u64, u64)>,
     running_root: bool,
     latest: Option<(u64, u64, Bundle, Limits)>,
@@ -45,14 +50,30 @@ impl DevSession {
                 .flat_map(nsh_core::element::Registry::sets)
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
-            tests: false,
+            tests: true,
         };
         log::info!("Connecting to {url}");
+        let attach = sender.clone();
+        let test_wake = wake.clone();
+        let tester = nsh_testing::agent::Tester::new(move |model| {
+            let (session, native) = agent::TestSession::new(model, test_wake.clone());
+            // Attachment and bundles share this ordered inbox, before engine startup.
+            if attach.send(Message::Test(session)).is_ok() {
+                test_wake.notify();
+            }
+            Box::new(native)
+        });
+        let tests = tester.clone();
         let client = DevClient::start(url, host, move |event| {
-            if sender.send(event).is_ok() {
+            let Some(event) = tests.event(event) else {
+                return;
+            };
+            if sender.send(Message::Event(Box::new(event))).is_ok() {
                 wake.notify();
             }
         })?;
+        let client = Arc::new(client);
+        tester.set_client(&client);
         Ok(Self {
             _client: client,
             inbox,
@@ -101,12 +122,20 @@ impl DevSession {
                             view.options.limits = limits;
                             view.diagnostics.close();
                             if let Err(error) = view.load_app(App::Js(bundle)) {
+                                if let Some(test) = &view.test {
+                                    test.model.error(error.to_string());
+                                }
                                 view.diagnostics
                                     .error("Cannot load app", &error.to_string());
                             }
                         }
                     }
-                    Err(error) => view.diagnostics.error("Invalid development bundle", &error),
+                    Err(error) => {
+                        if let Some(test) = &view.test {
+                            test.model.error(error.clone());
+                        }
+                        view.diagnostics.error("Invalid development bundle", &error);
+                    }
                 }
             }
             DevEvent::Patch {
@@ -132,7 +161,10 @@ impl DevSession {
             DevEvent::Disconnected => log::warn!("Dev server disconnected; reconnecting"),
             DevEvent::Building => log::info!("Building"),
             DevEvent::BuildFailed(message) | DevEvent::CannotRun { message, .. } => {
-                view.diagnostics.error("Development error", &message)
+                if let Some(test) = &view.test {
+                    test.model.error(message.clone());
+                }
+                view.diagnostics.error("Development error", &message);
             }
             DevEvent::Root => {
                 self.running_root = true;
@@ -141,10 +173,17 @@ impl DevSession {
                 if let Some(root) = view.options.root.clone() {
                     view.diagnostics.close();
                     if let Err(error) = view.load_app(App::Rust(root)) {
+                        if let Some(test) = &view.test {
+                            test.model.error(error.to_string());
+                        }
                         view.diagnostics
                             .error("Cannot load app", &error.to_string());
                     }
                 } else {
+                    if let Some(test) = &view.test {
+                        test.model
+                            .error("This host was not built with the app's Rust root");
+                    }
                     view.diagnostics.error(
                         "Cannot run app",
                         "This host was not built with the app's Rust root",
@@ -179,6 +218,9 @@ impl DevSession {
             view.options.limits = *limits;
             view.diagnostics.close();
             if let Err(error) = view.load_app(App::Js(bundle.clone())) {
+                if let Some(test) = &view.test {
+                    test.model.error(error.to_string());
+                }
                 view.diagnostics
                     .error("Cannot reload app", &error.to_string());
             }
