@@ -242,12 +242,16 @@ impl Painter<'_> {
                         .render(text_area, self.buffer);
                 }
             }
+            if let Some(canvas) = &view.canvas {
+                crate::canvas::draw(canvas, self.buffer, bounds, visible, self.cells, opacity);
+            }
             if let Some(component) = &mut view.component {
                 component.render(visible, self.buffer);
             } else if !matches!(
                 view.kind,
                 ViewKind::View
                     | ViewKind::Text
+                    | ViewKind::Canvas
                     | ViewKind::Scroll
                     | ViewKind::Stack
                     | ViewKind::Screen
@@ -288,7 +292,7 @@ impl Painter<'_> {
     }
 }
 
-fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> Color {
+pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> Color {
     let packed = color.0;
     let alpha = (packed & 255) as f32 / 255.0 * opacity;
     let (r, g, b) = match background {

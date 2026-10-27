@@ -1,0 +1,215 @@
+use nsh_core::{
+    AccessibilityRole, Bounds, Point, Points, Size,
+    canvas::{CanvasNode, CanvasTextAlign, CanvasTextBaseline, FillRule},
+    prelude::*,
+};
+use nsh_platform_tui::{App, Root};
+use ratatui_core::{backend::TestBackend, buffer::Buffer, style::Color, terminal::Terminal};
+
+use super::app::{draw_until, mouse, surface};
+
+const RED: u32 = 0xff0000;
+const GREEN: u32 = 0x00ff00;
+
+fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+    Bounds::new(Point::new(px(x), px(y)), Size::new(px(width), px(height)))
+}
+
+fn row(buffer: &Buffer, y: u16, columns: std::ops::Range<u16>) -> String {
+    columns.map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+#[component]
+fn Shapes() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .fill_color(nsh_core::color::rgb(RED))
+                    .fill_rect(0.0, 0.0, 40.0, 48.0)
+                    .stroke_color(nsh_core::color::rgb(GREEN))
+                    .begin_path()
+                    .move_to(50.0, 2.0)
+                    .line_to(160.0, 2.0)
+                    .stroke()
+                    .line_dash(&[px(8.0), px(8.0)])
+                    .begin_path()
+                    .move_to(50.0, 22.0)
+                    .line_to(160.0, 22.0)
+                    .stroke()
+                    .fill_color(nsh_core::color::rgb(GREEN))
+                    .text_align(CanvasTextAlign::Center)
+                    .text_baseline(CanvasTextBaseline::Top)
+                    .fill_text("Hi", 80.0, 32.0),
+            )
+            .w(px(160.0))
+            .h(px(48.0)),
+        )
+        .child(
+            canvas(
+                Painter::new()
+                    .global_alpha(0.5)
+                    .fill_color(nsh_core::color::rgb(0xffffff))
+                    .fill_rect(0.0, 0.0, 16.0, 16.0),
+            )
+            .w(px(16.0))
+            .h(px(16.0))
+            .bg(nsh_core::color::rgb(0x000000)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn canvas_fills_strokes_dashes_and_text_draw_in_braille_cells() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Shapes>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    for y in 0..3 {
+        assert_eq!(
+            row(buffer, y, 0..5),
+            "⣿⣿⣿⣿⣿",
+            "the filled rectangle, row {y}"
+        );
+        assert_eq!(buffer[(0, y)].fg, Color::Rgb(0xff, 0, 0));
+    }
+    assert_eq!(
+        row(buffer, 0, 6..20),
+        "⠉".repeat(14),
+        "a line through the top dots"
+    );
+    assert_eq!(buffer[(6, 0)].fg, Color::Rgb(0, 0xff, 0));
+    assert_eq!(
+        row(buffer, 1, 6..12),
+        "⠒ ⠒ ⠒ ",
+        "a dash pattern of one Cell on, one off"
+    );
+    assert_eq!(
+        row(buffer, 2, 9..11),
+        "Hi",
+        "text centered on its x, its top at y"
+    );
+    assert_eq!(buffer[(9, 2)].fg, Color::Rgb(0, 0xff, 0));
+    assert_eq!(buffer[(0, 3)].symbol(), "⣿");
+    assert_eq!(
+        buffer[(0, 3)].fg,
+        Color::Rgb(0x80, 0x80, 0x80),
+        "globalAlpha blends the paint over the Cell"
+    );
+    assert_eq!(
+        buffer[(0, 3)].bg,
+        Color::Rgb(0, 0, 0),
+        "the view's own fill stays under the dots"
+    );
+    let contents: String = buffer.content.iter().map(|c| c.symbol()).collect();
+    assert!(!contents.contains("Canvas"), "no placeholder is drawn");
+}
+
+#[component]
+fn Clipped() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .begin_path()
+                    .rect(rect(0.0, 0.0, 40.0, 32.0))
+                    .clip()
+                    .fill_color(nsh_core::color::rgb(RED))
+                    .fill_rect(0.0, 0.0, 80.0, 32.0)
+                    .stroke_color(nsh_core::color::rgb(GREEN))
+                    .begin_path()
+                    .move_to(0.0, 30.0)
+                    .line_to(80.0, 30.0)
+                    .stroke(),
+            )
+            .w(px(80.0))
+            .h(px(32.0)),
+        )
+        .child(
+            canvas(
+                Painter::new()
+                    .fill_color(nsh_core::color::rgb(RED))
+                    .begin_path()
+                    .rect(rect(0.0, 0.0, 80.0, 16.0))
+                    .rect(rect(16.0, 0.0, 48.0, 16.0))
+                    .fill_with(FillRule::EvenOdd),
+            )
+            .w(px(80.0))
+            .h(px(16.0)),
+        )
+        .child(text("clipped"))
+}
+
+#[test]
+fn a_clip_keeps_fills_and_strokes_inside_and_fill_rules_pick_the_dots() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Clipped>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "clipped");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(row(buffer, 0, 0..10), "⣿⣿⣿⣿⣿     ");
+    assert_eq!(
+        row(buffer, 1, 5..10),
+        "     ",
+        "the stroke outside the clip is left out"
+    );
+    assert_eq!(
+        buffer[(4, 1)].fg,
+        Color::Rgb(0, 0xff, 0),
+        "the stroke inside it is drawn"
+    );
+    assert_eq!(
+        row(buffer, 2, 0..10),
+        "⣿⣿      ⣿⣿",
+        "even-odd leaves the inner rectangle out"
+    );
+}
+
+const RIGHT_HALF: (f32, f32, f32, f32) = (40.0, 0.0, 40.0, 16.0);
+
+#[component]
+fn Pads() -> impl IntoElement {
+    let presses = signal(0);
+    let (x, y, width, height) = RIGHT_HALF;
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .fill_color(nsh_core::color::rgb(GREEN))
+                    .fill_rect(x, y, width, height)
+                    .node(
+                        CanvasNode::new(
+                            rect(x, y, width, height),
+                            AccessibilityRole::Button,
+                            "Right",
+                        )
+                        .test_id("right"),
+                    ),
+            )
+            .w(px(80.0))
+            .h(px(16.0))
+            .on_press(move || presses.update(|n| *n += 1)),
+        )
+        .child(text(move || format!("Pressed {}", presses.get())))
+}
+
+#[test]
+fn a_press_at_a_canvas_nodes_center_reaches_the_canvas() {
+    use nsh_platform_tui::{MouseButton, MouseKind};
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 3)).unwrap();
+    view.load(App::Rust(Root::new::<Pads>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Pressed 0");
+    // A test step presses a canvas node at its center, as a pointer there.
+    let (x, y, width, height) = RIGHT_HALF;
+    let column = ((x + width / 2.0) / 8.0).floor() as u16;
+    let row = ((y + height / 2.0) / 16.0).floor() as u16;
+    assert_eq!(terminal.backend().buffer()[(column, row)].symbol(), "⣿");
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row));
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), column, row));
+    draw_until(&mut view, &mut terminal, &rx, "Pressed 1");
+}
