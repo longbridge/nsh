@@ -15,8 +15,10 @@ workspace = true
 default = ["js"]
 js = ["nsh-engine/js"]
 run-app = []
+dev = ["js", "dep:nsh-dev"]
 
 [dependencies]
+nsh-dev = { workspace = true, optional = true, features = ["client"] }
 nsh-core.workspace = true
 nsh-base.workspace = true
 nsh-engine = { workspace = true, features = ["net"] }

@@ -117,6 +117,8 @@ pub enum HostPlatform {
     Web,
     /// The GPUI host (macOS, Windows, Linux).
     Gpui,
+    /// The terminal host (macOS, Windows, Linux).
+    Tui,
     /// A platform this version does not know.
     #[serde(other)]
     Other,

@@ -16,6 +16,8 @@ pub(crate) enum Message {
     Batch(MountBatch),
     Error(AppError),
     Frame,
+    #[cfg(feature = "dev")]
+    Reload,
 }
 
 #[derive(Default)]
@@ -69,6 +71,10 @@ impl MountSink for Sink {
     }
     fn report(&self, error: &AppError) {
         self.send(Message::Error(error.clone()));
+    }
+    #[cfg(feature = "dev")]
+    fn hot_update_failed(&self) {
+        self.send(Message::Reload);
     }
     fn request_frame(&self) {
         self.send(Message::Frame);

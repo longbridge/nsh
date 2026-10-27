@@ -12,7 +12,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-nsh-platform-tui = { workspace = true, features = ["js", "run-app"] }
+nsh-platform-tui = { workspace = true, features = ["js", "run-app", "dev"] }
 nsh-engine.workspace = true
 ratatui-core.workspace = true
 ratatui-crossterm.workspace = true
@@ -20,4 +20,12 @@ clap.workspace = true
 log.workspace = true
 
 [dev-dependencies]
+nsh-core.workspace = true
+nsh-dev = { workspace = true, features = ["server"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }

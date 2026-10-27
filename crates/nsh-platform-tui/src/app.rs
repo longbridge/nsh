@@ -1,3 +1,7 @@
+#[cfg(feature = "dev")]
+#[path = "dev.rs"]
+mod dev;
+
 use std::{io, path::PathBuf, sync::Arc, time::Instant};
 
 use nsh_core::{Bounds, Points, ROOT_ID, Size};
@@ -60,6 +64,9 @@ pub struct AppOptions {
     pub clipboard: Option<Arc<dyn nsh_core::clipboard::ClipboardBackend>>,
     /// Log engine timings through `nsh::perf`.
     pub trace: bool,
+    /// Root linked into an app-specific development host.
+    #[cfg(feature = "dev")]
+    pub root: Option<nsh_engine::Root>,
 }
 
 impl Default for AppOptions {
@@ -78,6 +85,8 @@ impl Default for AppOptions {
             assets: None,
             clipboard: None,
             trace: false,
+            #[cfg(feature = "dev")]
+            root: None,
         }
     }
 }
@@ -89,6 +98,10 @@ type TextErrorCallback = Box<dyn FnMut(&str)>;
 #[non_exhaustive]
 pub struct AppView {
     options: AppOptions,
+    #[cfg(feature = "dev")]
+    dev: Option<dev::DevSession>,
+    #[cfg(feature = "dev")]
+    diagnostics: dev::Diagnostics,
     surface: Surface,
     tree: Mounter,
     area: Rect,
@@ -121,6 +134,10 @@ impl AppView {
         surface.wake.set(options.wake.clone());
         Self {
             options,
+            #[cfg(feature = "dev")]
+            dev: None,
+            #[cfg(feature = "dev")]
+            diagnostics: dev::Diagnostics::default(),
             surface,
             tree: Mounter::default(),
             area: Rect::default(),
@@ -138,6 +155,11 @@ impl AppView {
     /// Replaces the app and starts its engine. Startup errors of app code arrive during render.
     pub fn load(&mut self, app: impl Into<App>) -> io::Result<()> {
         self.stop();
+        self.load_app(app.into())
+    }
+
+    fn load_app(&mut self, app: App) -> io::Result<()> {
+        self.stop_engine();
         let (sender, inbox) = crossbeam_channel::unbounded();
         let viewport = self.size();
         self.environment.window = viewport;
@@ -167,6 +189,24 @@ impl AppView {
         self.surface.engine = Some(engine);
         self.surface.inbox = inbox;
         Ok(())
+    }
+
+    /// Connects to a development server, replacing the current app and connection.
+    #[cfg(feature = "dev")]
+    pub fn connect_dev_server(&mut self, url: impl Into<String>) -> io::Result<()> {
+        self.stop();
+        self.dev = Some(dev::DevSession::start(
+            url.into(),
+            &self.options,
+            self.surface.wake.clone(),
+        )?);
+        Ok(())
+    }
+
+    /// Selects the development log shown by `C-h e`; the file is read only while the panel is open.
+    #[cfg(feature = "dev")]
+    pub fn set_dev_log_path(&mut self, path: PathBuf) {
+        self.diagnostics.log_path = Some(path);
     }
 
     /// The channel shared with the running app.
@@ -233,7 +273,14 @@ impl AppView {
 
     /// Earliest requested render, or no deadline while idle. Pending commits are due now.
     pub fn next_frame_deadline(&self) -> Option<Instant> {
-        self.surface.deadline()
+        let deadline = self.surface.deadline();
+        #[cfg(feature = "dev")]
+        if self.diagnostics.open {
+            return Some(deadline.map_or(self.diagnostics.refresh, |due| {
+                due.min(self.diagnostics.refresh)
+            }));
+        }
+        deadline
     }
 
     /// Whether app code requested exit. Standalone loops close; embedders decide their own response.
@@ -243,6 +290,23 @@ impl AppView {
 
     /// Routes input against the last completed render. Unused keys and outside-area events are ignored.
     pub fn handle(&mut self, input: Input) -> Handled {
+        #[cfg(feature = "dev")]
+        if (self.dev.is_some() || self.diagnostics.log_path.is_some())
+            && self.focused
+            && self.diagnostics.handle(&input)
+        {
+            self.pointer
+                .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+            if self.diagnostics.reload {
+                self.diagnostics.reload = false;
+                if let Some(mut dev) = self.dev.take() {
+                    dev.reload_latest(self);
+                    self.dev = Some(dev);
+                }
+            }
+            self.surface.wake.notify();
+            return Handled::Yes;
+        }
         match input {
             Input::Focus(focused) => {
                 self.set_focused(focused);
@@ -279,6 +343,13 @@ impl AppView {
 
     fn draw(&mut self, area: Rect, buffer: &mut Buffer) {
         self.surface.begin_frame();
+        #[cfg(feature = "dev")]
+        if let Some(mut dev) = self.dev.take() {
+            while let Ok(event) = dev.inbox.try_recv() {
+                dev.event(self, event);
+            }
+            self.dev = Some(dev);
+        }
         if self.area != area {
             self.pointer
                 .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
@@ -295,6 +366,13 @@ impl AppView {
                 Message::Batch(batch) => self.tree.apply(batch),
                 Message::Error(error) => errors.push(error),
                 Message::Frame => self.surface.request_frame(),
+                #[cfg(feature = "dev")]
+                Message::Reload => {
+                    if let Some(mut dev) = self.dev.take() {
+                        dev.reload(self);
+                        self.dev = Some(dev);
+                    }
+                }
             }
         }
         if let Some(engine) = &self.surface.engine {
@@ -318,6 +396,10 @@ impl AppView {
             }
         }
         for error in errors {
+            #[cfg(feature = "dev")]
+            if self.dev.is_some() || self.diagnostics.log_path.is_some() {
+                self.diagnostics.error("App error", &error.to_string());
+            }
             if let Some(callback) = &mut self.on_error {
                 callback(&error.to_string());
             }
@@ -339,10 +421,23 @@ impl AppView {
             self.options.cells,
             &mut self.hits,
         );
+        #[cfg(feature = "dev")]
+        self.diagnostics.draw(area, buffer);
     }
 
     /// Stops the engine, drops queued commits, and clears the surface's app-owned state.
     pub fn stop(&mut self) {
+        #[cfg(feature = "dev")]
+        {
+            self.dev = None;
+            let log_path = self.diagnostics.log_path.take();
+            self.diagnostics = dev::Diagnostics::default();
+            self.diagnostics.log_path = log_path;
+        }
+        self.stop_engine();
+    }
+
+    fn stop_engine(&mut self) {
         self.pointer
             .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
         self.surface.stop();
