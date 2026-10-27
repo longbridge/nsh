@@ -3,7 +3,8 @@
 `crates/nsh-platform-tui` renders an NSH surface into a terminal grid with ratatui. Its `AppView` lives on the
 embedding app's thread; the app owns the terminal, its event loop and the area given to the surface.
 `crates/nsh-tui-host` is the Development host: it loads a prebuilt source bundle, fills the terminal with one
-surface and restores the terminal when it exits. This first slice runs the counter's views, text and mouse presses.
+surface and restores the terminal when it exits. It draws views, text and clipped scroll content, and handles
+mouse presses.
 
 ```sh
 cargo build -p nsh-cli -p nsh-tui-host
@@ -95,6 +96,22 @@ The attached tree's page colors are collected after each complete mount batch, b
 matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
 remain transparent. The Emacs Key scheme, Minibuffer and mouse-capture changes are separate interaction work.
 
+## Scroll content
+
+A Scroll draws its children within its viewport, using the current content offset; it starts at zero. The view's
+own fill and border stay fixed. Children are translated by the offset (with content insets from the core's scroll
+behavior), then projected to Cells and clipped to the Scroll and its ancestors. Text that starts outside the
+viewport uses the same Paragraph scrolling path as other clipped text. The hit regions use these translated,
+clipped rectangles, so only visible content receives presses.
+
+The retained view owns the core's `scroll::ScrollState`. `ScrollConfig`, `ScrollContent` and `ScrollBehavior`
+update its axis, extent and behavior data. `ScrollTo` from the core, including an initial `contentOffset` and
+resolved `scrollToEnd`, moves immediately within the content limits in this reduced-motion slice. `ScrollBy`
+applies the core's anchoring delta without clamping it. After applying pending batches, the surface reports each
+changed scroll view's final offset and applied-command count to the engine, which delivers scroll events and
+updates its view of the content. Wheel and key scrolling, indicators, sticky cells, gestures and scrolling
+animations remain in the rest of the scrolling ticket.
+
 ## Degradation in this slice
 
 | Feature | Terminal representation |
@@ -106,10 +123,11 @@ remain transparent. The Emacs Key scheme, Minibuffer and mouse-capture changes a
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
 | Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
+| Scroll | Children translated by the current offset and clipped to the viewport |
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
-The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration and app
-exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
+positions and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 

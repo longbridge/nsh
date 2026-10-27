@@ -91,7 +91,7 @@ impl Painter<'_> {
             });
         }
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
-        let children_clip = if view.style.overflow_hidden {
+        let children_clip = if view.style.overflow_hidden || view.kind == ViewKind::Scroll {
             visible
         } else {
             clip
@@ -209,7 +209,10 @@ impl Painter<'_> {
             }
             if let Some(component) = &mut view.component {
                 component.render(visible, self.buffer);
-            } else if !matches!(view.kind, ViewKind::View | ViewKind::Text) {
+            } else if !matches!(
+                view.kind,
+                ViewKind::View | ViewKind::Text | ViewKind::Scroll
+            ) {
                 let title = view
                     .component_name
                     .clone()
@@ -217,12 +220,17 @@ impl Painter<'_> {
                 Block::bordered().title(title).render(visible, self.buffer);
             }
         }
+        let child_origin = origin
+            - view
+                .scroll
+                .as_ref()
+                .map_or_else(Point::default, |scroll| scroll.origin());
         let children = view.children.len();
         for index in 0..children {
             let child = self.tree.get(id).unwrap().children[index];
             self.view(
                 child,
-                origin,
+                child_origin,
                 children_clip,
                 opacity,
                 children_pointer,

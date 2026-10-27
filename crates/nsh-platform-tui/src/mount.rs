@@ -3,7 +3,7 @@ use std::{
     mem::{Discriminant, discriminant},
 };
 
-use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, ROOT_ID, ViewKind};
+use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, Points, ROOT_ID, ViewKind};
 
 use crate::{Appearance, ComponentFactory, view::NshView};
 
@@ -13,6 +13,7 @@ pub(crate) struct Mounter {
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
     pub(crate) page_backgrounds: Vec<Color>,
+    pub(crate) scrolled: Vec<NodeId>,
     unhandled: HashSet<Discriminant<MountItem>>,
     placeholders: HashSet<String>,
 }
@@ -25,6 +26,7 @@ impl Default for Mounter {
             appearance: None,
             exit: false,
             page_backgrounds: Vec::new(),
+            scrolled: Vec::new(),
             unhandled: HashSet::new(),
             placeholders: HashSet::new(),
         };
@@ -62,6 +64,7 @@ impl Mounter {
         self.exit = false;
         self.unhandled.clear();
         self.placeholders.clear();
+        self.scrolled.clear();
         self.page_backgrounds.clear();
     }
 
@@ -69,8 +72,10 @@ impl Mounter {
         for item in batch.items {
             match item {
                 MountItem::Create { id, kind } => {
-                    if !matches!(kind, ViewKind::View | ViewKind::Text | ViewKind::Native)
-                        && self.placeholders.insert(format!("{kind:?}"))
+                    if !matches!(
+                        kind,
+                        ViewKind::View | ViewKind::Text | ViewKind::Native | ViewKind::Scroll
+                    ) && self.placeholders.insert(format!("{kind:?}"))
                     {
                         log::warn!("terminal: {kind:?} shown as a placeholder");
                     }
@@ -127,6 +132,66 @@ impl Mounter {
                 } => {
                     if let Some(view) = self.get_mut(id) {
                         view.text = Some((layout, content));
+                    }
+                }
+                MountItem::ScrollConfig {
+                    id,
+                    horizontal,
+                    scrollbar_visible,
+                    mirrored,
+                    ..
+                } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.horizontal = horizontal;
+                        scroll.indicator = scrollbar_visible;
+                        scroll.mirrored = mirrored;
+                    }
+                }
+                MountItem::ScrollContent { id, size } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.content = size;
+                    }
+                }
+                MountItem::ScrollBehavior { id, behavior } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        scroll.behavior = *behavior;
+                    }
+                }
+                MountItem::ScrollBy { id, dx, dy } => {
+                    if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
+                        // Core anchoring moves with content changes; it must not be clamped.
+                        if scroll.horizontal {
+                            scroll.x += dx;
+                        } else {
+                            scroll.y += dy;
+                        }
+                        scroll.applied = scroll.applied.wrapping_add(1);
+                        if !self.scrolled.contains(&id) {
+                            self.scrolled.push(id);
+                        }
+                    }
+                }
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollTo { x, y, .. },
+                } if self.get(id).is_some_and(|view| view.scroll.is_some()) => {
+                    if let Some(view) = self.get_mut(id)
+                        && let Some(scroll) = &mut view.scroll
+                    {
+                        let max = scroll.max(view.frame.size);
+                        if scroll.horizontal {
+                            scroll.x = (x + scroll.behavior.content_inset.left)
+                                .max(Points::ZERO)
+                                .min(max.x);
+                        } else {
+                            scroll.y = (y + scroll.behavior.content_inset.top)
+                                .max(Points::ZERO)
+                                .min(max.y);
+                        }
+                        scroll.applied = scroll.applied.wrapping_add(1);
+                        if !self.scrolled.contains(&id) {
+                            self.scrolled.push(id);
+                        }
                     }
                 }
                 MountItem::Appearance { appearance } => self.appearance = Some(appearance),

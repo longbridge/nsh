@@ -11,6 +11,7 @@ pub(crate) struct NshView {
     pub(crate) props: ViewProps,
     pub(crate) events: EventMask,
     pub(crate) text: Option<(TextLayout, Bounds<Points>)>,
+    pub(crate) scroll: Option<Box<nsh_core::scroll::ScrollState>>,
     pub(crate) component: Option<Box<dyn NativeComponent>>,
     pub(crate) component_name: Option<String>,
 }
@@ -26,6 +27,7 @@ impl NshView {
             props: Default::default(),
             events: Default::default(),
             text: None,
+            scroll: (kind == ViewKind::Scroll).then(Default::default),
             component: None,
             component_name: None,
         }

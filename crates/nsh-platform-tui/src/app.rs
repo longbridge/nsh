@@ -297,6 +297,17 @@ impl AppView {
                 Message::Frame => self.surface.request_frame(),
             }
         }
+        if let Some(engine) = &self.surface.engine {
+            let control = engine.control();
+            for &id in &self.tree.scrolled {
+                if let Some(view) = self.tree.get(id)
+                    && let Some(scroll) = &view.scroll
+                {
+                    control.scroll(id, scroll.reported(view.frame.size), scroll.applied);
+                }
+            }
+        }
+        self.tree.scrolled.clear();
         if let Some(appearance) = self.tree.appearance.take() {
             self.set_appearance(appearance);
         }
