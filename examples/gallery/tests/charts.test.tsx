@@ -1,10 +1,11 @@
 // The Charts demo: charts an app builds from `nsh/base/plot`'s parts and
 // its own views. A live price streamed a tick a second that pauses and
 // resumes, an order book's depth whose side under the pointer is read out
-// and whose range changes, a drawdown whose day under the pointer is read
-// out over both of its plots, capacity rings by period, a donut of revenue
-// that reports the slice under the pointer (none in its hole) and closes
-// into a pie, and sales as bars side by side or stacked.
+// and whose range changes, a drawdown whose day under the pointer or the
+// arrow keys is read out over both of its plots, capacity rings by period,
+// a donut of revenue that reports the slice under the pointer (none in its
+// hole) or the arrow keys and closes into a pie, and sales as bars side by
+// side or stacked.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -20,6 +21,17 @@ beforeEach(async () => {
 const price = () => {
   const texts = app.texts();
   return texts[texts.findIndex((t) => t === "LIVE" || t === "PAUSED") + 1];
+};
+
+/** Tabs on, pressing Right at each stop, until `shown` is on screen: the first plot that reads it out has the focus. */
+const tabTo = async (shown: string) => {
+  let tabs = 0;
+  while (!app.shows(shown)) {
+    expect(++tabs).toBeLessThan(60);
+    await app.keyboard.press("tab");
+    await app.keyboard.press("right");
+    await app.wait(50);
+  }
 };
 
 test("each chart is one image for screen readers", async () => {
@@ -56,6 +68,21 @@ test("the drawdown reads out the day under the pointer on either plot", async ()
   expect(app.texts().some((t) => t.endsWith("% from the high"))).toBe(true);
 });
 
+test("Tab reaches the drawdown, whose arrow keys move the day it reads out", async () => {
+  // The first Right on the value plot starts at its first day.
+  await tabTo("DAY 1");
+  await app.keyboard.press("right");
+  await app.waitFor("DAY 2");
+  await app.keyboard.press("end");
+  await app.waitFor("DAY 120");
+  await app.keyboard.press("home");
+  await app.waitFor("DAY 1");
+  // Escape clears the hover: the readout is back on the last day, at a high.
+  await app.keyboard.press("escape");
+  await app.waitFor("at a high");
+  expect(app.texts()).toContain("DAY 120");
+});
+
 test("the capacity rings show each period's load", async () => {
   expect(app.texts()).toContain("49%");
   await app.press("role:tab[7d peak]");
@@ -75,6 +102,17 @@ test("a donut reports the slice under the pointer, none in its hole", async () =
   await app.waitFor("Show as donut");
   await app.hover(pie);
   await app.waitFor("text:/^(NORTH AMERICA|EMEA|APAC|LATIN AMERICA|OTHER)$/");
+});
+
+test("the donut's slices step with the arrow keys once Tab reaches it", async () => {
+  await tabTo("NORTH AMERICA");
+  await app.keyboard.press("right");
+  await app.waitFor("EMEA");
+  await app.keyboard.press("end");
+  await app.waitFor("OTHER");
+  // Escape clears the hover: the total is back in the hole.
+  await app.keyboard.press("escape");
+  await app.waitFor("TOTAL");
 });
 
 test("bars stand in bands side by side or stacked, a value over each", async () => {
