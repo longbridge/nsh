@@ -374,3 +374,123 @@ fn registered_components_draw_in_their_assigned_area() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Native");
 }
+
+#[component]
+fn PaddedLabel() -> impl IntoElement {
+    let count = signal(0);
+    view().flex_1().child(
+        view()
+            .absolute()
+            .left(px(4.0))
+            .top(px(216.0))
+            .w(px(40.0))
+            .py(px(12.0))
+            .bg(nsh_core::color::rgb(0x123456))
+            .on_press(move |_: &()| count.update(|count| *count += 1))
+            .child(text(move || format!("Tap {}", count.get()))),
+    )
+}
+
+#[test]
+fn equal_padding_centers_the_label_and_the_drawn_cells_take_presses() {
+    use nsh_platform_tui::{Handled, MouseButton, MouseKind};
+    use ratatui_core::style::Color;
+
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
+    view.load(App::Rust(Root::new::<PaddedLabel>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Tap 0");
+    let buffer = terminal.backend().buffer();
+    for row in 14..17 {
+        for column in 1..6 {
+            assert_eq!(buffer[(column, row)].bg, Color::Rgb(0x12, 0x34, 0x56));
+        }
+    }
+    assert_eq!(buffer[(1, 14)].symbol(), " ");
+    assert_eq!(buffer[(1, 15)].symbol(), "T");
+    assert_eq!(buffer[(1, 16)].symbol(), " ");
+    for (column, row) in [(1, 13), (1, 17), (0, 15), (6, 15)] {
+        assert_eq!(buffer[(column, row)].bg, Color::Reset);
+        assert_eq!(
+            view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row)),
+            Handled::Ignored
+        );
+        assert_eq!(
+            view.handle(mouse(MouseKind::Up(MouseButton::Left), column, row)),
+            Handled::Ignored
+        );
+    }
+    for (count, row) in [(1, 14), (2, 15), (3, 16)] {
+        assert_eq!(
+            view.handle(mouse(MouseKind::Down(MouseButton::Left), 1, row)),
+            Handled::Yes
+        );
+        assert_eq!(
+            view.handle(mouse(MouseKind::Up(MouseButton::Left), 1, row)),
+            Handled::Yes
+        );
+        draw_until(&mut view, &mut terminal, &rx, &format!("Tap {count}"));
+    }
+}
+
+#[component]
+fn PaddedTextContent() -> impl IntoElement {
+    view().flex_1().child(
+        text("Label")
+            .absolute()
+            .left(px(4.0))
+            .top(px(216.0))
+            .w(px(40.0))
+            .py(px(12.0))
+            .bg(nsh_core::color::rgb(0x123456)),
+    )
+}
+
+#[test]
+fn text_content_padding_uses_the_same_cell_origin_as_its_view() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
+    view.load(App::Rust(Root::new::<PaddedTextContent>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Label");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(1, 14)].symbol(), " ");
+    assert_eq!(buffer[(1, 15)].symbol(), "L");
+    assert_eq!(buffer[(1, 16)].symbol(), " ");
+    assert_eq!(
+        buffer[(1, 16)].bg,
+        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+    );
+}
+
+#[component]
+fn NegativeHalfCell() -> impl IntoElement {
+    view().flex_1().child(
+        view()
+            .absolute()
+            .left(px(-4.0))
+            .top(px(-8.0))
+            .w(px(8.0))
+            .h(px(16.0))
+            .bg(nsh_core::color::rgb(0x123456))
+            .child(text("X")),
+    )
+}
+
+#[test]
+fn negative_half_cell_edges_round_towards_the_positive_direction() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<NegativeHalfCell>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "X");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].symbol(), "X");
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+    );
+    assert_eq!(buffer[(1, 0)].bg, ratatui_core::style::Color::Reset);
+    assert_eq!(buffer[(0, 1)].bg, ratatui_core::style::Color::Reset);
+}
