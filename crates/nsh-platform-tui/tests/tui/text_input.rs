@@ -47,10 +47,12 @@ fn tab_enters_a_field_and_typing_moves_the_caret_and_reports_text() {
 }
 
 fn modified(name: &str, ctrl: bool, alt: bool, shift: bool) -> Input {
-    let mut modifiers = Modifiers::default();
-    modifiers.ctrl = ctrl;
-    modifiers.alt = alt;
-    modifiers.shift = shift;
+    let modifiers = Modifiers {
+        ctrl,
+        alt,
+        shift,
+        ..Default::default()
+    };
     Input::Key {
         key: name.into(),
         modifiers,
