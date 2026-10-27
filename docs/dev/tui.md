@@ -201,7 +201,7 @@ card's color. Other fills keep the app's colors, including colors that differ by
 
 The attached tree's page colors are collected after each complete mount batch, before drawing. This makes
 matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
-remain transparent. The terminal Key scheme is described below; the Minibuffer and mouse-capture controls are
+remain transparent. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
 separate interaction work.
 
 ## Navigation stacks
@@ -333,6 +333,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
 | Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
+| Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Quit |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
@@ -349,8 +350,44 @@ The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes a
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
 without firing again. Navigation activation completes a press in one action; a later release does not press
 again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter and Ctrl+[/Esc can be
-indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation and
-the search Minibuffer are separate work. Editing uses the keys below while a field is focused.
+indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control (the host's raw mode turns
+the tty's own flow control off). Kitty negotiation is separate work. Editing uses the keys below while a field
+is focused.
+
+## The Minibuffer
+
+`search.rs` searches the text on screen incrementally, as readline's and Emacs's incremental searches do:
+`C-s` forward, `C-r` backward. The app's shortcuts are matched first, so an app that binds either key keeps it;
+inside a field both still search. While searching, the Minibuffer owns the keys:
+
+| Keys while searching | Action |
+|---|---|
+| Characters, bracketed paste | Extend the query; the current match stays while it still matches, else the next one in the search's direction is taken |
+| Ctrl+S / Ctrl+R | Next / previous match; with an empty query, search for the previous search's query |
+| Backspace, Ctrl+H | Return to the query and match before the last key |
+| Enter | End the search at the match |
+| Esc, Ctrl+G | Cancel: restore the focus, the search point and the Scroll offsets from before the search |
+| Other keys, mouse input, losing focus | End the search at the match; the key or mouse input then acts as usual |
+
+The search reads the rows the Cell text engine laid out for the Text views of the current focus scope (the
+newest modal, else the page), including text scrolled out of a Scroll's viewport; concealed screens and hidden
+views supply none. Field contents and canvas text are not searched. A match lies within one displayed row and is
+compared grapheme by grapheme; a query without capitals ignores case (smart case). Matches are ordered by Cell
+position, top to bottom and left to right, and the order wraps at both ends. A search starts at the focused
+control (inclusive), at the search point, or at the first / last match when there is neither.
+
+A match moves keyboard focus to the nearest focusable view around it (a button's label focuses the button) and
+reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
+at the default scale) as focus traversal does. A match in other text clears focus and
+becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
+control after or before it in reading order.
+
+While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
+default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
+with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are reversed.
+The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
+Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
+row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
 
 ## Text fields
 
@@ -429,6 +466,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
+| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
@@ -444,7 +482,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
-positions, top screens and their headers, modal cancellation, terminal navigation and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+positions, top screens and their headers, modal cancellation, terminal navigation, search and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
@@ -466,7 +504,9 @@ counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapsho
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
 its own, checks invalid fields and successful account creation.
-The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
+The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
+during and after the search. The host's unit checks cover crossterm conversion; its two ignored lifecycle checks
+require a real terminal.
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui
@@ -476,6 +516,7 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1
 cargo test -p nsh-tui-host --lib terminal::tests::panic_restores_raw_mode -- --ignored --nocapture --test-threads=1
