@@ -451,7 +451,7 @@ impl Dash {
             pattern.extend_from_within(..);
         }
         let period: f32 = pattern.iter().sum();
-        (period > 0.0 && period.is_finite()).then(|| Self {
+        (period > 0.0 && period.is_finite()).then_some(Self {
             pattern,
             period,
             offset: offset * scale,
