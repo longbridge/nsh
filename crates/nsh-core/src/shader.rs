@@ -705,40 +705,6 @@ impl From<Vec<UniformValue>> for UniformValue {
     }
 }
 
-/// The name of a member of a shader's `struct Uniforms`, as
-/// [`ShaderView::uniform`](crate::element::ShaderView::uniform) takes it:
-/// usually an enum of the program's members, so a name is a variant the
-/// compiler checks rather than a string.
-///
-/// ```
-/// use nsh_core::shader::UniformName;
-///
-/// #[derive(Clone, Copy)]
-/// enum Wave {
-///     Tint,
-///     Speed,
-/// }
-///
-/// impl UniformName for Wave {
-///     fn name(&self) -> &str {
-///         match self {
-///             Wave::Tint => "tint",
-///             Wave::Speed => "speed",
-///         }
-///     }
-/// }
-/// ```
-pub trait UniformName {
-    /// The member's name in WGSL.
-    fn name(&self) -> &str;
-}
-
-impl UniformName for &str {
-    fn name(&self) -> &str {
-        self
-    }
-}
-
 /// The values of a shader's uniforms, by name (`uniforms`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ShaderUniforms(pub Vec<(Arc<str>, UniformValue)>);

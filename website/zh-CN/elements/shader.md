@@ -11,7 +11,7 @@ demo: el-shader
 shader 是一个由 GPU 程序绘制其区域的视图：流动的渐变、噪点与颗粒、等离子、极光、全息箔、跟随点按扩散的波纹。你只需编写一个 WGSL 函数 `shade`，给出区域内每个点的颜色；平台以屏幕分辨率在 GPU 上运行它，绘制在视图背景之上、子元素之下。动画值逐帧在原生侧驱动它，应用代码无需参与。TSX 用从 `nsh` 导入的 `<Shader>` 创建，Rust 用 `shader().source(program)`。
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::{Shader, UniformName}};
+use nsh_core::{prelude::*, shader::Shader};
 
 const GLOW: &str = r#"
 struct Uniforms { tint: vec4f }
@@ -24,25 +24,11 @@ fn shade(uv: vec2f) -> vec4f {
 }
 "#;
 
-/// The members of `GLOW`'s `struct Uniforms`.
-#[derive(Clone, Copy)]
-enum Glow {
-    Tint,
-}
-
-impl UniformName for Glow {
-    fn name(&self) -> &str {
-        match self {
-            Glow::Tint => "tint",
-        }
-    }
-}
-
 fn glow() -> impl IntoElement {
     let program = Shader::compile(GLOW).expect("a valid shader");
     shader()
         .source(program)
-        .uniform(Glow::Tint, Hsla::from(rgb(0x38bdf8)))
+        .uniform("tint", Hsla::from(rgb(0x38bdf8)))
         .h(px(200.0))
         .rounded(px(14.0))
 }
@@ -132,31 +118,15 @@ const palette = signal<keyof typeof palettes>("Sunset");
 uniform 可以是一个[原生动画值](../modules/nsh.md#animation)，或由它派生的节点（`interpolate`、算术运算）。平台在它变化的每一帧把值写入 shader 并重新绘制，全部在 UI 线程上完成：无论应用代码多忙，动画都以满帧率运行。数值驱动 `f32`、`i32`、`u32` 成员以及 `vec2f` 的分量；插值到颜色的节点驱动 `vec3f` 或 `vec4f`。
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::{Shader, UniformName}};
-
-/// The members of the ripple's `struct Uniforms`.
-#[derive(Clone, Copy)]
-enum Ripple {
-    Wave,
-    Center,
-}
-
-impl UniformName for Ripple {
-    fn name(&self) -> &str {
-        match self {
-            Ripple::Wave => "wave",
-            Ripple::Center => "center",
-        }
-    }
-}
+use nsh_core::{prelude::*, shader::Shader};
 
 fn ripple(program: Shader) -> impl IntoElement {
     let wave = animated_value(0.0);
     wave.timing(1.0, 2200.0, Easing::Linear);
     shader()
         .source(program)
-        .uniform(Ripple::Wave, &wave)
-        .uniform(Ripple::Center, [0.5_f32, 0.5])
+        .uniform("wave", &wave)
+        .uniform("center", [0.5_f32, 0.5])
         .h(px(200.0))
 }
 ```
@@ -250,7 +220,7 @@ shader 每个显示帧最多绘制一次，并且只在显示的内容变化时�
 
 | 方法 | 说明 |
 |---|---|
-| `.uniform(name, value)` | 设置 `struct Uniforms` 的一个成员，用应用实现了 `UniformName` 的枚举的一个变体命名（也可以是 `&str`）：一个数、一个 `Color` 或 `Hsla`、`[f32; 2]` / `[f32; 3]` / `[f32; 4]`，或一个 `Vec<UniformValue>`。绑定的值（`move \|\| …`）变化时重新设置；动画值（`&wave`：一个数，或用于 `vec3f` / `vec4f` 的颜色）在原生侧逐帧驱动它。 |
+| `.uniform(name, value)` | 设置 `struct Uniforms` 的一个成员：一个数、一个 `Color` 或 `Hsla`、`[f32; 2]` / `[f32; 3]` / `[f32; 4]`，或一个 `Vec<UniformValue>`。绑定的值（`move \|\| …`）变化时重新设置；动画值（`&wave`：一个数，或用于 `vec3f` / `vec4f` 的颜色）在原生侧逐帧驱动它。 |
 | `.paused(bool)` | 停止 `nsh.time` 的时钟；可绑定。 |
 
 子元素用 `.child(..)` 添加，样式用常用的类型化方法。

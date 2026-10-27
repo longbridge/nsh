@@ -452,8 +452,8 @@ What apps call to build UI in Rust stays stable and strongly typed:
 - Element constructors take no content: `shader()`, then builder methods (`.source(program)`, `.uniform(..)`), so a
   new input is a new method, never a changed signature. Existing constructors that take their content
   (`canvas(painter)`, `video(url)`) are not a model for new ones.
-- Names the app chooses (a shader's uniforms, ...) are typed: a trait the app implements on its own enum
-  (`shader::UniformName`), with `&str` implementing it too, never a bare `&str` parameter.
+- Names NSH defines (style properties, built-in values) are typed; names the app defines in its own code (a
+  shader's uniforms, declared in its WGSL) are plain `&str`, as TSX's keys are, checked where they are defined.
 - Values are typed (`impl Into<UniformValue>`, `Hsla`, `Points`), not strings to parse.
 - No macros to make elements or set their props (declaring components with `#[component]` and its derives stays):
   plain functions, methods and traits.

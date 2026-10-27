@@ -15,7 +15,7 @@ Animated values move it natively, frame by frame, with no work in the app's code
 `nsh`, Rust with `shader().source(program)`.
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::{Shader, UniformName}};
+use nsh_core::{prelude::*, shader::Shader};
 
 const GLOW: &str = r#"
 struct Uniforms { tint: vec4f }
@@ -28,25 +28,11 @@ fn shade(uv: vec2f) -> vec4f {
 }
 "#;
 
-/// The members of `GLOW`'s `struct Uniforms`.
-#[derive(Clone, Copy)]
-enum Glow {
-    Tint,
-}
-
-impl UniformName for Glow {
-    fn name(&self) -> &str {
-        match self {
-            Glow::Tint => "tint",
-        }
-    }
-}
-
 fn glow() -> impl IntoElement {
     let program = Shader::compile(GLOW).expect("a valid shader");
     shader()
         .source(program)
-        .uniform(Glow::Tint, Hsla::from(rgb(0x38bdf8)))
+        .uniform("tint", Hsla::from(rgb(0x38bdf8)))
         .h(px(200.0))
         .rounded(px(14.0))
 }
@@ -145,31 +131,15 @@ on the UI thread: the animation runs at full frame rate however busy the app's c
 and `u32` members and the components of a `vec2f`; an interpolation to colors animates a `vec3f` or `vec4f`.
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::{Shader, UniformName}};
-
-/// The members of the ripple's `struct Uniforms`.
-#[derive(Clone, Copy)]
-enum Ripple {
-    Wave,
-    Center,
-}
-
-impl UniformName for Ripple {
-    fn name(&self) -> &str {
-        match self {
-            Ripple::Wave => "wave",
-            Ripple::Center => "center",
-        }
-    }
-}
+use nsh_core::{prelude::*, shader::Shader};
 
 fn ripple(program: Shader) -> impl IntoElement {
     let wave = animated_value(0.0);
     wave.timing(1.0, 2200.0, Easing::Linear);
     shader()
         .source(program)
-        .uniform(Ripple::Wave, &wave)
-        .uniform(Ripple::Center, [0.5_f32, 0.5])
+        .uniform("wave", &wave)
+        .uniform("center", [0.5_f32, 0.5])
         .h(px(200.0))
 }
 ```
@@ -277,7 +247,7 @@ share it: it is cheap to clone. The program may be bound, `.source(move || …)`
 
 | Method | Description |
 |---|---|
-| `.uniform(name, value)` | Sets a member of `struct Uniforms`, named by a variant of the app's enum that implements `UniformName` (or a `&str`): a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes; an animated value (`&wave`: a number, or colors for a `vec3f` / `vec4f`) moves it on every frame, natively. |
+| `.uniform(name, value)` | Sets a member of `struct Uniforms`: a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes; an animated value (`&wave`: a number, or colors for a `vec3f` / `vec4f`) moves it on every frame, natively. |
 | `.paused(bool)` | Stops the clock of `nsh.time`; bindable. |
 
 Children are added with `.child(..)`, styles with the usual typed methods.

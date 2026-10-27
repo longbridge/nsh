@@ -421,20 +421,14 @@ impl ShaderView {
         self.bind_prop(shader, |s| Prop::Shader(Some(s)))
     }
 
-    /// Sets the member `name` of the shader's `struct Uniforms`, usually a
-    /// variant of the app's enum of them
-    /// ([`UniformName`](crate::shader::UniformName)), to `value`
+    /// Sets the member `name` of the shader's `struct Uniforms` to `value`
     /// ([`IntoUniform`]): a number, a color or a list (a vector, an array of
     /// `vec4f`), which a bound value (`move || …`) sets again when it
     /// changes; or an animated value (`&wave`, a number, or colors for a
     /// `vec3f` / `vec4f`), which the platform writes on every frame it
     /// changes, without the engine (one whose owner is gone counts as 0).
-    pub fn uniform(
-        mut self,
-        name: impl crate::shader::UniformName,
-        value: impl IntoUniform,
-    ) -> Self {
-        let name: Arc<str> = name.name().into();
+    pub fn uniform(mut self, name: &str, value: impl IntoUniform) -> Self {
+        let name: Arc<str> = name.into();
         let value = match value.into_uniform().0 {
             UniformSource::Value(value) => value,
             UniformSource::Animated(node) => {
@@ -2121,25 +2115,8 @@ mod tests {
             AnimatedValue,
             reactive::{Runtime, create_root, signal},
         },
-        shader::{ShaderUniforms, UniformName, UniformValue},
+        shader::{ShaderUniforms, UniformValue},
     };
-
-    #[derive(Clone, Copy)]
-    enum Ripple {
-        Center,
-        Wave,
-        Speed,
-    }
-
-    impl UniformName for Ripple {
-        fn name(&self) -> &str {
-            match self {
-                Ripple::Center => "center",
-                Ripple::Wave => "wave",
-                Ripple::Speed => "speed",
-            }
-        }
-    }
 
     fn uniforms(attrs: &super::super::builder::Attrs) -> ShaderUniforms {
         attrs
@@ -2182,9 +2159,9 @@ mod tests {
         let (value_owner, wave) = create_root(|| AnimatedValue::new(&executor, 0.0));
         let speed = signal(1.0_f32);
         let view = shader()
-            .uniform(Ripple::Center, [0.5_f32, 0.5])
-            .uniform(Ripple::Wave, &wave)
-            .uniform(Ripple::Speed, move || speed.get());
+            .uniform("center", [0.5_f32, 0.5])
+            .uniform("wave", &wave)
+            .uniform("speed", move || speed.get());
         let node = view.0;
 
         // The static and animated ones are set at once; the animated one by
@@ -2230,9 +2207,7 @@ mod tests {
 
     #[test]
     fn a_later_uniform_replaces_one_of_the_same_name() {
-        let view = shader()
-            .uniform("speed", 1.0_f32)
-            .uniform(Ripple::Speed, 3.0_f32);
+        let view = shader().uniform("speed", 1.0_f32).uniform("speed", 3.0_f32);
         let set = uniforms(&view.0.attrs);
         assert_eq!(set.0.len(), 1);
         assert_eq!(value(&set, "speed"), Some(UniformValue::Number(3.0)));
