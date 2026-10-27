@@ -118,7 +118,8 @@ restyles nothing, so the look is the app's own, after Emacs's dired, magit and i
   carry a value's meaning.
 - Separators are drawn with line characters (`─`, `│`, borders); there are no filled blocks. The pages set no
   background, so the terminal's own shows through, and the palette follows the light or dark appearance. The only
-  fill is a dialog's, which has to hide the rows under it.
+  fill is a dialog's (`nsh/base`'s `Dialog`, so the platform's modal focus and Esc apply), which has to hide the
+  rows under it.
 
 ```sh
 ./target/debug/nsh build examples/tui-gallery --out .nsh/tui-gallery
@@ -290,6 +291,39 @@ position. A wheel event with no keyboard focus creates none. Focus selection use
 so the next activation cannot target content that has left the viewport. Indicators, sticky cells, gestures and
 scrolling animations remain separate work.
 
+## Canvases
+
+`canvas.rs` replays a canvas's `Drawing` against a small 2D context onto a grid of braille dots, 2 across and 4
+down per Cell (4 × 4 points at the default 8 × 16), and ratatui's `canvas::Canvas` with `Marker::Braille` turns
+them into symbols. Only the canvas's visible Cells are replayed onto, so a canvas partly scrolled or clipped keeps
+its dots in place. The widget resets the background of its area, so it draws into a scratch buffer and only its
+symbols and colors are copied: the view's own fill and what lies under it stay.
+
+- **State**: the affine transform (`translate`, `scale`, `rotate`, `transform`, `setTransform`), `save` /
+  `restore`, `fillStyle` / `strokeStyle`, `globalAlpha`, the line dash and its offset, `font` (its weight and
+  italic only), `textAlign` and `textBaseline`, and the clip.
+- **Paths** (`canvas/path.rs`) are flattened to polylines in the view's points, within half a point: lines,
+  quadratic and cubic curves, `arc`, `arcTo`, `ellipse`, `rect` and `roundRect`, under the transform at the time
+  each part was added.
+- **Fills** set the dots whose centers the fill rule (nonzero or even-odd) puts inside the path, every subpath
+  closed; `fillRect` fills a rectangle without touching the current path. **Strokes** set the dots each segment
+  passes through, one dot wide; `strokeRect` strokes a rectangle. `clearRect` empties dots.
+- **Clips** are masks of dots, each new one intersected with those in effect; fills, strokes and text stay inside.
+- **Dashes** are sampled at each dot's center along its subpath, in user-space lengths scaled by the transform; an
+  odd pattern repeats, and every subpath starts the pattern again.
+- **Colors**: a gradient draws its middle stop, and an animated color (`Paint::Slot`) its current value from the
+  canvas arguments the native animator writes (transparent until it has one; numbers read 0). A paint's alpha,
+  `globalAlpha` and the view's opacity blend it over the dot's previous color or the Cell's background. A Cell
+  shows one foreground color: that of its most recently painted dot.
+- **Text** (`fillText` / `strokeText`) is printed on whole Cells above the dots, one row tall: `textAlign` places
+  it by its width in Cells, and `textBaseline` puts its row's top at `y` (`top`, `hanging`), half a row above
+  (`middle`), three quarters of a row above (`alphabetic`) or a whole row above (`ideographic`, `bottom`). A weight
+  of 600 or more is bold; `maxWidth` cuts it to the Cells that fit.
+
+A drawing's nodes (`Drawing::nodes`) are pressed as a pointer at their center presses: the agent's model finds the
+node, the canvas reports its Cells like any view, and the press goes to whatever takes presses under that Cell, the
+canvas itself included.
+
 ## The terminal Key scheme
 
 `key_scheme.rs` maps keystrokes to actions; `keyboard.rs` applies focus, activation and scrolling, and
@@ -411,6 +445,11 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
 | Modal | A surface-sized root above the page, with its own focus scope |
+| Canvas | Braille dots (2 × 4 per Cell) for fills and strokes, text on whole Cells above them |
+| Canvas line widths, caps, joins and miters | Decorative features left out: every stroke is one dot wide |
+| Canvas shadows, compositing (`globalCompositeOperation`) and images (`drawImage`) | Decorative features left out silently |
+| Canvas gradients | The gradient's middle stop as a flat color |
+| Canvas colors within a Cell | One foreground color per Cell: the most recently painted dot's |
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
@@ -422,7 +461,9 @@ Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
 The single integration test binary exercises the public `TextEngine` and `AppView` seams. It uses ratatui's
 `TestBackend`, real engines and the counter example compiled by NSH's single-module compiler. It checks visible
-cells, mouse-driven changes, area ownership, resize, callbacks and idle scheduling. The host's integration test
+cells, mouse-driven changes, area ownership, resize, callbacks and idle scheduling; canvases are checked by their
+braille Cells, clipping, fill rules and a press at a node's center, and the library's unit tests cover path
+flattening, fill-rule spans and dash patterns. The host's integration test
 bundles the counter into a temporary directory, loads it through `Bundle::read`, and drives `run_app` with
 crossterm events passed through `convert`. Its scripted user locates `+1` in the flushed cells, clicks it and
 waits through idle polls for the value and history to change. It needs no prebuilt CLI, existing bundle or TTY.
@@ -438,6 +479,7 @@ The host's unit checks cover crossterm conversion; its two ignored lifecycle che
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui
+cargo test -p nsh-platform-tui --lib canvas
 cargo test -p nsh-tui-host
 cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui

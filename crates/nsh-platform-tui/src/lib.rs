@@ -6,6 +6,7 @@
 //! same fixed grid that drawing and input use.
 
 mod app;
+mod canvas;
 mod geometry;
 mod input;
 mod key_scheme;

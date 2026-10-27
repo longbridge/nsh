@@ -5,7 +5,7 @@ use std::{
 
 use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, Points, ROOT_ID, ViewKind};
 
-use crate::{Appearance, ComponentFactory, view::NshView};
+use crate::{Appearance, ComponentFactory, canvas::CanvasView, view::NshView};
 
 pub(crate) struct Mounter {
     pub(crate) views: Vec<Option<NshView>>,
@@ -124,6 +124,7 @@ impl Mounter {
                         kind,
                         ViewKind::View
                             | ViewKind::Text
+                            | ViewKind::Canvas
                             | ViewKind::Native
                             | ViewKind::Input
                             | ViewKind::Scroll
@@ -248,6 +249,14 @@ impl Mounter {
                 } => {
                     if let Some(view) = self.get_mut(id) {
                         view.text = Some((layout, content));
+                    }
+                }
+                MountItem::Canvas { id, drawing } => {
+                    if let Some(view) = self.get_mut(id) {
+                        match &mut view.canvas {
+                            Some(canvas) => canvas.drawing = drawing,
+                            None => view.canvas = Some(Box::new(CanvasView::new(drawing))),
+                        }
                     }
                 }
                 MountItem::ScrollConfig {

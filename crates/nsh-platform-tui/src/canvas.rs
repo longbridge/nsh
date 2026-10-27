@@ -1,0 +1,724 @@
+//! Canvas views drawn in braille dots: the drawing's operations replayed
+//! against a small 2D context (transform, save / restore, paints, global
+//! alpha, dashes, clips) onto a grid of 2 × 4 dots per Cell, which
+//! ratatui's `Canvas` turns into braille symbols. Fills set the dots whose
+//! centers the fill rule puts inside the path, strokes the dots along each
+//! segment, and text is printed on whole Cells above the dots.
+//!
+//! Only the part of the canvas inside its visible Cells is replayed onto,
+//! so a canvas partly scrolled away keeps its dots where they were. A Cell
+//! shows one color: that of the dot painted last in it. Line widths, caps,
+//! joins, shadows, compositing and images are Decorative features left out.
+
+mod path;
+
+use std::{rc::Rc, sync::Arc};
+
+use nsh_core::{
+    animation::AnimationValue,
+    canvas::{
+        CanvasOp, CanvasTextAlign, CanvasTextBaseline, Drawing, FillRule, Num, Paint, PathOp,
+    },
+};
+use ratatui_core::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    symbols::Marker,
+    widgets::Widget,
+};
+use ratatui_widgets::canvas::{Canvas, Painter, Shape};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
+use self::path::{Dash, IDENTITY, Matrix, Outline, apply, distance, mean_scale, multiply};
+use crate::{CellSize, geometry::CellBounds, render::blend};
+
+const DOTS_ACROSS: usize = 2;
+const DOTS_DOWN: usize = 4;
+/// How far below a row's top the alphabetic baseline sits, in rows.
+const ALPHABETIC_BASELINE: f32 = 0.75;
+const BOLD_WEIGHT: u16 = 600;
+
+/// What a canvas view draws: its drawing and the current values of the
+/// animated slots it reads, which the native animator writes.
+pub(crate) struct CanvasView {
+    pub(crate) drawing: Arc<Drawing>,
+    pub(crate) args: Vec<Option<AnimationValue>>,
+}
+
+impl CanvasView {
+    pub(crate) fn new(drawing: Arc<Drawing>) -> Self {
+        Self {
+            drawing,
+            args: Vec::new(),
+        }
+    }
+
+    fn number(&self, n: Num) -> f32 {
+        n.get(|slot| {
+            self.args
+                .get(slot as usize)
+                .copied()
+                .flatten()
+                .map_or(0.0, AnimationValue::number)
+        })
+    }
+
+    /// The color a paint draws: a gradient by its middle stop, an animated
+    /// color by its current value (transparent until it has one).
+    fn color(&self, paint: &Paint) -> nsh_core::Color {
+        match paint {
+            Paint::Color(color) => *color,
+            Paint::Slot(slot) => match self.args.get(*slot as usize).copied().flatten() {
+                Some(AnimationValue::Color(color)) => nsh_core::Color(color),
+                _ => nsh_core::Color::TRANSPARENT,
+            },
+            Paint::Gradient(gradient) => gradient
+                .stops
+                .get(gradient.stops.len() / 2)
+                .map_or(nsh_core::Color::TRANSPARENT, |(_, color)| *color),
+        }
+    }
+}
+
+/// Draws `canvas` into the `visible` Cells of a view whose Cells are
+/// `bounds`, at the view's `opacity`.
+pub(crate) fn draw(
+    canvas: &CanvasView,
+    buffer: &mut Buffer,
+    bounds: CellBounds,
+    visible: Rect,
+    cells: CellSize,
+    opacity: f32,
+) {
+    if visible.is_empty() {
+        return;
+    }
+    let mut replay = Replay::new(canvas, buffer, bounds, visible, cells, opacity);
+    for op in &canvas.drawing.ops {
+        replay.op(op);
+    }
+    let Replay { dots, labels, .. } = replay;
+    let mut scratch = Buffer::empty(Rect::new(0, 0, visible.width, visible.height));
+    Canvas::default()
+        .marker(Marker::Braille)
+        .paint(|cx| cx.draw(&dots))
+        .render(scratch.area, &mut scratch);
+    // The Canvas widget resets the background of its whole area; copying
+    // only its symbols keeps the view's own fill and what lies under it.
+    for y in 0..visible.height {
+        for x in 0..visible.width {
+            let dot = &scratch[(x, y)];
+            if dot.symbol() != " " {
+                let symbol = dot.symbol().to_owned();
+                let fg = dot.fg;
+                let cell = &mut buffer[(visible.x + x, visible.y + y)];
+                cell.set_symbol(&symbol);
+                cell.set_fg(fg);
+            }
+        }
+    }
+    for label in labels {
+        let cell = &mut buffer[(visible.x + label.column, visible.y + label.row)];
+        let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg));
+        if label.bold {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if label.italic {
+            style = style.add_modifier(Modifier::ITALIC);
+        }
+        buffer.set_stringn(
+            visible.x + label.column,
+            visible.y + label.row,
+            &label.grapheme,
+            usize::from(visible.width - label.column),
+            style,
+        );
+    }
+}
+
+/// The dots of the visible Cells, each with its color and when it was
+/// painted (the Cell takes the color of its latest dot).
+struct Dots {
+    width: usize,
+    height: usize,
+    /// The canvas point at the top left of the first dot.
+    origin: [f32; 2],
+    /// A dot's size in points.
+    step: [f32; 2],
+    colors: Vec<Option<(Color, u32)>>,
+    /// The background of each visible Cell, which translucent paints blend
+    /// over.
+    backgrounds: Vec<Color>,
+    painted: u32,
+}
+
+impl Dots {
+    fn center_y(&self, row: usize) -> f32 {
+        self.origin[1] + (row as f32 + 0.5) * self.step[1]
+    }
+
+    fn background(&self, index: usize) -> Color {
+        let (column, row) = (index % self.width, index / self.width);
+        self.backgrounds[row / DOTS_DOWN * (self.width / DOTS_ACROSS) + column / DOTS_ACROSS]
+    }
+
+    fn paint(&mut self, index: usize, color: nsh_core::Color, alpha: f32) {
+        let under = self.colors[index].map_or_else(|| self.background(index), |(c, _)| c);
+        self.painted += 1;
+        self.colors[index] = Some((blend(color, alpha, under), self.painted));
+    }
+
+    /// Calls `visit` with each dot whose center `outline` holds by `rule`.
+    fn inside(&self, outline: &Outline, rule: FillRule, mut visit: impl FnMut(usize)) {
+        let mut spans = Vec::new();
+        for row in 0..self.height {
+            outline.spans(self.center_y(row), rule, &mut spans);
+            for &(start, end) in &spans {
+                let first = ((start - self.origin[0]) / self.step[0] - 0.5)
+                    .ceil()
+                    .max(0.0);
+                let after = ((end - self.origin[0]) / self.step[0] - 0.5)
+                    .ceil()
+                    .min(self.width as f32);
+                if first < after {
+                    for column in first as usize..after as usize {
+                        visit(row * self.width + column);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Calls `visit` with each dot the segment from `a` to `b` (view
+    /// points) passes through, and how far along the segment the dot's
+    /// center lies, in points (where dash patterns sample it).
+    fn trace(&self, a: [f32; 2], b: [f32; 2], mut visit: impl FnMut(usize, f32)) {
+        let to_dots = |p: [f32; 2]| {
+            [
+                (p[0] - self.origin[0]) / self.step[0],
+                (p[1] - self.origin[1]) / self.step[1],
+            ]
+        };
+        let Some((from, to)) = clip_segment(
+            to_dots(a),
+            to_dots(b),
+            [0.0, 0.0],
+            [self.width as f32, self.height as f32],
+        ) else {
+            return;
+        };
+        let direction = [b[0] - a[0], b[1] - a[1]];
+        let length = distance(a, b);
+        let steps = (to[0] - from[0])
+            .abs()
+            .max((to[1] - from[1]).abs())
+            .ceil()
+            .max(1.0) as usize;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let column = (from[0] + (to[0] - from[0]) * t).floor();
+            let row = (from[1] + (to[1] - from[1]) * t).floor();
+            if column < 0.0
+                || row < 0.0
+                || column as usize >= self.width
+                || row as usize >= self.height
+            {
+                continue;
+            }
+            let along = if length > 0.0 {
+                let center = [
+                    self.origin[0] + (column + 0.5) * self.step[0],
+                    self.origin[1] + (row + 0.5) * self.step[1],
+                ];
+                (((center[0] - a[0]) * direction[0] + (center[1] - a[1]) * direction[1]) / length)
+                    .clamp(0.0, length)
+            } else {
+                0.0
+            };
+            visit(row as usize * self.width + column as usize, along);
+        }
+    }
+}
+
+/// The part of the segment from `a` to `b` inside the box `min`..`max`
+/// (Liang–Barsky).
+fn clip_segment(
+    a: [f32; 2],
+    b: [f32; 2],
+    min: [f32; 2],
+    max: [f32; 2],
+) -> Option<([f32; 2], [f32; 2])> {
+    if !(a[0].is_finite() && a[1].is_finite() && b[0].is_finite() && b[1].is_finite()) {
+        return None;
+    }
+    let delta = [b[0] - a[0], b[1] - a[1]];
+    let (mut enter, mut exit) = (0.0f32, 1.0f32);
+    for axis in 0..2 {
+        for (p, q) in [
+            (-delta[axis], a[axis] - min[axis]),
+            (delta[axis], max[axis] - a[axis]),
+        ] {
+            if p == 0.0 {
+                if q < 0.0 {
+                    return None;
+                }
+            } else {
+                let t = q / p;
+                if p < 0.0 {
+                    enter = enter.max(t);
+                } else {
+                    exit = exit.min(t);
+                }
+            }
+        }
+    }
+    (enter <= exit).then(|| {
+        let at = |t: f32| [a[0] + delta[0] * t, a[1] + delta[1] * t];
+        (at(enter), at(exit))
+    })
+}
+
+impl Shape for Dots {
+    fn draw(&self, painter: &mut Painter) {
+        let columns = self.width / DOTS_ACROSS;
+        let mut latest: Vec<Option<(Color, u32)>> = vec![None; columns * (self.height / DOTS_DOWN)];
+        for (index, dot) in self.colors.iter().enumerate() {
+            if let Some((color, painted)) = *dot {
+                let cell =
+                    index / self.width / DOTS_DOWN * columns + index % self.width / DOTS_ACROSS;
+                if latest[cell].is_none_or(|(_, last)| painted > last) {
+                    latest[cell] = Some((color, painted));
+                }
+            }
+        }
+        for (index, dot) in self.colors.iter().enumerate() {
+            if dot.is_some() {
+                let cell =
+                    index / self.width / DOTS_DOWN * columns + index % self.width / DOTS_ACROSS;
+                if let Some((color, _)) = latest[cell] {
+                    painter.paint(index % self.width, index / self.width, color);
+                }
+            }
+        }
+    }
+}
+
+/// A grapheme of canvas text on a visible Cell.
+struct Label {
+    column: u16,
+    row: u16,
+    grapheme: String,
+    color: nsh_core::Color,
+    alpha: f32,
+    bold: bool,
+    italic: bool,
+}
+
+#[derive(Clone)]
+struct State {
+    matrix: Matrix,
+    fill: Paint,
+    stroke: Paint,
+    alpha: f32,
+    dash: Arc<[nsh_core::Points]>,
+    dash_offset: f32,
+    align: CanvasTextAlign,
+    baseline: CanvasTextBaseline,
+    bold: bool,
+    italic: bool,
+    /// The dots inside every clip in effect; `None` is no clip.
+    clip: Option<Rc<[bool]>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            matrix: IDENTITY,
+            fill: Paint::Color(nsh_core::Color::BLACK),
+            stroke: Paint::Color(nsh_core::Color::BLACK),
+            alpha: 1.0,
+            dash: Arc::from([]),
+            dash_offset: 0.0,
+            align: CanvasTextAlign::default(),
+            baseline: CanvasTextBaseline::default(),
+            bold: false,
+            italic: false,
+            clip: None,
+        }
+    }
+}
+
+struct Replay<'a> {
+    canvas: &'a CanvasView,
+    dots: Dots,
+    labels: Vec<Label>,
+    cells: CellSize,
+    /// The visible Cells' offset from the canvas's first Cell.
+    offset: [i32; 2],
+    opacity: f32,
+    state: State,
+    saved: Vec<State>,
+    path: Outline,
+}
+
+impl<'a> Replay<'a> {
+    fn new(
+        canvas: &'a CanvasView,
+        buffer: &Buffer,
+        bounds: CellBounds,
+        visible: Rect,
+        cells: CellSize,
+        opacity: f32,
+    ) -> Self {
+        let offset = [
+            i32::from(visible.x) - bounds.left,
+            i32::from(visible.y) - bounds.top,
+        ];
+        let (cell_width, cell_height) = (cells.width().0, cells.height().0);
+        let backgrounds = (visible.y..visible.bottom())
+            .flat_map(|y| (visible.x..visible.right()).map(move |x| (x, y)))
+            .map(|position| buffer[position].bg)
+            .collect();
+        let width = usize::from(visible.width) * DOTS_ACROSS;
+        let height = usize::from(visible.height) * DOTS_DOWN;
+        Self {
+            canvas,
+            dots: Dots {
+                width,
+                height,
+                origin: [
+                    offset[0] as f32 * cell_width,
+                    offset[1] as f32 * cell_height,
+                ],
+                step: [
+                    cell_width / DOTS_ACROSS as f32,
+                    cell_height / DOTS_DOWN as f32,
+                ],
+                colors: vec![None; width * height],
+                backgrounds,
+                painted: 0,
+            },
+            labels: Vec::new(),
+            cells,
+            offset,
+            opacity,
+            state: State::default(),
+            saved: Vec::new(),
+            path: Outline::default(),
+        }
+    }
+
+    fn n(&self, n: Num) -> f32 {
+        self.canvas.number(n)
+    }
+
+    fn transform(&mut self, by: Matrix) {
+        self.state.matrix = multiply(self.state.matrix, by);
+    }
+
+    fn outline(&self, path: &[PathOp]) -> Outline {
+        Outline::of(path, &self.state.matrix, &|n| self.n(n))
+    }
+
+    /// A paint's color and the alpha it is drawn with; `None` draws nothing.
+    fn ink(&self, paint: &Paint) -> Option<(nsh_core::Color, f32)> {
+        let color = self.canvas.color(paint);
+        let alpha = (color.0 & 255) as f32 / 255.0 * self.state.alpha * self.opacity;
+        (alpha > 0.0).then_some((color, alpha))
+    }
+
+    fn clipped_out(&self, index: usize) -> bool {
+        self.state.clip.as_ref().is_some_and(|clip| !clip[index])
+    }
+
+    fn fill(&mut self, outline: &Outline, rule: FillRule) {
+        let Some((color, alpha)) = self.ink(&self.state.fill.clone()) else {
+            return;
+        };
+        let mut inside = Vec::new();
+        self.dots.inside(outline, rule, |index| inside.push(index));
+        for index in inside {
+            if !self.clipped_out(index) {
+                self.dots.paint(index, color, alpha);
+            }
+        }
+    }
+
+    fn stroke(&mut self, outline: &Outline) {
+        let Some((color, alpha)) = self.ink(&self.state.stroke.clone()) else {
+            return;
+        };
+        let dash = Dash::new(
+            &self.state.dash,
+            self.state.dash_offset,
+            mean_scale(&self.state.matrix),
+        );
+        let mut on = Vec::new();
+        for subpath in &outline.subpaths {
+            let count = subpath.points.len();
+            if count < 2 {
+                continue;
+            }
+            let segments = if subpath.closed { count } else { count - 1 };
+            let mut travelled = 0.0;
+            for k in 0..segments {
+                let (a, b) = (subpath.points[k], subpath.points[(k + 1) % count]);
+                self.dots.trace(a, b, |index, along| {
+                    if dash
+                        .as_ref()
+                        .is_none_or(|dash| dash.is_on(travelled + along))
+                    {
+                        on.push(index);
+                    }
+                });
+                travelled += distance(a, b);
+            }
+        }
+        // A dot is painted once per stroke, so translucent strokes do not
+        // darken where segments meet.
+        on.sort_unstable();
+        on.dedup();
+        for index in on {
+            if !self.clipped_out(index) {
+                self.dots.paint(index, color, alpha);
+            }
+        }
+    }
+
+    fn clear(&mut self, outline: &Outline) {
+        let mut inside = Vec::new();
+        self.dots
+            .inside(outline, FillRule::NonZero, |index| inside.push(index));
+        for index in inside {
+            if !self.clipped_out(index) {
+                self.dots.colors[index] = None;
+            }
+        }
+    }
+
+    fn clip(&mut self, outline: &Outline, rule: FillRule) {
+        let mut clip = vec![false; self.dots.colors.len()];
+        self.dots.inside(outline, rule, |index| clip[index] = true);
+        if let Some(previous) = &self.state.clip {
+            for (inside, &before) in clip.iter_mut().zip(previous.iter()) {
+                *inside &= before;
+            }
+        }
+        self.state.clip = Some(clip.into());
+    }
+
+    fn text(&mut self, text: &str, x: f32, y: f32, max_width: Option<f32>, paint: Paint) {
+        let Some((color, alpha)) = self.ink(&paint) else {
+            return;
+        };
+        let (cell_width, cell_height) = (self.cells.width().0, self.cells.height().0);
+        let max_cells = max_width.map_or(usize::MAX, |w| (w / cell_width).max(0.0) as usize);
+        let mut graphemes = Vec::new();
+        let mut width_cells = 0;
+        for grapheme in text.graphemes(true) {
+            let width = grapheme.width();
+            if width_cells + width > max_cells {
+                break;
+            }
+            graphemes.push((grapheme, width_cells));
+            width_cells += width;
+        }
+        let [anchor_x, anchor_y] = apply(&self.state.matrix, x, y);
+        let text_width = width_cells as f32 * cell_width;
+        let left = match self.state.align {
+            CanvasTextAlign::Start | CanvasTextAlign::Left => anchor_x,
+            CanvasTextAlign::Center => anchor_x - text_width / 2.0,
+            CanvasTextAlign::End | CanvasTextAlign::Right => anchor_x - text_width,
+        };
+        let rows_above = match self.state.baseline {
+            CanvasTextBaseline::Top | CanvasTextBaseline::Hanging => 0.0,
+            CanvasTextBaseline::Middle => 0.5,
+            CanvasTextBaseline::Alphabetic => ALPHABETIC_BASELINE,
+            CanvasTextBaseline::Ideographic | CanvasTextBaseline::Bottom => 1.0,
+        };
+        let row = (anchor_y / cell_height - rows_above + 0.5).floor() as i32 - self.offset[1];
+        let first_column = (left / cell_width + 0.5).floor() as i32 - self.offset[0];
+        let columns = (self.dots.width / DOTS_ACROSS) as i32;
+        let rows = (self.dots.height / DOTS_DOWN) as i32;
+        if !(0..rows).contains(&row) {
+            return;
+        }
+        for (grapheme, at) in graphemes {
+            let column = first_column + at as i32;
+            if !(0..columns).contains(&column) {
+                continue;
+            }
+            // The dot right of and below the Cell's center stands for it.
+            let probe = (row as usize * DOTS_DOWN + DOTS_DOWN / 2) * self.dots.width
+                + column as usize * DOTS_ACROSS
+                + DOTS_ACROSS / 2;
+            if self.clipped_out(probe) {
+                continue;
+            }
+            self.labels.push(Label {
+                column: column as u16,
+                row: row as u16,
+                grapheme: grapheme.to_owned(),
+                color,
+                alpha,
+                bold: self.state.bold,
+                italic: self.state.italic,
+            });
+        }
+    }
+
+    fn op(&mut self, op: &CanvasOp) {
+        match op {
+            CanvasOp::Save => self.saved.push(self.state.clone()),
+            CanvasOp::Restore => {
+                if let Some(state) = self.saved.pop() {
+                    self.state = state;
+                }
+            }
+            CanvasOp::Translate(x, y) => {
+                self.transform([1.0, 0.0, 0.0, 1.0, self.n(*x), self.n(*y)]);
+            }
+            CanvasOp::Scale(x, y) => self.transform([self.n(*x), 0.0, 0.0, self.n(*y), 0.0, 0.0]),
+            CanvasOp::Rotate(angle) => {
+                let (sin, cos) = self.n(*angle).sin_cos();
+                self.transform([cos, sin, -sin, cos, 0.0, 0.0]);
+            }
+            CanvasOp::Transform(m) => self.transform(m.map(|n| self.n(n))),
+            CanvasOp::SetTransform(m) => self.state.matrix = m.map(|n| self.n(n)),
+            CanvasOp::BeginPath => self.path = Outline::default(),
+            CanvasOp::Path(op) => {
+                let matrix = self.state.matrix;
+                let canvas = self.canvas;
+                self.path.add(op, &matrix, &|n| canvas.number(n));
+            }
+            CanvasOp::Fill(path, rule) => match path {
+                Some(path) => self.fill(&self.outline(path), *rule),
+                None => {
+                    let current = std::mem::take(&mut self.path);
+                    self.fill(&current, *rule);
+                    self.path = current;
+                }
+            },
+            CanvasOp::Stroke(path) => match path {
+                Some(path) => self.stroke(&self.outline(path)),
+                None => {
+                    let current = std::mem::take(&mut self.path);
+                    self.stroke(&current);
+                    self.path = current;
+                }
+            },
+            CanvasOp::Clip(path, rule) => match path {
+                Some(path) => self.clip(&self.outline(path), *rule),
+                None => {
+                    let current = std::mem::take(&mut self.path);
+                    self.clip(&current, *rule);
+                    self.path = current;
+                }
+            },
+            CanvasOp::FillRect(rect) => {
+                let outline = Outline::rect(rect.map(|n| self.n(n)), &self.state.matrix);
+                self.fill(&outline, FillRule::NonZero);
+            }
+            CanvasOp::StrokeRect(rect) => {
+                let outline = Outline::rect(rect.map(|n| self.n(n)), &self.state.matrix);
+                self.stroke(&outline);
+            }
+            CanvasOp::ClearRect(rect) => {
+                let outline = Outline::rect(rect.map(|n| self.n(n)), &self.state.matrix);
+                self.clear(&outline);
+            }
+            CanvasOp::FillStyle(paint) => self.state.fill = paint.clone(),
+            CanvasOp::StrokeStyle(paint) => self.state.stroke = paint.clone(),
+            CanvasOp::LineDash(segments) => self.state.dash = segments.clone(),
+            CanvasOp::LineDashOffset(offset) => {
+                let offset = self.n(*offset);
+                if offset.is_finite() {
+                    self.state.dash_offset = offset;
+                }
+            }
+            CanvasOp::GlobalAlpha(alpha) => {
+                let alpha = self.n(*alpha);
+                // Canvas ignores values outside 0..1.
+                if (0.0..=1.0).contains(&alpha) {
+                    self.state.alpha = alpha;
+                }
+            }
+            CanvasOp::Font(font) => {
+                self.state.bold = font.weight >= BOLD_WEIGHT;
+                self.state.italic = font.italic;
+            }
+            CanvasOp::TextAlign(align) => self.state.align = *align,
+            CanvasOp::TextBaseline(baseline) => self.state.baseline = *baseline,
+            CanvasOp::FillText {
+                text,
+                x,
+                y,
+                max_width,
+            } => {
+                let (x, y) = (self.n(*x), self.n(*y));
+                let paint = self.state.fill.clone();
+                self.text(text, x, y, max_width.map(|w| w.0), paint);
+            }
+            CanvasOp::StrokeText {
+                text,
+                x,
+                y,
+                max_width,
+            } => {
+                let (x, y) = (self.n(*x), self.n(*y));
+                let paint = self.state.stroke.clone();
+                self.text(text, x, y, max_width.map(|w| w.0), paint);
+            }
+            // Decorative features: a stroke is one dot wide, shadows,
+            // compositing and images are left out.
+            CanvasOp::LineWidth(_)
+            | CanvasOp::LineCap(_)
+            | CanvasOp::LineJoin(_)
+            | CanvasOp::MiterLimit(_)
+            | CanvasOp::Composite(_)
+            | CanvasOp::ShadowColor(_)
+            | CanvasOp::ShadowBlur(_)
+            | CanvasOp::ShadowOffset(_)
+            | CanvasOp::FontVariantNumeric(_)
+            | CanvasOp::DrawImage { .. } => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{canvas::CanvasGradient, geometry::Percentage};
+
+    use super::*;
+
+    #[test]
+    fn slots_and_gradients_resolve_to_one_color() {
+        let mut canvas = CanvasView::new(Arc::default());
+        canvas.args = vec![None, Some(AnimationValue::Color(0x11223344))];
+        assert_eq!(canvas.color(&Paint::Slot(1)), nsh_core::Color(0x11223344));
+        assert_eq!(canvas.color(&Paint::Slot(0)), nsh_core::Color::TRANSPARENT);
+        let mut gradient = CanvasGradient::linear(Default::default(), Default::default());
+        gradient.stops = [0xff0000ff, 0x00ff00ff, 0x0000ffff]
+            .into_iter()
+            .enumerate()
+            .map(|(i, color)| (Percentage(i as f32 / 2.0), nsh_core::Color(color)))
+            .collect();
+        assert_eq!(
+            canvas.color(&Paint::Gradient(Arc::new(gradient))),
+            nsh_core::Color(0x00ff00ff)
+        );
+        canvas.args = vec![Some(AnimationValue::Number(7.0))];
+        assert_eq!(canvas.number(Num::Slot(0)), 7.0);
+        assert_eq!(canvas.number(Num::Slot(3)), 0.0);
+    }
+
+    #[test]
+    fn segments_are_clipped_to_the_dot_grid() {
+        let (from, to) =
+            clip_segment([-10.0, 5.0], [30.0, 5.0], [-1.0, -1.0], [20.0, 10.0]).unwrap();
+        assert_eq!([from[0], to[0]], [-1.0, 20.0]);
+        assert!(clip_segment([-10.0, 50.0], [30.0, 50.0], [-1.0, -1.0], [20.0, 10.0]).is_none());
+    }
+}

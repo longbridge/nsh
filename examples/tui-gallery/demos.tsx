@@ -1,5 +1,5 @@
 import { Canvas, type CanvasRenderingContext2D, cleanup, computed, signal, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { Dialog, Input } from "nsh/base";
 import { Button, colors, Field, Rule, Section, VerticalRule } from "./ui";
 
 /** A level drawn as a line, `━━━━────`: filled in its tone, the rest faint. */
@@ -404,25 +404,21 @@ export function Controls() {
           <Button label="Open a dialog" onPress={() => dialog.set(true)} />
         </View>
       </Section>
-      <If when={dialog()}>
-        <View
-          onPress={() => dialog.set(false)}
-          style={{ position: "absolute", top: -16, left: -8, right: -8, bottom: -16, alignItems: "center", justifyContent: "center" }}
-        >
-          {/* The one fill of the app: the dialog has to hide the rows under it. */}
-          <View
-            onPress={() => {}}
-            style={{ width: 400, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.page, paddingHorizontal: 15, paddingVertical: 15 }}
-          >
-            <Text style={{ fontWeight: "700", color: colors.text }}>Delete 3 files?</Text>
-            <Text style={{ color: colors.muted }}>The box is drawn with line characters over the page; click outside it to cancel.</Text>
-            <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <Button label="Cancel" onPress={() => dialog.set(false)} />
-              <Button label="Delete" tone={colors.down} onPress={() => dialog.set(false)} />
-            </View>
-          </View>
+      <Dialog
+        open={dialog()}
+        animation="none"
+        onOpenChange={(open) => dialog.set(open)}
+        backdropStyle={{}}
+        // The one fill of the app: the dialog has to hide the rows under it.
+        style={{ margin: "auto", width: 400, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.page, paddingHorizontal: 15, paddingVertical: 15 }}
+      >
+        <Text style={{ fontWeight: "700", color: colors.text }}>Delete 3 files?</Text>
+        <Text style={{ color: colors.muted }}>The box is drawn with line characters over the page; Esc or a click outside it cancels.</Text>
+        <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <Button label="Cancel" onPress={() => dialog.set(false)} />
+          <Button label="Delete" tone={colors.down} onPress={() => dialog.set(false)} />
         </View>
-      </If>
+      </Dialog>
     </>
   );
 }

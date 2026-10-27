@@ -5,6 +5,7 @@ mod text_input;
 
 mod app;
 
+mod canvas;
 mod focus_navigation;
 mod keyboard;
 mod modal_focus;

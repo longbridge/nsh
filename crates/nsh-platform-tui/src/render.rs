@@ -250,6 +250,9 @@ impl Painter<'_> {
                 );
                 field.draw(config, content, visible, self.buffer, opacity);
             }
+            if let Some(canvas) = &view.canvas {
+                crate::canvas::draw(canvas, self.buffer, bounds, visible, self.cells, opacity);
+            }
             if let Some(component) = &mut view.component {
                 component.render(visible, self.buffer);
             } else if !matches!(
@@ -257,6 +260,7 @@ impl Painter<'_> {
                 ViewKind::View
                     | ViewKind::Text
                     | ViewKind::Input
+                    | ViewKind::Canvas
                     | ViewKind::Scroll
                     | ViewKind::Stack
                     | ViewKind::Screen

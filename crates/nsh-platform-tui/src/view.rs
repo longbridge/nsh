@@ -20,6 +20,7 @@ pub(crate) struct NshView {
     pub(crate) field: Option<Box<crate::text_input::Field>>,
     pub(crate) text: Option<(TextLayout, Bounds<Points>)>,
     pub(crate) scroll: Option<Box<nsh_core::scroll::ScrollState>>,
+    pub(crate) canvas: Option<Box<crate::canvas::CanvasView>>,
     pub(crate) component: Option<Box<dyn NativeComponent>>,
     pub(crate) component_name: Option<String>,
 }
@@ -44,6 +45,7 @@ impl NshView {
             field: (kind == ViewKind::Input).then(Default::default),
             text: None,
             scroll: (kind == ViewKind::Scroll).then(Default::default),
+            canvas: None,
             component: None,
             component_name: None,
         }
