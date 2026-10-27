@@ -3352,6 +3352,204 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
     assert!(after.iter().any(|b| shows(b, "Price 21-75")));
 }
 
+const BASE_SELECT: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Select } from "nsh/base";
+
+const items = [
+  { value: "apple", title: "Apple" },
+  { value: "rice", title: "Rice", group: "Grains" },
+  { value: "kale", title: "Kale", disabled: true },
+];
+
+function App() {
+  const value = signal<string | null>(null);
+  const changes = signal<string[]>([]);
+  return (
+    <View>
+      <Select
+        items={items}
+        value={value()}
+        onChange={(next) => {
+          changes.set([...changes(), next]);
+          value.set(next);
+        }}
+        accessibilityLabel="Controlled"
+        trigger={<View><Text>Pick</Text></View>}
+        renderItem={(item) => <Text>{`${item.title}${item.selected ? " chosen" : ""}!`}</Text>}
+        renderGroup={(group) => <Text>{`[${group.title}]`}</Text>}
+      />
+      <Select
+        items={items}
+        defaultValue="rice"
+        accessibilityLabel="Own"
+        trigger={<View><Text>Own</Text></View>}
+      />
+      <Text>{`Changes: ${changes().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Select` through its JS face: `value={null}` is nothing
+/// chosen (the app's), a left-out `value` the select's own from
+/// `defaultValue`; the items' objects, the app's `renderItem` and
+/// `renderGroup`, and `onChange` with the chosen value.
+#[test]
+fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
+    use nsh_core::{AccessibilityRole, ViewProps};
+    let (engine, rx) = start(BASE_SELECT);
+    let props = |batches: &[MountBatch], label: &str, role: AccessibilityRole| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == role
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some((*id, (**props).clone()))
+                }
+                _ => None,
+            })
+    };
+    let chosen = |p: &ViewProps| {
+        p.accessibility
+            .value
+            .as_ref()
+            .and_then(|v| v.text.as_deref().map(str::to_owned))
+    };
+    let (mut own, mut controlled) = (false, false);
+    let first = until(&rx, |b| {
+        let b = std::slice::from_ref(b);
+        own |= props(b, "Own", AccessibilityRole::Combobox).is_some();
+        controlled |= props(b, "Controlled", AccessibilityRole::Combobox).is_some();
+        own && controlled
+    });
+    assert!(first.iter().any(|b| shows(b, "Changes: ")));
+    let first = &first[..];
+    let (controlled, trigger) = props(first, "Controlled", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(chosen(&trigger), None, "null: nothing chosen");
+    assert_eq!(trigger.accessibility.state.expanded, Some(false));
+    let (_, own) = props(first, "Own", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(
+        chosen(&own).as_deref(),
+        Some("Rice"),
+        "its own, from defaultValue"
+    );
+
+    // The list, its rows drawn by the app.
+    engine
+        .control()
+        .dispatch_event(controlled, EventKind::Press, EventPayload::None);
+    let opened = until(&rx, |b| shows(b, "Apple!"));
+    assert!(opened.iter().any(|b| shows(b, "[Grains]")));
+    let (apple, _) = props(&opened, "Apple", AccessibilityRole::Option).expect("an option");
+    let (_, kale) = props(&opened, "Kale", AccessibilityRole::Option).expect("an option");
+    assert!(kale.accessibility.state.disabled);
+
+    // A choice: `onChange` with its value; the app's value follows.
+    engine
+        .control()
+        .dispatch_event(apple, EventKind::Press, EventPayload::None);
+    let chose = until(&rx, |b| {
+        props(
+            std::slice::from_ref(b),
+            "Controlled",
+            AccessibilityRole::Combobox,
+        )
+        .is_some_and(|(_, p)| chosen(&p).as_deref() == Some("Apple"))
+    });
+    assert!(chose.iter().any(|b| shows(b, "Changes: apple")));
+    let (_, trigger) = props(&chose, "Controlled", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(chosen(&trigger).as_deref(), Some("Apple"));
+}
+
+const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
+import { Select } from "nsh/base";
+
+const items = [
+  { value: "apple", title: "Apple" },
+  { value: "rice", title: "Rice" },
+];
+
+mount(() => (
+  <View style={{ paddingTop: 100, paddingLeft: 40 }}>
+    <Select
+      items={items}
+      defaultOpen
+      accessibilityLabel="Food"
+      trigger={
+        <View testID="trigger" style={{ width: 120, height: 30 }}>
+          <Text>Pick</Text>
+        </View>
+      }
+    />
+  </View>
+));
+"##;
+
+/// On a desktop, a TSX `Select`'s trigger is the app's element: the
+/// combobox, and what the popup is placed against and as wide as (not the
+/// slot's view, which the column stretches); open at first (`defaultOpen`),
+/// the popup shows its rows once the trigger is laid out.
+#[test]
+fn a_base_select_on_a_desktop_places_its_popup_at_the_apps_trigger() {
+    use nsh_core::AccessibilityRole;
+    let (_engine, rx) = start_in(
+        BASE_SELECT_DESKTOP,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            idiom: nsh_engine::Idiom::Desktop,
+            ..Environment::default()
+        },
+    );
+    let mut all = until(&rx, |b| shows(b, "Apple"));
+    all.extend(until(&rx, |_| false));
+    let trigger = test_view(&all, "trigger");
+    let role_of = |id: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::ViewProps { id: v, props } if *v == id => Some(props.accessibility.role),
+                _ => None,
+            })
+            .next_back()
+    };
+    assert_eq!(role_of(trigger), Some(AccessibilityRole::Combobox));
+    let list = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props }
+                if props.accessibility.role == AccessibilityRole::Listbox =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the list");
+    let popup = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::Insert { parent, child, .. } if *child == list => Some(*parent),
+            _ => None,
+        })
+        .expect("the popup");
+    let frame = frame_of(&all, popup).expect("placed");
+    // Below the trigger (120 × 30 at 40, 100), at its start, as wide.
+    assert_eq!(
+        frame_of(&all, trigger).map(|f| f.size.width),
+        Some(px(120.0))
+    );
+    assert_eq!(frame.origin.x, px(40.0), "{frame:?}");
+    assert_eq!(frame.origin.y, px(130.0), "{frame:?}");
+    assert_eq!(frame.size.width, px(120.0), "{frame:?}");
+}
+
 const BASE_NUMBER_INPUT: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { NumberInput } from "nsh/base";
 
@@ -5149,6 +5347,236 @@ fn base_plot_pie_radii_move_with_the_update_motion() {
     let switched = all.iter().position(|b| shows(b, "pie")).unwrap();
     let edges = inner_edges(&all[switched..]);
     assert!(edges.iter().all(|e| e.1.is_some()), "{edges:?}");
+}
+
+const BASE_PLOT_ARC_CORNERS: &str = r##"import { mount, Text, View } from "nsh";
+import { Arc, Plot } from "nsh/base/plot";
+
+function App() {
+  return (
+    <View>
+      <Plot testID="plot" data={[{ v: 1 }]} y="v" style={{ width: 100, height: 100 }}>
+        <Arc endAngle={Math.PI / 2} innerRadius={30} outerRadius={50} cornerRadius={20} />
+        <Arc endAngle={0.2} innerRadius={30} outerRadius={50} cornerRadius={10} />
+        <Arc innerRadius={30} outerRadius={50} cornerRadius={10} />
+      </Plot>
+      <Text>ready</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `cornerRadius` (d3's `arc.cornerRadius`): an arc's corners are circles
+/// touching its edges and the rim or the hole, at most half the ring's
+/// thickness (round caps: the corners at the rim and at the hole are one
+/// circle) and, on a short arc, only as large as its angle leaves room
+/// for, the two corners meeting on its middle. A whole ring has none.
+#[test]
+fn base_plot_arc_corners_are_rounded_and_clamped() {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let (_engine, rx) = start(BASE_PLOT_ARC_CORNERS);
+    let mut all = until(&rx, |b| shows(b, "ready"));
+    all.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&all);
+    let arcs: Vec<Vec<DrawnArc>> = drawings.iter().map(|(_, d)| drawn_arcs(&d.ops)).collect();
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let at = |arc: &DrawnArc, x: f32, y: f32| near(arc.0.0, x) && near(arc.0.1, y);
+    // The quarter from 12 o'clock: corners of 10 (half of 50 - 30, not
+    // 20), their centers on the ring's middle, 40 out.
+    let quarter = arcs
+        .iter()
+        .find(|a| a.len() == 6 && a[1].1 == Some(50.0) && !near(a[1].2.0, a[1].2.1))
+        .unwrap_or_else(|| panic!("a rounded quarter: {arcs:?}"));
+    let a = (10.0f32 / 40.0).asin();
+    assert!(
+        at(&quarter[0], 50.0 + 40.0 * a.sin(), 50.0 - 40.0 * a.cos()),
+        "{quarter:?}"
+    );
+    assert_eq!(quarter[0].1, Some(10.0));
+    assert!(near(quarter[0].2.0, -PI) && near(quarter[0].2.1, -FRAC_PI_2 + a));
+    // The rim between the corners, then the hole's edge back.
+    assert!(near(quarter[1].2.0, a - FRAC_PI_2) && near(quarter[1].2.1, -a));
+    assert_eq!((quarter[4].1, quarter[4].3), (Some(30.0), true));
+    assert!(near(quarter[4].2.0, -a) && near(quarter[4].2.1, a - FRAC_PI_2));
+    // Round caps: the corners at the rim and at the hole are one circle.
+    assert!(at(&quarter[3], quarter[2].0.0, quarter[2].0.1));
+    assert!(at(&quarter[5], quarter[0].0.0, quarter[0].0.1));
+    // A short arc (0.2): the corners only as large as its angle leaves
+    // room for, meeting on its middle, the rim between them none.
+    let half = 0.1f32.sin();
+    let short = arcs
+        .iter()
+        .find(|a| a.len() == 6 && a[1].1 == Some(50.0) && near(a[1].2.0, a[1].2.1))
+        .unwrap_or_else(|| panic!("a short rounded arc: {arcs:?}"));
+    assert!(
+        near(short[0].1.unwrap(), 50.0 * half / (1.0 + half)),
+        "{short:?}"
+    );
+    assert!(
+        near(short[3].1.unwrap(), 30.0 * half / (1.0 - half)),
+        "{short:?}"
+    );
+    // The whole ring: no corners, its two edges only.
+    assert!(
+        arcs.iter().any(|a| a.len() == 2 && a[0].1 == Some(50.0)),
+        "{arcs:?}"
+    );
+}
+
+const BASE_PLOT_ARC_TWEEN: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Arc, Pie, Plot } from "nsh/base/plot";
+
+function App() {
+  const late = signal(false);
+  setTimeout(() => late.set(true), 50);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={late() ? [{ v: 1 }, { v: 1 }] : [{ v: 1 }, { v: 3 }]}
+        y="v"
+        motion={{ update: { duration: 250 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <Arc endAngle={late() ? Math.PI : Math.PI / 2} innerRadius={30} outerRadius={50} cornerRadius={10} />
+        <Pie innerRadius={10} outerRadius={20} />
+      </Plot>
+      <Text>{late() ? "late" : "early"}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The end of the rim (the first arc of its radius `rim`) of each plot
+/// drawing that has one: a constant, or the slot the animator moves.
+fn rim_ends(batches: &[MountBatch], rim: f32) -> Vec<(u32, nsh_core::canvas::Num)> {
+    use nsh_core::canvas::{CanvasOp, Num, PathOp};
+    plot_drawings(batches)
+        .iter()
+        .filter_map(|(id, d)| {
+            d.ops.iter().find_map(|op| match op {
+                CanvasOp::Path(PathOp::Arc {
+                    x: Num::Const(50.0),
+                    radius: Num::Const(r),
+                    end,
+                    ..
+                }) if *r == rim => Some((*id, *end)),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// The value of slot `slot` of view `view`'s drawing at each of `times`
+/// (seconds; the animations start at the first), with every animation of
+/// `all`.
+fn slot_at(all: &[MountBatch], view: u32, slot: u16, times: &[f64]) -> Vec<f32> {
+    use nsh_core::animation::{AnimationValue, Animator};
+    let mut animator = Animator::default();
+    for item in all.iter().flat_map(|b| b.items.iter()) {
+        animator.apply(item);
+    }
+    times
+        .iter()
+        .map(|&t| {
+            animator.tick(t);
+            let mut out = f32::NAN;
+            animator.write(
+                |id| (id == view).then_some(id),
+                |_, _, args| {
+                    if let Some((_, AnimationValue::Number(n))) = args.iter().find(|a| a.0 == slot)
+                    {
+                        out = *n;
+                    }
+                },
+            );
+            out
+        })
+        .collect()
+}
+
+/// An arc's and a pie's angles changing (`motion.update`, d3's
+/// `arcTween`): the angles move, not the outline, from the old ones to the
+/// new over the update's timing, the arc's round corners with them; a
+/// pie's slices move to their new shares. With reduced motion the new
+/// angles show at once.
+#[test]
+fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
+    use std::f32::consts::FRAC_PI_2;
+
+    use nsh_core::{
+        animation::{AnimationOp, Driver},
+        canvas::Num,
+    };
+    let updates = |b: &MountBatch| {
+        b.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Animation(AnimationOp::Start {
+                    driver: Driver::Timing { duration_ms, .. },
+                    ..
+                }) if *duration_ms == 250.0
+            )
+        })
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    // The rounded arc's rim ends `a` before its end: from a quarter to a
+    // half from 12 o'clock (0 and `PI / 2` on the canvas, less `a`).
+    let a = (10.0f32 / 40.0).asin();
+
+    let (_engine, rx) = start(BASE_PLOT_ARC_TWEEN);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(all.iter().any(updates), "the angles move over the update");
+    let switched = all.iter().position(|b| shows(b, "late")).unwrap();
+    let arc = rim_ends(&all[switched..], 40.0 + 10.0);
+    let [(arc, Num::Slot(end))] = arc[..] else {
+        panic!("the arc's rim, its end animated: {arc:?}")
+    };
+    let ends = slot_at(&all, arc, end, &[1.0, 1.125, 1.3]);
+    assert!(near(ends[0], -a), "{ends:?}");
+    assert!(
+        ends[1] > -a + 0.1 && ends[1] < FRAC_PI_2 - a - 0.1,
+        "{ends:?}"
+    );
+    assert!(near(ends[2], FRAC_PI_2 - a), "{ends:?}");
+    // The pie's first slice: from a quarter (its rim ending at 3 o'clock,
+    // the canvas's 0) to a half (6 o'clock).
+    let slices = rim_ends(&all[switched..], 20.0);
+    let (first, Num::Slot(end)) = slices[0] else {
+        panic!("the first slice's rim, its end animated: {slices:?}")
+    };
+    let ends = slot_at(&all, first, end, &[1.0, 1.3]);
+    assert!(near(ends[0], 0.0) && near(ends[1], FRAC_PI_2), "{ends:?}");
+
+    // Reduced motion: the new angles at once.
+    let environment = Environment {
+        reduce_motion: true,
+        ..Environment::default()
+    };
+    let (_engine, rx) = start_in(BASE_PLOT_ARC_TWEEN, environment);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(!all.iter().any(updates));
+    let arc = rim_ends(&all, 50.0);
+    assert!(
+        matches!(arc[..], [(_, Num::Const(end))] if near(end, FRAC_PI_2 - a)),
+        "{arc:?}"
+    );
+    let slices = rim_ends(&all, 20.0);
+    assert!(
+        matches!(slices[0], (_, Num::Const(end)) if near(end, FRAC_PI_2)),
+        "{slices:?}"
+    );
+    // The second slice ends at 12 o'clock again.
+    assert!(
+        matches!(slices[1], (_, Num::Const(end)) if near(end, 3.0 * FRAC_PI_2)),
+        "{slices:?}"
+    );
 }
 
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
