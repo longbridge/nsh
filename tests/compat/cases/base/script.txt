@@ -994,6 +994,70 @@ covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
 
+# base-otp-input
+tap id:case-base-otp-input
+# One field over the cells for the keyboard and screen readers: the
+# number pad, a code's autofill, no caret of its own; the cells (at least
+# 20 high) in their groups (2 around, each cell 2 below the top) make the
+# input 26 high.
+expect Code []
+prop label:Code accessibilityLabel Code
+prop label:Code keyboardType number-pad
+prop label:Code autoComplete one-time-code
+prop label:Code caret false
+frame id:otp 0 20 390 26
+# Its own code, masked (a secure field, bullets in the cells) and
+# disabled.
+expect •
+absent 1
+prop label:Own masked true
+prop label:Own accessibilityState disabled=true
+# Digits only: the field keeps the app's code.
+type label:Code 12a
+expect Code [12]
+prop label:Code value 12
+# The focus: the caret (50 high, 4 below the cell's top) in the cell that
+# takes the next digit, gone while it blinks off.
+event label:Code onFocus
+expect Focused yes
+frame id:otp 0 20 390 60
+wait 600
+frame id:otp 0 20 390 26
+# Up to the length: complete, the last cell `focus:`.
+type label:Code 345
+expect Code [1234]
+expect Done [1234]
+prop label:Code value 1234
+style parent:text:4 backgroundColor #00ff00ff
+# Two groups of two cells: the last cell 2 + 30 + 4 into the second group,
+# which is 10 after the first (2 + 30 + 4 + 30 + 2 wide).
+frame parent:text:4 36 4 30 20
+frame parent:parent:text:4 78 0 68 26
+event label:Code onBlur
+expect Focused no
+nostyle parent:text:4 backgroundColor
+# A code the app sets is shown and in the field.
+tap id:clear
+expect Code []
+absent 4
+covers [nsh/base] OtpInput
+covers [props] OtpInput.length
+covers [props] OtpInput.value
+covers [props] OtpInput.defaultValue
+covers [props] OtpInput.masked
+covers [props] disabled
+covers [props] OtpInput.groups
+covers [props] accessibilityLabel
+covers [props] OtpInput.cellClass
+covers [props] OtpInput.cellStyle
+covers [props] OtpInput.groupClass
+covers [props] OtpInput.groupStyle
+covers [props] OtpInput.caretClass
+covers [props] OtpInput.caretStyle
+covers [events] OtpInput.onChange
+covers [events] OtpInput.onComplete
+covers [events] OtpInput.onFocus
+covers [events] OtpInput.onBlur
 # base-progress
 tap id:case-base-progress
 # The progress bar role, its label, range and value for screen readers;
