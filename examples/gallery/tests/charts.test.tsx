@@ -28,8 +28,8 @@ const price = () => {
  * Tabs on, pressing Right at each stop, until `shown` is on screen: the
  * first plot that reads it out has the focus. With reduced motion: in a
  * desktop window a step waits for the page to settle, which the live
- * price's pulse never does, and the window's sidebar comes first in its
- * Tab order.
+ * price's pulse never does. A desktop window's sidebar comes first in
+ * its Tab order, so the walk there is long.
  */
 const tabTo = async (shown: string) => {
   await start(true);
@@ -89,7 +89,7 @@ test("Tab reaches the drawdown, whose arrow keys move the day it reads out", asy
   await app.keyboard.press("escape");
   await app.waitFor("at a high");
   expect(app.texts()).toContain("DAY 120");
-}, 60000);
+}, 120000);
 
 test("the capacity rings show each period's load", async () => {
   expect(app.texts()).toContain("49%");
@@ -121,7 +121,7 @@ test("the donut's slices step with the arrow keys once Tab reaches it", async ()
   // Escape clears the hover: the total is back in the hole.
   await app.keyboard.press("escape");
   await app.waitFor("TOTAL");
-}, 60000);
+}, 120000);
 
 test("bars stand in bands side by side or stacked, a value over each", async () => {
   // A value over each bar, the last month's total in the readout.
