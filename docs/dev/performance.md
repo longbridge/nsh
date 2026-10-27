@@ -401,12 +401,10 @@ monitor measures the real writer. Apply + draw excludes the monitor's formatting
 
 | Workload (200 × 60 Cells) | Apply + draw median / p95 | Apply / draw / flush means | Bytes / Cells per frame |
 |---|---|---|---|
-| Terminal Long list, 500 rows | Pending main-session release run | Pending | Pending |
-| DataTable, 10,000 × 24 | Pending main-session release run | Pending | Pending |
+| Terminal Long list, 500 rows | 0.538 / 0.623 ms | 0.074 / 0.474 / 0.136 ms | 5,979 B / 958 Cells |
+| DataTable, 10,000 × 24 | 2.035 / 2.404 ms | 0.284 / 1.765 / 0.153 ms | 7,429 B / 1,038 Cells |
 
-No measured release baseline or budget pass is claimed yet.
-The main session must run the command above and replace the pending entries with its machine, revision and
-results, including the phase breakdown if the budget fails. Tickets changing terminal rendering, input or layout
+Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f, 240 frames each: both workloads pass the budget. Tickets changing terminal rendering, input or layout
 bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
 commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.
 
@@ -429,13 +427,12 @@ measuring a disconnected process that should no longer exist.
 
 | Static app, 100 × 24 Cells | Idle CPU, one core | Bytes in 5 s |
 |---|---|---|
-| Monitor hidden | Pending main-session measurement | Pending |
-| `--fps`, after idle update | Pending main-session measurement | Pending |
+| Monitor hidden | 0.003% | 0 |
+| `--fps`, after idle update | 0.003% | 0 |
 
 The reported incident was 10–45% CPU per orphan after a tmux terminal was killed, with SIGTERM unable to end it.
 Source inspection found crossterm's default Unix read loop retrying EOF/EIO without returning to the host's
 shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and makes input/output cancellable.
 The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
-The release idle CPU benchmark remains unrun. Record its output, machine and revision in this table after the
-main session runs it. Repeat the same command
+Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f. Repeat the same command
 before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
