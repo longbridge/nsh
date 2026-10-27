@@ -201,10 +201,11 @@ fn is_number(ty: &Type) -> bool {
     )
 }
 
-/// Whether `ty` is a style (`nsh_core::element::Style`), whose setter takes the
-/// typed styles' closure.
+/// Whether `ty` is a style (`nsh_core::element::Style`, or `TextPartStyle`
+/// for a part that shows text), whose setter takes the typed styles'
+/// closure.
 fn is_style(ty: &Type) -> bool {
-    matches!(last_segment(ty), Some((id, None)) if id == "Style")
+    matches!(last_segment(ty), Some((id, None)) if id == "Style" || id == "TextPartStyle")
 }
 
 /// `PressDown` -> `press_down`, `HTMLView` -> `html_view`.
@@ -1919,13 +1920,9 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
         };
         from_js.push(quote! {
             #ident: {
-                let v = value.field(#js)?;
-                let v = v.get();
-                if v.kind() != #ui::JsKind::Undefined && (#is_option || !v.is_nullish()) {
-                    <#ty as #ui::JsValue>::from_js(v)
-                        .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #js, e)))?
-                } else {
-                    #missing
+                match #ui::__private::object_field::<#ty>(value, #js, #is_option)? {
+                    ::core::option::Option::Some(value) => value,
+                    ::core::option::Option::None => { #missing }
                 }
             }
         });

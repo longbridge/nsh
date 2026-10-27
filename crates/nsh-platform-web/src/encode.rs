@@ -1040,12 +1040,25 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 let _ = write!(out.s, "[{},{},", run.x, run.y);
                 push_str(&mut out.s, &run.text);
-                let _ = write!(out.s, ",{},{},", run.style, run.start);
-                match run.link {
-                    Some(link) => {
-                        let _ = write!(out.s, "{link}");
+                let _ = write!(out.s, ",{},", run.style);
+                match run.start {
+                    Some(start) => {
+                        let _ = write!(out.s, "{start}");
                     }
                     None => out.s.push_str("null"),
+                }
+                // Its characters in links: `[from, to, link]`.
+                if run.links.is_empty() {
+                    out.s.push_str(",null");
+                } else {
+                    out.s.push_str(",[");
+                    for (j, (from, to, link)) in run.links.iter().enumerate() {
+                        if j > 0 {
+                            out.s.push(',');
+                        }
+                        let _ = write!(out.s, "[{from},{to},{link}]");
+                    }
+                    out.s.push(']');
                 }
                 if !run.after.is_empty() {
                     out.s.push(',');

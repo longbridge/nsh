@@ -3,8 +3,11 @@
 // selection, a plan picker of radios with a disabled plan, tabs that switch
 // a section, collapsible sections whose content is kept while collapsed,
 // progress bars of a transfer the app drives and of one of unknown size,
-// sliders of a level and of a price range.
-// Every row is the control, its label included. Also the
+// sliders of a level and of a price range, number inputs of seats and a
+// price.
+// Every row is the control, its label included; on a desktop the plans
+// and the tabs are one stop of Tab each, moved through with the arrow
+// keys. Also the
 // gallery's own `Toggle` (a `Switch`) and `Segmented` (`Tabs`).
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
@@ -157,6 +160,33 @@ test("a slider reports the value the app owns, a range's thumbs never cross, and
   expect(app.texts()).toContain("100%");
 });
 
+test("a number input steps with the keys, holds a typed number to its range, and a locked one takes neither", async () => {
+  expect(app.count("role:spinbutton")).toBe(2);
+  await app.type("label:Seats", "");
+  await app.keyboard.press("up");
+  await app.waitFor("Seats: 3");
+  // Typed past the maximum: reported as typed, then held to it when the
+  // field is left for the price's (a phone's Tab moves nothing).
+  await app.type("label:Seats", "0");
+  await app.waitFor("Seats: 30");
+  await app.type("label:Price", "");
+  await app.waitFor("Seats: 8");
+  // A page down is ten steps, stopped at the minimum.
+  await app.type("label:Seats", "");
+  await app.keyboard.press("pagedown");
+  await app.waitFor("Seats: 1");
+  await app.type("label:Price", "");
+  await app.keyboard.press("down");
+  await app.waitFor("Price: 24");
+  // Locked: the seats' field takes nothing.
+  await app.press("Lock seats");
+  await app.waitFor("Seats: locked");
+  expect(app.enabled("label:Seats")).toBe(false);
+  await app.press("Unlock seats");
+  await app.waitFor("Seats: unlocked");
+  expect(app.enabled("label:Seats")).toBe(true);
+});
+
 test("the gallery's segmented control is a tab list", async () => {
   await app.back();
   await app.press("role:button[System]");
@@ -177,4 +207,56 @@ test("the gallery's toggle is a switch", async () => {
   await app.waitFor("overflow: visible");
   await app.press("label:Clip");
   await app.waitFor("overflow: hidden");
+});
+
+test("the keyboard moves through the plans and the tabs, each one stop of Tab", async () => {
+  // A desktop: Tab stops at the views that take presses. A manual clock:
+  // the gallery's live demos never settle, and in a real window each key
+  // would wait for them.
+  const desk = await open("../App.tsx", { platform: "macos", clock: {} });
+  await desk.press("role:button[Controls]");
+  await desk.waitFor("Select all");
+  // Tab from stop to stop until the plans, entered at the checked one
+  // (Plus): Down there checks the plan after it.
+  let tabs = 0;
+  while (!desk.shows("Plan: Team")) {
+    expect(++tabs).toBeLessThan(40);
+    await desk.keyboard.press("tab");
+    await desk.keyboard.press("down");
+    await desk.wait(50);
+  }
+  // Enterprise is disabled: Down goes around to Free, Up back to Team.
+  await desk.keyboard.press("down");
+  await desk.waitFor("Plan: Free");
+  await desk.keyboard.press("up");
+  await desk.waitFor("Plan: Team");
+  await desk.keyboard.press("right");
+  await desk.waitFor("Plan: Free");
+  await desk.keyboard.press("left");
+  await desk.waitFor("Plan: Team");
+  // One Tab leaves the group: Return presses the button after it.
+  await desk.keyboard.press("tab");
+  await desk.keyboard.press("enter");
+  await desk.waitFor("Continue: Team, $12 / mo");
+  // On to the tabs, entered at the selected one (Overview): the arrows
+  // select as they move.
+  tabs = 0;
+  while (!desk.shows("Tab: Activity")) {
+    expect(++tabs).toBeLessThan(10);
+    await desk.keyboard.press("tab");
+    await desk.keyboard.press("right");
+    await desk.wait(50);
+  }
+  expect(desk.texts()).toContain("Deployed to production");
+  // Billing is disabled: End stops at Members, Right goes around.
+  await desk.keyboard.press("end");
+  await desk.waitFor("Tab: Members");
+  await desk.waitFor("Grace Hopper");
+  await desk.keyboard.press("right");
+  await desk.waitFor("Tab: Overview");
+  expect(desk.texts()).toContain("Visitors");
+  await desk.keyboard.press("left");
+  await desk.waitFor("Tab: Members");
+  await desk.keyboard.press("home");
+  await desk.waitFor("Tab: Overview");
 });

@@ -9,6 +9,7 @@ mod build;
 mod cdp;
 mod check;
 mod dev;
+mod dev_port;
 mod entry;
 mod init;
 mod logger;
@@ -208,7 +209,7 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
         /// Minify and strip debug info.
@@ -244,7 +245,7 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
         /// Minify and strip debug info.
@@ -443,6 +444,10 @@ struct PackageArgs {
     /// Keystore password (also `NSH_KEYSTORE_PASSWORD`).
     #[arg(long, env = "NSH_KEYSTORE_PASSWORD", hide_env_values = true)]
     keystore_password: Option<String>,
+    /// Android ABIs of the APK, repeated or separated by commas (default:
+    /// arm64-v8a and armeabi-v7a; with --run also the device's).
+    #[arg(long, value_delimiter = ',', value_parser = crate::android::ABIS)]
+    abi: Vec<String>,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
     /// machine at the address it prints).
@@ -522,6 +527,12 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         // keeps TypeScript tests (a `tsconfig.json` for them).
         types &= check::has_typescript(entry);
     }
+    // Own the port across builds and restarts, until every host and forwarding
+    // rule from this command has been cleaned up.
+    let _port = match &command {
+        Command::Run { port, .. } | Command::Dev { port, .. } => dev_port::Session::acquire(*port)?,
+        _ => None,
+    };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
     // tested, run and packaged.
     let rust_command = matches!(
@@ -577,6 +588,9 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     }
     let mut restarted = false;
     loop {
+        if ui::stop_requested() {
+            return Ok(());
+        }
         match app.describe() {
             Ok(sets) => set_app_sets(sets),
             // Its build failed and waited for the next change already.
@@ -691,6 +705,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 keystore,
                 key_alias,
                 keystore_password,
+                abi,
                 run,
             } = *args;
             let mut config = package::read_config(&entry)?;
@@ -713,6 +728,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                         keystore_password.as_deref().unwrap_or_default(),
                     )
                 }),
+                abis: &abi,
                 run,
             })
         }

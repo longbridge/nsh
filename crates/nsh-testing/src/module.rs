@@ -1579,10 +1579,10 @@ impl App {
     }
 
     /// Moves the mouse over the middle of what `selector` names: the views
-    /// under it hear `onHoverIn` (and the ones it left `onHoverOut`), take
-    /// their `hover:` styles and hear `onHoverMove`. Desktops and the web
-    /// (at any width: a browser has a mouse) only: an iOS or Android phone
-    /// has none.
+    /// under it hear `onMouseEnter` (and the ones it left `onMouseLeave`),
+    /// take their `hover:` styles and hear `onMouseMove`, with no button
+    /// down. Desktops and the web (at any width: a browser has a mouse)
+    /// only: an iOS or Android phone has none.
     pub async fn hover(this: Instance<Self>, selector: String) -> Result<(), String> {
         step(&this, move |app| app.hover(&selector)).await
     }

@@ -64,7 +64,6 @@ pub use crate::element::{
     FontAsset,
     FontWeight,
     GestureEvent,
-    HoverEvent,
     Hsla,
     // The network.
     HttpRequest,
@@ -108,6 +107,8 @@ pub use crate::element::{
     MotionChannel,
     MotionPreset,
     MotionSpec,
+    MouseButton,
+    MouseEvent,
     NativeEvent,
     NativeView,
     NoEvent,

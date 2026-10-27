@@ -15,8 +15,11 @@
 // instance of its own), `assetBase` (where `asset:/<path>` is served) or
 // `assets` (a map from `<path>` to its URL, as `nsh package --target web`
 // writes it), `readAsset(uri)` (the bytes of an asset the engine needs at
-// once, a font: a `Uint8Array` or null), `chunks` / `chunkBase` (see
-// `run`), `prepareChunk(id)` (a promise for what chunk `id` needs once it
+// once, a font: a `Uint8Array` or null), `data` (the URLs of the files the
+// runtime fetches when it first needs them, by name, as `nsh package
+// --target web` writes them: `{ syntaxes: "nsh-syntaxes.<digest>.bin" }`;
+// by default `nsh-<name>.bin` next to this file), `chunks` / `chunkBase`
+// (see `run`), `prepareChunk(id)` (a promise for what chunk `id` needs once it
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
 // `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `overlay` (false: no error box),
@@ -39,8 +42,10 @@ const PRESSED = 1;
 const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
-const HOVER_EVENTS = ["onHoverIn", "onHoverOut", "onHoverMove"];
-/** The keys whose press or release is reported as a hover move. */
+const MOUSE_EVENTS = ["onMouseEnter", "onMouseLeave", "onMouseMove"];
+/** The DOM's `buttons` bits, in the order a held button is named by. */
+const MOUSE_BUTTONS = [[1, "left"], [2, "right"], [4, "middle"], [8, "back"], [16, "forward"]];
+/** The keys whose press or release is reported as a mouse move. */
 const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 // What lays out a field's text, copied to the hidden copy that finds its
 // caret (`caretBounds`).
@@ -419,6 +424,46 @@ function swapClass(el, slot, name) {
   el[slot] = name;
 }
 
+/** Fills a run with `text`, the characters of links (`parts`: `[from, to,
+ * link]`, UTF-16) in spans inside it that name their link (`links`):
+ * inline, they keep the run's shaping and bidi order. */
+function fillRun(run, text, parts, links) {
+  if (!parts) {
+    run.textContent = text;
+    return;
+  }
+  let at = 0;
+  for (const [from, to, link] of parts) {
+    if (from > at) run.append(text.slice(at, from));
+    const span = document.createElement("span");
+    span.textContent = text.slice(from, to);
+    span._link = links[link];
+    run.append(span);
+    at = to;
+  }
+  if (at < text.length) run.append(text.slice(at));
+}
+
+/** The text node and offset of character `offset` of a run. */
+function runPoint(run, offset) {
+  const walker = document.createTreeWalker(run, NodeFilter.SHOW_TEXT);
+  let node = null;
+  for (let next = walker.nextNode(); next; next = walker.nextNode()) {
+    node = next;
+    if (offset <= node.length) return [node, offset];
+    offset -= node.length;
+  }
+  return node ? [node, node.length] : [run, 0];
+}
+
+/** The offset in a run of a boundary (`container`, `offset`) inside it. */
+function runOffset(run, container, offset) {
+  const range = document.createRange();
+  range.setStart(run, 0);
+  range.setEnd(container, offset);
+  return range.toString().length;
+}
+
 let players = 0;
 
 /** How many players imported each wasm-bindgen glue, by URL. */
@@ -747,6 +792,7 @@ class Player {
         websocket_buffered: (id) => this.websockets.get(id)?.bufferedAmount ?? 0,
         websocket_cancel: (id) => this.websocketCancel(id),
         load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
+        load_data: (p, l) => this.loadData(this.str(p, l)),
         // The app's storage (`nsh/storage`): the entries of `localStorage`
         // under the app's prefix. 1 when done, 0 when the browser refused
         // (the error handed over with `nsh_storage_reply`).
@@ -804,9 +850,14 @@ class Player {
         throw new Error(`nsh.wasm called ${name}.${field}, which the web runtime does not provide`);
       };
     }
+    if (WebAssembly.Module.imports(module).some(entry => entry.module === "nsh_browser")) {
+      const { createBrowserHost } = await import("./browser/runtime.js");
+      this.browserHost = createBrowserHost(this);
+      imports.nsh_browser = this.browserHost.imports;
+    }
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
-    this.wasm = instance.exports;
+    this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
@@ -910,14 +961,13 @@ class Player {
         const el = this.views.get(query.id);
         if (!el?.isConnected) return null;
         for (const run of el.querySelectorAll(":scope > .nsh-run")) {
-          const node = run.firstChild;
-          if (!node || run._start == null) continue;
+          if (run._start == null) continue;
           const from = Math.max(query.start - run._start, 0);
-          const to = Math.min(query.end - run._start, node.length);
+          const to = Math.min(query.end - run._start, run.textContent.length);
           if (from >= to) continue;
           const range = document.createRange();
-          range.setStart(node, from);
-          range.setEnd(node, to);
+          range.setStart(...runPoint(run, from));
+          range.setEnd(...runPoint(run, to));
           const r = range.getBoundingClientRect();
           return [r.left, r.top, r.width, r.height];
         }
@@ -1082,6 +1132,12 @@ class Player {
     });
   }
 
+  /** Runs a trusted standalone app with the browser ES module loader. */
+  runModule(entry, options) {
+    if (!this.browserHost) throw new Error("this runtime has no browser JavaScript host");
+    return this.browserHost.run(entry, options);
+  }
+
   /**
    * Runs the Rust app the module was built for (an app's runtime with
    * `nsh.json` `"root"`): its root component, with no bundle and no JS of
@@ -1119,7 +1175,7 @@ class Player {
   }
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
-  begin(width, start) {
+  begin(width, start, deferEvents = false) {
     this.idiom = this.options.idiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
@@ -1138,6 +1194,11 @@ class Player {
     } finally {
       this.starting = false;
     }
+    if (!deferEvents) this.startedApp();
+  }
+
+  /** Delivers queued host events after the app installs its listeners. */
+  startedApp() {
     this.started = true;
     const events = this.hostEvents;
     this.hostEvents = [];
@@ -1165,6 +1226,26 @@ class Player {
     // A chunk of an app that was replaced meanwhile is dropped.
     if (app !== this.app) return;
     this.call((w) => this.withStrings([id, code], (ip, il, cp, cl) => w.nsh_chunk(ip, il, cp, cl, ok)));
+  }
+
+  /**
+   * Fetches the runtime's data `name` (`nsh-<name>.bin`, or the URL
+   * `data[name]` names) and hands it to the engine; a file that is missing
+   * or does not load is handed over as none (the code it would highlight
+   * stays plain).
+   */
+  async loadData(name) {
+    const url = this.options.data?.[name] ?? new URL(`nsh-${name}.bin`, import.meta.url);
+    let bytes = null;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      bytes = new Uint8Array(await response.arrayBuffer());
+    } catch (err) {
+      console.warn("[nsh]", `${err.message ?? err} (${url})`);
+    }
+    const data = bytes ?? new Uint8Array(0);
+    this.call((w) => this.withStrings([name, data], (np, nl, dp, dl) => w.nsh_data(np, nl, dp, dl, bytes ? 1 : 0)));
   }
 
   /**
@@ -1203,6 +1284,9 @@ class Player {
   }
 
   stop() {
+    if (this.stopping) return;
+    this.stopping = true;
+    try {
     // Host events wait for the next app (`begin`).
     this.started = false;
     this.hostEvents ??= [];
@@ -1212,7 +1296,9 @@ class Player {
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.browserHost?.stop();
     this.wasm?.nsh_stop();
+    } finally { this.stopping = false; }
   }
 
   /**
@@ -1722,15 +1808,14 @@ class Player {
     }
     // Nested texts that take presses: `[node, events]`, which runs name.
     const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
-    for (const [x, y, text, style, start, link, after] of runs) {
+    for (const [x, y, text, style, start, parts, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
       span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
-      span.textContent = text;
+      fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
-      if (link != null) span._link = spans[link];
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
@@ -1758,37 +1843,52 @@ class Player {
     this.updateFocusable(el);
     this.updateTouchAction(el);
     if (el._kind === "scroll" && el._events.has("onRefresh")) this.installPull(el);
-    if (!el._hoverEvents && HOVER_EVENTS.some((e) => el._events.has(e))) this.installHover(el);
+    if (!el._mouseEvents && MOUSE_EVENTS.some((e) => el._events.has(e))) this.installMouse(el);
   }
 
   /**
-   * `onHoverIn` / `onHoverOut` / `onHoverMove` of `el`, from the mouse's
-   * pointer events (pointerenter and pointerleave reach the views around
-   * the one under the mouse too, as with `:hover`). Moves with a button
-   * down are not hovers.
+   * `onMouseEnter` / `onMouseLeave` of `el`, from the mouse's pointer
+   * events (pointerenter and pointerleave reach the views around the one
+   * under the mouse too, as with `:hover`), with or without a button down;
+   * leaving, from where the mouse went. Whether the mouse is over `el`
+   * (`_hoverIn`) also decides who hears a modifier key change
+   * (`modifiersChanged`). Moves are `mouseMoved`'s.
    */
-  installHover(el) {
-    el._hoverEvents = true;
+  installMouse(el) {
+    el._mouseEvents = true;
     el.addEventListener("pointerenter", (e) => {
       if (e.pointerType !== "mouse") return;
       el._hoverIn = true;
-      if (el._events.has("onHoverIn")) this.event(el._id, "onHoverIn");
+      if (el._events.has("onMouseEnter")) this.event(el._id, "onMouseEnter", this.mouseEvent(el, e, true));
     });
-    el.addEventListener("pointerleave", () => {
+    el.addEventListener("pointerleave", (e) => {
       if (!el._hoverIn) return;
       el._hoverIn = false;
-      if (el._events.has("onHoverOut")) this.event(el._id, "onHoverOut");
+      if (el._events.has("onMouseLeave")) this.event(el._id, "onMouseLeave", this.mouseEvent(el, e, true));
     });
-    el.addEventListener("pointermove", (e) => {
-      if (e.pointerType !== "mouse" || e.buttons || !el._events.has("onHoverMove")) return;
-      const [pageX, pageY] = this.point(e);
+  }
+
+  /**
+   * The `MouseEvent` payload of `el` for the mouse at `e`'s `clientX` /
+   * `clientY`, with `e`'s modifiers and held button: the position in `el`
+   * with its transforms undone, null when they leave no area, unless
+   * `always`, which takes its box's offset then.
+   */
+  mouseEvent(el, e, always = false) {
+    let position = this.mousePoint(el, e);
+    if (!position) {
+      if (!always) return null;
       const r = el.getBoundingClientRect();
-      this.event(el._id, "onHoverMove", {
-        position: { x: e.clientX - r.left, y: e.clientY - r.top },
-        pagePosition: { x: pageX, y: pageY },
-        modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
-      });
-    });
+      position = [e.clientX - r.left, e.clientY - r.top];
+    }
+    const [pageX, pageY] = this.point(e);
+    const held = MOUSE_BUTTONS.find(([bit]) => e.buttons & bit);
+    return {
+      position: { x: position[0], y: position[1] },
+      pagePosition: { x: pageX, y: pageY },
+      modifiers: { control: !!e.ctrlKey, alt: !!e.altKey, shift: !!e.shiftKey, platform: !!e.metaKey },
+      pressedButton: held ? held[1] : null,
+    };
   }
 
   op_ts([, id, states]) {
@@ -4704,15 +4804,20 @@ class Player {
     return [(d * x - c * y) / det, (a * y - b * x) / det];
   }
 
-  /** Mouse motion follows the hit view, even during pointer capture. */
+  /**
+   * `onMouseMove` of the views under the mouse and the views they are in
+   * (inside out), with or without a button down. Mouse motion follows the
+   * hit view, even during pointer capture. The engine keeps the latest
+   * per view for the frame.
+   */
   mouseMoved(e) {
     if (e.pointerType !== "mouse" || !this.mouseTracked.size) return;
     const target = document.elementFromPoint(e.clientX, e.clientY);
     if (!target || !this.root.contains(target)) return;
     for (const el of this.ancestors(this.viewOf(target))) {
       if (!el._events?.has("onMouseMove")) continue;
-      const point = this.mousePoint(el, e);
-      if (point) this.event(el._id, "onMouseMove", { x: point[0], y: point[1] });
+      const payload = this.mouseEvent(el, e);
+      if (payload) this.event(el._id, "onMouseMove", payload);
     }
   }
 
@@ -4842,24 +4947,21 @@ class Player {
   /**
    * A modifier key went down or up while the mouse rests over the page
    * with no button down: the hovered views that listen hear
-   * `onHoverMove` again where it is, with the modifiers as they are now
+   * `onMouseMove` again where it is, with the modifiers as they are now
    * (an editor underlines a definition while Mod is held), as they would
    * on the next move.
    */
   modifiersChanged(e) {
-    if (!MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons) return;
+    if (!MODIFIER_KEYS.has(e.key) || e.repeat || !this.hover || this.hoverButtons || !this.mouseTracked.size) return;
     const [x, y] = this.hover;
     const target = document.elementFromPoint(x, y);
     if (!target || !this.root.contains(target)) return;
-    const r = this.root.getBoundingClientRect();
+    // The mouse where it rests, with the keys as they are now.
+    const at = { clientX: x, clientY: y, buttons: 0, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey };
     for (const el of this.ancestors(this.viewOf(target))) {
-      if (!el._hoverIn || !el._events?.has("onHoverMove")) continue;
-      const b = el.getBoundingClientRect();
-      this.event(el._id, "onHoverMove", {
-        position: { x: x - b.left, y: y - b.top },
-        pagePosition: { x: x - r.left, y: y - r.top },
-        modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
-      });
+      if (!el._hoverIn || !el._events?.has("onMouseMove")) continue;
+      const payload = this.mouseEvent(el, at);
+      if (payload) this.event(el._id, "onMouseMove", payload);
     }
   }
 
@@ -4957,11 +5059,11 @@ class Player {
     for (const run of this.root.querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
-      const node = run.firstChild;
-      if (!node) continue;
-      const text = node.data;
-      const from = range.startContainer === node ? range.startOffset : 0;
-      const to = range.endContainer === node ? range.endOffset : text.length;
+      // A link's characters are in a span inside the run.
+      const text = run.textContent;
+      if (!text) continue;
+      const from = run.contains(range.startContainer) ? runOffset(run, range.startContainer, range.startOffset) : 0;
+      const to = run.contains(range.endContainer) ? runOffset(run, range.endContainer, range.endOffset) : text.length;
       if (from >= to) continue;
       found = true;
       const area = this.areaOf(run.parentNode);
@@ -5264,6 +5366,9 @@ class Player {
 
   pointerDown(e) {
     this.lastPointer = e.pointerType;
+    // A press without a move still holds a button: a modifier key then
+    // fires no hover move (`modifiersChanged`).
+    if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
     Player.active = this;
     if (e.button > 0) return;
     if (e.pointerType === "mouse" && this.desktopUI && this.grabBar(e)) return;
@@ -5319,7 +5424,7 @@ class Player {
    * link's node, its events, placed as the text (as on the other
    * platforms, a link's press reports positions in its text). */
   linkPress(target, view) {
-    const link = target?.closest?.(".nsh-run")?._link;
+    const link = target?._link;
     if (!link || !PRESS_EVENTS.some((n) => link.events.has(n))) return null;
     return {
       _id: link.node,
@@ -5473,6 +5578,7 @@ class Player {
   }
 
   pointerUp(e, cancelled) {
+    if (e.pointerType === "mouse") this.hoverButtons = e.buttons;
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     if (p.mode === "bar") {

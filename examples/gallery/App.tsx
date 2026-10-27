@@ -46,7 +46,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     demos: [
       { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
       { name: "Shaders", detail: "WGSL shaders on the GPU: noise, gradients, animated uniforms", icon: "spark", screen: lazy(() => import("./demos/Shaders").then((m) => m.Shaders)) },
-      { name: "Charts", detail: "A line and area plot with hover, grid lines and motion, sparklines in a list", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
+      { name: "Charts", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut and bars, built from plot parts", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
       { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
       { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
       { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
@@ -64,7 +64,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
       { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
       { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
-      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars, sliders", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
+      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars, sliders, number inputs", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },

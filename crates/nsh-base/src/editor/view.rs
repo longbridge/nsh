@@ -319,8 +319,8 @@ fn fold_hit(
                 .w(move || Length::from(fold_width()))
                 .h(move || Length::from(lh2()))
                 .cursor_pointer()
-                .on_hover_in(move || pointer.hover.set(Some(row)))
-                .on_hover_out(move || {
+                .on_mouse_enter(move |_: &MouseEvent| pointer.hover.set(Some(row)))
+                .on_mouse_leave(move |_: &MouseEvent| {
                     if pointer.hover.get_untracked() == Some(row) {
                         pointer.hover.set(None);
                     }
@@ -685,8 +685,8 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> 
                 }
             })
         })
-        .on_hover_move(move |e: &HoverEvent| hover.hover_move(e))
-        .on_hover_out(move || hover_end.hover_out())
+        .on_mouse_move(move |e: &MouseEvent| hover.hover_move(e))
+        .on_mouse_leave(move |_: &MouseEvent| hover_end.hover_out())
         // The mouse selects as it drags (a finger scrolls): the rows take
         // its touches, which the scroll views around them keep off.
         .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {

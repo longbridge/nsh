@@ -582,8 +582,8 @@ impl Node {
         }
         // A disabled view still shows its hint, as the desktops' do.
         if self.overlay_watched & overlay::watch::HINT != 0 {
-            events.set(EventKind::HoverIn, true);
-            events.set(EventKind::HoverOut, true);
+            events.set(EventKind::MouseEnter, true);
+            events.set(EventKind::MouseLeave, true);
         }
         events
     }
@@ -1406,6 +1406,62 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The platform's views must get everything again, as new views do, and
+    /// text is measured again: the unit the platform converted the values
+    /// with changed (Android's density). The views stay, scrolled where they
+    /// are.
+    pub fn remount(&mut self) {
+        self.fonts_changed();
+        let keys: Vec<Key> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.created)
+            .map(|(k, _)| k as Key)
+            .collect();
+        for key in keys {
+            let flags = self.mount_state(key);
+            self.mark(key, flags);
+            let node = &mut self.nodes[key as usize];
+            if let Some(root) = node.root.as_mut() {
+                root.laid_out = None;
+            }
+            // A scroll view keeps where it is scrolled to: its content size
+            // goes again as it is, not as a first one (which would put a
+            // right to left one at its right end). A new size from the
+            // layout below replaces it ([`Self::set_scroll_content`]).
+            let id = node.id;
+            if let Some(scroll) = node.scroll.as_mut()
+                && let Some(size) = scroll.content
+            {
+                scroll.content_item = Some((self.batches, self.mount.len()));
+                self.mount.push(MountItem::ScrollContent { id, size });
+            }
+            if let Some(layout) = node.layout {
+                // Every frame is sent again.
+                self.layout.mark_dirty(layout);
+            }
+            // Replay pixel-based sticky state without clearing the lists'
+            // bookkeeping (which would restack their existing cells).
+            // If layout changes the logical ranges, its later item wins.
+            let ranges = self.sticky_ranges(key);
+            if !ranges.is_empty() {
+                self.mount.push(MountItem::StickyCells {
+                    id,
+                    cells: ranges
+                        .into_iter()
+                        .map(|r| StickyCell {
+                            cell: r.cell,
+                            start: Points(r.start),
+                            end: Points(r.end),
+                            offset: r.offset,
+                        })
+                        .collect(),
+                });
+            }
+        }
+        self.needs_layout = true;
+    }
+
     /// The user edited input `id` (before JS sees the edit): keeps the text
     /// for layout and for stale-value detection.
     pub fn input_changed(&mut self, id: NodeId, text: &str, count: u32) {
@@ -1483,17 +1539,10 @@ impl<M: TextEngine> Core<M> {
                 let node = &mut self.nodes[key as usize];
                 let before = node.events;
                 node.events.set(event, enabled);
-                // A listener added after layout still learns the frame.
                 if event == EventKind::Layout && enabled && !before.contains(event) {
-                    let f = node.frame;
-                    if !f.origin.x.0.is_nan() {
-                        self.events.push(crate::element::JsEvent::Event(
-                            id,
-                            event,
-                            EventPayload::Layout(f),
-                        ));
-                    }
+                    self.report_frame(key);
                 }
+                let node = &self.nodes[key as usize];
                 if node.events != before {
                     let relink = node.inline && (pressable(before) || pressable(node.events));
                     self.mark(key, dirty::EVENTS);
@@ -3361,6 +3410,9 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderVisible(v) => c.header_visible = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
+                        ScreenProp::HidesBottomBarWhenPushed(v) => {
+                            c.hides_bottom_bar_when_pushed = v
+                        }
                         ScreenProp::HeaderBackTitle(v) => c.back_title = v,
                         ScreenProp::HeaderBackVisible(v) => c.back_visible = v,
                         ScreenProp::HeaderRightSystemItem(v) => c.right_system_item = v,
@@ -4114,7 +4166,6 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
-        node.frame = Bounds::UNSET;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;
             // The new native view counts the core's scrolls from zero.
@@ -4126,7 +4177,71 @@ impl<M: TextEngine> Core<M> {
         let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
         let id = node.id;
         let kind = node.kind;
-        // A new native view already has the default style and no listeners.
+        let mut flags = self.mount_state(key);
+        let node = &mut self.nodes[key as usize];
+        if kind == Kind::Text && has_attachments {
+            // Its attachments' views go inside the new view.
+            node.attached.clear();
+            flags |= dirty::TEXT_BUILD;
+        }
+        self.mount.push(MountItem::Create {
+            id,
+            kind: if parent_list {
+                ViewKind::View
+            } else {
+                kind.view_kind()
+            },
+        });
+        if let Some(component) = self.nodes[key as usize].component.as_mut() {
+            // Unnamed, it is named later in this commit (`set_prop`), or
+            // never: the flush of its props says which.
+            if let Some(name) = &component.name {
+                self.mount.push(MountItem::Component {
+                    id,
+                    name: name.clone(),
+                });
+            }
+        }
+        if let Some(item) = self.creation_tracking(key) {
+            self.mount.push(item);
+        }
+        self.mark(key, flags);
+        if !kind.is_container() {
+            return;
+        }
+        // Bottom to top: by `zIndex`, then in order.
+        let mut children = std::mem::take(&mut self.nodes[key as usize].children);
+        let original = children.clone();
+        if children
+            .iter()
+            .any(|&c| self.nodes[c as usize].stack_rank() != (0, false))
+        {
+            children.sort_by_key(|&c| self.nodes[c as usize].stack_rank());
+        }
+        for &child in &children {
+            let c = &self.nodes[child as usize];
+            if c.layout.is_some() && !c.is_overlay() {
+                self.ensure_created(child);
+                let child_id = self.nodes[child as usize].id;
+                self.mount.push(MountItem::Insert {
+                    parent: id,
+                    child: child_id,
+                    before: None,
+                });
+            }
+        }
+        self.nodes[key as usize].children = original;
+    }
+
+    /// Resets what `key`'s native view was last sent and returns what a new
+    /// view needs: a new view has the default style and no listeners.
+    fn mount_state(&mut self, key: Key) -> u32 {
+        let node = &mut self.nodes[key as usize];
+        let kind = node.kind;
+        node.frame = Bounds::UNSET;
+        // A list in its parent's viewport is a plain view clipping its
+        // cells (`Node::mounted_view_style`), with no scroll view's config.
+        let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
         let mut flags = 0;
         if node.view_style != ViewStyle::default()
             || node.elevation != Points::ZERO
@@ -4141,11 +4256,6 @@ impl<M: TextEngine> Core<M> {
         }
         if kind == Kind::Text {
             flags |= dirty::TEXT_MOUNT;
-            if has_attachments {
-                // Its attachments' views go inside the new view.
-                node.attached.clear();
-                flags |= dirty::TEXT_BUILD;
-            }
         }
         if node.image.as_ref().is_some_and(|i| i.source.is_some()) {
             flags |= dirty::IMAGE;
@@ -4199,57 +4309,13 @@ impl<M: TextEngine> Core<M> {
                 flags |= dirty::INPUT_VALUE;
             }
         }
-        self.mount.push(MountItem::Create {
-            id,
-            kind: if parent_list {
-                ViewKind::View
-            } else {
-                kind.view_kind()
-            },
-        });
-        if let Some(component) = self.nodes[key as usize].component.as_mut() {
-            // Unnamed, it is named later in this commit (`set_prop`), or
-            // never: the flush of its props says which.
-            if let Some(name) = &component.name {
-                self.mount.push(MountItem::Component {
-                    id,
-                    name: name.clone(),
-                });
-            }
+        if let Some(component) = node.component.as_mut() {
             // The new component gets every property, and its slots' names.
             component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
             component.slots_changed.set(!component.slots.is_empty());
             flags |= dirty::COMPONENT;
         }
-        if let Some(item) = self.creation_tracking(key) {
-            self.mount.push(item);
-        }
-        self.mark(key, flags);
-        if !kind.is_container() {
-            return;
-        }
-        // Bottom to top: by `zIndex`, then in order.
-        let mut children = std::mem::take(&mut self.nodes[key as usize].children);
-        let original = children.clone();
-        if children
-            .iter()
-            .any(|&c| self.nodes[c as usize].stack_rank() != (0, false))
-        {
-            children.sort_by_key(|&c| self.nodes[c as usize].stack_rank());
-        }
-        for &child in &children {
-            let c = &self.nodes[child as usize];
-            if c.layout.is_some() && !c.is_overlay() {
-                self.ensure_created(child);
-                let child_id = self.nodes[child as usize].id;
-                self.mount.push(MountItem::Insert {
-                    parent: id,
-                    child: child_id,
-                    before: None,
-                });
-            }
-        }
-        self.nodes[key as usize].children = original;
+        flags
     }
 
     #[inline]
@@ -5795,6 +5861,19 @@ impl<M: TextEngine> Core<M> {
             }
             self.nodes[key as usize].children = children;
             self.update_overflow(key);
+        }
+    }
+
+    /// Queues node `key`'s frame for its layout listeners once it was laid
+    /// out: a listener added after layout still learns the frame.
+    fn report_frame(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if !node.frame.origin.x.0.is_nan() {
+            self.events.push(crate::element::JsEvent::Event(
+                node.id,
+                EventKind::Layout,
+                EventPayload::Layout(node.frame),
+            ));
         }
     }
 

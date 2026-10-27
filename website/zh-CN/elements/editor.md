@@ -384,7 +384,7 @@ let editor!: EditorRef;
 
 ### 悬停与点击
 
-- `onHover(event)`：鼠标停在一个字符上（桌面和 Web）。`event` 包含它的 `position`、UTF-16 的 `offset`、所在单词的 `range`、指针的 `pagePosition`、单词的 `pageBounds`、按住的 `modifiers`，以及那里的 `diagnostics`，应用显示它们的消息。移到另一个单词时立即报告下一次悬停。
+- `onHover(event)`：鼠标在没有按键按下时停在一个字符上（桌面和 Web；拖动用来选择文字）。`event` 包含它的 `position`、UTF-16 的 `offset`、所在单词的 `range`、指针的 `pagePosition`、单词的 `pageBounds`、按住的 `modifiers`，以及那里的 `diagnostics`，应用显示它们的消息。移到另一个单词时立即报告下一次悬停。
 - `onHoverEnd()`：鼠标离开了单词或编辑器，或者它下面的文本改变或滚动了。
 - `onTextPress(event)`：一个字符被点击，在编辑器放好光标之后：`{ position, offset, range, pagePosition, modifiers, clicks }`。
 - `caretBounds()` 和 `rangeBounds(range)`：光标和一个范围的位置 `{ bounds, pageBounds }`（在编辑器中和在根视图中）：应用的弹出层在那里打开。
