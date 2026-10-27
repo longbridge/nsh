@@ -404,7 +404,7 @@ monitor measures the real writer. Apply + draw excludes the monitor's formatting
 | Terminal Long list, 500 rows | Pending main-session release run | Pending | Pending |
 | DataTable, 10,000 × 24 | Pending main-session release run | Pending | Pending |
 
-No measured baseline or budget pass is claimed yet: ticket 20's worker is restricted to `cargo check`.
+No measured release baseline or budget pass is claimed yet.
 The main session must run the command above and replace the pending entries with its machine, revision and
 results, including the phase breakdown if the budget fails. Tickets changing terminal rendering, input or layout
 bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
@@ -433,6 +433,7 @@ measuring a disconnected process that should no longer exist.
 The reported incident was 10–45% CPU per orphan after a tmux terminal was killed, with SIGTERM unable to end it.
 Source inspection found crossterm's default Unix read loop retrying EOF/EIO without returning to the host's
 shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and makes input/output cancellable.
-No post-fix CPU result or runtime pass is claimed here: the worker is restricted to `cargo check`. Record the
-benchmark's output, machine and revision in this table after the main session runs it. Repeat the same command
+The macOS debug host suite passes, including the one-second signal, hangup and full-output shutdown checks.
+The release idle CPU benchmark remains unrun. Record its output, machine and revision in this table after the
+main session runs it. Repeat the same command
 before and after future scheduler or transport changes; the CPU sample excludes startup and termination.
