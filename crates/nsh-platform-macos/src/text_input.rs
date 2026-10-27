@@ -1445,7 +1445,7 @@ impl InputState {
             NSColor::clearColor()
         } else {
             config
-                .selection_color
+                .caret_color
                 .map_or_else(|| self.text_color(), ns_color)
         };
         view.setInsertionPointColor(Some(&caret));

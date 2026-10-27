@@ -1194,7 +1194,7 @@ mount(() => (
       style={{ placeholderColor: "#00ff00", selectionColor: "#0000ff" }}
     />
     <Input class="placeholder:text-white selection:bg-black" />
-    <Text selectable style={{ selectionColor: "#ff0000" }}>Pick me</Text>
+    <Text style={{ userSelect: "text", selectionColor: "#ff0000" }}>Pick me</Text>
   </>
 ));
 "##;
@@ -2679,6 +2679,117 @@ fn a_slots_props_are_the_apps_elements_own_and_live() {
     assert_eq!(listens(&locked, toggle), Some(false));
 }
 
+const POPUP_EVENTS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Menu, MenuItem, Popover } from "nsh/base";
+
+function App() {
+  const heard = signal<string[]>([]);
+  const hear = (what: string) => heard.set([...heard(), what]);
+  return (
+    <View>
+      <Menu
+        onOpenChange={(open, reason) => hear(`menu ${open} ${reason}`)}
+        onOpen={() => hear("menu open")}
+        onClose={() => hear("menu close")}
+        trigger={
+          <View testID="menu">
+            <Text>File</Text>
+          </View>
+        }
+      >
+        <MenuItem>
+          <Text>New</Text>
+        </MenuItem>
+      </Menu>
+      <Popover
+        onOpenChange={(open, reason) => hear(`popover ${open} ${reason}`)}
+        onOpen={() => hear("popover open")}
+        onClose={() => hear("popover close")}
+        trigger={
+          <View testID="popover">
+            <Text>Details</Text>
+          </View>
+        }
+      >
+        <Text>Body</Text>
+      </Popover>
+      <Text>{`Heard: ${heard().join(", ")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A popup reports a change of its open state before its lifecycle
+/// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
+/// there or all gone, also where that is at once (no motion).
+fn popups_report_their_open_change_first(environment: Environment) {
+    let (engine, rx) = start_in(POPUP_EVENTS, environment);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let by_test_id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let (menu, popover) = (by_test_id("menu"), by_test_id("popover"));
+    let press = |view| {
+        engine
+            .control()
+            .dispatch_event(view, EventKind::Press, EventPayload::None)
+    };
+    let mut heard = vec![];
+    for (view, name) in [(menu, "menu"), (popover, "popover")] {
+        for (open, life) in [(true, "open"), (false, "close")] {
+            heard.push(format!("{name} {open} triggerPress"));
+            heard.push(format!("{name} {life}"));
+            let wanted = format!("Heard: {}", heard.join(", "));
+            press(view);
+            let batches = until(&rx, |b| shows(b, &wanted));
+            assert!(
+                batches.iter().any(|b| shows(b, &wanted)),
+                "{wanted}: {:?}",
+                batches
+                    .iter()
+                    .flat_map(|b| b.items.iter())
+                    .filter_map(|i| match i {
+                        MountItem::Text { text, .. } if text.text.starts_with("Heard") => {
+                            Some(text.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+/// On the desktops a menu's popup has no motion: it is open and gone in
+/// the turn that changes it.
+#[test]
+fn popups_report_their_open_change_first_on_the_desktops() {
+    popups_report_their_open_change_first(Environment {
+        os: nsh_engine::Os::Windows,
+        ..Environment::default()
+    });
+}
+
+/// On touch screens a menu is a sheet that comes in and goes: its
+/// lifecycle follows the motion, after the change.
+#[test]
+fn popups_report_their_open_change_first_on_touch_screens() {
+    popups_report_their_open_change_first(Environment::default());
+}
+
 const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Progress } from "nsh/base";
 
@@ -2835,6 +2946,189 @@ fn a_base_progress_shows_the_apps_value_in_its_indicator() {
     });
     assert_eq!(value(&after), Some(range(None)));
     assert_eq!(width(&after), Some(50.0));
+}
+
+const BASE_SLIDER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Slider } from "nsh/base";
+
+function App() {
+  const price = signal<[number, number]>([20, 60]);
+  const ended = signal("none");
+  return (
+    <View>
+      <Slider
+        testID="price"
+        value={price()}
+        onChange={(next) => price.set(next as [number, number])}
+        onChangeEnd={(next) => ended.set(`end ${next}`)}
+        accessibilityLabel="Maximum price"
+        startAccessibilityLabel="Minimum price"
+        class="w-[200px]"
+        trackClass="h-[20px] justify-center"
+        indicatorClass="h-[4px]"
+        rangeStyle={{ backgroundColor: "#00ff00" }}
+        thumbClass="w-[10px] h-[10px]"
+      />
+      <Text>{`Price ${price()[0]}-${price()[1]}`}</Text>
+      <Text>{ended()}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Slider` with a range: each thumb is an adjustable element
+/// of its own with its label and value (the start's up to the end, the
+/// end's from the start), the range and the thumbs placed by the values
+/// along the indicator, a press on the track moving the nearer thumb there
+/// (one change, then its end), and a screen reader's increment stepping a
+/// thumb.
+#[test]
+fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
+    use nsh_core::{AccessibilityRole, AccessibilityValue, TouchEvent, TouchPhase, TouchPoint};
+    let (engine, rx) = start(BASE_SLIDER);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Price 20-60"));
+    let thumbs: Vec<u32> = first
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ViewProps { id, props }
+                if props.accessibility.role == AccessibilityRole::Adjustable =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(thumbs.len(), 2, "a thumb each");
+    let props_of = |batches: &[MountBatch], thumb: u32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == thumb => Some(props.clone()),
+                _ => None,
+            })
+            .expect("the thumb's props")
+    };
+    let first = std::slice::from_ref(&first);
+    let label = |thumb| {
+        props_of(first, thumb)
+            .accessibility
+            .label
+            .as_deref()
+            .map(str::to_owned)
+    };
+    let (start_thumb, end_thumb) = match label(thumbs[0]).as_deref() {
+        Some("Minimum price") => (thumbs[0], thumbs[1]),
+        _ => (thumbs[1], thumbs[0]),
+    };
+    assert_eq!(label(start_thumb).as_deref(), Some("Minimum price"));
+    assert_eq!(label(end_thumb).as_deref(), Some("Maximum price"));
+    let value = |min: f32, max: f32, now: f32| AccessibilityValue {
+        min: Some(min),
+        max: Some(max),
+        now: Some(now),
+        text: Some(format!("{now}").into()),
+    };
+    assert_eq!(
+        props_of(first, start_thumb).accessibility.value,
+        Some(value(0.0, 60.0, 20.0))
+    );
+    assert_eq!(
+        props_of(first, end_thumb).accessibility.value,
+        Some(value(20.0, 100.0, 60.0))
+    );
+    // The thumbs at 20% and 60% of the indicator, the range between them.
+    assert_eq!(
+        frame_of(first, start_thumb).map(|f| f.origin.x.0),
+        Some(40.0)
+    );
+    assert_eq!(
+        frame_of(first, end_thumb).map(|f| f.origin.x.0),
+        Some(120.0)
+    );
+    let range = first[0]
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color.0 == 0x00ff_00ff => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the range");
+    let range_frame = frame_of(first, range).expect("the range's frame");
+    assert_eq!(
+        (range_frame.origin.x.0, range_frame.size.width.0),
+        (40.0, 80.0)
+    );
+
+    // The track: around the indicator, which holds the thumbs.
+    let parent = |child: u32| {
+        first[0]
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .expect("a parent")
+    };
+    let track = parent(parent(end_thumb));
+    // A press at 75% of the track: nearer the end's thumb (the middle of
+    // the two is at 40%), which jumps there.
+    let touch = |phase| {
+        EventPayload::Touch(Box::new(TouchEvent {
+            phase,
+            timestamp: 0.0,
+            activated: None,
+            points: vec![TouchPoint {
+                id: 1,
+                target: track,
+                path: if phase == TouchPhase::Start {
+                    vec![track]
+                } else {
+                    Vec::new()
+                },
+                page: nsh_core::geometry::point(px(150.0), px(10.0)),
+                location: nsh_core::geometry::point(px(150.0), px(10.0)),
+                changed: true,
+            }],
+        }))
+    };
+    engine
+        .control()
+        .dispatch_event(ROOT_ID, EventKind::Touch, touch(TouchPhase::Start));
+    engine
+        .control()
+        .dispatch_event(ROOT_ID, EventKind::Touch, touch(TouchPhase::End));
+    let after = until(&rx, |b| shows(b, "end 20,75"));
+    assert!(after.iter().any(|b| shows(b, "Price 20-75")));
+    assert_eq!(
+        props_of(&after, end_thumb).accessibility.value,
+        Some(value(20.0, 100.0, 75.0))
+    );
+    assert_eq!(
+        props_of(&after, start_thumb).accessibility.value,
+        Some(value(0.0, 75.0, 20.0))
+    );
+
+    // A screen reader's increment on the start's thumb: one step.
+    engine.control().dispatch_event(
+        start_thumb,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    let after = until(&rx, |b| shows(b, "end 21,75"));
+    assert!(after.iter().any(|b| shows(b, "Price 21-75")));
 }
 
 const TAB_BAR: &str = r##"import { mount, signal } from "nsh";

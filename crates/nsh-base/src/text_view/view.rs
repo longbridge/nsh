@@ -491,7 +491,7 @@ impl Cx {
     /// A text of the block's inline content, selectable when asked.
     fn paragraph(&self, content: &[Inline], key: &str, tail: bool) -> Text {
         let el = text("")
-            .when(self.selectable, |t| t.selectable(true))
+            .when(self.selectable, |t| t.select_text())
             .children(self.inlines(content, key));
         self.caret_after(el, tail)
     }
@@ -622,7 +622,7 @@ impl Cx {
                                     .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
-                                    .when(self.selectable, |t| t.selectable(true)),
+                                    .when(self.selectable, |t| t.select_text()),
                             ),
                         Part::MathBlock,
                     )
@@ -863,7 +863,7 @@ impl Cx {
             body.font_family(mono_font)
                 .px(px(16.0))
                 .py(px(14.0))
-                .when(self.selectable, |t| t.selectable(true)),
+                .when(self.selectable, |t| t.select_text()),
             tail,
         );
         let block = view()
@@ -1157,7 +1157,7 @@ impl Cx {
             self.paragraph(&node.content, key, tail).into_element()
         } else {
             self.caret_after(
-                text(node.text.clone()).when(self.selectable, |t| t.selectable(true)),
+                text(node.text.clone()).when(self.selectable, |t| t.select_text()),
                 tail,
             )
             .into_element()
@@ -1393,7 +1393,7 @@ impl Cx {
                 .map(|s| s.width / s.height)
         };
         let el = nsh_core::element::image(image.src.clone())
-            .resize_mode(ResizeMode::Contain)
+            .object_fit(ResizeMode::Contain)
             .label(SharedString::from(image.alt.clone()))
             .when_some(image.title.clone(), |el, title| el.hint(title));
         let el = match flow {

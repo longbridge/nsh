@@ -253,8 +253,7 @@ export function Charts() {
             {/* The total in the hole fades as it opens and closes. */}
             <View
               class="transition-opacity duration-300 motion-reduce:transition-none"
-              pointerEvents="none"
-              style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, opacity: donut() ? 1 : 0 }}
+              style={{ pointerEvents: "none", position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, opacity: donut() ? 1 : 0 }}
             >
               <Text style={{ fontSize: size.detail, color: colors.muted }}>{shown()?.name ?? "Total"}</Text>
               <Text style={{ fontSize: 20, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
@@ -280,7 +279,7 @@ export function Charts() {
                 }}
               >
                 <View class={KEYS[i]} style={{ width: 8, height: 8, borderRadius: 2 }} />
-                <Text numberOfLines={1} style={{ flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
+                <Text style={{ numberOfLines: 1, flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
                 <Text style={{ fontSize: size.detail + 1, color: colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>{money(r.revenue)}</Text>
                 <Text style={{ width: 48, fontSize: size.detail + 1, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{share(r.revenue)}</Text>
               </View>

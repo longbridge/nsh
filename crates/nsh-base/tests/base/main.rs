@@ -12,4 +12,5 @@ mod plot;
 mod resizable;
 mod rich_editor;
 mod sheet;
+mod slider;
 mod text_view;

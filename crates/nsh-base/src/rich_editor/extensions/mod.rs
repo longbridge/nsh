@@ -44,3 +44,6 @@ pub use input_rules::{
 pub use keymap::{
     Keymap, KeymapError, KeymapOptions, keymap, keymap_plugin, keymap_with, normalize_key_name,
 };
+
+#[cfg(test)]
+mod list_scenarios;

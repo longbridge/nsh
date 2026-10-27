@@ -19,6 +19,10 @@ An editor has two parts: the session (`createRichEditor`), which owns the state 
 the view (`<RichEditor editor={…} />`), which renders the session natively and turns the platform's input into
 transactions. Several views can show one session.
 
+The editor's kernel is a Rust port of [ProseMirror](https://prosemirror.net) by Marijn Haverbeke, and its extension
+layer follows [Tiptap](https://tiptap.dev): their data structures, commands and names carry over, and so does what
+you know of them. Both are MIT-licensed, and their licenses apply to what is ported from them.
+
 ```tsx
 import { mount } from "nsh";
 import { RichEditor, createRichEditor, history, inputRules, keymap, markdown, markdownRules, starterKeymap, baseKeymap, toggleMark } from "nsh/base";
@@ -65,6 +69,29 @@ in the `listMarker` part: `•`, `◦`, `▪` by depth, or numbers from the list
   }}
 />
 ```
+
+The `content` part is the box of the document inside the editor's scroll view: its padding (`content: "px-6 py-5"`)
+is the room around the text, and the scroll bar runs along the editor's own edge. A drag that selects past the top
+or bottom of the editor scrolls the document along, faster the further the pointer goes.
+
+### Bubble menu
+
+`bubbleMenu` is Tiptap's bubble menu: the app's content shown next to the selection, above it by default
+(`bubbleMenuPlacement`, flipping to the other side where there is no room) at `bubbleMenuOffset` points (8), in an
+overlay that follows the text as it scrolls. The app passes it while it wants it shown, from the session's state:
+
+```tsx
+const inLink = () => (revision(), editor.isActive("link"));
+
+<RichEditor
+  editor={editor}
+  bubbleMenu={inLink() ? <LinkMenu href={editor.getAttributes("link").href} /> : undefined}
+  bubbleMenuPlacement="bottom"
+/>
+```
+
+A link menu edits the link under the caret with `chain([extendMarkRange("link"), command("setLink", { href })])`
+and removes it with `command("unsetLink")` after the same `extendMarkRange`.
 
 ## Schemas
 
@@ -169,7 +196,7 @@ editor.run(command("toggleBold"));
 
 `StarterKit` brings `Document`, `Paragraph`, the text node, `Heading`, `Blockquote`, `BulletList`, `OrderedList`,
 `ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
-`Bold`, `Italic`, `Strike`, `Code`, `Underline`, `Link`, `Highlight`, `Subscript`, `Superscript`, `TextStyle`,
+`Bold`, `Italic`, `Strike`, `Code`, `Underline`, `Link`, `Highlight`, `Subscript`, `Superscript`, `RichTextStyle` (Tiptap's `TextStyle`),
 `TextAlign`, `History`, `TrailingNode`, `Typography` and `ListKeymap`. An option named as one set to `false` leaves
 it out, an object configures it (`heading: { levels }`, `history: { depth }`, `textAlign: { types }`,
 `codeBlock: { enableTabIndentation }`). Each class's `configure(options)` and `extend({...})` make a
@@ -181,6 +208,10 @@ Each extension adds Tiptap's commands, which `command(name, args)` runs: `toggle
 `toggleOrderedList`, `toggleTaskList`, `toggleCodeBlock({ language })`, `setHardBreak`, `setHorizontalRule`,
 `setImage({ src })`, `toggleHighlight({ color })`, `setTextAlign("center")`, `unsetTextAlign`, and the link,
 character count and suggestion commands below.
+
+The list toggles work on whole lists, as a word processor's list buttons do: `toggleOrderedList` in a bulleted list
+numbers it at every level, nested lists included, and a list's own toggle takes the selected blocks out of every
+list around them.
 
 The order of `extensions` is their priority among equals: an extension listed later binds its keys before the ones
 before it; `priority` (100 by default) ranks them otherwise. With `extensions`, an editor's `plugins` come after the

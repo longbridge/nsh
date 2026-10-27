@@ -104,25 +104,27 @@ view styles apply):
 
 ### Colors
 
-The placeholder's color and the color of the caret and the selection are style keys, with their Tailwind variants, and
-methods in Rust:
+The colors of the placeholder, the caret and the selection highlight are style keys, with their Tailwind classes, and
+methods in Rust (UIKit tints the caret and the selection with one color, the caret's when set):
 
 | Style key | Rust | Class | Description |
 |---|---|---|---|
 | `placeholderColor` | `.placeholder_color(..)` | `placeholder:text-*` | The placeholder's color. |
-| `selectionColor` | `.selection_color(..)` | `selection:text-*` | The color of the caret and the selection. |
+| `caretColor` | `.caret_color(..)` | `caret-*` | The caret's color. |
+| `selectionColor` | `.selection_color(..)` | `selection:text-*` | The selection highlight's color. |
 
 ```rust tabs
 input()
     .placeholder("Search")
     .text_color(rgb(0x18181b))
     .placeholder_color(rgb(0x9ca3af))
-    .selection_color(rgb(0x2563eb))
+    .caret_color(rgb(0x2563eb))
+    .selection_color(rgb(0x93c5fd))
 ```
 
 ```tsx tabs
 <Input placeholder="Search" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
-<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", selectionColor: "#2563eb" }} />
+<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
 ```
 
 ### iOS

@@ -103,6 +103,19 @@ pub struct RichEditorProps {
     pub styles: Prop<RichEditorStyles>,
     /// What screen readers call the editor.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// Tiptap's bubble menu: shown next to the selection while the app
+    /// fills it (the app decides when, from the session's state: a link
+    /// under the caret, a selection of text), above it, below it where
+    /// there is no room, in an overlay that follows the text as it
+    /// scrolls. It looks like nothing: the app's content is the menu.
+    pub bubble_menu: Prop<Option<Slot>>,
+    /// Where the bubble menu goes against the selection (default
+    /// `"top"`; it flips to the other side without room).
+    #[prop(default = Placement::Top)]
+    pub bubble_menu_placement: Prop<Placement>,
+    /// The gap between the selection and the bubble menu (default 8).
+    #[prop(default = px(8.0))]
+    pub bubble_menu_offset: Prop<Points>,
 }
 
 /// A change of a `RichEditor`'s document. The document itself is read on

@@ -22,6 +22,11 @@ ICONS = [
     "sliders-horizontal", "smartphone", "sparkles", "square-code", "star",
     "strikethrough", "sun", "text-cursor-input", "text-quote", "toggle-right",
     "triangle-alert", "type", "underline", "undo-2", "wind", "x",
+    # The Rich Editor demo's zoom, links and tables.
+    "maximize-2", "minimize-2", "unlink", "external-link", "table",
+    "between-horizontal-start", "between-horizontal-end", "between-vertical-start",
+    "between-vertical-end", "table-cells-merge", "table-cells-split", "trash",
+    "grip-vertical", "grip-horizontal", "panel-top", "list-todo", "ellipsis",
 ]
 
 # The attributes each element's drawing reads.

@@ -163,6 +163,7 @@ pub use crate::element::{
     System,
     Task,
     Text,
+    TextShadow,
     Timing,
     Tokens,
     TouchClaim,

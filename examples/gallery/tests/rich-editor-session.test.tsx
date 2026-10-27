@@ -45,18 +45,19 @@ test("- and a space make the block a list item", async () => {
 
 test("Enter twice at the end of a list leaves it for a paragraph", async () => {
   const app = await openDemo();
-  const bullets = app.count("•");
-  // Replace the last item's text, leaving the caret at its end.
-  await selectBlock(app, "Tab indents an item, Shift-Tab outdents it");
+  // The numbered list's last item: replace its text, leaving the caret at
+  // its end.
+  await selectBlock(app, "Code, quotes and rules are blocks of their own");
   await typeKeys(app, "Last");
   await app.waitFor("Last");
   await app.keyboard.press("enter");
-  expect(app.count("•")).toBe(bullets + 1);
+  await app.waitFor("4.");
   await app.keyboard.press("enter");
   await typeKeys(app, "After");
   await app.waitFor("After");
   // The empty item became the paragraph: no marker in front of it.
-  expect(app.count("•")).toBe(bullets);
+  expect(app.shows("4.")).toBe(false);
+  expect(app.shows("3.")).toBe(true);
 });
 
 test("Mod-z undoes typing and Shift-Mod-z redoes it", async () => {

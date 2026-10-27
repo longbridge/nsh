@@ -734,7 +734,7 @@ extension_classes! {
     Highlight => "highlight", "Highlights (`highlight`, with a `color`): `Mod-Shift-h`, `==text==`; `setHighlight`, `toggleHighlight`, `unsetHighlight`.";
     Subscript => "subscript", "Subscript (`subscript`): `Mod-,`; `setSubscript`, `toggleSubscript`, `unsetSubscript`.";
     Superscript => "superscript", "Superscript (`superscript`): `Mod-.`; `setSuperscript`, `toggleSuperscript`, `unsetSuperscript`.";
-    TextStyle => "textStyle", "Text styles (`textStyle`: `color`, `fontFamily`, `fontSize`, `backgroundColor`); `setTextStyle`, `unsetTextStyle`.";
+    RichTextStyle => "textStyle", "Text styles (`textStyle`, Tiptap's `TextStyle`: `color`, `fontFamily`, `fontSize`, `backgroundColor`); `setTextStyle`, `unsetTextStyle`.";
     TextAlign => "textAlign", "Text alignment (`textAlign`) of the types its `types` option names: `Mod-Shift-l` / `e` / `r` / `j`; `setTextAlign`, `unsetTextAlign`.";
     History => "history", "Undo history (`history`, Tiptap 3's `undoRedo`; options `depth`, `newGroupDelay`): `Mod-z`, `Shift-Mod-z`, `Mod-y`.";
     TrailingNode => "trailingNode", "Keeps a node (the option `node`, the default block by default) at the document's end.";

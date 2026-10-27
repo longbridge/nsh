@@ -12,6 +12,8 @@ demo: el-rich-editor
 
 一个编辑器有两部分：会话（`createRichEditor`），它拥有状态，由应用的代码驱动；视图（`<RichEditor editor={…} />`），它原生地渲染会话，并把平台的输入变成事务。多个视图可以显示同一个会话。
 
+编辑器的内核是 Marijn Haverbeke 的 [ProseMirror](https://prosemirror.net) 的 Rust 移植，扩展层遵循 [Tiptap](https://tiptap.dev)：它们的数据结构、命令和名称都沿用下来，你对它们的了解在这里同样适用。两者都以 MIT 许可发布，移植自它们的部分适用其许可。
+
 ```tsx
 import { mount } from "nsh";
 import { RichEditor, createRichEditor, history, inputRules, keymap, markdown, markdownRules, starterKeymap, baseKeymap, toggleMark } from "nsh/base";
@@ -52,6 +54,24 @@ mount(App);
   }}
 />
 ```
+
+`content` 部件是编辑器滚动视图中文档的盒子：它的内边距（`content: "px-6 py-5"`）就是文本周围的留白，滚动条贴着编辑器自己的边缘。拖动选择越过编辑器的上下边缘时，文档随之滚动，指针越远滚得越快。
+
+### 气泡菜单
+
+`bubbleMenu` 即 Tiptap 的气泡菜单：应用的内容显示在选区旁，默认在其上方（`bubbleMenuPlacement`，没有空间时翻到另一侧），相距 `bubbleMenuOffset` 点（8），位于一个随文本滚动的浮层中。应用在希望显示它时传入，依据会话的状态：
+
+```tsx
+const inLink = () => (revision(), editor.isActive("link"));
+
+<RichEditor
+  editor={editor}
+  bubbleMenu={inLink() ? <LinkMenu href={editor.getAttributes("link").href} /> : undefined}
+  bubbleMenuPlacement="bottom"
+/>
+```
+
+链接菜单用 `chain([extendMarkRange("link"), command("setLink", { href })])` 编辑光标所在的链接，用同样的 `extendMarkRange` 之后的 `command("unsetLink")` 移除它。
 
 ## Schema
 
@@ -137,9 +157,11 @@ editor.run(command("toggleHeading", { level: 2 }));
 editor.run(command("toggleBold"));
 ```
 
-`StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`Link`、`Highlight`、`Subscript`、`Superscript`、`TextStyle`、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
+`StarterKit` 包含 `Document`、`Paragraph`、文本节点、`Heading`、`Blockquote`、`BulletList`、`OrderedList`、`ListItem`、`TaskList`、`TaskItem`、`CodeBlock`、`HardBreak`、`HorizontalRule`、`RichImage`（Tiptap 的 `Image`）、`Bold`、`Italic`、`Strike`、`Code`、`Underline`、`Link`、`Highlight`、`Subscript`、`Superscript`、`RichTextStyle`（Tiptap 的 `TextStyle`）、`TextAlign`、`History`、`TrailingNode`、`Typography` 和 `ListKeymap`。以某个扩展命名的选项设为 `false` 即不包含它，设为对象则配置它（`heading: { levels }`、`history: { depth }`、`textAlign: { types }`、`codeBlock: { enableTabIndentation }`）。每个类的 `configure(options)` 与 `extend({...})` 生成 `RichExtension`，它有 `name`、`type`、`priority` 和 `options`。每个编辑器还带有核心键位（Enter、Backspace、Delete、全选）。
 
 每个扩展都加入 Tiptap 的命令，由 `command(name, args)` 运行：`toggleBold`、`setItalic`、`unsetStrike`、`toggleHeading({ level })`、`setParagraph`、`toggleBlockquote`、`toggleBulletList`、`toggleOrderedList`、`toggleTaskList`、`toggleCodeBlock({ language })`、`setHardBreak`、`setHorizontalRule`、`setImage({ src })`、`toggleHighlight({ color })`、`setTextAlign("center")`、`unsetTextAlign`，以及下文的链接、字数统计与建议命令。
+
+列表切换作用于整个列表，如同文字处理软件的列表按钮：在项目符号列表中执行 `toggleOrderedList` 会把它的每一层（包括嵌套列表）都改为编号列表，而列表自身的切换会把选中的块从它们所在的每一层列表中移出。
 
 `extensions` 中的顺序是同优先级扩展之间的次序：排在后面的扩展先处理按键；其余情况由 `priority`（默认 100）排序。使用 `extensions` 时，编辑器的 `plugins` 排在扩展的插件之后。
 

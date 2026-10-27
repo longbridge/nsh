@@ -98,7 +98,7 @@ covers [events] onPressDown
 covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
-covers [props] Button.selectedStyle
+covers [props] selectedStyle
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the
@@ -489,11 +489,11 @@ expect Math block: x^2
 expect Image Logo: https://example.com/logo.png
 tap label:Logo
 expect Image pressed: Logo
-# Parts styled by `classes` and `styles`; `selectable`.
+# Parts styled by `classes` and `styles`; `selectable` (its texts' `userSelect`).
 style text:"Classed heading" color #ff0000ff
 style text:"Classed heading" fontWeight 600
 style text:"Styled paragraph." color #00ff00ff
-prop text:"Styled paragraph." selectable true
+style text:"Styled paragraph." userSelect text
 # The static functions.
 expect Plain: a b
 expect Parsed: 1 paragraph
@@ -507,7 +507,7 @@ covers [props] TextView.options
 covers [props] TextView.extensions
 covers [props] TextView.classes
 covers [props] TextView.styles
-covers [props] selectable
+covers [props] TextView.selectable
 covers [props] TextView.codeBlockScrollbar
 covers [props] TextView.tableScrollbar
 covers [props] TextView.streamingCaret
@@ -536,13 +536,13 @@ prop id:area selectableView true
 prop id:inner selectableView true
 prop id:own selectableView true
 noprop id:area-doc selectableView
-# Texts join the area unless they say `selectable={false}`.
-noprop text:"Area first text" selectable
-noprop text:"Area item" selectable
-prop text:"Area label" selectable false
-noprop text:"Inner text" selectable
-prop text:"Own selection" selectable true
-noprop text:"Outside text" selectable
+# Texts join the area unless they say `userSelect: "none"`.
+nostyle text:"Area first text" userSelect
+nostyle text:"Area item" userSelect
+style text:"Area label" userSelect none
+nostyle text:"Inner text" userSelect
+style text:"Own selection" userSelect text
+nostyle text:"Outside text" userSelect
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
@@ -953,7 +953,6 @@ covers [nsh/base] Tab
 covers [nsh/base] Tabs
 covers [props] Tab.selected
 covers [props] disabled
-covers [props] Tab.selectedStyle
 covers [props] accessibilityLabel
 covers [events] onPress
 
@@ -1010,6 +1009,82 @@ covers [props] Progress.trackClass
 covers [props] Progress.trackStyle
 covers [props] Progress.indicatorClass
 covers [props] Progress.indicatorStyle
+
+# base-slider
+tap id:case-base-slider
+# Each thumb an adjustable element with its label and value, placed by
+# the value on the indicator (4 high, centered in the track's 20): at 40%
+# of 200, its middle 2 down the indicator.
+expect Volume 40
+prop label:Volume role adjustable
+prop label:Volume accessibilityValue min=0 max=100 now=40 text=40
+frame label:Volume 80 2 10 10
+style label:Volume backgroundColor #0000ffff
+frame parent:label:Volume 0 8 200 4
+style parent:label:Volume backgroundColor #ccccccff
+frame parent:parent:label:Volume 0 0 200 20
+# A drag of the thumb: a value per step of 5, which the app passes back,
+# then the change's end.
+touch start label:Volume 5 5
+touch move 45 5
+expect Volume 60
+touch end
+expect end 60
+prop label:Volume accessibilityValue min=0 max=100 now=60 text=60
+frame label:Volume 120 2 10 10
+# A range: a thumb each, the start's value up to the end, the end's from
+# the start. A press on the track moves the nearer thumb there (at 75%,
+# past the middle of the two at 40%: the end's).
+expect Price 200-600
+prop label:"Min price" accessibilityValue min=0 max=600 now=200 text=200
+prop label:"Max price" accessibilityValue min=200 max=1000 now=600 text=600
+frame label:"Min price" 40 2 10 10
+frame label:"Max price" 120 2 10 10
+touch start parent:parent:label:"Max price" 150 10
+touch end
+expect Price 200-750
+prop label:"Min price" accessibilityValue min=0 max=750 now=200 text=200
+# Its own value, on a logarithmic scale along a vertical axis: a screen
+# reader's increment steps it by 1.
+prop label:Zoom accessibilityValue min=1 max=1000 now=10 text=10
+event label:Zoom onAccessibilityAction actionName=increment
+expect zoom 11
+prop label:Zoom accessibilityValue min=1 max=1000 now=11 text=11
+# `disabled`: dimmed for screen readers, `disabled:` on the thumb (6
+# wide), drags do nothing.
+prop label:Locked accessibilityState disabled=true
+frame label:Locked 100 2 6 10
+touch start label:Locked 3 3
+touch move 43 3
+touch end
+expect Locked none
+tap id:enable
+frame label:Locked 100 2 10 10
+touch start label:Locked 5 5
+touch move 45 5
+touch end
+expect Locked 70
+covers [nsh/base] Slider
+covers [props] value
+covers [props] Slider.defaultValue
+covers [props] Slider.min
+covers [props] Slider.max
+covers [props] Slider.step
+covers [props] Slider.scale
+covers [props] Slider.axis
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [props] Slider.startAccessibilityLabel
+covers [props] Slider.trackClass
+covers [props] Slider.trackStyle
+covers [props] Slider.indicatorClass
+covers [props] Slider.indicatorStyle
+covers [props] Slider.rangeClass
+covers [props] Slider.rangeStyle
+covers [props] Slider.thumbClass
+covers [props] Slider.thumbStyle
+covers [events] onChange
+covers [events] Slider.onChangeEnd
 
 # base-table
 tap id:case-base-table
@@ -1842,10 +1917,19 @@ covers [nsh/base] Superscript
 covers [nsh/base] TaskItem
 covers [nsh/base] TaskList
 covers [nsh/base] TextAlign
-covers [nsh/base] TextStyle
+covers [nsh/base] RichTextStyle
 covers [nsh/base] TrailingNode
 covers [nsh/base] Typography
 covers [nsh/base] Underline
 covers [nsh/base] createRichEditor
 covers [nsh/base] defineExtension
 covers [nsh/base] richExtension
+
+# base-rich-editor-view
+tap id:case-base-rich-editor-view
+expect BubbleMenu
+tap text:ToggleMenu
+absent BubbleMenu
+tap text:ToggleMenu
+expect BubbleMenu
+covers [props] RichEditor.bubbleMenu

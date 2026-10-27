@@ -16,13 +16,13 @@ use super::{
     base::{self, send},
     chain, command,
     helpers::{
-        can_join_items_at, find_parent_node, get_mark_attributes, get_mark_range, is_mark_active,
-        is_node_active, selection_to_insertion_end,
+        ParentNode, can_join_items_at, find_parent_node, get_mark_attributes, get_mark_range,
+        is_mark_active, is_node_active, selection_to_insertion_end,
     },
     list::{lift_list_item, wrap_in_list},
 };
 use crate::rich_editor::{
-    model::{Attrs, Fragment, MarkType, Node, NodeType},
+    model::{Attrs, Fragment, MarkType, Node, NodeType, ResolvedPos},
     state::{EditorState, NodeSelection, Selection, TextSelection, Transaction},
     transform::{MarkMatch, can_join, join_point, lift_target},
 };
@@ -899,6 +899,142 @@ fn convert_list(
     list_ty.create(attrs, content, vec![]).ok()
 }
 
+// Takes every selected textblock out of every list of `item_ty` around it,
+// nested ones too, as a word processor's list button does when turned off
+// (Tiptap lifts one level only, which leaves a nested item in a list). The
+// selection stays on the same text.
+fn lift_out_of_lists(item_ty: NodeType) -> BoxCommand {
+    command(move |state, dispatch| {
+        let lift = lift_list_item(item_ty.clone());
+        if !lift(state, None) {
+            return false;
+        }
+        let Some(dispatch) = dispatch else {
+            return true;
+        };
+        // Textblocks by their index in the document: lifting keeps their
+        // order and count.
+        let textblocks = |doc: &Node| {
+            let mut starts = Vec::new();
+            doc.descendants(&mut |node, pos, _, _| {
+                if node.is_textblock() {
+                    starts.push(pos + 1);
+                    return false;
+                }
+                true
+            });
+            starts
+        };
+        let selection = state.selection();
+        let place = |pos: usize, starts: &[usize]| {
+            let i = starts.partition_point(|&s| s <= pos).saturating_sub(1);
+            (i, pos - starts.get(i).copied().unwrap_or(0))
+        };
+        let starts = textblocks(state.doc());
+        let (first, _) = place(selection.from(), &starts);
+        let (last, _) = place(selection.to(), &starts);
+        let anchor = place(selection.anchor(), &starts);
+        let head = place(selection.head(), &starts);
+        let mut current = state.clone();
+        let mut whole = state.tr();
+        for index in first..=last {
+            // At most as many lifts as lists can nest.
+            for _ in 0..64 {
+                let Some(&start) = textblocks(current.doc()).get(index) else {
+                    break;
+                };
+                let in_item = current
+                    .doc()
+                    .resolve(start)
+                    .is_ok_and(|at| (1..=at.depth).any(|d| at.node(d).ty() == &item_ty));
+                if !in_item {
+                    break;
+                }
+                let mut tr = current.tr();
+                tr.set_selection(TextSelection::create(current.doc(), start, None));
+                let Ok(at_block) = current.apply(tr) else {
+                    return false;
+                };
+                let mut made = None;
+                if !lift(&at_block, Some(&mut |tr| made = Some(tr))) {
+                    break;
+                }
+                let Some(tr) = made else { break };
+                for step in &tr.steps {
+                    if whole.step(step.boxed_clone()).is_err() {
+                        return false;
+                    }
+                }
+                let Ok(next) = at_block.apply(tr) else {
+                    return false;
+                };
+                current = next;
+            }
+        }
+        // What was left of a list on both sides of a lifted block, now
+        // side by side, is one list again.
+        while let Some(at) = adjacent_lists(whole.doc(), &item_ty) {
+            if !can_join(whole.doc(), at) || whole.join(at, 1).is_err() {
+                break;
+            }
+        }
+        let starts = textblocks(whole.doc());
+        let at = |(i, offset): (usize, usize)| starts.get(i).map(|s| s + offset);
+        if let (Some(anchor), Some(head)) = (at(anchor), at(head)) {
+            let size = whole.doc().content().size();
+            whole.set_selection(TextSelection::create(
+                whole.doc(),
+                anchor.min(size),
+                Some(head.min(size)),
+            ));
+        }
+        dispatch(whole);
+        true
+    })
+}
+
+// The first place in `doc` between two lists of one type that join.
+fn adjacent_lists(doc: &Node, item_ty: &NodeType) -> Option<usize> {
+    fn within(node: &Node, start: usize, item_ty: &NodeType) -> Option<usize> {
+        let mut at = start;
+        for i in 0..node.child_count() {
+            let child = node.child(i);
+            if i > 0 {
+                let before = node.child(i - 1);
+                if before.ty() == child.ty()
+                    && is_list_node(child, item_ty)
+                    && list_types_compatible(before, child)
+                {
+                    return Some(at);
+                }
+            }
+            if !child.is_textblock()
+                && !child.is_leaf()
+                && let Some(found) = within(child, at + 1, item_ty)
+            {
+                return Some(found);
+            }
+            at += child.node_size();
+        }
+        None
+    }
+    within(doc, 0, item_ty)
+}
+
+// The outermost list of the lists nested around `at` from the one at
+// `depth`: up through items whose parents are lists. Its position and node.
+fn outermost_list(
+    at: &ResolvedPos,
+    depth: usize,
+    is_list: &dyn Fn(&Node) -> bool,
+) -> (usize, Node) {
+    let mut depth = depth;
+    while depth >= 3 && !is_list(at.node(depth - 1)) && is_list(at.node(depth - 2)) {
+        depth -= 2;
+    }
+    (at.before(depth), at.node(depth).clone())
+}
+
 // Tiptap's `findNodePosition`: where `target` (that very node) is in `root`.
 fn find_node_position(root: &Node, target: &Node) -> Option<usize> {
     let mut found = None;
@@ -939,7 +1075,17 @@ pub fn toggle_list(
             None => None,
         };
         let is_list = |node: &Node| is_list_node(node, &item_ty);
-        let parent_list = find_parent_node(selection, &is_list);
+        // The list holding the whole range: a selection from a nested item
+        // to an item of the outer list is in the outer one.
+        let parent_list = (1..=range.depth).rev().find_map(|depth| {
+            let node = from.node(depth);
+            is_list(node).then(|| ParentNode {
+                pos: from.before(depth),
+                start: from.start(depth),
+                depth,
+                node: node.clone(),
+            })
+        });
         let doc = state.doc();
         let all_selected = selection.from() == 0 && selection.to() == doc.content().size();
         let whole_doc_list = (all_selected && doc.child_count() == 1 && is_list(doc.child(0)))
@@ -977,17 +1123,38 @@ pub fn toggle_list(
                             true
                         })
                     });
-                    return chain(vec![inner, lift_list_item(item_ty.clone())])(state, dispatch);
+                    return chain(vec![inner, lift_out_of_lists(item_ty.clone())])(state, dispatch);
                 }
-                return lift_list_item(item_ty.clone())(state, dispatch);
+                return lift_out_of_lists(item_ty.clone())(state, dispatch);
             }
             if list_ty.valid_content(list_node.content()) {
+                // The whole list changes, every level of it, as a word
+                // processor's list does: from its outermost list down.
+                let (root_pos, root) = parent_list
+                    .as_ref()
+                    .map(|list| outermost_list(from, list.depth, &is_list))
+                    .unwrap_or((list_pos, list_node.clone()));
+                let mut targets = Vec::new();
+                if root.ty() != &list_ty {
+                    targets.push(root_pos);
+                }
+                root.descendants(&mut |node, pos, _, _| {
+                    if is_list(node)
+                        && node.ty() != &list_ty
+                        && list_ty.valid_content(node.content())
+                    {
+                        targets.push(root_pos + 1 + pos);
+                    }
+                    true
+                });
                 let retype = {
                     let list_ty = list_ty.clone();
                     command(move |state, dispatch| {
                         with_tr(state, dispatch, |tr| {
-                            tr.set_node_markup(list_pos, Some(list_ty.clone()), None, None)
-                                .is_ok()
+                            targets.iter().all(|&pos| {
+                                tr.set_node_markup(pos, Some(list_ty.clone()), None, None)
+                                    .is_ok()
+                            })
                         })
                     })
                 };
@@ -1134,6 +1301,57 @@ mod tests {
         // And off again.
         let off = apply(&ordered_state, to_ordered.as_ref()).unwrap();
         assert!(off.doc().eq(&doc), "{:?}", off.doc().to_json());
+    }
+
+    // ol[li[p a, ol[li[p b]]], li[p c]]: "a" at 3, "b" at 8, "c" at 15.
+    fn nested(s: &crate::rich_editor::model::Schema, outer: &NodeType, inner: &NodeType) -> Node {
+        let item = named(s, &["listItem"]);
+        let inner = list(s, inner, &item, &["b"]);
+        let first = item
+            .create(None, Fragment::from(vec![p(s, "a"), inner]), vec![])
+            .unwrap();
+        let second = item
+            .create(None, Fragment::from(vec![p(s, "c")]), vec![])
+            .unwrap();
+        let outer = outer
+            .create(None, Fragment::from(vec![first, second]), vec![])
+            .unwrap();
+        n(s, "doc", vec![outer])
+    }
+
+    fn list_types(doc: &Node) -> Vec<String> {
+        let mut types = Vec::new();
+        doc.descendants(&mut |node, _, _, _| {
+            if node.ty().name().ends_with("List") {
+                types.push(node.ty().name().to_owned());
+            }
+            true
+        });
+        types
+    }
+
+    #[test]
+    fn toggle_list_converts_every_level_of_a_nested_list() {
+        let s = schema();
+        let (bullet, ordered, item) = list_names(&s);
+        let to_bullet = toggle_list(bullet.clone(), item.clone(), false, Attrs::new());
+        // From the nested item, the outer item and a selection across both.
+        for (anchor, head) in [(8, 8), (3, 3), (3, 15), (8, 15)] {
+            let doc = nested(&s, &ordered, &ordered);
+            let next = apply(&state(doc, anchor, head), to_bullet.as_ref()).unwrap();
+            assert_eq!(
+                list_types(next.doc()),
+                ["bulletList", "bulletList"],
+                "{anchor}..{head}"
+            );
+            assert_eq!(next.doc().text_content(), "abc");
+        }
+        // Mixed levels become one type; the same type again lifts.
+        let doc = nested(&s, &ordered, &bullet);
+        let next = apply(&state(doc, 3, 3), to_bullet.as_ref()).unwrap();
+        assert_eq!(list_types(next.doc()), ["bulletList", "bulletList"]);
+        let off = apply(&next, to_bullet.as_ref()).unwrap();
+        assert_eq!(off.doc().child(0).ty().name(), "paragraph");
     }
 
     #[test]

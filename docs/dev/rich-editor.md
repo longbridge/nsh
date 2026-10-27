@@ -5,6 +5,14 @@ architecture: a document whose structure a schema defines, changes as steps grou
 editor states, commands, plugins, and adapters to the formats apps store. The kernel is headless: it depends on no view
 and is tested on its own; the native view renders its states and turns the platform's input into transactions.
 
+## Credits
+
+The kernel is a Rust port of [ProseMirror](https://prosemirror.net) (`prosemirror-model`, `-transform`, `-state`,
+`-commands`, `-schema-list`, `-history`, `-keymap`, `-inputrules`, `-gapcursor`, `-dropcursor`, `-tables`; MIT,
+© Marijn Haverbeke and others), and the extension layer follows [Tiptap](https://tiptap.dev) (MIT, © Tiptap GmbH):
+data structures, algorithms, names, options and command semantics come from them, and their MIT licenses apply to
+what is ported. A module ported from one names its source in its module doc; keep that when adding one.
+
 ## Modules
 
 | Module | What it holds |
@@ -145,9 +153,14 @@ selected node's view, the plugins' `handle_key_down`, the base keymap, then copy
 movement (graphemes, words, line ends, lines and pages by geometry, keeping the goal x, the document's ends).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection;
-a drag extends through `create_selection_between`. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
+a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
 `slice_from_text`), `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Copy:
 `clipboard_text_serializer`, else `slice_to_text`.
+
+The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
+content box so it scrolls with the text, anchors an `overlay()` holding the app's content (`bubbleMenuPlacement`,
+`bubbleMenuOffset`); the overlay flips and stays on screen as the core's overlays do. Whether it shows is the app's:
+it passes the slot while it wants the menu.
 
 ## The JS API (`rich_editor/js/`)
 
@@ -246,7 +259,7 @@ JS describes.
   [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
   (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a
   function's `name`). `RichExtension` (what they make) has `name`, `type`, `priority`, `options`, `configure` and
-  `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's) and `Text` is `richExtension("text")`.
+  `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's), `TextStyle` is `RichTextStyle` (`TextStyle` is the style type; a test of `nsh-js`'s declarations keeps exports from shadowing shared types) and `Text` is `richExtension("text")`.
   `defineExtension({ name, priority, node | mark, topNode, addOptions, addKeyboardShortcuts, addCommands,
   addInputRules, addPasteRules, addProseMirrorPlugins, addGlobalAttributes, addStorage })` declares the app's: its
   functions run once, in `createRichEditor` (a synchronous call, where JS runs anyway), with the extension's options,

@@ -9,6 +9,18 @@
 //! Positions count as ProseMirror's do: a text counts its UTF-16 code
 //! units, a leaf node one, a node with content its two boundaries.
 //! See docs/dev/rich-editor.md.
+//!
+//! # Credits
+//!
+//! The kernel is a Rust port of [ProseMirror](https://prosemirror.net)
+//! (`prosemirror-model`, `-transform`, `-state`, `-commands`,
+//! `-schema-list`, `-history`, `-keymap`, `-inputrules`, `-gapcursor`,
+//! `-dropcursor` and `-tables`; MIT, © Marijn Haverbeke and others): its
+//! data structures, algorithms and names follow ProseMirror's. The
+//! extension layer (`extensions`: extensions, the starter kit, their
+//! commands, keymaps and rules) follows [Tiptap](https://tiptap.dev)
+//! (MIT, © Tiptap GmbH), whose names, options and command semantics it
+//! keeps. Both projects' MIT licenses apply to the parts ported from them.
 
 pub mod commands;
 pub mod extensions;

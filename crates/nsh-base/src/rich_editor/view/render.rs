@@ -13,6 +13,7 @@
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
 use nsh_core::{
+    PropertyValue, StyleDecl, StyleKey,
     element::{EventKind, EventPayload, Style},
     prelude::*,
 };
@@ -90,9 +91,11 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
 fn content(rv: Rv) -> impl IntoElement {
     let desktop = is_desktop();
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
+    let height = rv.content_height;
     part(
         view()
             .element_ref(&rv.content)
+            .on_layout(move |b: &Bounds<Points>| height.set(b.size.height))
             .relative()
             .cursor(Cursor::Text),
         &rv,
@@ -126,7 +129,51 @@ fn content(rv: Rv) -> impl IntoElement {
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
-    .child(composition(rv))
+    .child(composition(rv.clone()))
+    .children(bubble_menu(rv))
+}
+
+/// The app's bubble menu: an overlay against an empty box over the
+/// selection, which scrolls with the text, so the menu follows it.
+fn bubble_menu(rv: Rv) -> [AnyElement; 2] {
+    let anchor = element_ref();
+    let props = rv.props;
+    let place = move || {
+        rv.sel_rev.get();
+        rv.layout_rev.get();
+        rv.doc_rev.get();
+        let b = rv.selection_box().unwrap_or_default();
+        let at = |key: StyleKey, value: Points| {
+            let value = key.number_value(value.0);
+            (key, value.unwrap_or(PropertyValue::Default))
+        };
+        Style::from_decls(
+            [
+                at(StyleKey::Left, b.origin.x),
+                at(StyleKey::Top, b.origin.y),
+                at(StyleKey::Width, b.size.width),
+                at(StyleKey::Height, b.size.height),
+            ]
+            .map(|(key, value)| StyleDecl::Set(key, value)),
+        )
+    };
+    let box_ = view()
+        .element_ref(&anchor)
+        .absolute()
+        .pointer_events(PointerEvents::None)
+        .inline_style(place);
+    let menu = when(
+        move || props.bubble_menu.get().is_some(),
+        move || {
+            overlay()
+                .anchor_content(&anchor)
+                .placement(props.bubble_menu_placement)
+                .align(Align::Center)
+                .offset(props.bubble_menu_offset)
+                .child(props.bubble_menu.place(|slot| slot))
+        },
+    );
+    [box_.into_element(), menu.into_element()]
 }
 
 /// The blocks of container `parent`, by id.

@@ -27,16 +27,19 @@ use super::{
     node_view::{NodeView, NodeViewEvent},
     session::{EditorSession, NodeViews, ViewGeometry, ViewRequest},
 };
-use crate::rich_editor::{
-    commands::base_keymap,
-    extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
-    formats::{DomParser, slice_from_text, slice_to_text},
-    model::{Fragment, Mark, Node, SchemaSpec, Slice},
-    state::{
-        Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
-        NodeSelection, Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
+use crate::{
+    editor::layout::{self, AutoScroll},
+    rich_editor::{
+        commands::base_keymap,
+        extensions::{HistoryOptions, Keymap, KeymapOptions, history, starter},
+        formats::{DomParser, slice_from_text, slice_to_text},
+        model::{Fragment, Mark, Node, SchemaSpec, Slice},
+        state::{
+            Affinity, ClickEvent, Decoration, EditorState, EditorStateConfig, GapCursor, KeyEvent,
+            NodeSelection, Plugin, Selection, TextSelection, Transaction, TransactionOrigin,
+        },
+        transform::drop_point,
     },
-    transform::drop_point,
 };
 
 /// The sink is emptied once it holds this many bytes (and no composition
@@ -154,6 +157,10 @@ pub(crate) struct Rv {
     pub(crate) content: ElementRef,
     pub(crate) scroll_y: Signal<Points>,
     pub(crate) viewport: Signal<Size<Points>>,
+    /// The content box's height, how far the scroll view scrolls.
+    pub(crate) content_height: Signal<Points>,
+    /// A drag scrolling on its own past the viewport's edge.
+    autoscroll: Rc<RefCell<AutoScroll>>,
     /// The state's scroll request was not carried out yet.
     scroll_pending: Rc<Cell<bool>>,
     blink_task: Rc<RefCell<Option<Spawned<()>>>>,
@@ -202,6 +209,8 @@ impl Rv {
             content: element_ref(),
             scroll_y: signal(px(0.0)),
             viewport: signal(Size::default()),
+            content_height: signal(px(0.0)),
+            autoscroll: Rc::default(),
             scroll_pending: Rc::default(),
             blink_task: Rc::default(),
             base_keymap: Rc::new(base_keymap),
@@ -1411,6 +1420,12 @@ impl Rv {
 
     /// The pointer dragged to `page` (root): the selection extends there.
     pub(crate) fn drag_to(&self, page: Point<Points>) {
+        self.follow_drag_edge(page);
+        self.drag_at(page);
+    }
+
+    /// Extends the selection (or moves the drop cursor) to `page`.
+    fn drag_at(&self, page: Point<Points>) {
         let Some(drag) = self.drag.borrow().clone() else {
             return;
         };
@@ -1447,6 +1462,7 @@ impl Rv {
     /// The press ended: a drag that moves the selection drops it where
     /// the drop cursor is, or selects as a press when it never moved.
     pub(crate) fn release(&self) {
+        self.autoscroll.borrow_mut().stop();
         let drag = self.drag.borrow_mut().take();
         let target = self.drop_at.get_untracked();
         if target.is_some() {
@@ -1466,6 +1482,54 @@ impl Rv {
                     self.set_selection(click, false);
                 }
             }
+        }
+    }
+
+    /// Starts, changes or stops scrolling on its own as a drag at `page`
+    /// (in the root view) nears or leaves the viewport's top or bottom, as
+    /// the code `Editor` does, so a selection grows past what shows.
+    fn follow_drag_edge(&self, page: Point<Points>) {
+        let Some(drag) = self.drag.borrow().clone() else {
+            self.autoscroll.borrow_mut().stop();
+            return;
+        };
+        let scroll_y = self.scroll_y.get_untracked();
+        let y = page.y + drag.shift.y + (scroll_y - drag.scroll) - scroll_y;
+        let viewport = self.viewport.get_untracked();
+        let dy = layout::edge_speed(y, viewport.height, layout::AUTOSCROLL_INNER_ZONE);
+        let mut auto = self.autoscroll.borrow_mut();
+        auto.page = page;
+        if dy.0 == 0.0 {
+            auto.stop();
+            return;
+        }
+        auto.speed = Point::new(px(0.0), dy);
+        if auto.task.is_none() {
+            let rv = self.clone();
+            let period = Duration::from_millis(layout::AUTOSCROLL_PERIOD_MS);
+            auto.task = Some(set_interval(period, move || rv.autoscroll_tick()));
+        }
+    }
+
+    /// A period of scrolling while dragging: the scroll view moves by the
+    /// speed (within its content) and the selection follows the pointer.
+    fn autoscroll_tick(&self) {
+        if self.drag.borrow().is_none() {
+            self.autoscroll.borrow_mut().stop();
+            return;
+        }
+        let (page, speed) = {
+            let auto = self.autoscroll.borrow();
+            (auto.page, auto.speed)
+        };
+        let max = (self.content_height.get_untracked() - self.viewport.get_untracked().height)
+            .max(px(0.0));
+        let from = self.scroll_y.get_untracked();
+        let to = (from + speed.y).min(max).max(px(0.0));
+        if to != from {
+            self.scroll_y.set(to);
+            self.scroll.scroll_to(Point::new(px(0.0), to), false);
+            self.drag_at(page);
         }
     }
 
@@ -1571,6 +1635,18 @@ impl Rv {
         let state = self.st.borrow();
         let sel = state.selection();
         self.geo.borrow().caret_rect(sel.head(), sel.affinity())
+    }
+
+    /// The box around the selection in the content box: its text's lines,
+    /// else the caret's box.
+    pub(crate) fn selection_box(&self) -> Option<Bounds<Points>> {
+        let state = self.st.borrow();
+        let sel = state.selection();
+        let geo = self.geo.borrow();
+        geo.range_rects(sel.from(), sel.to())
+            .into_iter()
+            .reduce(|a, b| a.union(&b))
+            .or_else(|| geo.caret_rect(sel.head(), sel.affinity()))
     }
 
     /// Scrolls the head into view, once it is laid out.
