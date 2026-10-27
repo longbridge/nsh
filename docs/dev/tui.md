@@ -87,8 +87,11 @@ Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
 The single integration test binary exercises the public `TextEngine` and `AppView` seams. It uses ratatui's
 `TestBackend`, real engines and the counter example compiled by NSH's single-module compiler. It checks visible
-cells, mouse-driven changes, area ownership, resize, callbacks and idle scheduling. The host's unit
-checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
+cells, mouse-driven changes, area ownership, resize, callbacks and idle scheduling. The host's integration test
+bundles the counter into a temporary directory, loads it through `Bundle::read`, and drives `run_app` with
+crossterm events passed through `convert`. Its scripted user locates `+1` in the flushed cells, clicks it and
+waits through idle polls for the value and history to change. It needs no prebuilt CLI, existing bundle or TTY.
+The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
 cargo test -p nsh-platform-tui --features run-app --test tui

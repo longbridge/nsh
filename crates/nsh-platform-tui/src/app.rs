@@ -143,7 +143,7 @@ impl AppView {
         self.environment.window = viewport;
         let mut config = EngineConfig::new(app);
         config.viewport = viewport;
-        config.environment = self.environment.clone();
+        config.environment = self.environment;
         config.header_heights = nsh_core::NO_NATIVE_HEADER;
         config.ui_sets = self.options.ui_sets.clone();
         config.network = Some(nsh_engine::net::network());
@@ -196,7 +196,7 @@ impl AppView {
         self.options.appearance = appearance;
         self.environment.color_scheme = appearance.resolve(self.options.capabilities.background);
         if let Some(engine) = &self.surface.engine {
-            engine.control().set_environment(self.environment.clone());
+            engine.control().set_environment(self.environment);
         }
         self.appearance_changed = true;
         self.surface.wake.notify();
@@ -286,7 +286,7 @@ impl AppView {
             self.environment.window = self.size();
             if let Some(engine) = &self.surface.engine {
                 engine.control().resize(self.size());
-                engine.control().set_environment(self.environment.clone());
+                engine.control().set_environment(self.environment);
             }
         }
         let mut errors = Vec::new();

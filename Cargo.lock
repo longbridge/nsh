@@ -3501,6 +3501,7 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "log",
+ "nsh-bundler",
  "nsh-engine",
  "nsh-platform-tui",
  "ratatui-core",
