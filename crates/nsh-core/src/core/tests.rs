@@ -16281,6 +16281,40 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 8), Some(rect(140.0, 80.0, 40.0, 20.0)));
+    // A trigger with padding and a border around its label: its whole box,
+    // so the overlay's start lines up with the trigger's edge.
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        2,
+        &[
+            ("paddingLeft", Number(10.0)),
+            ("paddingRight", Number(10.0)),
+            ("borderWidth", Number(1.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        14,
+        Tag::View,
+        12,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(12)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 80, 52 × 18) below the first one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.

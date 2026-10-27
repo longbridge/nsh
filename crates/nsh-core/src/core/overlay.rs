@@ -1022,7 +1022,19 @@ impl<M: TextEngine> Core<M> {
             });
         }
         Some(match out {
-            Some((x0, y0, x1, y1)) => rect(x0, y0, x1 - x0, y1 - y0),
+            // Around the children, and the view's own padding and border
+            // around them (a trigger draws those too), within its frame.
+            Some((x0, y0, x1, y1)) => {
+                let l = self.rounded_layout(self.nodes[key as usize].layout?);
+                let (left, top) = (own.page.x.0, own.page.y.0);
+                let (right, bottom) =
+                    (left + own.frame.size.width.0, top + own.frame.size.height.0);
+                let x0 = (x0 - l.padding.left - l.border.left).max(left);
+                let y0 = (y0 - l.padding.top - l.border.top).max(top);
+                let x1 = (x1 + l.padding.right + l.border.right).min(right);
+                let y1 = (y1 + l.padding.bottom + l.border.bottom).min(bottom);
+                rect(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
+            }
             None => Bounds {
                 origin: own.page,
                 size: own.frame.size,
