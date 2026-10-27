@@ -21,7 +21,8 @@ use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    RichEditorChange, RichEditorEvent, RichEditorProps, RichEditorSelection,
+    RichEditorChange, RichEditorEvent, RichEditorFile, RichEditorPastedFiles, RichEditorProps,
+    RichEditorSelection,
     geometry::{DOC, Geometry, Hit},
     keys::{self, Move, Unit},
     node_view::{NodeView, NodeViewEvent},
@@ -1209,6 +1210,29 @@ impl Rv {
     /// `clipboard_text_parser`; then `transform_pasted`, and `handle_paste`
     /// or a replace of the selection. Into code, the plain text is pasted
     /// as it is; HTML that parses to nothing falls back to the text.
+    /// A paste: files go to the app (`onPasteFiles`), text and HTML into
+    /// the document.
+    pub(crate) fn paste_event(&self, p: &nsh_core::PasteEvent) {
+        if self.editable() && (!p.files.is_empty() || !p.uris.is_empty()) {
+            let files = p
+                .files
+                .iter()
+                .map(|f| RichEditorFile {
+                    name: f.name.clone(),
+                    mime: f.mime.clone(),
+                    data: f.data.clone(),
+                })
+                .collect();
+            self.cx
+                .emit(RichEditorEvent::PasteFiles(RichEditorPastedFiles {
+                    files,
+                    uris: p.uris.clone(),
+                }));
+            return;
+        }
+        self.paste(&p.text, &p.html);
+    }
+
     pub(crate) fn paste(&self, text: &str, html: &str) {
         if !self.editable() || (text.is_empty() && html.is_empty()) {
             return;

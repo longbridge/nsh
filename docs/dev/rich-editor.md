@@ -155,7 +155,9 @@ movement (graphemes, words, line ends, lines and pages by geometry, keeping the 
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection;
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
-`slice_from_text`), `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Copy:
+`slice_from_text`), `transform_pasted`, `handle_paste`, else a replace of the selection (origin `Paste`). Files
+(images with their bytes, `file:` URLs from a file manager) go to the app as `onPasteFiles` and insert nothing,
+as Tiptap's file handler leaves them to its `onPaste`. Copy:
 `clipboard_text_serializer`, else `slice_to_text`.
 
 The bubble menu (`bubbleMenu`, a slot): an empty box over the selection's lines (`Rv::selection_box`), inside the
