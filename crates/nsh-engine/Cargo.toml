@@ -13,6 +13,8 @@ workspace = true
 
 [features]
 default = ["js"]
+# A host supplied by the browser; it executes source outside WebAssembly.
+browser = []
 # JS apps: the QuickJS VM, source maps, signed packages.
 js = ["dep:nsh-js", "dep:nsh-package", "dep:oxc_sourcemap"]
 # `net`: the HTTP stack behind `fetch` on ureq, which the Windows, Linux and

@@ -19555,3 +19555,291 @@ fn late_named_component_gets_bindings() {
     let bindings = at(&|i| matches!(i, MountItem::AnimationBindings { id: 2, .. }));
     assert!(component < names && names < bindings);
 }
+
+mod remount {
+    use super::*;
+
+    #[test]
+    fn resends_native_component_slots_before_their_bindings() {
+        let mut c = core();
+        native_with_animated_prop(&mut c, Some(7));
+        let first = c.commit().unwrap();
+        c.remount();
+        let again = c.commit().unwrap();
+        assert_eq!(component_bindings_of(&again), component_bindings_of(&first));
+        assert_eq!(animation_bindings_of(&again), animation_bindings_of(&first));
+        let slots = again
+            .items
+            .iter()
+            .position(|i| matches!(i, MountItem::ComponentPropSlots { id: 2, .. }))
+            .unwrap();
+        let bindings = again
+            .items
+            .iter()
+            .position(|i| matches!(i, MountItem::AnimationBindings { id: 2, .. }))
+            .unwrap();
+        assert!(slots < bindings);
+        assert!(
+            !again
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Create { .. } | MountItem::Component { .. }))
+        );
+        assert!(c.commit().is_none());
+    }
+
+    fn assert_sticky_replayed(c: &mut Core<FakeEngine>, first: &MountBatch, view: NodeId) {
+        let expected = sticky_of(first, view).expect("initial sticky ranges");
+        assert!(!expected.is_empty());
+        assert!(c.commit().is_none());
+        c.remount();
+        let batch = c.commit().unwrap();
+        assert_eq!(sticky_of(&batch, view), Some(expected));
+        assert!(
+            !batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::Create { .. } | MountItem::Insert { .. } | MountItem::Remove { .. }
+            )),
+            "existing sticky views must not be restacked: {:?}",
+            batch.items
+        );
+        assert!(c.commit().is_none());
+    }
+
+    #[test]
+    fn replays_css_sticky_ranges_even_when_layout_is_unchanged() {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(400.0))]),
+        ];
+        ops.extend(child_view(3, 2, 100.0, &[]));
+        ops.extend(child_view(
+            4,
+            2,
+            40.0,
+            &[
+                ("position", StyleValue::Str("sticky")),
+                ("top", StyleValue::Number(10.0)),
+            ],
+        ));
+        ops.extend(child_view(5, 2, 2000.0, &[]));
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        apply(&mut c, ops);
+        let first = c.commit().unwrap();
+        assert_sticky_replayed(&mut c, &first, 2);
+    }
+
+    #[test]
+    fn replays_sticky_rows_for_own_and_parent_viewports() {
+        for parent in [false, true] {
+            let mut c = core();
+            let list = if parent {
+                page(&mut c, 100.0, &[20]);
+                4
+            } else {
+                apply(
+                    &mut c,
+                    vec![
+                        Op::Create {
+                            id: 2,
+                            tag: Tag::List,
+                        },
+                        style_op(2, &[("height", StyleValue::Number(400.0))]),
+                        Op::SetProp {
+                            id: 2,
+                            prop: Prop::EstimatedItemSize(px(50.0)),
+                        },
+                        Op::SetProp {
+                            id: 2,
+                            prop: Prop::Count(20),
+                        },
+                        Op::Insert {
+                            parent: ROOT_ID,
+                            child: 2,
+                            before: None,
+                        },
+                    ],
+                );
+                2
+            };
+            apply(
+                &mut c,
+                vec![
+                    Op::SetProp {
+                        id: list,
+                        prop: Prop::StickyIndices(vec![0, 10]),
+                    },
+                    Op::Animation(AnimationOp::CreateValue {
+                        node: 2,
+                        value: 56.0,
+                    }),
+                    Op::SetProp {
+                        id: list,
+                        prop: Prop::StickyOffsetNode(Some(2)),
+                    },
+                ],
+            );
+            c.commit();
+            let (mut next_id, mut cells) = (100, Vec::new());
+            render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+            let first = c.commit().unwrap();
+            let offsets = sticky_offsets_of(&first, 2).unwrap();
+            assert_sticky_replayed(&mut c, &first, 2);
+            c.remount();
+            let again = c.commit().unwrap();
+            assert_eq!(sticky_offsets_of(&again, 2), Some(offsets));
+            if parent {
+                assert_eq!(sticky_of(&again, list), None);
+            }
+        }
+    }
+
+    #[test]
+    fn sends_every_view_again_without_creating_it() {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                Op::CreateText {
+                    id: 4,
+                    text: "hello".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(
+                    2,
+                    &[
+                        ("padding", StyleValue::Number(10.0)),
+                        ("borderRadius", StyleValue::Number(8.0)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let first = c.commit().unwrap();
+        assert!(c.commit().is_none());
+
+        c.remount();
+        let again = c.commit().expect("a remount sends a batch");
+        assert!(
+            !again.items.iter().any(|i| matches!(
+                i,
+                MountItem::Create { .. } | MountItem::Insert { .. } | MountItem::Remove { .. }
+            )),
+            "the views stay: {:?}",
+            again.items
+        );
+        assert_eq!(frame_of(&again, 2), frame_of(&first, 2));
+        assert_eq!(frame_of(&again, 3), frame_of(&first, 3));
+        assert!(
+            again
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::ViewStyle { id: 2, .. }))
+        );
+        assert!(
+            again
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Text { id: 3, .. }))
+        );
+        assert!(c.commit().is_none(), "nothing left to send");
+    }
+
+    /// A right to left horizontal scroll view the user scrolled stays where
+    /// it is: it gets its content size again, never the scroll to its right
+    /// end a new one gets.
+    #[test]
+    fn keeps_a_scrolled_right_to_left_scroll_view_where_it_is() {
+        let mut c = core();
+        let n = |v: f32| StyleValue::Number(v);
+        let mut ops = vec![
+            Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::LayoutDirection(true),
+            },
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Horizontal(true),
+            },
+            style_op(2, &[("width", n(150.0)), ("height", n(50.0))]),
+        ];
+        for id in [3, 4] {
+            ops.push(Op::Create { id, tag: Tag::View });
+            ops.push(style_op(id, &[("width", n(100.0)), ("height", n(50.0))]));
+            ops.push(Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            });
+        }
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        apply(&mut c, ops);
+        let first = c.commit().unwrap();
+        let scrolls = |batch: &MountBatch| {
+            batch
+                .items
+                .iter()
+                .filter(|i| {
+                    matches!(
+                        i,
+                        MountItem::Command { id: 2, .. } | MountItem::ScrollBy { id: 2, .. }
+                    )
+                })
+                .count()
+        };
+        // A new one starts at its right end.
+        assert_eq!(scrolls(&first), 1);
+        // The user scrolls it to its left end.
+        c.set_scroll_offset(2, point(px(0.0), px(0.0)), u32::MAX);
+        c.remount();
+        let again = c.commit().expect("a remount sends a batch");
+        let content: Vec<_> = again
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::ScrollContent { id: 2, size } => Some(*size),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(content, [size_pt(200.0, 50.0)]);
+        assert_eq!(scrolls(&again), 0, "{:?}", again.items);
+        assert!(c.commit().is_none(), "nothing left to send");
+    }
+}

@@ -237,10 +237,8 @@ pub(crate) struct WebRuntime {
 /// Which web runtime: the two differ in QuickJS only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WebKind {
-    /// Published apps' (`nsh package --target web`): without QuickJS'
-    /// parser (feature `bytecode-only`), it runs the bytecode the CLI
-    /// compiled. `nsh.wasm`.
-    Release,
+    /// Trusted standalone apps, executed by browser JavaScript.
+    Browser,
     /// The development host's (`nsh dev`, `nsh run --target web`): it runs
     /// JS source and hot updates. `nsh-dev.wasm`.
     Dev,
@@ -251,7 +249,7 @@ impl WebKind {
     /// next to the build's output.
     pub(crate) fn file(self) -> &'static str {
         match self {
-            WebKind::Release => "nsh.wasm",
+            WebKind::Browser => "nsh-browser.wasm",
             WebKind::Dev => "nsh-dev.wasm",
         }
     }
@@ -311,7 +309,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
         .join(WASM)
         .join("web");
     let features: &[&str] = match kind {
-        WebKind::Release => &["--features", "bytecode-only"],
+        WebKind::Browser => &["--no-default-features", "--features", "browser"],
         WebKind::Dev => &["--features", "dev"],
     };
     if build {
@@ -511,6 +509,24 @@ fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<Pat
         platform.dir(),
         path.display(),
     )
+}
+
+/// The browser facade ships with the runtime, including registry-built apps.
+pub(crate) fn copy_browser_host(source: &Path, target: &Path) -> anyhow::Result<()> {
+    let from = source.join("browser");
+    let to = target.join("browser");
+    fs::create_dir_all(&to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

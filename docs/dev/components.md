@@ -835,6 +835,17 @@ what changed.
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`element/back.rs`).
+- Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and
+  `keys::bind_while(focused, keys, handler)`, which binds them in an effect that returns early while it is false,
+  so the bindings of the global keymap come and go with the focus (`DataTable` does the same by hand).
+- Roving focus (`roving.rs`, WAI-ARIA's tab list and radio group): `Tabs` and `RadioGroup` provide a `Roving` through
+  context, and each `Tab` / `Radio` under one registers its ref, its current state (`selected`, `checked`), its
+  `disabled` and what moving to it does (a press, `Change(true)`); an item outside a group stays a stop of its own.
+  Only the stop is `focusable`: the item the focus is on, else the current one, else the first enabled, so Tab
+  passes the group in one step. While an item has the focus the group binds its arrows (and Home / End for tabs);
+  a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
+  `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates it.
+  Items are in the order they registered: the order the app's children were made.
 
 ## The JS face and the declarations
 

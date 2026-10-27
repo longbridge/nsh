@@ -196,9 +196,10 @@ jobs:
           ./target/debug/nsh test examples/gallery-rs/shortcuts.test.tsx --target web
       - name: Publish a TSX app with a Rust crate for the web
         run: |
-          # A TSX entry and the app's crate: QuickJS runs App.tsx, the
-          # crate's set is compiled into the app's runtime.
+          # A TSX entry runs in the browser; the app's Rust UI set is
+          # compiled into its browser-only runtime.
           ./target/debug/nsh package examples/rust-exports --target web -o target/rust-exports-web
           site="target/rust-exports-web/Rust Exports"
-          ls "$site"/app.*.nshc
+          ls "$site"/app.*.js
+          node crates/nsh-platform-web/web/browser/package-size.mjs "$site" --require-browser
           grep -q rust-exports/native "$site"/nsh.*.wasm

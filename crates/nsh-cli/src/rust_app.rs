@@ -1280,6 +1280,7 @@ opt-level = 3
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [features]\n# The runtime of published apps: bytecode only (nsh-platform-web).\n\
                  bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\
+                 browser = [\"nsh-platform-web/browser\"]\n\
                  # The development host's: what `nsh test --target web` asks about.\n\
                  dev = [\"nsh-platform-web/dev\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
@@ -1288,7 +1289,8 @@ opt-level = 3
                 self.web_lib(),
                 src("nsh-core"),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                src("nsh-platform-web"),
+                self.nsh
+                    .dep("nsh-platform-web", ", default-features = false"),
             ),
         )?;
         // nsh's `.cargo/config.toml` gives its own web runtime this stack
@@ -1432,7 +1434,7 @@ opt-level = 3
         // nor hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Release => &["--features", "bytecode-only"],
+            crate::runtime::WebKind::Browser => &["--features", "browser"],
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -1460,6 +1462,10 @@ opt-level = 3
         runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
         if self.nsh == Nsh::Registry {
             let js = self.registry_crate("nsh-platform-web")?.join("web/nsh.js");
+            crate::runtime::copy_browser_host(
+                js.parent().context("web runtime has no parent")?,
+                &out,
+            )?;
             fs::copy(&js, &runtime.js)
                 .with_context(|| format!("copy {} to {}", js.display(), runtime.js.display()))?;
         }
@@ -2178,7 +2184,7 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
     match kind {
-        crate::runtime::WebKind::Release => "web",
+        crate::runtime::WebKind::Browser => "web",
         crate::runtime::WebKind::Dev => "web-dev",
     }
 }
@@ -2972,7 +2978,7 @@ mod tests {
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
         app.write_workspace().unwrap();
         let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
-        assert_eq!(super::web_profile(WebKind::Release), "web");
+        assert_eq!(super::web_profile(WebKind::Browser), "web");
         let web = "[profile.web]
 inherits = \"release\"
 opt-level = \"z\"
