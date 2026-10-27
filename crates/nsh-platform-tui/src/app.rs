@@ -417,12 +417,14 @@ impl AppView {
                 } else {
                     self.pointer.handle(
                         mouse,
-                        self.area,
-                        self.options.cells,
-                        &self.hits,
-                        &self.geometry,
-                        &mut self.tree,
-                        &engine.control(),
+                        crate::input::PointerContext {
+                            area: self.area,
+                            cells: self.options.cells,
+                            hits: &self.hits,
+                            geometry: &self.geometry,
+                            tree: &mut self.tree,
+                            control: &engine.control(),
+                        },
                     )
                 };
                 if handled == Handled::Yes {

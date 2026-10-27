@@ -2,7 +2,11 @@ use nsh_core::{EventKind, EventPayload, NodeId, Point, Points, PressEvent, input
 use nsh_engine::EngineControl;
 use ratatui_core::layout::{Position, Rect};
 
-use crate::{CellSize, mount::Mounter, render::Hit};
+use crate::{
+    CellSize,
+    mount::Mounter,
+    render::{Geometry, Hit},
+};
 
 pub use nsh_core::keymap::Modifiers;
 
@@ -89,6 +93,15 @@ pub enum Input {
     Paste(String),
     /// The embedding application gave or removed keyboard focus.
     Focus(bool),
+}
+
+pub(crate) struct PointerContext<'a> {
+    pub(crate) area: Rect,
+    pub(crate) cells: CellSize,
+    pub(crate) hits: &'a [Hit],
+    pub(crate) geometry: &'a [Geometry],
+    pub(crate) tree: &'a mut Mounter,
+    pub(crate) control: &'a EngineControl,
 }
 
 #[derive(Default)]
@@ -255,16 +268,15 @@ impl Pointer {
         }
     }
 
-    pub(crate) fn handle(
-        &mut self,
-        mouse: MouseInput,
-        area: Rect,
-        cells: CellSize,
-        hits: &[Hit],
-        geometry: &[crate::render::Geometry],
-        tree: &mut Mounter,
-        control: &EngineControl,
-    ) -> Handled {
+    pub(crate) fn handle(&mut self, mouse: MouseInput, cx: PointerContext<'_>) -> Handled {
+        let PointerContext {
+            area,
+            cells,
+            hits,
+            geometry,
+            tree,
+            control,
+        } = cx;
         self.last = Some(mouse);
         self.rehover(area, hits, tree, control);
         if matches!(mouse.kind, MouseKind::Move) {
