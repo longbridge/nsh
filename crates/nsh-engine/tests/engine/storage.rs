@@ -5,9 +5,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
-    ApproxTextEngine, MountBatch, MountItem, Size,
-    storage::Storage,
-    ui::{Root, prelude::*},
+    ApproxTextEngine, MountBatch, MountItem, Size, element::Root, prelude::*, storage::Storage,
 };
 use nsh_engine::{App, Bundle, Engine, EngineConfig, Environment, FileStorage};
 
@@ -73,11 +71,14 @@ fn launch(
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: data_dir.map(Into::into),
+        cache: nsh_engine::CacheOptions::off(),
         storage: storage.map(|data| FileStorage::open(data) as _),
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -103,7 +104,7 @@ fn shown(rx: &Receiver<MountBatch>, prefix: &str) -> String {
 }
 
 const COUNTER: &str = r#"import { mount, signal, Text } from "nsh";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 const shown = signal("waiting");
 setTimeout(async () => {
@@ -176,11 +177,14 @@ fn rust_shares_the_entries_of_js() {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: Some(FileStorage::open(&data)),
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
@@ -191,7 +195,7 @@ fn rust_shares_the_entries_of_js() {
 }
 
 const EDGES: &str = r#"import { mount, signal, Text } from "nsh";
-import { Storage } from "nsh/storage";
+import { Storage } from "nsh";
 
 const shown = signal("waiting");
 const outcomes: string[] = [];
@@ -270,11 +274,14 @@ fn rust_edits_the_storage() {
         runtime: None,
         // In memory: the platform gave none.
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
@@ -342,11 +349,14 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: Some(root.clone()),
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust wrote");

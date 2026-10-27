@@ -1,8 +1,8 @@
 //! The app's Rust UI: its root component, which `nsh run`, `nsh package`
 //! and `cargo run` mount.
 
-use nsh_core::ui::prelude::*;
-use nsh_base::{safe_area_view, theme};
+use nsh_core::prelude::*;
+use nsh_base::theme;
 
 /// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
 /// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").
@@ -20,8 +20,9 @@ pub fn App() -> impl IntoElement {
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
         .child(
-            safe_area_view()
+            view()
                 .flex_1()
+                .p_safe_area()
                 .child(
                     view()
                         .flex_1()

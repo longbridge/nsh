@@ -17,6 +17,7 @@ fn test_run(filter: Option<&str>) -> TestRun {
         filter: filter.map(str::to_owned),
         trace: None,
         host: None,
+        page_host: None,
     }
 }
 
@@ -85,7 +86,7 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
     std::fs::create_dir_all(&root).unwrap();
     let expected = root.join("com.example.trace-exit");
     let source = format!(
-        "import process from 'process'; import {{platform}} from 'nsh/device';\n\
+        "import process from 'process'; import {{platform}} from 'nsh';\n\
          if (platform.os !== 'macos') throw new Error('trace OS was lost');\n\
          if (process.dataDir !== {}) throw new Error('trace data directory was lost: ' + process.dataDir);\n\
          process.exit(0);",
@@ -124,7 +125,7 @@ fn headless_runs_play_the_platform_s_part() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 8);
+    assert_eq!(results.len(), 10);
 }
 
 #[test]
@@ -232,10 +233,50 @@ fn a_manual_clock_moves_as_the_test_says() {
 }
 
 #[test]
+fn the_page_s_host_answers_the_apps_tests_open() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/host");
+    let run = |module: Option<&str>, file: &str| {
+        let run = TestRun {
+            page_host: module.map(|m| dir.join(m)),
+            ..test_run(None)
+        };
+        let results = run_file(&run, &dir.join(file), &mut |_| {}).unwrap();
+        let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+        assert!(failed.is_empty(), "{file}: {failed:#?}");
+        results.len()
+    };
+    assert_eq!(run(Some("host.js"), "Host.test.tsx"), 7);
+    assert_eq!(run(None, "NoHost.test.tsx"), 1);
+    assert_eq!(run(Some("none.js"), "Broken.test.tsx"), 1);
+}
+
+#[test]
 fn apps_run_under_the_capabilities_their_nsh_json_declares() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/capabilities");
     let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn a_test_plays_the_embedding_app() {
+    let run = TestRun {
+        ui_sets: vec![nsh_base::registry()],
+        compile: compiler(vec![nsh_base::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/embedding");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 4);
+}
+
+#[test]
+fn span_styles_follow_id_updates_and_reject_empty_spans() {
+    let file = todo().parent().unwrap().join("queries/Spans.test.tsx");
+    let results = run_file(&test_run(None), &file, &mut |_| {}).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].failure.is_none(), "{:?}", results[0]);
 }

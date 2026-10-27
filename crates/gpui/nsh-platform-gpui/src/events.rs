@@ -340,6 +340,7 @@ pub(crate) fn install(
         if phase != DispatchPhase::Bubble {
             return;
         }
+        crate::chrome::key_pressed(&s);
         let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
             return;
         };
@@ -382,7 +383,15 @@ pub(crate) fn install(
         }
         crate::rt::flush(cx);
     });
-    // The keymap's held key (see `crate::keymap::forget_held`).
+    // The keymap's held key (see `crate::keymap::forget_held`), Alt alone
+    // showing a menu bar that hides itself, and the hovered views told of
+    // the new modifiers.
     let s = surface.clone();
-    window.on_modifiers_changed(move |_, _, _| crate::keymap::forget_held(&s));
+    window.on_modifiers_changed(move |e, _, cx| {
+        crate::keymap::forget_held(&s);
+        let modifiers = crate::keys::modifiers(&e.modifiers);
+        crate::chrome::modifiers_changed(&s, &modifiers);
+        crate::input::modifiers_changed(&s, modifiers);
+        crate::rt::flush(cx);
+    });
 }

@@ -9,7 +9,7 @@
 
 use std::{cell::RefCell, ffi::c_void, ptr, rc::Rc};
 
-use nsh_core::ui::Registry;
+use nsh_core::element::Registry;
 use rquickjs::{Ctx, qjs};
 use rustc_hash::FxHashMap;
 
@@ -33,6 +33,8 @@ pub(crate) struct State {
     pub(crate) classes: crate::classes::Classes,
     pub(crate) hot: crate::hot::Hot,
     pub(crate) keymap: crate::keymap::Keymap,
+    /// `nsh/host`: listeners, kept events and calls waiting for answers.
+    pub(crate) host_channel: crate::host_channel::HostChannel,
     pub(crate) chunks: crate::chunks::Chunks,
     /// The native modules the context serves (the loader reads it).
     pub(crate) modules: ModuleTable,
@@ -64,7 +66,7 @@ pub(crate) fn install(
     cx: &Ctx<'_>,
     shared: Rc<Shared>,
     ui_sets: &[Registry],
-    posts: nsh_core::ui::Posts,
+    posts: nsh_core::element::Posts,
 ) {
     let raw = cx.as_raw().as_ptr();
     // SAFETY: registering classes on the context's runtime; the state is
@@ -88,6 +90,7 @@ pub(crate) fn install(
             classes: crate::classes::Classes::new(posts),
             hot: Default::default(),
             keymap: Default::default(),
+            host_channel: Default::default(),
             chunks: Default::default(),
             modules: ModuleTable::new(ui_sets),
         }));
@@ -124,6 +127,7 @@ pub(crate) fn uninstall(cx: &Ctx<'_>) {
         state.hot.free_all();
         state.chunks.free_all();
         state.keymap.free_all();
+        state.host_channel.free_all();
         state.web.free_all();
         state.canvases.free_all(raw);
         state.animations.free_all(raw);

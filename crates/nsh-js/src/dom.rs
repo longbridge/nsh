@@ -107,7 +107,7 @@ struct NodeData {
     pan_gated: bool,
     /// Values of props that may hold native animation nodes (`style`,
     /// `pan`, ...), kept alive with the view (owned).
-    retained: Vec<(&'static str, JsValue)>,
+    retained: Vec<(std::borrow::Cow<'static, str>, JsValue)>,
     /// A `<Scroll>`'s content container (`contentStyle` /
     /// `contentClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
@@ -118,6 +118,9 @@ struct NodeData {
     places: bool,
     /// The node's object (not owned: the data goes with it).
     object: JsValue,
+    /// The owner it was made under (`reactive::owner_handle`): its
+    /// listeners' failures go to that owner's error boundary.
+    owner: (u32, u32),
 }
 
 /// The renderer of `cx`.
@@ -332,13 +335,15 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         "focus",
         0,
         decl!("(): void"),
-        decl!("Focuses an `<Input>` (shows the keyboard)."),
+        decl!(
+            "Focuses an `<Input>` (shows the keyboard), or gives a view that takes presses the keyboard focus where Tab stops at it (macOS, the web), as Tab does: `focus:` styles, `onFocus`. A view `focusable={false}`, disabled or hidden stays unfocused."
+        ),
     ),
     (
         "blur",
         0,
         decl!("(): void"),
-        decl!("Unfocuses an `<Input>`."),
+        decl!("Unfocuses an `<Input>`, or takes the keyboard focus off a view that takes presses."),
     ),
     (
         "setSelection",
@@ -351,7 +356,7 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         2,
         decl!("(name: string, args?: unknown): void"),
         decl!(
-            "Calls command `name` of a registered native component (`nsh/native`) with `args` (any JSON value)."
+            "Calls command `name` of a registered native component (`nativeComponent` of `nsh`) with `args` (any JSON value)."
         ),
     ),
     (
@@ -558,6 +563,7 @@ fn new_node(cx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> JsV
         content: DETACHED,
         places: false,
         object: UNDEFINED,
+        owner: reactive::owner_handle(cx),
     }));
     // SAFETY: a registered class; the opaque is the boxed data, freed by
     // the finalizer.
@@ -609,11 +615,35 @@ pub(crate) fn node_id(cx: *mut JsContext, v: JsValue) -> Option<NodeId> {
 pub(crate) fn retain(cx: *mut JsContext, node: JsValue, key: &'static str, value: JsValue) {
     let p = node_ptr(cx, node);
     if !p.is_null() {
-        retain_in(cx, p, key, value);
+        retain_in(cx, p, key.into(), value);
     }
 }
 
-fn retain_in(cx: *mut JsContext, p: *mut NodeData, key: &'static str, value: JsValue) {
+/// Whether the value the node keeps under `key` is an animated value.
+fn retains_animated(cx: *mut JsContext, p: *mut NodeData, key: &str) -> bool {
+    // SAFETY: live node data; the reader gets its own reference, so no
+    // borrow is held while it reads (a getter may run JS).
+    let kept = unsafe {
+        (*p).retained
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| qjs::JS_DupValue(cx, *v))
+    };
+    let Some(kept) = kept else {
+        return false;
+    };
+    // SAFETY: a context reference for the reader, which owns `kept`.
+    let kept =
+        unsafe { Value::from_raw(Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)), kept) };
+    crate::protocol::animated_value(&kept).is_some()
+}
+
+fn retain_in(
+    cx: *mut JsContext,
+    p: *mut NodeData,
+    key: std::borrow::Cow<'static, str>,
+    value: JsValue,
+) {
     // SAFETY: live node data; the node owns a dup; the old one is freed
     // after the borrow ends (its finalizer may run).
     let old = unsafe {
@@ -1074,7 +1104,7 @@ fn part_style(
     cx: *mut JsContext,
     name: &str,
     value: JsValue,
-) -> Result<Option<std::sync::Arc<nsh_core::StylePatch>>, JsValue> {
+) -> Result<Option<std::rc::Rc<nsh_core::StylePatch>>, JsValue> {
     // SAFETY: a context reference for the decoder, which reads a dup.
     let js_cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
     let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
@@ -1082,7 +1112,7 @@ fn part_style(
     let patch = crate::protocol::style_patch(&v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
     match patch {
-        Ok(patch) => Ok((!patch.is_empty()).then(|| std::sync::Arc::new(patch))),
+        Ok(patch) => Ok((!patch.is_empty()).then(|| std::rc::Rc::new(patch))),
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => Err(throw_type(cx, &format!("nsh: prop `{name}`: {e}"))),
     }
@@ -1268,13 +1298,25 @@ fn set_prop(
         "pinch",
         "rotation",
         "scrollValue",
+        "pullValue",
+        "stickyHeaderOffset",
         "tooltip",
     ]
     .iter()
     .find(|k| **k == name)
     {
-        retain_in(cx, p, key, value);
+        retain_in(cx, p, key.into(), value);
     }
+    // A native component's prop may be an animated value (an object): kept
+    // under its own name until the prop changes or the view goes. Whether
+    // the value it replaces was one is read from what the node kept, so the
+    // binding goes whoever sets the prop (`nsh:rt`'s `prop` passes no
+    // previous value).
+    let was_bound = name.starts_with('$') && {
+        let bound = retains_animated(cx, p, name);
+        retain_in(cx, p, name.to_owned().into(), value);
+        bound
+    };
     // SAFETY: a context reference for the decoder, which reads `value`.
     let js_cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
     let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
@@ -1287,6 +1329,22 @@ fn set_prop(
     if let Ok(Some(Op::SetProp { prop, .. })) = &mut decoded {
         // A `blob:` URL's bytes are in this VM: they go with the source.
         crate::web::blob::resolve_image_source(cx, prop);
+    }
+    // A native component's prop that was an animated value and is not any
+    // more is unbound first (its new value is sent, not kept for later).
+    if was_bound
+        && let Ok(Some(Op::SetProp {
+            prop: nsh_core::Prop::ComponentProp(key, _),
+            ..
+        })) = &decoded
+    {
+        dom(cx).push(
+            cx,
+            Op::SetProp {
+                id,
+                prop: nsh_core::Prop::ComponentPropBinding(key.clone(), None),
+            },
+        )?;
     }
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),
@@ -2033,12 +2091,16 @@ fn new_array(cx: *mut JsContext, mut values: Vec<JsValue>) -> JsValue {
     unsafe { qjs::JS_NewArrayFrom(cx, values.len() as c_int, values.as_mut_ptr()) }
 }
 
-/// A run of a dynamic insert of a function: calls it, and the functions it
-/// returns, tracked by this effect. An array holding functions gets an
-/// effect of its own ([`insert_items`]), made again only when this one
-/// runs again: a component's `children` getter makes every node of the
-/// array, and a change in one of its functions (an `<If>`, a ternary)
-/// must run only that one, not the getter.
+/// A run of a dynamic insert of a function: calls it, tracked by this
+/// effect. A function it returns (what a component whose root is an
+/// `<If>` returns) gets a render effect of its own under this one, as
+/// Solid's `insertExpression` does: a change in what that function reads
+/// runs only it, never this one, which would call the expression again
+/// and make the component again. An array holding functions gets an
+/// effect of its own likewise ([`insert_items`]): a component's
+/// `children` getter makes every node of the array, and a change in one
+/// of its functions (an `<If>`, a ternary) must run only that one, not
+/// the getter.
 unsafe extern "C" fn insert_run(
     cx: *mut JsContext,
     _this: JsValue,
@@ -2050,21 +2112,22 @@ unsafe extern "C" fn insert_run(
     // SAFETY: four data values (`insert_effect`).
     let (parent, marker, value, shown) =
         unsafe { (*data, *data.add(1), *data.add(2), *data.add(3)) };
-    // SAFETY: a dup of a live value; each call's result replaces it.
+    // SAFETY: a dup of a live value; the call's result replaces it.
     let mut value = unsafe { qjs::JS_DupValue(cx, value) };
-    let mut depth = 0;
-    while unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null() {
-        if depth > MAX_DEPTH {
-            unsafe { qjs::JS_FreeValue(cx, value) };
-            return throw_type(cx, "nsh: children nested too deeply");
-        }
+    if unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null() {
         let r = unsafe { qjs::JS_Call(cx, value, UNDEFINED, 0, ptr::null_mut()) };
         unsafe { qjs::JS_FreeValue(cx, value) };
         if unsafe { qjs::JS_IsException(r) } {
             return r;
         }
         value = r;
-        depth += 1;
+        if unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null() {
+            // The nested effect shows what the function gives, in this
+            // insert's place; it goes when this effect runs again.
+            let nested = insert_effect(cx, insert_run, [parent, marker, value, shown]);
+            unsafe { qjs::JS_FreeValue(cx, value) };
+            return nested.err().unwrap_or(UNDEFINED);
+        }
     }
     let r = if unsafe { qjs::JS_IsArray(value) } && is_dynamic(cx, value, 0) {
         insert_items(cx, parent, marker, value, shown)
@@ -3005,6 +3068,15 @@ unsafe extern "C" fn setup(
             return e;
         }
     }
+    // The core makes the theme's tokens when the op above reaches it, after
+    // this turn; the first render, in this turn, reads them already.
+    let theme = arg(argc, argv, 1);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsString(theme) }
+        && let Some(json) = string_arg(cx, theme)
+    {
+        crate::env::take_theme(cx, &json);
+    }
     // Checked by the bundler; a hand-made bundle's wrong value is ignored.
     let status_bar = string_arg(cx, arg(argc, argv, 3))
         .and_then(|json| serde_json::from_str(&json).ok())
@@ -3200,6 +3272,158 @@ unsafe extern "C" fn each_component(
         }
         r
     }
+}
+
+/// Hands the pending exception of a listener of node `id` to the error
+/// boundary the node was made under: whether one caught it (else it stays
+/// pending, as before).
+pub(crate) fn catch_listener_failure(cx: *mut JsContext, id: NodeId) -> bool {
+    let p = dom(cx).by_id(id);
+    if p.is_null() {
+        return false;
+    }
+    // SAFETY: live node data.
+    let owner = unsafe { (*p).owner };
+    reactive::catch_pending(cx, owner)
+}
+
+// --- Error boundaries -------------------------------------------------------------
+
+/// `ErrorBoundary({ fallback, children })`: its children, or its fallback
+/// once something under them failed (a component's body, a binding, an
+/// effect, a listener). `fallback(error, reset)` gets the thrown value and
+/// what renders the children again; a fallback that is not a function of
+/// arguments is shown as is. What fails in the fallback goes to the
+/// boundary above.
+///
+/// A memo shows one or the other, reading the boundary's signal (`[error]`
+/// while failed): the children render in a memo of their own under it,
+/// whose context names the signal (`reactive::boundary_key`), so failures
+/// under it reach the boundary; the outer memo running again disposes it.
+pub(crate) unsafe extern "C" fn error_boundary(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let failed = reactive::new_signal(cx, UNDEFINED);
+    let mut data = [failed, arg(argc, argv, 0)];
+    // SAFETY: the function keeps dups of `data`; ours is freed.
+    let func =
+        unsafe { qjs::JS_NewCFunctionData(cx, Some(boundary_run), 0, 0, 2, data.as_mut_ptr()) };
+    unsafe { qjs::JS_FreeValue(cx, failed) };
+    if unsafe { qjs::JS_IsException(func) } {
+        return func;
+    }
+    let view = reactive::memo(cx, func, false);
+    reactive::finish_value(cx, view)
+}
+
+/// A run of an `ErrorBoundary`'s memo: the fallback while its signal holds
+/// an error, else a memo rendering the children.
+unsafe extern "C" fn boundary_run(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (`error_boundary`); values got are freed.
+    let (failed, props) = unsafe { (*data, *data.add(1)) };
+    let state = unsafe { qjs::JS_Call(cx, failed, UNDEFINED, 0, ptr::null_mut()) };
+    if unsafe { qjs::JS_IsException(state) } {
+        return state;
+    }
+    // SAFETY: inline checks; values got are owned.
+    unsafe {
+        if !qjs::JS_IsArray(state) {
+            qjs::JS_FreeValue(cx, state);
+            let mut fdata = [failed, props];
+            let func =
+                qjs::JS_NewCFunctionData(cx, Some(boundary_view), 0, 0, 2, fdata.as_mut_ptr());
+            if qjs::JS_IsException(func) {
+                return func;
+            }
+            return reactive::memo(cx, func, false);
+        }
+        let error = qjs::JS_GetPropertyUint32(cx, state, 0);
+        qjs::JS_FreeValue(cx, state);
+        reactive::untracked_with(cx, || {
+            let fallback = qjs::JS_GetPropertyStr(cx, props, c"fallback".as_ptr());
+            if !qjs::JS_IsFunction(cx, fallback) || !node_ptr(cx, fallback).is_null() {
+                qjs::JS_FreeValue(cx, error);
+                return fallback;
+            }
+            let mut length = 0i32;
+            let l = qjs::JS_GetPropertyStr(cx, fallback, c"length".as_ptr());
+            qjs::JS_ToInt32(cx, &mut length, l);
+            qjs::JS_FreeValue(cx, l);
+            if length == 0 {
+                // An element to show, as children are.
+                qjs::JS_FreeValue(cx, error);
+                return fallback;
+            }
+            let mut rdata = [failed];
+            let reset =
+                qjs::JS_NewCFunctionData(cx, Some(boundary_reset), 0, 0, 1, rdata.as_mut_ptr());
+            let mut args = [error, reset];
+            let r = qjs::JS_Call(cx, fallback, UNDEFINED, 2, args.as_mut_ptr());
+            for v in [fallback, error, reset] {
+                qjs::JS_FreeValue(cx, v);
+            }
+            r
+        })
+    }
+}
+
+/// The memo of an `ErrorBoundary`'s children: names the boundary in its
+/// context, then renders them (untracked). A function among them gets a
+/// memo of its own here, so that it runs under the boundary too.
+unsafe extern "C" fn boundary_view(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (`boundary_run`); values got are owned.
+    let (failed, props) = unsafe { (*data, *data.add(1)) };
+    reactive::provide(cx, reactive::boundary_key(cx), failed);
+    reactive::untracked_with(cx, || unsafe {
+        let children = qjs::JS_GetPropertyStr(cx, props, c"children".as_ptr());
+        if qjs::JS_IsException(children) {
+            // Caught here, not as the memo's failure: a failed memo runs
+            // again when it is read, and the children would render twice.
+            reactive::catch_pending_at(cx, failed);
+            return UNDEFINED;
+        }
+        if qjs::JS_IsFunction(cx, children) && node_ptr(cx, children).is_null() {
+            return item_memo(cx, children);
+        }
+        match memoize_run(cx, children) {
+            Some(memos) => {
+                qjs::JS_FreeValue(cx, children);
+                memos
+            }
+            None => children,
+        }
+    })
+}
+
+/// An `ErrorBoundary`'s `reset`: renders its children again.
+unsafe extern "C" fn boundary_reset(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`boundary_run`).
+    reactive::set_signal(cx, unsafe { *data }, UNDEFINED);
+    reactive::finish_value(cx, UNDEFINED)
 }
 
 /// The globals of the renderer: `If` and `Each`, the control flow tags no
@@ -3491,6 +3715,123 @@ mod tests {
         );
     }
 
+    /// The texts made since the last call.
+    fn texts(host: &Host) -> Vec<String> {
+        texts_and_element(host).0
+    }
+
+    /// The texts made since the last call, and the last text element made.
+    fn texts_and_element(host: &Host) -> (Vec<String>, Option<nsh_core::NodeId>) {
+        let mut out = Vec::new();
+        host.take_ops(&mut out);
+        let element = out.iter().rev().find_map(|op| match op {
+            Op::Create {
+                id,
+                tag: nsh_core::Tag::Text,
+            } => Some(*id),
+            _ => None,
+        });
+        let texts = out
+            .into_iter()
+            .filter_map(|op| match op {
+                Op::CreateText { text, .. } => Some(text),
+                Op::SetText { text, .. } => Some(format!("set {text}")),
+                _ => None,
+            })
+            .collect();
+        (texts, element)
+    }
+
+    const BOUNDARY: &str = r#"
+        import { mount, signal, ErrorBoundary } from "nsh";
+        import { element, insert, text, prop, component } from "nsh:rt";
+        const n = signal(0);
+        globalThis.n = n;
+        globalThis.failBody = false;
+        const Risky = () => {
+            if (globalThis.failBody) throw new Error("body");
+            const t = element("text");
+            prop(t, "onPress", () => { throw new Error("press"); });
+            insert(t, () => {
+                if (n() == 1) throw new Error("binding");
+                return `n${n()}`;
+            });
+            return t;
+        };
+        const boundary = (children, label) => component(ErrorBoundary, {
+            fallback: (error, reset) => {
+                globalThis.reset = () => { n.set(0); reset(); };
+                if (label == "inner") throw new Error(`fallback of ${error.message}`);
+                return text(`${label} caught ${error.message}`);
+            },
+            get children() { return children(); },
+        });
+    "#;
+
+    /// A failure under an `ErrorBoundary` (a binding, a component's body,
+    /// a listener) shows its fallback in place of what failed; `reset()`
+    /// renders the children again.
+    #[test]
+    fn error_boundaries_catch_and_reset() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => {{
+                const v = element("view");
+                insert(v, text("before"));
+                insert(v, boundary(() => component(Risky, {{}}), "outer"));
+                return v;
+            }});
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["before", "n0"]);
+        // A binding fails: the boundary shows its fallback, nothing throws.
+        assert!(host.eval_script("fail.js", "n.set(1)").is_ok());
+        assert_eq!(texts(&host), ["outer caught binding"]);
+        host.eval_script("reset.js", "reset()").unwrap();
+        let (shown, element) = texts_and_element(&host);
+        assert_eq!(shown, ["n0"]);
+        // A listener fails.
+        host.dispatch_event(element.unwrap(), EventKind::Press, &EventPayload::None);
+        assert_eq!(texts(&host), ["outer caught press"]);
+        // The body fails when rendered again.
+        host.eval_script("body.js", "failBody = true; reset()")
+            .unwrap();
+        assert_eq!(texts(&host), ["outer caught body"]);
+    }
+
+    /// A failure in a fallback goes to the boundary above; with no
+    /// boundary, the failure throws as before.
+    #[test]
+    fn error_boundaries_nest() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => {{
+                const v = element("view");
+                insert(v, boundary(() => boundary(() => component(Risky, {{}}), "inner"), "outer"));
+                return v;
+            }});
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["n0"]);
+        // The inner boundary's fallback throws: the outer one shows that.
+        host.eval_script("fail.js", "n.set(1)").unwrap();
+        assert_eq!(texts(&host), ["outer caught fallback of binding"]);
+
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{BOUNDARY}
+            mount(() => component(Risky, {{}}));
+            "#
+        ))
+        .unwrap();
+        assert_eq!(texts(&host), ["n0"]);
+        assert!(host.eval_script("fail.js", "n.set(1)").is_err());
+    }
+
     #[test]
     fn control_flow_and_keyed_rows() {
         let host = Host::new().unwrap();
@@ -3541,6 +3882,43 @@ mod tests {
                 "set text 16 \"c0\"",
                 "set text 8 \"a1\"",
             ]
+        );
+    }
+
+    /// A component whose root is an `<If>`, shown by a dynamic child: the
+    /// condition flipping shows the other branch and leaves the
+    /// component, and the expression that made it, as they are (Solid's
+    /// nested render effect).
+    #[test]
+    fn a_components_root_condition_does_not_make_it_again() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+            import {{ mount, signal }} from "nsh";
+            import {{ element, insert, cond, component }} from "nsh:rt";
+            const on = signal(false);
+            const made = [];
+            globalThis.toggle = () => on.update((v) => !v);
+            globalThis.count = () => report(made);
+            function Panel() {{
+                made.push("panel");
+                return cond(() => on(), () => text("zoomed"), () => text("inline"));
+            }}
+            mount(() => {{
+                const v = element("view");
+                insert(v, () => {{ made.push("expression"); return component(Panel, {{}}); }});
+                return v;
+            }});
+            "#
+        ))
+        .unwrap();
+        host.eval_script("toggle.js", "toggle(); toggle(); toggle(); count()")
+            .unwrap();
+        let texts = reported(&host);
+        assert_eq!(
+            texts.last().map(String::as_str),
+            Some(r#"["expression","panel"]"#),
+            "{texts:?}"
         );
     }
 
@@ -3856,7 +4234,12 @@ mod tests {
             const i = element("input");
             i.focus();
             i.setSelection(2);
-            globalThis.keep = [s, i];
+            // A view that takes presses: the platforms move the keyboard
+            // focus to it, as Tab does.
+            const v = element("view");
+            v.focus();
+            v.blur();
+            globalThis.keep = [s, i, v];
             "#,
         )
         .unwrap();
@@ -3871,7 +4254,103 @@ mod tests {
                 "Command { id: 2, command: ScrollToIndex { index: 3, animated: true, view_position: 0%, view_offset: 0pt } }",
                 "Command { id: 4, command: Focus }",
                 "Command { id: 4, command: SetSelection { start: 2, end: 2 } }",
+                "Command { id: 6, command: Focus }",
+                "Command { id: 6, command: Blur }",
             ]
+        );
+    }
+
+    #[test]
+    fn component_prop_unbinds_when_set_to_a_value() {
+        let host = Host::new().unwrap();
+        // `prop` passes no previous value: the node knows it was bound.
+        host.eval_source(
+            r#"
+            import { element, prop } from "nsh:rt";
+            import { AnimatedValue } from "nsh";
+            const n = element("native");
+            prop(n, "component", "com.example.thing");
+            prop(n, "$progress", new AnimatedValue(0));
+            prop(n, "$progress", 0.5);
+            prop(n, "$progress", 0.75);
+            "#,
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let props: Vec<_> = ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentPropBinding(name, node),
+                    ..
+                } if &**name == "progress" => Some(format!("bind {}", node.is_some())),
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentProp(name, value),
+                    ..
+                } if &**name == "progress" => Some(format!("{value:?}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            props,
+            [
+                "bind true",
+                "bind false",
+                "Some(Number(0.5))",
+                "Some(Number(0.75))"
+            ],
+            "{ops:?}"
+        );
+    }
+
+    #[test]
+    fn component_prop_keeps_its_node() {
+        use nsh_core::animation::AnimationOp;
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { element, prop } from "nsh:rt";
+            import { AnimatedValue } from "nsh";
+            globalThis.keep = (() => {
+                const n = element("native");
+                prop(n, "component", "com.example.thing");
+                prop(n, "$progress", new AnimatedValue(0).mul(2));
+                return n;
+            })();
+            "#,
+        )
+        .unwrap();
+        let mut first = Vec::new();
+        host.take_ops(&mut first);
+        assert!(
+            first.iter().any(|o| matches!(
+                o,
+                Op::SetProp {
+                    prop: nsh_core::Prop::ComponentPropBinding(name, Some(_)),
+                    ..
+                } if &**name == "progress"
+            )),
+            "{first:?}"
+        );
+        // Only the element holds the derived node (and, through it, its value).
+        host.collect_garbage();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(
+            !ops.iter()
+                .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
+            "{ops:?}"
+        );
+        // The element goes, and its nodes with it.
+        host.eval_script("drop.js", "keep = undefined").unwrap();
+        host.collect_garbage();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(
+            ops.iter()
+                .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
+            "{ops:?}"
         );
     }
 

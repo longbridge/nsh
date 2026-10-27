@@ -11,7 +11,7 @@ demo: el-video
 视频视图用平台自带的播放器播放视频文件或视频流：iOS 和 Mac Catalyst 上是 AVPlayer，Android 上是 MediaPlayer。播放通过属性控制（`paused`、`muted`、`rate` 等），因此播放器会像其他视图一样跟随你的状态。Rust 用 `video(url)` 创建，TSX 用从 `nsh` 导入的 `<Video>`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn player() -> impl IntoElement {
     let paused = signal(true);
@@ -24,7 +24,7 @@ fn player() -> impl IntoElement {
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
-                .resize_mode(ResizeMode::Contain)
+                .object_fit(ResizeMode::Contain)
                 .h(px(220.0))
                 .bg(black())
                 .on_progress(move |p: &VideoProgress| {
@@ -59,7 +59,6 @@ function Player() {
         src="https://example.com/clip.mp4"
         paused={paused()}
         repeat
-        resizeMode="contain"
         style={{ height: 220, backgroundColor: "#000000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
       />
@@ -88,7 +87,7 @@ function Player() {
 | `rate` | `.rate(..)` | `number` | `1` | 播放速度。 |
 | `repeat` | `.repeat(..)` | `boolean` | `false` | 播放到结尾后从头再播。 |
 | `controls` | `.controls(..)` | `boolean` | `false` | 显示平台的播放控件。 |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | | 视频如何适配其区域。 |
+| `objectFit`（样式）、`object-*` 类 | `.object_fit(ResizeMode::Contain)` | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | 视频如何适配其区域，同 CSS 的 `object-fit`（`class="object-cover"`）。iOS、macOS 和 Android 将 `"none"` 和 `"scale-down"` 按 `"contain"` 播放，Linux 将两者都按 `"scale-down"` 播放。 |
 | `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | `onProgress` 事件之间的毫秒数。 |
 
 请通过样式给视频一个尺寸，它的尺寸由样式决定。如果需要视频本身的比例，可以用 `onLoad` 报告的尺寸设置宽高比。
@@ -98,7 +97,7 @@ function Player() {
 | 事件 | Rust | 载荷 | 时机 |
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | 无 | 开始加载。 |
-| `onLoad` | `.on_load` | `{ duration, size }`（`VideoInfo`：`duration`、`size`） | 视频已就绪：时长（秒）和尺寸。 |
+| `onLoad` | `.on_load` | `{ duration, size }`（`VideoInfo`：`duration`、`size`） | 视频已就绪：时长（秒）和像素尺寸。 |
 | `onProgress` | `.on_progress` | `{ currentTime, duration }`（`VideoProgress`：`current_time`、`duration`） | 播放期间每隔 `progressUpdateInterval` 触发（秒）。 |
 | `onBuffer` | `.on_buffer` | `{ isBuffering }`（`bool`） | 因等待数据而卡顿 / 恢复播放。 |
 | `onEnd` | `.on_end` | 无 | 播放到结尾（设置了 `repeat` 时，每轮结束都会触发）。 |

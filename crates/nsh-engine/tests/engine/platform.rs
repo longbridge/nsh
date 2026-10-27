@@ -10,7 +10,7 @@ use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Idiom, Os};
 use crate::ChannelSink;
 
 const APP: &str = r#"import { mount, Text, View } from "nsh";
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 mount(
   () => (
@@ -62,11 +62,14 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let batch = rx

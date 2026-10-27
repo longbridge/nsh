@@ -306,7 +306,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Scroll, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const offset = createAnimatedValue(0);
@@ -326,7 +326,7 @@ function App() {
             fontSize: 22,
             fontWeight: "700",
             transformOrigin: "left center",
-            transform: [{ scale: offset.interpolate({ inputRange: [0, 80], outputRange: [1, 0.8] }) }],
+            scale: offset.interpolate({ inputRange: [0, 80], outputRange: [1, 0.8] }),
           }}
         >
           Inbox
@@ -362,7 +362,7 @@ const header = offset.diffClamp(0, 56);
   <Scroll style={{ flex: 1 }} scrollValue={offset}>
     <View style={{ paddingTop: 56 }}>…</View>
   </Scroll>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: header.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, header.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -401,7 +401,75 @@ const reload = async () => {
 <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={reload}>…</Scroll>
 ```
 
-iOS 上的控件是 UIRefreshControl；在 Mac Catalyst 的 Mac 界面风格中，NSH 显示自己的加载指示器，行为相同。列表也接受这两个属性。由于鼠标滚动时不拖动，在桌面和浏览器中下拉是触摸屏（或 macOS 的触控板，它能拉过顶部）的手势；请在这些地方另外提供刷新方式，比如按钮或键盘快捷键。
+iOS 上的控件是 UIRefreshControl；在 Mac Catalyst 的 Mac 界面风格中，NSH 显示自己的加载指示器，行为相同。列表也接受这些属性。由于鼠标滚动时不拖动，在桌面和浏览器中下拉是触摸屏（或 macOS 的触控板，它能拉过顶部）的手势；请在这些地方另外提供刷新方式，比如按钮或键盘快捷键。
+
+### 自己的指示器
+
+下拉的样子由应用决定。`refreshIndicator={{ height }}` 表示应用自己绘制指示器，高 `height` 点：平台的转圈隐藏，下拉到 `height` 即刷新，刷新中在内容上方为指示器留出 `height`。`pullValue` 把内容被拉过顶部的距离写进一个动画值：静止时为 0，随下拉增大，刷新中为 `height`。把指示器画在滚动视图顶部之上，用这个值插值出它的样式：样式在 UI 线程上跟随手指，每帧不经过 JS。
+
+```rust tabs
+let pull = animated_value(0.0);
+
+view()
+    .flex_1()
+    .child(
+        scroll()
+            .flex_1()
+            .refreshing(refreshing)
+            .on_refresh(reload)
+            .pull_value(&pull)
+            .refresh_indicator(Some(px(72.0)))
+            .child(content),
+    )
+    .child(
+        view()
+            .pointer_events(PointerEvents::None)
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(72.0))
+            .items_center()
+            .justify_center()
+            .bind_opacity(&pull.interpolate(&[0.0, 36.0], &[0.0, 1.0]))
+            .bind_rotate(&pull.interpolate(&[36.0, 72.0], &[0.0, 180.0]))
+            .child(arrow()),
+    )
+```
+
+```tsx tabs
+const pull = createAnimatedValue(0);
+
+<View style={{ flex: 1 }}>
+  <Scroll
+    style={{ flex: 1 }}
+    refreshing={refreshing()}
+    onRefresh={reload}
+    pullValue={pull}
+    refreshIndicator={{ height: 72 }}
+  >
+    …
+  </Scroll>
+  <View
+    style={{
+      pointerEvents: "none",
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 72,
+      alignItems: "center",
+      justifyContent: "center",
+      opacity: pull.interpolate({ inputRange: [0, 36], outputRange: [0, 1] }),
+      transform: [{ rotate: pull.interpolate({ inputRange: [36, 72], outputRange: ["0deg", "180deg"] }) }],
+    }}
+  >
+    <Arrow />
+  </View>
+</View>;
+```
+
+`height` 应不超过视口的一半：拉过顶部后，越往下拉阻力越大，太高就永远拉不到。在 iOS 上，应用自己的指示器会取代 UIRefreshControl，改由 NSH 自己检测下拉，和 Mac 界面风格一样。
 
 ## 缩放
 
@@ -494,7 +562,7 @@ let scroll!: YNode;
 
 ## 滚动视图与键盘
 
-NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。滚动视图之外的内容（例如固定在底部的消息栏）使用 [`KeyboardAvoidingView`](./forms-and-keyboard.md#滚动视图之外的内容keyboardavoidingview)。
+NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。滚动视图之外的内容（例如固定在底部的消息栏）以 `env(keyboard-inset-height)` 作为底部内边距（见[滚动视图之外的内容](./forms-and-keyboard.md#滚动视图之外的内容)）。
 
 有两个属性决定滚动和点击如何与键盘交互：
 
@@ -509,7 +577,7 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 - `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持；点在空白处则收起键盘。表单通常应选它。
 - `"always"`：键盘在每次点击后都保持显示。
 
-两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh/base`](../modules/nsh-base.md#keyboard) 的 `Keyboard.dismiss()`。
+两者都在点击或拖动发生时由原生决定，无需等待你的代码。要从代码收起键盘，在 Rust 中调用 `dismiss_keyboard()`，在 TSX 中调用 [`nsh`](../modules/nsh.md#keyboard-and-keyboardframe) 的 `Keyboard.dismiss()`。
 
 ## 嵌套滚动视图
 

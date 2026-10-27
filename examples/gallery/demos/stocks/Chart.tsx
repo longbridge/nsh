@@ -1,5 +1,5 @@
 import { Canvas, type CanvasRenderingContext2D, computed, effect, signal, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 import { colors, Legend, radius, Segmented } from "../../ui";
 import { type Candle, compact, OPEN, price, SESSION, type Stock, signed, time, toneOf } from "./market";
 import { alpha, calm, dashed, grid, hatch, pulse, scrub } from "./parts";
@@ -368,7 +368,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
           }}
         />
         {/* The crosshair over the canvas, moved by animated values. */}
-        <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: shown }}>
+        <View style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: shown }}>
           <View
             style={{
               position: "absolute",
@@ -377,7 +377,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
               left: 0,
               width: 1,
               backgroundColor: colors.muted,
-              transform: [{ translateX: centerX }],
+              translate: [centerX, 0],
             }}
           />
           <View
@@ -388,7 +388,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
               top: 0,
               height: 1,
               backgroundColor: alpha(colors.muted, 0.6),
-              transform: [{ translateY: cy }],
+              translate: [0, cy],
             }}
           />
           <View
@@ -402,7 +402,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
               backgroundColor: colors.text,
               borderWidth: 2,
               borderColor: colors.inset,
-              transform: [{ translateX: centerX }, { translateY: cy }],
+              translate: [centerX, cy],
             }}
           />
           <If when={cursor() !== null}>

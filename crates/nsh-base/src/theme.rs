@@ -28,8 +28,8 @@ use std::sync::{Arc, LazyLock};
 use nsh_core::{
     Color, JsonValue,
     color::Hsla,
+    element::{AdaptiveColor, FONT_MONO, FONT_SANS, SharedString, Tokens},
     geometry::{Points, px},
-    ui::{AdaptiveColor, FONT_MONO, FONT_SANS, SharedString, Tokens},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -62,7 +62,7 @@ thread_local! {
 /// The theme the app is drawn with (reading it subscribes: a new theme
 /// reaches what read it).
 pub fn theme() -> Arc<Theme> {
-    let tokens = nsh_core::ui::ambient::tokens();
+    let tokens = nsh_core::element::ambient::tokens();
     CURRENT.with_borrow_mut(|current| match current {
         Some(theme) if Arc::ptr_eq(&theme.tokens, &tokens) => theme.clone(),
         _ => current.insert(Arc::new(Theme::of(tokens))).clone(),
@@ -71,7 +71,7 @@ pub fn theme() -> Arc<Theme> {
 
 /// The tokens of theme file `json` over the default's (`None`: the
 /// default's): how the core reads `nsh.json`'s `"theme"`
-/// ([`nsh_core::ui::Registry::tokens_from`]).
+/// ([`nsh_core::element::Registry::tokens_from`]).
 pub fn tokens_of(json: Option<&str>) -> Result<Tokens, String> {
     match json {
         Some(json) => Theme::from_json(json)
@@ -231,6 +231,14 @@ impl Theme {
         self.tokens.color(name)
     }
 
+    /// The highlight of a selection, the one every component draws: the
+    /// app's `selection` color if the theme sets one, else `primary` at
+    /// 22 %.
+    pub fn selection(&self) -> AdaptiveColor {
+        self.color("selection")
+            .unwrap_or_else(|| self.primary.opacity(0.22))
+    }
+
     /// The number named `name` (any the theme sets).
     pub fn number(&self, name: &str) -> Option<f32> {
         self.tokens.number(name)
@@ -262,7 +270,7 @@ impl Theme {
         &self.tokens
     }
 
-    /// Its design tokens, for the core ([`nsh_core::ui::Root::tokens`],
+    /// Its design tokens, for the core ([`nsh_core::element::Root::tokens`],
     /// an engine's host theme).
     pub fn into_tokens(self) -> Tokens {
         Arc::unwrap_or_clone(self.tokens)
@@ -322,12 +330,31 @@ fn font_family(value: &str) -> Option<&str> {
     (!generic).then_some(first)
 }
 
+/// The tokens theme file `json` sets, and only those: an embedding app's
+/// overrides of the app's theme (the platforms' `AppView`s, the iOS and
+/// Android SDKs), which win over the app's tokens of the same names and
+/// leave its others as they are (`Core::set_host_tokens`). The file is the
+/// one [`Theme::from_json`] reads, shadcn's `cssVars`; a color it names
+/// (`var(--ring)`) and does not set is the default theme's.
+pub fn theme_overrides(json: &str) -> Result<Tokens, ThemeError> {
+    let mut tokens = Tokens::default();
+    apply_onto(&mut tokens, &DEFAULT_TOKENS, json)?;
+    Ok(tokens)
+}
+
 /// Applies theme file `json` (shadcn's `cssVars`) over `tokens`.
 fn apply(tokens: &mut Tokens, json: &str) -> Result<(), ThemeError> {
+    let base = tokens.clone();
+    apply_onto(tokens, &base, json)
+}
+
+/// Sets the tokens of theme file `json` in `tokens`; a color it names and
+/// does not set is `base`'s.
+fn apply_onto(tokens: &mut Tokens, base: &Tokens, json: &str) -> Result<(), ThemeError> {
     let value: JsonValue =
         serde_json::from_str(json).map_err(|e| ThemeError(format!("not JSON: {e}")))?;
     if let Some(vars) = value.get("cssVars") {
-        return apply_css_vars(tokens, vars);
+        return apply_css_vars(tokens, base, vars);
     }
     Err(ThemeError(
         "expected shadcn's `{ \"cssVars\": { ... } }`".into(),
@@ -341,7 +368,7 @@ fn apply(tokens: &mut Tokens, json: &str) -> Result<(), ThemeError> {
 /// file's or the one under it. Values of no kind a token has (shadows,
 /// letter spacing) are left out, as they are of no Tailwind utility NSH
 /// draws with a token.
-fn apply_css_vars(tokens: &mut Tokens, vars: &JsonValue) -> Result<(), ThemeError> {
+fn apply_css_vars(tokens: &mut Tokens, base: &Tokens, vars: &JsonValue) -> Result<(), ThemeError> {
     let section = |name: &str| -> Result<FxHashMap<String, String>, ThemeError> {
         let Some(v) = vars.get(name) else {
             return Ok(FxHashMap::default());
@@ -374,7 +401,6 @@ fn apply_css_vars(tokens: &mut Tokens, vars: &JsonValue) -> Result<(), ThemeErro
     let mut dark_vars = light_vars.clone();
     dark_vars.extend(dark.iter().map(|(k, v)| (k.clone(), v.clone())));
 
-    let base = tokens.clone();
     let mut names: Vec<&String> = light_vars.keys().chain(dark.keys()).collect();
     names.sort();
     names.dedup();
@@ -388,7 +414,7 @@ fn apply_css_vars(tokens: &mut Tokens, vars: &JsonValue) -> Result<(), ThemeErro
             continue;
         }
         let resolve = |vars: &FxHashMap<String, String>, dark: bool| {
-            resolve_color(name, vars, &base, dark, &mut FxHashSet::default())
+            resolve_color(name, vars, base, dark, &mut FxHashSet::default())
         };
         match (resolve(&light_vars, false)?, resolve(&dark_vars, true)?) {
             (Some(l), Some(d)) => tokens.set_color(name, AdaptiveColor { light: l, dark: d }),
@@ -578,5 +604,32 @@ mod tests {
         assert_eq!(hex(theme.color("edge").unwrap().light), 0xff0000);
         // The default's, in each appearance.
         assert_eq!(theme.color("line").unwrap(), Theme::default().border);
+    }
+
+    #[test]
+    fn overrides_are_the_tokens_the_file_sets() {
+        let tokens = theme_overrides(
+            r##"{ "cssVars": {
+                "theme": { "radius": "0.75rem" },
+                "light": { "primary": "#e11d48", "ring": "var(--primary)", "focus": "var(--border)" },
+                "dark": { "primary": "#fb7185" }
+            } }"##,
+        )
+        .unwrap();
+        let primary = tokens.color("primary").unwrap();
+        assert_eq!(
+            (hex(primary.light), hex(primary.dark)),
+            (0xe11d48, 0xfb7185)
+        );
+        // The file's own, per appearance.
+        assert_eq!(tokens.color("ring").unwrap(), primary);
+        // One it does not set: the default's.
+        assert_eq!(tokens.color("focus").unwrap(), Theme::default().border);
+        assert_eq!(tokens.number("radius"), Some(12.0));
+        // Nothing else: the app's tokens stay.
+        assert_eq!(tokens.colors().count(), 3);
+        assert_eq!(tokens.color("background"), None);
+        assert!(theme_overrides("{}").is_err());
+        assert!(theme_overrides("not json").is_err());
     }
 }

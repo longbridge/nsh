@@ -34,6 +34,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod fps;
 mod geom;
 mod gfx;
 mod image;
@@ -42,9 +43,10 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
+mod picker;
 mod render;
 mod scroll;
-mod selection_area;
+mod selectable_view;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -56,7 +58,9 @@ mod view;
 mod window;
 
 pub use nsh_core::platform::{Appearance, Locale};
-pub use nsh_engine::{App, Bundle, Limits, Root};
+pub use nsh_engine::{
+    App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root,
+};
 pub use windows;
 
 #[cfg(feature = "dev")]

@@ -39,6 +39,8 @@ pub mod menu;
 #[cfg(feature = "js")]
 mod module;
 #[cfg(feature = "js")]
+mod page_host;
+#[cfg(feature = "js")]
 mod run;
 #[cfg(feature = "js")]
 mod runner;
@@ -51,9 +53,9 @@ mod trace;
 use std::{path::Path, sync::Arc};
 
 #[cfg(feature = "js")]
-use nsh_core::ui::Registry;
+use nsh_core::element::Registry;
 #[cfg(feature = "bundle")]
-use nsh_core::ui::description::SetDescription;
+use nsh_core::element::description::SetDescription;
 #[cfg(feature = "bundle")]
 use nsh_engine::{Bundle, EngineConfig};
 
@@ -72,7 +74,7 @@ pub use self::{
     driver::Host,
     module::{
         App, ClockOptions, ColorScheme, Entries, Expectation, NetworkOption, OpenOptions, Platform,
-        RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
+        RouteOption, SPECIFIER, SafeArea, SpanStyle, StubRequest, Testing, registry,
     },
     run::{
         Built, Compile, Entry, Failure, HostOptions, Output, StartHost, TestResult, TestRun,
@@ -109,7 +111,11 @@ pub fn compile_tsx(entry: impl AsRef<Path>, ui_sets: &[Registry]) -> Result<Bund
 /// `entry` built against `ui_sets`: its bytecode and source map.
 #[cfg(feature = "bundle")]
 fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>), String> {
-    let sets: Vec<SetDescription> = ui_sets.iter().map(SetDescription::from).collect();
+    let sets: Vec<SetDescription> = ui_sets
+        .iter()
+        .flat_map(Registry::sets)
+        .map(SetDescription::from)
+        .collect();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,

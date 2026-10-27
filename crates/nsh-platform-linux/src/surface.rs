@@ -110,6 +110,10 @@ pub(crate) struct Surface {
     /// The embedding app's locale and text size, standing in for the
     /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
     pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
+    /// The embedding app's theme overrides
+    /// ([`crate::AppView::set_theme_overrides`]): sent to every engine the
+    /// surface starts, before its first frame.
+    pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// The tick callback runs.
@@ -121,6 +125,8 @@ pub(crate) struct Surface {
     test_model: RefCell<Option<Arc<nsh_testing::agent::Model>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
+    pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// What the running app may reach (checked for image redirects).
     pub(crate) access: RefCell<Arc<nsh_core::access::Access>>,
     /// Videos, web views and registered native components.
@@ -129,9 +135,11 @@ pub(crate) struct Surface {
     pub(crate) keymap: crate::keymap::KeymapState,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
-    /// Selections across the texts of selection areas
-    /// ([`crate::selection_area`]).
-    pub(crate) selection: crate::selection_area::State,
+    /// Selections across the texts of selectable views
+    /// ([`crate::selectable_view`]).
+    pub(crate) selection: crate::selectable_view::State,
+    /// The performance monitor, while it measures ([`crate::fps`]).
+    fps: RefCell<Option<Rc<crate::fps::Fps>>>,
 }
 
 impl Surface {
@@ -156,6 +164,7 @@ impl Surface {
             environment: Cell::new(environment),
             appearance: Cell::default(),
             host_environment: Cell::default(),
+            host_tokens: RefCell::new(None),
             js_frame: Cell::new(false),
             ticking: Cell::new(false),
             on_error: RefCell::new(None),
@@ -163,11 +172,13 @@ impl Surface {
             #[cfg(feature = "dev")]
             test_model: RefCell::default(),
             asset_base: RefCell::new(None),
+            image_cache: RefCell::new(None),
             access: RefCell::new(Arc::default()),
             native: Default::default(),
             keymap: Default::default(),
             chrome: Default::default(),
             selection: Default::default(),
+            fps: RefCell::new(None),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -176,9 +187,27 @@ impl Surface {
                 surface.resized(width, height);
             }
         });
+        // Canvases that came into sight are drawn in the frame that shows them.
+        root.connect_realize(|root| {
+            if let Some(clock) = root.frame_clock() {
+                clock.connect_layout(|_| crate::canvas::reveal());
+            }
+        });
         crate::input::install(&surface);
         crate::scroll::install_keyboard(&surface);
         surface
+    }
+
+    /// Measures the surface's frames and commits and logs them once a
+    /// second ([`crate::fps`]).
+    pub(crate) fn enable_fps(&self) {
+        if self.fps.borrow().is_some() {
+            return;
+        }
+        let fps = Rc::new(crate::fps::Fps::new());
+        crate::fps::install(self.root.upcast_ref(), &fps);
+        self.control(|c| c.set_perf_monitor(Some(fps.monitor.clone())));
+        *self.fps.borrow_mut() = Some(fps);
     }
 
     /// Its key ([`Surface::by_key`]).
@@ -237,12 +266,24 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        match Engine::start(config, move || PangoTextEngine::new(family), sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.host_tokens.borrow().clone();
+        let setup = |control: &EngineControl| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        };
+        match Engine::start_with(config, move || PangoTextEngine::new(family), sink, setup) {
             Ok(engine) => {
+                // The app's downloaded images go through its disk cache.
+                crate::image::set_disk_cache(self, engine.image_cache());
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
                     model.engine_started(engine.control());
+                }
+                if let Some(fps) = &*self.fps.borrow() {
+                    engine.control().set_perf_monitor(Some(fps.monitor.clone()));
                 }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
@@ -263,7 +304,7 @@ impl Surface {
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
-        crate::selection_area::reset(self);
+        crate::selectable_view::reset(self);
         crate::keymap::clear(self);
         self.js_frame.set(false);
     }
@@ -324,6 +365,18 @@ impl Surface {
 
     /// Applies what the engine sent.
     fn drain(self: &Rc<Self>) {
+        let started = self
+            .fps
+            .borrow()
+            .is_some()
+            .then(nsh_core::time::Instant::now);
+        self.drain_messages();
+        if let (Some(started), Some(fps)) = (started, &*self.fps.borrow()) {
+            fps.drained(started.elapsed());
+        }
+    }
+
+    fn drain_messages(self: &Rc<Self>) {
         self.pending.borrow().store(false, Ordering::Release);
         let messages: Vec<Message> = match &*self.rx.borrow() {
             Some(rx) => rx.try_iter().collect(),
@@ -381,11 +434,19 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let finished = {
+        let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
-            std::mem::take(&mut anim.finished)
+            let mut moved = Vec::new();
+            anim.write_components(
+                |id| crate::native::has_component(self, id),
+                |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
+            );
+            (std::mem::take(&mut anim.finished), moved)
         };
+        // No surface state borrowed while the app's components run.
+        crate::native::component_animated(self, moved);
+        crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
         }

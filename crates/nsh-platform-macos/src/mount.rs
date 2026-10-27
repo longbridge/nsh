@@ -105,7 +105,7 @@ impl Mounter {
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
         crate::input::content_moved(surface, false);
-        crate::selection_area::end_batch(surface);
+        crate::selectable_view::end_batch(surface);
     }
 
     fn get(&self, id: NodeId) -> Option<&NshView> {
@@ -185,6 +185,7 @@ impl Mounter {
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
+                        crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
                 }
@@ -230,6 +231,7 @@ impl Mounter {
                 crate::transition::style_changed(surface, view, &old);
                 view.moved();
                 crate::decor::style_changed(view, &old);
+                crate::access::style_changed(view, &old);
             }
             MountItem::Text {
                 id,
@@ -378,7 +380,9 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
         }
     }
 
@@ -403,9 +407,19 @@ impl Mounter {
     fn command(&self, surface: &Rc<Surface>, id: NodeId, command: &Command) {
         let view = self.views.get(&id);
         match command {
-            Command::Focus => view.map_or((), crate::text_input::focus),
+            // An input edits; a pressable takes the keyboard focus as Tab
+            // gives it.
+            Command::Focus => match view {
+                Some(view) if view.kind() == ViewKind::Input => crate::text_input::focus(view),
+                Some(view) if id != ROOT_ID => crate::input::focus_control(surface, view),
+                _ => {}
+            },
             Command::Blur => match view {
                 Some(view) if view.kind() == ViewKind::Input => crate::text_input::blur(view),
+                Some(view) if id != ROOT_ID => {
+                    crate::input::blur_control(surface, view);
+                    crate::text_input::blur_all(surface);
+                }
                 _ => crate::text_input::blur_all(surface),
             },
             Command::SetSelection { start, end } => {

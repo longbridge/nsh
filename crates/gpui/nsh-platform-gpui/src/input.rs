@@ -132,6 +132,18 @@ pub(crate) struct Modifiers {
     pub(crate) meta: bool,
 }
 
+impl Modifiers {
+    /// As the core's modifiers (`meta` is its `cmd`).
+    fn core(self) -> nsh_core::keymap::Modifiers {
+        nsh_core::keymap::Modifiers {
+            ctrl: self.ctrl,
+            alt: self.alt,
+            shift: self.shift,
+            cmd: self.meta,
+        }
+    }
+}
+
 /// A mouse, touch or pen event.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PointerEvent {
@@ -198,7 +210,7 @@ pub(crate) enum Cursor {
     /// The arrow.
     #[default]
     Arrow,
-    /// A hand (links, pressables with `cursor: pointer`).
+    /// A hand (`cursor: pointer`: links).
     Hand,
     /// The I-beam (text).
     Text,
@@ -314,7 +326,7 @@ enum Item {
     Input(NshView),
     /// Selectable text (mouse selection).
     Text(NshView),
-    /// A selection area (mouse selection across its texts).
+    /// A selectable view (mouse selection across its texts).
     Area(NshView),
 }
 
@@ -363,7 +375,7 @@ impl Item {
             Item::Text(view) => crate::text::pointer(surface, view, &event),
             // Areas follow the pointer in root coordinates: autoscrolling
             // moves the area under it.
-            Item::Area(_) => crate::selection_area::pointer(surface, kind, x, y),
+            Item::Area(_) => crate::selectable_view::pointer(surface, kind, x, y),
         }
     }
 }
@@ -580,10 +592,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
 // --- Cursors ------------------------------------------------------------------------
 
 /// The cursor of a CSS `cursor` value, `None` to inherit the parent's.
-fn css_cursor(cursor: nsh_core::Cursor, pressable: bool) -> Option<Cursor> {
+fn css_cursor(cursor: nsh_core::Cursor) -> Option<Cursor> {
     use nsh_core::Cursor as C;
     Some(match cursor {
-        C::Auto if pressable => Cursor::Hand,
         C::Auto => return None,
         C::Default => Cursor::Arrow,
         C::Pointer => Cursor::Hand,
@@ -609,7 +620,7 @@ fn css_cursor(cursor: nsh_core::Cursor, pressable: bool) -> Option<Cursor> {
 /// A view's own cursor: its style's, the I-beam over text fields and
 /// selectable text (a press target keeps the hand), or `None`.
 fn view_cursor(s: &ViewState) -> Option<Cursor> {
-    css_cursor(s.style.cursor, has_press(s.events)).or_else(|| {
+    css_cursor(s.style.cursor).or_else(|| {
         (s.kind == ViewKind::Input || crate::text::selectable(s)).then_some(Cursor::Text)
     })
 }
@@ -629,14 +640,14 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
             return c;
         }
     }
-    let in_area = crate::selection_area::area_of(&hit.view).is_some();
+    let in_area = crate::selectable_view::area_of(&hit.view).is_some();
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let s = v.state();
         if let Some(c) = view_cursor(&s) {
             return c;
         }
-        if in_area && crate::selection_area::selects(&s) {
+        if in_area && crate::selectable_view::selects(&s) {
             return Cursor::Text;
         }
         drop(s);
@@ -763,7 +774,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return;
     };
-    let area = crate::selection_area::area_of(&hit.view);
+    let area = crate::selectable_view::area_of(&hit.view);
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let (id, listens, input, selectable) = {
@@ -780,12 +791,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             let event = nsh_core::ContextMenuEvent {
                 position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
                 page_position: nsh_core::geometry::point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: modifiers.ctrl,
-                    alt: modifiers.alt,
-                    shift: modifiers.shift,
-                    cmd: modifiers.meta,
-                },
+                modifiers: modifiers.core(),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
@@ -794,10 +800,10 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        // Texts in a selection area select with it.
+        // Texts in a selectable view select with it.
         match &area {
             Some(area) if *area == v => {
-                crate::selection_area::context_menu(surface, area);
+                crate::selectable_view::context_menu(surface, area);
                 return;
             }
             None if selectable => {
@@ -835,7 +841,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             }
             // Any press elsewhere clears a text selection.
             crate::text::window_pressed(surface, x, y);
-            crate::selection_area::window_pressed(surface, x, y);
+            crate::selectable_view::window_pressed(surface, x, y);
             if mouse {
                 surface.input.last.set(Some((x, y)));
                 match event.button {
@@ -938,7 +944,7 @@ pub(crate) fn key_now(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
-        || crate::selection_area::key(surface, &event)
+        || crate::selectable_view::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
@@ -1163,12 +1169,12 @@ fn chain(view: &NshView) -> Vec<NshView> {
     out
 }
 
-/// The selection area a mouse press on `view` selects in: the area around
+/// The selectable view a mouse press on `view` selects in: the area around
 /// it, unless `view` is a text that is `selectable={false}` or a view
 /// between them pans or handles touches itself.
 fn area_press(surface: &Surface, view: &NshView) -> Option<NshView> {
-    let area = crate::selection_area::area_of(view)?;
-    if !crate::selection_area::takes(view) {
+    let area = crate::selectable_view::area_of(view)?;
+    if !crate::selectable_view::takes(view) {
         return None;
     }
     let mut current = Some(view.clone());
@@ -1302,9 +1308,9 @@ fn down(
         && hit.view.kind() != ViewKind::Input
         && let Some(area) = area_press(surface, &hit.view)
     {
-        // Mouse drags in a selection area select across its texts; its
+        // Mouse drags in a selectable view select across its texts; its
         // texts never select alone.
-        crate::selection_area::down(surface, &area, &hit.view, (x, y), clicks, modifiers.shift);
+        crate::selectable_view::down(surface, &area, &hit.view, (x, y), clicks, modifiers.shift);
         item = Some(Item::Area(area));
     }
     if item.is_none() {
@@ -1357,7 +1363,7 @@ fn down(
     let press = if native {
         None
     } else {
-        find_press(surface, &hit.view, &views, x, y)
+        find_press(surface, &hit.view, &views, x, y, modifiers, clicks)
     };
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
@@ -1683,6 +1689,8 @@ fn find_press(
     views: &[NshView],
     x: f32,
     y: f32,
+    modifiers: Modifiers,
+    clicks: u32,
 ) -> Option<Press> {
     let generation = surface.input.next_gen.get();
     surface.input.next_gen.set(generation + 1);
@@ -1699,13 +1707,16 @@ fn find_press(
             if let Some(link) = link
                 && has_press(link.events)
             {
-                return Some(Press::new(
-                    target.clone(),
-                    link.node,
-                    link.events,
-                    s.props.long_press_delay,
-                    generation,
-                ));
+                return Some(
+                    Press::new(
+                        target.clone(),
+                        link.node,
+                        link.events,
+                        s.props.long_press_delay,
+                        generation,
+                    )
+                    .clicked(modifiers.core(), clicks),
+                );
             }
         }
     }
@@ -1719,6 +1730,7 @@ fn find_press(
                 s.props.long_press_delay,
                 generation,
             )
+            .clicked(modifiers.core(), clicks)
         })
     })
 }
@@ -1744,6 +1756,8 @@ fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, 
     let event = nsh_core::PressEvent {
         position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
         page_position: nsh_core::geometry::point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
     };
     surface.event(press.node, kind, EventPayload::Press(event));
 }
@@ -2100,12 +2114,7 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
         let event = nsh_core::HoverEvent {
             position: nsh_core::geometry::point(Points(location_x), Points(location_y)),
             page_position: nsh_core::geometry::point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: modifiers.ctrl,
-                alt: modifiers.alt,
-                shift: modifiers.shift,
-                cmd: modifiers.meta,
-            },
+            modifiers: modifiers.core(),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
@@ -2135,6 +2144,21 @@ fn hover_event(surface: &Surface, view: &NshView, kind: EventKind) {
     };
     if listens {
         surface.event(id, kind, EventPayload::None);
+    }
+}
+
+/// The keyboard's modifiers changed (`modifiers` held now): while the
+/// mouse rests over the surface with no button down, the hovered views
+/// that listen hear `onHoverMove` again where it is, with the new
+/// modifiers (an editor underlines a definition while Mod is held), as
+/// they would on the next move.
+pub(crate) fn modifiers_changed(surface: &Surface, modifiers: Modifiers) {
+    let input = &surface.input;
+    if input.pointers.borrow().iter().any(|p| p.key == Key::Mouse) {
+        return;
+    }
+    if let Some((x, y)) = input.last.get() {
+        hover_moved(surface, x, y, modifiers);
     }
 }
 
@@ -2712,11 +2736,11 @@ mod tests {
     #[test]
     fn cursors() {
         use nsh_core::Cursor as C;
-        assert_eq!(css_cursor(C::Auto, false), None);
-        assert_eq!(css_cursor(C::Auto, true), Some(Cursor::Hand));
-        assert_eq!(css_cursor(C::Default, true), Some(Cursor::Arrow));
-        assert_eq!(css_cursor(C::NotAllowed, false), Some(Cursor::NotAllowed));
-        assert_eq!(css_cursor(C::None, false), Some(Cursor::Hidden));
+        assert_eq!(css_cursor(C::Auto), None);
+        assert_eq!(css_cursor(C::Default), Some(Cursor::Arrow));
+        assert_eq!(css_cursor(C::Pointer), Some(Cursor::Hand));
+        assert_eq!(css_cursor(C::NotAllowed), Some(Cursor::NotAllowed));
+        assert_eq!(css_cursor(C::None), Some(Cursor::Hidden));
     }
 
     #[test]

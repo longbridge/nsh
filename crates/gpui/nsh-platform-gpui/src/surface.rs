@@ -178,6 +178,8 @@ pub(crate) struct Surface {
     generation: Cell<u64>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
+    /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
+    pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
     /// What the running app may reach (checked for image redirects).
     pub(crate) access: RefCell<Arc<nsh_core::access::Access>>,
     /// Videos, web views and registered native components.
@@ -250,6 +252,7 @@ impl Surface {
             on_hot_update_failed: RefCell::new(None),
             generation: Cell::new(0),
             asset_base: RefCell::new(None),
+            image_cache: RefCell::new(None),
             access: RefCell::new(Arc::default()),
             native: Default::default(),
             keymap: Default::default(),
@@ -336,6 +339,8 @@ impl Surface {
             },
         ) {
             Ok(engine) => {
+                // The app's downloaded images go through its disk cache.
+                crate::image::set_disk_cache(self, engine.image_cache());
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
@@ -571,17 +576,25 @@ impl Surface {
             model.apply(batch);
         }
         crate::access::batch_applied(self);
-        crate::selection_area::batch_applied(self);
+        crate::selectable_view::batch_applied(self);
     }
 
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let finished = {
+        let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
-            std::mem::take(&mut anim.finished)
+            let mut moved = Vec::new();
+            anim.write_components(
+                |id| crate::native::has_component(self, id),
+                |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
+            );
+            (std::mem::take(&mut anim.finished), moved)
         };
+        // No surface state borrowed while the app's components run.
+        crate::native::component_animated(self, moved);
+        crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
         }

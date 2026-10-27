@@ -59,11 +59,14 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         ui_sets,
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -108,7 +111,7 @@ fn press(engine: &Engine, keymap: &Keymap, keystroke: &str, editing: bool) {
 }
 
 const APP: &str = r#"import { mount, signal, Text } from "nsh";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 
 const log = signal("");
 const say = (s: string) => log.set(s);
@@ -180,7 +183,7 @@ fn key_commands_run_their_handlers() {
 }
 
 const UNBIND: &str = r#"import { mount, signal, Text } from "nsh";
-import { keymap } from "nsh/keymap";
+import { keymap } from "nsh";
 
 const panel = signal(true);
 const off = keymap.bind("mod+k", () => {});
@@ -221,7 +224,7 @@ fn bindings_go_when_unbound_and_with_their_component() {
 fn js_and_view(view_first: bool) -> String {
     format!(
         r#"import {{ mount, signal, Text }} from "nsh";
-import {{ keymap }} from "nsh/keymap";
+import {{ keymap }} from "nsh";
 import {{ Shortcut }} from "test/ui";
 
 const VIEW_FIRST = {view_first};

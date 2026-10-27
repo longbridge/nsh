@@ -13,7 +13,7 @@ NSH 用 **signal** 更新界面：signal 是知道谁在读取自己的值。sig
 Rust 组件从 prelude 中取得本页的所有内容；TSX 从 `nsh` 导入：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
+use nsh_core::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
 ```
 
 ```tsx tabs
@@ -452,6 +452,44 @@ function Swatch() {
 
 请在组件函数体中（或在组件创建期间运行的代码中）读取 context，而不是在事件处理函数或定时器中读取：那里没有可供查找的组件。Rust 组件也是这样取得应用主题的：`nsh_base` 的 `theme()`（[主题](./rust.md#主题)）。
 
+## 错误边界
+
+错误边界把视图中某一部分的失败限制在这一部分之内。它下面的代码在渲染或运行时抛出异常（Rust 中为 panic），例如组件函数体、绑定、effect 或事件处理函数，失败的部分会被移除，错误边界在原处显示它的 fallback；视图的其余部分保持不变。Rust 中使用 `catch_error(view, fallback)`；TSX 中使用 `nsh` 的 `<ErrorBoundary fallback>`。fallback 得到错误（TSX 中就是抛出的值本身，通常是一个 `Error`）和一个重新渲染视图的 reset：
+
+```rust tabs
+fn profile_card(user: Signal<Option<User>>) -> impl IntoElement {
+    catch_error(
+        move || profile(user),
+        |error, reset| {
+            view()
+                .child(text(format!("Something went wrong: {error}")))
+                .child(text("Try again").on_press(move || reset.reset()))
+        },
+    )
+}
+```
+
+```tsx tabs
+import { ErrorBoundary, Text, View } from "nsh";
+
+function ProfileCard(props: { user: User | undefined }) {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <View>
+          <Text>Something went wrong: {error instanceof Error ? error.message : String(error)}</Text>
+          <Text onPress={reset}>Try again</Text>
+        </View>
+      )}
+    >
+      <Profile user={props.user} />
+    </ErrorBoundary>
+  );
+}
+```
+
+失败交给发生处上方最近的错误边界，fallback 中的失败交给再上一层的错误边界。没有错误边界时，失败作为未捕获的错误报告（开发时的错误浮层、日志）。TSX 中不带参数的 `fallback` 按原样显示：`fallback={<Text>Unavailable</Text>}`。
+
 ## 什么会运行，何时运行
 
 | 你写的 | 何时运行 | 何时再次运行 |
@@ -463,7 +501,7 @@ function Swatch() {
 | `when(cond, ..)` / `<If when>` | 创建时 | 条件是否成立发生变化时 |
 | `each(..)` / `<Each of>` 的行 | 它的 key 第一次出现时 | 从不；改为由条目和索引的 signal 变化 |
 
-环境同样是响应式的：Rust 中的 `window()`、`dark()`、`font_scale()`、`safe_area()` 和 `keyboard_height()`，TSX 中 [`nsh/device`](../modules/nsh-device.md) 的 `windowSize()`、`colorScheme()`、`fontScale()` 以及 [`nsh/base`](../modules/nsh-base.md) 的 `safeArea()` 和 `keyboardFrame()`，读取它们的绑定会跟随屏幕旋转、深色模式或键盘变化。
+环境同样是响应式的：Rust 中的 `window()`、`dark()`、`font_scale()`、`safe_area()` 和 `keyboard_height()`，TSX 中 [`nsh` 的设备 API](../modules/nsh.md#device) 的 `windowSize()`、`colorScheme()`、`fontScale()` 以及 [`nsh`](../modules/nsh.md) 的 `safeArea()` 和 `keyboardFrame()`，读取它们的绑定会跟随屏幕旋转、深色模式或键盘变化。
 
 ## 常见错误
 

@@ -1,6 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
-import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh/animated";
-import { desktop, Inspector, Panel, size, Stage, ui, wide } from "./palette";
+import { reduceMotion } from "nsh";
+import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh";
+import { button, buttonText, desktop, focusRing, Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 const TRACK = 250;
 // Read when they render, so they follow the theme.
@@ -9,16 +10,8 @@ const SWATCHES = 5;
 
 function Chip(props: { label: string; onPress: () => void }) {
   return (
-    <View
-      onPress={props.onPress}
-      activeStyle={{ opacity: 0.6 }}
-      style={
-        desktop
-          ? { ...ui().raised, alignSelf: "flex-start", height: size.control, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8 }
-          : { ...ui().raised, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 }
-      }
-    >
-      <Text style={{ color: ui().text, fontWeight: "600", fontSize: desktop ? 13 : undefined }}>{props.label}</Text>
+    <View onPress={props.onPress} {...button()}>
+      <Text style={buttonText()}>{props.label}</Text>
     </View>
   );
 }
@@ -73,14 +66,17 @@ function App() {
             borderRadius: on() ? 32 : 12,
             backgroundColor: on() ? ui().info : ui().accent,
             opacity: on() ? 0.6 : 1,
-            transform: [{ rotate: on() ? "45deg" : "0deg" }],
+            rotate: on() ? "45deg" : "0deg",
             transitionProperty: "all",
-            transitionDuration: 400,
+            transitionDuration: reduceMotion() ? 0 : 400,
             transitionTimingFunction: "ease-in-out",
           }}
+          hoverStyle={{ opacity: 0.88 }}
+          focusStyle={focusRing()}
+          activeStyle={{ opacity: 0.7 }}
         />
-        <View class="size-10 rounded-full border-4 animate-spin" style={{ borderColor: ui().border, borderTopColor: ui().accent }} />
-        <View class="size-10 rounded-full animate-pulse" style={{ backgroundColor: ui().up }} />
+        <View class="size-10 rounded-full border-4 animate-spin motion-reduce:animate-none" style={{ borderColor: ui().border, borderTopColor: ui().accent }} />
+        <View class="size-10 rounded-full animate-pulse motion-reduce:animate-none" style={{ backgroundColor: ui().up }} />
         <Text style={{ flex: 1, color: ui().muted, fontSize: 13 }}>
           {desktop ? "Click the square." : "Tap the square."} animate-spin / animate-pulse run natively.
         </Text>
@@ -88,15 +84,15 @@ function App() {
   );
   const tracks = () => (
       <>
-        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: ui().accent, transform: [{ translateX: timed }] }} />
-        <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: ui().info, transform: [{ translateX: sprung }] }} />
+        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: ui().accent, translate: [timed, 0] }} />
+        <View style={{ width: 20, height: 20, borderRadius: 4, backgroundColor: ui().info, translate: [sprung, 0] }} />
         <View
           style={{
             height: 8,
             borderRadius: 4,
             // One value, interpolated into a color and a width fraction.
             backgroundColor: timed.interpolate({ inputRange: [0, TRACK], outputRange: [ui().border, ui().up] }),
-            transform: [{ scaleX: timed.interpolate({ inputRange: [0, TRACK], outputRange: [0.1, 1] }) }],
+            scale: [timed.interpolate({ inputRange: [0, TRACK], outputRange: [0.1, 1] }), 1],
             transformOrigin: "left",
             width: wide() ? TRACK + 20 : undefined,
           }}
@@ -114,10 +110,8 @@ function App() {
                 height: 32,
                 borderRadius: 8,
                 backgroundColor: color(),
-                transform: [
-                  { translateY: ys[i()] },
-                  { rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) },
-                ],
+                translate: [0, ys[i()]],
+                rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }),
               }}
             />
           )}

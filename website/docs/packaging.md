@@ -56,7 +56,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | Key | Type | Default | Used for |
 |---|---|---|---|
 | `name` | string | the entry's directory name | The display name under the icon (`CFBundleDisplayName`, Android `android:label`) and the output file name. |
-| `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh-storage.md), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
+| `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh.md#storage), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
 | `version` | string | `"1.0.0"` | The user-visible version (`CFBundleShortVersionString`, `versionName`). |
 | `build` | number | `1` | The build number (`CFBundleVersion`, `versionCode`). Raise it for every release you upload. |
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
@@ -142,7 +142,7 @@ without Gradle. Requirements:
 - For a Rust app, the Android NDK (`sdkmanager "ndk;<version>"`, or `ANDROID_NDK_HOME`), which builds its
   `libnsh.so`.
 
-The app targets API 35 and needs API 28 (Android 9) or newer; it contains native code for `arm64-v8a` and `x86_64`.
+The app targets API 35 and needs API 28 (Android 9) or newer; it contains native code for `arm64-v8a`, `armeabi-v7a` and `x86_64`.
 
 ### Signing for release
 

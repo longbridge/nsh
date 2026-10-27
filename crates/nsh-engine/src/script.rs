@@ -12,6 +12,8 @@ pub(crate) struct SystemConfig {
     pub(crate) data_dir: Option<std::path::PathBuf>,
     pub(crate) paths: nsh_core::access::TrustedPaths,
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    /// The embedding app's side of `nsh/host`.
+    pub(crate) host: std::rc::Rc<dyn nsh_core::host_channel::HostBridge>,
 }
 
 #[cfg(not(feature = "js"))]
@@ -65,10 +67,11 @@ mod imp {
         pub(crate) fn start<M: TextEngine + 'static>(
             bundle: &Bundle,
             limits: Limits,
-            ui_sets: &[nsh_core::ui::Registry],
-            posts: nsh_core::ui::Posts,
+            ui_sets: &[nsh_core::element::Registry],
+            posts: nsh_core::element::Posts,
             environment: &Environment,
-            tokens: Arc<nsh_core::ui::Tokens>,
+            tokens: Arc<nsh_core::element::Tokens>,
+            theme: nsh_core::element::ThemeTokens,
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -98,6 +101,7 @@ mod imp {
             host.set_websocket_transport(system.websocket);
             host.set_filesystem(system.filesystem);
             host.set_system_wake(system.wake);
+            host.set_host_bridge(system.host);
             host.set_stop_flag(stop.clone());
             let exit_requested = Rc::new(Cell::new(false));
             let request = exit_requested.clone();
@@ -131,6 +135,7 @@ mod imp {
             }));
             host.set_environment(environment);
             host.set_tokens(tokens);
+            host.set_theme_tokens(theme);
             let script = Script {
                 host,
                 exit_requested,
@@ -219,12 +224,20 @@ mod imp {
             self.host.dispatch_event(id, event, payload);
         }
 
-        pub(crate) fn deliver(&self, event: nsh_core::ui::JsEvent) {
+        pub(crate) fn deliver(&self, event: nsh_core::element::JsEvent) {
             self.host.deliver(event);
         }
 
         pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
             self.host.bind_list(list, binds);
+        }
+
+        pub(crate) fn host_event(&self, name: &str, data: nsh_core::JsonValue) {
+            self.host.host_event(name, data);
+        }
+
+        pub(crate) fn host_reply(&self, id: u64, result: Result<nsh_core::JsonValue, String>) {
+            self.host.host_reply(id, result);
         }
 
         pub(crate) fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
@@ -273,8 +286,12 @@ mod imp {
             self.host.set_environment(environment);
         }
 
-        pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::ui::Tokens>) {
+        pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::element::Tokens>) {
             self.host.set_tokens(tokens);
+        }
+
+        pub(crate) fn set_theme_tokens(&self, theme: nsh_core::element::ThemeTokens) {
+            self.host.set_theme_tokens(theme);
         }
 
         pub(crate) fn take_fonts(&self, out: &mut Vec<String>) {
@@ -328,10 +345,11 @@ mod stub {
         pub(crate) fn start<M: TextEngine + 'static>(
             _: &Bundle,
             _: Limits,
-            _: &[nsh_core::ui::Registry],
-            _: nsh_core::ui::Posts,
+            _: &[nsh_core::element::Registry],
+            _: nsh_core::element::Posts,
             _: &Environment,
-            _: Arc<nsh_core::ui::Tokens>,
+            _: Arc<nsh_core::element::Tokens>,
+            _: nsh_core::element::ThemeTokens,
             _: Rc<M>,
             _: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -363,11 +381,19 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn deliver(&self, _: nsh_core::ui::JsEvent) {
+        pub(crate) fn deliver(&self, _: nsh_core::element::JsEvent) {
             match *self {}
         }
 
         pub(crate) fn bind_list(&self, _: NodeId, _: &[(u32, u32)]) {
+            match *self {}
+        }
+
+        pub(crate) fn host_event(&self, _: &str, _: nsh_core::JsonValue) {
+            match *self {}
+        }
+
+        pub(crate) fn host_reply(&self, _: u64, _: Result<nsh_core::JsonValue, String>) {
             match *self {}
         }
 
@@ -411,7 +437,11 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn set_tokens(&self, _: Arc<nsh_core::ui::Tokens>) {
+        pub(crate) fn set_tokens(&self, _: Arc<nsh_core::element::Tokens>) {
+            match *self {}
+        }
+
+        pub(crate) fn set_theme_tokens(&self, _: nsh_core::element::ThemeTokens) {
             match *self {}
         }
 

@@ -23,6 +23,7 @@ mod dom;
 mod env;
 mod error;
 mod host;
+mod host_channel;
 mod hot;
 mod keymap;
 mod list;
@@ -75,7 +76,7 @@ pub use crate::{
 /// imports against them).
 pub fn native_module_exports(
     specifier: &str,
-    ui_sets: &[nsh_core::ui::description::SetDescription],
+    ui_sets: &[nsh_core::element::description::SetDescription],
 ) -> Option<Vec<String>> {
     modules::ModuleTable::compiling(ui_sets).export_names(specifier)
 }

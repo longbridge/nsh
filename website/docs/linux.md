@@ -11,7 +11,7 @@ NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets an
 the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and Android,
 so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`platform.os` is `"linux"` in TSX) and TSX's
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come
-from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements
@@ -130,9 +130,18 @@ view.load(Bundle::source(code).into());
 QuickJS bytecode is trusted input, so only load it from your own app's files. A standalone window is
 `nsh_platform_linux::run_app(source, options)`, with `AppSource::Rust(root)` or `AppSource::Bundle(bundle)`.
 
+`AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
+[images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
+cache directory and 256 MiB of images by default).
+
 `AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
 text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
 follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
+`AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
+in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
+(`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
@@ -155,12 +164,12 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 | Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Alt+Left, Back key, mouse back button | Go back (also from a field) |
 | Ctrl+arrows, Home / End, with Shift; Ctrl+Backspace / Delete | Move, select and delete by word and line in a field, as in every GTK app |
-| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
+| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy selectable text |
 | Arrows; Page Up / Down, Space, Shift+Space; Home / End | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Ctrl+W, F11, Ctrl+Q | Close the window, full screen, quit (`nsh package` and `nsh run` apps) |
 | Ctrl+R | Reloads the latest build (`nsh run`) |
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) are a window-wide shortcut controller; Ctrl+Q and
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) are a window-wide shortcut controller; Ctrl+Q and
 F11 cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is the key that types C on a US layout).

@@ -18,10 +18,10 @@
 
 use jni::objects::GlobalRef;
 use nsh_core::{
-    AccessibilityRole, AutoCapitalize, AutoFill, BorderStyle, Checked, Color, Command,
-    DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve,
-    LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch,
-    MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle, Checked, Color,
+    Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType,
+    LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation,
+    MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
     ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
     ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE},
@@ -66,6 +66,7 @@ const COMPONENT_PROPS: i32 = 30;
 const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
+const COMPONENT_PROP_SLOTS: i32 = 34;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -80,6 +81,9 @@ pub(crate) struct Encoded {
     pub(crate) objects: Vec<Obj>,
     /// Items for the UI-thread animator, in order.
     pub(crate) animation: Vec<MountItem>,
+    /// The app's keyboard shortcuts, when the batch changed them: matched
+    /// natively (`crate::keymap`), never sent to Java.
+    pub(crate) keymap: Option<std::sync::Arc<nsh_core::keymap::Keymap>>,
 }
 
 impl Encoded {
@@ -212,7 +216,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     mask(&mut e, l.events);
                 }
                 // `selectable`: 1 asked for, 0 refused (`false`: out of
-                // selection areas too), 2 unset.
+                // selectable views too), 2 unset.
                 e.int(match text.selectable {
                     Some(true) => 1,
                     Some(false) => 0,
@@ -242,6 +246,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ResizeMode::Contain => 1,
                     ResizeMode::Stretch => 2,
                     ResizeMode::Center => 3,
+                    ResizeMode::ScaleDown => 4,
                 });
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
                 e.float(options.blur_radius.0);
@@ -263,6 +268,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 horizontal,
                 scrollbar_visible,
                 scroll_value,
+                pull_value,
                 keyboard_dismiss,
                 mirrored,
             } => {
@@ -281,6 +287,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     horizontal,
                     scrollbar_visible,
                     scroll_value,
+                    pull_value,
                     keyboard_dismiss,
                     mirrored,
                 });
@@ -300,13 +307,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     e.float(c.start.0);
                     e.float(c.end.0);
                 }
+                // Animated offsets are the UI thread's graph's (`animation.rs`).
+                e.animation.push(MountItem::StickyCells { id, cells });
             }
             MountItem::LayoutDirection { rtl } => {
                 e.int(LAYOUT_DIRECTION);
                 e.bool(rtl);
             }
-            // Keyboard shortcuts are not matched on Android yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => e.keymap = Some(keymap),
             MountItem::Appearance { appearance } => {
                 e.int(APPEARANCE);
                 e.int(appearance as i32);
@@ -366,6 +374,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.bool(b.bounces_zoom);
                 e.bool(b.pinch);
                 e.bool(b.center_content);
+                e.bool(b.refresh_indicator.is_some());
+                e.float(b.refresh_indicator.map_or(0.0, |h| h.0));
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 e.int(SCROLL_BY);
@@ -473,6 +483,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.string(name.to_string());
             }
+            MountItem::ComponentPropSlots { id, names } => {
+                e.int(COMPONENT_PROP_SLOTS);
+                e.int(id as i32);
+                e.int(names.len() as i32);
+                for name in names {
+                    e.string(name.to_string());
+                }
+            }
             MountItem::ComponentProps { id, props } => {
                 e.int(COMPONENT_PROPS);
                 e.int(id as i32);
@@ -539,11 +557,6 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                             });
                         }
                     }
-                    Command::Toast { text, long } => {
-                        e.int(13);
-                        e.string(text);
-                        e.bool(long);
-                    }
                     Command::SetJsResponder { block } => {
                         e.int(14);
                         e.bool(block);
@@ -591,11 +604,26 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(id as i32);
                         e.bool(has_only);
                     }
+                    Command::OpenUrl { id, url } => {
+                        e.int(26);
+                        e.int(id as i32);
+                        e.string(url);
+                    }
                     // Answered by the sink (`host::answer_clipboard_reads`);
                     // images are not written to Android's clipboard.
                     Command::ReadClipboardImage { .. }
                     | Command::ReadClipboardFiles { .. }
                     | Command::SetClipboardImage(_) => e.int(-1),
+                    // `Picker.java`: the request, the limit, the longest
+                    // side (0: any), the quality (-1: none), the format.
+                    Command::PickImages { id, request } => {
+                        e.int(25);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.int(request.max_dimension.map_or(0, |d| d.0.max(1)));
+                        e.float(request.quality.map_or(-1.0, |q| q.0));
+                        e.bool(request.format == nsh_core::picker::PickFormat::Current);
+                    }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
@@ -603,7 +631,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
-                    | Command::Desktop(_) => e.int(-1),
+                    | Command::Desktop(_)
+                    // No host answers `nsh/host` here (`Environment::host`):
+                    // the core rejects the calls first.
+                    | Command::HostCall { .. } => e.int(-1),
                 }
             }
         }
@@ -640,16 +671,6 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     });
     e.float(s.opacity);
     e.bool(s.overflow_hidden);
-    let shadow = s.shadow;
-    e.int(argb(shadow.color));
-    e.float(shadow.offset_x.0);
-    e.float(shadow.offset_y.0);
-    e.float(if shadow.is_visible() {
-        shadow.opacity
-    } else {
-        0.0
-    });
-    e.float(shadow.radius.0);
     for v in view_transform(&s.transform, |_| None) {
         e.float(v);
     }
@@ -760,22 +781,26 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
     }
     let filter_list = |e: &mut Encoded, list: &[Filter]| {
         // Color filters as one composed matrix, then blur, then the drop
-        // shadow (what Android's render effects take).
+        // shadow (what Android's render effects take): the widest of the
+        // chain's (the last of equals).
         let matrix = nsh_core::compose_color_matrices(list);
         e.bool(matrix.is_some());
         for v in matrix.unwrap_or([0.0; 20]) {
             e.float(v);
         }
         e.float(nsh_core::blur_radius(list).0);
-        let shadow = list.iter().find_map(|f| match *f {
-            Filter::DropShadow {
-                offset_x,
-                offset_y,
-                blur,
-                color,
-            } => Some((offset_x.0, offset_y.0, blur.0, color)),
-            _ => None,
-        });
+        let shadow = list
+            .iter()
+            .filter_map(|f| match *f {
+                Filter::DropShadow {
+                    offset_x,
+                    offset_y,
+                    blur,
+                    color,
+                } => Some((offset_x.0, offset_y.0, blur.0, color)),
+                _ => None,
+            })
+            .max_by(|a, b| a.2.total_cmp(&b.2));
         e.bool(shadow.is_some());
         let (x, y, b, c) = shadow.unwrap_or((0.0, 0.0, 0.0, Color::TRANSPARENT));
         e.float(x);
@@ -927,6 +952,11 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             });
             e.bool(v.controls);
             e.float(v.progress_interval_ms);
+            e.int(match v.audio_session {
+                AudioSession::Default => 0,
+                AudioSession::Playback => 1,
+                AudioSession::MixWithOthers => 2,
+            });
         }
     }
 }
@@ -1042,7 +1072,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         }
         None => e.int(0),
     }
-    e.bool(p.selection_area);
+    e.bool(p.selectable_view);
 }
 
 /// Index of `role` in `A11y.java`'s class name table.
@@ -1078,6 +1108,13 @@ fn role_index(role: AccessibilityRole) -> i32 {
         Toolbar => 26,
         List => 27,
         Grid => 28,
+        Table => 29,
+        Row => 30,
+        Cell => 31,
+        ColumnHeader => 32,
+        RowGroup => 33,
+        Listbox => 34,
+        Option => 35,
     }
 }
 
@@ -1092,6 +1129,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
         LayoutCurve::EaseOut => (2, 0.0),
         LayoutCurve::EaseInEaseOut => (3, 0.0),
         LayoutCurve::Spring { damping } => (4, damping),
+        LayoutCurve::Keyboard => (5, 0.0),
     };
     e.int(curve);
     e.float(damping);
@@ -1154,6 +1192,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.auto_focus);
     e.bool(c.selection_color.is_some());
     e.int(c.selection_color.map_or(0, argb));
+    e.bool(c.caret_color.is_some());
+    e.int(c.caret_color.map_or(0, argb));
     // What return does: 0 submit, 1 submit and unfocus, 2 a line break.
     e.int(match c.submit() {
         SubmitBehavior::Submit => 0,
@@ -1192,6 +1232,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     });
     e.bool(c.rtl);
     e.bool(c.caret_hidden);
+    // `pasteBehavior`: whether a paste inserts its text.
+    e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
 }
 
 // --- Canvas drawings (`CanvasBox.java`) -------------------------------------

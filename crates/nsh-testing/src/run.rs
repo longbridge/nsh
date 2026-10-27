@@ -21,9 +21,10 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
+    element::{Callback, Registry, Root},
     geometry::{Points, Size},
     platform::{Idiom, Locale, Os},
-    ui::{Callback, Registry, Root, prelude::timer},
+    prelude::timer,
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
@@ -36,6 +37,7 @@ use crate::{
         DirectoryAssets, Headless, RecordingNetwork, StubNetwork, UreqNetwork, WAIT, print_batch,
     },
     module::{Case, Hook, Item, Launch, Mode, NetworkSetup, Platform, SafeArea, Suite},
+    page_host::PageHost,
 };
 
 /// Builds an entry ([`Entry`]; an app's may be its directory).
@@ -84,6 +86,11 @@ pub struct TestRun {
     /// Opens the apps on a real platform's host instead of a headless
     /// engine (`nsh test --target`).
     pub host: Option<StartHost>,
+    /// The web page's host module (`nsh.json` `web.host`, exporting
+    /// `createHost(player)`): each app opened headless gets one of its own,
+    /// which answers its `nsh/host` calls and sends its events, and
+    /// `host.available()` is true. `None`: the apps have no host.
+    pub page_host: Option<PathBuf>,
 }
 
 /// Starts the app whose entry is the path on a real platform's host, as
@@ -190,6 +197,24 @@ pub struct TestResult {
     /// Why it failed (`None` unless its status is
     /// [`TestStatus::Failed`]).
     pub failure: Option<Failure>,
+}
+
+impl TestResult {
+    /// The result of a test that ran elsewhere (`cargo test`'s, which
+    /// `nsh test` reports with the app's TypeScript tests).
+    pub fn new(
+        name: impl Into<String>,
+        elapsed: Duration,
+        status: TestStatus,
+        failure: Option<Failure>,
+    ) -> TestResult {
+        TestResult {
+            name: name.into(),
+            elapsed,
+            status,
+            failure,
+        }
+    }
 }
 
 /// Whether a test ran and passed.
@@ -453,6 +478,15 @@ impl Session {
         let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let safe_area = launch.safe_area;
+        // Loaded before the app starts, as the page's host is: what it
+        // sends meanwhile waits for the app.
+        let page_host = match &self.run.page_host {
+            Some(module) => Some(
+                PageHost::start(module, clock.clone())
+                    .map_err(|e| format!("open({entry:?}): {e}"))?,
+            ),
+            None => None,
+        };
         let default = EngineConfig::new(app);
         let config = EngineConfig {
             viewport: nsh_core::Size::new(
@@ -485,14 +519,20 @@ impl Session {
                     Platform::Ios | Platform::Android => Idiom::default(),
                     _ => Idiom::Desktop,
                 },
+                host: page_host.is_some(),
                 ..Default::default()
             },
             ui_sets: self.run.ui_sets.clone(),
             clock,
+            host: launch.host,
             ..default
         };
         let mut app = Headless::start(config)
             .map_err(|e| format!("open({entry:?}): the engine did not start: {e}"))?;
+        if let Some(host) = page_host {
+            host.attach(app.engine().control());
+            app.on_host_call(move |id, name, args| host.call(id, name, args));
+        }
         if let Some(out) = &self.run.trace {
             let out = out.clone();
             app.observe(move |step, batch| {
@@ -507,6 +547,7 @@ impl Session {
             .unwrap_or_else(|| path.clone());
         // `App` answers dialogs after each step, with the test's handler.
         app.answer_dialogs_myself();
+        app.answer_picks_myself();
         app.set_clipboard(launch.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
@@ -535,8 +576,18 @@ impl Session {
         {
             return Err(format!("open({entry:?}): {tag:?} is not a locale"));
         }
+        // The host's dev host plays no handlers of the test's: they run
+        // headless only. The launch parameters reach its engine.
+        if launch.host_handlers {
+            return Err(format!(
+                "open({entry:?}): {}",
+                crate::driver::headless_only("`host.handlers`")
+            ));
+        }
         let safe_area = launch.safe_area;
         let mut environment = nsh_dev::protocol::TestEnvironment::default();
+        let params = launch.host.params();
+        environment.host_params = (!params.is_empty()).then_some(params);
         environment.clipboard = launch.clipboard.clone();
         environment.locale = launch.locale.clone();
         environment.reduced_motion = launch.reduced_motion.then_some(true);
@@ -642,7 +693,7 @@ impl Session {
     /// may be an app a `beforeAll` opened).
     async fn close_apps_since(self: &Arc<Self>, mark: usize) -> Option<Vec<String>> {
         let session = self.clone();
-        nsh_core::ui::prelude::blocking(move || session.close_apps(mark))
+        nsh_core::prelude::blocking(move || session.close_apps(mark))
             .await
             .ok()
             .flatten()

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     animation::AnimationOp,
+    element::PropEnum,
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement, TooltipContent},
     props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
-    style::{Color, EllipsizeMode, Style, StylePatch},
-    ui::PropEnum,
+    style::{Color, Style, StylePatch},
 };
 
 /// Identifier of a node, assigned by the JS renderer.
@@ -167,8 +167,8 @@ events! {
     Error = "onError": "An image failed to load (payload: [`EventPayload::Error`]).",
     ChangeText = "onChangeText" as "onChange": "The user edited an input (payload: [`EventPayload::Text`]).",
     SubmitEditing = "onSubmitEditing" as "onSubmit": "The return key was pressed in an input (payload: [`EventPayload::Text`]).",
-    Focus = "onFocus": "An input became focused.",
-    Blur = "onBlur": "An input lost focus.",
+    Focus = "onFocus": "An input, or a view that takes presses, took the keyboard focus.",
+    Blur = "onBlur": "An input, or a view that takes presses, lost the keyboard focus.",
     PressDown = "onPressIn" as "onPressDown": "A press went down on a pressable view (a finger, a pen or a mouse button; payload as `Press`).",
     PressUp = "onPressOut" as "onPressUp": "The press ended: released, moved away or cancelled (payload as `Press`).",
     Layout = "onLayout": "The frame changed (payload: [`EventPayload::Layout`], relative to the parent).",
@@ -205,7 +205,7 @@ events! {
     BackRequest = "onBackRequest" as "onBackPress": "The user pressed back on a screen (the header's back button, Android back, the desktops' back keys and mouse button, the browser's back), whether or not `popOnBack` let it pop.",
     NativeEvent = "onNativeEvent": "A registered native component emitted an event (payload: [`EventPayload::Native`]).",
     Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds what was asked; for text `text`, unless only `has` was asked; for an image `uri` (a `data:` URI), `width` and `height`, unless only `has` was asked; for files `files`, their `file:` URLs one per line).",
-    KeyCommand = "onKeyCommand": "A key matched a binding of `nsh/keymap` (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
+    KeyCommand = "onKeyCommand": "A key matched a binding of `keymap` (`nsh`) (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (never on touches).",
     HoverOut = "onHoverOut": "The mouse left the view and the views inside it, or the window.",
@@ -219,6 +219,12 @@ events! {
     Cancel = "onCancel": "Escape or the Android back button was pressed while the overlay was the top one listening to it (raised by the core).",
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
+    Host = "onHost": "The embedding host answered a [`Command::HostCall`] or sent an event to `host`'s listeners (`nsh`) (root only; payload: [`EventPayload::Json`], `{ type: \"reply\", id, ok, value?, error? }` or `{ type: \"event\", event, payload }`).",
+    Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
+    LoadMoreAtStart = "onLoadMoreAtStart": "A list was scrolled close to its start after the user or a scroll command moved it (raised by the core).",
+    OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
+    CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
+    Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
 
 }
 
@@ -371,7 +377,8 @@ pub struct HoverEvent {
 
 /// Where the pointer was at a press ([`EventKind::Press`],
 /// [`EventKind::LongPress`], [`EventKind::PressDown`],
-/// [`EventKind::PressUp`]), on backends that know it, in points.
+/// [`EventKind::PressUp`]), with the modifier keys and the click count, on
+/// backends that know it, in points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PressEvent {
     /// Position in the pressed view, its transforms undone (for a pressed
@@ -380,6 +387,11 @@ pub struct PressEvent {
     /// Position in the root view the view is in (the surface, or its
     /// modal), as touches' `page`.
     pub page_position: Point<Points>,
+    /// The modifier keys held when the press began.
+    pub modifiers: crate::keymap::Modifiers,
+    /// Consecutive clicks at the same place: 1 for a click, 2 for a
+    /// double click, ...
+    pub clicks: u32,
 }
 
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
@@ -407,6 +419,138 @@ pub struct TouchEvent {
     /// A view around the fingers whose `panActivation` the platform
     /// activated with this event: it becomes the responder.
     pub activated: Option<NodeId>,
+}
+
+/// What the user pasted into an input ([`EventKind::Paste`]): what the
+/// clipboard held when the user pasted, which the platform read then (the
+/// app never reads the clipboard for it).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PasteEvent {
+    /// The plain text, empty when it held none.
+    pub text: String,
+    /// The same content as HTML (`text/html`), empty when the clipboard
+    /// held none: what a browser, an office suite or a rich text editor
+    /// copied, with its formatting.
+    pub html: String,
+    /// Files with their bytes: images (a screenshot, an image copied from a
+    /// page or an app), in the platform's order.
+    pub files: Vec<PastedFile>,
+    /// Absolute `file:` URLs of local files copied in a file manager, in the
+    /// platform's order (as [`EventPayload::FileDrop`]'s).
+    pub uris: Vec<String>,
+}
+
+impl EventPayload {
+    /// An `onPaste` payload of fields (`text`; a reported paste with no
+    /// payload is an empty one) made a [`EventPayload::Paste`], as handlers
+    /// read it (`files` and `uris` always there).
+    pub fn into_paste(self) -> EventPayload {
+        match self {
+            EventPayload::Map(fields) => {
+                let mut paste = PasteEvent::default();
+                for (key, value) in fields {
+                    match (key, value) {
+                        ("text", PayloadValue::Str(text)) => paste.text = text,
+                        ("html", PayloadValue::Str(html)) => paste.html = html,
+                        _ => {}
+                    }
+                }
+                EventPayload::Paste(Box::new(paste))
+            }
+            EventPayload::None => EventPayload::Paste(Box::default()),
+            payload => payload,
+        }
+    }
+}
+
+impl PasteEvent {
+    /// A paste of `text`, with no files.
+    pub fn new(text: impl Into<String>) -> PasteEvent {
+        PasteEvent {
+            text: text.into(),
+            ..PasteEvent::default()
+        }
+    }
+
+    /// Whether it holds nothing.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+            && self.html.is_empty()
+            && self.files.is_empty()
+            && self.uris.is_empty()
+    }
+}
+
+/// A file pasted with its bytes ([`PasteEvent::files`]): JS gets a `File`.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PastedFile {
+    /// Its name (`image.png` for an image without one).
+    pub name: String,
+    /// Its MIME type (`image/png`).
+    pub mime: String,
+    /// Its bytes.
+    pub data: Vec<u8>,
+}
+
+impl PastedFile {
+    /// A file named `name` of type `mime` holding `data`.
+    pub fn new(name: impl Into<String>, mime: impl Into<String>, data: Vec<u8>) -> PastedFile {
+        PastedFile {
+            name: name.into(),
+            mime: mime.into(),
+            data,
+        }
+    }
+
+    /// An image of encoded `data` (PNG, JPEG, GIF, WebP, HEIC, TIFF, BMP;
+    /// PNG when unknown), named `image.<extension>`.
+    pub fn image(data: Vec<u8>) -> PastedFile {
+        let (mime, extension) = image_type(&data);
+        PastedFile::new(format!("image.{extension}"), mime, data)
+    }
+}
+
+/// The MIME type and file extension of encoded image `data`.
+fn image_type(data: &[u8]) -> (&'static str, &'static str) {
+    match data {
+        [0xFF, 0xD8, 0xFF, ..] => ("image/jpeg", "jpg"),
+        [b'G', b'I', b'F', b'8', ..] => ("image/gif", "gif"),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => ("image/webp", "webp"),
+        [
+            _,
+            _,
+            _,
+            _,
+            b'f',
+            b't',
+            b'y',
+            b'p',
+            b'h',
+            b'e',
+            b'i',
+            b'c' | b'x',
+            ..,
+        ] => ("image/heic", "heic"),
+        [b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => ("image/tiff", "tiff"),
+        [b'B', b'M', ..] => ("image/bmp", "bmp"),
+        _ => ("image/png", "png"),
+    }
 }
 
 // Every kind has a bit of [`EventMask`].
@@ -502,6 +646,19 @@ pub enum EventPayload {
         /// The `pan.y` value now.
         value_y: Option<Points>,
     },
+    /// A system-cancelled drag, with the same last values as `Pan`.
+    PanCancelled {
+        /// The translation.
+        translation: Point<Points>,
+        /// Horizontal velocity.
+        velocity_x: f32,
+        /// Vertical velocity.
+        velocity_y: f32,
+        /// The `pan.x` value now (`None` without one).
+        value_x: Option<Points>,
+        /// The `pan.y` value now.
+        value_y: Option<Points>,
+    },
     /// A scroll position: the content offset.
     Scroll(Point<Points>),
     /// A loaded image's source size in pixels (before downsampling).
@@ -527,12 +684,22 @@ pub enum EventPayload {
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
     /// Where the pointer was at a press (`onPress`, `onLongPress`,
-    /// `onPressDown`, `onPressUp`), on backends that know it.
+    /// `onPressDown`, `onPressUp`), with the modifier keys and the click
+    /// count, on backends that know it.
     Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
+    /// What the user pasted into an input.
+    Paste(Box<PasteEvent>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
+    /// The files the user picked ([`EventKind::Pick`]), with their bytes.
+    Picked {
+        /// The request ([`Command::PickImages`]).
+        id: u32,
+        /// The files, in the order picked; none when cancelled.
+        files: Vec<crate::picker::PickedFile>,
+    },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.
     Native {
@@ -541,6 +708,18 @@ pub enum EventPayload {
         /// Its data.
         data: crate::JsonValue,
     },
+    /// A JSON value handed to JS as it is ([`EventKind::Host`]).
+    Json(crate::JsonValue),
+}
+
+impl EventPayload {
+    /// An input's `onCaretMove`: the caret's `bounds` in the input's
+    /// coordinates (its border box, the input's own scrolling applied), as
+    /// the platforms report it. The core adds `pageBounds`
+    /// ([`crate::Core::locate_caret`]).
+    pub fn caret(bounds: Bounds<Points>) -> EventPayload {
+        EventPayload::Map(vec![("bounds", PayloadValue::Bounds(bounds))])
+    }
 }
 
 impl TouchEvent {
@@ -568,14 +747,20 @@ pub enum ResizeMode {
     Contain,
     /// Stretch to the box.
     Stretch,
-    /// Center at natural size.
+    /// Center at natural size, cropped where larger than the box (CSS's
+    /// `object-fit: none`).
     Center,
+    /// Center at natural size, shrunk to fit the box where larger (CSS's
+    /// `object-fit: scale-down`, React Native's `center`).
+    #[prop(rename = "scale-down")]
+    ScaleDown,
 }
 
 impl ResizeMode {
     /// Where content of `natural` size goes in a box of `size`: scaled as
-    /// the mode scales it (`Center` shrinks content larger than the box,
-    /// as CSS's `scale-down`), then placed at `position`. The rectangle
+    /// the mode scales it (`Center` keeps the natural size, as CSS's
+    /// `none`; `ScaleDown` shrinks content larger than the box, as CSS's
+    /// `scale-down`), then placed at `position`. The rectangle
     /// may reach outside the box (a covering image), which crops it.
     /// Content without a size fills the box.
     pub fn fit(
@@ -595,7 +780,8 @@ impl ResizeMode {
         let scale = match self {
             ResizeMode::Cover => (size.width.0 / nw).max(size.height.0 / nh),
             ResizeMode::Contain => contain,
-            ResizeMode::Center => contain.min(1.0),
+            ResizeMode::Center => 1.0,
+            ResizeMode::ScaleDown => contain.min(1.0),
             ResizeMode::Stretch => 1.0,
         };
         let content = Size {
@@ -833,6 +1019,46 @@ pub enum ReturnKeyType {
     Send,
 }
 
+/// What an input does with what the user pastes (`pasteBehavior`); it
+/// reports it either way (`onPaste`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum PasteBehavior {
+    /// Inserts the pasted text (default). Images and files are never
+    /// inserted: a text input holds text.
+    #[default]
+    Insert,
+    /// Inserts nothing: the app does what it wants with `onPaste`'s text,
+    /// images and files.
+    Report,
+}
+
+/// A bar button UIKit draws itself, with the system's look, symbol or
+/// label (`ios={{ headerRightSystemItem }}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum HeaderSystemItem {
+    /// A plus (`UIBarButtonSystemItemAdd`).
+    #[default]
+    Add,
+    /// The system's "Done" (`UIBarButtonSystemItemDone`).
+    Done,
+    /// A close mark (`UIBarButtonSystemItemClose`).
+    Close,
+    /// The system's "Edit" (`UIBarButtonSystemItemEdit`).
+    Edit,
+    /// A compose symbol (`UIBarButtonSystemItemCompose`).
+    Compose,
+    /// A magnifying glass (`UIBarButtonSystemItemSearch`).
+    Search,
+    /// The share symbol (`UIBarButtonSystemItemAction`).
+    Share,
+    /// A trash can (`UIBarButtonSystemItemTrash`).
+    Trash,
+    /// The system's "Save" (`UIBarButtonSystemItemSave`).
+    Save,
+    /// The system's "Cancel" (`UIBarButtonSystemItemCancel`).
+    Cancel,
+}
+
 /// What return does in an input (`submitBehavior`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum SubmitBehavior {
@@ -977,6 +1203,12 @@ pub enum ScrollProp {
     /// `centerContent`: content smaller than the viewport (zoomed out) is centered.
     #[prop(js = "centerContent", on = SCROLL)]
     CenterContent(bool),
+    /// `refreshIndicator`: `{ height }`, the app draws its own
+    /// pull-to-refresh indicator (from `pullValue`), `height` points tall:
+    /// the platform's spinner is hidden, a pull refreshes once it reaches
+    /// `height`, and refreshing keeps `height` above the content.
+    #[prop(js = "refreshIndicator", with = crate::js::host_values::refresh_indicator, reset = ScrollProp::RefreshIndicator(None), ts = "{ height: number }", on = SCROLLING)]
+    RefreshIndicator(Option<Points>),
 }
 
 /// What a list cell holds.
@@ -1022,10 +1254,12 @@ pub enum ListViewport {
 /// Without thresholds, any visible pixel does.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Viewability {
-    /// Percent of the viewport an item must cover.
-    pub view_area_percent: Option<f32>,
-    /// Percent of an item that must be visible.
-    pub item_visible_percent: Option<f32>,
+    /// How much of the viewport an item must cover (TS:
+    /// `viewAreaCoverageThreshold`, 0 to 1).
+    pub view_area_coverage_threshold: Option<Percentage>,
+    /// How much of an item must be visible (TS: `itemVisibleThreshold`, 0
+    /// to 1).
+    pub item_visible_threshold: Option<Percentage>,
 }
 
 /// Where a header item goes (`<headeritem slot>`).
@@ -1079,6 +1313,12 @@ pub enum ScreenProp {
     /// label of the back button leading back to this page.
     #[prop(js = "headerBackTitle", on = SCREEN)]
     HeaderBackTitle(Option<Arc<str>>),
+    /// `ios={{ headerRightSystemItem }}`: UIKit's own bar button in the
+    /// system header's trailing slot, in place of the view of
+    /// `headerRight`; a press on it is a press on the first pressable view
+    /// of `headerRight`. Without a `headerRight`, nothing is drawn there.
+    #[prop(ios = "headerRightSystemItem", on = SCREEN)]
+    HeaderRightSystemItem(Option<HeaderSystemItem>),
     /// `headerBackVisible`: the system header's back button shows (default
     /// true; iOS and Android).
     #[prop(js = "headerBackVisible", default = true, on = SCREEN)]
@@ -1174,11 +1414,12 @@ pub enum ModalProp {
 /// An overlay option (`<Overlay …>`, [`crate::overlay`]).
 #[derive(Debug, Clone, Copy, PartialEq, HostProps)]
 pub enum OverlayProp {
-    /// `anchor`: the view (a ref) or the point (`{ x, y }` in the root view,
-    /// as touches' `pageX` / `pageY`) it is placed against, following a
-    /// view as it moves; without one it is laid out as a `position: fixed`
-    /// box of its root view.
-    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | null", on = OVERLAY)]
+    /// `anchor`: the view (a ref), the point (`{ x, y }` in the root view,
+    /// as touches' `pageX` / `pageY`) or the box (`{ origin, size }` in the
+    /// root view, as an input's caret `pageBounds`) it is placed against,
+    /// following a view as it moves; without one it is laid out as a
+    /// `position: fixed` box of its root view.
+    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | Bounds | null", on = OVERLAY)]
     Anchor(OverlayAnchor),
     /// `placement`: the side of the anchor it goes on (default `"bottom"`);
     /// the other side when only that one has room.
@@ -1297,13 +1538,6 @@ pub enum Command {
         /// End.
         end: u32,
     },
-    /// Show a short message (Android toast; on the root).
-    Toast {
-        /// The message.
-        text: String,
-        /// Show it longer.
-        long: bool,
-    },
     /// Have the screen reader read a message (on the root).
     Announce(String),
     /// Load the image at `uri` (keeping its bytes for views that show it
@@ -1319,7 +1553,7 @@ pub enum Command {
     AccessibilityFocus,
     /// Measure the view with this commit's layout (`ref.measure()`):
     /// answered by the core in its events for promise `call`
-    /// ([`crate::ui::JsEvent::Reply`]: a [`crate::Measurement`], or null
+    /// ([`crate::element::JsEvent::Reply`]: a [`crate::Measurement`], or null
     /// when the view is not laid out); never mounted.
     Measure {
         /// The call to answer.
@@ -1356,9 +1590,43 @@ pub enum Command {
         /// The request.
         id: u32,
     },
+    /// Show the system's picker for images (on the root;
+    /// `Picker.pickImages`), prepare the picked ones as `request` says
+    /// ([`crate::picker`]) and report them as [`EventKind::Pick`]
+    /// ([`EventPayload::Picked`] `id`; no files when cancelled).
+    PickImages {
+        /// The request.
+        id: u32,
+        /// What to show and how to prepare the images.
+        request: crate::picker::PickRequest,
+    },
+    /// Open `url` outside the app (on the root; `openUrl` of `nsh/device`,
+    /// [`crate::open_url`]): the browser, the mail or phone app, the app
+    /// that registered its scheme. Report whether it opened as
+    /// [`EventKind::OpenUrl`] `id`. The core sends it once the URL was
+    /// checked and the embedding app did not take it.
+    OpenUrl {
+        /// The request.
+        id: u32,
+        /// The URL ([`crate::open_url::check_url`] passed it).
+        url: String,
+    },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
+    /// Call function `name` of the app embedding NSH (on the root;
+    /// `nsh/host`'s `host.call`): the platform answers with
+    /// [`EventKind::Host`] `{ type: "reply", id, .. }`. Sent only on
+    /// platforms whose [`crate::platform::Environment::host`] is set, for
+    /// functions the app's `capabilities.host` grants.
+    HostCall {
+        /// The call, echoed by the reply.
+        id: u64,
+        /// The host's function.
+        name: String,
+        /// Its argument (any JSON value; `null` without one).
+        args: crate::JsonValue,
+    },
     /// A call on a registered native component (`ref.command(name, args)`).
     Native {
         /// The command.
@@ -1544,16 +1812,19 @@ pub enum Prop {
     /// A property of a registered native component (`$name` from JS):
     /// any JSON value, `None` to remove it.
     ComponentProp(Arc<str>, Option<crate::JsonValue>),
+    /// A property of a registered native component bound to an animated
+    /// value (`$name` from JS given an animated value): the platform pushes
+    /// the value to the component on every frame it changes. `None` unbinds
+    /// it; a value set with [`Prop::ComponentProp`] while bound is kept and
+    /// sent once it is unbound.
+    ComponentPropBinding(Arc<str>, Option<crate::animation::NodeId>),
     /// A prop of a Rust component's host, decoded in the JS call into the
-    /// prop's Rust type ([`crate::ui::PropSpec::decode`]); `None` resets it
+    /// prop's Rust type ([`crate::element::PropSpec::decode`]); `None` resets it
     /// to its default.
-    RustProp(&'static str, Option<crate::ui::AnyValue>),
+    RustProp(&'static str, Option<crate::element::AnyValue>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
-    /// `resizeMode`: how an image (or a video) fits its box.
-    #[prop(js = "resizeMode", on = IMAGE | VIDEO)]
-    ResizeMode(ResizeMode),
     /// `horizontal`: scrolls sideways.
     #[prop(js = "horizontal", on = SCROLL | LIST)]
     Horizontal(bool),
@@ -1603,8 +1874,12 @@ pub enum Prop {
     /// `stickyHeaderOffset`: how far from the start of the viewport sticky
     /// items stick, as CSS `position: sticky`'s `top` (negative: partly out
     /// of view); the content scrolls under the space before them.
-    #[prop(js = "stickyHeaderOffset", default = Points(0.0), on = LIST)]
+    #[prop(js = "stickyHeaderOffset", with = crate::js::host_values::sticky_offset, reset = Prop::StickyOffset(Points(0.0)), ts = "number | AnimatedNode", on = LIST)]
     StickyOffset(Points),
+    /// `stickyHeaderOffset` as an animated value: sticky items stick that
+    /// far from the start of the viewport, following the value (below a
+    /// header that moves); the platforms read it as they pin.
+    StickyOffsetNode(Option<crate::animation::NodeId>),
     /// `viewport`: `"parent"` lays the list out at its full length in its
     /// parent and renders the rows near the viewport of the scroll view
     /// around it, which scrolls it (a page of headers and lists); `"own"`
@@ -1624,6 +1899,9 @@ pub enum Prop {
     /// How close to the end `onLoadMore` fires, in viewports.
     #[prop(js = "loadMoreThreshold", default = 1.0, internal)]
     LoadMoreThreshold(f32),
+    /// How close to the start `onLoadMoreAtStart` fires, in viewports.
+    #[prop(js = "loadMoreAtStartThreshold", default = 1.0, internal)]
+    LoadMoreAtStartThreshold(f32),
     /// The item index a list cell now renders (set by the runtime after
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
@@ -1632,18 +1910,18 @@ pub enum Prop {
     /// scroll-linked effects.
     #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
     ScrollValue(Option<crate::animation::NodeId>),
+    /// `pullValue`: an animated value fed with how far a vertical scroll
+    /// view is pulled past its top (0 at rest, growing with the pull; the
+    /// room kept above the content while it refreshes), for an app's own
+    /// pull-to-refresh indicator.
+    #[prop(js = "pullValue", with = crate::js::host_values::pull_value, reset = Prop::PullValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
+    PullValue(Option<crate::animation::NodeId>),
     /// `pan`: drags drive these animated values (points) on the UI thread.
     #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: AnimatedValue; y?: AnimatedValue }")]
     PanValues(
         Option<crate::animation::NodeId>,
         Option<crate::animation::NodeId>,
     ),
-    /// `numberOfLines`: the most lines shown; 0 (default) is unlimited.
-    #[prop(js = "numberOfLines", on = TEXT)]
-    NumberOfLines(u32),
-    /// `ellipsizeMode`: where text that does not fit `numberOfLines` is cut.
-    #[prop(js = "ellipsizeMode", on = TEXT)]
-    EllipsizeMode(EllipsizeMode),
     /// `value`: the text, controlled by JS.
     #[prop(js = "value", on = INPUT)]
     Value(String),
@@ -1692,6 +1970,11 @@ pub enum Prop {
     /// from Shift+Return or Option / Alt+Return on desktops.
     #[prop(js = "submitBehavior", on = INPUT)]
     SubmitBehavior(Option<SubmitBehavior>),
+    /// `pasteBehavior`: what a paste does: `"insert"` (default) inserts its
+    /// text, `"report"` inserts nothing; `onPaste` reports what was pasted
+    /// either way. Decided natively when the user pastes.
+    #[prop(js = "pasteBehavior", on = INPUT)]
+    PasteBehavior(PasteBehavior),
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
@@ -1706,10 +1989,13 @@ pub enum Prop {
     /// `inputAccessoryViewID`).
     #[prop(js = "nativeID")]
     NativeId(Option<Box<str>>),
-    /// An input's caret and selection, the highlight of a `selectable`
-    /// text's selection (Rust components; TS sets the `selectionColor`
-    /// style key or `selection:text-*`).
+    /// The highlight of an input's or a selectable text's selection (Rust
+    /// components; TS sets the `selectionColor` style key or
+    /// `selection:bg-*`).
     SelectionColor(Option<Color>),
+    /// An input's caret (Rust components; TS sets the `caretColor` style
+    /// key or `caret-*`).
+    CaretColor(Option<Color>),
     /// `autoComplete` (iOS: also `textContentType`): what an input holds, for
     /// autofill (React Native's values, e.g. "username", "current-password",
     /// "new-password", "one-time-code", "email", "tel", "postal-code", "cc-number",
@@ -1723,9 +2009,9 @@ pub enum Prop {
     /// `keyboardDismissMode`: whether dragging dismisses the keyboard.
     #[prop(js = "keyboardDismissMode", on = SCROLL | LIST)]
     KeyboardDismissMode(KeyboardDismissMode),
-    /// `pointerEvents`: touch handling of the view and its children (React Native
-    /// semantics).
-    #[prop(js = "pointerEvents")]
+    /// Touch handling of the view and its children (React Native
+    /// semantics), which wins over the style's `pointerEvents` unless
+    /// `auto`. Set by the core (a tooltip's overlay), never by JS.
     PointerEvents(PointerEvents),
     /// `hitSlop`: extends the touch area beyond the bounds.
     #[prop(js = "hitSlop", with = crate::js::host_values::hit_slop, reset = Prop::HitSlop(EdgeInsets::default()), ts = "number | Partial<Edges>")]
@@ -1736,26 +2022,32 @@ pub enum Prop {
     /// it keep the touches until then.
     #[prop(js = "panActivation")]
     PanActivation(Option<crate::props::PanActivation>),
+    /// Whether native pans may start or update their bound values. Rust
+    /// components use this to retain gesture state across permission changes.
+    PanEnabled(bool),
+    /// A vertical pan cooperates with descendant scroll views on iOS:
+    /// scrolling consumes the drag until its top, then the pan follows.
+    PanScrollHandoff(bool),
     /// `activeStyle`: the style while pressed (and not disabled), over the
     /// view's style; applied natively, no JS round trip.
-    ActiveStyle(Option<Arc<StylePatch>>),
+    ActiveStyle(Option<std::rc::Rc<StylePatch>>),
     /// `hoverStyle`: the style while a pointer is over the view (and it is
     /// not disabled).
-    HoverStyle(Option<Arc<StylePatch>>),
+    HoverStyle(Option<std::rc::Rc<StylePatch>>),
     /// `focusStyle`: the style while the view has focus (and is not
     /// disabled).
-    FocusStyle(Option<Arc<StylePatch>>),
+    FocusStyle(Option<std::rc::Rc<StylePatch>>),
     /// `disabledStyle`: the style while `disabled`, over every other state's.
-    DisabledStyle(Option<Arc<StylePatch>>),
+    DisabledStyle(Option<std::rc::Rc<StylePatch>>),
     /// `selectedStyle`: the style while `accessibilityState.selected` (a
     /// `Button`'s `selected`), and not disabled.
-    SelectedStyle(Option<Arc<StylePatch>>),
+    SelectedStyle(Option<std::rc::Rc<StylePatch>>),
     /// `checkedStyle`: the style while `accessibilityState.checked` (true,
     /// not mixed: a checkbox's, a switch's, a radio's), and not disabled.
-    CheckedStyle(Option<Arc<StylePatch>>),
+    CheckedStyle(Option<std::rc::Rc<StylePatch>>),
     /// `indeterminateStyle`: the style while `accessibilityState.checked`
     /// is mixed (a checkbox's `indeterminate`), and not disabled.
-    IndeterminateStyle(Option<Arc<StylePatch>>),
+    IndeterminateStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`
@@ -1766,14 +2058,14 @@ pub enum Prop {
     ProjectedStates(u8),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
-    HeaderStyle(Option<Arc<StylePatch>>),
+    HeaderStyle(Option<std::rc::Rc<StylePatch>>),
     /// `headerClass` of a page: the header's colors as classes (`bg-*`,
     /// `text-*`, `tint-*`); `headerStyle` wins over them.
     HeaderClass(Box<str>),
     /// A page header's colors as typed styles lowered as classes are (Rust:
     /// `Screen::header_style_with`), in place of `headerClass`;
     /// `headerStyle` wins over them. Set by components, never by JS.
-    HeaderClassList(Option<Arc<crate::tailwind::ClassList>>),
+    HeaderClassList(Option<std::rc::Rc<crate::tailwind::ClassList>>),
     /// The surface lays out right to left (on the root, from the user's
     /// language).
     #[prop(js = "layoutDirectionRtl", internal)]
@@ -1789,8 +2081,7 @@ pub enum Prop {
     /// points on the physical edges; set by components
     /// (`Element::inset_padding`), never by JS.
     InsetPadding(EdgeInsets),
-    /// Margin added to the style's own (`KeyboardAvoidingView`'s
-    /// `height` behavior), in points on the physical edges; set by
+    /// Margin added to the style's own (an inset margin), in points on the physical edges; set by
     /// components.
     InsetMargin(EdgeInsets),
     /// `class`: Tailwind CSS classes (`"flex-row gap-2 p-4 bg-white
@@ -1841,33 +2132,31 @@ pub enum Prop {
     /// `tooltip`: a hint about the view, shown above it on the desktops
     /// while the pointer rests on it (after half a second) until the
     /// pointer leaves or presses it, never on touch screens; it never takes
-    /// the pointer. A string shows in a minimal bubble drawn with the
-    /// theme's `popover` tokens; an element is shown as it is (style it, or
-    /// use `Tooltip` of `nsh/base` for its placement, delay and events).
+    /// the pointer. The element is shown as it is; a `Tooltip` of
+    /// `nsh/base` is the tooltip itself, with its placement, delay and
+    /// events.
     #[prop(js = "tooltip", with = crate::js::host_values::tooltip, reset = Prop::Tooltip(TooltipContent::None), ts = "JSX.Element")]
     Tooltip(TooltipContent),
-    /// `focusable`: whether a view that takes presses is a stop of the
-    /// keyboard focus (Tab, on the platforms that move it between
-    /// pressables); `false` leaves it to the pointer (a backdrop that
-    /// closes a popover). Default true.
+    /// `focusable`: whether the view is a stop of the keyboard focus (Tab,
+    /// on the platforms that move it between views): `true` makes any view
+    /// one, whether or not it takes presses (a chart or a slider in a
+    /// pressable card, which takes its keys while focused); `false` leaves
+    /// a view that takes presses to the pointer (a backdrop that closes a
+    /// popover). Unset, the views that take presses are stops.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
-    /// The view is a selection area (`SelectionArea` of `nsh/base`): the
-    /// texts in it share one selection ([`crate::selection`]); set by
-    /// components (`Element::selection_area`).
-    #[prop(js = "selectionArea", internal)]
-    SelectionArea(bool),
+    /// `selectable` of a view: the texts in it share one selection, as a
+    /// browser page's do ([`crate::selection`]); texts with
+    /// `selectable={false}` stay out of it, a selectable view inside
+    /// another is part of the outer one.
+    #[prop(js = "selectable", on = VIEW, shared)]
+    SelectableView(bool),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
     AllowFontScaling(bool),
     /// `maxFontSizeMultiplier`: the upper bound of the system scale (0 is none).
     #[prop(js = "maxFontSizeMultiplier", min = 0, on = TEXT | INPUT)]
     MaxFontSizeMultiplier(f32),
-    /// `selectable`: a long press offers to copy the text; `false` also
-    /// keeps it from being selected where text is by default (desktop
-    /// browsers), unset leaves it to the platform.
-    #[prop(js = "selectable", on = TEXT)]
-    Selectable(Option<bool>),
     /// `adjustsFontSizeToFit`: shrink the font until the text fits its lines
     /// (`numberOfLines`) and box.
     #[prop(js = "adjustsFontSizeToFit", on = TEXT)]
@@ -1974,7 +2263,7 @@ pub enum NativeProp {
     /// `repeat` (videos): plays again from the start at the end.
     #[prop(js = "repeat", on = VIDEO)]
     Repeat(bool),
-    /// Video `resizeMode`.
+    /// How a video fits its box (`objectFit`, a Rust `resize_mode`).
     #[prop(reset = NativeProp::VideoResizeMode(ResizeMode::Contain))]
     VideoResizeMode(ResizeMode),
     /// `controls` (videos): the platform's playback controls.
@@ -1984,6 +2273,15 @@ pub enum NativeProp {
     /// (250 by default).
     #[prop(js = "progressUpdateInterval", default = 250.0, on = VIDEO)]
     ProgressInterval(f32),
+    /// `audioSession` (videos): what the sound does to the rest of the
+    /// device's audio while it plays (`"default"` when unset: the app's
+    /// audio settings).
+    #[prop(
+        js = "audioSession",
+        reset = NativeProp::AudioSession(crate::AudioSession::Default),
+        on = VIDEO
+    )]
+    AudioSession(crate::AudioSession),
 }
 
 /// A mutation produced by the JS renderer.
@@ -2076,7 +2374,7 @@ pub enum Op {
     /// A call JS made into Rust that runs in order with the UI's ops: a
     /// module function with a context, the start of an `async` function or
     /// member, a method of a component's ref, or the place of a JS call
-    /// posted during a synchronous call ([`crate::ui::RustCall`]). Never
+    /// posted during a synchronous call ([`crate::element::RustCall`]). Never
     /// reaches a platform.
-    Rust(crate::ui::RustOp),
+    Rust(crate::element::RustOp),
 }

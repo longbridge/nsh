@@ -1,7 +1,8 @@
 import { Overlay, signal, Text, View, type YNode } from "nsh";
 import { Popover, Sheet, Tooltip } from "nsh/base";
-import { platform } from "nsh/device";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius } from "../ui";
+import { dismissToast, toast } from "../toast";
+import { platform } from "nsh";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius, Tip } from "../ui";
 
 /** The popups' look: the gallery's, as `nsh/base` draws none. */
 const popup = () => ({
@@ -41,7 +42,7 @@ function Trigger(props: { label: string }) {
 /**
  * Overlays: `<Overlay>` shows its children on top of the screen whatever
  * clips them, and `nsh/base`'s popups are built on it: a popover, a
- * tooltip (and the `tooltip` prop every element has), a sheet (menus have
+ * tooltip (and the `tooltip` prop every element has), a sheet, toasts (menus have
  * a demo of their own, `Menus.tsx`).
  */
 export function Overlays() {
@@ -102,8 +103,8 @@ export function Overlays() {
     return (
       <Card icon="text" title="Tooltip" subtitle={platform.idiom === "desktop" ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {/* A text: the core's bubble, drawn with the theme's popover tokens. */}
-          <View tooltip="Saves the document">
+          {/* A short text in a `Tooltip` of the gallery's look. */}
+          <View tooltip={<Tip label="Saves the document" />}>
             <Button label="Save" variant="secondary" onPress={() => last.set("pressed Save")} />
           </View>
           {/* `Tooltip` of `nsh/base` as the tooltip: the bubble is the app's, and it reports. */}
@@ -154,6 +155,34 @@ export function Overlays() {
     );
   }
 
+  function Toasts() {
+    let count = 0;
+    return (
+      <Card icon="system" title="Toast" subtitle="The gallery's toasts, on ToastManager, ToastStack and Toast">
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <Button
+            label="Copy the link"
+            variant="secondary"
+            onPress={() => {
+              count += 1;
+              void toast({ title: "Copied", description: `The link is on the clipboard (${count})` });
+            }}
+          />
+          <Button
+            label="Delete the draft"
+            variant="secondary"
+            onPress={async () => {
+              const answer = await toast({ id: "draft", title: "Draft deleted", action: "Undo", close: "×", duration: 8000 });
+              last.set(answer === "Undo" ? "toast: undone" : "toast: gone");
+            }}
+          />
+          <Button label="Dismiss all" variant="secondary" onPress={() => dismissToast()} />
+        </View>
+        <Caption label="Swipe one away; the pointer on one stops its time" />
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -162,5 +191,5 @@ export function Overlays() {
     );
   }
 
-  return <DemoPage cards={[Primitive, Popovers, Tooltips, Sheets, Last]} />;
+  return <DemoPage cards={[Primitive, Popovers, Tooltips, Sheets, Toasts, Last]} />;
 }

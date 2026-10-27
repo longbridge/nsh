@@ -9,14 +9,14 @@ order: 2.2
 `nsh` exports `Image`, the [`<Image>`](../elements/image.md) element that shows images. The same `Image` also asks the native image loader about images without showing them: their size, and loading them before they are shown.
 
 ```ts
-import { Image, type ImageSize } from "nsh";
+import { Image, type PixelSize } from "nsh";
 ```
 
 `Image` is a component carrying two functions: `<Image src=…>` renders the native image view (the compiler makes it in place, as it does `<View>`), and `Image.getSize` / `Image.prefetch` are called on it directly.
 
 ```ts
 const Image: ((props: ImageProps) => YNode) & {
-  getSize(src: string | ImageAsset): Promise<ImageSize>;
+  getSize(src: string | ImageAsset): Promise<PixelSize>;
   prefetch(src: string | ImageAsset): Promise<boolean>;
 };
 ```
@@ -26,9 +26,9 @@ See [Images and assets](../docs/images-and-assets.md) for the guide.
 ## Image.getSize
 
 ```ts
-getSize(src: string | ImageAsset): Promise<ImageSize>;
+getSize(src: string | ImageAsset): Promise<PixelSize>;
 
-interface ImageSize {
+interface PixelSize {
   width: number;   // pixels (an SVG's: points)
   height: number;
 }
@@ -62,7 +62,7 @@ next.forEach((p) => Image.prefetch(p.url));
 
 ## Related
 
-- [`<Image>`](../elements/image.md): `src`, `resizeMode`, `placeholder`, `onLoad`, `onProgress`, `onError` and the other props.
+- [`<Image>`](../elements/image.md): `src`, `placeholder`, the `objectFit` style, `onLoad`, `onProgress`, `onError` and the other props.
 - Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ url, size, scales? }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
 
 > [!NOTE]

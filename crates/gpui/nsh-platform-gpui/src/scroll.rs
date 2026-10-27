@@ -90,6 +90,17 @@ impl ScrollHost for Host<'_> {
         }
     }
 
+    fn pulled(&self, distance: Points) {
+        let pulled = self
+            .surface
+            .anim
+            .borrow_mut()
+            .pulled(self.view.id(), distance);
+        if pulled && self.surface.mounter.try_borrow().is_ok() {
+            self.surface.write_animations();
+        }
+    }
+
     fn relayout(&self) {
         self.view.moved();
     }
@@ -113,6 +124,13 @@ impl ScrollHost for Host<'_> {
             }
             shared::frame(&host, now * 1000.0)
         });
+    }
+
+    fn settled(&self) {
+        let id = self.view.id();
+        if self.surface.anim.borrow_mut().scroll_ended(id) {
+            self.surface.ensure_ticking();
+        }
     }
 }
 
@@ -161,7 +179,11 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
     if s.sticky.is_empty() {
         return;
     }
-    for (cell, shift) in s.sticky_shifts() {
+    // An animated offset is the graph's (pinned again with its frames,
+    // `pin_animated_sticky`, when it is being written).
+    let anim = surface.anim.try_borrow().ok();
+    let value = |n| anim.as_ref().map_or(0.0, |a| a.value(n));
+    for (cell, shift) in s.sticky_shifts_with(value) {
         let shift = (shift.x.0, shift.y.0);
         with_cell(surface, view, cell, |cell| {
             let mut cs = cell.state_mut();
@@ -171,6 +193,22 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
                 cell.moved();
             }
         });
+    }
+}
+
+/// Pins again the sticky cells of the scroll views whose cells stick an
+/// animated value further in, after the graph's values were written.
+pub(crate) fn pin_animated_sticky(surface: &Surface) {
+    let views: Vec<u32> = surface.anim.borrow().sticky_views().to_vec();
+    for id in views {
+        let view = surface
+            .mounter
+            .try_borrow()
+            .ok()
+            .and_then(|m| m.views.get(id));
+        if let Some(view) = view {
+            pin_sticky(surface, &view);
+        }
     }
 }
 

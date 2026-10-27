@@ -13,10 +13,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_core::{
-    ContextMenuEvent, TouchEvent, TouchPhase,
-    ui::{Style, prelude::*},
-};
+use nsh_core::{ContextMenuEvent, TouchEvent, TouchPhase, element::Style, prelude::*};
 
 use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};
 
@@ -262,9 +259,7 @@ pub enum MenuEvent {
 pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
-        if open.request(next) {
-            cx.emit(MenuEvent::OpenChange(next, reason));
-        }
+        open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let anchor = element_ref();
     let parts = Surface {
@@ -345,9 +340,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
         if next && props.disabled.get_untracked() {
             return;
         }
-        if open.request(next) {
-            cx.emit(MenuEvent::OpenChange(next, reason));
-        }
+        open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let point = signal(Point::<Points>::default());
     let parts = Surface {

@@ -47,7 +47,7 @@ mod navigation;
 mod render;
 mod rt;
 mod scroll;
-mod selection_area;
+mod selectable_view;
 mod stats;
 mod surface;
 #[cfg(feature = "dev")]
@@ -65,10 +65,13 @@ mod tests;
 pub use gpui;
 pub use nsh_base::{Theme, ThemeError};
 pub use nsh_core::{
+    element::{AdaptiveColor, Color, Hsla, Rgba},
     platform::{Appearance, Locale},
-    ui::{AdaptiveColor, Color, Hsla, Rgba},
 };
-pub use nsh_engine::{App, AppError, AppErrorKind, Bundle, Limits, PackageInfo, Root};
+pub use nsh_engine::{
+    App, AppError, AppErrorKind, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy,
+    Limits, PackageInfo, Root,
+};
 /// Signed packages: verifying, unpacking and accepting them
 /// (`docs/dev/signed-packages.md`).
 #[cfg(feature = "js")]
@@ -77,7 +80,8 @@ pub use nsh_engine::{LoadedPackage, accept_package, load_package, package, verif
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, open_app_window, run_app, set_ui_sets},
+    app::{AppOptions, AppSource, AppView, CloseRequest, open_app_window, run_app, set_ui_sets},
+    chrome::titlebar_options,
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };

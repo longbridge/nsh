@@ -31,11 +31,11 @@ use crate::{
     surface::Surface,
 };
 
-static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
+static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
 /// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
-pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
+pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
 }
 
@@ -60,7 +60,7 @@ pub(crate) fn root() -> Option<Root> {
 }
 
 /// The UI sets engines serve.
-pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
+pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
@@ -90,6 +90,9 @@ pub enum AppSource {
 pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
+    /// Logs the performance monitor's readings once a second (target
+    /// `nsh::perf`): frame rate, frame phases, commits, CPU, memory.
+    pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
     pub asset_base: Option<AssetBase>,
@@ -118,15 +121,25 @@ pub struct AppOptions {
     /// system's data directory ([`nsh_engine::data_dir`]); an app that
     /// embeds nsh gives its own (its data directory + `/nsh`, say).
     pub data_dir: Option<PathBuf>,
+    /// Where the apps it runs keep their caches (the images they
+    /// downloaded) and how much each keeps: by default the system's cache
+    /// directory, each app's in `<dir>/<app id>`. See [`AppView::set_cache`].
+    pub cache: nsh_engine::CacheOptions,
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// The embedding app's channel with the apps the view runs
+    /// (`nsh/host`): their launch parameters, events to them and handlers of
+    /// their calls and posts ([`AppView::host`]). One for every app the view
+    /// loads; a new one by default.
+    pub host: nsh_engine::HostChannel,
 }
 
 impl Default for AppOptions {
     fn default() -> Self {
         AppOptions {
             trace: false,
+            fps: false,
             asset_base: None,
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
@@ -135,7 +148,9 @@ impl Default for AppOptions {
             appearance: Appearance::System,
             limits: Limits::default(),
             data_dir: None,
+            cache: Default::default(),
             storage: None,
+            host: nsh_engine::HostChannel::default(),
         }
     }
 }
@@ -192,6 +207,9 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
+        if view.options.borrow().fps {
+            view.surface.enable_fps();
+        }
         Ok(view)
     }
 
@@ -205,12 +223,29 @@ impl AppView {
         crate::window::show(self.hwnd);
     }
 
+    /// The channel with the apps this view runs (`nsh/host`;
+    /// [`AppOptions::host`]): set their launch parameters
+    /// ([`nsh_engine::HostChannel::set_params`], read when an app starts),
+    /// send them events ([`nsh_engine::HostChannel::send`]) and handle their
+    /// calls and posts ([`nsh_engine::HostChannel::handle`]; handlers run on
+    /// the engine thread). Any thread may use it.
+    pub fn host(&self) -> nsh_engine::HostChannel {
+        self.options.borrow().host.clone()
+    }
+
     /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now
     /// on: the JS heap, the stack, the time budgets of loading and of every
     /// other call into JS, and the quotas (nodes, ops). The running app
     /// keeps the limits it was loaded with.
     pub fn set_limits(&self, limits: Limits) {
         self.options.borrow_mut().limits = limits;
+    }
+
+    /// Where the apps loaded from now on keep their caches (the images they
+    /// downloaded) and how much each keeps. The running app keeps the
+    /// caches it was loaded with.
+    pub fn set_cache(&self, cache: nsh_engine::CacheOptions) {
+        self.options.borrow_mut().cache = cache;
     }
 
     /// Runs `app`, replacing what ran.
@@ -237,11 +272,14 @@ impl AppView {
             ui_sets: ui_sets(),
             runtime: None,
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+            cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: options.host.clone(),
+            picker: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -275,7 +313,7 @@ impl AppView {
 
     /// The embedding app's text size relative to the default (1.0), which
     /// stands in for the user's: every text that allows font scaling (texts,
-    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// inputs, the components' labels and alerts) is laid out again
     /// at it, and `fontScale()` reads it, at once and for every app loaded
     /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
     /// boxes sized by their text grow with it. `None` follows the system's
@@ -285,6 +323,21 @@ impl AppView {
         host.font_scale = scale;
         self.surface.host_environment.set(host);
         crate::system::host_environment_changed(&self.surface);
+    }
+
+    /// The embedding app's theme overrides: a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them, as `nsh.json`'s `"theme"`), whose tokens
+    /// win over the app's of the same names, light and dark, while the
+    /// app's others stay (a brand's `primary` and `radius`). Classes naming
+    /// them (`bg-primary`) are resolved again at once, and every app loaded
+    /// later starts with them. `None` gives the app its own theme back.
+    /// Fails, changing nothing, on a file that does not parse.
+    pub fn set_theme_overrides(&self, json: Option<&str>) -> Result<(), nsh_base::ThemeError> {
+        let tokens = json.map(nsh_base::theme_overrides).transpose()?;
+        *self.surface.host_tokens.borrow_mut() = tokens.clone();
+        self.surface.control(|c| c.set_tokens(tokens));
+        Ok(())
     }
 
     /// Stops the app.

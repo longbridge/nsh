@@ -1,8 +1,10 @@
-import { batch, cleanup, computed, effect, Input, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
-import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
-import { Clipboard } from "nsh/clipboard";
-import { platform } from "nsh/device";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, SelectionArea } from "nsh/base";
+import { batch, cleanup, computed, effect, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { createAnimatedValue, LayoutAnimation } from "nsh";
+import { Clipboard } from "nsh";
+import { platform } from "nsh";
+import { Picker } from "nsh";
+import { Input } from "nsh/base";
+import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
 import { localReply, type Provider } from "./chat/local";
@@ -288,6 +290,15 @@ export function Chat() {
     } else void submit(freeform(text, model()), text);
   };
 
+  /** Attaches a photo from the system's picker: its bytes stay native, shown through a blob URL. */
+  const choosePhoto = async () => {
+    const [picked] = await Picker.pickImages({ maxDimension: 2048, quality: 0.85 });
+    if (!picked) return;
+    const { file } = picked;
+    const size = file.size < 1024 * 1024 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`;
+    attachment.set({ image: URL.createObjectURL(file), file: { name: file.name, size } });
+  };
+
   const play = (id: string) => {
     if (id === "history") {
       menu.set(false);
@@ -362,7 +373,7 @@ export function Chat() {
             borderColor: colors.border,
           }}
         >
-          <Text selectable style={{ fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
+          <Text style={{ userSelect: "text", fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
         </View>
       </If>
       <If when={m().waiting}>
@@ -416,7 +427,7 @@ export function Chat() {
                 <Text style={{ fontSize: 14, color: colors.muted, fontVariant: ["tabular-nums"] }}>{thinkingLabel()}</Text>
                 <View
                   style={{
-                    transform: [{ rotate: reasoning()?.open ? "0deg" : "-90deg" }],
+                    transform: reasoning()?.open ? "rotate(0deg)" : "rotate(-90deg)",
                     transitionProperty: "transform",
                     transitionDuration: 220,
                     transitionTimingFunction: "ease-out",
@@ -429,7 +440,7 @@ export function Chat() {
             <If when={reasoning()?.open}>
               <View style={{ flexDirection: "row", gap: 12, paddingLeft: 7 }}>
                 <View style={{ width: 2, borderRadius: 1, backgroundColor: colors.border }} />
-                <Text selectable style={{ flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
+                <Text style={{ userSelect: "text", flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
               </View>
             </If>
           </View>
@@ -524,17 +535,18 @@ export function Chat() {
   const chips = [...scenarios.map((s) => ({ id: s.id, label: s.chip })), { id: "history", label: "Load a long conversation" }];
 
   const menuRows: { id: string; glyph: "clip" | "regenerate"; label: string }[] = [
+    { id: "photo", glyph: "clip", label: "Choose a photo" },
     { id: "attach", glyph: "clip", label: "Attach a photo and a file" },
     ...chips.map((c) => ({ id: c.id, glyph: "regenerate" as const, label: c.label })),
   ];
 
   const pane = (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }}>
+      <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
         <View style={{ flex: 1 }}>
           <If when={messages().length} else={empty}>
             {/* One selection across messages: in the List, over the rows that are mounted. */}
-            <SelectionArea style={{ flex: 1 }}>
+            <View selectable style={{ flex: 1 }}>
               <List
                 ref={list}
                 each={messages()}
@@ -571,18 +583,18 @@ export function Chat() {
                   );
                 }}
               </List>
-            </SelectionArea>
+            </View>
           </If>
 
           {/* Jump to the latest message: shown while scrolled up. */}
           <View
-            pointerEvents={following() ? "none" : "auto"}
             style={{
+              pointerEvents: following() ? "none" : "auto",
               position: "absolute",
               right: 16,
               bottom: 12,
               opacity: jump,
-              transform: [{ scale: jump.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+              scale: jump.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }),
             }}
           >
             <RoundButton icon="arrow-down" label="Jump to the latest message" variant="secondary" onPress={jumpToLatest} />
@@ -593,14 +605,14 @@ export function Chat() {
 
           {/* Connection banner. */}
           <View
-            pointerEvents="none"
             style={{
+              pointerEvents: "none",
               position: "absolute",
               top: 8,
               left: 16,
               right: 16,
               opacity: bannerValue,
-              transform: [{ translateY: bannerValue.interpolate({ inputRange: [0, 1], outputRange: [-64, 0] }) }],
+              translate: [0, bannerValue.interpolate({ inputRange: [0, 1], outputRange: [-64, 0] })],
             }}
           >
             <View
@@ -640,22 +652,19 @@ export function Chat() {
 
           {/* The "+" menu: attachments and the scenarios, to replay them. */}
           <View
-            pointerEvents={menu() ? "auto" : "none"}
             onPress={() => menu.set(false)}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", opacity: menuValue }}
+            style={{ pointerEvents: menu() ? "auto" : "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", opacity: menuValue }}
           />
           <View
-            pointerEvents={menu() ? "auto" : "none"}
             style={{
+              pointerEvents: menu() ? "auto" : "none",
               position: "absolute",
               left: 16,
               right: 16,
               bottom: 8,
               opacity: menuValue,
-              transform: [
-                { translateY: menuValue.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
-                { scale: menuValue.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
-              ],
+              translate: [0, menuValue.interpolate({ inputRange: [0, 1], outputRange: [24, 0] })],
+              scale: menuValue.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }),
             }}
           >
             <View
@@ -676,7 +685,8 @@ export function Chat() {
                     <View
                       onPress={() => {
                         menu.set(false);
-                        if (row().id === "attach") attachment.set({ image: photo, file: { name: "trip-notes.pdf", size: "2.4 MB" } });
+                        if (row().id === "photo") void choosePhoto();
+                        else if (row().id === "attach") attachment.set({ image: photo, file: { name: "trip-notes.pdf", size: "2.4 MB" } });
                         else play(row().id);
                       }}
                       activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
@@ -684,7 +694,7 @@ export function Chat() {
                       accessibilityLabel={row().label}
                       style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
                     >
-                      <Glyph name={row().glyph} size={16} tint={i() === 0 ? colors.accent : colors.muted} />
+                      <Glyph name={row().glyph} size={16} tint={i() < 2 ? colors.accent : colors.muted} />
                       <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{row().label}</Text>
                     </View>
                   )}
@@ -757,12 +767,12 @@ export function Chat() {
               placeholder={`Message ${native ? provider() : model()}`}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ placeholderColor: colors.faint, selectionColor: colors.accent, height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
+              style={{ placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View
                 style={{
-                  transform: [{ rotate: menu() ? "45deg" : "0deg" }],
+                  transform: menu() ? "rotate(45deg)" : "rotate(0deg)",
                   transitionProperty: "transform",
                   transitionDuration: 200,
                   transitionTimingFunction: "ease-out",
@@ -778,7 +788,7 @@ export function Chat() {
               <If
                 when={streaming()}
                 else={
-                  <View style={{ opacity: canSend() ? 1 : 0.35 }} pointerEvents={canSend() ? "auto" : "none"}>
+                  <View style={{ pointerEvents: canSend() ? "auto" : "none", opacity: canSend() ? 1 : 0.35 }}>
                     <RoundButton icon="arrow-up" label="Send" onPress={send} />
                   </View>
                 }
@@ -792,7 +802,7 @@ export function Chat() {
             </View>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
   if (!wide) return pane;
@@ -850,10 +860,10 @@ export function Chat() {
               class={current() === chip().id ? "bg-accent" : "hover:bg-card active:bg-accent"}
               style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.control, gap: 2, cursor: "pointer" }}
             >
-              <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: current() === chip().id ? "600" : "400", color: colors.text }}>
+              <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: current() === chip().id ? "600" : "400", color: colors.text }}>
                 {chip().label}
               </Text>
-              <Text numberOfLines={1} style={{ fontSize: 12, color: colors.muted }}>
+              <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>
                 {scenarios.find((x) => x.id === chip().id)?.prompt ?? "Weeks of messages, loaded at once"}
               </Text>
             </View>

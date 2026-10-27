@@ -165,6 +165,7 @@ impl Mounter {
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
+                        crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
                 }
@@ -357,7 +358,9 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
         }
     }
 

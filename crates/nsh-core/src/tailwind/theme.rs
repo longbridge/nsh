@@ -13,8 +13,8 @@ use rustc_hash::FxHashMap;
 use crate::{
     css,
     effects::BoxShadow,
+    element::AdaptiveColor,
     style::{Color, TextShadow},
-    ui::AdaptiveColor,
 };
 
 /// Tailwind's design tokens.
@@ -27,7 +27,9 @@ pub struct Theme {
     /// Flat color names: `red-500`, `black`, `brand`.
     pub(crate) colors: FxHashMap<Box<str>, Color>,
     /// Breakpoints (`sm:`), ascending.
-    pub(crate) breakpoints: Vec<(Box<str>, f32)>,
+    /// Name, width, and whether Tailwind's is in `rem` (the default
+    /// theme's, which Tailwind orders after `px` ones).
+    pub(crate) breakpoints: Vec<(Box<str>, f32, bool)>,
     /// `max-w-sm` and friends.
     pub(crate) containers: FxHashMap<Box<str>, f32>,
     /// `text-lg`: size and line height (a multiple of the size).
@@ -64,7 +66,7 @@ pub struct Theme {
     tokens: Option<Arc<ClassTokens>>,
 }
 
-/// The design tokens (`crate::ui::Tokens`) by the names classes give them,
+/// The design tokens (`crate::element::Tokens`) by the names classes give them,
 /// their names: as Tailwind's theme variables, colors are names of the
 /// color utilities (`bg-primary`, `text-muted-foreground/70`) when the
 /// Tailwind theme has no color of that name, and every token is a
@@ -85,11 +87,11 @@ pub(crate) struct ClassTokens {
 }
 
 static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
-    LazyLock::new(|| Arc::new(ClassTokens::new(&crate::ui::Tokens::default())));
+    LazyLock::new(|| Arc::new(ClassTokens::new(&crate::element::Tokens::default())));
 
 impl ClassTokens {
     /// The names classes give `theme`'s tokens.
-    pub(crate) fn new(theme: &crate::ui::Tokens) -> Self {
+    pub(crate) fn new(theme: &crate::element::Tokens) -> Self {
         ClassTokens {
             colors: theme.colors().map(|(k, c)| (k.into(), c)).collect(),
             numbers: theme.numbers().map(|(k, n)| (k.into(), n)).collect(),
@@ -235,11 +237,11 @@ impl Default for Theme {
             rem,
             colors,
             breakpoints: vec![
-                ("sm".into(), 40.0 * rem),
-                ("md".into(), 48.0 * rem),
-                ("lg".into(), 64.0 * rem),
-                ("xl".into(), 80.0 * rem),
-                ("2xl".into(), 96.0 * rem),
+                ("sm".into(), 40.0 * rem, true),
+                ("md".into(), 48.0 * rem, true),
+                ("lg".into(), 64.0 * rem, true),
+                ("xl".into(), 80.0 * rem, true),
+                ("2xl".into(), 96.0 * rem, true),
             ],
             containers: map(&[
                 ("3xs", 16.0 * rem),
@@ -255,8 +257,6 @@ impl Default for Theme {
                 ("5xl", 64.0 * rem),
                 ("6xl", 72.0 * rem),
                 ("7xl", 80.0 * rem),
-                // 65 characters of a 16pt font, roughly.
-                ("prose", 65.0 * 0.5 * rem),
             ]),
             text: map(&[
                 ("xs", (0.75 * rem, Some(1.0 / 0.75))),
@@ -345,7 +345,6 @@ impl Default for Theme {
                 ("2xs", shadows("inset 0 1px rgb(0 0 0 / 0.05)")),
                 ("xs", shadows("inset 0 1px 1px rgb(0 0 0 / 0.05)")),
                 ("sm", shadows("inset 0 2px 4px rgb(0 0 0 / 0.05)")),
-                ("", shadows("inset 0 2px 4px rgb(0 0 0 / 0.05)")),
             ]),
             drop_shadows: map(&[
                 ("xs", shadows("0 1px 1px rgb(0 0 0 / 0.05)")),
@@ -504,8 +503,8 @@ impl Theme {
                 "breakpoints" => {
                     for (name, w) in entries(v, "breakpoints")? {
                         let w = num(&w, &format!("breakpoint `{name}`"))?;
-                        self.breakpoints.retain(|(n, _)| **n != *name);
-                        self.breakpoints.push((name.into(), w));
+                        self.breakpoints.retain(|(n, ..)| **n != *name);
+                        self.breakpoints.push((name.into(), w, false));
                     }
                     self.breakpoints.sort_by(|a, b| a.1.total_cmp(&b.1));
                 }
@@ -627,7 +626,7 @@ impl Theme {
     /// breakpoint variants take by name. Tools enumerate the classes a
     /// theme offers with them (the engine's record of Tailwind classes).
     pub fn names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, _)| &**n).collect();
+        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, ..)| &**n).collect();
         let keys = [
             self.colors.keys().collect::<Vec<_>>(),
             self.containers.keys().collect(),
@@ -670,7 +669,7 @@ impl Theme {
 
     /// Takes design tokens `theme`, which classes such as `bg-primary`
     /// name. Without them classes name none.
-    pub fn set_tokens(&mut self, theme: &crate::ui::Tokens) {
+    pub fn set_tokens(&mut self, theme: &crate::element::Tokens) {
         self.tokens = Some(Arc::new(ClassTokens::new(theme)));
     }
 

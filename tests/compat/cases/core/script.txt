@@ -16,7 +16,7 @@ covers [nsh] mount
 covers [nsh] signal
 covers [nsh] Text
 covers [nsh] View
-covers [nsh/device] locale
+covers [nsh] locale
 covers [nsh:rt] append
 covers [nsh:rt] component
 covers [nsh:rt] element
@@ -45,29 +45,32 @@ expect Decay moves forward: yes
 expect Value is a node: true
 expect Sum is a node: true
 expect Interpolation is a node: true
+# A node, the same for the same options, another without `snap`.
+expect Snapping diffClamp: true true true
 expect Composite: function/function/function
 expect Preset duration: 300
 expect Created: 250 linear opacity
+expect Keyboard: keyboard
 frame id:faded 0 302 40 40
 frame id:box 0 359 50 20
 tap id:grow
 frame id:box 0 359 150 20
-covers [nsh/animated] Animated
-covers [nsh/animated] AnimatedNode
-covers [nsh/animated] AnimatedValue
-covers [nsh/animated] Easing
-covers [nsh/animated] LayoutAnimation
-covers [nsh/animated] createAnimatedValue
+covers [nsh] Animated
+covers [nsh] AnimatedNode
+covers [nsh] AnimatedValue
+covers [nsh] Easing
+covers [nsh] LayoutAnimation
+covers [nsh] createAnimatedValue
 # core-canvas
 tap id:case-core-canvas
 frame id:canvas 0 64 200 100
 expect Not checked
 tap id:check
 expect size 200x100 canvas 200x100 drawn true context true gradient true in true out false added true current true stroke true dash 3,1 measured true
-covers [nsh/canvas] Canvas
-covers [nsh/canvas] CanvasGradient
-covers [nsh/canvas] CanvasRenderingContext2D
-covers [nsh/canvas] Path2D
+covers [nsh] Canvas
+covers [nsh] CanvasGradient
+covers [nsh] CanvasRenderingContext2D
+covers [nsh] Path2D
 covers [props] Canvas.draw
 # core-elements
 tap id:case-core-elements
@@ -79,20 +82,21 @@ frame id:image 0 200 64 48
 frame id:video 0 248 160 90
 frame id:web 0 338 180 60
 frame id:map 0 398 100 50
-frame id:pan 0 448 50 50
+frame id:map-animated 0 448 100 50
+frame id:pan 0 498 50 50
 expect Missing module: ReferenceError
 expect Base module: object
 expect Same object: true
 expect Pan handlers: some
 expect Pan start: true
 covers [nsh] Scroll
-covers [nsh] Input
-covers [nsh/image] Image
-covers [nsh/video] Video
-covers [nsh/webview] WebView
-covers [nsh/native] nativeComponent
-covers [nsh/native] nativeModule
-covers [nsh/gesture] PanResponder
+covers [nsh/base] Input
+covers [nsh] Image
+covers [nsh] Video
+covers [nsh] WebView
+covers [nsh] nativeComponent
+covers [nsh] nativeModule
+covers [nsh] PanResponder
 # core-list
 tap id:case-core-list
 expect Fruits
@@ -112,10 +116,15 @@ frame id:inner2 8 8 374 20
 expect Plum
 absent No plums
 expect Nothing here
+# A viewport of overscan below the visible rows (100 pt): bound after the
+# first frame, never further.
+expect Long 0
+expect Long 4
+absent Long 6
 tap id:add
 expect 4. Item 4
 expect 3. Cherry
-covers [nsh/list] List
+covers [nsh] List
 covers [nsh:rt] list
 covers [props] contentStyle
 covers [props] contentClass
@@ -248,6 +257,11 @@ style id:card opacity 0.5
 style id:card transform rotate(45deg) scale(2)
 nostyle id:plain backgroundColor
 nostyle id:plain transform
+# CSS's order: translate, rotate, scale, then transform (its functions, or
+# its list of steps); a percentage of translate is of the view's own size.
+style id:moved transform translateX(10) translateY(20) rotate(30deg) scale(1.5)
+style id:composed transform translateX(5) translateY(20) rotateX(40deg) scaleX(2) scaleY(3) translateX(4) rotate(10deg)
+style id:stepped transform perspective(800) rotateY(30deg) translateX(4)
 prop id:card role button
 noprop id:plain role
 listens id:card onLongPress
@@ -258,7 +272,7 @@ style text:"Plain bold" color #ff0000ff
 prop id:field placeholder Name
 prop id:field ios.keyboardAppearance dark
 covers [globals] console
-covers [nsh] Input
+covers [nsh/base] Input
 covers [props] role
 covers [props] ios
 covers [props] ios.keyboardAppearance
@@ -268,6 +282,9 @@ covers [styles] backgroundColor
 covers [styles] borderRadius
 covers [styles] opacity
 covers [styles] transform
+covers [styles] translate
+covers [styles] rotate
+covers [styles] scale
 covers [styles] color
 covers [styles] fontWeight
 # core-primitives
@@ -290,6 +307,19 @@ covers [nsh] CanvasGradient
 covers [nsh] CanvasRenderingContext2D
 covers [nsh] Path2D
 covers [nsh] List
+# core-motion
+tap id:case-core-motion
+expect Presets: many
+expect Kinds: attention enter exit loop
+expect Shake moves: translateX
+expect Fade in up from: 24
+expect Steps: 0 0.25 0.5 0.75 1
+expect Transform steps: 7
+expect Bound: true
+expect Started: yes
+expect Staggered: function function
+covers [nsh] createMotion
+covers [nsh] motions
 # core-overlay
 tap id:case-core-overlay
 expect OverlayContent
@@ -308,6 +338,10 @@ expect Pressed outside
 tap id:point
 expect Placed left
 frame id:overlay 322 4 50 10
+# Against a box (300, 50, 1 × 20): on its right, 8 points away, their
+# bottoms lined up.
+tap id:box
+frame id:overlay 309 60 50 10
 # Escape or back.
 event text:OverlayContent onCancel
 absent OverlayContent
@@ -320,3 +354,18 @@ covers [props] margin
 covers [events] onPosition
 covers [events] onPressOutside
 covers [events] onCancel
+# core-error-boundary
+tap id:case-core-error-boundary
+expect Around the boundary
+expect Risky ok
+expect Outer caught fallback of binding
+tap id:break
+expect Caught binding
+absent Risky ok
+expect Around the boundary
+tap id:retry
+expect Risky ok
+tap id:risky
+expect Caught pressed
+expect Break
+covers [nsh] ErrorBoundary

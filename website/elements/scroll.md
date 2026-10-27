@@ -13,7 +13,7 @@ children as its content and scrolls them natively: scrolling, flinging, bouncing
 the display's rate. Rust makes one with `scroll()`, TSX with `<Scroll>` from `nsh`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 scroll().flex_1().child(
     view().p_4().gap_2().child(each(
@@ -72,6 +72,8 @@ are methods of the `Scrollable` trait, which lists share.
 |---|---|---|---|
 | `refreshing` | `.refreshing(..)` | `boolean` | The refresh spinner shows. |
 | `onRefresh` | `.on_refresh(..)` | `() => void` | The user pulled to refresh: start loading and set `refreshing` until it ends. |
+| `refreshIndicator` | `.refresh_indicator(Some(height))` | `{ height: number }` | The app draws its own indicator, `height` points tall: the platform's spinner is hidden, a pull refreshes once it reaches `height`, and refreshing keeps `height` above the content. A height of 0 or less is none. |
+| `pullValue` | `.pull_value(&value)` | `AnimatedValue` | An animated value fed with how far the view is pulled past its top (0 at rest, growing with the pull; the room kept above the content while it refreshes: `height` with `refreshIndicator`), for the app's indicator. |
 
 ```rust tabs
 let refreshing = signal(false);
@@ -182,8 +184,8 @@ scroller.scrollTo({ y: 0, animated: true });
 ## Keyboard
 
 Inputs inside a scroll view are kept clear of the keyboard natively: the scroll view gets a bottom inset and scrolls to
-the focused input on its own. For content outside scroll views use [`KeyboardAvoidingView`](./keyboard-avoiding-view.md)
-from `nsh/base`. See [forms and the keyboard](../docs/forms-and-keyboard.md).
+the focused input on its own. For content outside scroll views use [`env(keyboard-inset-height)`](./keyboard.md)
+in a bottom padding or margin. See [forms and the keyboard](../docs/forms-and-keyboard.md).
 
 ## Right to left
 

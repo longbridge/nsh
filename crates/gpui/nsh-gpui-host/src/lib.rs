@@ -8,7 +8,7 @@
 //! - `--window-size 1200x800` sets the window size.
 //! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
-//!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
+//!   passes the app's (`nsh.json` `"id"`). The app's data (`Storage` of `nsh`)
 //!   is kept under the id its bundle carries, in the system's data
 //!   directory.
 //!
@@ -62,7 +62,15 @@ pub fn main() -> std::process::ExitCode {
             "--fps" => options.fps = true,
             // Where apps keep their data (`nsh test --target` gives each app
             // a fresh one); the system's data directory otherwise.
-            "--data-dir" => options.data_dir = args.next().map(PathBuf::from),
+            "--data-dir" => {
+                options.data_dir = args.next().map(PathBuf::from);
+                // Its caches too (downloaded images): a test's app starts with none.
+                if let Some(dir) = &options.data_dir {
+                    options.cache = nsh_engine::CacheOptions::at(nsh_engine::CacheLocation::Dir(
+                        dir.join("cache"),
+                    ));
+                }
+            }
             "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));

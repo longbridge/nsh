@@ -1,5 +1,7 @@
 ---
 import '../styles/global.css';
+import 'virtual:nsh-gallery-ui.css';
+import exampleTheme from '../../../examples/nsh-gallery-ui/theme.json';
 import { BASE, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, type Lang } from '../lib/site';
 
 export interface Props {
@@ -13,7 +15,10 @@ export interface Props {
 
 const { title, description = SITE_DESCRIPTION, lang = 'en', alternates, robots } = Astro.props;
 
-const pageTitle = !title || title === SITE_TITLE ? `${SITE_TITLE} — AI-generated UI, native in your app` : `${title} · ${SITE_TITLE}`;
+// A title that already names the site (the home pages') is used as it is.
+const pageTitle = !title || title === SITE_TITLE
+  ? `${SITE_TITLE} — Build once, native everywhere | Rust UI framework`
+  : title.startsWith(SITE_TITLE) ? title : `${title} · ${SITE_TITLE}`;
 const canonical = new URL(Astro.url.pathname.replace(/\/+$/, '') || '/', SITE_URL).href;
 const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SITE_URL).href;
 ---
@@ -27,8 +32,8 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta name="description" content={description} />
     {robots && <meta name="robots" content={robots} />}
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#101113" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f4f4f2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content={exampleTheme.cssVars.dark.background} media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content={exampleTheme.cssVars.light.background} media="(prefers-color-scheme: light)" />
     <!-- Before first paint: `theme` in localStorage is "light" or "dark";
          absent follows the system. <html> gets `dark` or `light`. -->
     <script is:inline>
@@ -57,6 +62,7 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     {alternates?.['zh-CN'] && <link rel="alternate" hreflang="zh-CN" href={abs(alternates['zh-CN'])} />}
     {alternates?.en && <link rel="alternate" hreflang="x-default" href={abs(alternates.en)} />}
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content={lang === 'zh-CN' ? 'zh_CN' : 'en_US'} />
     <meta property="og:site_name" content={SITE_TITLE} />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />

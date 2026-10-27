@@ -136,6 +136,24 @@ pub(crate) struct Input {
     /// Next press / zoom generation (invalidates callbacks of
     /// earlier ones).
     next_gen: Cell<u64>,
+    /// Hears the modifier keys change, once a view hears hover moves.
+    flags: FlagsMonitor,
+}
+
+/// A local monitor of the modifier keys (`flagsChanged`), which reach only
+/// the first responder: a change while the mouse rests is a hover move
+/// where it is ([`modifiers_changed`]). Removed with the surface.
+#[derive(Default)]
+struct FlagsMonitor(RefCell<Option<Retained<objc2::runtime::AnyObject>>>);
+
+impl Drop for FlagsMonitor {
+    fn drop(&mut self) {
+        if let Some(monitor) = self.0.borrow_mut().take() {
+            // SAFETY: a monitor `addLocalMonitorForEventsMatchingMask`
+            // returned.
+            unsafe { NSEvent::removeMonitor(&monitor) };
+        }
+    }
 }
 
 /// What a drag on a view may start.
@@ -313,7 +331,7 @@ pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
 }
 
 fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
-    if view.kind() == ViewKind::Input || is_key_control(view) {
+    if view.kind() == ViewKind::Input || is_key_stop(view) {
         return;
     }
     let Some(window) = view.ns().window() else {
@@ -365,9 +383,8 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
 // --- Cursors ------------------------------------------------------------------------
 
 /// The cursor a view asks for, `None` to inherit its parent's.
-fn cursor_of(cursor: Cursor, pressable: bool) -> Option<Cursor> {
+fn cursor_of(cursor: Cursor) -> Option<Cursor> {
     match cursor {
-        Cursor::Auto if pressable => Some(Cursor::Pointer),
         Cursor::Auto => None,
         other => Some(other),
     }
@@ -419,10 +436,10 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .iter()
         .find_map(|v| {
             let s = v.state();
-            cursor_of(s.style.cursor, has_press(s.events))
+            cursor_of(s.style.cursor)
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
-                    (v == &hit.view && crate::selection_area::is_area_text(v, &s))
+                    (v == &hit.view && crate::selectable_view::is_area_text(v, &s))
                         .then_some(Cursor::Text)
                 })
         })
@@ -454,6 +471,12 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     if always || NSCursor::currentCursor() != cursor {
         cursor.set();
     }
+}
+
+/// Where the mouse last was (root coordinates), while it is over the root:
+/// where the pointer events the root got put it, the test agent's too.
+pub(crate) fn pointer_location(surface: &Surface) -> Option<(f32, f32)> {
+    surface.input.last.get()
 }
 
 /// Sets the cursor again where the mouse is (what is under it changed).
@@ -540,6 +563,19 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let (x, y) = (p.x as f32, p.y as f32);
     let time = event.timestamp() * 1000.0;
     let input = &surface.input;
+    // Every button's press and release puts the mouse there, the secondary
+    // ones' too: a menu the app opens on a right click without a place
+    // (`Menu.popup()`) opens where that click was, not where an earlier
+    // press left it (`chrome::popup`).
+    if matches!(
+        ty,
+        NSEventType::RightMouseDown
+            | NSEventType::RightMouseUp
+            | NSEventType::OtherMouseDown
+            | NSEventType::OtherMouseUp
+    ) {
+        input.last.set(Some((x, y)));
+    }
     match ty {
         // Control-click is the secondary click on macOS.
         NSEventType::LeftMouseDown
@@ -547,6 +583,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 .modifierFlags()
                 .contains(NSEventModifierFlags::Control) =>
         {
+            input.last.set(Some((x, y)));
             context_menu(surface, x, y, event.modifierFlags());
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
@@ -556,14 +593,13 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 return;
             }
             input.last.set(Some((x, y)));
-            let shift = event.modifierFlags().contains(NSEventModifierFlags::Shift);
             down(
                 surface,
                 x,
                 y,
                 time,
                 event.clickCount().max(1) as usize,
-                shift,
+                event.modifierFlags(),
             );
         }
         NSEventType::LeftMouseDragged
@@ -625,12 +661,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
             let event = nsh_core::ContextMenuEvent {
                 position: point(Points(location_x), Points(location_y)),
                 page_position: point(Points(x), Points(y)),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flags.contains(NSEventModifierFlags::Control),
-                    alt: flags.contains(NSEventModifierFlags::Option),
-                    shift: flags.contains(NSEventModifierFlags::Shift),
-                    cmd: flags.contains(NSEventModifierFlags::Command),
-                },
+                modifiers: modifiers(flags),
             };
             surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
             return;
@@ -655,7 +686,9 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
             let events = view.state().events;
             for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
                 if events.contains(kind) {
-                    press_event(surface, view.id(), kind);
+                    // From the keyboard: no pointer to report.
+                    log::debug!(target: "nsh::input", "{} on {} (keyboard)", kind.prop_name(), view.id());
+                    surface.event(view.id(), kind, EventPayload::None);
                 }
             }
         }
@@ -725,15 +758,67 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     crate::scroll::key_scroll(surface, &hit.view, horizontal, m)
 }
 
-/// A mounted ordinary view that can be reached and activated by keyboard.
+/// A mounted ordinary view the keyboard focus stops at (Tab): one that
+/// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
+/// shown and reachable by the pointer.
+pub(crate) fn is_key_stop(view: &NshView) -> bool {
+    {
+        let state = view.state();
+        if state.kind == ViewKind::Input
+            || !state
+                .props
+                .focus_stop(state.events.contains(EventKind::Press))
+        {
+            return false;
+        }
+    }
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+}
+
+/// A stop that Return and Space press ([`is_key_stop`] taking presses): a
+/// stop that takes none hears its keys through the app's keymap.
 pub(crate) fn is_key_control(view: &NshView) -> bool {
-    let state = view.state();
-    state.kind != ViewKind::Input
-        && state.events.contains(EventKind::Press)
-        && state.props.focusable != Some(false)
-        && !state.props.accessibility.state.disabled
-        && view.can_target()
-        && !view.ns().isHiddenOrHasHiddenAncestor()
+    is_key_stop(view) && view.state().events.contains(EventKind::Press)
+}
+
+/// `focus()` on a view that is not an input: the keyboard focus moves to
+/// it as Tab moves it there (its `becomeFirstResponder` sets `focus:` and
+/// reports `onFocus`), if it is a stop of Tab ([`is_key_stop`]).
+pub(crate) fn focus_control(surface: &Surface, view: &NshView) {
+    if !is_key_stop(view) || has_key_focus(view) {
+        return;
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    // A field that edits keeps the focus while a click is handled (the
+    // view refuses it then): the window takes it first, as `blur()` does.
+    if crate::text_input::editing(surface) {
+        window.makeFirstResponder(None);
+    }
+    window.makeFirstResponder(Some(view.ns()));
+}
+
+/// `blur()` on a view that is not an input and has the keyboard focus:
+/// the surface's root takes it, as when an input is blurred.
+pub(crate) fn blur_control(surface: &Surface, view: &NshView) {
+    if let Some(window) = view.ns().window()
+        && has_key_focus(view)
+    {
+        window.makeFirstResponder(Some(surface.root.ns()));
+    }
+}
+
+/// Whether `view` itself is its window's first responder.
+fn has_key_focus(view: &NshView) -> bool {
+    view.ns()
+        .window()
+        .and_then(|window| window.firstResponder())
+        .is_some_and(|responder| {
+            responder
+                .downcast_ref::<objc2_app_kit::NSView>()
+                .is_some_and(|v| v == view.ns())
+        })
 }
 
 /// Enter or Space addressed to a focused control inside the current modal.
@@ -758,8 +843,8 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 }
 
 /// Tab / Shift+Tab (or with Control) with the root focused: moves into
-/// AppKit's key view loop (fields and pressable views), from the first or last, so
-/// focus never gets stuck on the root.
+/// AppKit's key view loop (fields and the views [`is_key_stop`] takes), from
+/// the first or last, so focus never gets stuck on the root.
 fn tab(surface: &Surface, event: &NSEvent) -> bool {
     const TAB: u16 = 48;
     let flags = event.modifierFlags();
@@ -777,7 +862,7 @@ fn tab(surface: &Surface, event: &NSEvent) -> bool {
     let from = responder
         .as_ref()
         .and_then(|responder| responder.downcast_ref::<objc2_app_kit::NSView>())
-        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_control(&view)))
+        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_stop(&view)))
         .unwrap_or(surface.root.ns());
     crate::text_input::tab(surface, from, flags.contains(NSEventModifierFlags::Shift));
     true
@@ -1042,16 +1127,24 @@ fn put(surface: &Surface, p: Pointer) {
     *surface.input.pointer.borrow_mut() = Some(p);
 }
 
-fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: bool) {
+fn down(
+    surface: &Rc<Surface>,
+    x: f32,
+    y: f32,
+    time: f64,
+    clicks: usize,
+    flags: NSEventModifierFlags,
+) {
+    let shift = flags.contains(NSEventModifierFlags::Shift);
     // A release we never saw.
     if let Some(stale) = take(surface) {
         finish(surface, stale, true);
     }
     let hit = pick(&surface.root, x, y);
-    // A selection area around the view selects across its texts; else a
+    // A selectable view around the view selects across its texts; else a
     // selectable text selects alone.
     let selecting = hit.as_ref().filter(|h| !h.native).and_then(|h| {
-        crate::selection_area::target(&h.view)
+        crate::selectable_view::target(&h.view)
             .or_else(|| crate::text::selectable(&h.view.state()).then(|| h.view.clone()))
     });
     let Some(hit) = hit else {
@@ -1140,10 +1233,11 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
         None
     } else {
         find_press(surface, &hit.view, &views, x, y)
+            .map(|p| p.clicked(modifiers(flags), clicks as u32))
     };
     match &selecting {
-        Some(area) if crate::selection_area::is_area(area) => {
-            crate::selection_area::down(surface, area, x, y, clicks, shift, press.is_some());
+        Some(area) if crate::selectable_view::is_area(area) => {
+            crate::selectable_view::down(surface, area, x, y, clicks, shift, press.is_some());
         }
         Some(view) => {
             let (lx, ly) = local(surface, view, x, y);
@@ -1190,14 +1284,14 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
     }
     if let Some(press) = &mut p.press {
         let generation = press.generation;
-        press_in(surface, press);
+        press_in(surface, press, (x, y));
         if press.events.contains(EventKind::LongPress) {
             let delay = press.long_delay.max(0.0) as u64;
             after(surface, generation, delay, |surface, p| {
                 let Some(press) = &mut p.press else { return };
-                press_in(surface, press);
+                press_in(surface, press, (p.x, p.y));
                 press.long = true;
-                press_event(surface, press.node, EventKind::LongPress);
+                press_event(surface, press, EventKind::LongPress, (p.x, p.y));
             });
         }
     }
@@ -1221,8 +1315,8 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     if let Mode::Select(view) = &p.mode {
         let view = view.clone();
-        let selects = if crate::selection_area::is_area(&view) {
-            crate::selection_area::drag(surface, &view, tx, ty, x, y)
+        let selects = if crate::selectable_view::is_area(&view) {
+            crate::selectable_view::drag(surface, &view, tx, ty, x, y)
         } else {
             let (lx, ly) = local(surface, &view, x, y);
             crate::text::selection_drag(&view, tx, ty, lx, ly)
@@ -1330,11 +1424,12 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
                 cancel_press(surface, &mut p);
             }
             if let Some(mut press) = p.press.take() {
+                let at = (p.x, p.y);
                 if cancelled {
-                    press_out(surface, &mut press, false);
+                    press_out(surface, &mut press, false, at);
                 } else {
                     let inside = released_inside(surface, &press.view, p.x, p.y);
-                    press_out(surface, &mut press, inside);
+                    press_out(surface, &mut press, inside, at);
                 }
             }
         }
@@ -1344,8 +1439,8 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
 /// The button pressed on selecting `view` (an area's or a text's) went
 /// up. True if it ended a selecting drag.
 fn selection_up(surface: &Surface, view: &NshView) -> bool {
-    if crate::selection_area::is_area(view) {
-        crate::selection_area::up(surface)
+    if crate::selectable_view::is_area(view) {
+        crate::selectable_view::up(surface)
     } else {
         crate::text::selection_up(view)
     }
@@ -1458,28 +1553,48 @@ fn find_press(
     })
 }
 
-fn press_in(surface: &Rc<Surface>, press: &mut Press) {
+/// Presses in: `onPressDown`, the first time. `at` is the pointer in root
+/// coordinates.
+fn press_in(surface: &Rc<Surface>, press: &mut Press, at: (f32, f32)) {
     if let Some(kind) = press.press_in() {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
 /// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
 /// and it was no long press.
-fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
+fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool, at: (f32, f32)) {
     for kind in press.press_out(fire) {
-        press_event(surface, press.node, kind);
+        press_event(surface, press, kind, at);
     }
 }
 
-fn press_event(surface: &Surface, node: NodeId, kind: EventKind) {
-    log::debug!(target: "nsh::input", "{} on {node}", kind.prop_name());
-    surface.event(node, kind, EventPayload::None);
+/// Sends `kind` of `press` with the pointer at `(x, y)` (root coordinates).
+fn press_event(surface: &Surface, press: &Press, kind: EventKind, (x, y): (f32, f32)) {
+    log::debug!(target: "nsh::input", "{} on {}", kind.prop_name(), press.node);
+    let (location_x, location_y) = local(surface, &press.view, x, y);
+    let event = nsh_core::PressEvent {
+        position: point(Points(location_x), Points(location_y)),
+        page_position: point(Points(x), Points(y)),
+        modifiers: press.modifiers,
+        clicks: press.clicks,
+    };
+    surface.event(press.node, kind, EventPayload::Press(event));
 }
 
 fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
     if let Some(mut press) = p.press.take() {
-        press_out(surface, &mut press, false);
+        press_out(surface, &mut press, false, (p.x, p.y));
+    }
+}
+
+/// The modifier keys of AppKit's `flags`.
+fn modifiers(flags: NSEventModifierFlags) -> nsh_core::keymap::Modifiers {
+    nsh_core::keymap::Modifiers {
+        ctrl: flags.contains(NSEventModifierFlags::Control),
+        alt: flags.contains(NSEventModifierFlags::Option),
+        shift: flags.contains(NSEventModifierFlags::Shift),
+        cmd: flags.contains(NSEventModifierFlags::Command),
     }
 }
 
@@ -1807,18 +1922,60 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
             }
             s.id
         };
+        watch_flags(surface);
         let (location_x, location_y) = local(surface, &v, x, y);
         let event = nsh_core::HoverEvent {
             position: point(Points(location_x), Points(location_y)),
             page_position: point(Points(x), Points(y)),
-            modifiers: nsh_core::keymap::Modifiers {
-                ctrl: flags.contains(NSEventModifierFlags::Control),
-                alt: flags.contains(NSEventModifierFlags::Option),
-                shift: flags.contains(NSEventModifierFlags::Shift),
-                cmd: flags.contains(NSEventModifierFlags::Command),
-            },
+            modifiers: modifiers(flags),
         };
         surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    }
+}
+
+/// Installs the surface's [`FlagsMonitor`], unless it is there.
+fn watch_flags(surface: &Surface) {
+    let monitor = &surface.input.flags.0;
+    if monitor.borrow().is_some() {
+        return;
+    }
+    let key = surface.key();
+    let block = block2::RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit passes a valid event.
+        let e = unsafe { event.as_ref() };
+        if let Some(surface) = Surface::with_key(key) {
+            modifiers_changed(&surface, e);
+        }
+        event.as_ptr()
+    });
+    // SAFETY: the block returns the event it got (never consumed); the
+    // monitor is removed with the surface's input.
+    *monitor.borrow_mut() = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            objc2_app_kit::NSEventMask::FlagsChanged,
+            &block,
+        )
+    };
+}
+
+/// The modifier keys changed (`event`, a `flagsChanged`): while the mouse
+/// rests over the surface's window with no button down, the hovered views
+/// that listen hear `onHoverMove` again where it is, with the modifiers as
+/// they are now (an editor underlines a definition while Command is held),
+/// as they would on the next move.
+fn modifiers_changed(surface: &Surface, event: &NSEvent) {
+    let Some(window) = surface.root.ns().window() else {
+        return;
+    };
+    if event.window(surface.mtm).as_deref() != Some(&*window) {
+        return;
+    }
+    let input = &surface.input;
+    if input.pointer.borrow().is_some() {
+        return;
+    }
+    if let Some((x, y)) = input.last.get() {
+        hover_moved(surface, x, y, event.modifierFlags());
     }
 }
 
@@ -2223,9 +2380,9 @@ mod tests {
 
     #[test]
     fn cursors() {
-        assert_eq!(cursor_of(Cursor::Auto, false), None);
-        assert_eq!(cursor_of(Cursor::Auto, true), Some(Cursor::Pointer));
-        assert_eq!(cursor_of(Cursor::Default, true), Some(Cursor::Default));
+        assert_eq!(cursor_of(Cursor::Auto), None);
+        assert_eq!(cursor_of(Cursor::Default), Some(Cursor::Default));
+        assert_eq!(cursor_of(Cursor::Pointer), Some(Cursor::Pointer));
     }
 
     #[test]

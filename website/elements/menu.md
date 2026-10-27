@@ -15,12 +15,12 @@ A menu is a list of actions its trigger opens. One structure serves every device
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop; a `Submenu` shows its items in the
   sheet in place of the menu's, with a row of yours leading back.
 
-Choosing an item, a press outside, Escape and the Android back button close it. `ContextMenu` is the same menu opened
+Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
 by the secondary button (a right click) at the pointer, or by a finger held on its trigger on touch screens.
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
     menu_item()
@@ -85,7 +85,7 @@ function FileMenu() {
 
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup on desktops and the
-sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh/device`) with `"desktop"`.
+sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh`) with `"desktop"`.
 
 ## Context menus
 
@@ -172,4 +172,5 @@ it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside
 ## Accessibility
 
 The popup or sheet is a menu and its items menu items for screen readers; the trigger tells whether the menu is
-expanded. Only the items of the level shown are on screen, so screen readers read what is there.
+expanded. In TSX the trigger is the element you pass: it takes the presses and the expanded state itself, so its own
+`active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.

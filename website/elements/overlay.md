@@ -16,7 +16,7 @@ menus, tooltips and sheets are built on it; [`nsh/base`](../modules/nsh-base.md)
 use to build your own.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn more_button() -> impl IntoElement {
     let open = signal(false);
@@ -78,7 +78,7 @@ function MoreButton() {
 }
 ```
 
-`Overlay` comes from `nsh` in TSX and `overlay()` from `nsh_core::ui::prelude` in Rust. It is shown while it is in the
+`Overlay` comes from `nsh` in TSX and `overlay()` from `nsh_core::prelude` in Rust. It is shown while it is in the
 view: put it in an `If` (Rust: `when(..)`) to open and close it. Overlays shown later are on top of earlier ones, and
 an overlay inside another is on top of it.
 
@@ -90,8 +90,9 @@ full-window layer; `class="bottom-0 left-0 right-0"` is a bar along the bottom.
 
 With `anchor`, NSH places it next to the anchor:
 
-- `anchor` is a view (a `ref`) or a `Point` (`{ x, y }`) in the root view's coordinates, the `pageX` / `pageY` of a touch
-  (a menu where the pointer is).
+- `anchor` is a view (a `ref`), a `Point` (`{ x, y }`) in the root view's coordinates, the `pageX` / `pageY` of a touch
+  (a menu where the pointer is), or a `Bounds` (`{ origin, size }`) there: an input's caret (`onCaretMove`'s `pageBounds`), where suggestions
+  for what is being typed open.
 - `placement` is the side it goes on: `"top"`, `"bottom"` (the default), `"left"` or `"right"`. When it does not fit
   there and fits on the other side, it goes there; when it fits on neither, it goes on the side with more room.
 - `align` lines it up along that side: `"start"`, `"center"` (the default) or `"end"`. Above and below the anchor,
@@ -119,7 +120,7 @@ An overlay reports what usually closes a popup and leaves the decision to you:
 
 - `onPressOutside` fires when a finger or a mouse button goes down outside the overlay, its anchor and the overlays
   inside it. The press goes on to what is under it.
-- `onCancel` fires on Escape and the Android back button, for the top overlay that listens to it only. It takes them
+- `onCancel` fires on Escape, the Android back button and VoiceOver's escape gesture on iOS, for the top overlay that listens to it only. It takes them
   before the pages and `BackHandler`.
 
 To block the screen behind a popup, put a second overlay under it with `class="inset-0"` and an `onPress` that closes
@@ -129,7 +130,7 @@ both: that is how [Sheet](./sheet.md) and the phone presentation of [Popover](./
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `anchor` | `.anchor(&element_ref)`, `.anchor_point(point)` | `YNode \| { x: number; y: number } \| null` | none | The view or the point it is placed against. Without one it is a fixed box of its root view. |
+| `anchor` | `.anchor(&element_ref)`, `.anchor_point(point)`, `.anchor_bounds(bounds)` | `YNode \| Point \| Bounds \| null` | none | The view, the point or the box it is placed against. Without one it is a fixed box of its root view. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The side of the anchor it goes on. |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the anchor along that side. |
 | `offset` | `.offset(px(..))` | `number` | `0` | The gap between the anchor and the overlay. |
@@ -144,7 +145,7 @@ It also takes the [common props](./index.md#common-props) of a view.
 | Event | Rust | Description |
 |---|---|---|
 | `onPressOutside` | `.on_press_outside(\|point\| ..)` | A press went down outside it, its anchor and the overlays inside it (`pagePosition`, a `Point`). |
-| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button, while it is the top overlay listening. |
+| `onCancel` | `.on_cancel(\|\| ..)` | Escape, the Android back button or VoiceOver's escape gesture, while it is the top overlay listening. |
 | `onPosition` | `.on_position(\|position\| ..)` | NSH placed it: `placement` (the side it went on), `bounds` in the root view, and `available` (a `Size`: the room on that side). |
 
 ## Platform notes

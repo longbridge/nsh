@@ -4,14 +4,13 @@
 //! The cheap path is the view's own layer: `cornerRadius` + `maskedCorners`
 //! covers every shape whose rounded corners share one radius. Only corners
 //! with different radii need shape layers, and only a view that both clips
-//! its children and casts a shadow needs an extra content view (clipping a
-//! layer also clips its shadow).
+//! its children and draws outside its bounds (an outer box shadow, an
+//! outline) needs an extra content view (clipping a layer also clips what it
+//! draws outside).
 //!
-//! With a background a shadow gets a `shadowPath` (no offscreen pass); with a
-//! transparent background it follows the content (text shadows). Known
-//! limits: scroll views and lists take one radius (the largest) and clip
-//! their shadow; a `<text>` with different radii is masked, which clips its
-//! shadow too.
+//! A `drop-shadow()` filter is the layer's own shadow: it follows the
+//! content. Known limits: scroll views and lists take one radius (the
+//! largest); a `<text>` with different radii is masked.
 
 use nsh_core::{
     BorderStyle, Borders, Color, CornerRadii, ObjectPosition, ResizeMode, ViewStyle,
@@ -185,7 +184,12 @@ impl Decor {
         };
     }
 
-    /// How an image view fits its image (`resizeMode`) and where it places
+    /// How the image fits the view.
+    pub(crate) fn resize_mode(&self) -> ResizeMode {
+        self.mode
+    }
+
+    /// How an image view fits its image (`objectFit`) and where it places
     /// it (`objectPosition`).
     pub(crate) fn set_fit(&mut self, mode: ResizeMode, position: ObjectPosition) {
         if self.mode != mode || self.position != position {
@@ -212,13 +216,7 @@ impl Decor {
         });
         let natural = size(px(natural.0), px(natural.1));
         let bounds = size(px(bounds.width as f32), px(bounds.height as f32));
-        let mut fitted = self.mode.fit(natural, bounds, self.position);
-        // `center` keeps an image larger than the view at its natural size
-        // here (cropped), as UIKit's center gravity always showed it.
-        if self.mode == ResizeMode::Center && natural.width.0 > 0.0 && natural.height.0 > 0.0 {
-            fitted.size = natural;
-            fitted.origin = self.position.place(bounds, natural);
-        }
+        let fitted = self.mode.fit(natural, bounds, self.position);
         let frame = CGRect::new(
             CGPoint::new(fitted.origin.x.0 as CGFloat, fitted.origin.y.0 as CGFloat),
             CGSize::new(
@@ -301,27 +299,17 @@ impl Decor {
         });
     }
 
-    /// Sets the shadow's color, opacity and radius (animated ones).
-    pub(crate) fn set_shadow(&self, view: &UIView, color: Color, opacity: f32, radius: f32) {
-        let layer = view.layer();
-        layer.setShadowColor(cg_color(color).as_deref());
-        layer.setShadowOpacity(opacity.clamp(0.0, 1.0));
-        layer.setShadowRadius(radius.max(0.0) as CGFloat);
-    }
-
     /// Shapes `view` after `style` at its current size. `background` is the
-    /// current (possibly animated) background; `animated_background` tells
-    /// whether it may change without a new style.
+    /// current (possibly animated) background.
     pub(crate) fn apply(
         &mut self,
         view: &UIView,
         kind: Kind,
         style: &ViewStyle,
         background: Color,
-        animated_background: bool,
         mtm: MainThreadMarker,
     ) {
-        quiet(|| self.apply_quietly(view, kind, style, background, animated_background, mtm));
+        quiet(|| self.apply_quietly(view, kind, style, background, mtm));
     }
 
     /// Like [`Decor::apply`], letting the current transaction animate the
@@ -332,10 +320,9 @@ impl Decor {
         kind: Kind,
         style: &ViewStyle,
         background: Color,
-        animated_background: bool,
         mtm: MainThreadMarker,
     ) {
-        self.apply_quietly(view, kind, style, background, animated_background, mtm);
+        self.apply_quietly(view, kind, style, background, mtm);
     }
 
     fn apply_quietly(
@@ -344,7 +331,6 @@ impl Decor {
         kind: Kind,
         style: &ViewStyle,
         background: Color,
-        animated_background: bool,
         mtm: MainThreadMarker,
     ) {
         let layer = view.layer();
@@ -356,7 +342,6 @@ impl Decor {
         // paths are not reshaped on resize.
         let raw = style.radii();
         let radii = raw.fit(size(px(w), px(h)));
-        let shadow = style.shadow.is_visible();
         let borders = &style.borders;
         // Sides that differ are drawn as colored rings; equal sides by the
         // layer's border or a stroke.
@@ -375,7 +360,7 @@ impl Decor {
             (kind == Kind::Scroll).then(|| raw.to_array().into_iter().fold(0.0, |m, r| r.0.max(m)))
         });
         let corners = corner_mask(&raw);
-        let outside = shadow || crate::visual::draws_outside(style);
+        let outside = crate::visual::draws_outside(style);
         let content = kind == Kind::View && style.overflow_hidden && outside;
 
         // Text draws into the layer's own contents, below every sublayer: it
@@ -389,7 +374,6 @@ impl Decor {
         let mask = shared.is_none() && (style.overflow_hidden || kind == Kind::Text) && !content;
 
         self.sized = kind == Kind::Image
-            || shadow
             || shared.is_none()
             || content
             || stroke
@@ -501,7 +485,7 @@ impl Decor {
             (0.0, None)
         };
 
-        // Children in a content view: it clips, the view casts the shadow.
+        // Children in a content view: it clips, the view draws outside.
         self.set_content(view, content, mtm);
         let border_layer = match &self.content {
             Some(c) => {
@@ -569,21 +553,7 @@ impl Decor {
             }
         }
 
-        // Shadow. With a background the shape is known and passed as a path,
-        // which spares Core Animation an offscreen pass over the content.
-        if shadow {
-            let s = style.shadow;
-            layer.setShadowColor(cg_color(s.color).as_deref());
-            layer.setShadowOpacity(s.opacity);
-            layer.setShadowOffset(CGSize::new(
-                s.offset_x.0 as CGFloat,
-                s.offset_y.0 as CGFloat,
-            ));
-            layer.setShadowRadius(s.radius.0 as CGFloat);
-            let solid = !style.background_color.is_transparent() || animated_background;
-            let path = solid.then(|| rounded(local, radii));
-            layer.setShadowPath(path.as_deref().map(|p| &**p));
-        } else if let Some((x, y, blur, color)) = crate::visual::drop_shadow(style) {
+        if let Some((x, y, blur, color)) = crate::visual::drop_shadow(style) {
             // `drop-shadow()`: follows the content's shape (no path).
             layer.setShadowColor(cg_color(Color(color.0 | 0xff)).as_deref());
             layer.setShadowOpacity((color.0 & 0xff) as f32 / 255.0);

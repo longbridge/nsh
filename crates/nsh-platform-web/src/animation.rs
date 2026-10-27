@@ -4,7 +4,7 @@
 //! items (the Android animator's design, `nsh-platform-android/src/animation.rs`).
 
 use nsh_core::{
-    Color, GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform,
+    Color, GestureValues, MAX_TRANSFORMS, MountItem, Transform,
     animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
 };
 use rustc_hash::FxHashMap;
@@ -25,11 +25,16 @@ pub(crate) struct UiAnimation {
     /// View id -> bound properties.
     bindings: FxHashMap<u32, Vec<(AnimationProp, NodeId)>>,
     /// View id -> static transform list, whose animated entries the
-    /// bindings replace, and shadow, whose bound parts they replace.
-    statics: FxHashMap<u32, (Transform, Shadow)>,
+    /// bindings replace.
+    statics: FxHashMap<u32, Transform>,
     gestures: FxHashMap<u32, Gestures>,
     /// Scroll view id -> (value node, horizontal).
     scrolls: FxHashMap<u32, (NodeId, bool)>,
+    /// Vertical scroll view id -> pull value node.
+    pulls: FxHashMap<u32, NodeId>,
+    /// Scroll view id -> its sticky cells that stick an animated value
+    /// further in, with that value's node.
+    sticky: FxHashMap<u32, Vec<(u32, NodeId)>>,
 }
 
 fn value_css(v: AnimationValue) -> String {
@@ -53,7 +58,7 @@ impl UiAnimation {
                 }
             }
             MountItem::ViewStyle { id, style } => {
-                self.statics.insert(*id, (style.transform, style.shadow));
+                self.statics.insert(*id, style.transform);
             }
             MountItem::Gestures { id, values } => {
                 if values.is_empty() {
@@ -66,20 +71,43 @@ impl UiAnimation {
                 id,
                 horizontal,
                 scroll_value,
+                pull_value,
                 ..
-            } => match scroll_value {
-                Some(node) => {
-                    self.scrolls.insert(*id, (*node, *horizontal));
+            } => {
+                match scroll_value {
+                    Some(node) => {
+                        self.scrolls.insert(*id, (*node, *horizontal));
+                    }
+                    None => {
+                        self.scrolls.remove(id);
+                    }
                 }
-                None => {
-                    self.scrolls.remove(id);
+                match pull_value.filter(|_| !*horizontal) {
+                    Some(node) => {
+                        self.pulls.insert(*id, node);
+                    }
+                    None => {
+                        self.pulls.remove(id);
+                    }
                 }
-            },
+            }
+            MountItem::StickyCells { id, cells } => {
+                let animated: Vec<(u32, NodeId)> = cells
+                    .iter()
+                    .filter_map(|c| Some((c.cell, c.offset?)))
+                    .collect();
+                if animated.is_empty() {
+                    self.sticky.remove(id);
+                } else {
+                    self.sticky.insert(*id, animated);
+                }
+            }
             MountItem::Delete { id } => {
                 self.bindings.remove(id);
                 self.statics.remove(id);
                 self.gestures.remove(id);
                 self.scrolls.remove(id);
+                self.pulls.remove(id);
             }
             _ => {}
         }
@@ -93,6 +121,14 @@ impl UiAnimation {
         self.graph.is_animating()
     }
 
+    /// Scroll view `id` came to rest: the snapping values that follow its
+    /// scroll value settle (the next frame request runs them).
+    pub(crate) fn scroll_ended(&mut self, id: u32) {
+        if let Some(&(node, _)) = self.scrolls.get(&id) {
+            self.graph.settle(node);
+        }
+    }
+
     /// A scroll view moved: feeds its scroll value.
     pub(crate) fn scrolled(&mut self, id: u32, x: f32, y: f32) -> bool {
         let Some(&(node, horizontal)) = self.scrolls.get(&id) else {
@@ -100,6 +136,16 @@ impl UiAnimation {
         };
         self.graph
             .set(node, if horizontal { x } else { y }, &mut self.finished);
+        true
+    }
+
+    /// A vertical scroll view is pulled `distance` past its top: feeds its
+    /// pull value.
+    pub(crate) fn pulled(&mut self, id: u32, distance: f32) -> bool {
+        let Some(&node) = self.pulls.get(&id) else {
+            return false;
+        };
+        self.graph.set(node, distance.max(0.0), &mut self.finished);
         true
     }
 
@@ -171,9 +217,6 @@ impl UiAnimation {
         for (&view, bindings) in &self.bindings {
             let mut overrides = [None; MAX_TRANSFORMS];
             let mut transformed = false;
-            let statics = self.statics.get(&view).copied();
-            let mut shadow: Option<Shadow> = None;
-            let static_shadow = statics.map_or(Shadow::DEFAULT, |s| s.1);
             for &(prop, node) in bindings {
                 match prop {
                     // `nsh.js` puts these on the border overlay and the
@@ -183,19 +226,6 @@ impl UiAnimation {
                     }
                     AnimationProp::Color => {
                         out.animation(view, "color", &value_css(self.graph.eval(node)));
-                    }
-                    AnimationProp::ShadowColor => {
-                        if let AnimationValue::Color(c) = self.graph.eval(node) {
-                            shadow.get_or_insert(static_shadow).color = Color(c);
-                        }
-                    }
-                    AnimationProp::ShadowOpacity => {
-                        shadow.get_or_insert(static_shadow).opacity =
-                            self.graph.eval(node).number().clamp(0.0, 1.0);
-                    }
-                    AnimationProp::ShadowRadius => {
-                        shadow.get_or_insert(static_shadow).radius =
-                            nsh_core::Points(self.graph.eval(node).number().max(0.0));
                     }
                     AnimationProp::Opacity => {
                         out.animation(view, "opacity", &self.graph.eval(node).number().to_string());
@@ -216,26 +246,28 @@ impl UiAnimation {
                             transformed = true;
                         }
                     }
+                    // The scroll view's (`sticky` below), never bound.
+                    AnimationProp::StickyTop | AnimationProp::StickyLeft => {}
+                    // No registered native components on the web.
+                    AnimationProp::ComponentSlot(_) => {}
                 }
             }
-            if let Some(s) = shadow {
-                // The view's `box-shadow` (layered `boxShadow`s are not
-                // kept while its shadow is bound).
-                let c = s.color.0;
-                let alpha = ((c & 0xff) as f32 * s.opacity).round().clamp(0.0, 255.0) as u32;
-                let css = format!(
-                    "{}px {}px {}px {}",
-                    s.offset_x,
-                    s.offset_y,
-                    s.radius,
-                    css_color(Color((c & !0xff) | alpha))
-                );
-                out.animation(view, "box-shadow", &css);
-            }
             if transformed {
-                let statics = statics.map_or(Transform::IDENTITY, |s| s.0);
+                let statics = self
+                    .statics
+                    .get(&view)
+                    .copied()
+                    .unwrap_or(Transform::IDENTITY);
                 let css = css_transform(&statics, |i| overrides[i]);
                 out.animation(view, "transform", css.trim_end());
+            }
+        }
+        // Sticky cells that stick an animated value further in (`nsh.js`
+        // moves their sticky inset).
+        for cells in self.sticky.values() {
+            for &(cell, node) in cells {
+                let value = self.graph.eval(node).number().to_string();
+                out.animation(cell, "sticky-offset", &value);
             }
         }
     }

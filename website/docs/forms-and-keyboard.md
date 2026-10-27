@@ -13,7 +13,7 @@ Text entry is the input element, `input()` in Rust and `<Input>` in TSX: a UITex
 An input takes styles like any view (typed style methods in Rust, styles and Tailwind classes in TSX), so the fields of a form have your app's own look. A labeled field is a short component of your own:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoElement {
     let focused = signal(false);
@@ -38,7 +38,8 @@ fn field(label: &'static str, value: Signal<String>, masked: bool) -> impl IntoE
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Field(props: { label: string; value: string; onChange: (text: string) => void; masked?: boolean }) {
   const focused = signal(false);
@@ -64,7 +65,7 @@ function Field(props: { label: string; value: string; onChange: (text: string) =
 An input is **controlled** when you pass its value (`.value(..)`, TSX `value`): it shows what your signal holds, and you update the signal from the change event (`.on_change(..)`, TSX `onChange`).
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -93,7 +94,8 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const name = signal("");
@@ -181,6 +183,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |
+| `pasteBehavior` | `"insert" \| "report"` | `"insert"` | What a paste does: insert its text, or nothing ([pasting](#pasting-images-and-files)). |
 | `caret` | `boolean` | `true` | The caret is drawn; `false` hides it. |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | The keyboard's look (iOS). |
 | `selectedRange` | `{ start: number; end?: number }` | | The controlled selection, in UTF-16 units. |
@@ -197,13 +200,15 @@ Events:
 | `onSubmit` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
+| `onPaste` | `{ text, html, files, uris }` | The user pasted: text, its HTML (Linux, web), images as `File`s, local files' URLs ([pasting](#pasting-images-and-files)). |
+| `onCaretMove` | `{ bounds, pageBounds }` | The caret moved: where it is in the input and in the window ([the caret](#the-caret)). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 | `onCompositionChange` | `{ composing, text }` | An input method's composition started, changed or ended (see [Input methods](#input-methods)). |
 
 An input is styled like text: `fontSize`, `color`, `fontFamily`, `textAlign`, `letterSpacing` and the rest of [text styles](./text.md), plus borders, padding and backgrounds. The focus style (`.focus(|s| ..)` in Rust, the `focus:` Tailwind variant or `focusStyle` in TSX) applies while the input has focus. The placeholder's color is `.placeholder_color(..)` (the
-`placeholderColor` style key, `placeholder:text-*`), and the caret and selection's color is `.selection_color(..)` (`selectionColor`,
-`selection:text-*`):
+`placeholderColor` style key, `placeholder:text-*`), the caret's is `.caret_color(..)` (`caretColor`, `caret-*`), and the selection highlight's is `.selection_color(..)`
+(`selectionColor`, `selection:text-*`); UIKit tints the caret and the selection with one color, the caret's when set:
 
 ```rust tabs
 input()
@@ -246,7 +251,7 @@ On iOS, `.keyboard_appearance(KeyboardAppearance::Dark)` (TSX `ios={{ keyboardAp
 Autofill (`.auto_fill(AutoFill::Email)`, TSX `autoComplete`) tells the system what the field holds, so it can offer saved names, addresses, passwords and one-time codes from messages. Rust's `AutoFill` has a variant per kind (`Name`, `GivenName`, `FamilyName`, `Email`, `Tel`, `Username`, `Password`, `NewPassword`, `OneTimeCode`, `StreetAddress`, `PostalCode`, `Country`, `CreditCardNumber`, `Url`, `Birthdate`, ..., and `Off`). TSX takes these values: `"name"`, `"given-name"`, `"family-name"`, `"email"`, `"tel"`, `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"street-address"`, `"postal-code"`, `"country"`, `"cc-number"`, `"cc-exp"`, `"cc-csc"`, `"url"`, `"birthdate-full"` and others, or `"off"`; iOS's own names (`"emailAddress"`, `"oneTimeCode"`, ...) are accepted too, in `autoComplete` or `ios={{ textContentType }}`.
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input()
     .keyboard_type(KeyboardType::Email)
@@ -283,7 +288,7 @@ A multiline input with `"submit"` or `"blurAndSubmit"` sends on return, as chat 
 To move to the next field, keep refs to the inputs (`element_ref()` and `.element_ref(&r)` in Rust, `ref` in TSX) and call `focus()`:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn sign_in() -> impl IntoElement {
     let email = signal(String::new());
@@ -317,7 +322,8 @@ pub fn sign_in() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, mount, signal, View, type YNode } from "nsh";
+import { mount, signal, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
 
 function SignIn() {
   const email = signal("");
@@ -343,7 +349,7 @@ function SignIn() {
 mount(SignIn);
 ```
 
-Submitting without blurring (`SubmitBehavior::Submit`, `submitBehavior="submit"`) on the first field keeps the keyboard up while focus moves, so it does not drop and rise again. A chat input that sends on return and stays focused submits the same way (see the composer [below](#content-outside-scroll-views-keyboardavoidingview)).
+Submitting without blurring (`SubmitBehavior::Submit`, `submitBehavior="submit"`) on the first field keeps the keyboard up while focus moves, so it does not drop and rise again. A chat input that sends on return and stays focused submits the same way (see the composer [below](#content-outside-scroll-views)).
 
 Both the maximum length and the submit behavior are enforced natively: the platform asks "may this character be added?" and "should return end editing?" as the user types, and NSH answers from the props without waiting for JS.
 
@@ -357,15 +363,16 @@ An input's ref has:
 | `blur()` | `blur()` | Unfocuses it. |
 | `set_selection(start, end)` | `setSelection(start, end?)` | Selects `start..end` (UTF-16 units); a caret when they are equal (TSX: without `end`). |
 
-`dismiss_keyboard()` in Rust and `Keyboard.dismiss()` from `nsh/base` in TSX unfocus whichever input has focus:
+On macOS and the web, `focus()` and `blur()` on the ref of a view that takes presses move the keyboard focus as Tab does ([keyboard focus](../elements/index.md#keyboard-focus)).
+
+`dismiss_keyboard()` in Rust and `Keyboard.dismiss()` from `nsh` in TSX unfocus whichever input has focus:
 
 ```rust tabs
 view().on_press(|| dismiss_keyboard())
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { Keyboard } from "nsh/base";
+import { View, Keyboard } from "nsh";
 
 <View onPress={() => Keyboard.dismiss()}>…</View>
 ```
@@ -423,6 +430,132 @@ const selection = signal<{ start: number; end?: number } | undefined>(undefined)
 <View onPress={() => selection.set({ start: 0, end: text().length })}><Text>Select all</Text></View>
 ```
 
+## The caret
+
+The caret event (`.on_caret_move(..)`, TSX `onCaretMove`) says where the caret is, so that what belongs at the
+caret can open there: suggestions for an `@` mention, a slash command's menu, an emoji picker. `bounds` is a `Bounds`
+in the input (`origin` and `size`, the input's padding and scrolling applied), as wide as the platform draws the
+caret and as tall as its line; `pageBounds` is the same box in the window (or the dialog the input is in), which an
+overlay takes as its `anchor`. The event comes while the input has the focus, whenever the caret moves: with the
+selection, and when the input's text scrolls or wraps onto other lines. In Rust an overlay is placed against a box
+with `.anchor_bounds(..)`.
+
+```rust tabs
+let draft = signal(String::new());
+let end = signal(0u32);
+let caret = signal(None::<Bounds<Points>>);
+
+view()
+    .child(
+        input()
+            .multiline(true)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_selection_change(move |s: &Selection| end.set(s.end))
+            .on_caret_move(move |e: &CaretEvent| {
+                // Suggestions while the word before the caret starts with "@".
+                let typed = draft.with(|t| utf16_slice(t, 0, end.get()));
+                let word = typed.rsplit(char::is_whitespace).next().unwrap_or("");
+                caret.set(word.starts_with('@').then_some(e.page_bounds));
+            })
+            .p_2(),
+    )
+    .child(when(
+        move || caret.get().is_some(),
+        move || {
+            overlay()
+                .anchor_bounds(move || caret.get().unwrap_or_default())
+                .placement(Placement::Bottom)
+                .align(Align::Start)
+                .offset(px(4.0))
+                .child(text("@ada"))
+                .child(text("@grace"))
+        },
+    ))
+```
+
+```tsx tabs
+import { type Bounds, Overlay, Text, View, signal } from "nsh";
+import { Input } from "nsh/base";
+
+const draft = signal("");
+const end = signal(0);
+const caret = signal<Bounds | null>(null);
+
+<View>
+  <Input
+    multiline
+    value={draft()}
+    onChange={(t) => draft.set(t)}
+    onSelectionChange={(e) => end.set(e.end)}
+    onCaretMove={(e) => {
+      // Suggestions while the word before the caret starts with "@".
+      const word = draft().slice(0, end()).split(/\s/).pop() ?? "";
+      caret.set(word.startsWith("@") ? e.pageBounds : null);
+    }}
+    class="p-2"
+  />
+  <If when={caret()}>
+    <Overlay anchor={caret()} placement="bottom" align="start" offset={4}>
+      <Text>@ada</Text>
+      <Text>@grace</Text>
+    </Overlay>
+  </If>
+</View>;
+```
+
+`pageBounds` is where the caret was when the event came: a page that scrolls under the input moves the input but
+sends no event, so close the suggestions when it scrolls, or anchor them to the input itself.
+
+## Pasting images and files
+
+The paste event (`.on_paste(..)`, TSX `onPaste`) tells what the user pasted, from the keyboard's shortcut, a menu's
+Paste or a keyboard's image: `text`, `html`, `files` and `uris`. `html` is the same content with its formatting, as a
+browser, an office suite or a rich text editor copied it (on Linux and the web). `files` are what the clipboard held as data, such as a
+screenshot or an image copied from a page or another app: `File`s whose bytes the app can upload or show, named
+`image.png` (or the type it is). `uris` are the `file:` URLs of files copied in a file manager, as a file drop's.
+The platform reads the clipboard as the user pastes, and only then.
+
+The input inserts the pasted text by itself, as it always does: the event comes before the `onChange` of that text.
+Images and files are never inserted, since an input holds text. With `pasteBehavior` `"report"` the input inserts
+nothing, and the app decides what a paste does: send a long text as an attachment, or insert a cleaned-up version.
+The input decides at once, from the prop, because the system asks it on the spot.
+
+```rust tabs
+let attachments = signal(Vec::<PastedFile>::new());
+
+input()
+    .multiline(true)
+    .placeholder("Message")
+    .on_paste(move |e: &PasteEvent| {
+        // A screenshot pasted into the message goes along as an image.
+        attachments.update(|a| a.extend(e.files.iter().cloned()));
+    })
+    .p_2()
+```
+
+```tsx tabs
+import { signal } from "nsh";
+import { Input } from "nsh/base";
+
+const attachments = signal<File[]>([]);
+
+<Input
+  multiline
+  placeholder="Message"
+  onPaste={(e) => {
+    // A screenshot pasted into the message goes along as an image.
+    attachments.update((a) => [...a, ...e.files]);
+  }}
+  class="p-2"
+/>;
+```
+
+Upload a pasted file as any `File`, with `fetch` and `FormData` (`form.append("image", file)`); its bytes stay
+native until they are sent. On Android, keyboards that insert images (GIFs, stickers) report them the same way. On
+Linux the clipboard is read asynchronously, so the event may come after the `onChange` of the text it inserts.
+Masked inputs on macOS keep AppKit's own paste and report nothing.
+
 ## Multiline inputs that grow
 
 A multiline input (`.multiline(true)`, TSX `multiline`) scrolls its text inside its own height. To grow it with its content, feed the content size event's height (`.on_content_size_change(..)`, TSX `onContentSizeChange`) back into its style, with a limit:
@@ -479,13 +612,12 @@ scroll()
 
 The dismiss mode (`.keyboard_dismiss_mode(..)`, TSX `keyboardDismissMode`: none, on drag, interactive) lets dragging the form hide the keyboard; handled taps (`.keyboard_taps(KeyboardTaps::Handled)`, TSX `keyboardShouldPersistTaps="handled"`) let a tap on a button go through while the keyboard is up instead of only dismissing it. See [Scrolling](./scrolling.md#scroll-views-and-the-keyboard).
 
-### Content outside scroll views: KeyboardAvoidingView
+### Content outside scroll views
 
-A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Wrap the screen in `KeyboardAvoidingView` from `nsh_base` (TSX: `nsh/base`): it makes room at the bottom as tall as the keyboard, animated with the keyboard.
+A message bar pinned to the bottom of a screen is not in a scroll view, so nothing moves it. Pad the screen's bottom by CSS's `env(keyboard-inset-height)` (`paddingBottom: "env(keyboard-inset-height)"`, Tailwind `pb-[env(keyboard-inset-height)]`, Rust `.pb_keyboard()`): it makes room at the bottom as tall as the keyboard, animated natively with the keyboard.
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn chat_screen() -> impl IntoElement {
     let draft = signal(String::new());
@@ -496,8 +628,9 @@ pub fn chat_screen() -> impl IntoElement {
         }
         draft.set(String::new());
     };
-    keyboard_avoiding_view()
+    view()
         .flex_1()
+        .pb_keyboard()
         .child(scroll().flex_1().keyboard_dismiss_mode(KeyboardDismissMode::Interactive) /* messages */)
         .child(
             view()
@@ -524,8 +657,8 @@ pub fn chat_screen() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, Scroll, signal, View } from "nsh";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
+import { Scroll, signal, View, keyboardFrame, safeAreaInsets } from "nsh";
+import { Input } from "nsh/base";
 
 function ChatScreen() {
   const insets = safeAreaInsets();
@@ -535,7 +668,7 @@ function ChatScreen() {
     draft.set("");
   };
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
       <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
         {/* messages */}
       </Scroll>
@@ -558,24 +691,18 @@ function ChatScreen() {
           style={{ flex: 1, maxHeight: 120 }}
         />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 ```
 
-In Rust each prop is a setter of `keyboard_avoiding_view()` (`.behavior(AvoidBehavior::Height)`, `.offset(px(49.0))`, `.enabled(move || ..)`):
+Padding (`.pb_keyboard()`) shrinks the content above while the background reaches the bottom of the screen; a bottom margin (`marginBottom: "env(keyboard-inset-height)"`, `.mb_keyboard()`) ends the whole view at the top of the keyboard. `calc(env(keyboard-inset-height) + <length>)` (Rust `.pb_keyboard_plus(..)`, `.mb_keyboard_plus(..)`) adds a length, such as minus the height of a tab bar below the view.
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `behavior` | `"padding" \| "height"` | `"padding"` | `padding` pads the bottom by the keyboard's height; `height` shrinks the view (its background ends at the keyboard). |
-| `enabled` | `boolean` | `true` | Avoid the keyboard. |
-| `offset` | `number` | `0` | Added to the keyboard's height while it shows (a tab bar below the view, say). |
-
-It assumes it reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and `KeyboardAvoidingView` has nothing to do. See [KeyboardAvoidingView](../modules/nsh-base.md#keyboardavoidingview).
+The full height suits a view that reaches the bottom of the surface, as a screen's content does. On an Android host whose window resizes for the keyboard, the window itself shrinks and the variable is 0. See [Keyboard](../elements/keyboard.md).
 
 ### The keyboard accessor
 
-`keyboard_height()` and `keyboard_duration()` in Rust, and `keyboardFrame()` from `nsh/base` in TSX (a `{ height, duration }`), are reactive: how far the keyboard reaches into the surface (0 when hidden; the bottom safe area under it included) and its animation's duration in seconds. Read them for anything custom: hide a floating button while typing, or size a panel.
+`keyboard_height()` and `keyboard_duration()` in Rust, and `keyboardFrame()` from `nsh` in TSX (a `{ height, duration }`), are reactive: how far the keyboard reaches into the surface (0 when hidden; the bottom safe area under it included) and its animation's duration in milliseconds. Read them for anything custom: hide a floating button while typing, or size a panel. A layout that changes with them moves with the keyboard when it animates on the keyboard's curve: `LayoutAnimation.configureNext({ duration: keyboardFrame().duration, update: { type: "keyboard" } })` (Rust: `LayoutCurve::Keyboard`), as `env(keyboard-inset-height)` does.
 
 ```rust tabs
 view().child(when(
@@ -585,8 +712,7 @@ view().child(when(
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { keyboardFrame } from "nsh/base";
+import { View, keyboardFrame } from "nsh";
 
 <If when={keyboardFrame().height === 0}>
   <View style={{ position: "absolute", right: 16, bottom: 16 }}>…</View>
@@ -595,10 +721,10 @@ import { keyboardFrame } from "nsh/base";
 
 ## A bar over the keyboard (iOS): InputAccessoryView
 
-`input_accessory_view(id)` in Rust and `InputAccessoryView` from `nsh/ios` in TSX show a bar attached to the top of the keyboard while an input that names it has focus: iOS's `inputAccessoryView`. It moves with the keyboard natively, including during interactive dismissal. It takes no room where it is placed in the tree; inputs refer to it by its id (`.input_accessory(id)`, TSX `ios={{ inputAccessoryViewID }}` and `nativeID`):
+`input_accessory_view(id)` in Rust and `InputAccessoryView` from `nsh/mobile` in TSX show a bar attached to the top of the keyboard while an input that names it has focus: iOS's `inputAccessoryView`. It moves with the keyboard natively, including during interactive dismissal. It takes no room where it is placed in the tree; inputs refer to it by its id (`.input_accessory(id)`, TSX `ios={{ inputAccessoryViewID }}` and `nativeID`):
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn note() -> impl IntoElement {
     let content = signal(String::new());
@@ -636,8 +762,9 @@ pub fn note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal, Text, View, type YNode } from "nsh";
-import { InputAccessoryView } from "nsh/ios";
+import { signal, Text, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
+import { InputAccessoryView } from "nsh/mobile";
 
 function Note() {
   const text = signal("");
@@ -662,11 +789,11 @@ function Note() {
 }
 ```
 
-The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view (`isAvailable` from `nsh/ios` is `false`), so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `platform.os === "android"` in TSX).
+The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view, so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `platform.os === "android"` in TSX).
 
 ## Related
 
 - [`Input`](../elements/input.md): the element reference.
-- [`KeyboardAvoidingView`](../modules/nsh-base.md#keyboardavoidingview) and [`Keyboard`](../modules/nsh-base.md#keyboard).
-- [`nsh/ios`](../modules/nsh-ios.md): `InputAccessoryView`.
+- [Keyboard](../elements/keyboard.md) and [`Keyboard`](../modules/nsh.md#keyboard-and-keyboardframe).
+- [`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview): `InputAccessoryView`.
 - [Scrolling](./scrolling.md#scroll-views-and-the-keyboard): keyboard dismissal and taps in scroll views.

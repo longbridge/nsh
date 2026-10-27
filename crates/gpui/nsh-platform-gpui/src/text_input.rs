@@ -133,6 +133,8 @@ pub(crate) struct InputState {
     count: Cell<u32>,
     /// Selection as last reported (UTF-16).
     reported: Cell<(u32, u32)>,
+    /// The caret as last reported, in the view.
+    reported_caret: Cell<nsh_core::Bounds<Points>>,
     /// The composition as last reported (`onCompositionChange`): its text
     /// while one is in progress.
     composed: RefCell<Option<String>>,
@@ -175,6 +177,7 @@ impl InputState {
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
             reported: Cell::new((0, 0)),
+            reported_caret: Cell::new(nsh_core::Bounds::default()),
             composed: RefCell::new(None),
             pending: RefCell::new(None),
             anim_color: Cell::new(None),
@@ -493,7 +496,7 @@ impl Hosted for InputState {
             // On whole pixels, so that the caret stays sharp.
             let snap = |v: f32| (v * cx.scale).round() / cx.scale;
             let x = snap(ox + x);
-            let tint = config.selection_color.unwrap_or(color);
+            let tint = config.caret_color.unwrap_or(color);
             cx.fill_rect(
                 crate::geom::rect(x, oy + y, CARET_WIDTH, ch),
                 [0.0; 4],
@@ -1352,26 +1355,56 @@ fn key_press(surface: &Surface, view: &NshView, key: &str) {
     });
 }
 
-/// Reports the selection if it moved and JS listens.
+/// Reports the selection if it moved and JS listens, then the caret.
 fn report_selection(surface: &Surface, view: &NshView, input: &InputState) {
-    if !view.state().events.contains(EventKind::SelectionChange) {
+    if view.state().events.contains(EventKind::SelectionChange) {
+        let range = {
+            let model = input.model.borrow();
+            let (s, e) = model.selection();
+            let text = model.text();
+            (model::byte_to_utf16(text, s), model::byte_to_utf16(text, e))
+        };
+        if input.reported.replace(range) != range {
+            send(surface, view, EventKind::SelectionChange, || {
+                EventPayload::Map(vec![
+                    ("start", PayloadValue::Number(range.0 as f64)),
+                    ("end", PayloadValue::Number(range.1 as f64)),
+                ])
+            });
+        }
+    }
+    report_caret(surface, view, input);
+}
+
+/// `onCaretMove` if the caret moved (with the selection, or as the text
+/// scrolled or wrapped again) and JS listens.
+fn report_caret(surface: &Surface, view: &NshView, input: &InputState) {
+    // Only an input that edits shows a caret.
+    if !input.focused.get() || !view.state().events.contains(EventKind::CaretMove) {
         return;
     }
-    let range = {
-        let model = input.model.borrow();
-        let (s, e) = model.selection();
-        let text = model.text();
-        (model::byte_to_utf16(text, s), model::byte_to_utf16(text, e))
+    let caret: nsh_core::Bounds<Points> = caret_bounds(view, input);
+    if input.reported_caret.replace(caret) != caret {
+        send(surface, view, EventKind::CaretMove, || {
+            EventPayload::caret(caret)
+        });
+    }
+}
+
+/// The caret in the input view's coordinates (`onCaretMove`'s `bounds`):
+/// in the content box, scrolled with the text.
+fn caret_bounds(view: &NshView, input: &InputState) -> nsh_core::Bounds<Points> {
+    let Some((x, y, h)) = input.caret_rect(None) else {
+        return nsh_core::Bounds::default();
     };
-    if input.reported.replace(range) == range {
-        return;
+    let content = content_rect(view, input);
+    nsh_core::Bounds {
+        origin: nsh_core::geometry::point(
+            content.origin.x + Points(x),
+            content.origin.y + Points(y),
+        ),
+        size: nsh_core::geometry::size(Points(CARET_WIDTH), Points(h)),
     }
-    send(surface, view, EventKind::SelectionChange, || {
-        EventPayload::Map(vec![
-            ("start", PayloadValue::Number(range.0 as f64)),
-            ("end", PayloadValue::Number(range.1 as f64)),
-        ])
-    });
 }
 
 /// Reports the composition if it started, changed or ended since last
@@ -1622,6 +1655,9 @@ pub(crate) fn content(view: &NshView, content: nsh_core::Bounds<Points>) {
     place(view, &input);
     if input.focused.get() {
         input.reveal();
+        if let Some(surface) = surface_of(view) {
+            report_caret(&surface, view, &input);
+        }
     }
 }
 
@@ -1805,6 +1841,11 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let moved = input.scroll.get() != before;
     if moved {
         view.changed();
+        if input.focused.get()
+            && let Some(surface) = surface_of(view)
+        {
+            report_caret(&surface, view, &input);
+        }
     }
     moved
 }
@@ -1823,10 +1864,20 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
     let key = surface.key();
     let view = view.clone();
     crate::rt::on_app(move |cx| {
-        let has_text = cx
-            .read_from_clipboard()
+        let item = cx.read_from_clipboard();
+        // Images and files paste too while the app listens to pastes.
+        let listens = view.state().events.contains(EventKind::Paste);
+        let has_text = item
+            .as_ref()
             .and_then(|item| item.text())
-            .is_some_and(|t| !t.is_empty());
+            .is_some_and(|t| !t.is_empty())
+            || (listens
+                && item.iter().flat_map(|item| item.entries()).any(|entry| {
+                    matches!(
+                        entry,
+                        gpui::ClipboardEntry::Image(_) | gpui::ClipboardEntry::ExternalPaths(_)
+                    )
+                }));
         if let Some(surface) = Surface::by_key(key)
             && let Some(input) = input_of(&view)
         {
@@ -2110,15 +2161,15 @@ fn cut(surface: &Surface, view: &NshView, input: &InputState, secure: bool) -> b
     true
 }
 
-/// Pastes the clipboard's text into `view` (once the app is at hand: the
-/// clipboard is read with it), if it still has the focus then.
+/// Pastes the clipboard into `view` (once the app is at hand: the
+/// clipboard is read with it, only on the user's paste), if it still has
+/// the focus then: reports what it holds (`onPaste`) if the app listens,
+/// then inserts its text as `pasteBehavior` says.
 fn paste(surface: &Surface, view: &NshView) {
     let key = surface.key();
     let view = view.clone();
     crate::rt::on_app(move |cx| {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
+        let item = cx.read_from_clipboard();
         let Some(surface) = Surface::by_key(key) else {
             return;
         };
@@ -2128,11 +2179,47 @@ fn paste(surface: &Surface, view: &NshView) {
         let Some(input) = input_of(&view) else {
             return;
         };
+        let text = item.as_ref().and_then(|item| item.text());
+        if view.state().events.contains(EventKind::Paste) {
+            surface.event(
+                view.id(),
+                EventKind::Paste,
+                EventPayload::Paste(Box::new(pasted_content(text.clone(), item))),
+            );
+        }
+        if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
+            return;
+        }
+        let Some(text) = text else {
+            return;
+        };
         let text = pasted(&text, input.multiline());
         if !text.is_empty() {
             insert(&surface, &view, &input, &text, false);
         }
     });
+}
+
+/// What clipboard `item` holds, for `onPaste`: `text`, its images and its
+/// local files' `file:` URLs.
+fn pasted_content(text: Option<String>, item: Option<gpui::ClipboardItem>) -> nsh_core::PasteEvent {
+    let mut paste = nsh_core::PasteEvent::new(text.unwrap_or_default());
+    for entry in item.into_iter().flat_map(|item| item.into_entries()) {
+        match entry {
+            gpui::ClipboardEntry::Image(image) => {
+                paste.files.push(nsh_core::PastedFile::image(image.bytes));
+            }
+            gpui::ClipboardEntry::ExternalPaths(paths) => paste.uris.extend(
+                paths
+                    .paths()
+                    .iter()
+                    .filter(|path| path.is_absolute())
+                    .map(|path| nsh_core::platform::clipboard::file_url(&path.to_string_lossy())),
+            ),
+            _ => {}
+        }
+    }
+    paste
 }
 
 /// The start or end of the caret's visual line (wrapped lines included).

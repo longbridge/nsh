@@ -5,8 +5,9 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
+    element::{Renderer, Style, StyleRefinement},
     geometry::{DefiniteLength, Length},
-    ui::{Renderer, Style, StyleRefinement, prelude::*},
+    prelude::*,
 };
 
 use super::{
@@ -48,6 +49,13 @@ pub struct TextViewProps {
     /// a pointer), each block on its own.
     #[prop(default)]
     pub selectable: Prop<bool>,
+    /// What a press on a link does: `"report"` (the default) reports it
+    /// (`onLinkPress`) and opens nothing; `"open"` also opens a link to
+    /// another app or site outside the app (`openUrl` of `nsh/device`,
+    /// under the app's `openUrl` capability; the embedding app may route
+    /// it), while anchors in the document (`#…`) are only reported.
+    #[prop(default)]
+    pub links: Prop<TextViewLinks>,
     /// Whether code blocks show the scroll indicator of their horizontal
     /// scroll view (default true).
     #[prop(default = true)]
@@ -102,12 +110,25 @@ pub struct TextViewMath {
     pub display: bool,
 }
 
+/// What a press on a link of a [`TextView`] does (`links`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub enum TextViewLinks {
+    /// It is reported (`onLinkPress`); the app decides what opens.
+    #[default]
+    Report,
+    /// It is reported, then a URL of another app or site (with a scheme:
+    /// `https:`, `mailto:`, ...) opens outside the app
+    /// ([`nsh_core::element::open_url`]); an anchor in the document (`#…`) is
+    /// only reported.
+    Open,
+}
+
 /// The events of a [`TextView`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum TextViewEvent {
     /// A link was pressed: its URL (`#anchor` for a heading of the
-    /// document, `#footnote-<label>` for a footnote). Nothing opens it:
-    /// the app decides.
+    /// document, `#footnote-<label>` for a footnote). Nothing opens it
+    /// unless `links` is `"open"`: the app decides.
     #[args(event)]
     LinkPress(TextViewLinkPressEvent),
     /// An image that is not in a link was pressed: the image (its `src`,
@@ -216,8 +237,15 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .line_height(px(BODY_SIZE * BODY_LINE))
         .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
-        // a `SelectionArea`, the outer area's).
-        .selection_area(props.selectable)
+        // a `selectable` view, the outer one's).
+        .selectable(props.selectable)
+        .map(|mut el| {
+            if let Some(parts) = use_context::<TextViewParts>() {
+                let style = std::mem::take(el.style());
+                *el.style() = parts.refine(Part::Root, style);
+            }
+            el
+        })
         .app_class(move || props.classes.with(|c| c.root.clone()))
         .inline_style(move || {
             props
@@ -370,6 +398,7 @@ struct Cx {
     /// image there is the link's.
     link: std::cell::RefCell<Option<SharedString>>,
     highlighter: Option<CodeHighlighter>,
+    links: TextViewLinks,
     scope: Scope<TextViewEvent>,
 }
 
@@ -400,7 +429,24 @@ impl Cx {
             list_depth: std::cell::Cell::new(0),
             line: std::cell::Cell::new(BODY_SIZE * BODY_LINE),
             link: std::cell::RefCell::new(None),
+            links: props.links.get(),
             scope,
+        }
+    }
+
+    /// What a press on a link to `url` does: reported, and opened outside
+    /// the app when `links` says so.
+    fn link_press(&self, url: SharedString) -> impl Fn() + Clone + 'static {
+        let (scope, links) = (self.scope, self.links);
+        move || {
+            scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                url: url.clone(),
+            }));
+            if links == TextViewLinks::Open && !url.starts_with('#') {
+                // Whether it opened is the platform's to show; a refused
+                // URL or capability is logged.
+                drop(open_url(url.to_string()));
+            }
         }
     }
 
@@ -445,7 +491,7 @@ impl Cx {
     /// A text of the block's inline content, selectable when asked.
     fn paragraph(&self, content: &[Inline], key: &str, tail: bool) -> Text {
         let el = text("")
-            .when(self.selectable, |t| t.selectable(true))
+            .when(self.selectable, |t| t.select_text())
             .children(self.inlines(content, key));
         self.caret_after(el, tail)
     }
@@ -576,7 +622,7 @@ impl Cx {
                                     .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
-                                    .when(self.selectable, |t| t.selectable(true)),
+                                    .when(self.selectable, |t| t.select_text()),
                             ),
                         Part::MathBlock,
                     )
@@ -817,7 +863,7 @@ impl Cx {
             body.font_family(mono_font)
                 .px(px(16.0))
                 .py(px(14.0))
-                .when(self.selectable, |t| t.selectable(true)),
+                .when(self.selectable, |t| t.select_text()),
             tail,
         );
         let block = view()
@@ -1111,7 +1157,7 @@ impl Cx {
             self.paragraph(&node.content, key, tail).into_element()
         } else {
             self.caret_after(
-                text(node.text.clone()).when(self.selectable, |t| t.selectable(true)),
+                text(node.text.clone()).when(self.selectable, |t| t.select_text()),
                 tail,
             )
             .into_element()
@@ -1194,7 +1240,6 @@ impl Cx {
                 title,
                 content,
             } => {
-                let scope = self.scope;
                 let url = SharedString::from(url.clone());
                 let outer = self.link.replace(Some(url.clone()));
                 let span = self.span(content, key);
@@ -1207,11 +1252,7 @@ impl Cx {
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
-                    .on_press(move || {
-                        scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                            url: url.clone(),
-                        }))
-                    });
+                    .on_press(self.link_press(url));
                 self.part(el, Part::Link).into_element()
             }
             Inline::Image(image) => {
@@ -1302,11 +1343,10 @@ impl Cx {
         let scope = self.scope;
         let pressed = image.clone();
         let is_link = link.is_some();
+        let link = link.map(|url| self.link_press(url));
         // In a link it is the link's; else a press reports the image.
         let press = Some(move || match &link {
-            Some(url) => scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
-                url: url.clone(),
-            })),
+            Some(press) => press(),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
         });
         let role = if is_link {
@@ -1352,8 +1392,8 @@ impl Cx {
                 .filter(|s| s.width > px(0.0) && s.height > px(0.0))
                 .map(|s| s.width / s.height)
         };
-        let el = nsh_core::ui::image(image.src.clone())
-            .resize_mode(ResizeMode::Contain)
+        let el = nsh_core::element::image(image.src.clone())
+            .object_fit(ResizeMode::Contain)
             .label(SharedString::from(image.alt.clone()))
             .when_some(image.title.clone(), |el, title| el.hint(title));
         let el = match flow {

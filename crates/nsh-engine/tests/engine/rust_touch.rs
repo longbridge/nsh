@@ -9,8 +9,9 @@ use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, ROOT_ID, Size,
     TouchEvent, TouchPhase, TouchPoint,
     canvas::{CanvasOp, Num, PathOp},
+    element::Root,
     geometry::px,
-    ui::{Root, prelude::*},
+    prelude::*,
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
 
@@ -131,11 +132,14 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
+        picker: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();

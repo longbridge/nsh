@@ -9,14 +9,14 @@ group: platforms
 
 NSH runs on phones, desktops and the web: iOS, Android, macOS, Windows, Linux, GPUI and web pages. Each has a backend of its own that draws with the platform's own UI, so an app is UIKit views on an iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: the reactive graph, the renderer, Taffy layout, the components and the native modules are the same Rust code everywhere, so one app runs on all of them. An app written in Rust is that code and your crate, with no JavaScript VM; a TSX app runs its modules on QuickJS on top of it ([Building with Rust](./rust.md)).
 
-On every platform, NSH's main use is the same: apps embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop them with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates), and the same app can also be packaged as an installable app (`nsh package`), a supported second use.
+On every platform, an app is used the same two ways: packaged as an installable app of that platform (`nsh package`), or embedded in a native app of your own, whether the host links a Rust root or loads TSX at run time. You develop it with `nsh run` (Rust edits rebuild and restart the app, TSX edits are hot updates).
 
 ## At a glance
 
 | Platform | Backend; text | Runs on | Develop | Package |
 |---|---|---|---|---|
 | [iOS](./ios.md) | UIKit; CoreText | iOS 15.0+, devices and the simulator | `nsh run --target ios` | `.app` (simulator), signed `.ipa` |
-| [Android](./android.md) | Android views; `StaticLayout` | Android 9 (API 28)+, `arm64-v8a` and `x86_64` | `nsh run --target android` | signed `.apk` |
+| [Android](./android.md) | Android views; `StaticLayout` | Android 9 (API 28)+, `arm64-v8a`, `armeabi-v7a` and `x86_64` | `nsh run --target android` | signed `.apk` |
 | [macOS](./macos.md) | AppKit and Core Animation; CoreText | macOS 14+ | `nsh run --target macos` | ad hoc signed `.app` |
 | [Windows](./windows.md) | Win32 windows drawn with Direct2D; DirectWrite | Windows 10 1809+, Windows 11 | `nsh run` (the default on Windows) | a directory and a `.zip` |
 | [Linux](./linux.md) | GTK 4 widgets; Pango | GTK 4.14+ | `nsh run` (the default on Linux) | a directory and a `.tar.gz` |
@@ -67,14 +67,14 @@ A Rust host mounts a Rust root (`Root::of::<App>()`) as `AppSource::Rust` or `Ap
 
 Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):
 
-- **The environment says where the app runs**: in Rust `os()`, `idiom()` and `is_desktop()` (`nsh_core::ui::prelude`), in TSX `platform.os`, `platform.idiom` and `platform.select` from `nsh/device`. The OS is iOS, Android, macOS, Windows, Linux or the web.
+- **The environment says where the app runs**: in Rust `os()`, `idiom()` and `is_desktop()` (`nsh_core::prelude`), in TSX `platform.os`, `platform.idiom` and `platform.select` from `nsh`. The OS is iOS, Android, macOS, Windows, Linux or the web.
 - **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `web={{…}}` or `desktop={{…}}` in TSX (`desktop`: macOS, Windows, Linux and desktop browsers).
 - **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
 An app's components are drawn with NSH's primitives, so they run on desktops as well as on phones, looking the same on both. A desktop layout is built from the primitives (`view`, `text`, `scroll`, `virtual_list`, …; `View`, `Text`, `Scroll`, `List`, … in TSX) and a check for the desktop, as the gallery's desktop layout is:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn Shell() -> impl IntoElement {
@@ -95,7 +95,7 @@ fn tab_layout() -> AnyElement {
 
 ```tsx tabs
 import { View } from "nsh";
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 export function Shell() {
   // macOS, Windows, Linux and desktop browsers get a sidebar; phones get tabs.

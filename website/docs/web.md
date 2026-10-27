@@ -26,11 +26,11 @@ requestAnimationFrame ──────────────┘             
 ```
 
 - **Layout is the core's.** Every view is an absolutely positioned element at the frame Taffy computed, so flexbox, grid, `aspectRatio` and percentages behave exactly as on devices. The browser's own layout is not involved.
-- **Styles are turned into CSS in Rust.** Background, borders, radii, shadows (`shadow*` and `boxShadow`), gradients, filters, `backdropFilter`, transforms, `transformOrigin`, `outline`, `mixBlendMode`, transitions and the built-in keyframe animations become CSS properties. Tailwind classes, `active:`, `hover:` and `focus:` states and `dark:` all resolve natively, as they do on devices.
+- **Styles are turned into CSS in Rust.** Background, borders, radii, shadows (`boxShadow`, `textShadow`), gradients, filters, `backdropFilter`, transforms, `transformOrigin`, `outline`, `mixBlendMode`, transitions and the built-in keyframe animations become CSS properties. Tailwind classes, `active:`, `hover:` and `focus:` states and `dark:` all resolve natively, as they do on devices.
 - **Text is laid out in Rust** with font measurements from the browser (`CanvasRenderingContext2D.measureText`) and drawn run by run at the positions the layout chose, so what was measured is what is drawn. Lines break after spaces, around CJK characters and at `\n`; `numberOfLines` truncates with an ellipsis.
-- **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, animated values bound to `opacity`, `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices. `LayoutAnimation`, style transitions, the `animate-*` keyframes and screen transitions move as on the desktop backends, and `prefers-reduced-motion` turns them off (screens fade).
+- **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, animated values bound to `opacity`, `translate`, `rotate`, `scale`, the steps of `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices. `LayoutAnimation`, style transitions, the `animate-*` keyframes and screen transitions move as on the desktop backends, and `prefers-reduced-motion` turns them off (screens fade).
 - **Input:** presses with `activeStyle` / `active:` feedback and long presses, the responder system (`onTouch*`, `PanResponder`), native drags and two-finger pinch and rotation, scroll views (the browser's scrolling), pull to refresh, zooming scroll views (pinch, ctrl+wheel and touchpad pinches, `zoomTo`), `<Input>` with controlled values, focus and submit, `Canvas`, `NavStack` and `NavPage` with the page's `header`, `Dialog`.
-- **System UI is drawn in the page:** `AlertDialog` looks like the desktop backends' dialogs on desktop browsers and like iOS's on phones (with the `desktop` idiom, see below), and `Toast.show` shows a toast at the bottom. Custom fonts are measured again once the browser has loaded them, and an app waits for the fonts it imports before its first frame shows.
+- **System UI is drawn in the page:** `AlertDialog` looks like the desktop backends' dialogs on desktop browsers and like iOS's on phones (with the `desktop` idiom, see below). Custom fonts are measured again once the browser has loaded them, and an app waits for the fonts it imports before its first frame shows.
 - **Dialogs** are a layer over the whole app that shows the app's popup and backdrop, as on the desktop backends. Escape, the browser's back button and a press on the backdrop close them (`closeOnEscape`, `closeOnBackdropPress`), and `animation`, `onOpen`, `onClose`, `onCancel` and `onOpenChange` work as on devices.
 
 ## Keyboard, mouse and touch
@@ -38,11 +38,11 @@ requestAnimationFrame ──────────────┘             
 Published apps behave as desktop apps in desktop browsers and as phone apps in phone browsers:
 
 - **Wheels and touchpads** scroll the innermost scroll view along their axis that can still move (a vertical wheel scrolls a horizontal list when nothing vertical can), and stay on it until the scroll ends; wheel notches glide, paging and snapping views move one page per scroll. Ctrl + wheel and touchpad pinches pinch views with native pinch values instead of zooming the page. Dragging with the mouse does not scroll, as on the desktop platforms: mouse drags go to pans, the responder system and text selection. Scroll views report `onScrollDragStart` / `onScrollDragEnd`, `onMomentumStart` / `End` and `onScrollEnd` as on the desktop platforms.
-- **Keyboard**: Tab and Shift+Tab move between pressables and inputs (a focus ring and `focus:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `nsh/keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
+- **Keyboard**: Tab and Shift+Tab move between pressables and inputs (a focus ring and `focus:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
 - **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button close the newest dialog or pop the innermost stack, as the Android back button does; `popOnBack` and `onBackPress` work as there. When the app is the whole page, every pushed page and open dialog is a browser history entry, so the browser's back button goes back in the app.
 - **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
 - **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `announce` speaks through a live region and `setAccessibilityFocus` moves the focus. Views under a dialog or alert are inert.
-- **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `selectable={false}` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only `selectable` text is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
+- **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `userSelect: "none"` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only text with `userSelect: "text"` is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
 
 
 ## Apps with Rust components
@@ -150,6 +150,7 @@ page and files named after their content.
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
 | `app.<digest>.nshc` | A TSX app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
 | `harden.<digest>.nshc` | With a TSX app, the [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
+| `host.<digest>.js` | The page's host, `nsh.json` `web.host` ([the host's functions](#the-hosts-functions)) |
 | `chunks/<name>.<digest>.nshc` | With a TSX app, what `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
 | `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
@@ -257,6 +258,65 @@ With `nsh-playground.wasm`, `player.runSource(tsx, name, options)` compiles TSX 
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 
+## The host's functions
+
+On the web the page is the app's host: it answers [`host`](../modules/nsh.md#host)'s `host.call(name, args)` and sends the events `host.on` listens to. `createPlayer`'s `host` is an object whose `call(name, args)` returns the result, or a promise of it; a throw or a rejection rejects the app's call with the error's message. `player.hostEvent(event, payload)` sends an event with a JSON payload (a payload that is not JSON throws). With a `host`, `host.available()` is `true`.
+
+```js
+const player = await createPlayer(container, {
+  wasm: "./nsh.wasm",
+  host: {
+    async call(name, args) {
+      if (name === "user.info") return { name: "Ada" };
+      throw new Error(`no host function ${name}`);
+    },
+  },
+});
+player.hostEvent("theme", { dark: true });
+```
+
+A published app gets its host from `nsh.json`: `web.host` names a JS module in the app's directory, relative to `nsh.json`, that exports `createHost(player)`. `nsh package --target web` copies it into the site as `host.<digest>.js`, and the page runs `createHost` with the player before the app starts; what it returns (or resolves with) must have a `call` function, or the page shows that the app could not be loaded. The player `createHost` receives sends events from then on:
+
+```json
+{
+  "capabilities": {
+    "host": ["user.*"]
+  },
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
+}
+```
+
+```js
+// host.js
+const post = (url) => (args) =>
+  fetch(url, { method: "POST", body: JSON.stringify(args) }).then((r) => r.json());
+
+// The functions the app may call, by their exact names.
+const functions = new Map([
+  ["user.info", post("https://api.example.com/user/info")],
+  ["user.settings", post("https://api.example.com/user/settings")],
+]);
+
+export async function createHost(player) {
+  addEventListener("online", () => player.hostEvent("online", {}));
+  return {
+    call(name, args) {
+      const f = functions.get(name);
+      if (!f) throw new Error(`no host function ${name}`);
+      return f(args);
+    },
+  };
+}
+```
+
+The host looks each name up as it is in a table of its functions, as above, and keeps its URLs and paths its own: `capabilities.host` grants names by their beginning (`user.*`), so a name the host turned into a path could reach what the grant leaves out. The runtime passes on names of 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:` and `-`, without `..`, and rejects the call of any other name. A prefix grant ends with a separator (`bridge.*`): `bridge*` matches `bridgeAdmin` too.
+
+Events sent before the app runs, such as from `createHost` itself, are delivered in order as soon as it starts, so the app's top-level `host.on` listeners receive them. An event sent before a listener registers is not replayed to it: an app reads the state it starts with through a call (`host.call("user.info")`) and follows its changes through events.
+
+The host module runs in the app's page and shares its Content-Security-Policy: when the app's capabilities restrict `network`, the page's `connect-src` holds the page's origin, the hosts `capabilities.network` lists and the hosts `web.connect` lists. `web.connect` names the hosts the host module's own requests (`fetch`, `XMLHttpRequest`, `WebSocket`) reach, as patterns like those of `capabilities.network.hosts` (`api.example.com`, `*.example.com`, `"*"`), as `api.example.com` above; the app's own requests stay checked against its `capabilities`.
+
+The module is copied as it is, so it imports other code by absolute URL. The app still needs its `host` [capability](./sandbox-and-capabilities.md) for each function it calls. `nsh run --target web` runs it on the development page, and `nsh test` runs the same module for every app its tests open, headless or in a browser (`--target web`), so the app and its host are tested together ([Testing](./testing-and-trace.md#the-pages-host)).
+
 ## The browser as a platform
 
 `platform.os` is `"web"`. What kind of device the browser is on decides how the app behaves, as `platform.idiom`:
@@ -328,7 +388,7 @@ The browser decides these, and the web backend follows it:
 - **Videos with sound that start on their own**: `Video` is a `<video>` with every prop and event, but browsers only start a video with sound after a user gesture (muted videos play).
 - **Native components**: registered native components belong to the native apps that embed NSH; on the web their view stays empty, with a warning in the console.
 - **Platform services**: reading the clipboard (`Clipboard.readText`, also `hasText`) needs a secure context (HTTPS) and may ask the user. Images do not report `onProgress`.
-- **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
+- **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens, and the line start and end rules of CJK punctuation: closing marks such as `。`, `，` and `」` stay off the start of a line, opening marks such as `（` and `「` off its end), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 
 The player and the dev server run apps with development settings (no hardening); published apps run hardened. Both use the default [limits](./sandbox-and-capabilities.md).
 

@@ -11,7 +11,7 @@ NSH apps also run on Windows. The Windows backend draws them in Win32 windows wi
 DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the native modules are the same
 as on iOS and Android, so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`platform.os` is `"windows"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
-context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+context menus come from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements
@@ -53,6 +53,16 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 ```
 
 `--window-size` is the window's size in points (`<width>x<height>`; TSX apps).
+
+### Performance monitor
+
+`--fps` (`nsh run App.tsx --target windows --fps`, `nsh test --target windows --fps`, the host's `--fps`, or
+`AppOptions { fps: true, .. }` in a Rust app's `run_app`) logs the performance monitor's readings once a second
+(target `nsh::perf`): frames shown over the display's rate, the main thread's time per frame and its phases (`tick`,
+`drain`, `paint`, `present`, `canvas`), the engine's commits, CPU and memory, in the shape the other desktops log
+(milliseconds as mean/p50/p95/max). `nsh test --fps -v` shows them and `examples/gallery/tools/perf.py` reads them
+([Performance report](./performance-report.md#windows-win32-direct2d)). Measure release builds; the monitor costs
+nothing while it is off.
 
 ## Packaging
 
@@ -128,9 +138,18 @@ only load it from your own app's files. A standalone window is `nsh_platform_win
 `AppSource::Rust(root)` or `AppSource::Bundle(bundle)`. `Root::tokens` gives a root its [theme](./rust.md#theme) and
 `Root::app_id` the id its data is kept under.
 
+`AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
+[images they download](./images-and-assets.md#kept-on-disk), and how much each keeps (`CacheOptions`: the system's
+cache directory and 256 MiB of images by default).
+
 `AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
 text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
 follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
+`AppView::set_theme_overrides(Some(json))` puts your app's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file
+in the format of `nsh.json`'s `"theme"`, whose tokens win over the app's of the same names in light and dark mode
+while the app's others stay; classes such as `bg-primary` restyle at once, and apps loaded later start with it
+(`None` gives the app its own theme back; a file that does not parse is an error and changes nothing).
 
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-windows-rust). `set_ui_sets(sets)` sets the UI sets every
@@ -154,7 +173,7 @@ effects setting and the locale the user's regional format. See [Device and envir
 | Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Alt+Left, Browser Back key, mouse back button | Go back (also from a field) |
 | Ctrl+arrows, Home / End, Ctrl+Home / End, with Shift; Ctrl+Backspace / Delete | Move, select and delete by word and line in a field, as in every Windows app |
-| Ctrl+Z, Ctrl+Y, Ctrl+X / C / V / A; Shift+Delete, Ctrl+Insert, Shift+Insert | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
+| Ctrl+Z, Ctrl+Y, Ctrl+X / C / V / A; Shift+Delete, Ctrl+Insert, Shift+Insert | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy selectable text |
 | Arrows; Page Up / Down, Space, Shift+Space; Home / End, Ctrl+Home / End | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | F11, Alt+F4 | Full screen, close the window (`nsh package` and `nsh run` apps) |
 | Ctrl+R, F5 | Reload the latest build (`nsh run`) |
@@ -163,7 +182,7 @@ Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is t
 A return that commits an input method's composition (Chinese, Japanese, ...) never submits. `onKeyPress` reports
 what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`; pasted text is not reported.
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) come before a focused field's keys, navigation
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come before a focused field's keys, navigation
 and scrolling; Alt+F4, F11 and Ctrl+Q cannot be bound.
 
 Different, or not supported:

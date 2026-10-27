@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { ui } from "./palette";
+import { button, buttonText, focusRing, ui } from "./palette";
 
 const LONG =
   "Text is typeset natively (CoreText on iOS, StaticLayout on Android) and measured on the engine thread, so the main thread only draws it.";
@@ -19,11 +19,11 @@ function App() {
           {", "}
           <Text style={{ fontStyle: "italic", color: ui().violet }}>italic</Text>
           {", and "}
-          <Text style={link()} onPress={() => tapped.set("the first link")}>
+          <Text style={link()} onPress={() => tapped.set("the first link")} hoverStyle={{ opacity: 0.88 }} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
             links
           </Text>
           {" that take presses of "}
-          <Text style={link()} onPress={() => tapped.set("the second link")}>
+          <Text style={link()} onPress={() => tapped.set("the second link")} hoverStyle={{ opacity: 0.88 }} focusStyle={focusRing()} activeStyle={{ opacity: 0.7 }}>
             their own
           </Text>
           .
@@ -32,20 +32,19 @@ function App() {
 
         <View style={{ height: 1, backgroundColor: ui().line }} />
 
-        <Text numberOfLines={lines()} style={{ fontSize: 15, color: ui().text }}>
+        <Text style={{ numberOfLines: lines(), fontSize: 15, color: ui().text }}>
           {LONG}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View
             onPress={() => lines.set(lines() === 2 ? 0 : 2)}
-            activeStyle={{ opacity: 0.6 }}
-            style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
+            {...button()}
           >
-            <Text style={{ color: ui().text }}>{lines() === 2 ? "Show all" : "numberOfLines 2"}</Text>
+            <Text style={buttonText()}>{lines() === 2 ? "Show all" : "numberOfLines 2"}</Text>
           </View>
         </View>
 
-        <Text numberOfLines={1} ellipsizeMode="middle" style={{ fontSize: 15, color: ui().muted }}>
+        <Text style={{ numberOfLines: 1, textOverflow: "ellipsis-middle", fontSize: 15, color: ui().muted }}>
           {LONG}
         </Text>
 
@@ -63,9 +62,7 @@ function App() {
             backgroundColor: "#c8f26d",
             paddingHorizontal: 10,
             borderRadius: 8,
-            textShadowColor: "rgba(255,255,255,0.55)",
-            textShadowOffset: { width: 2, height: 2 },
-            textShadowRadius: 4,
+            textShadow: "2px 2px 4px rgba(255,255,255,0.55)",
           }}
         >
           Text shadow

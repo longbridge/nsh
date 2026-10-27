@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "example-embed-gpui"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "fancy-regex"
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "gallery-native"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "env_logger",
  "log",
@@ -2302,6 +2302,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
+name = "imara-diff"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f01d462f766df78ab820dd06f5eb700233c51f0f4c2e846520eaf4ba6aa5c5c"
+dependencies = [
+ "hashbrown 0.15.5",
+ "memchr",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2871,9 +2881,10 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "html5ever",
+ "imara-diff",
  "log",
  "markdown",
  "markup5ever_rcdom",
@@ -2881,16 +2892,18 @@ dependencies = [
  "nsh-engine",
  "nsh-testing",
  "regex",
+ "ropey",
  "rustc-hash",
  "serde",
  "serde_json",
  "syntect",
  "two-face",
+ "unicode-segmentation",
 ]
 
 [[package]]
 name = "nsh-bundler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dunce",
@@ -2914,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2948,14 +2961,18 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cap-std",
+ "crc32fast",
  "flate2",
  "futures-util",
+ "httpdate",
+ "imagesize 0.15.0",
  "libc",
  "log",
  "nsh-macros",
+ "ordered-float",
  "resvg",
  "rustc-hash",
  "serde",
@@ -2966,13 +2983,14 @@ dependencies = [
  "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
+ "unicode-linebreak",
  "url",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nsh-dev"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2987,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -3004,11 +3022,12 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nsh-ios-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-ios",
@@ -3016,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-ios-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3026,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-js"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "brotli",
  "flate2",
@@ -3051,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-linux",
@@ -3060,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3070,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-macos",
@@ -3079,7 +3098,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3089,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -3100,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -3114,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-android"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jni",
  "libc",
@@ -3131,7 +3150,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-ios"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -3156,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-linux"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "gtk4",
@@ -3178,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-macos"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "crossbeam-channel",
@@ -3205,7 +3224,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-web"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-base",
@@ -3219,11 +3238,12 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "ttf-parser",
+ "unicode-bidi",
 ]
 
 [[package]]
 name = "nsh-platform-windows"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -3246,7 +3266,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-testing"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -3258,6 +3278,7 @@ dependencies = [
  "nsh-dev",
  "nsh-engine",
  "nsh-js",
+ "quickjs-jit",
  "regex",
  "serde",
  "serde_json",
@@ -3267,7 +3288,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-platform-windows",
@@ -3276,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3474,6 +3495,15 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "ordered-float"
+version = "5.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f59006ce1e204c30956638535b74d317bca99477b9356dfaec54c37f6f600ab"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "outref"
@@ -5310,7 +5340,7 @@ dependencies = [
 
 [[package]]
 name = "rust-exports-native"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6414,6 +6444,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
+
+[[package]]
 name = "unicode-id"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6430,6 +6466,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-segmentation"
@@ -7183,7 +7225,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",

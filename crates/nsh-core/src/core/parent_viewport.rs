@@ -146,22 +146,19 @@ impl<M: TextEngine> Core<M> {
         list.set_parent(parent);
         if parent {
             let len = list.content_len();
-            let spacer = self
-                .layout
-                .new_leaf(spacer_style(list.horizontal, len))
-                .expect("taffy leaf");
-            self.layout.add_child(layout, spacer).expect("taffy child");
+            let spacer = self.layout.new_leaf(spacer_style(list.horizontal, len));
+            self.layout.add_child(layout, spacer);
             list.spacer = Some((spacer, len));
             self.parent_lists.push(key);
             self.outer_moved = true;
         } else {
             if let Some((spacer, _)) = list.spacer.take() {
-                self.layout.remove(spacer).expect("taffy remove");
+                self.layout.remove(spacer);
             }
             self.parent_lists.retain(|&k| k != key);
             self.forget_outer(key);
         }
-        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.layout.mark_dirty(layout);
         self.needs_layout = true;
         if let Some(Some(at)) = create {
             let kind = if parent {
@@ -202,8 +199,7 @@ impl<M: TextEngine> Core<M> {
         }
         list.spacer = Some((spacer, new));
         self.layout
-            .set_style(spacer, spacer_style(list.horizontal, new))
-            .expect("taffy style");
+            .set_style(spacer, spacer_style(list.horizontal, new));
         self.needs_layout = true;
         self.extent_changed = true;
     }
@@ -391,6 +387,7 @@ impl<M: TextEngine> Core<M> {
                     cell: r.cell,
                     start: Points(r.start),
                     end: Points(r.end),
+                    offset: r.offset,
                 })
                 .collect();
             self.nodes[view as usize]
@@ -653,10 +650,18 @@ impl<M: TextEngine> Core<M> {
             if scroll.scroll_value.is_some() {
                 bits |= ignored::SCROLL_VALUE;
             }
-            if scroll.refreshing {
+            if scroll.refreshing
+                || scroll.pull_value.is_some()
+                || scroll.behavior.refresh_indicator.is_some()
+            {
                 bits |= ignored::REFRESH;
             }
-            if scroll.behavior != ScrollBehavior::default()
+            // The app's refresh indicator counts as refresh above.
+            let behavior = ScrollBehavior {
+                refresh_indicator: None,
+                ..scroll.behavior.clone()
+            };
+            if behavior != ScrollBehavior::default()
                 || scroll.keyboard_dismiss != crate::ops::KeyboardDismissMode::None
             {
                 bits |= ignored::BEHAVIOR;
@@ -701,7 +706,11 @@ const IGNORED: [(u16, &str, &str); 7] = [
         AROUND,
     ),
     (ignored::SCROLL_VALUE, "`scrollValue`", AROUND),
-    (ignored::REFRESH, "`refreshing` and `onRefresh`", AROUND),
+    (
+        ignored::REFRESH,
+        "`refreshing`, `onRefresh`, `pullValue` and `refreshIndicator`",
+        AROUND,
+    ),
     (
         ignored::BEHAVIOR,
         "paging, snapping, `contentInset`, `contentOffset`, `bounces`, `scrollable` and `keyboardDismissMode`",

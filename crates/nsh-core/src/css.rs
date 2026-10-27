@@ -64,11 +64,15 @@ pub(crate) fn number(s: &str) -> Option<f32> {
     s.trim().parse::<f32>().ok().filter(|n| n.is_finite())
 }
 
-/// A length in points: `4`, `4px`, `0.5rem`, `1pt`.
+/// A length in points: `4`, `4px`, `0.5rem`, `1pt` (CSS's point, 4/3 of
+/// a pixel).
 pub(crate) fn length(s: &str) -> Option<f32> {
     let s = s.trim();
-    if let Some(n) = s.strip_suffix("px").or_else(|| s.strip_suffix("pt")) {
+    if let Some(n) = s.strip_suffix("px") {
         return number(n);
+    }
+    if let Some(n) = s.strip_suffix("pt") {
+        return number(n).map(|n| n * 4.0 / 3.0);
     }
     if let Some(n) = s.strip_suffix("rem") {
         return number(n).map(|n| n * REM);
@@ -110,7 +114,87 @@ pub(crate) fn amount(s: &str) -> Option<f32> {
     }
 }
 
+// --- Flex -----------------------------------------------------------------
+
+/// CSS's `flex` shorthand, `none | <grow> <shrink>? || <basis>` and the
+/// keywords: its grow and shrink factors and its basis as written (`None`:
+/// 0, which a shorthand without one sets). Factors are unitless numbers of
+/// at least 0; a unitless 0 is a factor unless two came before it.
+pub(crate) fn flex(s: &str) -> Option<(f32, f32, Option<&str>)> {
+    let factor = |w: &str| number(w).filter(|n| *n >= 0.0);
+    let w = words(s);
+    Some(match w.as_slice() {
+        ["none"] => (0.0, 0.0, Some("auto")),
+        ["auto"] => (1.0, 1.0, Some("auto")),
+        ["initial"] => (0.0, 1.0, Some("auto")),
+        [a] => match factor(a) {
+            Some(g) => (g, 1.0, None),
+            None => (1.0, 1.0, Some(basis(a)?)),
+        },
+        [a, b] => match (factor(a), factor(b)) {
+            (Some(g), Some(sh)) => (g, sh, None),
+            (Some(g), None) => (g, 1.0, Some(basis(b)?)),
+            (None, Some(g)) => (g, 1.0, Some(basis(a)?)),
+            (None, None) => return None,
+        },
+        [a, b, c] => match (factor(a), factor(b), factor(c)) {
+            // After two factors, a unitless 0 is the basis.
+            (Some(g), Some(sh), Some(0.0)) => (g, sh, None),
+            (Some(g), Some(sh), _) => (g, sh, Some(basis(c)?)),
+            (None, Some(g), Some(sh)) => (g, sh, Some(basis(a)?)),
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// A `flex` word that can only be its basis: not a number (a unitless
+/// one is a factor) and not a negative length.
+fn basis(w: &str) -> Option<&str> {
+    (number(w).is_none() && !w.starts_with('-')).then_some(w)
+}
+
 // --- Colors ---------------------------------------------------------------
+
+/// Whether `s` is CSS's `currentColor` keyword (ASCII case insensitive, as
+/// CSS keywords are).
+pub(crate) fn is_current_color(s: &str) -> bool {
+    s.trim().eq_ignore_ascii_case("currentcolor")
+}
+
+/// The spans of `s` that are the word `currentColor` (in any case), not
+/// part of a longer name.
+fn current_color_spans(s: &str) -> impl Iterator<Item = usize> + '_ {
+    const WORD: &[u8] = b"currentcolor";
+    let bytes = s.as_bytes();
+    let name = |b: u8| b.is_ascii_alphanumeric() || b == b'-' || b == b'_';
+    (0..bytes.len().saturating_sub(WORD.len() - 1)).filter(move |&i| {
+        bytes[i..i + WORD.len()].eq_ignore_ascii_case(WORD)
+            && (i == 0 || !name(bytes[i - 1]))
+            && bytes.get(i + WORD.len()).is_none_or(|&b| !name(b))
+    })
+}
+
+/// Whether the value `s` writes `currentColor` somewhere in it (a
+/// gradient's stop, a `color-mix()`, a shadow's color).
+pub(crate) fn mentions_current_color(s: &str) -> bool {
+    current_color_spans(s).next().is_some()
+}
+
+/// `s` with every `currentColor` in it written as `color`, to parse once
+/// the color is known.
+pub(crate) fn with_current_color(s: &str, color: Color) -> String {
+    let hex = format!("#{:08x}", color.0);
+    let mut out = String::with_capacity(s.len());
+    let mut at = 0;
+    for i in current_color_spans(s) {
+        out.push_str(&s[at..i]);
+        out.push_str(&hex);
+        at = i + "currentcolor".len();
+    }
+    out.push_str(&s[at..]);
+    out
+}
 
 /// Parses a CSS color.
 pub(crate) fn color(s: &str) -> Option<Color> {
@@ -281,7 +365,7 @@ enum MixSpace {
 }
 
 /// How `color-mix()` interpolates a hue (CSS Color 4 "hue-interpolation").
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum HueMethod {
     Shorter,
     Longer,
@@ -317,6 +401,22 @@ fn color_mix(args: &str) -> Option<Color> {
         return None;
     }
     let w1 = p1 / sum;
+    let (out, alpha) = mix_coords(c1, c2, w1, space, hue);
+    // A sum below 100% leaves the rest transparent.
+    let alpha = alpha * sum.min(1.0);
+    Some(from_mix_space(out, alpha, space))
+}
+
+/// `c1` and `c2` mixed in `space`, `w1` of `c1`: the coordinates and the
+/// alpha, channels interpolated with premultiplied alpha, a powerless
+/// hue taking the other color's.
+fn mix_coords(
+    c1: Color,
+    c2: Color,
+    w1: f32,
+    space: MixSpace,
+    hue: Option<HueMethod>,
+) -> ([f32; 3], f32) {
     let (mut v1, a1, missing1) = to_mix_space(c1, space);
     let (mut v2, a2, missing2) = to_mix_space(c2, space);
     let alpha = a1 * w1 + a2 * (1.0 - w1);
@@ -343,9 +443,7 @@ fn color_mix(args: &str) -> Option<Color> {
             v1[i] * w1 + v2[i] * (1.0 - w1)
         };
     }
-    // A sum below 100% leaves the rest transparent.
-    let alpha = alpha * sum.min(1.0);
-    Some(from_mix_space(out, alpha, space))
+    (out, alpha)
 }
 
 /// `in <space> [<hue-method> hue]?`; a hue method only for polar spaces.
@@ -486,16 +584,40 @@ use crate::{
 
 /// A `box-shadow` list (`none` is empty).
 pub(crate) fn box_shadows(s: &str) -> Option<Vec<BoxShadow>> {
+    Some(shadow_layers(s)?.into_iter().map(|(l, _)| l).collect())
+}
+
+/// A shadow list's layers, each with whether it names its color (else it
+/// is black here, CSS's `currentColor` for a style to fill in).
+pub(crate) fn shadow_layers(s: &str) -> Option<Vec<(BoxShadow, bool)>> {
     let s = s.trim();
     if s.is_empty() || s == "none" {
         return Some(Vec::new());
     }
-    split_top(s, ',').into_iter().map(box_shadow).collect()
+    split_top(s, ',').into_iter().map(shadow_layer).collect()
 }
 
-/// One shadow: `[inset] <x> <y> [<blur> [<spread>]] [<color>]`, words in
-/// any order around the lengths.
-pub(crate) fn box_shadow(s: &str) -> Option<BoxShadow> {
+/// A `text-shadow` list (`none` is empty): offsets, blur and color.
+pub(crate) fn text_shadows(s: &str) -> Option<Vec<(crate::style::TextShadow, bool)>> {
+    shadow_layers(s)?
+        .into_iter()
+        .map(|(l, colored)| {
+            (!l.inset && l.spread.0 == 0.0).then_some((
+                crate::style::TextShadow {
+                    color: l.color,
+                    offset_x: l.offset_x,
+                    offset_y: l.offset_y,
+                    radius: l.blur,
+                },
+                colored,
+            ))
+        })
+        .collect()
+}
+
+/// One shadow, `[inset] <x> <y> [<blur> [<spread>]] [<color>]` (words in
+/// any order around the lengths), and whether it names its color.
+fn shadow_layer(s: &str) -> Option<(BoxShadow, bool)> {
     let mut shadow = BoxShadow {
         color: Color(0x0000_00ff),
         ..BoxShadow::default()
@@ -525,7 +647,7 @@ pub(crate) fn box_shadow(s: &str) -> Option<BoxShadow> {
         }
         _ => return None,
     }
-    Some(shadow)
+    Some((shadow, color_seen))
 }
 
 /// A `background-image` list of gradients (`none` is empty).
@@ -565,18 +687,42 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
         },
         _ => return None,
     };
-    // The first argument configures the gradient when it is not a stop.
-    if let Some(first) = parts.first()
-        && configure(&mut kind, first)
-    {
-        parts = &parts[1..];
+    // The first argument configures the gradient when it is not a stop:
+    // its geometry and how its colors mix (`in oklab`).
+    let mut interpolation = Interpolation::SRGB;
+    let mut explicit = false;
+    if let Some(first) = parts.first() {
+        let first = first.trim();
+        // `to right in oklab` or `in oklab to right`: CSS takes both orders.
+        let (geometry, method) = match interpolation_at(first) {
+            Some(i) => {
+                let end = method_end(&first[i..]) + i;
+                let geometry = format!("{} {}", &first[..i], &first[end..]);
+                (geometry, Some(&first[i..end]))
+            }
+            None => (first.to_string(), None),
+        };
+        if let Some(method) = method {
+            let (space, hue) = mix_method(method)?;
+            interpolation = Interpolation { space, hue };
+            explicit = true;
+        }
+        let configured = configure(&mut kind, geometry.trim());
+        if method.is_some() && !configured {
+            return None;
+        }
+        if configured {
+            parts = &parts[1..];
+        }
     }
     let conic = matches!(kind, GradientKind::Conic { .. });
     let mut stops = Vec::with_capacity(parts.len());
+    let mut modern = false;
     for part in parts {
         let w = words(part);
         let (c, positions) = w.split_first()?;
         let color = color(c)?;
+        modern |= !is_legacy_color(c);
         // A stop takes up to two positions (`red 0 10px`: a band of one
         // color).
         if positions.len() > 2 {
@@ -602,11 +748,254 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
         let only = stops[0];
         stops.push(only);
     }
+    // Without a method, CSS mixes in Oklab unless every color is a legacy
+    // sRGB one.
+    if !explicit && modern {
+        interpolation = Interpolation::OKLAB;
+    }
     Some(Gradient {
         kind,
-        stops,
+        stops: interpolate_stops(stops, interpolation),
         repeating,
     })
+}
+
+/// Whether the CSS color `s` is a legacy sRGB color (hex, `rgb()`,
+/// `hsl()`, `hwb()`, a name), which CSS mixes in sRGB where no
+/// interpolation method is given, and in Oklab otherwise.
+pub(crate) fn is_legacy_color(s: &str) -> bool {
+    let s = s.trim().to_ascii_lowercase();
+    !["oklch(", "oklab(", "lab(", "lch(", "color(", "color-mix("]
+        .iter()
+        .any(|p| s.starts_with(p))
+}
+
+/// Where `arg` (a gradient's first argument) says `in <space>`, outside
+/// parentheses (keywords in any case, as CSS's).
+fn interpolation_at(arg: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in arg.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0
+                && arg[i..].get(..3).is_some_and(|w| {
+                    w[..2].eq_ignore_ascii_case("in") && w.ends_with(char::is_whitespace)
+                })
+                && (i == 0 || arg[..i].ends_with(char::is_whitespace)) =>
+            {
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The length of the `<color-interpolation-method>` `s` starts with: `in`,
+/// the space, and `<method> hue` when it follows.
+fn method_end(s: &str) -> usize {
+    let mut words = Vec::with_capacity(4);
+    let mut word = None;
+    for (i, c) in s.char_indices().chain([(s.len(), ' ')]) {
+        match (c.is_whitespace(), word) {
+            (false, None) => word = Some(i),
+            (true, Some(start)) => {
+                words.push((start, i));
+                word = None;
+                if words.len() == 4 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let text = |n: usize| words.get(n).map(|&(a, b)| s[a..b].to_ascii_lowercase());
+    let hue = matches!(
+        text(2).as_deref(),
+        Some("shorter" | "longer" | "increasing" | "decreasing")
+    ) && text(3).as_deref() == Some("hue");
+    match (hue, words.get(1)) {
+        (true, _) => words[3].1,
+        (false, Some(&(_, end))) => end,
+        (false, None) => s.len(),
+    }
+}
+
+/// How a gradient's colors mix between its stops (CSS's
+/// `<color-interpolation-method>`).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct Interpolation {
+    space: MixSpace,
+    hue: Option<HueMethod>,
+}
+
+impl Interpolation {
+    /// In sRGB, what the platforms draw: CSS's for legacy colors.
+    pub(crate) const SRGB: Interpolation = Interpolation {
+        space: MixSpace::Srgb,
+        hue: None,
+    };
+    /// In Oklab, Tailwind's for every gradient utility (`in oklab`).
+    pub(crate) const OKLAB: Interpolation = Interpolation {
+        space: MixSpace::Oklab,
+        hue: None,
+    };
+
+    /// `t` of the way from `a` to `b`.
+    fn mix(self, a: Color, b: Color, t: f32) -> Color {
+        let (v, alpha) = mix_coords(a, b, 1.0 - t, self.space, self.hue);
+        from_mix_space(v, alpha, self.space)
+    }
+}
+
+/// `stops` mixed in `method`, as the platforms draw: they interpolate in
+/// sRGB, so between each two stops placed in the same unit (two fractions
+/// of the line, two lengths; unplaced ones are spread as CSS spreads them
+/// first, when every placed one is a fraction) stops sampled in `method`
+/// are inserted where the sRGB segments would leave the curve by more than
+/// about one 8-bit step, at most 32 segments per pair.
+pub(crate) fn interpolate_stops(
+    mut stops: Vec<ColorStop>,
+    method: Interpolation,
+) -> Vec<ColorStop> {
+    if method == Interpolation::SRGB || stops.windows(2).all(|w| w[0].color == w[1].color) {
+        return stops;
+    }
+    spread_positions(&mut stops);
+    let mut out = Vec::with_capacity(stops.len() * 4);
+    for (i, &stop) in stops.iter().enumerate() {
+        out.push(stop);
+        let Some(&next) = stops.get(i + 1) else {
+            break;
+        };
+        let place = match (stop.position, next.position) {
+            (Some(DefiniteLength::Fraction(a)), Some(DefiniteLength::Fraction(b))) if b.0 > a.0 => {
+                Some((a.0, b.0, true))
+            }
+            (Some(DefiniteLength::Absolute(a)), Some(DefiniteLength::Absolute(b))) => {
+                let rem = crate::geometry::REM_SIZE;
+                let (a, b) = (a.to_points(rem).0, b.to_points(rem).0);
+                (b > a).then_some((a, b, false))
+            }
+            _ => None,
+        };
+        let Some((from, to, fraction)) = place.filter(|_| stop.color != next.color) else {
+            continue;
+        };
+        let at = |t: f32| -> DefiniteLength {
+            let p = from + (to - from) * t;
+            if fraction {
+                percentage(p).into()
+            } else {
+                px(p).into()
+            }
+        };
+        // Polar spaces may turn the hue all the way around: never fewer
+        // than four segments there.
+        let min_depth =
+            if method.hue.is_some() || matches!(method.space, MixSpace::Oklch | MixSpace::Hsl) {
+                2
+            } else {
+                0
+            };
+        subdivide(
+            method,
+            stop.color,
+            next.color,
+            (0.0, stop.color),
+            (1.0, next.color),
+            0,
+            min_depth,
+            &mut |t, color| {
+                out.push(ColorStop {
+                    color,
+                    position: Some(at(t)),
+                });
+            },
+        );
+    }
+    out
+}
+
+/// Emits the samples of `a` to `b` in `method` between `lo` and `hi` (each
+/// `(t, color)`), in order.
+#[allow(clippy::too_many_arguments)]
+fn subdivide(
+    method: Interpolation,
+    a: Color,
+    b: Color,
+    lo: (f32, Color),
+    hi: (f32, Color),
+    depth: u8,
+    min_depth: u8,
+    emit: &mut impl FnMut(f32, Color),
+) {
+    const MAX_DEPTH: u8 = 5;
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    let t = (lo.0 + hi.0) / 2.0;
+    let mid = method.mix(a, b, t);
+    // Premultiplied, as a fully transparent end has no color to leave.
+    let premultiplied = |c: Color| {
+        let c = crate::color::Rgba::from(c);
+        [c.r * c.a, c.g * c.a, c.b * c.a, c.a]
+    };
+    let (m, l, h) = (premultiplied(mid), premultiplied(lo.1), premultiplied(hi.1));
+    let off = (0..4)
+        .map(|i| (m[i] - (l[i] + h[i]) / 2.0).abs())
+        .fold(0.0f32, f32::max);
+    if depth >= min_depth && off * 255.0 <= 1.0 {
+        return;
+    }
+    subdivide(method, a, b, lo, (t, mid), depth + 1, min_depth, emit);
+    emit(t, mid);
+    subdivide(method, a, b, (t, mid), hi, depth + 1, min_depth, emit);
+}
+
+/// Places unplaced stops as CSS does, when every placed one is a fraction
+/// of the line: the first at 0, the last at 1, the others spread evenly
+/// between their placed neighbors; then each at least the one before it.
+fn spread_positions(stops: &mut [ColorStop]) {
+    let fraction = |s: &ColorStop| match s.position {
+        Some(DefiniteLength::Fraction(f)) => Some(f.0),
+        _ => None,
+    };
+    if stops
+        .iter()
+        .any(|s| s.position.is_some() && fraction(s).is_none())
+    {
+        return;
+    }
+    let n = stops.len();
+    if stops[0].position.is_none() {
+        stops[0].position = Some(percentage(0.0).into());
+    }
+    if stops[n - 1].position.is_none() {
+        stops[n - 1].position = Some(percentage(1.0).into());
+    }
+    let mut max = 0.0f32;
+    let mut i = 0;
+    while i < n {
+        let Some(p) = fraction(&stops[i]) else {
+            // A run of unplaced stops up to the next placed one.
+            let start = i - 1;
+            let end = (i..n)
+                .find(|&j| stops[j].position.is_some())
+                .unwrap_or(n - 1);
+            let (a, b) = (max, fraction(&stops[end]).unwrap_or(1.0).max(max));
+            for (j, stop) in stops.iter_mut().enumerate().take(end).skip(i) {
+                let t = (j - start) as f32 / (end - start) as f32;
+                stop.position = Some(percentage(a + (b - a) * t).into());
+            }
+            i = end;
+            continue;
+        };
+        max = max.max(p);
+        stops[i].position = Some(percentage(max).into());
+        i += 1;
+    }
 }
 
 /// A stop's position: a percentage, or a length along a linear or radial
@@ -633,19 +1022,9 @@ fn stop_position(s: &str, conic: bool) -> Option<DefiniteLength> {
     }
 }
 
-/// Reads a gradient's configuration argument into `kind`; false when the
-/// argument is a color stop.
+/// Reads a gradient's geometry argument (without its interpolation
+/// method) into `kind`; false when the argument is a color stop.
 fn configure(kind: &mut GradientKind, arg: &str) -> bool {
-    // An interpolation space (`in oklab`) changes how colors mix; sRGB is
-    // what the platforms draw.
-    let arg = match arg
-        .find(" in ")
-        .or_else(|| arg.starts_with("in ").then_some(0))
-    {
-        Some(0) => "",
-        Some(i) => arg[..i].trim(),
-        None => arg,
-    };
     let w = words(arg);
     if w.is_empty() {
         return true;
@@ -845,6 +1224,13 @@ pub(crate) fn object_position(s: &str) -> Option<ObjectPosition> {
 
 /// A `filter` list (`none` is empty).
 pub(crate) fn filters(s: &str) -> Option<Vec<Filter>> {
+    Some(filter_list(s)?.into_iter().map(|(f, _)| f).collect())
+}
+
+/// A `filter` list, each function with whether it names its color: a
+/// `drop-shadow()` without one is black here, CSS's `currentColor` for a
+/// style to fill in.
+pub(crate) fn filter_list(s: &str) -> Option<Vec<(Filter, bool)>> {
     let s = s.trim();
     if s.is_empty() || s == "none" {
         return Some(Vec::new());
@@ -852,7 +1238,7 @@ pub(crate) fn filters(s: &str) -> Option<Vec<Filter>> {
     words(s).into_iter().map(filter).collect()
 }
 
-fn filter(s: &str) -> Option<Filter> {
+fn filter(s: &str) -> Option<(Filter, bool)> {
     let open = s.find('(')?;
     let name = &s[..open];
     let arg = s[open + 1..].strip_suffix(')')?.trim();
@@ -863,7 +1249,8 @@ fn filter(s: &str) -> Option<Filter> {
             amount(arg)
         }
     };
-    Some(match name {
+    let mut named = true;
+    let filter = match name {
         "blur" => Filter::Blur(px(if arg.is_empty() { 0.0 } else { length(arg)? })),
         "brightness" => Filter::Brightness(factor(1.0)?),
         "contrast" => Filter::Contrast(factor(1.0)?),
@@ -874,7 +1261,8 @@ fn filter(s: &str) -> Option<Filter> {
         "saturate" => Filter::Saturate(factor(1.0)?),
         "sepia" => Filter::Sepia(factor(1.0)?.clamp(0.0, 1.0)),
         "drop-shadow" => {
-            let s = box_shadow(arg)?;
+            let (s, colored) = shadow_layer(arg)?;
+            named = colored;
             Filter::DropShadow {
                 offset_x: s.offset_x,
                 offset_y: s.offset_y,
@@ -883,12 +1271,26 @@ fn filter(s: &str) -> Option<Filter> {
             }
         }
         _ => return None,
-    })
+    };
+    Some((filter, named))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_color_in_values() {
+        assert!(mentions_current_color(
+            "color-mix(in srgb, CurrentColor 50%, red)"
+        ));
+        // Part of a longer name: not the keyword.
+        assert!(!mentions_current_color("var(--currentcolor) currentcolors"));
+        assert_eq!(
+            with_current_color("0 1px currentColor, 0 2px currentcolor", Color(0x1234_56ff)),
+            "0 1px #123456ff, 0 2px #123456ff"
+        );
+    }
 
     #[test]
     fn object_positions() {
@@ -1140,6 +1542,37 @@ mod tests {
         assert!(box_shadows("1px").is_none());
     }
 
+    /// `cargo test --release -p nsh-core bench_gradient_oklab -- --ignored
+    /// --nocapture`: the stops a Tailwind gradient gets, sampled in Oklab,
+    /// which its node's styling pays each time its classes apply.
+    #[test]
+    #[ignore]
+    fn bench_gradient_oklab() {
+        use crate::geometry::percentage;
+        let stops = |c: [u32; 3]| {
+            [0.0, 0.4, 1.0]
+                .iter()
+                .zip(c)
+                .map(|(&p, c)| ColorStop {
+                    color: Color(c),
+                    position: Some(percentage(p).into()),
+                })
+                .collect::<Vec<_>>()
+        };
+        for c in [
+            [0x2b7f_ffff, 0xad46_ffff, 0xf633_9aff],
+            [0xff00_00ff, 0x00ff_00ff, 0x0000_ffff],
+            [0x1818_1bff, 0x2727_2aff, 0],
+        ] {
+            let n = interpolate_stops(stops(c), Interpolation::OKLAB).len();
+            let t = std::time::Instant::now();
+            for _ in 0..1000 {
+                std::hint::black_box(interpolate_stops(stops(c), Interpolation::OKLAB));
+            }
+            println!("{c:08x?}: {n} stops, {:?} per gradient", t.elapsed() / 1000);
+        }
+    }
+
     #[test]
     fn gradient_syntax() {
         let g = gradient("linear-gradient(to right, #f00, rgb(0 0 255) 80%)").unwrap();
@@ -1147,6 +1580,55 @@ mod tests {
         assert_eq!(g.stops[1].position, Some(percentage(0.8).into()));
         let g = gradient("linear-gradient(45deg in oklab, red, blue)").unwrap();
         assert_eq!(g.kind, GradientKind::Linear { angle: deg(45.0) });
+        // `in oklab` mixes in Oklab: stops sampled there are placed between
+        // the two, the halfway one CSS's `color-mix(in oklab, red, blue)`.
+        assert!(g.stops.len() > 2);
+        let half = g
+            .stops
+            .iter()
+            .find(|s| s.position == Some(percentage(0.5).into()))
+            .unwrap();
+        assert_eq!(half.color, color("color-mix(in oklab, red, blue)").unwrap());
+        // In sRGB (or saying nothing, legacy colors), the platforms' own.
+        for g in [
+            "linear-gradient(in srgb, red, blue)",
+            "linear-gradient(red, blue)",
+            "linear-gradient(#f00, rgb(0 0 255), hsl(120 100% 50%))",
+            "linear-gradient(in srgb, oklch(60% 0.2 30), blue)",
+        ] {
+            assert!(gradient(g).unwrap().stops.len() <= 3, "{g}");
+        }
+        // Saying nothing with a modern color, Oklab (CSS Color 4).
+        assert!(
+            gradient("linear-gradient(oklch(60% 0.2 30), blue)")
+                .unwrap()
+                .stops
+                .len()
+                > 2
+        );
+        let g = gradient("linear-gradient(to right in oklch longer hue, red, blue)").unwrap();
+        assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) });
+        assert!(g.stops.len() >= 5);
+        // The method before the direction, and in any case.
+        for g in [
+            "linear-gradient(in oklch longer hue to right, red, blue)",
+            "linear-gradient(IN OKLCH LONGER HUE to right, red, blue)",
+        ] {
+            let g = gradient(g).unwrap();
+            assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) }, "{g:?}");
+            assert!(g.stops.len() >= 5);
+        }
+        let g = gradient("radial-gradient(in oklab circle at 25% 75%, red, blue)").unwrap();
+        assert!(matches!(g.kind, GradientKind::Radial { circle: true, .. }));
+        assert!(g.stops.len() > 2);
+        let g = gradient("linear-gradient(in hsl, red 0 10px, blue 30px)").unwrap();
+        assert_eq!(g.stops[1].position, Some(px(10.0).into()));
+        assert!(g.stops.len() > 3);
+        assert_eq!(g.stops.last().unwrap().position, Some(px(30.0).into()));
+        // A space NSH does not mix in is no gradient (a browser's is).
+        assert!(gradient("linear-gradient(in display-p3, red, blue)").is_none());
+        // A stop holding `in` inside a function is a stop.
+        assert!(gradient("linear-gradient(color-mix( in srgb, red, blue), blue)").is_some());
         let g = gradient("radial-gradient(circle at 25% 75%, red, blue)").unwrap();
         assert_eq!(
             g.kind,
@@ -1179,7 +1661,7 @@ mod tests {
                 Some(fraction(0.0)),
                 Some(points(16.0)),
                 Some(fraction(0.5)),
-                Some(points(2.0))
+                Some(points(8.0 / 3.0))
             ]
         );
         let g = gradient("radial-gradient(circle, red 4px, blue 20px)").unwrap();
@@ -1219,6 +1701,8 @@ mod tests {
     #[test]
     fn units() {
         assert_eq!(length("0.5rem"), Some(8.0));
+        // CSS's absolute units: 1pt is 1/72 of an inch, 4/3 of a pixel.
+        assert_eq!(length("12pt"), Some(16.0));
         assert_eq!(angle("0.25turn"), Some(90.0));
         assert_eq!(words("a rgb(0 0 0) b"), ["a", "rgb(0 0 0)", "b"]);
         assert_eq!(split_top("a(1,2), b", ','), ["a(1,2)", "b"]);

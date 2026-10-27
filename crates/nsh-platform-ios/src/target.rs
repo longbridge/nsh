@@ -23,7 +23,11 @@ use objc2_ui_kit::{
     UITouch, UIView,
 };
 
-use crate::{input, mount::SharedMounter, press::PressRecognizer};
+use crate::{
+    input,
+    mount::SharedMounter,
+    press::{PressAt, PressRecognizer},
+};
 
 pub(crate) struct TargetIvars {
     control: EngineControl,
@@ -31,6 +35,8 @@ pub(crate) struct TargetIvars {
     /// Scrolls the core asked for that each scroll view applied, reported
     /// with its offsets (`EngineControl::scroll`).
     scrolls_applied: std::cell::RefCell<rustc_hash::FxHashMap<NodeId, u32>>,
+    /// The app's keyboard shortcuts, matched as keys are pressed.
+    keymap: crate::keymap::KeymapState,
 }
 
 define_class!(
@@ -50,11 +56,12 @@ define_class!(
             let Some(view) = recognizer.view() else { return };
             let id = view.tag() as NodeId;
             let link = recognizer.link();
+            let at = recognizer.at();
             // Press out first, then the press, as in React Native.
             if recognizer.release() {
                 match link {
-                    Some(link) => self.link_event(&link, EventKind::Press),
-                    None => self.with_mounter(move |m| m.pressed(id)),
+                    Some(link) => self.link_event(&link, EventKind::Press, id, at),
+                    None => self.with_mounter(move |m| m.pressed(id, at)),
                 }
             }
         }
@@ -259,6 +266,12 @@ define_class!(
             a: &UIGestureRecognizer,
             b: &UIGestureRecognizer,
         ) -> bool {
+            if let Ok(m) = self.ivars().mounter.get(self.mtm()).try_borrow()
+                && let Some(m) = m.as_ref()
+                && (m.pan_shares_scroll(a, b) || m.pan_shares_scroll(b, a))
+            {
+                return true.into();
+            }
             let transform = |r: &UIGestureRecognizer| {
                 r.isKindOfClass(UIPanGestureRecognizer::class())
                     || r.isKindOfClass(UIPinchGestureRecognizer::class())
@@ -281,6 +294,13 @@ define_class!(
         /// keyboard (`keyboardShouldPersistTaps`).
         #[unsafe(method(gestureRecognizer:shouldReceiveTouch:))]
         fn should_receive_touch(&self, recognizer: &UIGestureRecognizer, touch: &UITouch) -> bool {
+            if recognizer.isKindOfClass(UIPanGestureRecognizer::class())
+                && let (Some(view), Some(touched)) = (recognizer.view(), touch.view())
+                && let Ok(mut m) = self.ivars().mounter.get(self.mtm()).try_borrow_mut()
+                && let Some(m) = m.as_mut()
+            {
+                m.pan_touch(view.tag() as NodeId, &touched);
+            }
             !recognizer.isKindOfClass(UITapGestureRecognizer::class())
                 || self.tap_dismisses_keyboard(touch)
         }
@@ -291,12 +311,25 @@ define_class!(
         fn scroll_view_did_scroll(&self, scroll: &UIScrollView) {
             let id = scroll.tag() as NodeId;
             let offset = scroll.contentOffset();
+            if let Ok(m) = self.ivars().mounter.get(self.mtm()).try_borrow()
+                && let Some(m) = m.as_ref()
+            {
+                let clamped = m.pan_scroll_offset(scroll, offset);
+                if clamped != offset {
+                    scroll.setContentOffset(clamped);
+                    return;
+                }
+            }
             // Lists need offsets to pick rows; the engine coalesces them.
             let applied = self.ivars().scrolls_applied.borrow().get(&id).copied().unwrap_or(0);
             self.ivars()
                 .control
                 .scroll(id, point(px(offset.x as f32), px(offset.y as f32)), applied);
             self.with_mounter(move |m| m.scrolled(id, offset));
+            // A text area scrolling moves its caret.
+            if scroll.downcast_ref::<input::Area>().is_some() {
+                self.caret_moved(scroll);
+            }
         }
 
         /// Zoomable scroll views zoom their zoom view.
@@ -360,7 +393,10 @@ define_class!(
             let proposed = unsafe { target.read() };
             let snapped = match self.ivars().mounter.get(self.mtm()).try_borrow() {
                 // UIKit's velocity is in points per millisecond.
-                Ok(m) => m.as_ref().and_then(|m| m.snap_target(id, velocity, proposed)),
+                Ok(m) => m.as_ref().and_then(|m| {
+                    let clamped = m.pan_scroll_offset(scroll, proposed);
+                    if clamped != proposed { Some(clamped) } else { m.snap_target(id, velocity, proposed) }
+                }),
                 Err(_) => None,
             };
             if let Some(p) = snapped {
@@ -455,6 +491,7 @@ impl EventTarget {
             control,
             mounter,
             scrolls_applied: Default::default(),
+            keymap: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -476,7 +513,12 @@ impl EventTarget {
         self.ivars().scrolls_applied.borrow_mut().remove(&id);
     }
 
-    fn dispatch(&self, id: NodeId, event: EventKind, payload: EventPayload) {
+    /// The app's keyboard shortcuts.
+    pub(crate) fn keymap(&self) -> &crate::keymap::KeymapState {
+        &self.ivars().keymap
+    }
+
+    pub(crate) fn dispatch(&self, id: NodeId, event: EventKind, payload: EventPayload) {
         self.ivars().control.dispatch_event(id, event, payload);
     }
 
@@ -494,13 +536,13 @@ impl EventTarget {
     }
 
     /// A finger went down on (or left) pressable view `id`.
-    pub(crate) fn press_changed(&self, id: NodeId, pressed: bool) {
-        self.with_mounter(move |m| m.press_changed(id, pressed));
+    pub(crate) fn press_changed(&self, id: NodeId, pressed: bool, at: PressAt) {
+        self.with_mounter(move |m| m.press_changed(id, pressed, at));
     }
 
     /// A press on view `id` was held long enough.
-    pub(crate) fn long_press(&self, id: NodeId) {
-        self.with_mounter(move |m| m.long_pressed(id));
+    pub(crate) fn long_press(&self, id: NodeId, at: PressAt) {
+        self.with_mounter(move |m| m.long_pressed(id, at));
     }
 
     /// The node under a touch on `view` and the nodes around it that listen
@@ -560,6 +602,33 @@ impl EventTarget {
                 ]),
             )
         });
+        self.caret_moved(view);
+    }
+
+    /// `onPaste` of input `id`: what the user pasted.
+    pub(crate) fn pasted(&self, id: NodeId, paste: nsh_core::PasteEvent) {
+        self.with_mounter(move |m| {
+            m.input_event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)))
+        });
+    }
+
+    /// `onCaretMove` of the input `view` belongs to if its caret moved:
+    /// with the selection, or as a text area scrolled or the input was laid
+    /// out again, while it edits.
+    pub(crate) fn caret_moved(&self, view: &UIView) {
+        if !view.isFirstResponder() {
+            return;
+        }
+        let Some(caret) = input::caret(view) else {
+            return;
+        };
+        if !input::caret_changed(view, caret) {
+            return;
+        }
+        let id = view.tag() as NodeId;
+        self.with_mounter(move |m| {
+            m.input_event(id, EventKind::CaretMove, EventPayload::caret(caret))
+        });
     }
 
     /// The composition of the input `view` belongs to, as it is with
@@ -570,10 +639,17 @@ impl EventTarget {
         self.with_mounter(move |m| m.input_composition(id, text, marked));
     }
 
-    /// A press event on a pressable text span.
-    pub(crate) fn link_event(&self, link: &nsh_core::TextLink, kind: EventKind) {
+    /// A press event on a pressable text span of text view `view`.
+    pub(crate) fn link_event(
+        &self,
+        link: &nsh_core::TextLink,
+        kind: EventKind,
+        view: NodeId,
+        at: PressAt,
+    ) {
         if link.events.contains(kind) {
-            self.dispatch(link.node, kind, EventPayload::None);
+            let node = link.node;
+            self.with_mounter(move |m| m.link_event(node, kind, view, at));
         }
     }
 
@@ -614,6 +690,11 @@ impl EventTarget {
     }
 
     fn scroll_event(&self, scroll: &UIScrollView, event: EventKind) {
+        if event == EventKind::ScrollEnd {
+            // Snapping animated values that follow it settle.
+            let id = scroll.tag() as NodeId;
+            self.with_mounter(move |m| m.scroll_ended(id));
+        }
         let offset = scroll.contentOffset();
         self.dispatch(
             scroll.tag() as NodeId,

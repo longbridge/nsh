@@ -9,14 +9,14 @@ group: platforms
 
 NSH 运行在手机、桌面和网页上：iOS、Android、macOS、Windows、Linux、GPUI 和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个应用在 iPhone 上是 UIKit 视图，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：响应式图、渲染器、Taffy 布局、组件和原生模块在每个平台上都是同一份 Rust 代码，所以一个应用可以在所有平台上运行。用 Rust 编写的应用就是这份代码加上你的 crate，不带 JavaScript 虚拟机；TSX 应用则在它之上用 QuickJS 运行自己的模块（[用 Rust 开发](./rust.md)）。
 
-在每个平台上，NSH 的主要用途都一样：把应用嵌入你自己的原生应用，宿主可以链接一个 Rust 根组件，也可以在运行时加载 TSX。开发时用 `nsh run`（改动 Rust 会重新构建并重启应用，改动 TSX 是热更新）；同一个应用也可以打包成可安装的应用（`nsh package`），这是受支持的第二种用法。
+在每个平台上，应用都有同样的两种用法：打包成该平台可安装的应用（`nsh package`），或嵌入你自己的原生应用——宿主可以链接一个 Rust 根组件，也可以在运行时加载 TSX。开发时用 `nsh run`（改动 Rust 会重新构建并重启应用，改动 TSX 是热更新）。
 
 ## 一览
 
 | 平台 | 后端；文本 | 运行环境 | 开发 | 打包 |
 |---|---|---|---|---|
 | [iOS](./ios.md) | UIKit；CoreText | iOS 15.0+，真机和模拟器 | `nsh run --target ios` | `.app`（模拟器）、签名的 `.ipa` |
-| [Android](./android.md) | Android 视图；`StaticLayout` | Android 9（API 28）+，`arm64-v8a` 和 `x86_64` | `nsh run --target android` | 签名的 `.apk` |
+| [Android](./android.md) | Android 视图；`StaticLayout` | Android 9（API 28）+，`arm64-v8a`、`armeabi-v7a` 和 `x86_64` | `nsh run --target android` | 签名的 `.apk` |
 | [macOS](./macos.md) | AppKit 与 Core Animation；CoreText | macOS 14+ | `nsh run --target macos` | ad hoc 签名的 `.app` |
 | [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录和一个 `.zip` |
 | [Linux](./linux.md) | GTK 4 控件；Pango | GTK 4.14+ | `nsh run`（Linux 上的默认目标） | 一个目录和一个 `.tar.gz` |
@@ -67,14 +67,14 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 
 应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
 
-- **环境说明应用运行在哪里**：Rust 里是 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::ui::prelude`），TSX 里是 `nsh/device` 的 `platform.os`、`platform.idiom` 和 `platform.select`。操作系统是 iOS、Android、macOS、Windows、Linux 或 Web。
+- **环境说明应用运行在哪里**：Rust 里是 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::prelude`），TSX 里是 `nsh` 的 `platform.os`、`platform.idiom` 和 `platform.select`。操作系统是 iOS、Android、macOS、Windows、Linux 或 Web。
 - **平台专属属性**在 TSX 里放在 `ios={{…}}`、`android={{…}}`、`web={{…}}` 或 `desktop={{…}}` 里（`desktop`：macOS、Windows、Linux 和桌面浏览器）。
 - **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
 
 应用的组件用 NSH 的基础元素绘制，所以在桌面上和在手机上一样运行，样子也相同。桌面布局用基础元素（`view`、`text`、`scroll`、`virtual_list` 等；TSX 里是 `View`、`Text`、`Scroll`、`List` 等）加上对桌面的判断搭建，示例应用 gallery 的桌面布局就是这样做的：
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn Shell() -> impl IntoElement {
@@ -95,7 +95,7 @@ fn tab_layout() -> AnyElement {
 
 ```tsx tabs
 import { View } from "nsh";
-import { platform } from "nsh/device";
+import { platform } from "nsh";
 
 export function Shell() {
   // macOS、Windows、Linux 和桌面浏览器用侧边栏；手机用标签页。

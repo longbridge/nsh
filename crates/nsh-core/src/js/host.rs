@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub use nsh_macros::HostProps;
 
-use crate::{EdgeInsets, EventKind, geometry::Points, style::Color, ui::TsTypes};
+use crate::{EdgeInsets, EventKind, element::TsTypes, geometry::Points, style::Color};
 
 /// A JS value as host props read it.
 pub trait HostInput: Sized {
@@ -115,13 +115,10 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
             Tag::WebView => on::WEBVIEW,
             Tag::Video => on::VIDEO,
             Tag::InputAccessory => on::INPUT_ACCESSORY,
-            Tag::View
-            | Tag::Cell
-            | Tag::Stack
-            | Tag::HeaderItem
-            | Tag::Canvas
-            | Tag::Native
-            | Tag::Overlay => 0,
+            Tag::View => on::VIEW,
+            Tag::Cell | Tag::Stack | Tag::HeaderItem | Tag::Canvas | Tag::Native | Tag::Overlay => {
+                0
+            }
         }
 }
 
@@ -163,6 +160,8 @@ pub mod on {
     pub const INPUT_ACCESSORY: u32 = 1 << 11;
     /// `<overlay>`.
     pub const OVERLAY: u32 = 1 << 12;
+    /// `<view>`.
+    pub const VIEW: u32 = 1 << 13;
     /// Set by the runtime itself, not part of the elements' types.
     pub const INTERNAL: u32 = 1 << 31;
 }
@@ -395,6 +394,13 @@ export interface Size {
   height: number;
 }
 
+/** An image's or a video's own extent, in pixels as decoded
+ * (`nsh_core::geometry::Size<DevicePixels>`), not the points it is drawn at. */
+export interface PixelSize {
+  width: number;
+  height: number;
+}
+
 /** A position and an extent, in points (`nsh_core::geometry::Bounds`). */
 export interface Bounds {
   /** The top left corner. */
@@ -432,6 +438,8 @@ export interface OverlayPosition {
 
 /** A drag: translation since the start and velocity (points / second). */
 export interface PanEvent {
+  /** The system cancelled the drag rather than releasing it. */
+  cancelled: boolean;
   translationX: number;
   translationY: number;
   velocityX: number;
@@ -442,12 +450,15 @@ export interface PanEvent {
   valueY?: number;
 }
 
-/** Where the pointer was at a press: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
+/** Where the pointer was at a press, the modifier keys held when it began and its click count: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
 export interface PressEvent {
   /** Position in the pressed view (its transforms undone; a pressed span's text view). */
   position: Point;
   /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
   pagePosition: Point;
+  modifiers: Modifiers;
+  /** Consecutive clicks at the same place: 1 for a click, 2 for a double click. */
+  clickCount: number;
 }
 
 /** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
@@ -480,6 +491,26 @@ export interface ScrollEvent {
   zoomScale: number;
 }
 
+/** Where an input's caret is: the payload of `onCaretMove`. */
+export interface CaretEvent {
+  /** The caret in the input (its border box), the input's own scrolling applied: as wide as the platform draws it, as tall as its line. Empty until the input is laid out. */
+  bounds: Bounds;
+  /** The caret in the root view the input is in (the surface or its dialog), as of the event: an `Overlay`'s `anchor`. */
+  pageBounds: Bounds;
+}
+
+/** What the user pasted into an input: the payload of `onPaste`. The platform read the clipboard as the user pasted; the app never reads it for this. */
+export interface PasteEvent {
+  /** The plain text, `""` when there was none. */
+  text: string;
+  /** The same content as HTML (`text/html`), with its formatting: what a browser, an office suite or a rich text editor copied; `""` when there was none. */
+  html: string;
+  /** Files with their bytes: images (a screenshot, an image copied from a page or an app), as `File`s an app can upload. */
+  files: File[];
+  /** `file:` URLs of local files copied in a file manager (as `onFileDrop`'s). */
+  uris: string[];
+}
+
 /** A line of a laid-out text (in the text's content box). */
 export interface TextLayoutLine {
   text: string;
@@ -509,25 +540,25 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Press,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A tap. `e` is where the pointer was, on backends that know it.",
+        "A tap. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::LongPress,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A press held for about half a second. `e` is where the pointer was, on backends that know it.",
+        "A press held for about half a second. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::PressDown,
         on::ALL,
         "(e?: PressEvent) => void",
-        "A press went down. `e` is where the pointer was, on backends that know it.",
+        "A press went down. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::PressUp,
         on::ALL,
         "(e?: PressEvent) => void",
-        "The press ended. `e` is where the pointer was, on backends that know it.",
+        "The press ended. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
         EventKind::HoverIn,
@@ -653,7 +684,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::IMAGE,
-        "(e: Size) => void",
+        "(e: PixelSize) => void",
         "The source image's size in pixels (not the decoded, downsampled one).",
     ),
     (
@@ -665,7 +696,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::VIDEO,
-        "(e: { duration: number; size: Size }) => void",
+        "(e: { duration: number; size: PixelSize }) => void",
         "",
     ),
     (
@@ -719,6 +750,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (EventKind::Refresh, on::SCROLL | on::LIST, "() => void", ""),
     (EventKind::LoadMore, on::LIST, "() => void", ""),
     (
+        EventKind::LoadMoreAtStart,
+        on::LIST,
+        "() => void",
+        "Within `loadMoreAtStartThreshold` viewports of the start, once the user or a scroll command moved the list: load what comes before the first item.",
+    ),
+    (
         EventKind::ChangeText,
         on::INPUT,
         "(text: string) => void",
@@ -730,13 +767,35 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: { text: string }) => void",
         "",
     ),
-    (EventKind::Focus, on::INPUT, "() => void", ""),
-    (EventKind::Blur, on::INPUT, "() => void", ""),
+    (
+        EventKind::Focus,
+        on::ALL,
+        "() => void",
+        "It took the keyboard focus: an input, or a view that takes presses reached by Tab on the platforms that move the focus between pressables (macOS, the web).",
+    ),
+    (
+        EventKind::Blur,
+        on::ALL,
+        "() => void",
+        "It lost the keyboard focus.",
+    ),
     (
         EventKind::SelectionChange,
         on::INPUT,
         "(e: { start: number; end: number }) => void",
         "",
+    ),
+    (
+        EventKind::Paste,
+        on::INPUT,
+        "(e: PasteEvent) => void",
+        "The user pasted (the keyboard's shortcut, a menu's Paste, a keyboard's image): the text, images as `File`s, local files' `file:` URLs. It comes before the `onChange` of the text it inserts; `pasteBehavior` decides whether the input inserts the text (images and files never are).",
+    ),
+    (
+        EventKind::CaretMove,
+        on::INPUT,
+        "(e: CaretEvent) => void",
+        "The caret moved: with the selection, or as the text scrolled or wrapped again. `bounds` is where it is in the input, `pageBounds` in the root view (an `Overlay`'s `anchor`): an `@` mention's suggestions open there.",
     ),
     (
         EventKind::KeyPress,
@@ -796,7 +855,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
 ];
 
 /// The events no element's props declare: the root's (`BackHandler`,
-/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus), the runtime's own (touches, insets, native
+/// `nsh/keymap`, dialogs, `Image.getSize`, clipboard reads, menus, `nsh/host`'s replies and events), the runtime's own (touches, insets, native
 /// components' events) and those whose payload a module makes
 /// (`List`'s viewable items, with the app's items).
 pub const INTERNAL_EVENTS: &[EventKind] = &[
@@ -807,6 +866,9 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::BackPress,
     EventKind::ImageInfo,
     EventKind::Clipboard,
+    EventKind::Host,
+    EventKind::Pick,
+    EventKind::OpenUrl,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,
@@ -823,6 +885,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
 /// to: `HostProps` for every element, `TextHostProps` for `<text>`, ...
 const GROUPS: &[(u32, &str, &str)] = &[
     (on::ALL, "", "every element"),
+    (on::VIEW, "View", "`<View>`"),
     (on::TEXT, "Text", "`<Text>`"),
     (on::IMAGE, "Image", "`<Image>`"),
     (

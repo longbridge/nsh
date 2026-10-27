@@ -13,7 +13,7 @@ NSH updates the UI with **signals**: values that know who reads them. When a sig
 Rust components take everything on this page from the prelude; TSX imports it from `nsh`:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
+use nsh_core::prelude::*;   // signal, computed, effect, resource, batch, untracked, cleanup, provide_context, use_context
 ```
 
 ```tsx tabs
@@ -453,6 +453,44 @@ function Swatch() {
 
 Read a context in a component body (or in code that runs while components are being created), not in an event handler or a timer, where there is no component to look it up from. Rust components also take the app's theme this way: `theme()` from `nsh_base` ([Theme](./rust.md#theme)).
 
+## Error boundaries
+
+An error boundary keeps a failure in one part of a view to that part. When something under it throws (Rust: panics) while it renders or runs, such as a component's body, a binding, an effect or an event handler, the failed part is removed and the boundary shows its fallback in its place; the rest of the view stays as it is. In Rust it is `catch_error(view, fallback)`; in TSX, `<ErrorBoundary fallback>` from `nsh`. The fallback gets the error (in TSX the thrown value itself, usually an `Error`) and a reset that renders the view again:
+
+```rust tabs
+fn profile_card(user: Signal<Option<User>>) -> impl IntoElement {
+    catch_error(
+        move || profile(user),
+        |error, reset| {
+            view()
+                .child(text(format!("Something went wrong: {error}")))
+                .child(text("Try again").on_press(move || reset.reset()))
+        },
+    )
+}
+```
+
+```tsx tabs
+import { ErrorBoundary, Text, View } from "nsh";
+
+function ProfileCard(props: { user: User | undefined }) {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <View>
+          <Text>Something went wrong: {error instanceof Error ? error.message : String(error)}</Text>
+          <Text onPress={reset}>Try again</Text>
+        </View>
+      )}
+    >
+      <Profile user={props.user} />
+    </ErrorBoundary>
+  );
+}
+```
+
+A failure goes to the nearest boundary above where it happened, and one in a fallback to the boundary above that. Without a boundary, the failure is reported as an uncaught error (the development error overlay, the log). In TSX, a `fallback` that takes no arguments is shown as it is: `fallback={<Text>Unavailable</Text>}`.
+
 ## What runs, and when
 
 | You write | Runs | Runs again when |
@@ -464,7 +502,7 @@ Read a context in a component body (or in code that runs while components are be
 | `when(cond, ..)` / `<If when>` | When created | Whether the condition holds changes |
 | `each(..)` / `<Each of>` row | When its key first appears | Never; its item and index signals change instead |
 
-The environment is reactive the same way: `window()`, `dark()`, `font_scale()`, `safe_area()` and `keyboard_height()` in Rust, `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh/device`](../modules/nsh-device.md) and `safeArea()` and `keyboardFrame()` from [`nsh/base`](../modules/nsh-base.md) in TSX, so bindings that read them follow rotation, dark mode or the keyboard.
+The environment is reactive the same way: `window()`, `dark()`, `font_scale()`, `safe_area()` and `keyboard_height()` in Rust, `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh`](../modules/nsh.md#device) and `safeArea()` and `keyboardFrame()` from [`nsh`](../modules/nsh.md) in TSX, so bindings that read them follow rotation, dark mode or the keyboard.
 
 ## Common mistakes
 

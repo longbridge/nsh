@@ -26,11 +26,11 @@ requestAnimationFrame ───────────┘                      
 ```
 
 - **布局由核心完成。** 每个视图都是一个绝对定位的元素，位置和大小就是 Taffy 算出的 frame，所以 flexbox、grid、`aspectRatio` 和百分比的表现与设备上完全一致，浏览器自身的布局不参与。
-- **样式在 Rust 里转成 CSS。** 背景、边框、圆角、阴影（`shadow*` 和 `boxShadow`）、渐变、滤镜、`backdropFilter`、变换、`transformOrigin`、`outline`、`mixBlendMode`、过渡和内置的关键帧动画都会变成 CSS 属性。Tailwind 类、`active:`、`hover:`、`focus:` 状态和 `dark:` 与设备上一样在原生侧解析。
+- **样式在 Rust 里转成 CSS。** 背景、边框、圆角、阴影（`boxShadow`、`textShadow`）、渐变、滤镜、`backdropFilter`、变换、`transformOrigin`、`outline`、`mixBlendMode`、过渡和内置的关键帧动画都会变成 CSS 属性。Tailwind 类、`active:`、`hover:`、`focus:` 状态和 `dark:` 与设备上一样在原生侧解析。
 - **文本在 Rust 里排版**，字体度量来自浏览器（`CanvasRenderingContext2D.measureText`），再按排版确定的位置逐段绘制，所以测量的就是绘制的。换行发生在空格之后、CJK 字符前后和 `\n` 处；`numberOfLines` 会截断并加省略号。
-- **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的动画值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
+- **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`translate`、`rotate`、`scale`、`transform` 的步骤和 `backgroundColor` 的动画值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
 - **输入**：带 `activeStyle` / `active:` 反馈的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带页面 `header` 的 `NavStack` 和 `NavPage`、`Dialog`。
-- **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
+- **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文）。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
 - **对话框**与桌面后端一样，是覆盖整个应用的一层，显示应用的弹出层和背景。Escape、浏览器的返回按钮和点击背景会关闭它（`closeOnEscape`、`closeOnBackdropPress`），`animation`、`onOpen`、`onClose`、`onCancel` 和 `onOpenChange` 与设备上一致。
 
 ## 键盘、鼠标和触摸
@@ -38,11 +38,11 @@ requestAnimationFrame ───────────┘                      
 发布出去的应用，在桌面浏览器里表现得像桌面应用，在手机浏览器里表现得像手机应用：
 
 - **滚轮和触控板**滚动沿其方向、还能继续滚动的最内层滚动视图（没有可滚动的纵向视图时，纵向滚轮也会滚动横向列表），并且直到这次滚动结束都停留在这个视图上；滚轮的每一格平滑滑动，分页和吸附的视图每次滚动移动一页。Ctrl + 滚轮和触控板捏合会捏合带原生捏合值的视图，而不是缩放页面。和桌面平台一样，用鼠标拖动不会滚动：鼠标拖动交给拖拽手势、响应者系统和文字选择。滚动视图像桌面平台一样上报 `onScrollDragStart` / `onScrollDragEnd`、`onMomentumStart` / `End` 和 `onScrollEnd`。
-- **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（焦点环和 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`nsh/keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
+- **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（焦点环和 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
 - **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会关闭最上层的对话框或弹出最内层的栈，和 Android 返回键一样；`popOnBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，每个压入的页面和打开的对话框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。
 - **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。
 - **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`announce` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
-- **选择和菜单**：在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素里的文字（带按压或触摸处理的视图：按钮、可按压的列表行、标签栏）以及设置了 `selectable={false}` 或 `select-none` 的文字除外；在上面拖动鼠标会选择文字，Ctrl/Cmd+C 按行复制，Ctrl/Cmd+A 全选选区所在的这段文字。在手机和平板浏览器中，只有 `selectable` 文字可以选择，和原生应用一样。浏览器的右键菜单只在可选文字和输入框里出现。
+- **选择和菜单**：在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素里的文字（带按压或触摸处理的视图：按钮、可按压的列表行、标签栏）以及设置了 `userSelect: "none"` 或 `select-none` 的文字除外；在上面拖动鼠标会选择文字，Ctrl/Cmd+C 按行复制，Ctrl/Cmd+A 全选选区所在的这段文字。在手机和平板浏览器中，只有设置了 `userSelect: "text"` 的文字可以选择，和原生应用一样。浏览器的右键菜单只在可选文字和输入框里出现。
 
 
 ## 带 Rust 组件的应用
@@ -143,6 +143,7 @@ nsh package App.tsx --target web --run
 | `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
 | `app.<digest>.nshc` | TSX 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
 | `harden.<digest>.nshc` | TSX 应用的[沙箱](./sandbox-and-capabilities.md)的加固脚本，同样编译成字节码（1.4 KB） |
+| `host.<digest>.js` | 页面的宿主，即 `nsh.json` 的 `web.host`（[宿主的函数](#宿主的函数)） |
 | `chunks/<name>.<digest>.nshc` | TSX 应用中 `import()` 加载的代码，同样是字节码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
 | `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在注册它们的代码运行前加载，因为文本要用它们测量：在应用启动前，或随导入它们的分块一起加载） |
 | `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
@@ -235,7 +236,65 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
-> [!NOTE]
+## 宿主的函数
+
+在 Web 上，页面就是应用的宿主：它应答 [`host`](../modules/nsh.md#host) 的 `host.call(name, args)`，并发送 `host.on` 监听的事件。`createPlayer` 的 `host` 是一个对象，它的 `call(name, args)` 返回结果或结果的 Promise；抛出异常或 Promise 被拒绝时，应用的调用以错误消息被拒绝。`player.hostEvent(event, payload)` 发送一个带 JSON 数据的事件（数据不是 JSON 时抛出异常）。传入 `host` 后，`host.available()` 为 `true`。
+
+```js
+const player = await createPlayer(container, {
+  wasm: "./nsh.wasm",
+  host: {
+    async call(name, args) {
+      if (name === "user.info") return { name: "Ada" };
+      throw new Error(`no host function ${name}`);
+    },
+  },
+});
+player.hostEvent("theme", { dark: true });
+```
+
+发布的应用从 `nsh.json` 得到宿主：`web.host` 指向应用目录内的一个 JS 模块（路径相对于 `nsh.json`），它导出 `createHost(player)`。`nsh package --target web` 把它以 `host.<digest>.js` 复制进站点，页面在应用启动前用播放器调用 `createHost`；它返回（或 resolve）的对象就是播放器的 `host`，必须带 `call` 函数，否则页面显示应用无法加载。`createHost` 拿到的播放器从此可以发送事件：
+
+```json
+{
+  "capabilities": {
+    "host": ["user.*"]
+  },
+  "web": { "host": "./host.js", "connect": ["api.example.com"] }
+}
+```
+
+```js
+// host.js
+const post = (url) => (args) =>
+  fetch(url, { method: "POST", body: JSON.stringify(args) }).then((r) => r.json());
+
+// 应用可以调用的函数，按完整名字登记。
+const functions = new Map([
+  ["user.info", post("https://api.example.com/user/info")],
+  ["user.settings", post("https://api.example.com/user/settings")],
+]);
+
+export async function createHost(player) {
+  addEventListener("online", () => player.hostEvent("online", {}));
+  return {
+    call(name, args) {
+      const f = functions.get(name);
+      if (!f) throw new Error(`no host function ${name}`);
+      return f(args);
+    },
+  };
+}
+```
+
+宿主按原样的名字在自己的函数表里查找（如上），URL 和路径由宿主自己决定：`capabilities.host` 按名字开头授权（`user.*`），宿主若把名字拼成路径，就可能访问到授权之外的地址。运行时只放行由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成、长度 1 到 128 且不含 `..` 的名字，其他名字的调用直接 reject。前缀授权以分隔符结尾（`bridge.*`）：`bridge*` 也会匹配 `bridgeAdmin`。
+
+应用运行之前发送的事件（比如 `createHost` 里发送的）会在应用启动后立即按顺序送达，应用顶层注册的 `host.on` 监听器能收到它们。监听器注册之前发送的事件不会补发给它：应用通过调用（`host.call("user.info")`）读取启动时的状态，再通过事件跟进变化。
+
+宿主模块运行在应用的页面里，与应用共用页面的 Content-Security-Policy：应用的能力限制了 `network` 时，页面的 `connect-src` 包含页面自身的源、`capabilities.network` 列出的主机和 `web.connect` 列出的主机。`web.connect` 列出宿主模块自己的请求（`fetch`、`XMLHttpRequest`、`WebSocket`）访问的主机，写法与 `capabilities.network.hosts` 的模式相同（`api.example.com`、`*.example.com`、`"*"`），如上面的 `api.example.com`；应用自己的请求仍按它的 `capabilities` 检查。
+
+模块按原样复制，所以它通过绝对 URL 导入其他代码。应用调用的每个函数仍需在 `host` [能力](./sandbox-and-capabilities.md)中声明。`nsh run --target web` 在开发页面上运行它，`nsh test` 会为测试打开的每个应用运行同一个模块，无界面运行或在浏览器中（`--target web`）都一样，从而一起测试应用和它的宿主（[测试](./testing-and-trace.md#页面的宿主)）。
+
 ## 浏览器作为平台
 
 `platform.os` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `platform.idiom`：
@@ -306,7 +365,7 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 - **自动播放的有声视频**：`Video` 是一个 `<video>`，支持全部属性和事件，但浏览器只在用户操作之后才允许有声视频开始播放（静音视频可以自动播放）。
 - **原生组件**：注册的原生组件属于嵌入 NSH 的原生应用；在 Web 上它的视图保持为空，并在控制台给出警告。
 - **平台服务**：读取剪贴板（`Clipboard.readText`，`hasText` 也一样）需要安全上下文（HTTPS），并可能询问用户。图片不报告 `onProgress`。
-- **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符），没有自动断词，除段落方向外也不做双向重排。
+- **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符，以及 CJK 标点的避头尾规则：`。`、`，`、`」` 这类收尾标点不放在行首，`（`、`「` 这类开头标点不放在行尾），没有自动断词，除段落方向外也不做双向重排。
 
 播放器和开发服务器以开发模式运行应用（不做加固），发布的应用经过加固。两者都使用默认的[资源限制](./sandbox-and-capabilities.md)。
 

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
+use nsh_macros::PropEnum;
+
 use crate::{
     animation::{AnimationOp, AnimationProp},
     geometry::{Bounds, Points, Size},
     ops::{
         AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, ResizeMode,
-        ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
+        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, PasteBehavior,
+        ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
     },
     props::{EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
     style::{Color, TextAlign, ViewStyle},
@@ -94,11 +96,34 @@ impl Default for WebProps {
     }
 }
 
+/// What a video's sound does to the rest of the device's audio while it
+/// plays: whether it plays in silent mode, whether other apps' audio pauses,
+/// and whether the system treats it as speech. iOS sets the shared
+/// `AVAudioSession` while such a video plays and restores it after; Android
+/// marks the sound as speech and holds audio focus for `Playback`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum AudioSession {
+    /// The app's audio settings (the platform's for video unless the app, or
+    /// the app embedding NSH, set others): nothing is changed.
+    #[default]
+    Default,
+    /// Plays speech: audible in silent mode, other apps' audio pauses while
+    /// it plays (Apple's `playback` category, `spokenAudio` mode; Android's
+    /// speech content type with transient audio focus).
+    Playback,
+    /// Plays speech over other apps' audio, which keeps playing
+    /// (Apple's `playback` category with `mixWithOthers`; Android's speech
+    /// content type without audio focus).
+    MixWithOthers,
+}
+
 /// A video player.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoProps {
     /// The video's URL (or `asset:/` URI).
     pub source: Option<Arc<str>>,
+    /// What its sound does to the rest of the device's audio.
+    pub audio_session: AudioSession,
     /// Paused.
     pub paused: bool,
     /// Muted.
@@ -121,6 +146,7 @@ impl Default for VideoProps {
     fn default() -> Self {
         Self {
             source: None,
+            audio_session: AudioSession::default(),
             paused: false,
             muted: false,
             volume: 1.0,
@@ -176,7 +202,18 @@ pub struct ScrollBehavior {
     pub pinch: bool,
     /// `centerContent`: content smaller than the viewport is centered.
     pub center_content: bool,
+    /// `refreshIndicator`: the height of the app's own pull-to-refresh
+    /// indicator, which replaces the platform's spinner; `None` for the
+    /// platform's.
+    pub refresh_indicator: Option<Points>,
 }
+
+/// How far past the top a released pull refreshes with the platform's
+/// spinner.
+const REFRESH_PULL: Points = Points(64.0);
+/// The room the platform's spinner keeps above the content while
+/// refreshing.
+const REFRESH_SPACE: Points = Points(56.0);
 
 impl Default for ScrollBehavior {
     fn default() -> Self {
@@ -196,6 +233,7 @@ impl Default for ScrollBehavior {
             bounces_zoom: true,
             pinch: true,
             center_content: false,
+            refresh_indicator: None,
         }
     }
 }
@@ -204,6 +242,25 @@ impl ScrollBehavior {
     /// Whether the content zooms (scrolling both ways while zoomed in).
     pub fn zooms(&self) -> bool {
         self.max_zoom > self.min_zoom
+    }
+
+    /// Whether a vertical scroll view dragged to `offset` (negative: pulled
+    /// past its top) refreshes when the finger lifts, if it listens to
+    /// `onRefresh` and is not refreshing yet.
+    pub fn refreshes(&self, offset: Points) -> bool {
+        offset.0 <= -self.refresh_threshold().0
+    }
+
+    /// How far past the top a released pull refreshes: the app's
+    /// indicator's height, or the platform spinner's distance.
+    pub fn refresh_threshold(&self) -> Points {
+        self.refresh_indicator.unwrap_or(REFRESH_PULL)
+    }
+
+    /// The room kept above the content while it refreshes: the app's
+    /// indicator's height, or the platform spinner's.
+    pub fn refresh_inset(&self) -> Points {
+        self.refresh_indicator.unwrap_or(REFRESH_SPACE)
     }
 
     /// Whether flings end at snap points.
@@ -290,7 +347,8 @@ fn nearest(points: &[f32], to: f32) -> Option<f32> {
 /// sticky offset from it): at scroll offset `offset` (along the main axis)
 /// it shows `clamp(offset - start, 0, end - start)` past where it is laid
 /// out.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
 pub struct StickyCell {
     /// The cell.
     pub cell: NodeId,
@@ -300,6 +358,12 @@ pub struct StickyCell {
     /// The scroll offset at which the next sticky cell pushes it out (may be
     /// infinite).
     pub end: Points,
+    /// An animated value added to the scroll offset: it sticks that much
+    /// further from the viewport's start (below a header that moves), at
+    /// `clamp(offset + value - start, 0, end - start)`. The platforms read
+    /// it from the animation graph whenever they pin, and pin again on the
+    /// graph's frames.
+    pub offset: Option<crate::animation::NodeId>,
 }
 
 /// The header heights a platform without a native header gives the core
@@ -350,6 +414,9 @@ pub struct ScreenConfig {
     pub left: Option<NodeId>,
     /// Trailing header item view.
     pub right: Option<NodeId>,
+    /// UIKit's own bar button in the trailing slot instead of `right`'s
+    /// view (iOS); a press on it presses `right`'s first pressable view.
+    pub right_system_item: Option<crate::HeaderSystemItem>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -380,6 +447,7 @@ impl Default for ScreenConfig {
             animation: ScreenAnimation::Default,
             left: None,
             right: None,
+            right_system_item: None,
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -476,10 +544,15 @@ pub struct InputConfig {
     pub blur_on_submit: bool,
     /// `submitBehavior` as set; [`InputConfig::submit`] resolves it.
     pub submit_behavior: Option<SubmitBehavior>,
+    /// What a paste does (`pasteBehavior`).
+    pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
-    /// Caret and selection color.
+    /// Selection highlight color (on iOS also the caret's, unless
+    /// [`InputConfig::caret_color`] is set: UIKit tints both with one).
     pub selection_color: Option<Color>,
+    /// Caret color; the platform's default when `None`.
+    pub caret_color: Option<Color>,
     /// What the input holds, for autofill.
     pub auto_fill: crate::ops::AutoFill,
     /// The text runs right to left.
@@ -526,8 +599,10 @@ impl Default for InputConfig {
             editable: true,
             blur_on_submit: true,
             submit_behavior: None,
+            paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
             selection_color: None,
+            caret_color: None,
             auto_fill: crate::ops::AutoFill::Default,
             rtl: false,
             caret_hidden: false,
@@ -664,6 +739,9 @@ pub enum MountItem {
         scrollbar_visible: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,
+        /// Native animation value fed with how far it is pulled past its
+        /// top (vertical views).
+        pull_value: Option<crate::animation::NodeId>,
         /// When dragging dismisses the keyboard.
         keyboard_dismiss: KeyboardDismissMode,
         /// A horizontal list laid out right to left: the platform mirrors
@@ -827,6 +905,16 @@ pub enum MountItem {
         id: NodeId,
         /// The name it was registered by (`com.example.map`).
         name: Arc<str>,
+    },
+    /// The names of a registered native component's animated prop slots:
+    /// `names[n]` is [`AnimationProp::ComponentSlot`]`(n)`. Sent before the
+    /// [`MountItem::AnimationBindings`] that use new slots; slots keep their
+    /// name for the component's life.
+    ComponentPropSlots {
+        /// The container.
+        id: NodeId,
+        /// The name of each slot.
+        names: Vec<Arc<str>>,
     },
     /// Properties of a registered native component that changed (all of
     /// them after [`MountItem::Component`]); `None` removes one.

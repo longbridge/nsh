@@ -13,7 +13,7 @@ A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -151,7 +151,7 @@ In both, measurements stay with their rows, and when rows are inserted above the
 
 ## Props
 
-A list takes every scrolling prop of the scroll view that makes sense for a list (`pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `decelerationRate`, `disableIntervalMomentum`, `bounces`, `scrollable`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `keyboardDismissMode`, `scrollEventThrottle`, `onScroll`, `onScrollDragStart`, `onScrollDragEnd`, `onMomentumStart`, `onMomentumEnd`, `onScrollEnd`, `scrollValue`; in Rust the same methods as a scroll view's), described in [Scrolling](./scrolling.md). Lists keep a scale of 1. Its own props:
+A list takes every scrolling prop of the scroll view that makes sense for a list (`pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `decelerationRate`, `disableIntervalMomentum`, `bounces`, `scrollable`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `keyboardDismissMode`, `scrollEventThrottle`, `onScroll`, `onScrollDragStart`, `onScrollDragEnd`, `onMomentumStart`, `onMomentumEnd`, `onScrollEnd`, `scrollValue`, `pullValue`; in Rust the same methods as a scroll view's), described in [Scrolling](./scrolling.md). Lists keep a scale of 1. Its own props:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
@@ -164,7 +164,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `inverted` | `.inverted()` | `boolean` | `false` | Item 0 at the bottom (chat); starts at the end and keeps its distance from the end. |
 | `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content grows (see below). |
 | `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | Items that stick to the top while scrolled past (one column, not inverted). |
-| `stickyHeaderOffset` | `.sticky_header_offset(px(..))` | `number` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. |
+| `stickyHeaderOffset` | `.sticky_header_offset(px(..))`, `.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. An animated value moves them every frame. |
 | `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, ..., `.row_gap(..)`, `.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
 | `contentClass` | | `string` | | The same as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
 | `header` | `.header(..)` | component or element | | Before the items. |
@@ -174,10 +174,13 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near (see below). |
 | `loadMoreThreshold` | `.load_more_threshold(..)` | `number` | `1` | How close to the end, in viewports, `onLoadMore` fires. |
+| `onLoadMoreAtStart` | `.on_load_more_at_start(..)` | `() => void` | | The start is near, after a scroll (see below). |
+| `loadMoreAtStartThreshold` | `.load_more_at_start_threshold(..)` | `number` | `1` | How close to the start, in viewports, `onLoadMoreAtStart` fires. |
 | `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info) => void` | | Items became or stopped being viewable. |
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable. |
 | `keyExtractor` | `.keys(..)` | `(item, index) => string` | | The key in viewability tokens; in Rust, the rows' identities. |
 | `refreshing` / `onRefresh` | `.refreshing(..)` / `.on_refresh(..)` | `boolean` / `() => void` | | Pull to refresh. |
+| `refreshIndicator` | `.refresh_indicator(..)` | `{ height: number }` | | The app's own pull-to-refresh indicator, in place of the platform's spinner (see [Scrolling](./scrolling.md#an-indicator-of-your-own)). |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `ref` | `.element_ref(&list)` | `YNode` | | `scrollToIndex`, `scrollToOffset`, `scrollToEnd`, `scrollTo`. |
 
@@ -278,13 +281,37 @@ Because a cell may show a header now and a name later, the row decides what to r
 
 `stickyHeaderOffset` (`.sticky_header_offset(..)` in Rust) makes the headers stick that many points below the top instead, as CSS `position: sticky`'s `top` does: under a translucent bar 56 points tall, `stickyHeaderOffset={56}` (`.sticky_header_offset(px(56.0))`) keeps each header below the bar while the rows scroll on under it, and the next header pushes it out from there. A negative offset leaves part of a header out of view.
 
-## Chat: inverted lists
-
-`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top).
+The offset can be an [animated value](./animation.md#animated-values) (`.bind_sticky_header_offset(&node)` in Rust): the headers follow it every frame on the UI thread, so they stay below a bar that moves. With a bar that hides as the content scrolls down and comes back as it scrolls up ([`diffClamp`](./animation.md#arithmetic-and-diffclamp)), the headers stick to its bottom edge wherever it is:
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
+let offset = animated_value(0.0);
+let hidden = offset.diff_clamp(0.0, 56.0);
+let shown = hidden.mul(-1.0).add(56.0);
 
+view().flex_1().overflow_hidden().child(
+    virtual_list(rows.len(), row)
+        .scroll_value(&offset)
+        .sticky_header_indices(headers)
+        .bind_sticky_header_offset(&shown),
+).child(view().absolute().top_0().left_0().right_0().h(px(56.0)).bind_translate_y(&hidden.mul(-1.0)))
+```
+
+```tsx tabs
+const scroll = createAnimatedValue(0);
+const hidden = scroll.diffClamp(0, 56);
+const shown = hidden.mul(-1).add(56);
+
+<View style={{ flex: 1, overflow: "hidden" }}>
+  <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, hidden.mul(-1)] }}>…</View>
+</View>
+```
+
+## Chat: inverted lists
+
+`inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
+
+```rust tabs
 #[derive(Clone, PartialEq)]
 struct Message {
     id: u32,
@@ -348,8 +375,9 @@ pub fn chat() -> impl IntoElement {
     .on_load_more(load_older)
     .load_more_threshold(0.5)
     .flex_1();
-    keyboard_avoiding_view()
+    view()
         .flex_1()
+        .pb_keyboard()
         .child(list)
         .child(
             view().flex_row().gap_2().p_2().child(
@@ -374,8 +402,8 @@ pub fn chat() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, List, mount, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { List, mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 
@@ -391,7 +419,7 @@ function Chat() {
   };
   const loadOlder = () => messages.update((m) => [...m, ...Array.from({ length: 20 }, (_, i) => message(`Older ${i}`, false))]);
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
       <List
         each={messages()}
         inverted
@@ -429,7 +457,7 @@ function Chat() {
           style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
         />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -597,14 +625,78 @@ loadMore();
 
 Guard against overlapping loads as above: the end may be reported again while a page is on its way.
 
+## Loading at the start: onLoadMoreAtStart
+
+A list can also open in the middle of its data: a chat opened at an old message (a search result, a reply's quote) shows a page around it, with newer messages still to load. `onLoadMoreAtStart` (`.on_load_more_at_start(..)`) fires when the viewport comes within `loadMoreAtStartThreshold` viewports of the start (1 by default), the side of item 0: the top of a list, the bottom of an inverted one. Prepend the page: the rows on screen keep their place while it arrives before them (an inverted list too, once scrolled away from its bottom), and the list fires again on the next approach, or at once when the page left it still near the start.
+
+It fires once the user scrolls there or a scroll command takes the list there (`initialScrollIndex` included), so a list that opens at its newest item asks for nothing, and one opened with `initialScrollIndex` near its start asks for the page before it right away.
+
+```rust tabs
+let messages = signal(page_around(target)); // newest first, ending at an old message
+let loading = stored(false);
+
+let load_newer = move |_: &()| {
+    if loading.replace(true) {
+        return;
+    }
+    let newest = messages.with(|m| m[0].id);
+    spawn(async move {
+        if let Ok(response) = fetch(format!("https://api.example.com/messages?after={newest}")).await {
+            let newer = parse_messages(&response.text());
+            messages.update(|m| {
+                m.splice(0..0, newer);
+            });
+        }
+        loading.replace(false);
+    });
+};
+
+virtual_list(move || messages.with(Vec::len), move |at| message_row(messages, at))
+    .inverted(true)
+    .on_load_more(load_older)
+    .on_load_more_at_start(load_newer)
+    .load_more_at_start_threshold(0.5)
+    .flex_1()
+```
+
+```tsx tabs
+const messages = signal<Message[]>(pageAround(target)); // newest first, ending at an old message
+let loading = false;
+
+const loadNewer = async () => {
+  if (loading) return;
+  loading = true;
+  try {
+    const newest = messages()[0].id;
+    const newer: Message[] = await (await fetch(`https://api.example.com/messages?after=${newest}`)).json();
+    messages.set([...newer, ...messages()]);
+  } finally {
+    loading = false;
+  }
+};
+
+<List
+  each={messages()}
+  inverted
+  style={{ flex: 1 }}
+  onLoadMore={loadOlder}
+  onLoadMoreAtStart={loadNewer}
+  loadMoreAtStartThreshold={0.5}
+>
+  {(message) => <Bubble message={message()} />}
+</List>
+```
+
+Once the newest message is in, stop loading: new messages then arrive at the start as in any chat.
+
 ## Viewability
 
 `onViewableItemsChange` (`.on_viewable_items_change(..)`) reports which items are on screen, for analytics, autoplaying the visible video, or marking messages read. In TSX it gets `{ viewableItems, changed }`, arrays of tokens `{ item, key, index, isViewable }`; in Rust, `ViewableItems` with the first and last viewable row (`viewable`) and the rows whose state changed (`changed()`). Viewability is computed natively; your code only hears about changes.
 
 | `viewabilityConfig` | Rust | Description |
 |---|---|---|
-| `itemVisiblePercentThreshold` | `Viewability { item_visible_percent, .. }` | Percent of an item that must be visible. |
-| `viewAreaCoveragePercentThreshold` | `Viewability { view_area_percent, .. }` | Percent of the viewport an item must cover. |
+| `itemVisibleThreshold` | `Viewability { item_visible_threshold, .. }` | How much of an item must be visible, from 0 to 1. |
+| `viewAreaCoverageThreshold` | `Viewability { view_area_coverage_threshold, .. }` | How much of the viewport an item must cover, from 0 to 1. |
 | `minimumViewTime` | `.minimum_view_time(Duration)` | Milliseconds an item must stay viewable before it is reported. |
 
 Without a threshold, any visible pixel counts.
@@ -615,7 +707,7 @@ let playing = signal(None::<usize>);
 virtual_list(count, move |at| video_card(videos.clone(), at))
     .estimated_item_size(px(300.0))
     .viewability(Viewability {
-        item_visible_percent: Some(60.0),
+        item_visible_threshold: Some(Percentage(0.6)),
         ..Viewability::default()
     })
     .minimum_view_time(Duration::from_millis(250))
@@ -631,7 +723,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
   estimatedItemSize={300}
   style={{ flex: 1 }}
   keyExtractor={(v) => v.slug}
-  viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 250 }}
+  viewabilityConfig={{ itemVisibleThreshold: 0.6, minimumViewTime: 250 }}
   onViewableItemsChange={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
 >
   {(v) => <VideoCard video={v()} />}
@@ -676,7 +768,7 @@ The look of a list is the app's own: the list places and recycles the rows, and 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::{palette::NEUTRAL, prelude::*};
+use nsh_core::{element::palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,

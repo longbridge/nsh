@@ -104,7 +104,7 @@ logo; // { url: "asset:/assets/logo.svg", size: { width: 120, height: 40 } }
 <Image src={star} style={{ width: 36, height: 36, tintColor: "#0969da" }} />
 ```
 
-SVG 在显示的尺寸下清晰。浏览器以矢量方式绘制它；iOS、macOS 和 Android 在图片加载时按视图显示它的像素尺寸绘制（与位图的降采样相同；之后变大的视图会缩放这次绘制的结果，直到图片重新加载）；Windows、Linux 和 GPUI 以每点四个像素绘制一次（每边最多 2048 像素），再缩放到各个视图。其余一切与位图相同：`resizeMode`、`tintColor`（透过 SVG 的不透明形状着色，单色图标因此能随主题变色）、滤镜、`blurRadius`、占位图、加载事件、`Image.getSize` 与 `Image.prefetch`。`onLoad` 和 `Image.getSize` 以整数点报告 SVG 的尺寸；图片按它的精确尺寸布局。远程 SVG 文件以同样的方式加载，经过同样的下载与[能力](./sandbox-and-capabilities.md)检查；NSH 根据内容识别 SVG（包括 gzip 压缩的 `.svgz`），与 URL 的结尾无关。
+SVG 在显示的尺寸下清晰。浏览器以矢量方式绘制它；iOS、macOS 和 Android 在图片加载时按视图显示它的像素尺寸绘制（与位图的降采样相同；之后变大的视图会缩放这次绘制的结果，直到图片重新加载）；Windows、Linux 和 GPUI 以每点四个像素绘制一次（每边最多 2048 像素），再缩放到各个视图。其余一切与位图相同：`objectFit`、`tintColor`（透过 SVG 的不透明形状着色，单色图标因此能随主题变色）、滤镜、`blurRadius`、占位图、加载事件、`Image.getSize` 与 `Image.prefetch`。`onLoad` 和 `Image.getSize` 以整数点报告 SVG 的尺寸；图片按它的精确尺寸布局。远程 SVG 文件以同样的方式加载，经过同样的下载与[能力](./sandbox-and-capabilities.md)检查；NSH 根据内容识别 SVG（包括 gzip 压缩的 `.svgz`），与 URL 的结尾无关。
 
 **原生平台绘制的内容。** iOS、macOS、Android、Windows、Linux 和 GPUI 用同一个渲染器（resvg）绘制 SVG，因此同一幅图在各平台上看起来一致：形状与路径、填充与描边、渐变与图案、裁剪路径与蒙版、不透明度、滤镜和变换。文本（`<text>`）、动画（SMIL 与 CSS）、嵌入的图片（`<image>`）和 HTML（`<foreignObject>`）在浏览器中显示；原生平台绘制 SVG 的其余部分，保持静止，`nsh build` 会指出用到它们的文件。把文本导出为轮廓（路径），即可在各处得到相同的效果。
 
@@ -133,37 +133,76 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - 解码后的图片缓存在内存中（内存紧张时会清理），以 URL、解码尺寸和模糊半径为键。
 - 当应用声明了[能力](./sandbox-and-capabilities.md)时，图片的主机必须在 `network` 中被允许；被拒绝的图片会触发错误事件。
 
+### 磁盘缓存
+
+下载的图片还会按服务器发送的原样保存在磁盘上，所以再次打开的应用（满是头像和照片的会话、信息流）无需重新下载就能显示之前显示过的图片，离线时也一样。应用无需任何设置：在 iOS、Android、macOS、Windows、Linux 和 GPUI 上，每张 `http://` 或 `https://` URL 的图片都经过这个缓存；在浏览器中，由浏览器自己的 HTTP 缓存完成同样的事。
+
+缓存遵循服务器的 HTTP 缓存头：
+
+- 图片会被保存，除非响应带有 `Cache-Control: no-store`。
+- 在新鲜期内直接使用，不发请求：新鲜期为 `max-age`，否则到 `Expires` 为止，否则为距 `Last-Modified` 时长的十分之一（最多一周）。
+- 过期后向服务器确认（用它的 `ETag` 发 `If-None-Match`，用它的 `Last-Modified` 发 `If-Modified-Since`）：未变的图片（`304`）无需下载即可再次使用，变了的则被替换。
+- 请求失败（没有网络）或服务器出错（`5xx`）时，显示保存的副本，除非响应声明了 `must-revalidate` 或 `no-cache`。
+
+每个应用有自己的缓存，大小为 256 MiB；超出后，最久未使用的图片先被删除。同一应用的多个视图、surface 和进程可以安全地共用它。嵌入应用可以选择它的位置和大小，或关闭它：
+
+```rust tabs
+// macOS、Windows、Linux 和 GPUI：AppView 的选项（或 AppView::set_cache）。
+let mut cache = CacheOptions::at(CacheLocation::Dir(caches.join("nsh")));  // 每个应用在 <dir>/<app id>
+cache.images = CachePolicy::MaxSize(ByteSize::mib(64));                     // CachePolicy::Off：不保存
+let view = AppView::new(mtm, AppOptions { cache, ..AppOptions::default() });
+```
+
+```swift tabs
+// iOS：NshAppView，在加载之前设置。
+app.cacheOptions = NshCacheOptions(location: .directory(caches.appendingPathComponent("nsh")),
+                                   images: .maxSize(megabytes: 64))   // .off：不保存
+```
+
+```java tabs
+// Android：NshView，在加载之前设置。
+nsh.setCacheOptions(NshCacheOptions.builder()
+        .location(new File(getCacheDir(), "nsh"))
+        .imagesMaxMegabytes(64)          // imagesOff()：不保存
+        .build());
+```
+
+`CacheLocation::Off`（`.off`、`noDiskCache()`）表示不在磁盘上保存任何内容。
+
+默认情况下，缓存位于系统的缓存目录：iOS 上是 `Library/Caches/nsh`，Android 上是缓存目录中的 `nsh`，macOS 上是 `~/Library/Caches`，Windows 上是 `%LOCALAPPDATA%`，Linux 上是 `$XDG_CACHE_HOME`（`~/.cache`），每个应用在其中的 `<app id>/images`。系统需要空间时可能会清理这些目录。
+
 ## 缩放模式
 
-缩放模式（Rust 中的 `.resize_mode(..)`，TSX 中的 `resizeMode`）决定图片如何填充形状不同的框：
+`objectFit` 样式，即 CSS 的 `object-fit`（Rust 中的 `.object_fit(..)`），决定图片如何填充形状不同的框：
 
 | 取值 | 效果 |
 |---|---|
 | `"cover"`（`ResizeMode::Cover`，默认） | 保持宽高比填满整个框，裁掉溢出部分 |
 | `"contain"`（`ResizeMode::Contain`） | 保持宽高比完整放入框内，留出空白 |
-| `"stretch"`（`ResizeMode::Stretch`） | 精确填满框，图片会变形 |
-| `"center"`（`ResizeMode::Center`） | 自然尺寸，居中 |
+| `"fill"`（`ResizeMode::Stretch`） | 精确填满框，图片会变形 |
+| `"none"`（`ResizeMode::Center`） | 自然尺寸，放在 `objectPosition` 处（默认居中） |
+| `"scale-down"`（`ResizeMode::ScaleDown`） | 自然尺寸，比框大时缩小到放得下 |
 
 ```rust tabs
-image(photo).resize_mode(ResizeMode::Contain).size(px(140.0)).bg(rgb(0xeaeef2))
+image(photo).object_fit(ResizeMode::Contain).size(px(140.0)).bg(rgb(0xeaeef2))
 ```
 
 ```tsx tabs
-<Image src={photo} resizeMode="contain" style={{ width: 140, height: 140, backgroundColor: "#eaeef2" }} />
+<Image src={photo} style={{ width: 140, height: 140, objectFit: "contain", backgroundColor: "#eaeef2" }} />
 ```
 
-Tailwind 类 `object-cover`、`object-contain` 等效果相同。
+Tailwind 类 `object-cover`、`object-contain`、`object-fill`、`object-none` 和 `object-scale-down` 设置的是同一个样式。
 
 ### 图片位置
 
 缩放后的图片在框中的位置由 `objectPosition` 样式决定（Rust 中为 `.object_position(..)` 和 `.object_top()` 等），即 CSS 的 `object-position`，默认居中。覆盖整个框的图片围绕这个位置裁剪，完整放入的图片在留白中按它移动。它接受关键字（`"top"`、`"left bottom"`）、百分比与长度（`"25% 75%"`、`"10px 0"`），以及带偏移的边（`"right 10px bottom 20%"`）。聊天气泡里的长图可以这样显示顶部：
 
 ```rust tabs
-image(photo).resize_mode(ResizeMode::Cover).object_top().w(px(220.0)).h(px(160.0)).rounded(px(16.0))
+image(photo).object_fit(ResizeMode::Cover).object_top().w(px(220.0)).h(px(160.0)).rounded(px(16.0))
 ```
 
 ```tsx tabs
-<Image src={photo} resizeMode="cover" style={{ width: 220, height: 160, borderRadius: 16, objectPosition: "top" }} />
+<Image src={photo} style={{ width: 220, height: 160, borderRadius: 16, objectPosition: "top" }} />
 ```
 
 Tailwind 类与 Tailwind 相同：`object-top`、`object-bottom`、`object-left`、`object-right`、`object-center`、`object-top-left`、`object-top-right`、`object-bottom-left`、`object-bottom-right`，以及任意值（`object-[25%_75%]`）。
@@ -220,7 +259,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 
 ## 动图
 
-动态 GIF、WebP 和 APNG 文件会自动播放，无论是资源还是来自 URL。它们支持相同的样式和缩放模式；在 iOS 上，着色后的动图只显示第一帧。
+动态 GIF、WebP 和 APNG 文件会自动播放，无论是资源还是来自 URL。它们支持相同的样式，包括 `objectFit`；在 iOS 上，着色后的动图只显示第一帧。
 
 ## 加载事件
 
@@ -236,7 +275,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 let status = signal(SharedString::from("loading…"));
 
 image(url)
-    .on_load(move |size: &Size<Points>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
+    .on_load(move |size: &Size<DevicePixels>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
     .on_error(move |message: &str| status.set(message.to_owned().into()))
     .w(px(90.0))
     .h(px(60.0))

@@ -115,13 +115,17 @@ An app declares what it may reach outside its VM in `nsh.json`:
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true
+    "clipboard": true,
+    "picker": true,
+    "host": ["getUserInfo", "bridge.*"],
+    "openUrl": { "schemes": ["https", "mailto"] }
   }
 }
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
+restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`, and the host's functions
+through `host`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
 build errors, so a typo is caught when you build instead of becoming a missing permission at runtime. A [signed
 package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
 runtime does not know: they are not granted there.
@@ -174,11 +178,46 @@ allows them without allowing any remote page.
 
 ### `clipboard`
 
-`"clipboard": true` lets the app read and write the system clipboard ([`nsh/clipboard`](../modules/nsh-clipboard.md)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
+`"clipboard": true` lets the app read and write the system clipboard ([`Clipboard`](../modules/nsh.md#clipboard)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
+
+### `picker`
+
+`"picker": true` lets the app show the system's picker for photos ([`Picker`](../modules/nsh.md#picker)): the user
+picks what reaches the app.
+
+### `openUrl`
+
+Lets the app open URLs outside it ([`openUrl`](../modules/nsh.md#openurl), a `TextView`'s links with
+`links="open"`): `"openUrl": true` for every scheme, `"openUrl": { "schemes": ["https", "mailto"] }` for the schemes
+listed. A URL whose scheme is not granted throws a `TypeError`. URLs that would run code or reach the app's own data
+(`javascript:`, `data:`, `file:`, ...) are never opened, whatever the capability.
 
 ### Storage
 
-Every app may keep its own data on the device with [`nsh/storage`](../modules/nsh-storage.md), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
+Every app may keep its own data on the device with [`Storage`](../modules/nsh.md#storage), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
+
+### `host`
+
+`host` lists the functions of the app embedding NSH that `nsh`'s `host.call(name, args)` may call: exact names
+(`"getUserInfo"`) or prefixes ending in `*` (`"bridge.*"` matches `bridge.call` and `bridge.share`). `"host": true`
+allows every function. A function not listed is refused, also in an app without `"capabilities"`: the host's
+functions are never granted by default, and building an app that imports `host` from `nsh` without `host` warns that every
+call will be refused. Names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `.`, `:` and `-`, without `..`;
+the call of any other name is refused before the grants are read. End a prefix with a separator (`"bridge.*"`):
+`"bridge*"` matches `bridgeAdmin` too. The host's events (`host.on(event, listener)`) reach the app's listeners as the host sends them.
+
+```ts
+import { host } from "nsh";
+
+if (host.available()) {
+  const user = await host.call("getUserInfo");
+  const sub = host.on("loginChanged", (payload) => console.log(payload));
+  sub.remove();
+}
+```
+
+`host.available()` is true on platforms that embed a host; elsewhere `host.call` rejects with
+`nsh/host: this platform has no host`.
 
 ### What a refusal looks like
 
@@ -188,6 +227,8 @@ Every app may keep its own data on the device with [`nsh/storage`](../modules/ns
 | Remote image | The image fails with `onError`. |
 | Video source, web view source, status bar change | Nothing is shown or changed. |
 | Clipboard | `writeText` and `writeImage` do nothing; `readText` resolves `""`, `readImage` `null`, `readFiles` `[]`, and `hasText` and `hasImage` `false`. |
+| Picker | `pickImages` shows nothing and resolves `[]`. |
+| Host call | The promise rejects, saying to add the function to `capabilities.host`; the call never reaches the host. |
 
 Each refusal is logged once, saying which key to add:
 

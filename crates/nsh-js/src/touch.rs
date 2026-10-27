@@ -16,7 +16,9 @@ use std::{
     ffi::{CStr, c_int},
 };
 
-use nsh_core::{Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, decl, ui::PanGesture};
+use nsh_core::{
+    Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, decl, element::PanGesture,
+};
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 
@@ -298,6 +300,10 @@ fn call_with(
     free(cx, f);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(r) } {
+        // A listener made under an error boundary fails into it.
+        if dom::catch_listener_failure(cx, id) {
+            return Ok(UNDEFINED);
+        }
         Err(r)
     } else {
         Ok(r)
@@ -695,7 +701,8 @@ fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
     }
     set(cx, gs, c"numberActiveTouches", number(n as f64));
     if n == ln {
-        let dt = (time - lt).max(1.0);
+        // Timestamps are milliseconds, velocities per second.
+        let dt = (time - lt).max(1.0) / 1000.0;
         set(cx, gs, c"dx", number(get_number(cx, gs, c"dx") + x - lx));
         set(cx, gs, c"dy", number(get_number(cx, gs, c"dy") + y - ly));
         // Smoothed over a few samples.
@@ -908,7 +915,7 @@ export interface ResponderGestureState {
   /** Distance moved since then. */
   dx: number;
   dy: number;
-  /** Velocity (points per millisecond). */
+  /** Velocity (points per second). */
   vx: number;
   vy: number;
   numberActiveTouches: number;
@@ -993,7 +1000,7 @@ mod tests {
         host.eval_source(
             r#"
             import { element, append, spread } from "nsh:rt";
-            import { PanResponder } from "nsh/gesture";
+            import { PanResponder } from "nsh";
             const log = [];
             globalThis.log = log;
             const outer = element("view");
