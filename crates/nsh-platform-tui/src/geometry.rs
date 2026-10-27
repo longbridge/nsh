@@ -76,8 +76,8 @@ impl CellBounds {
         Self {
             left,
             top,
-            right: left.saturating_add(cell_edge(bounds.size.width, cells.width())),
-            bottom: top.saturating_add(cell_edge(bounds.size.height, cells.height())),
+            right: left.saturating_add(cell_extent(bounds.size.width, cells.width())),
+            bottom: top.saturating_add(cell_extent(bounds.size.height, cells.height())),
         }
     }
 
@@ -104,4 +104,13 @@ impl CellBounds {
 // A half Cell belongs to the edge in the positive direction, including off-screen edges.
 fn cell_edge(value: Points, unit: Points) -> i32 {
     (value / unit + 0.5).floor() as i32
+}
+
+// A positive rail, thumb or indicator occupies a Cell; zero-sized content stays empty.
+fn cell_extent(value: Points, unit: Points) -> i32 {
+    if value > Points::ZERO {
+        cell_edge(value, unit).max(1)
+    } else {
+        0
+    }
 }

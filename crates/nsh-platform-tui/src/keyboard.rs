@@ -134,6 +134,15 @@ impl Keyboard {
                 parent = view.parent;
             }
         }
+        // The core derives ancestor focus-within from focused transitions.
+        // Clear the old focus first, even when the new node has a lower id.
+        if old != id
+            && let Some(view) = old.and_then(|id| tree.get_mut(id))
+            && view.states & FOCUSED != 0
+        {
+            view.states &= !FOCUSED;
+            control.set_states(old.unwrap(), view.states);
+        }
         self.sync_states(tree, control);
         if old != id {
             if let Some(old) = old {
