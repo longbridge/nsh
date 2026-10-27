@@ -118,6 +118,11 @@ step, the details only when something fails. Every command prints through it:
 before every `cargo run`): `✓` lines for its builds, cargo's and the tools' output only when they fail, `-v` /
 `NSH_VERBOSE` to see it all (`cargo xtask clippy-android` streams clippy's output: it is what the task is for).
 
+For `nsh run --target tui` (and `nsh dev --target tui`), the CLI routes its diagnostics to the app's `.nsh/tui.log`
+for the whole run, including Rust builds and restarts. Spinners and colors are disabled there; verbose subprocess
+output is captured into the same file. The terminal host inherits stdin/stdout and appends stderr and its logger
+to that file. `C-h e` opens its log/error panel; closing it gives every row back to the app.
+
 ## Dev server (nsh dev / nsh run)
 
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, the next free port if taken) to all
@@ -149,6 +154,13 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   process group of its own (`CREATE_NEW_PROCESS_GROUP`), out of the console's Ctrl-C, so a stop is not taken for the
   host failing, and in a job object that kills it when the job closes (`run::KillOnClose`): Windows ends a child with
   its parent only in a job, so the host goes with `nsh` however it ends (a closed console, a killed process).
+- `nsh run --target tui` runs `nsh-tui-host` in the current terminal while the CLI serves and watches in process.
+  It uses the ordinary hot-patch/full-bundle protocol and reports `HostPlatform::Tui`. App errors open a dismissible
+  panel and successful updates close it. `--points-per-cell WIDTHxHEIGHT` overrides `nsh.json`'s
+  `"tui": { "pointsPerCell": "8x16" }`; both dimensions are finite, positive points, defaulting to 8 by 16.
+  The selection applies at startup. Rust UI sets and Rust roots use a generated `.nsh/rust/tui-host`; Rust edits
+  restart it through the existing watcher. The CLI asks the host to exit on a stop before reaping it, allowing
+  raw mode and the alternate screen to be restored. See [the terminal backend](tui.md).
 - `nsh run --target android` forwards the dev server's port to the device (`adb reverse tcp:<port> tcp:<port>`,
   `android::Reverse`) and removes that rule, and only that one (`adb reverse --remove tcp:<port>`), however the run
   ends: normally, by an error, by Ctrl-C or SIGTERM, or for a restart of an app with a Rust crate (`rust_app::Restart`;
@@ -768,6 +780,10 @@ Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GP
 Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
+
+The terminal Development host uses `runtime/tui/nsh-tui-host[.exe]` in a prebuilt runtime tree. In a checkout it
+is built with `cargo build -p nsh-tui-host` into the CLI's native target/profile directory, as the desktop hosts
+are. App-specific development hosts are generated in `.nsh/rust/tui-host`.
 
 ## Releases
 

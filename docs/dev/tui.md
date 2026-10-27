@@ -2,20 +2,58 @@
 
 `crates/nsh-platform-tui` renders an NSH surface into a terminal grid with ratatui. Its `AppView` lives on the
 embedding app's thread; the app owns the terminal, its event loop and the area given to the surface.
-`crates/nsh-tui-host` is the Development host: it loads a prebuilt source bundle, fills the terminal with one
-surface and restores the terminal when it exits. It draws views, text and clipped scroll content, and handles
-mouse presses.
+`crates/nsh-tui-host` is the Development host: it fills the terminal with one surface and restores the terminal
+when it exits. It loads source bundles directly or connects to the CLI's development server.
 
 ```sh
 cargo build -p nsh-cli -p nsh-tui-host
-./target/debug/nsh build examples/counter --out .nsh/tui-counter
-./target/debug/nsh-tui-host --bundle .nsh/tui-counter/bundle.js
+./target/debug/nsh run examples/tui-gallery --target tui
+./target/debug/nsh run examples/counter --target tui --points-per-cell 8x16
 ```
 
-Click `+1` and `−1` to change the value; Ctrl+C exits. The host uses the source bundle reader, which also reads
-its adjacent source map and capability metadata. Bytecode files require the trusted-resource or verified-package
-path, owned by the packaging work. The host keeps a bounded diagnostic tail and prints it after restoring the
-terminal. `--trace` includes the engine's timing logs, `--data-dir` selects its persistent data directory.
+The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
+profile, and starts it with inherited stdin/stdout. CLI diagnostics, the host's stderr and the host logger append
+to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C exits;
+Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the
+screen and raw mode before the CLI reaps it.
+
+`C-h e` toggles the logs and errors panel. Escape, `C-g` or `q` closes it; arrows and PageUp/PageDown scroll,
+Home/End select the start/end, and `r` reloads the latest build. Errors open the panel automatically and the next
+update closes it. Ordinary builds and connection messages stay in the log. With the panel closed, the app owns
+every row. The panel reads at most 64 KiB from the log tail every 250 ms while open; its recent error history keeps
+at most 256 lines of 4096 characters each. Control characters are removed before drawing diagnostics.
+
+A source bundle can also be loaded directly:
+
+```sh
+./target/debug/nsh build examples/counter --out .nsh/tui-counter
+./target/debug/nsh-tui-host --bundle .nsh/tui-counter/bundle.js --log-file .nsh/tui-counter/host.log
+./target/debug/nsh-tui-host --dev-server ws://127.0.0.1:8790/ws
+```
+
+`--bundle` reads the adjacent source map and capability metadata. Bytecode files require the trusted-resource
+or verified-package path, owned by the packaging work. Direct hosts without `--log-file` keep diagnostics in
+`nsh-tui-host-<pid>.log` in the system temporary directory, visible through the same panel. `--trace` includes
+the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
+app data. A source-bundle failure exits after terminal restoration; a development session stays open for a fix.
+
+## Development sessions
+
+Feature `dev` adds `AppView::connect_dev_server`. The shared `nsh-dev::DevClient` reports `HostPlatform::Tui`,
+bytecode compatibility and the linked UI sets, reconnects on disconnect and queues ordered events for the
+embedding thread. Rendering processes those events. Full bundles carry their source map, app ID, declared
+capabilities, development policy and VM limits. A patch applies only to its `(session, base)` through
+`EngineControl::hot_update`; its following full bundle becomes the reload target without restarting the app.
+The existing hot-runtime rules determine which signals and component instances survive an edit (see
+[tooling](tooling.md#dev-server-nsh-dev--nsh-run)). A rejected patch reloads its matching full bundle, whether
+that bundle arrived before or after the rejection. Build failures, incompatible UI sets and structured app
+errors appear in the dismissible panel. Public `load` and `stop` disconnect the dev client; internal development
+reloads replace only the engine and retained tree.
+
+Apps with their own Rust UI sets get a generated `tui-host` in `.nsh/rust`, using `main_with_options` to pass
+registries and an optional Rust root. Rust roots use the development server's `Root` message; Rust edits use the
+CLI's existing rebuild/restart path. Embedders may select a diagnostic file with `AppView::set_dev_log_path`.
+The library neither installs a logger nor takes over terminal streams.
 
 ## The example app
 
@@ -72,14 +110,21 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. Dev-server connection, the CLI target, test agent, terminal idiom, animation and the Release
-runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
+component ticket. The test agent, terminal idiom, animation and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
 
 ## Points per Cell
 
 One **Cell** is **8 × 16 points** by default. These are layout units, independent of the terminal font's physical
 pixel dimensions. `CellSize::new` accepts finite, positive typed dimensions; the same value is used for the text
-engine, viewport, drawing and input. CLI and app-file selection of the scale belongs to the terminal-idiom work.
+engine, viewport, drawing and input. `nsh run --target tui --points-per-cell 10x20` overrides the app setting:
+
+```json
+{ "tui": { "pointsPerCell": "10x20" } }
+```
+
+The CLI option wins over `nsh.json`; the default is `8x16`. Both dimensions must be finite and positive.
+The development host takes the same `--points-per-cell WIDTHxHEIGHT` option. The selection is made when the
+session starts; restart the run after changing this setting.
 
 Every geometric projection uses **round-half-up**: `floor(points / points_per_cell + 0.5)`. A tie goes toward
 positive coordinates, including negative positions (`-0.5` becomes `0`). The embedding area's integer Cell origin
@@ -168,7 +213,8 @@ it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations
 `key_scheme.rs` maps keystrokes to actions; `keyboard.rs` applies focus, activation and scrolling, and
 `navigation.rs` handles back. This keeps a future vim scheme independent of the actions, with one scheme selected
 today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy.
-The standalone host retains its Ctrl+C exit handling.
+The standalone host reserves Ctrl+C for exit and C-h e for diagnostics. While the diagnostics panel is open,
+it owns keys and the app's focus cursor is hidden; closing it restores the app's cursor.
 
 | Keys | Action |
 |---|---|
@@ -200,6 +246,8 @@ the search Minibuffer are separate work; this slice adds navigation over fields,
 
 | Feature | Terminal representation |
 |---|---|
+| Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
+| Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
 | Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
@@ -225,11 +273,16 @@ cells, mouse-driven changes, area ownership, resize, callbacks and idle scheduli
 bundles the counter into a temporary directory, loads it through `Bundle::read`, and drives `run_app` with
 crossterm events passed through `convert`. Its scripted user locates `+1` in the flushed cells, clicks it and
 waits through idle polls for the value and history to change. It needs no prebuilt CLI, existing bundle or TTY.
+The development tests use a real local `DevServer` and `TestBackend` to check complete loads, hot updates retaining
+clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess tests select a temporary host via
+`NSH_RUNTIME` to check inherited input/output, file diagnostics (including `-v`) and Cell scale precedence and
+validation. These are additional ticket-02 seams; the platform test-agent seam remains the later ticket.
 The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
 cargo test -p nsh-platform-tui --features run-app --test tui
 cargo test -p nsh-tui-host
+cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1
 cargo test -p nsh-tui-host --lib terminal::tests::panic_restores_raw_mode -- --ignored --nocapture --test-threads=1
 ```

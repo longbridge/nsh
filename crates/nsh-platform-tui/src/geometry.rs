@@ -41,6 +41,22 @@ impl CellSize {
     }
 }
 
+impl std::str::FromStr for CellSize {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (width, height) = value
+            .split_once('x')
+            .ok_or("expected WIDTHxHEIGHT in points")?;
+        let parse = |part: &str| {
+            part.parse::<f32>()
+                .map(Points)
+                .map_err(|_| "expected WIDTHxHEIGHT in points".to_owned())
+        };
+        Self::new(parse(width)?, parse(height)?)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct CellBounds {
     pub(crate) left: i32,

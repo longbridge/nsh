@@ -82,7 +82,7 @@ pub(crate) fn verbose() -> bool {
 
 /// Whether output is colored.
 pub(crate) fn color() -> bool {
-    term().color
+    term().color && !LOGGING.load(Ordering::Acquire)
 }
 
 /// Mirrors [`Out::drawn`] for the signal handler, which cannot lock.
@@ -354,6 +354,7 @@ struct Out {
     /// The spinner line is on screen.
     drawn: bool,
     frame: usize,
+    log: Option<std::fs::File>,
 }
 
 struct Spinner {
@@ -367,7 +368,36 @@ static OUT: Mutex<Out> = Mutex::new(Out {
     spinners: Vec::new(),
     drawn: false,
     frame: 0,
+    log: None,
 });
+
+static LOGGING: AtomicBool = AtomicBool::new(false);
+
+/// Routes CLI diagnostics and tool output away from the terminal until dropped.
+pub(crate) struct LogFile;
+
+impl LogFile {
+    pub(crate) fn open(path: &Path) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        let mut out = out();
+        out.clear(&mut std::io::stderr().lock());
+        out.log = Some(file);
+        LOGGING.store(true, Ordering::Release);
+        Ok(Self)
+    }
+}
+
+impl Drop for LogFile {
+    fn drop(&mut self) {
+        let mut out = out();
+        out.log = None;
+        out.spinners.clear();
+        LOGGING.store(false, Ordering::Release);
+    }
+}
 
 const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -385,6 +415,9 @@ impl Out {
     }
 
     fn draw(&mut self, err: &mut impl std::io::Write) {
+        if self.log.is_some() {
+            return;
+        }
         let Some(spinner) = self.spinners.last() else {
             return self.clear(err);
         };
@@ -418,6 +451,10 @@ impl Out {
 /// Prints `text` (whole lines) above the spinner.
 fn print(text: &str) {
     let mut out = out();
+    if let Some(log) = &mut out.log {
+        let _ = writeln!(log, "{text}");
+        return;
+    }
     let mut err = std::io::stderr().lock();
     out.clear(&mut err);
     let _ = err.write_all(text.as_bytes());
@@ -610,7 +647,7 @@ impl Step {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         let start = Instant::now();
-        if term().tty && !verbose() {
+        if term().tty && !verbose() && !LOGGING.load(Ordering::Acquire) {
             spin();
             let mut out = out();
             out.spinners.push(Spinner {
@@ -747,7 +784,7 @@ pub(crate) fn capture(
     cmd: &mut Command,
     on_line: impl FnMut(&str),
 ) -> std::io::Result<(ExitStatus, String)> {
-    if verbose() {
+    if verbose() && !LOGGING.load(Ordering::Acquire) {
         return Ok((cmd.status()?, String::new()));
     }
     capture_all(cmd, on_line)
@@ -858,7 +895,7 @@ impl Tail {
 pub(crate) fn quiet(cmd: &mut Command) -> std::io::Result<(std::process::Child, Tail)> {
     const KEEP: usize = 200;
     let tail = Tail::default();
-    if verbose() {
+    if verbose() && !LOGGING.load(Ordering::Acquire) {
         return Ok((cmd.spawn()?, tail));
     }
     let (reader, writer) = std::io::pipe()?;
@@ -872,6 +909,9 @@ pub(crate) fn quiet(cmd: &mut Command) -> std::io::Result<(std::process::Child, 
         .spawn(move || {
             for line in BufReader::new(reader).lines() {
                 let Ok(line) = line else { break };
+                if verbose() {
+                    plain(&line);
+                }
                 let mut lines = lines.0.lock().unwrap_or_else(|e| e.into_inner());
                 if lines.len() == KEEP {
                     lines.pop_front();

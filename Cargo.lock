@@ -3424,6 +3424,7 @@ dependencies = [
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
+ "nsh-dev",
  "nsh-engine",
  "ratatui-core",
  "ratatui-widgets",
@@ -3500,12 +3501,16 @@ name = "nsh-tui-host"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "libc",
  "log",
  "nsh-bundler",
+ "nsh-core",
+ "nsh-dev",
  "nsh-engine",
  "nsh-platform-tui",
  "ratatui-core",
  "ratatui-crossterm",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

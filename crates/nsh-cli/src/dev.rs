@@ -416,6 +416,7 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
         (HostPlatform::Linux, run(Target::Linux, "linux")),
         (HostPlatform::Windows, run(Target::Windows, "windows")),
         (HostPlatform::Gpui, run(Target::Gpui, "gpui")),
+        (HostPlatform::Tui, run(Target::Tui, "tui")),
         (HostPlatform::IosSimulator, run(Target::Ios, "ios")),
         (HostPlatform::Android, run(Target::Android, "android")),
         (HostPlatform::Web, run(Target::Web, "web")),

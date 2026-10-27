@@ -652,3 +652,49 @@ fn a_later_modal_takes_focus_even_when_inserted_before_the_existing_one() {
         .unwrap();
     terminal.backend_mut().assert_cursor_position((0, 5));
 }
+
+#[cfg(feature = "dev")]
+#[test]
+fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
+    let path = std::env::temp_dir().join(format!(
+        "nsh-keyboard-diagnostics-{}.log",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path,
+        (0..30)
+            .map(|line| format!("Log{line:02}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    view.set_dev_log_path(path.clone());
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(App::Rust(Root::new::<FocusPage>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    view.handle(ctrl("n"));
+    draw_until(&mut view, &mut terminal, &rx, "focus A");
+    view.handle(ctrl("h"));
+    view.handle(key("e", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "Logs and errors");
+    view.handle(key("Home", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "Log00");
+    view.handle(Input::KeyRepeat {
+        key: "Down".into(),
+        modifiers: Default::default(),
+    });
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert_eq!(
+        (0..5)
+            .map(|x| terminal.backend().buffer()[(x, 1)].symbol())
+            .collect::<String>(),
+        "Log01"
+    );
+    view.handle(key("Escape", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "focus A");
+    terminal.backend_mut().assert_cursor_position((0, 1));
+    view.stop();
+    std::fs::remove_file(path).unwrap();
+}

@@ -59,6 +59,8 @@ pub(crate) enum Platform {
     /// GPUI, on this machine (macOS, Windows or Linux): a development host
     /// only, as GPUI is the backend for embedding in GPUI apps.
     Gpui,
+    /// The terminal host on this machine.
+    Tui,
 }
 
 impl Platform {
@@ -71,6 +73,7 @@ impl Platform {
             Platform::MacOs => "macos",
             Platform::Windows => "windows",
             Platform::Gpui => "gpui",
+            Platform::Tui => "tui",
         }
     }
 
@@ -80,7 +83,11 @@ impl Platform {
             Platform::IphoneOs => Some("aarch64-apple-ios"),
             Platform::IphoneSimulator => Some("aarch64-apple-ios-sim"),
             Platform::MacCatalyst => Some("aarch64-apple-ios-macabi"),
-            Platform::Linux | Platform::MacOs | Platform::Windows | Platform::Gpui => None,
+            Platform::Linux
+            | Platform::MacOs
+            | Platform::Windows
+            | Platform::Gpui
+            | Platform::Tui => None,
         }
     }
 
@@ -94,6 +101,8 @@ impl Platform {
             (Platform::MacOs, true) => "nsh-macos-app",
             (Platform::Windows, false) => "nsh-windows-host",
             (Platform::Windows, true) => "nsh-windows-app",
+            (Platform::Tui, false) => "nsh-tui-host",
+            (Platform::Tui, true) => "nsh-tui-app",
             (Platform::Gpui, false) => "nsh-gpui-host",
             (Platform::Gpui, true) => unreachable!("GPUI apps are embedded, never packaged"),
             (_, false) => "nsh-ios-host",
@@ -128,6 +137,7 @@ impl Platform {
             Platform::MacOs => "macOS",
             Platform::Windows => "Windows",
             Platform::Gpui => "GPUI",
+            Platform::Tui => "the terminal",
         };
         format!("the {what} for {platform}")
     }
