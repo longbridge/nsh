@@ -10,7 +10,7 @@ group: platforms
 NSH 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Windows 上，
 `os()` 为 `Os::Windows`（TSX 中 `platform.os` 为 `"windows"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
-菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
+菜单栏和右键菜单在 Rust 中由 `nsh_core::element::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 ## 环境要求
@@ -48,6 +48,14 @@ dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-si
 ```
 
 `--window-size` 是窗口的尺寸，单位为点（`<宽>x<高>`；TSX 应用）。
+
+### 性能监视器
+
+`--fps`（`nsh run App.tsx --target windows --fps`、`nsh test --target windows --fps`、宿主的 `--fps`，或 Rust 应用在
+`run_app` 中用 `AppOptions { fps: true, .. }`）每秒输出一行性能监视器读数（target `nsh::perf`）：显示的帧数与显示器刷新率、
+主线程每帧的耗时及其各阶段（`tick`、`drain`、`paint`、`present`、`canvas`）、引擎的 commit、CPU 和内存，格式与其他桌面平台一致
+（毫秒，依次为 mean/p50/p95/max）。`nsh test --fps -v` 会显示这些读数，`examples/gallery/tools/perf.py` 会读取它们
+（[性能报告](./performance-report.md#windowswin32direct2d)）。请测量 release 构建；监视器关闭时没有任何开销。
 
 ## 打包
 
@@ -144,7 +152,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 | Escape | 离开有焦点的输入框；否则清除文本选区，再关闭最上层的对话框或返回上一页 |
 | Alt+Left、浏览器后退键、鼠标的后退键 | 返回上一页（在输入框中也是） |
 | Ctrl+方向键、Home / End、Ctrl+Home / End，加 Shift；Ctrl+Backspace / Delete | 在输入框中按词和行移动、选择、删除，与其他 Windows 应用一致 |
-| Ctrl+Z、Ctrl+Y、Ctrl+X / C / V / A；Shift+Delete、Ctrl+Insert、Shift+Insert | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 `selectable` 文本 |
+| Ctrl+Z、Ctrl+Y、Ctrl+X / C / V / A；Shift+Delete、Ctrl+Insert、Shift+Insert | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 可选择的文本 |
 | 方向键；Page Up / Down、Space、Shift+Space；Home / End、Ctrl+Home / End | 滚动有焦点的视图所在或鼠标下方的滚动视图：一行、一页、到开头 / 结尾（输入框有焦点时不滚动） |
 | F11、Alt+F4 | 全屏、关闭窗口（`nsh package` 和 `nsh run` 的应用） |
 | Ctrl+R、F5 | 重新加载最新的构建（`nsh run`） |
@@ -152,7 +160,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 快捷键适用于任何键盘布局（在西里尔或希腊字母布局下，Ctrl+C 是美式布局中输入 C 的那个键）。确认输入法组合文字（中文、日文等）的回车
 不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`；粘贴的文字不报告。
 
-应用自己的快捷键（[`nsh/keymap`](../modules/nsh-keymap.md)）先于有焦点的输入框、导航和滚动处理按键；Alt+F4、F11 和 Ctrl+Q 不能被绑定。
+应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）先于有焦点的输入框、导航和滚动处理按键；Alt+F4、F11 和 Ctrl+Q 不能被绑定。
 
 不同之处或不支持的功能：
 

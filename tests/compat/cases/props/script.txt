@@ -147,11 +147,16 @@ prop id:plain resizeMode cover
 prop id:scale-down resizeMode scale-down
 prop id:object-none resizeMode center
 prop id:object-scale-down resizeMode scale-down
+# objectFit's `fill` stretches, `none` centers at the natural size, and a
+# style's value wins over a class's.
+prop id:fit-fill resizeMode stretch
+prop id:fit-none resizeMode center
+prop id:style-over-class resizeMode cover
 prop id:plain blurRadius 0
 noprop id:plain placeholder
 noprop id:plain fadeDuration
 covers [props] src
-covers [props] resizeMode
+covers [styles] objectFit
 covers [props] placeholder
 covers [props] blurRadius
 covers [props] fadeDuration
@@ -178,7 +183,7 @@ covers [props] volume
 covers [props] rate
 covers [props] repeat
 covers [props] controls
-covers [props] resizeMode
+covers [styles] objectFit
 covers [props] progressUpdateInterval
 # props-media-webview
 tap id:case-props-media-webview
@@ -259,6 +264,20 @@ covers [props] horizontal
 covers [props] scrollable
 covers [props] refreshing
 covers [props] scrollEventThrottle
+# props-refresh-indicator
+tap id:case-props-refresh-indicator
+expect Pull me
+# The app's indicator, 72 tall, takes the spinner's place; the pull feeds
+# the animated value the app made (created at 3).
+prop id:pull refreshIndicator height=72
+prop id:pull pullValue 3
+listens id:pull onRefresh
+# A list passes it to its scroll view.
+prop scroll:text:"Row 0" refreshIndicator height=60
+# Without a height there is no indicator: the platform's spinner stays.
+noprop id:none refreshIndicator
+covers [props] pullValue
+covers [props] refreshIndicator
 # props-scroll-zoom
 tap id:case-props-scroll-zoom
 expect Zoom
@@ -283,20 +302,20 @@ covers [props] zoomScale
 covers [props] scrollValue
 # props-text-lines
 tap id:case-props-text-lines
-prop id:two numberOfLines 2
-prop id:all numberOfLines 0
+style id:two numberOfLines 2
+style id:all numberOfLines 0
 frame id:two 0 64 100 24
 frame id:all 0 88 100 48
-prop id:head ellipsizeMode head
-prop id:plain ellipsizeMode tail
-prop id:selectable selectable true
-noprop id:plain selectable
+style id:head textOverflow ellipsis-start
+style id:plain textOverflow ellipsis
+style id:selectable userSelect text
+nostyle id:plain userSelect
 # Shrunk to fit: at most to minimumFontScale; what fits keeps its size.
 style id:fit fontSize 20
 style id:fit-min fontSize 10
-covers [props] numberOfLines
-covers [props] ellipsizeMode
-covers [props] selectable
+covers [styles] numberOfLines
+covers [styles] textOverflow
+covers [styles] userSelect
 covers [props] adjustsFontSizeToFit
 covers [props] minimumFontScale
 # props-view-accessibility
@@ -320,6 +339,13 @@ prop id:important-yes accessible true
 prop id:important-yes accessibilityElementsHidden false
 prop id:actions accessibilityActions activate, magicTap:Magic
 noprop id:plain accessibilityActions
+# A select's popup: a listbox of options, the chosen one selected.
+prop id:listbox role listbox
+prop id:listbox accessibilityLabel Fruit
+prop id:option role option
+prop id:option accessibilityState selected=true
+prop id:other-option role option
+prop id:other-option accessibilityState {}
 covers [props] accessible
 covers [props] accessibilityHint
 covers [props] accessibilityState
@@ -365,9 +391,9 @@ covers [props] ios.inputAccessoryViewID
 # props-view-touch
 tap id:case-props-view-touch
 # for each view's touch handling.
-prop id:none pointerEvents none
-prop id:box-none pointerEvents box-none
-prop id:plain pointerEvents auto
+style id:none pointerEvents none
+style id:box-none pointerEvents box-none
+style id:plain pointerEvents auto
 prop id:slop hitSlop top=10 right=10 bottom=10 left=10
 prop id:slop-sides hitSlop top=4 left=2
 prop id:plain hitSlop {}
@@ -377,8 +403,9 @@ noprop id:plain delayLongPress
 prop id:pan panActivation activeOffsetX=20 failOffsetY=10
 noprop id:plain panActivation
 prop id:unfocusable focusable false
+prop id:stop focusable true
 noprop id:plain focusable
-covers [props] pointerEvents
+covers [styles] pointerEvents
 covers [props] hitSlop
 covers [props] delayLongPress
 covers [props] panActivation
@@ -394,7 +421,7 @@ prop id:view-box src asset:/svg/star.svg
 frame id:view-box 0 84 24 24
 prop id:one-side src asset:/svg/mark.svg
 frame id:one-side 0 108 32 16
-covers [nsh/image] Image
+covers [nsh] Image
 covers [props] src
 # props-media-image-variants
 tap id:case-props-media-image-variants

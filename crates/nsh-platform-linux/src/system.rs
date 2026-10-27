@@ -1,8 +1,8 @@
-//! Surface-wide commands and the environment: dialogs, toasts,
-//! announcements, the clipboard, exiting; the system appearance followed
+//! Surface-wide commands and the environment: dialogs, announcements,
+//! the clipboard, exiting; the system appearance followed
 //! into [`Environment`].
 //!
-//! Dialogs and toasts are drawn inside the surface, as GTK widgets the
+//! Dialogs are drawn inside the surface, as GTK widgets the
 //! root view hosts over the app's views (overlays), rather than as
 //! separate windows: they stay with the surface when it is embedded,
 //! never block the main loop, and look the same everywhere (like the web
@@ -46,7 +46,6 @@
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
-    time::Duration,
 };
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
@@ -63,9 +62,6 @@ use crate::{surface::Surface, view::NshView};
 /// The GTK 4.20 setting of the system's color scheme.
 const INTERFACE_SCHEME: &str = "gtk-interface-color-scheme";
 
-/// How long a toast shows (Android's short and long durations).
-const TOAST_SHORT: Duration = Duration::from_millis(2000);
-const TOAST_LONG: Duration = Duration::from_millis(3500);
 /// Fades of overlays, in milliseconds.
 const FADE_IN: f64 = 150.0;
 const FADE_OUT: f64 = 120.0;
@@ -112,11 +108,6 @@ button.nsh-dialog-button.destructive:hover { background-color: #dc2626; }
 .nsh-dialog-card.sheet button.nsh-dialog-button.destructive { color: #ef4444; }
 .nsh-dark .nsh-dialog-card.sheet button.nsh-dialog-button.destructive { color: #f87171; }
 .nsh-dialog-card.sheet button.nsh-dialog-button.cancel { font-weight: 600; }
-.nsh-toast {
-  padding: 9px 16px; border-radius: 18px; font-size: 14px;
-  background-color: rgba(23, 23, 23, 0.92); color: #fafafa;
-}
-.nsh-dark .nsh-toast { background-color: rgba(250, 250, 250, 0.92); color: #0a0a0a; }
 ";
 
 /// What the system's settings say, for every surface.
@@ -129,7 +120,7 @@ struct Appearance {
     screen_reader: bool,
 }
 
-/// A dialog or toast over a surface.
+/// A dialog over a surface.
 struct Overlay {
     /// The surface's root view, which hosts it.
     root: NshView,
@@ -138,7 +129,6 @@ struct Overlay {
 }
 
 enum OverlayKind {
-    Toast(gtk::Label),
     /// `sized` gets the width of the window less `gutter`, at most `max`.
     Dialog {
         sized: gtk::Widget,
@@ -487,7 +477,6 @@ fn screen_reader(proxy: &gio::DBusProxy) {
 pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     match command {
         Command::Dialog(dialog) => show_dialog(surface, dialog),
-        Command::Toast { text, long } => show_toast(surface, text, *long),
         Command::Announce(text) => crate::access::announce(&surface.root, text),
         Command::Desktop(command) => crate::chrome::command(surface, command),
         Command::SetClipboard(text) => {
@@ -549,7 +538,7 @@ pub(crate) fn surface_resized(surface: &Surface, width: f32, height: f32) {
     });
 }
 
-/// The app stopped: its dialogs and toasts go too.
+/// The app stopped: its dialogs go too.
 pub(crate) fn clear(surface: &Surface) {
     let removed: Vec<Overlay> = SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
@@ -580,25 +569,6 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
                     size: Size {
                         width: Points(width),
                         height: Points(height),
-                    },
-                },
-            );
-        }
-        OverlayKind::Toast(label) => {
-            let max = (width - 48.0).max(0.0) as i32;
-            let (_, natural, _, _) = label.measure(gtk::Orientation::Horizontal, -1);
-            let w = natural.min(max);
-            let (_, h, _, _) = label.measure(gtk::Orientation::Vertical, w);
-            overlay.root.set_native(
-                &overlay.widget,
-                Bounds {
-                    origin: Point {
-                        x: Points(((width - w as f32) / 2.0).round()),
-                        y: Points(height - 64.0 - h as f32),
-                    },
-                    size: Size {
-                        width: Points(w as f32),
-                        height: Points(h as f32),
                     },
                 },
             );
@@ -1010,38 +980,6 @@ fn descendants(widget: &gtk::Widget) -> impl Iterator<Item = gtk::Widget> {
     })
 }
 
-/// Shows `text` at the bottom of the surface for a while (one at a time:
-/// a new toast replaces the one showing).
-fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
-    let showing: Vec<gtk::Widget> = SYSTEM.with(|s| {
-        s.borrow()
-            .overlays
-            .iter()
-            .filter(|o| o.root == surface.root && matches!(o.kind, OverlayKind::Toast(_)))
-            .map(|o| o.widget.clone())
-            .collect()
-    });
-    for widget in &showing {
-        remove_overlay(widget);
-    }
-    let label = gtk::Label::builder()
-        .label(text)
-        .wrap(true)
-        .wrap_mode(gtk::pango::WrapMode::WordChar)
-        .max_width_chars(48)
-        .justify(gtk::Justification::Center)
-        .css_classes(["nsh-toast"])
-        .can_target(false)
-        .build();
-    let widget: gtk::Widget = label.clone().upcast();
-    add_overlay(surface, widget.clone(), OverlayKind::Toast(label));
-    surface
-        .root
-        .announce(text, gtk::AccessibleAnnouncementPriority::Low);
-    let duration = if long { TOAST_LONG } else { TOAST_SHORT };
-    glib::timeout_add_local_once(duration, move || remove_overlay(&widget));
-}
-
 /// `Clipboard.readText` / `hasText`: answers read `id` with whether the
 /// clipboard holds text and, unless `has_only`, the text.
 /// Opens `url` with the app the desktop has for its scheme
@@ -1164,6 +1102,7 @@ pub(crate) fn read_pasted(
     done: impl FnOnce(nsh_core::PasteEvent) + 'static,
 ) {
     let types = board.formats().union_deserialize_types();
+    let has_html = board.formats().contain_mime_type("text/html");
     let (has_image, has_files) = (
         types.contains_type(gdk::Texture::static_type()),
         types.contains_type(gdk::FileList::static_type()),
@@ -1171,6 +1110,9 @@ pub(crate) fn read_pasted(
     glib::spawn_future_local(async move {
         let text = board.read_text_future().await.ok().flatten();
         let mut paste = nsh_core::PasteEvent::new(text.map(|t| t.to_string()).unwrap_or_default());
+        if has_html {
+            paste.html = read_html(&board).await.unwrap_or_default();
+        }
         if has_files
             && let Ok(value) = board
                 .read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT)
@@ -1195,6 +1137,39 @@ pub(crate) fn read_pasted(
         }
         done(paste);
     });
+}
+
+/// The clipboard's `text/html`: UTF-8, or UTF-16 with a byte order mark as
+/// Firefox writes it.
+async fn read_html(board: &gdk::Clipboard) -> Option<String> {
+    let (stream, _) = board
+        .read_future(&["text/html"], glib::Priority::DEFAULT)
+        .await
+        .ok()?;
+    let out = gio::MemoryOutputStream::new_resizable();
+    out.splice_future(
+        &stream,
+        gio::OutputStreamSpliceFlags::CLOSE_SOURCE | gio::OutputStreamSpliceFlags::CLOSE_TARGET,
+        glib::Priority::DEFAULT,
+    )
+    .await
+    .ok()?;
+    let bytes = out.steal_as_bytes();
+    Some(decode_html(&bytes))
+}
+
+/// Clipboard HTML bytes as text.
+fn decode_html(bytes: &[u8]) -> String {
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, u16::from_le_bytes),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, u16::from_be_bytes),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
+fn utf16(bytes: &[u8], word: fn([u8; 2]) -> u16) -> String {
+    let words: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| word(*c)).collect();
+    String::from_utf16_lossy(&words)
 }
 
 /// `Picker.pickImages`: GTK's file dialog (the portal's where there is

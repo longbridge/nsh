@@ -12,12 +12,12 @@
 use std::{cell::RefCell, fmt::Write as _};
 
 use nsh_core::{
-    BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
-    ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
-    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
+    BorderStyle, Color, Command, EventKind, EventMask, Filter, Gradient, GradientKind,
+    GradientSize, ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem,
+    NativeProps, ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform,
+    TransformKind, TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
+    element::PropEnum,
     geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
-    ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
 
@@ -234,6 +234,22 @@ fn forget_view(id: u32) {
     });
 }
 
+/// `events` as the names of their props: `["onPress", ...]`.
+fn push_events(s: &mut String, events: EventMask) {
+    s.push('[');
+    let mut first = true;
+    for kind in EventKind::ALL {
+        if events.contains(*kind) {
+            if !first {
+                s.push(',');
+            }
+            first = false;
+            push_str(s, kind.prop_name());
+        }
+    }
+    s.push(']');
+}
+
 fn push_str(out: &mut String, v: &str) {
     out.push('"');
     for c in v.chars() {
@@ -267,11 +283,6 @@ pub(crate) fn css_color(c: Color) -> String {
     } else {
         format!("rgba({r},{g},{b},{:.3})", a as f32 / 255.0)
     }
-}
-
-fn with_alpha(c: Color, opacity: f32) -> Color {
-    let a = ((c.0 & 0xff) as f32 * opacity).round().clamp(0.0, 255.0) as u32;
-    Color((c.0 & !0xff) | a)
 }
 
 /// `FooBar` (a `Debug` name) as `foo-bar`.
@@ -460,15 +471,6 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         css.push_str("overflow:clip;");
     }
     let mut shadows = Vec::new();
-    if s.shadow.opacity > 0.0 && !s.shadow.color.is_transparent() {
-        shadows.push(format!(
-            "{}px {}px {}px {}",
-            s.shadow.offset_x.0,
-            s.shadow.offset_y.0,
-            s.shadow.radius.0,
-            css_color(with_alpha(s.shadow.color, s.shadow.opacity))
-        ));
-    }
     if let Some(effects) = &s.effects {
         for b in &effects.box_shadows {
             shadows.push(format!(
@@ -795,11 +797,12 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
-    if p.focusable == Some(false) {
-        s.push_str(",\"focusable\":false");
+    // Unset leaves it to the presses (`ViewProps::focus_stop`).
+    if let Some(focusable) = p.focusable {
+        let _ = write!(s, ",\"focusable\":{focusable}");
     }
-    if p.selection_area {
-        s.push_str(",\"selectionArea\":true");
+    if p.selectable_view {
+        s.push_str(",\"selectableView\":true");
     }
     s.push('}');
     s
@@ -847,7 +850,7 @@ fn field_css(c: &InputConfig) -> String {
     if let Some(c) = c.placeholder_color {
         let _ = write!(css, "--ph:{};", css_color(c));
     }
-    if let Some(c) = c.selection_color {
+    if let Some(c) = c.caret_color {
         let _ = write!(css, "caret-color:{};", css_color(c));
     }
     css
@@ -856,7 +859,7 @@ fn field_css(c: &InputConfig) -> String {
 fn behavior_json(b: &ScrollBehavior) -> String {
     let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.0.to_string()).collect();
     format!(
-        "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{},\"bouncesZoom\":{},\"pinch\":{},\"centerContent\":{}}}",
+        "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{},\"bouncesZoom\":{},\"pinch\":{},\"centerContent\":{},\"refreshIndicator\":{}}}",
         b.paging,
         b.snap_interval.0,
         offsets.join(","),
@@ -871,7 +874,9 @@ fn behavior_json(b: &ScrollBehavior) -> String {
         b.max_zoom,
         b.bounces_zoom,
         b.pinch,
-        b.center_content
+        b.center_content,
+        b.refresh_indicator
+            .map_or("null".to_owned(), |h| format!("{{\"height\":{}}}", h.0))
     )
 }
 
@@ -884,7 +889,7 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
                 LayoutCurve::Linear => "linear".to_owned(),
                 LayoutCurve::EaseIn => "ease-in".to_owned(),
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
-                LayoutCurve::EaseInEaseOut => "ease-in-out".to_owned(),
+                LayoutCurve::EaseInEaseOut | LayoutCurve::Keyboard => "ease-in-out".to_owned(),
                 LayoutCurve::Spring { damping } => spring_easing(damping),
             };
             format!(
@@ -1035,7 +1040,13 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 let _ = write!(out.s, "[{},{},", run.x, run.y);
                 push_str(&mut out.s, &run.text);
-                let _ = write!(out.s, ",{}", run.style);
+                let _ = write!(out.s, ",{},{},", run.style, run.start);
+                match run.link {
+                    Some(link) => {
+                        let _ = write!(out.s, "{link}");
+                    }
+                    None => out.s.push_str("null"),
+                }
                 if !run.after.is_empty() {
                     out.s.push(',');
                     push_str(&mut out.s, &run.after);
@@ -1055,7 +1066,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 None => out.raw("null"),
             };
             out.class_arg(selection);
-            if !layout.backgrounds.is_empty() {
+            if !layout.backgrounds.is_empty() || !text.links.is_empty() {
                 // Span backgrounds: `[x, y, width, height, radius, color]`.
                 out.s.push_str(",[");
                 for (i, b) in layout.backgrounds.iter().enumerate() {
@@ -1072,22 +1083,25 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 out.s.push(']');
             }
+            if !text.links.is_empty() {
+                // Links, as runs name them: `[node, events]`.
+                out.s.push_str(",[");
+                for (i, link) in text.links.iter().enumerate() {
+                    if i > 0 {
+                        out.s.push(',');
+                    }
+                    let _ = write!(out.s, "[{},", link.node);
+                    push_events(&mut out.s, link.events);
+                    out.s.push(']');
+                }
+                out.s.push(']');
+            }
             out.end();
         }
         MountItem::Events { id, events } => {
             out.item("e").num(*id);
-            out.s.push_str(",[");
-            let mut first = true;
-            for kind in EventKind::ALL {
-                if events.contains(*kind) {
-                    if !first {
-                        out.s.push(',');
-                    }
-                    first = false;
-                    push_str(&mut out.s, kind.prop_name());
-                }
-            }
-            out.s.push(']');
+            out.s.push(',');
+            push_events(&mut out.s, *events);
             out.end();
         }
         MountItem::Image {
@@ -1156,6 +1170,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.item("cv")
                 .num(*id)
                 .raw(&crate::canvas::encode(drawing))
+                .end();
+        }
+        MountItem::Shader { id, layer } => {
+            out.item("sh")
+                .num(*id)
+                .raw(&crate::shader::encode(layer.as_deref()))
                 .end();
         }
         MountItem::Gestures { id, values } => {
@@ -1263,7 +1283,9 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::Component { id, name } => out.item("comp").num(*id).str(name).end(),
         // Browsers hit-test what overflows a box themselves; the keymap
         // stays in Rust (`nsh_key`).
+        // No registered native components on the web.
         MountItem::ComponentProps { .. }
+        | MountItem::ComponentPropSlots { .. }
         | MountItem::Keymap(_)
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }
@@ -1351,14 +1373,6 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 None => out.raw("null").raw("null"),
             };
             out.bool(*animated).end();
-        }
-        Command::Toast { text, long } => {
-            out.item("cmd")
-                .num(id)
-                .str("toast")
-                .str(text)
-                .bool(*long)
-                .end();
         }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
         Command::OpenUrl { id: request, url } => out

@@ -56,7 +56,7 @@ impl Mounter {
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
-        crate::selection_area::end_batch(surface);
+        crate::selectable_view::end_batch(surface);
     }
 
     fn get(&self, id: NodeId) -> Option<&NshView> {
@@ -121,11 +121,11 @@ impl Mounter {
                 if parent.kind() == ViewKind::Scroll {
                     crate::scroll::child_inserted(parent);
                 }
-                crate::selection_area::touched(surface, child);
+                crate::selectable_view::touched(surface, child);
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
-                    crate::selection_area::touched(surface, view);
+                    crate::selectable_view::touched(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -135,11 +135,12 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
-                    crate::selection_area::touched(surface, &view);
+                    crate::selectable_view::touched(surface, &view);
                     crate::native::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
+                        crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
                 }
@@ -180,7 +181,7 @@ impl Mounter {
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
                     ViewKind::Canvas => view.changed(),
-                    _ => {}
+                    _ => crate::shader::resized(view),
                 }
             }
             MountItem::ViewStyle { id, style } => {
@@ -188,6 +189,7 @@ impl Mounter {
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
                 crate::input::style_changed(view);
                 crate::transition::style_changed(surface, view, &old);
+                crate::access::style_changed(view, &old);
                 view.moved();
             }
             MountItem::Text {
@@ -198,7 +200,7 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     crate::text::set(view, text, layout, *content);
-                    crate::selection_area::touched(surface, view);
+                    crate::selectable_view::touched(surface, view);
                     crate::access::text_changed(view);
                 }
             }
@@ -282,6 +284,11 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            MountItem::Shader { id, layer } => {
+                if let Some(view) = self.get(*id) {
+                    crate::shader::set(surface, view, layer.clone());
+                }
+            }
             MountItem::Gestures { id, values } => {
                 if let Some(view) = self.get(*id) {
                     crate::input::gestures(surface, view, *values);
@@ -292,7 +299,7 @@ impl Mounter {
                 view.set_can_target(!matches!(props.pointer_events, PointerEvents::None));
                 view.state_mut().props = props.clone();
                 crate::input::props_changed(surface, view);
-                crate::selection_area::props_changed(surface, view);
+                crate::selectable_view::props_changed(surface, view);
                 crate::access::props_changed(view);
             }
             MountItem::LayoutAnimation(a) => self.layout_animation = Some(*a),
@@ -338,7 +345,9 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
         }
     }
 

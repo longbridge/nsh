@@ -16,7 +16,7 @@ use crate::{
         MotionSpec, NodeId, PRESETS as MOTIONS, PlaybackDirection, StaggerFrom, StepPosition,
         keyframes,
     },
-    ui::TsTypes,
+    element::TsTypes,
 };
 
 /// A curve of `Easing`: its name, its parameter (name and default) and
@@ -289,6 +289,7 @@ const LAYOUT_TYPES: &[(&str, MakeLayoutCurve)] = &[
     ("linear", |_| LayoutCurve::Linear),
     ("easeIn", |_| LayoutCurve::EaseIn),
     ("easeOut", |_| LayoutCurve::EaseOut),
+    ("keyboard", |_| LayoutCurve::Keyboard),
 ];
 
 /// What appearing and disappearing views animate (`property`), by name
@@ -579,6 +580,7 @@ pub fn tables() -> crate::JsonValue {
             LayoutCurve::EaseOut => ("easeOut", None),
             LayoutCurve::EaseInEaseOut => ("easeInEaseOut", None),
             LayoutCurve::Spring { damping } => ("spring", Some(damping)),
+            LayoutCurve::Keyboard => ("keyboard", None),
         };
         let property = match t.property {
             LayoutProperty::Opacity => "opacity",

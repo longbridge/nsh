@@ -17,11 +17,12 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{keyboard_avoiding_view, selection_area};
+use nsh_base::input;
 use nsh_core::{
     LayoutAnimation, Points, Size,
+    element::{AccessibilityState, ScrollEvent, View},
+    prelude::*,
     time::Instant,
-    ui::{AccessibilityState, ScrollEvent, View, prelude::*},
 };
 
 use self::{
@@ -841,7 +842,12 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     // mounted.
     let content = when(
         move || !messages.with(Vec::is_empty),
-        move || selection_area().flex_1().child(chat.list_view(list, wide)),
+        move || {
+            view()
+                .selectable(true)
+                .flex_1()
+                .child(chat.list_view(list, wide))
+        },
     )
     .otherwise(move || chat.empty());
 
@@ -1086,6 +1092,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         })
                         .placeholder(move || format!("Message {}", model.get().name()))
                         .placeholder_color(|| color(colors::FAINT))
+                        .caret_color(|| color(colors::ACCENT))
                         .selection_color(|| color(colors::ACCENT))
                         .on_focus(move || menu.set(false))
                         .on_content_size_change(move |size: &Size<Points>| {
@@ -1166,7 +1173,8 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         );
 
     let pane = view().flex_1().bg(colors::BACKGROUND).child(
-        keyboard_avoiding_view()
+        view()
+            .pb_keyboard()
             .flex_1()
             .child(
                 view()
@@ -1714,7 +1722,7 @@ fn user_row(item: Item) -> View {
                     .border_color(colors::BORDER)
                     .child(
                         text(move || body.get())
-                            .selectable(true)
+                            .select_text()
                             .text_size(px(15.0))
                             .line_height(px(21.0))
                             .text_color(colors::TEXT),
@@ -1807,7 +1815,7 @@ fn reasoning_text(reasoning: impl Fn() -> String + 'static) -> View {
         .child(view().w(px(2.0)).rounded(px(1.0)).bg(colors::BORDER))
         .child(
             text(reasoning)
-                .selectable(true)
+                .select_text()
                 .flex_1()
                 .text_size(px(14.0))
                 .line_height(px(20.0))

@@ -11,10 +11,11 @@ mod hit;
 use std::sync::Arc;
 
 pub use self::{
-    damage::{Damage, DamageScan},
+    damage::{Damage, DamageScan, first_animated, prefix_path_needed},
     hit::{point_in_path, point_in_stroke},
 };
 use crate::{
+    element::{PropEnum, TsTypes},
     geometry::{Bounds, Corners, Percentage, Point, Points, Radians, ScaledPixels, Size, px},
     js::{
         canvas::*,
@@ -22,7 +23,6 @@ use crate::{
         ops::{JsOps, OpArg, OpReader, OpsError},
     },
     style::{Color, FontVariant},
-    ui::{PropEnum, TsTypes},
 };
 
 /// A number of a drawing: a constant or the value of animated value slot
@@ -252,6 +252,75 @@ impl CanvasGradient {
         self.stops.insert(at, (offset, Color::from(color.into())));
         self
     }
+
+    /// The CSS gradient `gradient` (a layer of `background-image`) as the
+    /// background of a box at `area` (canvas coordinates) draws it: the
+    /// gradient line and its stops resolved for the box's size as CSS
+    /// resolves them, a repeating gradient's stops repeated along the
+    /// whole line. `None` for an elliptical radial gradient, which a canvas
+    /// gradient (between circles) does not draw.
+    pub fn from_css(gradient: &crate::effects::Gradient, area: Bounds<Points>) -> Option<Self> {
+        use crate::{effects::GradientKind, geometry::point};
+        let size = area.size;
+        let (w, h) = (size.width.0, size.height.0);
+        let (left, top) = (area.origin.x.0, area.origin.y.0);
+        let at = |x: f32, y: f32| point(px(x), px(y));
+        let shape = match gradient.kind {
+            GradientKind::Radial { circle: false, .. } => return None,
+            GradientKind::Radial { x, y, .. } => {
+                let center = at(left + x.0 * w, top + y.0 * h);
+                GradientShape::Radial {
+                    start: center,
+                    start_radius: Points::ZERO,
+                    end: center,
+                    end_radius: gradient.line_length(size),
+                }
+            }
+            // CSS turns from the top, a canvas from the x axis; both
+            // clockwise.
+            GradientKind::Conic { from, x, y } => GradientShape::Conic {
+                start_angle: Radians(from.0 - std::f32::consts::FRAC_PI_2),
+                center: at(left + x.0 * w, top + y.0 * h),
+            },
+            kind => {
+                // Through the center at the angle, long enough that the
+                // corners get the end colors (CSS Images 3).
+                let angle = kind
+                    .linear_angle(size)
+                    .unwrap_or(Radians(std::f32::consts::PI));
+                // A quarter turn's sine and cosine exactly (`to bottom` is
+                // 180deg): float error would put the line a hair off the
+                // box's edges.
+                let exact = |v: f32| {
+                    if v.abs() < 1e-6 {
+                        0.0
+                    } else if (v.abs() - 1.0).abs() < 1e-6 {
+                        v.signum()
+                    } else {
+                        v
+                    }
+                };
+                let (sin, cos) = angle.sin_cos();
+                let (sin, cos) = (exact(sin), exact(cos));
+                // CSS's gradient line: |w sin| + |h cos| long.
+                let half = ((w * sin).abs() + (h * cos).abs()) / 2.0;
+                let (cx, cy) = (left + w / 2.0, top + h / 2.0);
+                GradientShape::Linear {
+                    start: at(cx - sin * half, cy + cos * half),
+                    end: at(cx + sin * half, cy - cos * half),
+                }
+            }
+        };
+        let mut stops = gradient.unrolled_stops(size, Percentage(1.0));
+        // A canvas gradient clamps offsets, which would squeeze stops past
+        // either end: they are cut there, at the color between.
+        if !stops.iter().all(|s| (0.0..=1.0).contains(&s.1.0)) {
+            stops = crate::effects::cut_stops(&stops, Percentage(1.0));
+        }
+        let mut out = Self::new(shape);
+        out.stops = stops.into_iter().map(|(color, at)| (at, color)).collect();
+        Some(out)
+    }
 }
 
 /// `fillStyle` / `strokeStyle`.
@@ -461,17 +530,48 @@ pub fn measure_line(
     font: &CanvasFont,
     text: &str,
 ) -> Points {
-    let mut attributed = crate::text::AttributedText {
-        no_wrap: true,
-        max_lines: 1,
-        ..Default::default()
-    };
-    attributed.push(text, font.text_style());
-    if attributed.text.is_empty() {
+    if text.is_empty() {
         return Points::ZERO;
     }
-    let prepared = engine.prepare(&attributed);
-    engine.measure(&prepared, None).width
+    advance(engine, font, text)
+}
+
+/// What closes a text ending in white space while it is measured.
+const MARK: &str = "x";
+
+/// How far `text` advances on one line in `font`, its trailing white space
+/// included, as canvas `measureText` counts it. Text engines lay a line
+/// out without the white space at its end (it hangs past the line, as in
+/// CSS), so a run of spaces measures 0 and `"a "` as `"a"`: such a text is
+/// measured with a mark after it, less the mark.
+fn advance(engine: &impl crate::text::TextEngine, font: &CanvasFont, text: &str) -> Points {
+    let width = |text: &str| {
+        let mut attributed = crate::text::AttributedText {
+            no_wrap: true,
+            max_lines: 1,
+            ..Default::default()
+        };
+        attributed.push(text, font.text_style());
+        let prepared = engine.prepare(&attributed);
+        engine.measure(&prepared, None).width
+    };
+    // A line break ends the line: what follows it is not on it.
+    let hangs = text.ends_with(|c: char| c.is_whitespace() && !is_line_break(c));
+    if !hangs {
+        return width(text);
+    }
+    let mut marked = String::with_capacity(text.len() + MARK.len());
+    marked.push_str(text);
+    marked.push_str(MARK);
+    (width(&marked) - width(MARK)).max(Points::ZERO)
+}
+
+/// Whether `c` breaks a line (Unicode's mandatory breaks).
+fn is_line_break(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+    )
 }
 
 /// How `text` sits on one line in a canvas font ([`line_metrics`]): its
@@ -510,7 +610,7 @@ pub fn line_metrics(
     let width = if text.is_empty() {
         Points::ZERO
     } else {
-        size.width
+        advance(engine, font, text)
     };
     let layout = engine.layout(&prepared, size);
     match engine.lines(&layout).first() {
@@ -727,6 +827,24 @@ pub enum CanvasOp {
     },
 }
 
+impl CanvasOp {
+    /// Whether it paints (rather than setting the state: transforms,
+    /// styles, paths, clips).
+    pub fn paints(&self) -> bool {
+        matches!(
+            self,
+            CanvasOp::Fill(..)
+                | CanvasOp::Stroke(_)
+                | CanvasOp::FillRect(_)
+                | CanvasOp::StrokeRect(_)
+                | CanvasOp::ClearRect(_)
+                | CanvasOp::FillText { .. }
+                | CanvasOp::StrokeText { .. }
+                | CanvasOp::DrawImage { .. }
+        )
+    }
+}
+
 /// One `draw` of a canvas.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Drawing {
@@ -738,6 +856,44 @@ pub struct Drawing {
     /// assistive technologies and UI tests ([`CanvasNode`]), in reading
     /// order.
     pub nodes: Vec<CanvasNode>,
+    /// The operations whose value is the canvas view's style rather than
+    /// one of their own, by index in `ops`: the core gives them the
+    /// view's paint properties ([`crate::style::PaintStyle`], inherited
+    /// from the views around it) before a platform gets the drawing
+    /// ([`Drawing::painted`]), so what a Rust component draws follows the
+    /// app's `fill-*` / `stroke-*` classes and the appearance without
+    /// being recorded again.
+    pub view_paints: Vec<(u32, ViewPaint)>,
+}
+
+/// An operation of a [`Drawing`] that takes its value from the canvas
+/// view's paint properties ([`Drawing::view_paints`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewPaint {
+    /// `fillStyle` is the view's `fill`; where nothing sets one, this.
+    Fill(crate::style::SvgPaint),
+    /// `strokeStyle` is the view's `stroke`; where nothing sets one, this.
+    Stroke(crate::style::SvgPaint),
+    /// `lineWidth` is the view's `strokeWidth` (1 where nothing sets one,
+    /// CSS's initial value).
+    StrokeWidth,
+    /// The line dash is the view's `strokeDasharray` (solid where nothing
+    /// sets one).
+    StrokeDasharray,
+    /// Fills the current path by `rule` with the view's background: its
+    /// `backgroundColor`, then its `backgroundImage` layers over it (the
+    /// last one first, as CSS stacks them), each positioned over `area`
+    /// (canvas coordinates) as over a box of that size
+    /// ([`CanvasGradient::from_css`]); the canvas's state is kept around
+    /// it. The view draws no background of its own behind the drawing: it
+    /// shows where this fills, as with CSS's `clip-path` (an area under a
+    /// chart's line that fades out, in the app's `bg-linear-*` classes).
+    Background {
+        /// The box the background is positioned over.
+        area: Bounds<Points>,
+        /// Which parts of the path are inside.
+        rule: FillRule,
+    },
 }
 
 /// A part of a canvas's drawing that assistive technologies and UI tests
@@ -791,6 +947,95 @@ impl CanvasNode {
 }
 
 impl Drawing {
+    /// Whether it fills with its view's background
+    /// ([`ViewPaint::Background`]), which the view then does not draw.
+    pub fn paints_background(&self) -> bool {
+        self.view_paints
+            .iter()
+            .any(|(_, v)| matches!(v, ViewPaint::Background { .. }))
+    }
+
+    /// The drawing as a platform replays it: its [`Drawing::view_paints`]
+    /// given the paint properties `paint` of its view, whose text color is
+    /// `current` (`currentColor`), and its background, the color
+    /// `background` under the gradients `images` (top layer first). `none`
+    /// paints nothing (a transparent paint). Its own `view_paints` are
+    /// resolved, so it has none.
+    pub fn painted(
+        &self,
+        paint: &crate::style::PaintStyle,
+        current: Color,
+        background: Color,
+        images: &[crate::effects::Gradient],
+    ) -> Drawing {
+        use crate::style::SvgPaint;
+        let color = |p: SvgPaint| {
+            Paint::Color(match p {
+                SvgPaint::None => Color::TRANSPARENT,
+                SvgPaint::CurrentColor => current,
+                SvgPaint::Color(c) => c,
+            })
+        };
+        let mut out = self.clone();
+        for &(at, view) in &self.view_paints {
+            let Some(op) = out.ops.get_mut(at as usize) else {
+                continue;
+            };
+            *op = match view {
+                ViewPaint::Fill(initial) => {
+                    CanvasOp::FillStyle(color(paint.fill.unwrap_or(initial)))
+                }
+                ViewPaint::Stroke(initial) => {
+                    CanvasOp::StrokeStyle(color(paint.stroke.unwrap_or(initial)))
+                }
+                ViewPaint::StrokeWidth => {
+                    CanvasOp::LineWidth(Num::Const(paint.stroke_width.map_or(1.0, |w| w.0)))
+                }
+                ViewPaint::StrokeDasharray => CanvasOp::LineDash(
+                    paint
+                        .stroke_dasharray
+                        .clone()
+                        .unwrap_or_else(|| Arc::from([])),
+                ),
+                // Expanded below: its place holds the fill it becomes.
+                ViewPaint::Background { .. } => continue,
+            };
+        }
+        out.view_paints = Vec::new();
+        if !self.paints_background() {
+            return out;
+        }
+        let ops = std::mem::take(&mut out.ops);
+        let mut backgrounds = self.view_paints.iter().filter_map(|&(at, v)| match v {
+            ViewPaint::Background { area, rule } => Some((at as usize, area, rule)),
+            _ => None,
+        });
+        let mut next = backgrounds.next();
+        for (i, op) in ops.into_iter().enumerate() {
+            let Some((_, area, rule)) = next.filter(|&(at, ..)| at == i) else {
+                out.ops.push(op);
+                continue;
+            };
+            next = backgrounds.next();
+            out.ops.push(CanvasOp::Save);
+            if !background.is_transparent() {
+                out.ops.push(CanvasOp::FillStyle(Paint::Color(background)));
+                out.ops.push(CanvasOp::Fill(None, rule));
+            }
+            for image in images.iter().rev() {
+                let Some(gradient) = CanvasGradient::from_css(image, area) else {
+                    log::warn!("an elliptical `radial-gradient()` fills no canvas shape");
+                    continue;
+                };
+                out.ops
+                    .push(CanvasOp::FillStyle(Paint::Gradient(Arc::new(gradient))));
+                out.ops.push(CanvasOp::Fill(None, rule));
+            }
+            out.ops.push(CanvasOp::Restore);
+        }
+        out
+    }
+
     /// The slot of animated value `node`, adding it if new.
     pub fn slot(&mut self, node: crate::animation::NodeId) -> u16 {
         match self.slots.iter().position(|&n| n == node) {
@@ -1211,6 +1456,157 @@ fn arc_to_cubics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text::{AttributedText, TextEngine, TextLayout};
+
+    /// A CSS gradient as the background of a box: the line through the
+    /// box's center at the gradient's angle, as long as CSS makes it, and
+    /// its stops; a repeating one's stops repeated over the whole line, the
+    /// ends cut at the colors there; an elliptical radial one not drawn.
+    #[test]
+    fn css_gradients_become_canvas_gradients_over_a_box() {
+        use crate::geometry::{bounds, point, size};
+        let area = bounds(point(px(10.0), px(20.0)), size(px(100.0), px(50.0)));
+        let one = |css: &str| crate::css::gradients(css).unwrap().remove(0);
+        let gradient = |css: &str| CanvasGradient::from_css(&one(css), area);
+        let down = gradient("linear-gradient(to bottom, #ff0000, #0000ff)").unwrap();
+        assert_eq!(
+            down.shape,
+            GradientShape::Linear {
+                start: point(px(60.0), px(20.0)),
+                end: point(px(60.0), px(70.0)),
+            }
+        );
+        assert_eq!(down.stops[0], (Percentage(0.0), Color(0xff00_00ff)));
+        assert_eq!(
+            down.stops[down.stops.len() - 1],
+            (Percentage(1.0), Color(0x0000_ffff))
+        );
+        let right = gradient("linear-gradient(90deg, #ff0000, #0000ff)").unwrap();
+        let GradientShape::Linear { start, end } = right.shape else {
+            panic!("{right:?}")
+        };
+        assert!((start.x.0 - 10.0).abs() < 1e-3 && (start.y.0 - 45.0).abs() < 1e-3);
+        assert!((end.x.0 - 110.0).abs() < 1e-3 && (end.y.0 - 45.0).abs() < 1e-3);
+        // Repeating every quarter: the stops again at each quarter, all
+        // within the line.
+        let stripes =
+            gradient("repeating-linear-gradient(to bottom, #ff0000 0%, #0000ff 25%)").unwrap();
+        let at = |o: f32| {
+            stripes
+                .stops
+                .iter()
+                .filter(|(p, _)| (p.0 - o).abs() < 1e-4)
+                .count()
+        };
+        assert!(
+            at(0.25) >= 2 && at(0.5) >= 2 && at(0.75) >= 2,
+            "{stripes:?}"
+        );
+        assert!(
+            stripes
+                .stops
+                .iter()
+                .all(|(p, _)| (0.0..=1.0).contains(&p.0))
+        );
+        // Stops past the end: cut there, at the color between.
+        let cut = gradient("linear-gradient(to bottom, #000000 0%, #ffffff 200%)").unwrap();
+        assert_eq!(
+            cut.stops[cut.stops.len() - 1],
+            (Percentage(1.0), Color(0x8080_80ff))
+        );
+        assert!(gradient("radial-gradient(#ff0000, #0000ff)").is_none());
+        let circle = gradient("radial-gradient(circle, #ff0000, #0000ff)").unwrap();
+        assert!(matches!(circle.shape, GradientShape::Radial { .. }));
+    }
+
+    /// A drawing filling with its view's background: the color, then each
+    /// gradient from the bottom layer up, filling the path, the canvas's
+    /// state kept around them.
+    #[test]
+    fn a_drawing_fills_with_its_views_background() {
+        use crate::geometry::{bounds, point, size};
+        let area = bounds(point(px(0.0), px(0.0)), size(px(10.0), px(10.0)));
+        let drawing = crate::element::Painter::new()
+            .begin_path()
+            .fill_background_from_view(area)
+            .finish();
+        assert!(drawing.paints_background());
+        let images = crate::css::gradients("linear-gradient(#ff0000, #0000ff)").unwrap();
+        let none = crate::style::PaintStyle::default();
+        let painted = drawing.painted(&none, Color::TRANSPARENT, Color(0x00ff_00ff), &images);
+        assert!(painted.view_paints.is_empty());
+        let ops = &painted.ops[1..];
+        assert_eq!(ops[0], CanvasOp::Save);
+        assert_eq!(
+            ops[1],
+            CanvasOp::FillStyle(Paint::Color(Color(0x00ff_00ff)))
+        );
+        assert_eq!(ops[2], CanvasOp::Fill(None, FillRule::NonZero));
+        assert!(matches!(ops[3], CanvasOp::FillStyle(Paint::Gradient(_))));
+        assert_eq!(ops[4], CanvasOp::Fill(None, FillRule::NonZero));
+        assert_eq!(ops[5], CanvasOp::Restore);
+        // No background: nothing fills.
+        let bare = drawing.painted(&none, Color::TRANSPARENT, Color::TRANSPARENT, &[]);
+        assert_eq!(&bare.ops[1..], [CanvasOp::Save, CanvasOp::Restore]);
+    }
+
+    /// Lays a line out as text engines do: 10 points a character, without
+    /// the white space at its end.
+    struct Hanging;
+
+    impl TextEngine for Hanging {
+        type Prepared = String;
+
+        fn prepare(&self, text: &AttributedText) -> String {
+            text.text.to_string()
+        }
+
+        fn prepare_aligned(
+            &self,
+            text: &AttributedText,
+            _: &crate::text::AttachmentAlignments,
+        ) -> String {
+            self.prepare(text)
+        }
+
+        fn measure(&self, text: &String, _: Option<Points>) -> Size<Points> {
+            let shown = text.trim_end_matches(|c: char| c.is_whitespace());
+            Size::new(Points(10.0 * shown.chars().count() as f32), Points(12.0))
+        }
+
+        fn layout(&self, _: &String, _: Size<Points>) -> TextLayout {
+            TextLayout(std::sync::Arc::new(()))
+        }
+    }
+
+    #[test]
+    fn trailing_white_space_advances_as_canvas_measures_it() {
+        let font = CanvasFont::default();
+        for (text, width) in [
+            ("", 0.0),
+            ("ab", 20.0),
+            (" ", 10.0),
+            ("   ", 30.0),
+            ("  items: ", 90.0),
+            ("a\t", 20.0),
+            // Chinese and its ideographic space, a character each.
+            ("名字\u{3000}", 30.0),
+            ("你好 ", 30.0),
+            // A line break ends the line.
+            ("ab\n", 20.0),
+        ] {
+            assert_eq!(
+                measure_line(&Hanging, &font, text),
+                Points(width),
+                "{text:?}"
+            );
+            assert_eq!(
+                line_metrics(&Hanging, &font, text).width,
+                Points(width),
+                "{text:?}"
+            );
+        }
+    }
 
     fn consts(op: &PathOp) -> Vec<f32> {
         let v = |n: &Num| match n {

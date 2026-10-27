@@ -7,14 +7,7 @@
 // ends where its commit puts it. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import {
-  Animated,
-  AnimatedNode,
-  AnimatedValue,
-  Easing,
-  LayoutAnimation,
-  createAnimatedValue,
-} from "nsh/animated";
+import { Animated, AnimatedNode, AnimatedValue, Easing, LayoutAnimation, createAnimatedValue } from "nsh";
 
 const fixed = (values: number[]) => values.map((v) => v.toFixed(3)).join(" ");
 
@@ -23,10 +16,13 @@ function App() {
   const scale = new AnimatedValue(2);
   const sum = Animated.add(opacity, scale);
   const mapped = scale.interpolate({ inputRange: [0, 4], outputRange: [0, 100] });
+  // A floating bar that settles shown or hidden when its scroll view rests.
+  const bar = scale.diffClamp(0, 56, { snap: true });
   const fade = Animated.timing(opacity, { toValue: 1, duration: 200, easing: Easing.out(Easing.cubic) });
   const spring = Animated.sampleSpring({ toValue: 1, damping: 40 });
   const decay = Animated.sampleDecay({ velocity: 1000, from: 0 });
   const custom = LayoutAnimation.create(250, LayoutAnimation.Types.linear, LayoutAnimation.Properties.opacity);
+  const keyboard = LayoutAnimation.create(250, LayoutAnimation.Types.keyboard);
   const width = signal(50);
   return (
     <View testID="root" style={{ flex: 1, paddingTop: 64 }}>
@@ -46,7 +42,7 @@ function App() {
       <Text>
         Created: {custom.duration} {custom.create?.type} {custom.create?.property}
       </Text>
-      <View testID="faded" style={{ width: 40, height: 40, opacity, transform: [{ translateX: mapped }] }} />
+      <View testID="faded" style={{ width: 40, height: 40, opacity, translate: [mapped, 0] }} />
       <View
         testID="grow"
         onPress={() => {
@@ -57,6 +53,12 @@ function App() {
         <Text>Grow</Text>
       </View>
       <View testID="box" style={{ width: width(), height: 20 }} />
+      <Text>Keyboard: {keyboard.update?.type}</Text>
+      <Text>
+        Snapping diffClamp: {String(bar instanceof AnimatedNode)}{" "}
+        {String(Animated.diffClamp(scale, 0, 56, { snap: true }) === bar)}{" "}
+        {String(scale.diffClamp(0, 56) !== bar)}
+      </Text>
     </View>
   );
 }

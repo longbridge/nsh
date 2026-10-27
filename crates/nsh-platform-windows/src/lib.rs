@@ -34,6 +34,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod fps;
 mod geom;
 mod gfx;
 mod image;
@@ -45,7 +46,8 @@ mod navigation;
 mod picker;
 mod render;
 mod scroll;
-mod selection_area;
+mod selectable_view;
+mod shader;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

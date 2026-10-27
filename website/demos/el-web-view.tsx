@@ -1,6 +1,6 @@
 import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
-import { platform, windowSize } from "nsh/device";
-import { ui } from "./palette";
+import { platform, windowSize } from "nsh";
+import { button, buttonText, ui } from "./palette";
 
 // The page: a button that posts to the app, and a line that shows what the
 // app posts back.
@@ -29,10 +29,9 @@ function Button(props: { label: string; onPress: () => void }) {
   return (
     <View
       onPress={props.onPress}
-      activeStyle={{ opacity: 0.6 }}
-      style={{ ...ui().raised, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 }}
+      {...button()}
     >
-      <Text style={{ color: ui().text, fontWeight: "600" }}>{props.label}</Text>
+      <Text style={buttonText()}>{props.label}</Text>
     </View>
   );
 }
@@ -83,7 +82,7 @@ function App() {
           </View>
           <View style={{ ...ui().card, borderRadius: 12, padding: 12, gap: 4 }}>
             <Text style={{ color: ui().muted, fontSize: 12 }}>onLoad</Text>
-            <Text style={{ color: ui().text, fontFamily: "monospace", fontSize: 13 }} numberOfLines={1}>
+            <Text style={{ numberOfLines: 1, color: ui().text, fontFamily: "monospace", fontSize: 13 }}>
               {nav() ? `title "${nav()!.title}"` : "…"}
             </Text>
             <Text style={{ color: ui().muted, fontSize: 12, marginTop: 6 }}>onMessage, newest first</Text>

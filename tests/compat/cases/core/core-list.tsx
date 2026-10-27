@@ -7,7 +7,7 @@
 // the viewport, rendered once the frames after the first bind them. Its
 // script checks each.
 import { Scroll, Text, View, signal } from "nsh";
-import { List } from "nsh/list";
+import { List } from "nsh";
 
 function App() {
   const items = signal(["Apple", "Banana", "Cherry"]);

@@ -1,6 +1,6 @@
 import { type CanvasRenderingContext2D, effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
-import { Animated, createAnimatedValue, Easing, type AnimatedNode } from "nsh/animated";
-import { PanResponder } from "nsh/gesture";
+import { Animated, createAnimatedValue, Easing, type AnimatedNode } from "nsh";
+import { PanResponder } from "nsh";
 import { alpha, colors, isDark } from "../../ui";
 import type { Quote } from "./market";
 
@@ -75,7 +75,7 @@ export function LiveDot(props: { running: () => boolean; size?: number }) {
           borderRadius: size / 2,
           backgroundColor: colors.accent,
           opacity: p.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-          transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }) }],
+          scale: p.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }),
         }}
       />
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: props.running() ? colors.accent : colors.faint }} />
@@ -164,7 +164,7 @@ export function SpringBar(props: { share: () => number; color: string; from?: "l
       }}
       style={{ height: h, overflow: "hidden", borderRadius: props.radius ?? h / 2 }}
     >
-      <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, borderRadius: props.radius ?? h / 2, backgroundColor: props.color, transform: [{ translateX: x }] }} />
+      <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, borderRadius: props.radius ?? h / 2, backgroundColor: props.color, translate: [x, 0] }} />
     </View>
   );
 }

@@ -15,13 +15,35 @@ use std::{
 use nsh_core::{
     AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
     MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
-    ui::PropEnum,
+    element::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
+
+/// The UTF-16 offset of byte `at` of `text`.
+fn utf16_at(text: &str, at: usize) -> u32 {
+    text[..at].encode_utf16().count() as u32
+}
+
+/// Where `want` reads in `text`, as the UTF-16 offset of each match.
+fn char_starts(text: &str, want: &TextMatch) -> Vec<u32> {
+    let ranges: Vec<usize> = match want {
+        TextMatch::Exact(want) if want.is_empty() => Vec::new(),
+        TextMatch::Exact(want) => text
+            .match_indices(want.as_str())
+            .map(|(at, _)| at)
+            .collect(),
+        TextMatch::Regex(re) => re
+            .find_iter(text)
+            .filter(|m| !m.is_empty())
+            .map(|m| m.start())
+            .collect(),
+    };
+    ranges.into_iter().map(|at| utf16_at(text, at)).collect()
+}
 
 /// The ids the model gives a canvas's nodes ([`nsh_core::canvas::CanvasNode`]),
 /// counting down from the top of the id space, where the core and JS
@@ -89,6 +111,9 @@ pub struct Screen {
     commands: Vec<(NodeId, Command)>,
     /// The input that has the focus.
     focused: Option<NodeId>,
+    /// The view that takes presses Tab gave the keyboard focus to (macOS,
+    /// the web).
+    key_focus: Option<NodeId>,
     /// Scroll views a command moved, whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
@@ -163,15 +188,18 @@ struct View {
     role: AccessibilityRole,
     /// It takes no presses (`disabled`, its accessibility state).
     disabled: bool,
+    /// `focusable`: `Some(true)` makes it a stop of Tab, `Some(false)` keeps
+    /// a pressable out ([`nsh_core::ViewProps::focus_stop`]).
+    focusable: Option<bool>,
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
-    /// A selection area (`SelectionArea` of `nsh/base`): its texts share
+    /// A selectable view (a `View` with `selectable`): its texts share
     /// one selection.
-    selection_area: bool,
+    selectable_view: bool,
     /// The interaction states it tracks (`TrackStates`: pressed, hovered).
     tracked: u8,
     /// The interaction states it is in (of those it tracks).
@@ -190,6 +218,9 @@ struct View {
     span: Option<Span>,
     /// The spans of a text view's text that take presses.
     spans: Vec<NodeId>,
+    /// The text a text view shows, styles included, so a step can read a
+    /// span's style.
+    attributed: Option<Arc<nsh_core::AttributedText>>,
     /// Which touches it and its subtree receive (`pointerEvents`).
     pointer_events: PointerEvents,
     /// A node of a canvas's drawing, not a view of its own.
@@ -273,6 +304,8 @@ pub(crate) struct Scroll {
     content: Option<Size<Points>>,
     /// The user cannot scroll it (`scrollable={false}`).
     pub(crate) locked: bool,
+    /// How it scrolls (where a pull refreshes).
+    pub(crate) behavior: nsh_core::ScrollBehavior,
 }
 
 impl Screen {
@@ -342,6 +375,7 @@ impl Screen {
             MountItem::ScrollBehavior { id, behavior } => {
                 if let Some(scroll) = self.scroll_mut(*id) {
                     scroll.locked = !behavior.enabled;
+                    scroll.behavior = (**behavior).clone();
                 }
             }
             MountItem::Events { id, events } => self.nodes.entry(*id).or_default().events = *events,
@@ -351,9 +385,10 @@ impl Screen {
                 view.label = props.accessibility.label.clone();
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
+                view.focusable = props.focusable;
                 view.selected = props.accessibility.state.selected;
                 view.long_press_delay = props.long_press_delay;
-                view.selection_area = props.selection_area;
+                view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
                 view.pointer_events = props.pointer_events;
             }
@@ -369,7 +404,11 @@ impl Screen {
                 self.nodes.entry(*id).or_default().label = label.clone();
             }
             MountItem::Text { id, text, .. } => {
-                self.nodes.entry(*id).or_default().text = Some(text.text.clone());
+                {
+                    let view = self.nodes.entry(*id).or_default();
+                    view.text = Some(text.text.clone());
+                    view.attributed = Some(Arc::clone(text));
+                }
                 self.set_spans(*id, text);
             }
             MountItem::Input { id, config } => {
@@ -586,6 +625,84 @@ impl Screen {
     pub(crate) fn span(&self, id: NodeId) -> Option<(NodeId, u32, u32)> {
         let span = self.nodes.get(&id)?.span.as_ref()?;
         Some((span.view, span.start, span.end))
+    }
+
+    /// The style of the span `selector` names, from its first character,
+    /// inherited from the spans around it. `id:<testID>` names a nested
+    /// text's span. `text:<text>` names where the text reads it. The parts
+    /// before the last name the views to look in. An error when none or
+    /// several match, when the matched span is empty, or when the last part
+    /// is not a span name.
+    pub fn span_style(&self, selector: &str) -> Result<nsh_core::ResolvedTextStyle, String> {
+        let selector = Selector::parse(selector)?;
+        let scope = selector.scope().map(|s| self.resolve(&s));
+        let last = selector.parts.last().expect("a selector has a part");
+        let mut hits = Vec::new();
+        for id in self.by_layer() {
+            if scope
+                .as_ref()
+                .is_some_and(|scope| !scope.iter().any(|s| *s == id || self.is_inside(id, *s)))
+            {
+                continue;
+            }
+            let Some(text) = self.nodes.get(&id).and_then(|v| v.attributed.as_ref()) else {
+                continue;
+            };
+            let ranges = match &last.matcher {
+                Matcher::TestId(want) => text
+                    .test_ids
+                    .iter()
+                    .filter(|t| &*t.test_id == want)
+                    .map(|t| (t.start < t.end).then_some(t.start))
+                    .collect(),
+                Matcher::Text(want) => char_starts(&text.text, want)
+                    .into_iter()
+                    .map(Some)
+                    .collect(),
+                Matcher::Any(want) => {
+                    let ids: Vec<Option<u32>> = text
+                        .test_ids
+                        .iter()
+                        .filter(|t| &*t.test_id == want)
+                        .map(|t| (t.start < t.end).then_some(t.start))
+                        .collect();
+                    if ids.is_empty() {
+                        char_starts(&text.text, &TextMatch::Exact(want.trim().to_owned()))
+                            .into_iter()
+                            .map(Some)
+                            .collect()
+                    } else {
+                        ids
+                    }
+                }
+                Matcher::Label(_) | Matcher::Role { .. } | Matcher::View(_) => {
+                    return Err(format!(
+                        "`{selector}`: a span is named by `id:<testID>` or `text:<text>`"
+                    ));
+                }
+            };
+            hits.extend(ranges.into_iter().map(|start| (id, start)));
+        }
+        if let Some(n) = last.nth {
+            hits = hits.get(n).copied().into_iter().collect();
+        }
+        let (id, start) = match hits.as_slice() {
+            [(id, Some(start))] => (*id, *start),
+            [(_, None)] => return Err(format!("span `{selector}` has no characters")),
+            [] => return Err(format!("no span matches `{selector}`")),
+            many => {
+                return Err(format!(
+                    "`{selector}` matches {} spans; add `nth=<n>` or name the text views to look in",
+                    many.len()
+                ));
+            }
+        };
+        self.nodes
+            .get(&id)
+            .and_then(|v| v.attributed.as_ref())
+            .and_then(|text| text.span_at(start))
+            .map(|span| span.style)
+            .ok_or_else(|| format!("no span matches `{selector}`"))
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -896,6 +1013,26 @@ impl Screen {
         first
     }
 
+    /// The view `selector` matches inside `target` (a text in the button
+    /// a press goes to); `None` when the match is `target` itself.
+    pub(crate) fn match_inside(&self, selector: &Selector, target: NodeId) -> Option<NodeId> {
+        self.resolve(selector)
+            .into_iter()
+            .find(|id| self.is_inside(*id, target))
+    }
+
+    /// Where in `target` a press of what `selector` names lands: the
+    /// center of the view it matches inside `target`, as a finger taps the
+    /// text it reads. `None` when the match is `target` itself.
+    pub(crate) fn press_point(&self, selector: &Selector, target: NodeId) -> Option<Point<Points>> {
+        let inner = self.bounds_in_root(self.match_inside(selector, target)?)?;
+        let outer = self.bounds_in_root(target)?;
+        Some(nsh_core::geometry::point(
+            inner.origin.x - outer.origin.x + inner.size.width / 2.0,
+            inner.origin.y - outer.origin.y + inner.size.height / 2.0,
+        ))
+    }
+
     fn is_inside(&self, mut id: NodeId, ancestor: NodeId) -> bool {
         while let Some(parent) = self.nodes.get(&id).and_then(|v| v.parent) {
             if parent == ancestor {
@@ -1000,17 +1137,17 @@ impl Screen {
         }
     }
 
-    /// Whether the view `selector` names is in a selection area (it or a
-    /// view around it is one: `SelectionArea` of `nsh/base`, a selectable
+    /// Whether the view `selector` names is in a selectable view (it or a
+    /// view around it is one: a `View` with `selectable`, a selectable
     /// `TextView`); an error when none or several match.
-    pub fn in_selection_area(&self, selector: &str) -> Result<bool, String> {
+    pub fn in_selectable_view(&self, selector: &str) -> Result<bool, String> {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [mut id] => loop {
                 let Some(view) = self.nodes.get(&id) else {
                     return Ok(false);
                 };
-                if view.selection_area {
+                if view.selectable_view {
                     return Ok(true);
                 }
                 match view.parent {
@@ -1551,6 +1688,42 @@ impl Screen {
 
     pub(crate) fn set_focused(&mut self, id: Option<NodeId>) {
         self.focused = id;
+    }
+
+    /// The view (not an input) with the keyboard focus, while it is
+    /// mounted: a pressable or a `focusable` view Tab moved it to.
+    pub(crate) fn key_focus(&self) -> Option<NodeId> {
+        self.key_focus.filter(|id| self.nodes.contains_key(id))
+    }
+
+    pub(crate) fn set_key_focus(&mut self, id: Option<NodeId>) {
+        self.key_focus = id;
+    }
+
+    /// Tab's stops, in tree order, as macOS and the web have them: the
+    /// inputs that edit and the views [`nsh_core::ViewProps::focus_stop`]
+    /// takes (those that take presses unless `focusable={false}`, and
+    /// `focusable={true}` ones whether or not they do), shown and enabled.
+    pub(crate) fn tab_stops(&self) -> Vec<NodeId> {
+        self.shown()
+            .into_iter()
+            .filter(|&id| {
+                let Some(v) = self.nodes.get(&id) else {
+                    return false;
+                };
+                if let Some(input) = &v.input {
+                    return input.config.editable && !self.disabled_from(id, None);
+                }
+                // Disabled is the ancestors' too here (`disabled_from`).
+                let props = nsh_core::ViewProps {
+                    focusable: v.focusable,
+                    ..Default::default()
+                };
+                v.span.is_none()
+                    && props.focus_stop(v.events.contains(EventKind::Press))
+                    && !self.disabled_from(id, None)
+            })
+            .collect()
     }
 
     pub(crate) fn scroll(&self, id: NodeId) -> Option<&Scroll> {

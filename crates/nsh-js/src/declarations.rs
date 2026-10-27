@@ -2,7 +2,7 @@
 //! from what serves it: the declaration ([`Ts`]) next to each export of
 //! nsh's modules (`modules.rs` and the tables it lists), the modules' own
 //! types, the specs of the registries' components and modules
-//! (`nsh_core::ui::declarations`), and the core's tables (styles, host
+//! (`nsh_core::element::declarations`), and the core's tables (styles, host
 //! props and events, easings, canvas operations: `nsh_core::js`). Nothing
 //! is written twice: a test loads every module and checks that what it
 //! exports is what its declarations say.
@@ -12,7 +12,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use nsh_core::ui::{Registry, description::SetDescription};
+use nsh_core::element::{Registry, description::SetDescription};
 
 use crate::modules::{Item, MODULES, NativeModule, Ts};
 
@@ -30,8 +30,9 @@ export type RecursiveArray<T> = readonly (T | RecursiveArray<T>)[];
  * right; falsy entries are skipped. */
 export type StyleProp<T> = T | RecursiveArray<T | false | null | undefined> | false | null | undefined;
 
-/** Props every host element accepts. */
-export interface CommonProps extends TouchProps, HostProps, StateStyleProps {
+/** Props every host element accepts; `S`, the style its state styles
+ * take (its `style`'s). */
+export interface CommonProps<S = ViewStyle> extends TouchProps, HostProps, StateStyleProps<S> {
   ref?: YNode | ((node: YNode) => void);
   children?: JSX.Element;
   /** iOS-only props (ignored elsewhere). */
@@ -49,22 +50,25 @@ export interface CommonProps extends TouchProps, HostProps, StateStyleProps {
  * classes, applied natively (no JS runs): as the `<state>:` classes.
  * Later states win (checked, then hover, focus, active); `disabledStyle`
  * wins over all, and the others do not apply while disabled. */
-export interface StateStyleProps {
+export interface StateStyleProps<S = ViewStyle> {
   /** While pressed (`active:`). */
-  activeStyle?: StyleProp<ViewStyle>;
+  activeStyle?: StyleProp<S>;
   /** While a pointer is over it (`hover:`). */
-  hoverStyle?: StyleProp<ViewStyle>;
+  hoverStyle?: StyleProp<S>;
   /** While it has focus (`focus:`). */
-  focusStyle?: StyleProp<ViewStyle>;
+  focusStyle?: StyleProp<S>;
   /** While `disabled` (`disabled:`). */
-  disabledStyle?: StyleProp<ViewStyle>;
+  disabledStyle?: StyleProp<S>;
+  /** While `accessibilityState.selected` is `true` (`selected:`): a
+   * tab, a segment or a `Button` that is selected. */
+  selectedStyle?: StyleProp<S>;
   /** While `accessibilityState.checked` is `true` (`checked:`; `"mixed"`
    * is not checked): a checkbox, a switch or a radio styled by its
    * value. */
-  checkedStyle?: StyleProp<ViewStyle>;
+  checkedStyle?: StyleProp<S>;
   /** While `accessibilityState.checked` is `"mixed"` (`indeterminate:`):
    * a checkbox that is neither checked nor unchecked. */
-  indeterminateStyle?: StyleProp<ViewStyle>;
+  indeterminateStyle?: StyleProp<S>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */
@@ -80,12 +84,12 @@ export interface WebProps {}
 export interface AndroidProps extends AndroidHostProps {}
 
 /** `<View>` */
-export interface ViewProps extends CommonProps {
+export interface ViewProps extends CommonProps, ViewHostProps {
   style?: StyleProp<ViewStyle>;
 }
 
 /** `<Text>`: nested `<Text>` elements are spans of the same paragraph. */
-export interface TextProps extends CommonProps, TextHostProps {
+export interface TextProps extends CommonProps<TextStyle>, TextHostProps {
   style?: StyleProp<TextStyle>;
 }
 
@@ -102,8 +106,15 @@ export interface ImageAsset {
 }
 
 /** `<Image>` */
-export interface ImageProps extends CommonProps, ImageHostProps {
+export interface ImageProps extends CommonProps<ImageStyle>, ImageHostProps {
   style?: StyleProp<ImageStyle>;
+}
+
+/** `<Shader>`: a view whose box a WGSL shader draws, under its children. */
+export interface ShaderProps extends CommonProps, ViewHostProps, ShaderHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`. */
+  source: string;
+  style?: StyleProp<ViewStyle>;
 }
 
 /** `<Scroll>` */
@@ -118,15 +129,6 @@ export interface ScrollProps extends CommonProps, ScrollingHostProps, ScrollHost
    * `"grow justify-center p-4"`. */
   contentClass?: string;
 }
-
-/** `<Input>` */
-export interface InputProps extends CommonProps, InputHostProps {
-  style?: StyleProp<TextStyle>;
-  ios?: IOSInputProps;
-}
-
-/** iOS-only props of `<Input>`. */
-export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
 
 /** `<Overlay>`: its children shown on top of the root view it is in (the
  * surface, or the dialog around it), outside its parent's layout and
@@ -180,29 +182,17 @@ fn doc_comment(out: &mut String, doc: &str, indent: &str) {
 
 /// The declaration of export `name`.
 fn export(out: &mut String, name: &str, ts: Ts) {
-    export_moved(out, name, ts, None);
-}
-
-/// The declaration of export `name`, `@deprecated` when it is imported
-/// from module `moved_to` now.
-fn export_moved(out: &mut String, name: &str, ts: Ts, moved_to: Option<&str>) {
-    let doc = |doc: &str| match moved_to {
-        Some(to) => format!("{doc}\n\n@deprecated Import from \"{to}\"."),
-        None => doc.to_owned(),
-    };
     match ts {
         Ts::Function(text, signatures) => {
-            doc_comment(out, &doc(text), "");
+            doc_comment(out, text, "");
             for signature in signatures {
                 let _ = writeln!(out, "export declare function {name}{signature};");
             }
         }
         Ts::Const(text, ty) => {
-            doc_comment(out, &doc(text), "");
+            doc_comment(out, text, "");
             let _ = writeln!(out, "export declare const {name}: {ty};");
         }
-        // One declaration for both modules (a class declared twice is two
-        // types), which `nsh` re-exports: never deprecated.
         Ts::Class(text, body) => {
             doc_comment(out, text, "");
             let _ = writeln!(out, "export declare class {name}{body}");
@@ -212,35 +202,9 @@ fn export_moved(out: &mut String, name: &str, ts: Ts, moved_to: Option<&str>) {
     out.push('\n');
 }
 
-fn exports(out: &mut String, items: &[Item], moved_to: Option<&str>) {
+fn exports(out: &mut String, items: &[Item]) {
     for &(name, _, ts) in items {
-        export_moved(out, name, ts, moved_to);
-    }
-}
-
-/// What module `m` serves of module `other` (`nsh` of `nsh/list`): its
-/// values declared again, its classes and types re-exported from its file
-/// (`other_body`, the names it declares).
-fn also_part(out: &mut String, m: &NativeModule, other: &NativeModule, other_body: &str) {
-    let from = relative(&path_of(m.name), &path_of(other.name));
-    for &(name, _, ts) in other.exports {
-        match ts {
-            Ts::Class(..) => {
-                let _ = writeln!(out, "export {{ {name} }} from \"{from}\";");
-            }
-            ts => export(out, name, ts),
-        }
-    }
-    let values: Vec<&str> = other.exports.iter().map(|e| e.0).collect();
-    let mut any = false;
-    for name in exported_names(other_body) {
-        if !values.contains(&name.as_str()) {
-            let _ = writeln!(out, "export type {{ {name} }} from \"{from}\";");
-            any = true;
-        }
-    }
-    if any || other.exports.iter().any(|e| matches!(e.2, Ts::Class(..))) {
-        out.push('\n');
+        export(out, name, ts);
     }
 }
 
@@ -289,7 +253,7 @@ fn generated(module: &str) -> String {
 /// declares.
 fn registry_part(out: &mut String, registry: &Registry, own: &[Item]) {
     let omit: Vec<&str> = own.iter().map(|(n, ..)| *n).collect();
-    out.push_str(&nsh_core::ui::declarations(registry, &omit));
+    out.push_str(&nsh_core::element::declarations(registry, &omit));
     let (values, types) = registry.reexports();
     reexports_part(out, values, types, registry.native_value_names());
 }
@@ -308,12 +272,24 @@ fn set_part(out: &mut String, set: &SetDescription) {
     );
 }
 
+/// The props of `Input`, declared beside it (`nsh/base`).
+const INPUT_TYPES: &str = r#"/** `<Input>` */
+export interface InputProps extends CommonProps<InputStyle>, InputHostProps {
+  style?: StyleProp<InputStyle>;
+  ios?: IOSInputProps;
+}
+
+/** iOS-only props of `<Input>`. */
+export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
+"#;
+
 /// The declarations of what a set exports as the runtime makes it: the
 /// runtime's `values` and `types`, and the values nsh-js makes for it
-/// (`natives`: navigation's).
+/// (`natives`: `Input` and navigation's).
 fn reexports_part(out: &mut String, values: &[&str], types: &[&str], natives: &[&str]) {
     let made = crate::env::REEXPORTS
         .iter()
+        .chain(crate::env::ELEMENTS)
         .chain(crate::navigation::EXPORTS);
     let mut navigation = false;
     for item in made {
@@ -325,6 +301,9 @@ fn reexports_part(out: &mut String, values: &[&str], types: &[&str], natives: &[
     if navigation {
         out.push_str(crate::navigation::TYPES);
         out.push('\n');
+    }
+    if natives.contains(&"Input") {
+        out.push_str(INPUT_TYPES);
     }
     if !types.is_empty() {
         let _ = writeln!(out, "export type {{ {} }};", types.join(", "));
@@ -342,25 +321,39 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
             body.push('\n');
         }
         body.push_str(&generated(m.name));
+        // What nsh-js declares itself, the sources it serves included.
+        let own: Vec<Item> = m
+            .also
+            .iter()
+            .filter_map(|a| MODULES.iter().find(|o| o.name == *a))
+            .flat_map(|o| o.exports.iter().copied())
+            .chain(m.exports.iter().copied())
+            .collect();
         for registry in registries.iter().filter(|r| r.specifier() == Some(m.name)) {
-            registry_part(&mut body, registry, m.exports);
+            registry_part(&mut body, registry, &own);
         }
         // A UI set is a module of its own (the command line refuses one
         // named as nsh's): nothing of nsh's to leave out.
         for set in ui_sets.iter().filter(|s| s.specifier == m.name) {
             set_part(&mut body, set);
         }
-        exports(&mut body, m.exports, m.moved_to);
+        exports(&mut body, m.exports);
         body
     };
-    for m in MODULES.iter().filter(declared) {
+    // A module `nsh` serves (`moved_to`) is declared in `nsh`'s file.
+    for m in MODULES
+        .iter()
+        .filter(declared)
+        .filter(|m| m.moved_to.is_none())
+    {
         let mut body = body_of(m);
         for other in m
             .also
             .iter()
             .filter_map(|a| MODULES.iter().find(|o| o.name == *a))
         {
-            also_part(&mut body, m, other, &body_of(other));
+            body.push('\n');
+            body.push_str(&body_of(other));
         }
         files.push((path_of(m.name), body));
     }
@@ -747,15 +740,15 @@ fn member_names(members: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    #[derive(Default, nsh_core::ui::JsObject)]
+    #[derive(Default, nsh_core::element::JsObject)]
     struct Pick {
         value: bool,
     }
 
-    #[nsh_core::ui::module]
+    #[nsh_core::element::module]
     struct PickerTypes;
 
-    #[nsh_core::ui::module]
+    #[nsh_core::element::module]
     impl PickerTypes {
         fn accept(_pick: Pick) {}
     }
@@ -763,7 +756,7 @@ mod tests {
     #[test]
     fn component_host_props_do_not_import_a_modules_pick_type() {
         PickerTypes::accept(Pick::default());
-        let mut registry = nsh_core::ui::Registry::ui_set("test/picker-types");
+        let mut registry = nsh_core::element::Registry::ui_set("test/picker-types");
         registry.module::<PickerTypes>();
         let files = type_definitions(&[registry.into()]);
         let (_, fixture) = files
@@ -876,6 +869,40 @@ declare const text: "export default ignored";
                 }
             }
         }
+    }
+
+    /// No module declares a value (a class, function or constant) named as
+    /// a type `types.d.ts` declares: it would shadow the shared type
+    /// everywhere in that module (an extension class `TextStyle` made
+    /// `StyleProp<TextStyle>` mean the class). The same type alias
+    /// generated in both is the same type.
+    #[test]
+    fn no_module_shadows_a_shared_type() {
+        let files = bodies(&[nsh_base::registry().into()]);
+        let (_, types) = files
+            .iter()
+            .find(|(path, _)| path == "nsh/types.d.ts")
+            .expect("types.d.ts");
+        let shared = exported_names(types);
+        let mut clashes = Vec::new();
+        for (path, body) in files.iter().filter(|(path, _)| path != "nsh/types.d.ts") {
+            let (_, local) = references(body);
+            let value = |name: &str| {
+                ["class", "function", "const"].iter().any(|kind| {
+                    body.contains(&format!("declare {kind} {name}<"))
+                        || body.contains(&format!("declare {kind} {name} "))
+                        || body.contains(&format!("declare {kind} {name}("))
+                        || body.contains(&format!("declare {kind} {name}:"))
+                })
+            };
+            clashes.extend(
+                local
+                    .iter()
+                    .filter(|name| shared.contains(name) && value(name))
+                    .map(|name| format!("{path}: {name}")),
+            );
+        }
+        assert!(clashes.is_empty(), "{clashes:?}");
     }
 
     /// Each web class declares the members its spec defines, and no others.

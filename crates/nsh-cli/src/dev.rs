@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    collections::HashSet,
     net::{Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
@@ -21,8 +22,6 @@ use crate::{build, logger, ui};
 
 /// File events arriving within this window are coalesced into one rebuild.
 const DEBOUNCE: Duration = Duration::from_millis(30);
-/// Ports tried after the requested one when it is taken.
-const PORT_ATTEMPTS: u16 = 10;
 
 /// A running dev server plus the source watcher feeding it.
 pub(crate) struct DevSession {
@@ -34,6 +33,8 @@ pub(crate) struct DevSession {
     /// The modules of the last good development build: updates are
     /// computed against it.
     hot: std::cell::RefCell<Option<nsh_bundler::HotBundle>>,
+    /// Files read by the last good build (imports may be outside the app).
+    watch_files: std::cell::RefCell<Vec<PathBuf>>,
     /// Good builds so far: the first one is "built", the next "rebuilt".
     builds: Cell<u32>,
     /// A Rust app (`nsh.json` `"root"`): nothing to bundle, the hosts run
@@ -77,6 +78,7 @@ impl DevSession {
             server,
             devices,
             hot: Default::default(),
+            watch_files: Default::default(),
             builds: Cell::new(0),
             rust_root,
         };
@@ -156,6 +158,8 @@ impl DevSession {
                 watcher.watch(dir, RecursiveMode::Recursive)?;
             }
         }
+        let mut imported_dirs = HashSet::new();
+        self.watch_imports(&mut watcher, &mut imported_dirs)?;
         loop {
             if ui::stop_requested() || stop()? {
                 return Ok(());
@@ -182,7 +186,29 @@ impl DevSession {
                 .is_ok()
             {}
             self.rebuild();
+            self.watch_imports(&mut watcher, &mut imported_dirs)?;
         }
+    }
+
+    /// Watch the directories of shared imports, so atomic saves and new
+    /// modules work as they do inside the app. Its own tree is watched above.
+    fn watch_imports(
+        &self,
+        watcher: &mut impl Watcher,
+        watched: &mut HashSet<PathBuf>,
+    ) -> anyhow::Result<()> {
+        for dir in self
+            .watch_files
+            .borrow()
+            .iter()
+            .filter_map(|path| path.parent())
+        {
+            if !dir.starts_with(&self.src_dir) && watched.insert(dir.to_path_buf()) {
+                watcher.watch(dir, RecursiveMode::NonRecursive)?;
+                ui::debug(format!("watching shared source {}", ui::path(dir)));
+            }
+        }
+        Ok(())
     }
 
     fn rebuild(&self) {
@@ -194,6 +220,7 @@ impl DevSession {
         if self.release {
             match build::compile(&self.entry, true) {
                 Ok(built) => {
+                    self.watch_files.replace(built.watch_files.clone());
                     let capabilities = built.capabilities_json();
                     let summary = self.summary(&built);
                     self.server.publish(
@@ -215,6 +242,7 @@ impl DevSession {
         }
         match build::compile_hot(&self.entry) {
             Ok((built, hot)) => {
+                self.watch_files.replace(built.watch_files.clone());
                 let summary = self.summary(&built);
                 // Other capabilities: the app starts again under them.
                 let patch = self
@@ -393,19 +421,26 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
 }
 
 fn start_server(port: u16, assets_root: &Path, devices: Arc<Devices>) -> anyhow::Result<DevServer> {
-    let mut last_err = None;
-    for port in port..port.saturating_add(PORT_ATTEMPTS) {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let root = Some(assets_root.to_path_buf());
-        let devices = devices.clone();
-        match DevServer::start(addr, nsh_js::BYTECODE_VERSION, root, move |event| {
-            devices.on_event(event)
-        }) {
-            Ok(server) => return Ok(server),
-            Err(err) => last_err = Some(err),
-        }
+    if ui::stop_requested() {
+        anyhow::bail!("development session is stopping");
     }
-    Err(last_err.expect("at least one attempt")).context("start dev server")
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    DevServer::start(
+        addr,
+        nsh_js::BYTECODE_VERSION,
+        Some(assets_root.to_path_buf()),
+        move |event| devices.on_event(event),
+    )
+    .map_err(|error| {
+        let message = if error.kind() == std::io::ErrorKind::AddrInUse {
+            format!(
+                "start dev server: port {port} is taken; stop what uses it or choose another --port"
+            )
+        } else {
+            format!("start dev server on port {port}")
+        };
+        anyhow::Error::new(error).context(message)
+    })
 }
 
 fn is_source(event: &notify::Event) -> bool {
@@ -527,6 +562,36 @@ fn lan_ips() -> Vec<Ipv4Addr> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn occupied_port_fails_without_moving_or_stopping_the_listener() {
+        let taken = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
+        let port = taken.local_addr().unwrap().port();
+        let error = super::start_server(port, &std::env::temp_dir(), Default::default())
+            .err()
+            .expect("must not move to another port");
+        assert!(error.to_string().contains(&format!("port {port}")));
+        assert_eq!(
+            error
+                .root_cause()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::AddrInUse
+        );
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+    }
+
+    #[test]
+    fn zero_allocates_a_port_and_an_explicit_port_is_kept() {
+        let dir = std::env::temp_dir();
+        let server = super::start_server(0, &dir, Default::default()).unwrap();
+        let port = server.local_addr().port();
+        assert_ne!(port, 0);
+        drop(server);
+        let server = super::start_server(port, &dir, Default::default()).unwrap();
+        assert_eq!(server.local_addr().port(), port);
+    }
+
     #[test]
     fn devices_go_by_short_names_unless_two_share_one() {
         let connected = [

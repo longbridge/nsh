@@ -11,7 +11,7 @@ NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets an
 the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and Android,
 so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`platform.os` is `"linux"` in TSX) and TSX's
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come
-from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements
@@ -164,12 +164,12 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 | Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Alt+Left, Back key, mouse back button | Go back (also from a field) |
 | Ctrl+arrows, Home / End, with Shift; Ctrl+Backspace / Delete | Move, select and delete by word and line in a field, as in every GTK app |
-| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
+| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy selectable text |
 | Arrows; Page Up / Down, Space, Shift+Space; Home / End | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Ctrl+W, F11, Ctrl+Q | Close the window, full screen, quit (`nsh package` and `nsh run` apps) |
 | Ctrl+R | Reloads the latest build (`nsh run`) |
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) are a window-wide shortcut controller; Ctrl+Q and
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) are a window-wide shortcut controller; Ctrl+Q and
 F11 cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is the key that types C on a US layout).

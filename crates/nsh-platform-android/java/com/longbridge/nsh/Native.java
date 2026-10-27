@@ -236,6 +236,15 @@ final class Native {
     static native void hover(long handle, int id, float x, float y, float pageX, float pageY, int modifiers);
 
     /**
+     * Press event {@code kind} ({@code onPress}, {@code onLongPress}, {@code onPressDown},
+     * {@code onPressUp}) of node {@code id}: the touch at ({@code x}, {@code y}) in the pressed
+     * view and at ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers} as
+     * {@link #hover}'s; {@code clicks}: the click count.
+     */
+    static native void press(long handle, int id, int kind, float x, float y, float pageX, float pageY,
+            int modifiers, int clicks);
+
+    /**
      * An event with an object payload ({@code Double}, {@code Boolean} or
      * {@code String} values), or a single value when {@code keys} is null.
      */
@@ -249,12 +258,27 @@ final class Native {
 
     static native float[] tick(long handle, long frameNanos);
 
+    /** Shader view {@code id} is {@code width} × {@code height} px; whether frames should come. */
+    static native boolean shaderSize(long handle, int id, int width, int height);
+
     /**
      * A scroll view's offset, after applying {@code applied} of the scrolls
      * the core asked for. Returns bound values when a scroll value changed,
      * else null.
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
+
+    /**
+     * How far (points) a vertical scroll view is pulled past its top.
+     * Returns bound values when a pull value changed, else null.
+     */
+    static native float[] pull(long handle, int id, float distance);
+
+    /**
+     * A scroll view came to rest: the snapping animated values that follow it settle. Returns
+     * bound values when one starts moving, else null.
+     */
+    static native float[] scrollEnded(long handle, int id);
 
     /** A zoomable scroll view's zoom scale, reported before its offset. */
     static native void zoom(long handle, int id, float scale);

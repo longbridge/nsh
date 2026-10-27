@@ -5,12 +5,14 @@
 //! - `nsh-windows-host --bundle <path> [--trace]` runs a built bundle (`.nshc`
 //!   is QuickJS bytecode, anything else JS source).
 //!
+//! - `--fps` logs the performance monitor's readings once a second (frame
+//!   rate, frame phases, commits, CPU and memory; target `nsh::perf`).
 //! - `--window-size 390x844` sets the window size in points (default 1200x800,
 //!   wide enough for desktop layouts such as the gallery's sidebar).
 //! - `--data-dir <dir>` keeps the apps' data there instead of the system's
 //!   data directory (`nsh test --target` gives each app a fresh one).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
-//!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
+//!   passes the app's (`nsh.json` `"id"`). The app's data (`Storage` of `nsh`)
 //!   is kept under the id its bundle carries, in the system's data
 //!   directory.
 //!
@@ -56,6 +58,7 @@ pub fn main() -> std::process::ExitCode {
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,
+            "--fps" => options.fps = true,
             "--app-id" => {
                 if let Some(id) = args.next().filter(|id| !id.is_empty()) {
                     options.app_id = id;

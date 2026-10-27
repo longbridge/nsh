@@ -39,6 +39,8 @@ const FORWARDED: &[&str] = &[
     "scrollbar",
     "refreshing",
     "onRefresh",
+    "pullValue",
+    "refreshIndicator",
     "onLoadMore",
     "onLoadMoreAtStart",
     "onScrollEnd",
@@ -1167,10 +1169,10 @@ export interface ViewToken<T> {
 }
 
 export interface ViewabilityConfig {
-  /** Percent of the viewport an item must cover to count as viewable. */
-  viewAreaCoveragePercentThreshold?: number;
-  /** Percent of an item that must be visible. Without either threshold, any visible pixel counts. */
-  itemVisiblePercentThreshold?: number;
+  /** How much of the viewport an item must cover to count as viewable, from 0 to 1. */
+  viewAreaCoverageThreshold?: number;
+  /** How much of an item must be visible, from 0 to 1. Without either threshold, any visible pixel counts. */
+  itemVisibleThreshold?: number;
   /** Milliseconds items must stay viewable before they are reported. */
   minimumViewTime?: number;
 }
@@ -1232,7 +1234,7 @@ mod tests {
         host.eval_source(
             "import { mount } from \"nsh\";\n\
              import { text } from \"nsh:rt\";\n\
-             import { List } from \"nsh/list\";\n\
+             import { List } from \"nsh\";\n\
              mount(() => List({\n\
                each: [1, 2],\n\
                children: (n) => text(`Row ${n()}`),\n\

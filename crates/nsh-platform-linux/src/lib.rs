@@ -26,6 +26,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod fps;
 mod image;
 mod input;
 mod keymap;
@@ -33,7 +34,8 @@ mod mount;
 mod native;
 mod navigation;
 mod scroll;
-mod selection_area;
+mod selectable_view;
+mod shader;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

@@ -5,8 +5,9 @@ use std::rc::Rc;
 use nsh_core::{
     ResizeMode,
     color::Hsla,
+    element::{Renderer, Style, StyleRefinement},
     geometry::{DefiniteLength, Length},
-    ui::{Renderer, Style, StyleRefinement, prelude::*},
+    prelude::*,
 };
 
 use super::{
@@ -117,7 +118,7 @@ pub enum TextViewLinks {
     Report,
     /// It is reported, then a URL of another app or site (with a scheme:
     /// `https:`, `mailto:`, ...) opens outside the app
-    /// ([`nsh_core::ui::open_url`]); an anchor in the document (`#…`) is
+    /// ([`nsh_core::element::open_url`]); an anchor in the document (`#…`) is
     /// only reported.
     Open,
 }
@@ -236,8 +237,15 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .line_height(px(BODY_SIZE * BODY_LINE))
         .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
-        // a `SelectionArea`, the outer area's).
-        .selection_area(props.selectable)
+        // a `selectable` view, the outer one's).
+        .selectable(props.selectable)
+        .map(|mut el| {
+            if let Some(parts) = use_context::<TextViewParts>() {
+                let style = std::mem::take(el.style());
+                *el.style() = parts.refine(Part::Root, style);
+            }
+            el
+        })
         .app_class(move || props.classes.with(|c| c.root.clone()))
         .inline_style(move || {
             props
@@ -483,7 +491,7 @@ impl Cx {
     /// A text of the block's inline content, selectable when asked.
     fn paragraph(&self, content: &[Inline], key: &str, tail: bool) -> Text {
         let el = text("")
-            .when(self.selectable, |t| t.selectable(true))
+            .when(self.selectable, |t| t.select_text())
             .children(self.inlines(content, key));
         self.caret_after(el, tail)
     }
@@ -614,7 +622,7 @@ impl Cx {
                                     .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
-                                    .when(self.selectable, |t| t.selectable(true)),
+                                    .when(self.selectable, |t| t.select_text()),
                             ),
                         Part::MathBlock,
                     )
@@ -855,7 +863,7 @@ impl Cx {
             body.font_family(mono_font)
                 .px(px(16.0))
                 .py(px(14.0))
-                .when(self.selectable, |t| t.selectable(true)),
+                .when(self.selectable, |t| t.select_text()),
             tail,
         );
         let block = view()
@@ -1149,7 +1157,7 @@ impl Cx {
             self.paragraph(&node.content, key, tail).into_element()
         } else {
             self.caret_after(
-                text(node.text.clone()).when(self.selectable, |t| t.selectable(true)),
+                text(node.text.clone()).when(self.selectable, |t| t.select_text()),
                 tail,
             )
             .into_element()
@@ -1384,8 +1392,8 @@ impl Cx {
                 .filter(|s| s.width > px(0.0) && s.height > px(0.0))
                 .map(|s| s.width / s.height)
         };
-        let el = nsh_core::ui::image(image.src.clone())
-            .resize_mode(ResizeMode::Contain)
+        let el = nsh_core::element::image(image.src.clone())
+            .object_fit(ResizeMode::Contain)
             .label(SharedString::from(image.alt.clone()))
             .when_some(image.title.clone(), |el, title| el.hint(title));
         let el = match flow {

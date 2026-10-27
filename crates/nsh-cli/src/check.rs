@@ -3,6 +3,11 @@
 //! files, no Node). A pinned release is downloaded once from the npm
 //! registry, its tarball checked against the integrity recorded here, and
 //! kept in nsh's cache; `--tsc` (or `NSH_TSC`) uses another `tsc` instead.
+//!
+//! An app with Rust crates of its own (`nsh.json` `"rust"`) has its crates
+//! checked first, each with `cargo check --all-targets` in its directory
+//! ([`cargo_check`]): a Rust app (`"root"`) only that, unless it has a
+//! `tsconfig.json` (for its TypeScript tests), a mixed app both.
 
 use std::{
     env,
@@ -14,6 +19,8 @@ use std::{
 use anyhow::{Context as _, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use sha2::{Digest as _, Sha512};
+
+use crate::rust_app::RustApp;
 
 /// The TypeScript release `nsh check` uses.
 const TYPESCRIPT: &str = "7.0.2";
@@ -109,6 +116,29 @@ pub(crate) fn check(entry: &Path, tsc: Option<&Path>, args: &[String]) -> anyhow
     Ok(())
 }
 
+/// Checks the crates of `app` with `cargo check --all-targets` (their
+/// tests and examples too), each in its own directory, so it builds in the
+/// workspace and target directory `cargo` there uses; fails on the first
+/// with errors, showing cargo's output.
+pub(crate) fn cargo_check(app: &RustApp) -> anyhow::Result<()> {
+    for krate in app.crates() {
+        let mut cmd = krate.cargo("check");
+        cmd.arg("--all-targets");
+        crate::ui::cargo_as(&mut cmd, ["checking", "checked"], krate.package())?;
+    }
+    Ok(())
+}
+
+/// Whether the app of `entry` has TypeScript to check: a TSX entry's app,
+/// or a Rust app (`nsh.json` `"root"`) with a `tsconfig.json` for its test
+/// files.
+pub(crate) fn has_typescript(entry: &Path) -> bool {
+    !crate::rust_app::is_root(entry)
+        || entry
+            .parent()
+            .is_some_and(|dir| dir.join("tsconfig.json").is_file())
+}
+
 /// The `tsc` of [`TYPESCRIPT`], downloaded into the cache the first time.
 fn typescript() -> anyhow::Result<PathBuf> {
     let Some(&(_, _, name, integrity)) = BUILDS
@@ -170,7 +200,7 @@ fn verify(data: &[u8], integrity: &str) -> anyhow::Result<()> {
 }
 
 /// nsh's cache: `NSH_CACHE`, else the platform's cache directory.
-fn cache() -> anyhow::Result<PathBuf> {
+pub(crate) fn cache() -> anyhow::Result<PathBuf> {
     if let Some(dir) = env::var_os("NSH_CACHE") {
         return Ok(PathBuf::from(dir));
     }

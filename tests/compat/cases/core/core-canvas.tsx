@@ -5,7 +5,7 @@
 // dash, text measures, gradients made). Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh";
 
 function App() {
   let kept: CanvasRenderingContext2D | undefined;

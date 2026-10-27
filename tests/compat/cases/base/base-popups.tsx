@@ -16,6 +16,7 @@ function App() {
   const log = signal("Log: none");
   const pop = signal(true);
   const sheet = signal(false);
+  const swipeSheet = signal(false);
   const ctxOff = signal(false);
   const ctx = signal(false);
   const menu = signal(false);
@@ -126,7 +127,7 @@ function App() {
       <View style={{ height: 30 }} tooltip={<Tooltip defaultOpen><Text>ShownTip</Text></Tooltip>}>
         <Text>ShownTrigger</Text>
       </View>
-      <View style={{ height: 30 }} tooltip="PropTip">
+      <View style={{ height: 30 }} tooltip={<Text>PropTip</Text>}>
         <Text>PropTrigger</Text>
       </View>
       <View onPress={() => sheet.set(true)}><Text>OpenSheet</Text></View>
@@ -147,6 +148,10 @@ function App() {
         backdropStyle={{ opacity: 0.75 }}
       >
         <Text>SheetBody</Text>
+      </Sheet>
+      <View onPress={() => swipeSheet.set(true)}><Text>OpenSwipeSheet</Text></View>
+      <Sheet open={swipeSheet()} closeOnSwipe onOpenChange={(next) => swipeSheet.set(next)} popupStyle={{ paddingTop: 54 }}>
+        <Text style={{ height: 300 }}>SwipeSheetBody</Text>
       </Sheet>
       <Sheet defaultOpen closeOnBackdropPress={false} popupStyle={{ height: 20 }}>
         <Text>StuckSheet</Text>

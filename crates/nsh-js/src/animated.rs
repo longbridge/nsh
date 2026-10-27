@@ -467,12 +467,17 @@ fn derived_hash(op: &AnimationOp) -> u64 {
             }
         }
         AnimationOp::CreateDiffClamp {
-            input, min, max, ..
+            input,
+            min,
+            max,
+            snap,
+            ..
         } => {
             kind = 1;
             ids[0] = *input;
             f(*min);
             f(*max);
+            snap.hash(&mut h);
         }
         AnimationOp::CreateMath { a, b, .. } => {
             kind = 2;
@@ -547,6 +552,9 @@ unsafe extern "C" fn node_diff_clamp(
         int(input),
         dup(cx, arg(argc, argv, 0)),
         dup(cx, arg(argc, argv, 1)),
+        // `{ snap }`: settles at the nearer bound when its scroll view
+        // rests (undefined without options).
+        get(cx, arg(argc, argv, 2), c"snap"),
     ];
     derived(cx, vec![dup(cx, this)], ANIMATION_DIFF_CLAMP, args)
 }
@@ -1489,8 +1497,8 @@ unsafe extern "C" fn motion_method(
 
 /// A motion's transform steps (owned) over its channels' `values`: the
 /// translations and rotations, then the scales with `scale` folded into
-/// `scaleX` and `scaleY` (multiplied natively), so a motion takes 7 of a
-/// view's 8 transform steps and leaves one for the app (a `perspective`).
+/// `scaleX` and `scaleY` (multiplied natively): a `transform` list, which
+/// an app's own steps (a `perspective` first) may join.
 fn motion_transform(cx: *mut JsContext, values: &[JsValue]) -> Vec<JsValue> {
     use MotionChannel::*;
     let at = |c: MotionChannel| values[c.index()];
@@ -2089,8 +2097,12 @@ pub(crate) const EXPORTS: &[Item] = &[
     easing?: Easing;
   }): AnimatedNode;
   /** Follows this node's changes, kept within `min..max` (a header that
-   * hides while content scrolls up and comes back as it scrolls down). */
-  diffClamp(min: number, max: number): AnimatedNode;
+   * hides while content scrolls up and comes back as it scrolls down).
+   * `snap`: when the scroll view it follows comes to rest between the
+   * bounds, it settles at the nearer one in 200 ms, easing out (a floating
+   * bar shows or hides fully); at `max` only once this node reached
+   * `max`, so a page scrolled less than the bar's height shows all of it. */
+  diffClamp(min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   add(b: AnimatedNode | number): AnimatedNode;
   sub(b: AnimatedNode | number): AnimatedNode;
   mul(b: AnimatedNode | number): AnimatedNode;
@@ -2142,7 +2154,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         "createAnimatedValue",
         Export::Function(animated_value, 1),
         Ts::function(
-            "Creates an animated value. Bind it (or nodes derived from it) to style\nproperties (`opacity`, `transform`, `backgroundColor`, `borderColor`, a\ntext's `color`, `shadowColor` / `shadowOpacity` / `shadowRadius`), to a\nscroll position (`scrollValue`) or to drags (`pan`).",
+            "Creates an animated value. Bind it (or nodes derived from it) to style\nproperties (`opacity`, `translate` / `rotate` / `scale`, a `transform` list,\n`backgroundColor`, `borderColor`, a text's `color`), to a scroll position (`scrollValue`) or to drags (`pan`).",
             &["(value?: number): AnimatedValue"],
         ),
     ),
@@ -2301,8 +2313,8 @@ export interface MotionOptions extends MotionPlayOptions {
 }
 
 /** A motion's transform: its channels in the order they apply, `scale`
- * folded into `scaleX` and `scaleY` (7 steps; a view takes 8, so one is left
- * for yours, such as a `perspective` before them for 3D flips). */
+ * folded into `scaleX` and `scaleY`; spread it into a list with steps of
+ * your own (`[{ perspective: 800 }, ...motion.transform]` for 3D flips). */
 export type MotionTransform = [
   { translateX: AnimatedValue },
   { translateY: AnimatedValue },
@@ -2329,7 +2341,7 @@ export interface Motion {
   /** `{ opacity, transform }`: bind it with `style={motion.style}`, or
    * spread it into a style. */
   readonly style: { opacity: AnimatedValue; transform: MotionTransform };
-  /** The transform alone, to spread into one with steps of your own. */
+  /** The transform alone, to spread into a list with steps of your own. */
   readonly transform: MotionTransform;
   /** Plays a preset or a motion of your own; a new one interrupts the one
    * playing. Resolves with whether it finished. */
@@ -2374,7 +2386,7 @@ export interface AnimatedModule {
   multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
   modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
-  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number, options?: { snap?: boolean }): AnimatedNode;
   /** The values a spring moves through from `from` (0), one per frame at
    * `fps` (60) until it rests: the exact curve the native driver runs. */
   sampleSpring(config: SpringConfig & { from?: number }, fps?: number): number[];
@@ -2408,7 +2420,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, AnimatedValue } from "nsh/animated";
+            import { Animated, AnimatedValue } from "nsh";
             import { text } from "nsh:rt";
             const v = new AnimatedValue(0);
             globalThis.log = [];
@@ -2483,7 +2495,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { AnimatedValue } from "nsh/animated";
+            import { AnimatedValue } from "nsh";
             import { text } from "nsh:rt";
             const v = new AnimatedValue(1);
             globalThis.log = [];
@@ -2542,7 +2554,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { AnimatedValue } from "nsh/animated";
+            import { AnimatedValue } from "nsh";
             import { text } from "nsh:rt";
             const v = new AnimatedValue(0);
             const config = { inputRange: [0, 1], outputRange: ["red", "blue"] };
@@ -2602,7 +2614,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, AnimatedValue } from "nsh/animated";
+            import { Animated, AnimatedValue } from "nsh";
             globalThis.v = new AnimatedValue(0);
             Animated.loop(Animated.timing(v, { toValue: 1 })).start();
             "#,
@@ -2626,11 +2638,44 @@ mod tests {
     }
 
     #[test]
+    fn a_diff_clamp_asks_to_snap() {
+        use nsh_core::animation::AnimationOp as A;
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { Animated, AnimatedValue } from "nsh";
+            import { text } from "nsh:rt";
+            const scroll = new AnimatedValue(0);
+            const plain = scroll.diffClamp(0, 56);
+            const snapping = scroll.diffClamp(0, 56, { snap: true });
+            globalThis.report = () =>
+                text([
+                    plain === snapping,
+                    Animated.diffClamp(scroll, 0, 56, { snap: true }) === snapping,
+                    scroll.diffClamp(0, 56, { snap: false }) === plain,
+                ].join(","));
+            globalThis.keep = [scroll, plain, snapping];
+            "#,
+        )
+        .unwrap();
+        let snaps: Vec<bool> = animation_ops(&host)
+            .into_iter()
+            .filter_map(|o| match o {
+                A::CreateDiffClamp { snap, .. } => Some(snap),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(snaps, [false, true]);
+        // Equal ones share a node; a snapping one is not a plain one.
+        assert_eq!(report(&host).as_deref(), Some("false,true,true"));
+    }
+
+    #[test]
     fn curves_are_sampled_natively() {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, Easing } from "nsh/animated";
+            import { Animated, Easing } from "nsh";
             import { text } from "nsh:rt";
             const quad = Easing.sample(Easing.quad, 3);
             const spring = Animated.sampleSpring({ toValue: 1, from: 0, damping: 40 });
@@ -2657,7 +2702,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, AnimatedValue, Easing, createMotion, motions } from "nsh/animated";
+            import { Animated, AnimatedValue, Easing, createMotion, motions } from "nsh";
             import { text } from "nsh:rt";
             const v = new AnimatedValue(0);
             v.keyframes([0, { value: 10, offset: 0.25, easing: Easing.steps(2) }, 0], { duration: 400 });

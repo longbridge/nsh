@@ -1,8 +1,8 @@
 ---
 title: Input
 description: "The native text field: controlled and uncontrolled text, keyboards, autofill, selection, multiline inputs and focus."
-order: 6
-group: primitives
+order: 20.1
+group: base
 demo: el-input
 ---
 
@@ -10,10 +10,11 @@ demo: el-input
 
 `Input` is a native text field: a UITextField (single line) or UITextView (multiline) on iOS and Mac Catalyst, an
 EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own. Rust makes one
-with `input()`, TSX with `<Input>` from `nsh`.
+with `nsh_base::input()`, TSX with `<Input>` from `nsh/base`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_base::input;
+use nsh_core::prelude::*;
 
 fn name_field() -> impl IntoElement {
     let name = signal(String::new());
@@ -32,7 +33,8 @@ fn name_field() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, signal } from "nsh";
+import { signal } from "nsh";
+import { Input } from "nsh/base";
 
 function NameField() {
   const name = signal("");
@@ -102,25 +104,27 @@ view styles apply):
 
 ### Colors
 
-The placeholder's color and the color of the caret and the selection are style keys, with their Tailwind variants, and
-methods in Rust:
+The colors of the placeholder, the caret and the selection highlight are style keys, with their Tailwind classes, and
+methods in Rust (UIKit tints the caret and the selection with one color, the caret's when set):
 
 | Style key | Rust | Class | Description |
 |---|---|---|---|
 | `placeholderColor` | `.placeholder_color(..)` | `placeholder:text-*` | The placeholder's color. |
-| `selectionColor` | `.selection_color(..)` | `selection:text-*` | The color of the caret and the selection. |
+| `caretColor` | `.caret_color(..)` | `caret-*` | The caret's color. |
+| `selectionColor` | `.selection_color(..)` | `selection:text-*` | The selection highlight's color. |
 
 ```rust tabs
 input()
     .placeholder("Search")
     .text_color(rgb(0x18181b))
     .placeholder_color(rgb(0x9ca3af))
-    .selection_color(rgb(0x2563eb))
+    .caret_color(rgb(0x2563eb))
+    .selection_color(rgb(0x93c5fd))
 ```
 
 ```tsx tabs
 <Input placeholder="Search" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
-<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", selectionColor: "#2563eb" }} />
+<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", caretColor: "#2563eb", selectionColor: "#93c5fd" }} />
 ```
 
 ### iOS
@@ -128,11 +132,11 @@ input()
 | `ios` key | Rust | Type | Description |
 |---|---|---|---|
 | `textContentType` | `.auto_fill(..)` | `AutoComplete \| TextContentType` | iOS's names for `autoComplete` (`"oneTimeCode"`, `"newPassword"`, …). |
-| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | The `nativeID` of an `InputAccessoryView` ([`nsh/ios`](../modules/nsh-ios.md)) shown over the keyboard while the input has focus. |
+| `inputAccessoryViewID` | `.input_accessory(id)` | `string` | The `nativeID` of an `InputAccessoryView` ([`InputAccessoryView`](../modules/nsh-mobile.md#inputaccessoryview)) shown over the keyboard while the input has focus. |
 | `keyboardAppearance` | `.keyboard_appearance(KeyboardAppearance::Dark)` | `"default" \| "light" \| "dark"` | The keyboard's look; `"default"` follows the system's appearance. Android's keyboards follow the system's theme. |
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 ```
@@ -149,7 +153,7 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input gained / lost focus. |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
-| `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, files, uris }` | The user pasted: the text, images (a screenshot) as `File`s, local files' `file:` URLs. Before the `onChange` of the text it inserts ([forms and keyboard](../docs/forms-and-keyboard.md#pasting-images-and-files)). |
+| `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, html, files, uris }` | The user pasted: the text, its formatting as HTML (Linux, web), images (a screenshot) as `File`s, local files' `file:` URLs. Before the `onChange` of the text it inserts ([forms and keyboard](../docs/forms-and-keyboard.md#pasting-images-and-files)). |
 | `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | The caret moved, with the selection or as the text scrolled or wrapped: `bounds` is where it is in the input, `pageBounds` in the window, an `Overlay`'s `anchor` ([forms and keyboard](../docs/forms-and-keyboard.md#the-caret)). |
 | `onKeyPress` | `.on_key_press(\|key: &str\| ..)` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ width, height }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
@@ -190,7 +194,7 @@ const height = signal(40);
 Moving focus to the next field on return:
 
 ```rust tabs
-use nsh_core::ui::AutoFill;
+use nsh_core::element::AutoFill;
 
 let password = element_ref();
 
@@ -207,12 +211,14 @@ let password!: YNode;
 </>;
 ```
 
-`Keyboard.dismiss()` from `nsh/base` (`dismiss_keyboard()` in Rust) hides the keyboard whichever input has it.
+`Keyboard.dismiss()` from `nsh` (`dismiss_keyboard()` in Rust) hides the keyboard whichever input has it.
 
 ## Platform notes
 
+- On macOS, single-line text, placeholders and carets share the native field's font metrics and are centered together
+  inside the content box. `lineHeight` participates in layout; multiline editors also use it for paragraph spacing.
 - Inputs inside a [scroll view](./scroll.md#keyboard) are kept clear of the keyboard natively. Elsewhere use
-  [`KeyboardAvoidingView`](./keyboard-avoiding-view.md).
+  a bottom padding or margin of [`env(keyboard-inset-height)`](./keyboard.md).
 - `disabled` disables the input (no focus) as well as applying the disabled styles; a `readonly` input keeps its
   focus and selection.
 - `inputAccessoryViewID` applies on iOS, where the keyboard has an accessory bar.

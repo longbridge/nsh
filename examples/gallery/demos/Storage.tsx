@@ -1,6 +1,6 @@
-import { Input, signal, Text, View } from "nsh";
-import { AlertDialog } from "nsh/base";
-import { Storage } from "nsh/storage";
+import { signal, Text, View } from "nsh";
+import { AlertDialog, Input } from "nsh/base";
+import { Storage } from "nsh";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, mono, radius, Row } from "../ui";
 
@@ -129,7 +129,7 @@ export function StorageDemo() {
             <Each of={entries()}>
               {(entry, i) => (
                 <Row first={i() === 0}>
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, color: colors.text, fontFamily: mono }}>
+                  <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, color: colors.text, fontFamily: mono }}>
                     {entry().key}
                   </Text>
                   <Text style={{ fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${entry().length} chars`}</Text>

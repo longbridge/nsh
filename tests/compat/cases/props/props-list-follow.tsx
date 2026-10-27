@@ -4,7 +4,7 @@
 // threshold (fully visible ones only). Its script
 // checks each.
 import { Text, View, signal } from "nsh";
-import { List } from "nsh/list";
+import { List } from "nsh";
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 
@@ -30,7 +30,7 @@ function App() {
       </List>
       <List
         each={range(10)}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 100 }}
+        viewabilityConfig={{ itemVisibleThreshold: 1 }}
         onViewableItemsChange={(info) => viewable.set(info.viewableItems.map((t) => t.index).join(","))}
         style={{ height: 100 }}
       >

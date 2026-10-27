@@ -33,9 +33,9 @@ colored with the theme's tokens; the app restyles each part over it.
 - **Each block is made with primitives** (`Cx::block`): a paragraph or heading is one `text` whose children are spans
   (`Inline` → nested texts, inline images, slots), lists are rows of a marker text and a column, code blocks a column
   with floating actions and a horizontal `scroll`, tables one grid in a horizontal `scroll` (below), disclosures a
-  pressable summary and an `If`. With `selectable`, every text carries `selectable` and the root is a selection area
-  (`Element::selection_area`), so one selection runs across the blocks, and inside a `SelectionArea` on into the
-  texts around the view ("Selection areas" in `text.md`).
+  pressable summary and an `If`. With `selectable`, every text carries `userSelect: "text"` (`.select_text()`) and the root is a selectable view
+  (`Element::selectable`), so one selection runs across the blocks, and inside a selectable view on into the
+  texts around the view ("Selectable views" in `text.md`).
 - **Tables** (`Cx::table`) lay out as gpui-kit's: columns fit their content when there is room, shrink (their cells
   wrapping) down to a floor per column when the view is narrower, and below the floors the table scrolls horizontally
   (`tableScroll`; `tableScrollbar` hides its indicator, as `codeBlockScrollbar` a code block's). The cells are one CSS grid, so columns line up across rows: each column is a `minmax(<floor>,
@@ -64,7 +64,7 @@ colored with the theme's tokens; the app restyles each part over it.
   code blocks again only while they are being written.
 - **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
-  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::ui::open_url`,
+  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::element::open_url`,
   under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
 
 ## Parts and their default styles
@@ -107,7 +107,7 @@ overlapping or off a character boundary, and keeps its header, actions, scroll v
 last: the app's `renderCodeBlock` (TS and Rust: the whole block is the app's), the app's `CodeHighlighter`
 (`provide_context`, Rust: `tree-sitter`, a theme of its own, ...), the built-in one.
 
-The built-in highlighter (`highlight.rs`, `nsh-base`'s feature `highlight`, on by default) is syntect 5 with pure-Rust
+The built-in highlighter (`highlight.rs`, on the tokens, palette and syntaxes of `syntax.rs`, which the `Editor` shares; `nsh-base`'s feature `highlight`, on by default) is syntect 5 with pure-Rust
 regexes (`regex-fancy`, so it builds for WebAssembly; no Oniguruma) and two-face's syntaxes (bat's set: syntect's own
 plus TypeScript / TSX, TOML, Dockerfile, ...). A block's language is found by extension or name, case-insensitive
 (`ts`, `tsx`, `rs`, `py`, `sh`, `yml`, `md`, `Rust`, ...) plus the other names fences use (`jsx`, `shell`, `golang`,
@@ -137,7 +137,8 @@ Some grammars give declarations and types one scope (Rust's `let`, `const` and `
 is `keyword.operator.rust`): those settle by their text (`Token::settle`). The website's Shiki themes
 (`website/src/light.theme.json` / `dark.theme.json`, `allsum-light` / `allsum-dark`) color the same scopes with the same
 palette, so the site's code looks as an app's does. These colors are the one look NSH ships beyond `TextView`'s
-typography; an app with its own palette provides its own `CodeHighlighter`.
+typography and the `Editor`'s look, which colors its text with the same tokens (`crate::syntax`, `editor.md`); an app
+with its own palette provides its own `CodeHighlighter`.
 
 Cost (release, x86-64, 500 lines of real files): a fresh block takes 22 ms in Rust, 139 ms in TSX (TypeScript's
 grammar is the heaviest), 2-3x that for the first block of a language, which compiles its regexes; loading the
@@ -224,14 +225,14 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 |---|---|
 | `TextView::markdown` / `::html` | `markdown` / `html` props; `document` for blocks the app builds |
 | `TextViewStyle` (colors, code block style, heading sizes) | A default typography in the theme's colors; `classes` / `styles` by part; `TextViewParts` (typed, Rust) |
-| Selection across the view | `selectable`: the view is a selection area, one selection across its blocks (drag, double / triple click, Shift+click; long press and handles); `SelectionArea` joins several views and texts |
+| Selection across the view | `selectable`: the view is a selectable view, one selection across its blocks (drag, double / triple click, Shift+click; long press and handles); a `selectable` `View` joins several views and texts |
 | Code block actions (copy) | `codeBlockActions` (`copy` built in, the app's with `renderCodeBlockAction` / `onCodeBlockAction`) |
 | Highlighter (tree-sitter) | Built in (syntect, Allsum's palette, feature `highlight`); the app's `CodeHighlighter` (Rust, styled ranges) or `renderCodeBlock` replaces it |
 | Table actions | `renderTableActions` |
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |
 | Link clicks | `onLinkPress({ url })` |
-| Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh/animated`, layout animation) |
+| Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh`'s `Animated`, layout animation) |
 
 ## Limits
 

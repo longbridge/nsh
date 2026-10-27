@@ -4,9 +4,11 @@
 //! Android animator's design, `nsh-platform-android/src/anim.rs`). The
 //! backends store the values in their views and redraw them.
 
+use std::sync::Arc;
+
 use rustc_hash::FxHashMap;
 
-use super::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
+use super::{AnimatedPropValue, AnimationProp, AnimationValue, Finished, Graph, NodeId};
 use crate::{
     Color, GestureValues, MAX_TRANSFORMS, MountItem,
     geometry::{Point, Points},
@@ -26,12 +28,6 @@ pub struct AnimValues {
     pub border_color: Option<Color>,
     /// Animated text color (a text view's runs, an input's text).
     pub color: Option<Color>,
-    /// Animated shadow color.
-    pub shadow_color: Option<Color>,
-    /// Animated shadow opacity.
-    pub shadow_opacity: Option<f32>,
-    /// Animated shadow blur radius.
-    pub shadow_radius: Option<Points>,
 }
 
 #[derive(Default)]
@@ -54,12 +50,18 @@ pub struct Animator {
     gestures: FxHashMap<u32, Gestures>,
     /// Scroll view id -> (value node, horizontal).
     scrolls: FxHashMap<u32, (NodeId, bool)>,
+    /// Vertical scroll view id -> pull value node.
+    pulls: FxHashMap<u32, NodeId>,
     /// Scroll views with sticky cells that stick an animated value further
     /// in (`StickyCell::offset`): pinned again on the graph's frames.
     sticky: Vec<u32>,
     /// A view's canvas slot values while they are written (reused: written
     /// on every frame).
     canvas_args: Vec<(u16, AnimationValue)>,
+    /// Native component view id -> the names of its animated prop slots.
+    component_slots: FxHashMap<u32, Vec<Arc<str>>>,
+    /// (view, slot) -> the value last written to the component.
+    component_values: FxHashMap<(u32, u16), AnimatedPropValue>,
 }
 
 impl Animator {
@@ -68,7 +70,17 @@ impl Animator {
     pub fn apply(&mut self, item: &MountItem) {
         match item {
             MountItem::Animation(op) => self.graph.apply(op.clone(), &mut self.finished),
+            MountItem::ComponentPropSlots { id, names } => {
+                self.component_slots.insert(*id, names.clone());
+            }
             MountItem::AnimationBindings { id, bindings } => {
+                // An unbound slot is written again once bound again.
+                self.component_values.retain(|&(view, slot), _| {
+                    view != *id
+                        || bindings
+                            .iter()
+                            .any(|(p, _)| *p == AnimationProp::ComponentSlot(slot))
+                });
                 if bindings.is_empty() {
                     self.bindings.remove(id);
                 } else {
@@ -86,15 +98,26 @@ impl Animator {
                 id,
                 horizontal,
                 scroll_value,
+                pull_value,
                 ..
-            } => match scroll_value {
-                Some(node) => {
-                    self.scrolls.insert(*id, (*node, *horizontal));
+            } => {
+                match scroll_value {
+                    Some(node) => {
+                        self.scrolls.insert(*id, (*node, *horizontal));
+                    }
+                    None => {
+                        self.scrolls.remove(id);
+                    }
                 }
-                None => {
-                    self.scrolls.remove(id);
+                match pull_value.filter(|_| !*horizontal) {
+                    Some(node) => {
+                        self.pulls.insert(*id, node);
+                    }
+                    None => {
+                        self.pulls.remove(id);
+                    }
                 }
-            },
+            }
             MountItem::StickyCells { id, cells } => {
                 let animated = cells.iter().any(|c| c.offset.is_some());
                 let at = self.sticky.iter().position(|v| v == id);
@@ -107,9 +130,12 @@ impl Animator {
                 }
             }
             MountItem::Delete { id } => {
+                self.component_slots.remove(id);
+                self.component_values.retain(|&(view, _), _| view != *id);
                 self.bindings.remove(id);
                 self.gestures.remove(id);
                 self.scrolls.remove(id);
+                self.pulls.remove(id);
                 self.sticky.retain(|v| v != id);
             }
             _ => {}
@@ -148,6 +174,28 @@ impl Animator {
         let value = if horizontal { offset.x } else { offset.y };
         self.graph.set(node, value.0, &mut self.finished);
         true
+    }
+
+    /// A vertical scroll view is pulled `distance` past its top (0 when
+    /// not): feeds its pull value. False if no value is bound to it.
+    pub fn pulled(&mut self, id: u32, distance: Points) -> bool {
+        let Some(&node) = self.pulls.get(&id) else {
+            return false;
+        };
+        self.graph
+            .set(node, distance.0.max(0.0), &mut self.finished);
+        true
+    }
+
+    /// Scroll view `id` came to rest (its drag and momentum ended): the
+    /// snapping `diffClamp`s that follow its scroll value settle
+    /// ([`super::Graph::settle`]). True if one starts moving: the platform
+    /// runs its frames.
+    pub fn scroll_ended(&mut self, id: u32) -> bool {
+        let Some(&(node, _)) = self.scrolls.get(&id) else {
+            return false;
+        };
+        self.graph.settle(node)
     }
 
     /// A drag began: grabbing an animating value stops it where it is.
@@ -236,11 +284,6 @@ impl Animator {
                     AnimationProp::BackgroundColor => values.background = Some(color(value)),
                     AnimationProp::BorderColor => values.border_color = Some(color(value)),
                     AnimationProp::Color => values.color = Some(color(value)),
-                    AnimationProp::ShadowColor => values.shadow_color = Some(color(value)),
-                    AnimationProp::ShadowOpacity => values.shadow_opacity = Some(value.number()),
-                    AnimationProp::ShadowRadius => {
-                        values.shadow_radius = Some(Points(value.number()))
-                    }
                     AnimationProp::Transform(i) => {
                         if let Some(t) = values.transform.get_mut(i as usize) {
                             *t = Some(value.number());
@@ -249,9 +292,45 @@ impl Animator {
                     AnimationProp::CanvasArg(k) => canvas.push((k, value)),
                     // The scroll view's (`sticky_views`), never bound.
                     AnimationProp::StickyTop | AnimationProp::StickyLeft => {}
+                    // The component's (`write_components`).
+                    AnimationProp::ComponentSlot(_) => {}
                 }
             }
             set(view, values, canvas);
+        }
+    }
+}
+
+impl Animator {
+    /// Evaluates every bound native component prop: for each view `find`
+    /// knows, `set` gets the slot's name and value, only when it changed
+    /// since the last call (the components see one call per change).
+    pub fn write_components<V: Copy>(
+        &mut self,
+        mut find: impl FnMut(u32) -> Option<V>,
+        mut set: impl FnMut(V, &str, AnimatedPropValue),
+    ) {
+        for (&id, bindings) in &self.bindings {
+            let Some(names) = self.component_slots.get(&id) else {
+                continue;
+            };
+            for &(prop, node) in bindings {
+                let AnimationProp::ComponentSlot(slot) = prop else {
+                    continue;
+                };
+                let Some(name) = names.get(slot as usize) else {
+                    continue;
+                };
+                let value = AnimatedPropValue::from(self.graph.eval(node));
+                if self.component_values.get(&(id, slot)) == Some(&value) {
+                    continue;
+                }
+                let Some(view) = find(id) else {
+                    continue;
+                };
+                self.component_values.insert((id, slot), value);
+                set(view, name, value);
+            }
         }
     }
 }
@@ -272,6 +351,89 @@ mod tests {
         animation::AnimationOp,
         geometry::{Points, point, px},
     };
+
+    fn component_writes(a: &mut Animator) -> Vec<(u32, String, AnimatedPropValue)> {
+        let mut out = Vec::new();
+        a.write_components(Some, |id, name, value| {
+            out.push((id, name.to_string(), value))
+        });
+        out
+    }
+
+    fn bound_component(a: &mut Animator, value: f32) {
+        a.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value,
+        }));
+        a.apply(&MountItem::ComponentPropSlots {
+            id: 4,
+            names: vec!["progress".into()],
+        });
+        a.apply(&MountItem::AnimationBindings {
+            id: 4,
+            bindings: vec![(AnimationProp::ComponentSlot(0), 2)],
+        });
+    }
+
+    #[test]
+    fn component_values_written_once_per_change() {
+        let mut a = Animator::default();
+        bound_component(&mut a, 0.25);
+        assert_eq!(
+            component_writes(&mut a),
+            vec![(4, "progress".to_string(), AnimatedPropValue::Number(0.25))]
+        );
+        // Unchanged: nothing.
+        assert!(component_writes(&mut a).is_empty());
+        a.apply(&MountItem::Animation(AnimationOp::Set {
+            node: 2,
+            value: 0.5,
+        }));
+        assert_eq!(
+            component_writes(&mut a),
+            vec![(4, "progress".to_string(), AnimatedPropValue::Number(0.5))]
+        );
+    }
+
+    #[test]
+    fn component_color_is_argb() {
+        assert_eq!(
+            AnimatedPropValue::from(AnimationValue::Color(0x1122_3344)),
+            AnimatedPropValue::Color(0x4411_2233)
+        );
+        assert_eq!(
+            AnimatedPropValue::from(AnimationValue::Number(0.5)),
+            AnimatedPropValue::Number(0.5)
+        );
+    }
+
+    #[test]
+    fn deleted_component_slots_are_dropped() {
+        let mut a = Animator::default();
+        bound_component(&mut a, 0.25);
+        component_writes(&mut a);
+        a.apply(&MountItem::Delete { id: 4 });
+        assert!(component_writes(&mut a).is_empty());
+        // A view made again with that id starts over.
+        bound_component(&mut a, 0.25);
+        assert_eq!(component_writes(&mut a).len(), 1);
+    }
+
+    #[test]
+    fn rebound_component_prop_is_written_again() {
+        let mut a = Animator::default();
+        bound_component(&mut a, 0.25);
+        component_writes(&mut a);
+        a.apply(&MountItem::AnimationBindings {
+            id: 4,
+            bindings: vec![],
+        });
+        a.apply(&MountItem::AnimationBindings {
+            id: 4,
+            bindings: vec![(AnimationProp::ComponentSlot(0), 2)],
+        });
+        assert_eq!(component_writes(&mut a).len(), 1);
+    }
 
     #[test]
     fn sticky_views_with_animated_offsets_are_pinned_on_frames() {
@@ -298,6 +460,7 @@ mod tests {
             horizontal: false,
             scrollbar_visible: true,
             scroll_value: Some(2),
+            pull_value: None,
             keyboard_dismiss: Default::default(),
             mirrored: false,
         });
@@ -309,5 +472,45 @@ mod tests {
             cells: vec![cell(None)],
         });
         assert!(a.sticky_views().is_empty());
+    }
+
+    #[test]
+    fn a_scroll_view_at_rest_settles_the_values_that_follow_it() {
+        let mut a = Animator::default();
+        a.apply(&MountItem::Animation(AnimationOp::CreateValue {
+            node: 2,
+            value: 0.0,
+        }));
+        a.apply(&MountItem::Animation(AnimationOp::CreateDiffClamp {
+            node: 3,
+            input: 2,
+            min: 0.0,
+            max: 50.0,
+            snap: true,
+        }));
+        a.apply(&MountItem::ScrollConfig {
+            id: 4,
+            horizontal: false,
+            scrollbar_visible: true,
+            scroll_value: Some(2),
+            pull_value: None,
+            keyboard_dismiss: Default::default(),
+            mirrored: false,
+        });
+        for y in [0.0, 200.0, 190.0] {
+            a.scrolled(
+                4,
+                crate::geometry::point(crate::Points(0.0), crate::Points(y)),
+            );
+            a.graph.eval(3);
+        }
+        // Another scroll view's end settles nothing.
+        assert!(!a.scroll_ended(5));
+        assert!(a.scroll_ended(4));
+        assert!(a.animating());
+        a.tick(1.0);
+        a.tick(1.3);
+        assert_eq!(a.graph.eval(3).number(), 50.0);
+        assert!(!a.animating());
     }
 }

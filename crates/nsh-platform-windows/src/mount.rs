@@ -81,7 +81,7 @@ impl Mounter {
     /// The batch is applied.
     pub(crate) fn end_batch(&mut self, surface: &Rc<Surface>) {
         self.layout_animation = None;
-        crate::selection_area::end_batch(surface);
+        crate::selectable_view::end_batch(surface);
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
     }
@@ -103,7 +103,7 @@ impl Mounter {
                 | MountItem::Delete { .. }
                 | MountItem::ViewProps { .. }
         ) {
-            crate::selection_area::tree_changed();
+            crate::selectable_view::tree_changed();
         }
         match item {
             MountItem::Create { id, kind } => {
@@ -172,6 +172,7 @@ impl Mounter {
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
+                        crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
                 }
@@ -210,7 +211,7 @@ impl Mounter {
                     ViewKind::WebView | ViewKind::Video | ViewKind::Native => {
                         crate::native::resized(view)
                     }
-                    _ => {}
+                    _ => crate::shader::resized(view),
                 }
             }
             MountItem::ViewStyle { id, style } => {
@@ -218,6 +219,7 @@ impl Mounter {
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
                 crate::input::style_changed(view);
                 crate::transition::style_changed(surface, view, &old);
+                crate::access::style_changed(view, &old);
                 view.moved();
             }
             MountItem::Text {
@@ -311,6 +313,11 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            MountItem::Shader { id, layer } => {
+                if let Some(view) = &self.get(*id) {
+                    crate::shader::set(surface, view, layer.clone());
+                }
+            }
             MountItem::Gestures { id, values } => {
                 if let Some(view) = &self.get(*id) {
                     crate::input::gestures(surface, view, *values);
@@ -365,7 +372,20 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
+        }
+        // What the item may change on screen is drawn again, whether or not
+        // what applied it said so: a partial frame draws only that.
+        match redrawn(item) {
+            Redraw::Nothing => {}
+            Redraw::View(id) => {
+                if let Some(view) = self.views.get(id) {
+                    view.changed();
+                }
+            }
+            Redraw::Window => surface.invalidate(),
         }
     }
 
@@ -432,5 +452,59 @@ impl Mounter {
             }
             other => crate::system::command(surface, id, other),
         }
+    }
+}
+
+/// What a mount item may change on screen.
+enum Redraw {
+    Nothing,
+    /// The view and its subtree.
+    View(NodeId),
+    /// Anything.
+    Window,
+}
+
+/// What `item` may change on screen once applied. Insertions and removals
+/// draw their parents again themselves ([`NshView::insert_before`],
+/// [`NshView::unparent`]); a new view is drawn when it is inserted.
+fn redrawn(item: &MountItem) -> Redraw {
+    match item {
+        MountItem::Create { .. }
+        | MountItem::Insert { .. }
+        | MountItem::Remove { .. }
+        | MountItem::Delete { .. }
+        | MountItem::TrackStates { .. }
+        | MountItem::Events { .. }
+        | MountItem::AccessibilityLabel { .. }
+        | MountItem::Gestures { .. }
+        | MountItem::Keymap(_)
+        | MountItem::LayoutAnimation(_)
+        | MountItem::Animation(_)
+        | MountItem::AnimationBindings { .. }
+        | MountItem::ComponentPropSlots { .. } => Redraw::Nothing,
+        MountItem::Frame { id, .. }
+        | MountItem::ViewStyle { id, .. }
+        | MountItem::Text { id, .. }
+        | MountItem::Image { id, .. }
+        | MountItem::ScrollConfig { id, .. }
+        | MountItem::ScrollContent { id, .. }
+        | MountItem::ScrollBy { id, .. }
+        | MountItem::Overflow { id, .. }
+        | MountItem::StickyCells { id, .. }
+        | MountItem::ScrollBehavior { id, .. }
+        | MountItem::Refreshing { id, .. }
+        | MountItem::Canvas { id, .. }
+        | MountItem::Shader { id, .. }
+        | MountItem::ViewProps { id, .. }
+        | MountItem::Input { id, .. }
+        | MountItem::InputValue { id, .. }
+        | MountItem::InputContent { id, .. }
+        | MountItem::ScreenConfig { id, .. }
+        | MountItem::ModalConfig { id, .. }
+        | MountItem::NativeProps { id, .. }
+        | MountItem::Component { id, .. }
+        | MountItem::ComponentProps { id, .. }
+        | MountItem::Command { id, .. } => Redraw::View(*id),
+        MountItem::LayoutDirection { .. } | MountItem::Appearance { .. } => Redraw::Window,
     }
 }

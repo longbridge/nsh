@@ -1,6 +1,6 @@
 import { Image, mount, signal, Text, View } from "nsh";
-import { windowSize } from "nsh/device";
-import { ui } from "./palette";
+import { windowSize } from "nsh";
+import { button, buttonText, focusRing, ui } from "./palette";
 
 // The pictures are SVG `data:` URIs, so the demo needs no network. An app
 // would import a file next to it (`import hills from "./hills.png"`) or pass
@@ -42,7 +42,7 @@ const star = svg(`<path d="M12 2l3 6.5 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21.1l1.5-7
 
 const sources = { landscape, portrait, missing: "asset:/missing.png" } as const;
 type Source = keyof typeof sources;
-const modes = ["cover", "contain", "stretch", "center"] as const;
+const modes = ["cover", "contain", "fill", "none"] as const;
 type Mode = (typeof modes)[number];
 
 function Segments<T extends string>(props: { options: readonly T[]; value: T; onChange: (v: T) => void }) {
@@ -63,6 +63,9 @@ function Segments<T extends string>(props: { options: readonly T[]; value: T; on
                 backgroundImage: on() ? ui().raised.backgroundImage : "none",
                 boxShadow: on() ? ui().raised.boxShadow : "none",
               }}
+              hoverStyle={{ opacity: 0.88 }}
+              focusStyle={focusRing()}
+              activeStyle={{ opacity: 0.7 }}
             >
               <Text style={{ fontWeight: "600", color: on() ? ui().text : ui().muted }}>{option()}</Text>
             </View>
@@ -88,27 +91,22 @@ function App() {
         <Image
           src={sources[source()]}
           placeholder={placeholder}
-          resizeMode={mode()}
           blurRadius={blur() ? 12 : 0}
           fadeDuration={250}
           onLoadStart={() => log("onLoadStart")}
           onLoad={(e) => log(`onLoad ${Math.round(e.width)} × ${Math.round(e.height)}`)}
           onError={(e) => log(`onError ${e.message}`)}
           onLoadEnd={() => log("onLoadEnd")}
-          style={{ ...ui().inset, flex: 1, minHeight: 180, borderRadius: 14 }}
+          style={{ ...ui().inset, flex: 1, minHeight: 180, borderRadius: 14, objectFit: mode() }}
         />
         <View style={{ gap: 12, width: wide() ? 320 : undefined }}>
           <Text style={{ color: ui().muted }}>src</Text>
           <Segments options={Object.keys(sources) as Source[]} value={source()} onChange={(s) => source.set(s)} />
-          <Text style={{ color: ui().muted }}>resizeMode</Text>
+          <Text style={{ color: ui().muted }}>objectFit</Text>
           <Segments options={modes} value={mode()} onChange={(m) => mode.set(m)} />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View
-              onPress={() => blur.set(!blur())}
-              activeStyle={{ opacity: 0.6 }}
-              style={{ ...(blur() ? ui().accentFill : ui().raised), paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
-            >
-              <Text style={{ fontWeight: "600", color: blur() ? ui().onAccent : ui().text }}>blurRadius {blur() ? 12 : 0}</Text>
+            <View onPress={() => blur.set(!blur())} {...button("secondary", { on: blur })}>
+              <Text style={buttonText("secondary", { on: blur })}>blurRadius {blur() ? 12 : 0}</Text>
             </View>
             <Text style={{ color: ui().muted }}>tintColor</Text>
             <Image src={star} style={{ width: 24, height: 24, tintColor: ui().accent }} />
