@@ -138,7 +138,7 @@ backend restyles nothing and only projects it to Cells.
   keyboard focus and cancel a pending press.
 - **Scheduling is passive.** The wake callback only schedules a render on the embedding thread. Wakeups coalesce
   until rendering begins. `next_frame_deadline` is immediate for pending messages, timed for an engine display
-  frame request, and `None` while idle. Error and appearance callbacks run during render on the embedding thread.
+  frame request or native animation, and `None` while idle. Error and appearance callbacks run during render on the embedding thread.
   `Widget for &mut AppView` follows the same batch and drawing path for buffer-only callers.
 - **The terminal transport stays in the host.** The library depends on `ratatui-core` 0.1 and `ratatui-widgets`
   0.3, the crates behind ratatui 0.30. Feature `run-app` adds a generic loop over `Terminal<B>` and a polling
@@ -152,7 +152,7 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. The terminal idiom, animation and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
+component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
 
 ## Points per Cell
 
@@ -199,8 +199,9 @@ view fill of exactly the same RGBA color. These fills draw `Color::Reset`, so th
 background. A matching fill resets the background even when it lies over a colored card; it does not inherit that
 card's color. Other fills keep the app's colors, including colors that differ by a single channel value.
 
-The attached tree's page colors are collected after each complete mount batch, before drawing. This makes
-matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
+The attached tree's page colors are collected before drawing, after complete mount batches and animated values
+have been applied. This makes matching independent of paint order and follows style changes, animation frames,
+detachments and app replacement. Transparent fills
 remain transparent. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
 separate interaction work.
 
@@ -281,6 +282,36 @@ focus moves to the nearest visible focusable view in the current focus scope, me
 position. A wheel event with no keyboard focus creates none. Focus selection uses the completed scrolled frame,
 so the next activation cannot target content that has left the viewport. Indicators, sticky cells, gestures and
 scrolling animations remain separate work.
+
+## Native animations
+
+The retained tree owns one core `animation::Animator`. Every mount item feeds it, including deletion and binding
+changes. `AppView::render` and its buffer-only Widget path tick it with monotonic seconds, write `AnimValues` and
+canvas slots, then send its finished runs and value reads through `EngineControl::animations_finished`. Timing,
+springs, decay, composites and native keyframes use the core's drivers. Replacing or stopping an app clears the
+graph and its deadline. Replacing bindings clears their old overrides, so ordinary styles become visible again.
+
+Active drivers request the next render in 16 ms through `next_frame_deadline`; they have their own deadline,
+separate from the engine's display-frame request. Embedders arm a timer for that deadline after rendering. The
+standalone loop already uses this contract. Once the graph finishes or is stopped, it schedules no further
+frames. The test agent reports the graph's actual animation state when settling input.
+
+Animated opacity multiplies through descendants. Background, border and text colors override their style values;
+text fields keep their placeholder color. Colors blend with the current Cell background. Page backgrounds keep
+their terminal-default treatment as their animated color changes. Canvas numeric and color slots are evaluated
+on the same frame, including the slots used by drawing transforms.
+
+`animation.rs` composes two-dimensional view transforms in CSS order around `transformOrigin`, including bound
+steps. Translation snaps to Cells; scale, rotation and skew project each view and content box to its axis-aligned
+Cell extent. Descendants inherit the transform, and clipping, focus geometry and hit regions use those projected
+boxes. Text keeps upright, unscaled terminal glyphs inside its projected box; borders remain Cell-aligned.
+Canvas paths receive the composed affine transform on the braille grid, including after a canvas `setTransform`.
+Depth rotation and perspective are Decorative features left out silently.
+
+The environment reports reduced motion. Navigation, modal transitions, layout animations and style transitions
+take their final state immediately. Motions honor reduced motion through the core; explicit `Animated` and
+animated-value drivers run as written, so entrance fades such as the gallery's `Appear` finish visible and
+completion callbacks and promises resolve normally.
 
 ## Canvases
 
@@ -470,7 +501,11 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
-| Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
+| Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
+| 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
+| Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |
+| Navigation, modal, layout and style transitions | Final state applied immediately under reduced motion |
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
 | Modal | A surface-sized root above the page, with its own focus scope |
@@ -505,8 +540,11 @@ The text-input fixture checks typing, readline navigation, one large paste, sele
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
 its own, checks invalid fields and successful account creation.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
-during and after the search. The host's unit checks cover crossterm conversion; its two ignored lifecycle checks
-require a real terminal.
+during and after the search.
+The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
+app replacement, binding removal, page backgrounds, transform geometry and presses, and canvas slots. The
+`animation` host fixture checks final Cells and callbacks through `nsh test --target tui`.
+The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui
@@ -517,6 +555,7 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/animation --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1
 cargo test -p nsh-tui-host --lib terminal::tests::panic_restores_raw_mode -- --ignored --nocapture --test-threads=1

@@ -3,6 +3,8 @@
 mod text;
 mod text_input;
 
+#[cfg(feature = "js")]
+mod animation;
 mod app;
 
 mod canvas;

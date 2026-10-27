@@ -8,6 +8,7 @@ use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, Points, ROOT_ID, V
 use crate::{Appearance, ComponentFactory, canvas::CanvasView, view::NshView};
 
 pub(crate) struct Mounter {
+    pub(crate) animator: nsh_core::animation::Animator,
     pub(crate) views: Vec<Option<NshView>>,
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
@@ -28,6 +29,7 @@ pub(crate) struct Mounter {
 impl Default for Mounter {
     fn default() -> Self {
         let mut this = Self {
+            animator: Default::default(),
             views: Vec::new(),
             components: HashMap::new(),
             appearance: None,
@@ -99,6 +101,7 @@ impl Mounter {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.animator = Default::default();
         self.focus_requests.clear();
         self.views.clear();
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
@@ -118,7 +121,17 @@ impl Mounter {
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
         for item in batch.items {
+            self.animator.apply(&item);
             match item {
+                MountItem::Animation(_) | MountItem::LayoutAnimation(_) => {}
+                MountItem::AnimationBindings { id, .. } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.animated = Default::default();
+                        if let Some(canvas) = &mut view.canvas {
+                            canvas.args.clear();
+                        }
+                    }
+                }
                 MountItem::Create { id, kind } => {
                     if !matches!(
                         kind,
@@ -376,6 +389,9 @@ impl Mounter {
             }
         }
         crate::navigation::end_batch(self);
+    }
+
+    pub(crate) fn collect_page_backgrounds(&mut self) {
         self.page_backgrounds.clear();
         collect_page_backgrounds(&self.views, ROOT_ID, &mut self.page_backgrounds);
     }
@@ -389,7 +405,10 @@ fn collect_page_backgrounds(views: &[Option<NshView>], id: NodeId, colors: &mut 
         || view.parent == Some(ROOT_ID)
         || matches!(view.kind, ViewKind::Screen | ViewKind::Modal)
     {
-        let fill = view.style.background_color;
+        let fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
         if !fill.is_transparent() && !colors.contains(&fill) {
             colors.push(fill);
         }

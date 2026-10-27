@@ -12,6 +12,8 @@ use nsh_engine::{AppError, Engine, MountSink};
 
 use crate::WakeCallback;
 
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+
 pub(crate) enum Message {
     Batch(MountBatch),
     Error(AppError),
@@ -86,6 +88,8 @@ pub(crate) struct Surface {
     pub(crate) inbox: Receiver<Message>,
     pub(crate) wake: Arc<Wake>,
     pub(crate) frame: Option<Instant>,
+    pub(crate) animation_frame: Option<Instant>,
+    pub(crate) animation_start: Instant,
 }
 
 impl Default for Surface {
@@ -95,6 +99,8 @@ impl Default for Surface {
             inbox: crossbeam_channel::never(),
             wake: Arc::default(),
             frame: None,
+            animation_frame: None,
+            animation_start: Instant::now(),
         }
     }
 }
@@ -104,7 +110,7 @@ impl Surface {
         if self.wake.pending.load(Ordering::Acquire) || !self.inbox.is_empty() {
             Some(Instant::now())
         } else {
-            self.frame
+            self.frame.into_iter().chain(self.animation_frame).min()
         }
     }
 
@@ -123,13 +129,44 @@ impl Surface {
 
     pub(crate) fn request_frame(&mut self) {
         self.frame
-            .get_or_insert_with(|| Instant::now() + Duration::from_millis(16));
+            .get_or_insert_with(|| Instant::now() + FRAME_INTERVAL);
+    }
+
+    pub(crate) fn animate(&mut self, tree: &mut crate::mount::Mounter) {
+        let now = Instant::now();
+        tree.animator
+            .tick(now.duration_since(self.animation_start).as_secs_f64());
+        let views = &mut tree.views;
+        tree.animator.write(Some, |id, values, args| {
+            if let Some(view) = views.get_mut(id as usize).and_then(Option::as_mut) {
+                view.animated = values;
+                if let Some(canvas) = &mut view.canvas {
+                    for &(slot, value) in args {
+                        canvas
+                            .args
+                            .resize(canvas.args.len().max(usize::from(slot) + 1), None);
+                        canvas.args[usize::from(slot)] = Some(value);
+                    }
+                }
+            }
+        });
+        // A delay keeps the graph running even when this tick changed no values.
+        self.animation_frame = tree.animator.animating().then_some(now + FRAME_INTERVAL);
+        if !tree.animator.finished.is_empty()
+            && let Some(engine) = &self.engine
+        {
+            engine
+                .control()
+                .animations_finished(std::mem::take(&mut tree.animator.finished));
+        }
     }
 
     pub(crate) fn stop(&mut self) {
         self.engine = None;
         self.inbox = crossbeam_channel::never();
         self.frame = None;
+        self.animation_frame = None;
+        self.animation_start = Instant::now();
         self.wake.notify();
     }
 }

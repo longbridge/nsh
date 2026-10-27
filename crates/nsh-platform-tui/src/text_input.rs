@@ -428,6 +428,7 @@ impl Field {
         clip: Rect,
         buffer: &mut Buffer,
         opacity: f32,
+        color: Option<nsh_core::Color>,
     ) {
         self.bounds = Some(bounds);
         self.visible = bounds.clipped(clip);
@@ -459,7 +460,7 @@ impl Field {
         let color = if placeholder {
             config.placeholder_color.unwrap_or(config.style.color)
         } else {
-            config.style.color
+            color.unwrap_or(config.style.color)
         };
         let mut style = Style::default().fg(crate::render::blend(
             color,
