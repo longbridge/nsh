@@ -182,9 +182,10 @@ positive coordinates, including negative positions (`-0.5` becomes `0`). The emb
 is added after conversion. `geometry::CellBounds` is the common boundary for view frames and content boxes;
 input content boxes follow the same rule as text content boxes.
 
-A positive width or height occupies at least one Cell; a zero extent stays zero. This keeps thin progress rails,
-slider thumbs and partial indicators visible and operable, including the official gallery's 6-point rails.
-It changes only the Cell projection: layout and the control's numeric value remain the core's.
+A positive width or height occupies at least one Cell; a zero extent stays zero. This rendering rule keeps thin
+progress rails, slider thumbs and partial indicators visible and operable: the official gallery's 6-point rail
+occupies one Cell row at the default 16-point Cell height. It changes only the Cell projection; layout, app styles
+and the control's numeric value remain the core's.
 
 A box first snaps its origin relative to its parent's snapped origin. Its right and bottom edges are then computed
 from that snapped origin plus its point width and height, using the same rounding rule. Children and content use
@@ -361,7 +362,9 @@ above; unfocused surfaces ignore keys.
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
 state stays on a shared ancestor when moving backward between its controls. App-defined outlines draw as
 single-Cell strokes in the app's color, with their offset rounded to Cells and their hidden edges clipped.
-They take no layout space; text and children draw above the stroke when they share its Cells.
+They take no layout space; text and children draw above the stroke when they share its Cells. This is a
+rendering rule for outlines the app sets, including focus outlines; the backend adds no outline of its own.
+The app and shared example UI own the appearance, while the backend projects their styles onto Cells.
 
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
