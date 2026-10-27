@@ -48,6 +48,10 @@ use crate::{
 /// The sink is emptied once it holds this many bytes (and no composition
 /// is in progress).
 const SINK_LIMIT: usize = 256;
+
+/// How much nearer a drop place that takes a block as it is counts than
+/// one that takes it wrapped, between blocks.
+const DIRECT_SLACK: f32 = 6.0;
 /// How many half-line steps a caret moving up or down probes past a gap
 /// between blocks before it takes the document's edge.
 const GAP_PROBES: usize = 64;
@@ -1712,9 +1716,32 @@ impl Rv {
                 (slice.open_start == 0 && slice.open_end == 0 && slice.content.child_count() > 0)
                     .then(|| slice.content.child(0))
                     .filter(|n| n.is_block());
+            // ProseMirror's drop point looks for a place the slice fits as
+            // it is: a place that takes the block wrapped (an item out of
+            // its list) stays where the pointer chose.
             let target = block
-                .and_then(|node| self.block_drop(at, node))
-                .and_then(|p| drop_point(state.doc(), p, slice))
+                .and_then(|node| {
+                    let p = self.block_drop(at, node)?;
+                    let rp = state.doc().resolve(p).ok()?;
+                    let index = rp.index(rp.depth);
+                    if rp.parent().can_replace_with(index, index, node.ty(), None) {
+                        return drop_point(state.doc(), p, slice);
+                    }
+                    // Next to a list that takes the item, it joins that list
+                    // (at its start or end) rather than making another.
+                    let takes = |n: &Node, i: usize| n.can_replace_with(i, i, node.ty(), None);
+                    if let Some(after) = rp.node_after()
+                        && takes(&after, 0)
+                    {
+                        return Some(p + 1);
+                    }
+                    if let Some(before) = rp.node_before()
+                        && takes(&before, before.child_count())
+                    {
+                        return Some(p - 1);
+                    }
+                    Some(p)
+                })
                 .or_else(|| {
                     self.hit_clamped(at)
                         .and_then(|p| drop_point(state.doc(), p, slice))
@@ -1775,7 +1802,16 @@ impl Rv {
                 continue;
             };
             let index = rp.index(rp.depth);
-            if !rp.parent().can_replace_with(index, index, node.ty(), None) {
+            // A node the parent takes wrapped goes there too (a list item
+            // dropped between paragraphs lands in a list of its own).
+            let direct = rp.parent().can_replace_with(index, index, node.ty(), None);
+            let fits = direct
+                || rp
+                    .parent()
+                    .content_match_at(index)
+                    .and_then(|m| m.find_wrapping(node.ty()))
+                    .is_some();
+            if !fits {
                 continue;
             }
             let (top, bottom) = (origin.y, origin.y + frame.size.height);
@@ -1795,8 +1831,16 @@ impl Rv {
                 } else {
                     at.y - bottom
                 };
-                if nearest.is_none_or(|(d, _)| distance < d) {
-                    nearest = Some((distance, boundary));
+                // Between blocks, places that take the node as it is win
+                // a near tie: an item just past its list's end stays in it,
+                // one dragged into the gap above a paragraph leaves it.
+                let rank = if direct {
+                    distance - px(DIRECT_SLACK)
+                } else {
+                    distance
+                };
+                if nearest.is_none_or(|(r, _)| rank < r) {
+                    nearest = Some((rank, boundary));
                 }
             }
         }
@@ -2243,6 +2287,30 @@ pub(crate) fn fill_gap(state: &EditorState) -> Option<Transaction> {
 /// prosemirror-view's drop of `slice` at `insert`: the selection deleted
 /// first when `moved`, the slice inserted where `insert` maps to (a single
 /// closed node as that node), then selected; `None` when nothing changes.
+/// `node` as it goes at `pos` in `doc`: as it is where it fits, else in
+/// a copy of `home` (the parent it left) when that fits, else in the
+/// schema's first wrapping; none where nothing does.
+fn wrapped(doc: &Node, pos: usize, node: Node, home: Option<&Node>) -> Option<Node> {
+    let rp = doc.resolve(pos).ok()?;
+    let (parent, index) = (rp.parent(), rp.index(rp.depth));
+    if parent.can_replace_with(index, index, node.ty(), None) {
+        return Some(node);
+    }
+    if let Some(home) = home
+        && home.ty().content_match().match_type(node.ty()).is_some()
+        && parent.can_replace_with(index, index, home.ty(), None)
+    {
+        return home
+            .ty()
+            .create(Some(home.attrs().clone()), Fragment::from(node), vec![])
+            .ok();
+    }
+    let wrappers = parent.content_match_at(index)?.find_wrapping(node.ty())?;
+    wrappers.iter().rev().try_fold(node, |inner, ty| {
+        ty.create(None, Fragment::from(inner), vec![]).ok()
+    })
+}
+
 pub(crate) fn drop_transaction(
     state: &EditorState,
     slice: &Slice,
@@ -2251,8 +2319,23 @@ pub(crate) fn drop_transaction(
     source: Option<(usize, usize)>,
 ) -> Option<Transaction> {
     let mut tr = state.tr();
+    // The parent the moved block leaves, which wraps it again where the
+    // drop's place takes it only wrapped (an item dropped out of its list).
+    let home = source
+        .and_then(|(from, _)| state.doc().resolve(from).ok())
+        .filter(|rp| rp.depth > 0)
+        .map(|rp| rp.parent().clone());
     match (moved, source) {
         (true, Some((from, to))) => {
+            // A parent left empty goes with its last child (a list whose
+            // only item moves away).
+            let (mut from, mut to) = (from, to);
+            while let Ok(rp) = state.doc().resolve(from) {
+                if rp.depth == 0 || rp.start(rp.depth) != from || rp.end(rp.depth) != to {
+                    break;
+                }
+                (from, to) = (rp.before(rp.depth), rp.after(rp.depth));
+            }
             tr.delete(from, to).ok()?;
         }
         (true, None) => {
@@ -2264,6 +2347,7 @@ pub(crate) fn drop_transaction(
     let single = (slice.open_start == 0 && slice.open_end == 0 && slice.content.child_count() == 1)
         .then(|| slice.content.first_child().cloned())
         .flatten();
+    let single = single.and_then(|node| wrapped(tr.doc(), pos, node, home.as_ref()));
     let before = tr.doc().clone();
     match &single {
         Some(node) => {
