@@ -17,6 +17,26 @@ its adjacent source map and capability metadata. Bytecode files require the trus
 path, owned by the packaging work. The host keeps a bounded diagnostic tail and prints it after restoring the
 terminal. `--trace` includes the engine's timing logs, `--data-dir` selects its persistent data directory.
 
+## The example app
+
+`examples/tui-gallery` is the reference for how an app designed for the Terminal idiom looks; the platform
+restyles nothing, so the look is the app's own, after Emacs's dired, magit and ibuffer:
+
+- Dense and text first: sizes in whole Cells (8 points across, 16 down), at most one Cell of padding, one blank
+  row between sections.
+- Section headings are bold text, not bordered cards; a header line names the page, a rule of `─` below it.
+- Buttons are text, `[ OK ]`; switches `[on ]` / `[off]`, checkboxes `[x]`, radios `(*)`, levels `━━━──`.
+- One accent color marks what is selected or active (a selected row also gets a `▸` marker); green and red only
+  carry a value's meaning.
+- Separators are drawn with line characters (`─`, `│`, borders); there are no filled blocks. The pages set no
+  background, so the terminal's own shows through, and the palette follows the light or dark appearance. The only
+  fill is a dialog's, which has to hide the rows under it.
+
+```sh
+./target/debug/nsh build examples/tui-gallery --out .nsh/tui-gallery
+./target/debug/nsh-tui-host --bundle .nsh/tui-gallery/bundle.js
+```
+
 ## Architecture
 
 - **The core lays out in points.** Taffy places each view. The backend projects its frame to Cells using the

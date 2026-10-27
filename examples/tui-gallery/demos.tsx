@@ -1,10 +1,22 @@
 import { Canvas, type CanvasRenderingContext2D, cleanup, computed, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { Button, Card, colors, Field } from "./ui";
+import { Button, colors, Field, Rule, Section, VerticalRule } from "./ui";
+
+/** A level drawn as a line, `━━━━────`: filled in its tone, the rest faint. */
+function Meter(props: { value: number; tone: string; cells: number; suffix: string }) {
+  const filled = () => Math.round(Math.max(0, Math.min(1, props.value)) * props.cells);
+  return (
+    <Text>
+      <Text style={{ color: props.tone }}>{"━".repeat(filled())}</Text>
+      <Text style={{ color: colors.faint }}>{"─".repeat(props.cells - filled())}</Text>
+      <Text style={{ color: colors.muted }}> {props.suffix}</Text>
+    </Text>
+  );
+}
 
 // ─── Counter ────────────────────────────────────────────────────────────
 
-/** Digits five rows tall, drawn with blocks. */
+/** Digits five rows tall, drawn with block characters in the text color. */
 const DIGITS: Record<string, string[]> = {
   "0": ["███", "█ █", "█ █", "█ █", "███"],
   "1": [" █ ", "██ ", " █ ", " █ ", "███"],
@@ -19,12 +31,12 @@ const DIGITS: Record<string, string[]> = {
   "-": ["   ", "   ", "███", "   ", "   "],
 };
 
-function BigNumber(props: { value: number; color: string }) {
+function BigNumber(props: { value: number }) {
   const rows = () => {
     const glyphs = String(props.value).split("").map((d) => DIGITS[d] ?? DIGITS["0"]);
     return [0, 1, 2, 3, 4].map((row) => glyphs.map((g) => g[row]).join(" ")).join("\n");
   };
-  return <Text style={{ color: props.color }}>{rows()}</Text>;
+  return <Text style={{ color: colors.text }}>{rows()}</Text>;
 }
 
 export function Counter() {
@@ -35,30 +47,30 @@ export function Counter() {
     count.set(next);
     history.update((h) => [next, ...h].slice(0, 8));
   };
-  const tone = () => (count() < 0 ? colors.down : count() > 0 ? colors.up : colors.text);
+  const sign = () => (count() < 0 ? "below zero" : count() > 0 ? "above zero" : "zero");
+  const tone = () => (count() < 0 ? colors.down : count() > 0 ? colors.up : colors.muted);
   return (
     <>
-      <Card title="Value">
-        <View style={{ alignItems: "center", gap: 16 }}>
-          <BigNumber value={count()} color={tone()} />
-          <View style={{ flexDirection: "row", gap: 16 }}>
-            <Button label="−10" tone={colors.down} onPress={() => change(-10)} />
-            <Button label="−1" tone={colors.down} onPress={() => change(-1)} />
-            <Button label="Reset" onPress={() => change(-count())} />
-            <Button label="+1" tone={colors.up} onPress={() => change(1)} />
-            <Button label="+10" tone={colors.up} onPress={() => change(10)} />
-          </View>
+      <Section title="Value">
+        <BigNumber value={count()} />
+        <Text style={{ color: tone() }}>{sign()}</Text>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
+          <Button label="−10" onPress={() => change(-10)} />
+          <Button label="−1" onPress={() => change(-1)} />
+          <Button label="Reset" onPress={() => change(-count())} />
+          <Button label="+1" onPress={() => change(1)} />
+          <Button label="+10" onPress={() => change(10)} />
         </View>
-      </Card>
-      <Card title="History">
+      </Section>
+      <Section title="History">
         <If when={history().length > 0} else={<Text style={{ color: colors.faint }}>Press a button: the values show here.</Text>}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 16 }}>
             <Each of={history()}>
-              {(value, i) => <Text style={{ color: i() === 0 ? colors.text : colors.muted }}>{i() === 0 ? `▶ ${value()}` : String(value())}</Text>}
+              {(value, i) => <Text style={{ color: i() === 0 ? colors.accent : colors.muted }}>{i() === 0 ? `▸ ${value()}` : String(value())}</Text>}
             </Each>
           </View>
         </If>
-      </Card>
+      </Section>
     </>
   );
 }
@@ -98,6 +110,9 @@ const SEED: [string, string, number][] = [
 ];
 
 type SortKey = "symbol" | "last" | "change";
+
+/** The selection marker's column, before the others. */
+const MARKER_WIDTH = 16;
 
 const COLUMNS: { key: SortKey | null; label: string; width: number; right?: boolean }[] = [
   { key: "symbol", label: "Symbol", width: 72 },
@@ -140,59 +155,57 @@ export function Watchlist() {
 
   return (
     <>
-      <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
-        <Button label={running() ? "❚❚ Pause" : "▶ Resume"} onPress={() => running.set(!running())} active={!running()} tone={colors.warn} />
+      <View style={{ flexDirection: "row", gap: 16 }}>
+        <Button label={running() ? "Pause" : "Resume"} onPress={() => running.set(!running())} active={!running()} />
         <Text style={{ color: colors.muted }}>
           tick <Text style={{ color: colors.text }}>{ticks()}</Text> · <Text style={{ color: colors.up }}>{advancing()} up</Text> ·{" "}
           <Text style={{ color: colors.down }}>{quotes().length - advancing()} down</Text> · click a column to sort, a row to select
         </Text>
       </View>
-      <Card>
-        <View>
-          <View style={{ flexDirection: "row", height: 16 }}>
-            <Each of={COLUMNS}>
-              {(column) => {
-                const c = column();
-                const arrow = () => (c.key && sort().key === c.key ? (sort().descending ? " ▼" : " ▲") : "");
-                return (
-                  <View onPress={c.key ? () => toggleSort(c.key!) : undefined} style={{ width: c.width, paddingHorizontal: 8 }}>
-                    <Text style={{ fontWeight: "700", color: c.key && sort().key === c.key ? colors.accent : colors.muted, textAlign: c.right ? "right" : "left" }}>
-                      {c.label + arrow()}
-                    </Text>
-                  </View>
-                );
-              }}
-            </Each>
-          </View>
-          <View style={{ height: 1, backgroundColor: colors.line, marginVertical: 0 }} />
-          <Each of={sorted()}>
-            {(quote) => {
-              const q = () => quote();
-              const pct = () => change(q());
-              const tone = () => (pct() >= 0 ? colors.up : colors.down);
-              const isSelected = () => selected() === q().symbol;
+      <View>
+        <View style={{ flexDirection: "row", height: 16 }}>
+          <View style={{ width: MARKER_WIDTH }} />
+          <Each of={COLUMNS}>
+            {(column) => {
+              const c = column();
+              const isSortKey = () => c.key !== null && sort().key === c.key;
+              const arrow = () => (isSortKey() ? (sort().descending ? " ▼" : " ▲") : "");
               return (
-                <View
-                  onPress={() => selected.set(isSelected() ? null : q().symbol)}
-                  style={{ flexDirection: "row", height: 16, backgroundColor: isSelected() ? colors.raised : "transparent" }}
-                >
-                  <Text style={{ width: 72, paddingHorizontal: 8, fontWeight: "700", color: isSelected() ? colors.accent : colors.text }}>{q().symbol}</Text>
-                  <Text numberOfLines={1} style={{ width: 144, paddingHorizontal: 8, color: colors.muted }}>
-                    {q().name}
+                <View onPress={c.key ? () => toggleSort(c.key!) : undefined} style={{ width: c.width, paddingHorizontal: 8 }}>
+                  <Text style={{ fontWeight: "700", color: isSortKey() ? colors.accent : colors.text, textAlign: c.right ? "right" : "left" }}>
+                    {c.label + arrow()}
                   </Text>
-                  <Text style={{ width: 80, paddingHorizontal: 8, textAlign: "right", color: colors.text }}>{q().last.toFixed(2)}</Text>
-                  <Text style={{ width: 80, paddingHorizontal: 8, textAlign: "right", color: tone() }}>
-                    {(pct() >= 0 ? "+" : "") + pct().toFixed(2) + "%"}
-                  </Text>
-                  <Text style={{ width: 336, paddingHorizontal: 8, color: tone() }}>{sparkline(q().trend)}</Text>
                 </View>
               );
             }}
           </Each>
         </View>
-      </Card>
+        <Rule />
+        <Each of={sorted()}>
+          {(quote) => {
+            const q = () => quote();
+            const pct = () => change(q());
+            const tone = () => (pct() >= 0 ? colors.up : colors.down);
+            const isSelected = () => selected() === q().symbol;
+            return (
+              <View onPress={() => selected.set(isSelected() ? null : q().symbol)} style={{ flexDirection: "row", height: 16 }}>
+                <Text style={{ width: MARKER_WIDTH, color: colors.accent }}>{isSelected() ? "▸" : " "}</Text>
+                <Text style={{ width: 72, paddingHorizontal: 8, fontWeight: "700", color: isSelected() ? colors.accent : colors.text }}>{q().symbol}</Text>
+                <Text style={{ numberOfLines: 1, width: 144, paddingHorizontal: 8, color: isSelected() ? colors.accent : colors.muted }}>
+                  {q().name}
+                </Text>
+                <Text style={{ width: 80, paddingHorizontal: 8, textAlign: "right", color: isSelected() ? colors.accent : colors.text }}>{q().last.toFixed(2)}</Text>
+                <Text style={{ width: 80, paddingHorizontal: 8, textAlign: "right", color: tone() }}>
+                  {(pct() >= 0 ? "+" : "") + pct().toFixed(2) + "%"}
+                </Text>
+                <Text style={{ width: 336, paddingHorizontal: 8, color: tone() }}>{sparkline(q().trend)}</Text>
+              </View>
+            );
+          }}
+        </Each>
+      </View>
       <If when={pick()}>
-        <Card title={`${pick()!.symbol} · ${pick()!.name}`}>
+        <Section title={`${pick()!.symbol} · ${pick()!.name}`}>
           <View style={{ flexDirection: "row", gap: 32 }}>
             <Text style={{ color: colors.muted }}>
               Open <Text style={{ color: colors.text }}>{pick()!.open.toFixed(2)}</Text>
@@ -207,7 +220,7 @@ export function Watchlist() {
               Low <Text style={{ color: colors.down }}>{Math.min(...pick()!.trend).toFixed(2)}</Text>
             </Text>
           </View>
-        </Card>
+        </Section>
       </If>
     </>
   );
@@ -215,20 +228,14 @@ export function Watchlist() {
 
 // ─── Form ───────────────────────────────────────────────────────────────
 
+/** A one-row field between brackets, as Emacs's widgets: `[ text ]`, the error on the row below. */
 function TextField(props: { value: string; onChange: (v: string) => void; placeholder: string; error?: string; secure?: boolean }) {
   const focused = signal(false);
+  const bracket = () => (props.error ? colors.down : focused() ? colors.accent : colors.faint);
   return (
-    <View style={{ flex: 1, gap: 0 }}>
-      <View
-        style={{
-          borderWidth: 1,
-          borderRadius: 8,
-          borderColor: props.error ? colors.down : focused() ? colors.accent : colors.line,
-          paddingHorizontal: 15,
-          paddingVertical: 15,
-          backgroundColor: colors.background,
-        }}
-      >
+    <View style={{ flex: 1 }}>
+      <View style={{ flexDirection: "row", height: 16 }}>
+        <Text style={{ color: bracket() }}>[ </Text>
         <Input
           value={props.value}
           onChange={props.onChange}
@@ -236,8 +243,9 @@ function TextField(props: { value: string; onChange: (v: string) => void; placeh
           masked={props.secure}
           onFocus={() => focused.set(true)}
           onBlur={() => focused.set(false)}
-          style={{ height: 16, color: colors.text, placeholderColor: colors.faint }}
+          style={{ flex: 1, height: 16, color: colors.text, placeholderColor: colors.faint }}
         />
+        <Text style={{ color: bracket() }}> ]</Text>
       </View>
       <If when={props.error}>
         <Text style={{ color: colors.down }}>✗ {props.error}</Text>
@@ -245,6 +253,8 @@ function TextField(props: { value: string; onChange: (v: string) => void; placeh
     </View>
   );
 }
+
+const STRENGTH_WORDS = ["empty", "weak", "fair", "good", "strong"];
 
 export function Form() {
   const name = signal("");
@@ -267,7 +277,7 @@ export function Form() {
   };
   return (
     <>
-      <Card title="Sign up">
+      <Section title="Sign up">
         <Field label="Name">
           <TextField value={name()} onChange={(v) => name.set(v)} placeholder="Ada Lovelace" error={show("name")} />
         </Field>
@@ -278,19 +288,21 @@ export function Form() {
           <TextField value={password()} onChange={(v) => password.set(v)} placeholder="6 characters or more" error={show("password")} secure />
         </Field>
         <Field label="Strength">
-          <Text style={{ color: [colors.down, colors.down, colors.warn, colors.up, colors.up][strength()] }}>
-            {"█".repeat(strength() * 4) + "░".repeat(16 - strength() * 4)}
-            <Text style={{ color: colors.muted }}> {["empty", "weak", "fair", "good", "strong"][strength()]}</Text>
-          </Text>
+          <Meter
+            value={strength() / 4}
+            cells={16}
+            tone={[colors.down, colors.down, colors.warn, colors.up, colors.up][strength()]}
+            suffix={STRENGTH_WORDS[strength()]}
+          />
         </Field>
         <Field label="Newsletter">
           <View onPress={() => subscribe.set(!subscribe())} role="checkbox" style={{ flexDirection: "row", gap: 8 }}>
-            <Text style={{ color: subscribe() ? colors.accent : colors.muted }}>{subscribe() ? "[✓]" : "[ ]"}</Text>
+            <Text style={{ color: subscribe() ? colors.accent : colors.muted }}>{subscribe() ? "[x]" : "[ ]"}</Text>
             <Text style={{ color: colors.text }}>Send me the monthly notes</Text>
           </View>
         </Field>
-        <View style={{ flexDirection: "row", gap: 16, paddingLeft: 144 }}>
-          <Button label="Create account" active tone={colors.accent} onPress={submit} />
+        <View style={{ flexDirection: "row", gap: 8, paddingLeft: 144, marginTop: 16 }}>
+          <Button label="Create account" active onPress={submit} />
           <Button
             label="Clear"
             onPress={() => {
@@ -302,11 +314,9 @@ export function Form() {
             }}
           />
         </View>
-      </Card>
+      </Section>
       <If when={sent()}>
-        <Card title="Done">
-          <Text style={{ color: colors.up }}>✓ Account created for {sent()}</Text>
-        </Card>
+        <Text style={{ color: colors.up }}>✓ Account created for {sent()}</Text>
       </If>
     </>
   );
@@ -314,12 +324,13 @@ export function Form() {
 
 // ─── Controls ───────────────────────────────────────────────────────────
 
+/** A switch as text: `[on ]` in the accent, `[off]` faint. */
 function Switch(props: { value: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
-    <View onPress={() => props.onChange(!props.value)} role="switch" style={{ flexDirection: "row", gap: 16, height: 16 }}>
-      <View style={{ width: 48, flexDirection: "row", backgroundColor: props.value ? colors.accent : colors.raised }}>
-        <View style={{ width: 16, height: 16, marginLeft: props.value ? 32 : 0, backgroundColor: colors.text }} />
-      </View>
+    <View onPress={() => props.onChange(!props.value)} role="switch" style={{ flexDirection: "row", gap: 8, height: 16 }}>
+      <Text style={{ fontWeight: props.value ? "700" : "400", color: props.value ? colors.accent : colors.faint }}>
+        {props.value ? "[on ]" : "[off]"}
+      </Text>
       <Text style={{ color: props.value ? colors.text : colors.muted }}>{props.label}</Text>
     </View>
   );
@@ -332,18 +343,6 @@ function Segmented<T extends string>(props: { options: T[]; value: T; onChange: 
         {(option) => <Button label={option()} active={props.value === option()} onPress={() => props.onChange(option())} />}
       </Each>
     </View>
-  );
-}
-
-function Bar(props: { value: number; tone: string; width?: number }) {
-  const cells = () => (props.width ?? 40);
-  const full = () => Math.round(Math.max(0, Math.min(1, props.value)) * cells());
-  return (
-    <Text>
-      <Text style={{ color: props.tone }}>{"█".repeat(full())}</Text>
-      <Text style={{ color: colors.raised }}>{"█".repeat(cells() - full())}</Text>
-      <Text style={{ color: colors.muted }}> {Math.round(props.value * 100)}%</Text>
-    </Text>
   );
 }
 
@@ -363,61 +362,64 @@ export function Controls() {
   cleanup(() => clearInterval(timer));
   return (
     <>
-      <Card title="Switches">
+      <Section title="Switches">
         <Switch value={wifi()} onChange={(v) => wifi.set(v)} label="Wi-Fi" />
         <Switch value={bluetooth()} onChange={(v) => bluetooth.set(v)} label="Bluetooth" />
         <Switch value={dark()} onChange={(v) => dark.set(v)} label="Dark appearance" />
-      </Card>
-      <Card title="Choices">
+      </Section>
+      <Section title="Choices">
         <Field label="Range">
           <Segmented options={RANGES} value={range()} onChange={(v) => range.set(v)} />
         </Field>
         <Field label="Plan">
-          <View style={{ gap: 0 }}>
+          <View>
             <Each of={["Free", "Pro", "Team"]}>
               {(name) => (
                 <View onPress={() => plan.set(name())} role="radio" style={{ flexDirection: "row", gap: 8, height: 16 }}>
-                  <Text style={{ color: plan() === name() ? colors.accent : colors.muted }}>{plan() === name() ? "(●)" : "( )"}</Text>
-                  <Text style={{ color: colors.text }}>{name()}</Text>
+                  <Text style={{ color: plan() === name() ? colors.accent : colors.faint }}>{plan() === name() ? "(*)" : "( )"}</Text>
+                  <Text style={{ color: plan() === name() ? colors.text : colors.muted }}>{name()}</Text>
                 </View>
               )}
             </Each>
           </View>
         </Field>
         <Field label="Volume">
-          <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
             <Button label="−" onPress={() => volume.set(Math.max(0, volume() - 1))} />
-            <Bar value={volume() / 10} tone={colors.violet} width={20} />
+            <Meter value={volume() / 10} tone={colors.accent} cells={20} suffix={`${volume() * 10}%`} />
             <Button label="+" onPress={() => volume.set(Math.min(10, volume() + 1))} />
           </View>
         </Field>
-      </Card>
-      <Card title="Progress">
+      </Section>
+      <Section title="Progress">
         <Field label="Download">
-          <Bar value={progress()} tone={colors.up} />
+          <Meter value={progress()} tone={colors.up} cells={40} suffix={`${Math.round(progress() * 100)}%`} />
         </Field>
         <Field label="Range">
           <Text style={{ color: colors.muted }}>
             Showing the last <Text style={{ color: colors.accent, fontWeight: "700" }}>{range().toLowerCase()}</Text>
           </Text>
         </Field>
-        <View style={{ flexDirection: "row" }}>
-          <Button label="Open a dialog" active onPress={() => dialog.set(true)} />
+        <View style={{ flexDirection: "row", marginTop: 16 }}>
+          <Button label="Open a dialog" onPress={() => dialog.set(true)} />
         </View>
-      </Card>
+      </Section>
       <If when={dialog()}>
         <View
           onPress={() => dialog.set(false)}
-          style={{ position: "absolute", top: -16, left: -16, right: -16, bottom: -16, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" }}
+          style={{ position: "absolute", top: -16, left: -8, right: -8, bottom: -16, alignItems: "center", justifyContent: "center" }}
         >
-          <View onPress={() => {}} style={{ width: 400 }}>
-            <Card title="Delete 3 files?">
-              <Text style={{ color: colors.muted }}>The backdrop is black at 60% opacity, blended over the cells below it.</Text>
-              <View style={{ flexDirection: "row", gap: 16, justifyContent: "flex-end" }}>
-                <Button label="Cancel" onPress={() => dialog.set(false)} />
-                <Button label="Delete" active tone={colors.down} onPress={() => dialog.set(false)} />
-              </View>
-            </Card>
+          {/* The one fill of the app: the dialog has to hide the rows under it. */}
+          <View
+            onPress={() => {}}
+            style={{ width: 400, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.page, paddingHorizontal: 15, paddingVertical: 15 }}
+          >
+            <Text style={{ fontWeight: "700", color: colors.text }}>Delete 3 files?</Text>
+            <Text style={{ color: colors.muted }}>The box is drawn with line characters over the page; click outside it to cancel.</Text>
+            <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <Button label="Cancel" onPress={() => dialog.set(false)} />
+              <Button label="Delete" tone={colors.down} onPress={() => dialog.set(false)} />
+            </View>
           </View>
         </View>
       </If>
@@ -433,7 +435,7 @@ const LONG =
 export function TextDemo() {
   return (
     <>
-      <Card title="Styles">
+      <Section title="Styles">
         <Text style={{ color: colors.text }}>
           <Text style={{ fontWeight: "700" }}>Bold</Text> · <Text style={{ fontStyle: "italic" }}>italic</Text> ·{" "}
           <Text style={{ textDecorationLine: "underline" }}>underline</Text> ·{" "}
@@ -445,33 +447,44 @@ export function TextDemo() {
         <Text style={{ color: colors.text }}>
           Wide characters take two cells: <Text style={{ color: colors.accent }}>你好，终端！こんにちは 안녕하세요</Text>
         </Text>
-      </Card>
-      <Card title="Wrapping">
+      </Section>
+      <Section title="Wrapping">
         <Text style={{ color: colors.muted }}>{LONG}</Text>
-      </Card>
-      <Card title="numberOfLines={1} and {2}">
-        <Text numberOfLines={1} style={{ color: colors.text }}>
+      </Section>
+      <Section title="numberOfLines={1} and {2}">
+        <Text style={{ numberOfLines: 1, color: colors.text }}>
           {LONG}
         </Text>
-        <Text numberOfLines={2} style={{ color: colors.muted }}>
+        <Text style={{ numberOfLines: 2, color: colors.muted }}>
           {LONG}
         </Text>
-      </Card>
-      <Card title="Alignment">
+      </Section>
+      <Section title="Alignment">
         <Text style={{ color: colors.text, textAlign: "left" }}>left ◀</Text>
         <Text style={{ color: colors.text, textAlign: "center" }}>▶ center ◀</Text>
         <Text style={{ color: colors.text, textAlign: "right" }}>▶ right</Text>
-      </Card>
+      </Section>
     </>
   );
 }
 
 // ─── Layout ─────────────────────────────────────────────────────────────
 
-function Box(props: { label: string; color: string; flex?: number; width?: number }) {
+/** A box outlined in line characters, three rows tall, its label in the middle row. */
+function Box(props: { label: string; flex?: number; width?: number }) {
   return (
-    <View style={{ flex: props.flex, width: props.width, height: 48, backgroundColor: props.color, alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: colors.background, fontWeight: "700" }}>{props.label}</Text>
+    <View
+      style={{
+        flex: props.flex,
+        width: props.width,
+        height: 48,
+        borderWidth: 1,
+        borderColor: colors.line,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: colors.text, fontWeight: "700" }}>{props.label}</Text>
     </View>
   );
 }
@@ -480,39 +493,39 @@ export function Layout() {
   const justify = signal<"flex-start" | "center" | "flex-end" | "space-between" | "space-around">("space-between");
   return (
     <>
-      <Card title="flex: 1 · 2 · 1">
+      <Section title="flex: 1 · 2 · 1">
         <View style={{ flexDirection: "row", gap: 8 }}>
-          <Box label="1" color={colors.accent} flex={1} />
-          <Box label="2" color={colors.violet} flex={2} />
-          <Box label="1" color={colors.up} flex={1} />
+          <Box label="1" flex={1} />
+          <Box label="2" flex={2} />
+          <Box label="1" flex={1} />
         </View>
-      </Card>
-      <Card title={`justifyContent: ${justify()}`}>
+      </Section>
+      <Section title={`justifyContent: ${justify()}`}>
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Each of={["flex-start", "center", "flex-end", "space-between", "space-around"] as const}>
             {(j) => <Button label={j()} active={justify() === j()} onPress={() => justify.set(j())} />}
           </Each>
         </View>
-        <View style={{ flexDirection: "row", justifyContent: justify(), backgroundColor: colors.background }}>
-          <Box label="A" color={colors.warn} width={80} />
-          <Box label="B" color={colors.down} width={80} />
-          <Box label="C" color={colors.up} width={80} />
+        <View style={{ flexDirection: "row", justifyContent: justify() }}>
+          <Box label="A" width={80} />
+          <Box label="B" width={80} />
+          <Box label="C" width={80} />
         </View>
-      </Card>
-      <Card title="Nesting and borders">
+      </Section>
+      <Section title="Nesting and borders">
         <View style={{ flexDirection: "row", gap: 16 }}>
-          <View style={{ flex: 1, borderWidth: 1, borderColor: colors.accent, paddingHorizontal: 8, paddingVertical: 15 }}>
-            <Text style={{ color: colors.accent }}>Square corners</Text>
+          <View style={{ flex: 1, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 15, paddingVertical: 15 }}>
+            <Text style={{ color: colors.text }}>Square corners</Text>
           </View>
-          <View style={{ flex: 1, borderWidth: 1, borderRadius: 8, borderColor: colors.violet, paddingHorizontal: 8, paddingVertical: 15 }}>
-            <Text style={{ color: colors.violet }}>Rounded corners</Text>
+          <View style={{ flex: 1, borderWidth: 1, borderRadius: 8, borderColor: colors.line, paddingHorizontal: 15, paddingVertical: 15 }}>
+            <Text style={{ color: colors.text }}>Rounded corners</Text>
           </View>
-          <View style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.up, paddingHorizontal: 16, backgroundColor: colors.raised }}>
-            <Text style={{ color: colors.up }}>A left rule</Text>
+          <View style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.line, paddingLeft: 15 }}>
+            <Text style={{ color: colors.text }}>A left rule</Text>
             <Text style={{ color: colors.muted }}>quote-like</Text>
           </View>
         </View>
-      </Card>
+      </Section>
     </>
   );
 }
@@ -538,8 +551,8 @@ export function LongList() {
   return (
     <>
       <Text style={{ color: colors.muted }}>
-        500 rows in one scroll view: wheel, ↑ ↓, PgUp / PgDn. Click a row to tick it ·{" "}
-        <Text style={{ color: colors.up }}>{done().size} ticked</Text>
+        500 rows in one scroll view: wheel, ↑ ↓, PgUp / PgDn. Click a row to mark it ·{" "}
+        <Text style={{ color: colors.accent }}>{done().size} marked</Text>
       </Text>
       <View>
         <Each of={items}>
@@ -547,11 +560,11 @@ export function LongList() {
             const it = item();
             const ticked = () => done().has(it.id);
             return (
-              <View onPress={() => toggle(it.id)} style={{ flexDirection: "row", height: 16, gap: 16, backgroundColor: it.id % 2 ? "transparent" : colors.surface }}>
+              <View onPress={() => toggle(it.id)} style={{ flexDirection: "row", height: 16, gap: 16 }}>
                 <Text style={{ width: 48, textAlign: "right", color: colors.faint }}>{String(it.id)}</Text>
-                <Text style={{ color: ticked() ? colors.up : colors.muted }}>{ticked() ? "✓" : "·"}</Text>
-                <Text style={{ flex: 1, color: ticked() ? colors.muted : colors.text, textDecorationLine: ticked() ? "line-through" : "none" }}>{it.title}</Text>
-                <Text style={{ width: 96, textAlign: "right", paddingRight: 16, color: colors.faint }}>{(it.size / 100).toFixed(1)} KB</Text>
+                <Text style={{ color: ticked() ? colors.accent : colors.faint }}>{ticked() ? "*" : " "}</Text>
+                <Text style={{ flex: 1, color: ticked() ? colors.accent : colors.text }}>{it.title}</Text>
+                <Text style={{ width: 96, textAlign: "right", paddingRight: 8, color: colors.faint }}>{(it.size / 100).toFixed(1)} KB</Text>
               </View>
             );
           }}
@@ -590,13 +603,13 @@ export function Scope() {
   cleanup(() => clearInterval(timer));
   return (
     <>
-      <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
-        <Button label={running() ? "❚❚ Pause" : "▶ Live"} onPress={() => running.set(!running())} active={!running()} tone={colors.warn} />
+      <View style={{ flexDirection: "row", gap: 16 }}>
+        <Button label={running() ? "Pause" : "Live"} onPress={() => running.set(!running())} active={!running()} />
         <Text style={{ color: colors.muted }}>
           Drawn on a <Text style={{ color: colors.text }}>{"<Canvas>"}</Text> with paths: ratatui's canvas in braille dots, 2 × 4 to a cell
         </Text>
       </View>
-      <Card title="oscilloscope · amplitude">
+      <Section title="oscilloscope · amplitude">
         <Canvas
           style={{ height: 192 }}
           draw={(cx, { width, height }) => {
@@ -616,9 +629,9 @@ export function Scope() {
             cx.fillText("time →", width - 56, height - 4);
           }}
         />
-      </Card>
-      <View style={{ flexDirection: "row", gap: 16 }}>
-        <Card title="spectroscope · level" grow>
+      </Section>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Section title="spectroscope · level" grow>
           <Canvas
             style={{ height: 176 }}
             draw={(cx, { width, height }) => {
@@ -629,15 +642,16 @@ export function Scope() {
                 const peak = Math.exp(-((f - 0.12) ** 2) / 0.002) + 0.7 * Math.exp(-((f - 0.38 - 0.05 * Math.sin(p)) ** 2) / 0.001);
                 const level = Math.min(1, 0.08 + peak * (0.8 + 0.2 * Math.sin(p * 3 + i)) + 0.05 * Math.random());
                 const h = level * (height - 16);
-                cx.fillStyle = level > 0.6 ? colors.down : level > 0.3 ? colors.warn : colors.violet;
+                cx.fillStyle = level > 0.6 ? colors.down : level > 0.3 ? colors.warn : colors.accent;
                 cx.fillRect(i * 8 + 1, height - h, 4, h);
               }
               cx.fillStyle = colors.faint;
               cx.fillText("frequency →", width - 96, 12);
             }}
           />
-        </Card>
-        <Card title="vectorscope · left / right">
+        </Section>
+        <VerticalRule />
+        <Section title="vectorscope · left / right">
           <Canvas
             style={{ width: 352, height: 176 }}
             draw={(cx, { width, height }) => {
@@ -659,7 +673,7 @@ export function Scope() {
               cx.stroke();
             }}
           />
-        </Card>
+        </Section>
       </View>
     </>
   );
