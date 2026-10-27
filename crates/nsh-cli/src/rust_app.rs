@@ -1776,21 +1776,33 @@ opt-level = 3
     }
 
     /// The Android runtime of the app: the prebuilt runtime's `classes.dex`
-    /// with the app's `libnsh.so` for each of its ABIs.
-    pub(crate) fn android(&self, prebuilt: &Path, dev: bool) -> anyhow::Result<PathBuf> {
-        self.android_runtime(prebuilt, dev, self.root.is_some())
+    /// with the app's `libnsh.so` for each of `abis` (empty: each ABI of the
+    /// prebuilt runtime).
+    pub(crate) fn android(
+        &self,
+        prebuilt: &Path,
+        dev: bool,
+        abis: &[String],
+    ) -> anyhow::Result<PathBuf> {
+        self.android_runtime(prebuilt, dev, self.root.is_some(), abis)
     }
 
     /// The Android runtime `nsh test --target android` runs the app in: the
     /// development library, a Rust app's too (with its root, which it runs
     /// when the test session says so).
     pub(crate) fn test_android(&self, prebuilt: &Path) -> anyhow::Result<PathBuf> {
-        self.android_runtime(prebuilt, true, false)
+        self.android_runtime(prebuilt, true, false, &[])
     }
 
     /// [`Self::android`]; `rust`: a Rust app's runner library, with no
     /// development support.
-    fn android_runtime(&self, prebuilt: &Path, dev: bool, rust: bool) -> anyhow::Result<PathBuf> {
+    fn android_runtime(
+        &self,
+        prebuilt: &Path,
+        dev: bool,
+        rust: bool,
+        abis: &[String],
+    ) -> anyhow::Result<PathBuf> {
         let sdk = crate::android::Sdk::find()?;
         let out = self.workspace.join(match (rust, dev) {
             (true, true) => "android-rust-dev",
@@ -1802,6 +1814,10 @@ opt-level = 3
         install(&prebuilt.join("classes.dex"), &out.join("classes.dex"))?;
         for entry in fs::read_dir(prebuilt.join("lib"))? {
             let abi = entry?.file_name().to_string_lossy().into_owned();
+            // Only what the APK takes: each ABI is a build of its own.
+            if !abis.is_empty() && !abis.contains(&abi) {
+                continue;
+            }
             let triple = match abi.as_str() {
                 "arm64-v8a" => "aarch64-linux-android",
                 "armeabi-v7a" => "armv7-linux-androideabi",
