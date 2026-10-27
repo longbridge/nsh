@@ -12,9 +12,11 @@ Build web apps with Native Shell using the same components, styles and applicati
 
 `nsh package --target web` publishes the app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), and `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)). Every live demo on this site uses this web backend.
 
+Published TSX apps use the browser JavaScript engine. Packaging selects a lite runtime for apps that use the core components and standard APIs it serves, and the full runtime for other apps. Syntax highlighting data loads when code is first highlighted.
+
 ## What runs where
 
-The page is built from HTML elements styled with CSS. NSH turns component updates into batches of DOM changes, while the browser displays the interface and handles scrolling, text selection and input. WebAssembly hosts the shared Rust engine for component state, layout and updates: with a Rust app's crate compiled in, or with QuickJS for a TSX app.
+The page is built from HTML elements styled with CSS. NSH turns component updates into batches of DOM changes, while the browser displays the interface and handles scrolling, text selection and input. WebAssembly hosts the shared Rust engine for component state, layout and updates: with a Rust app's crate compiled in, or alongside the browser JavaScript engine for a published TSX app. Development and embedded players use QuickJS.
 
 On every native platform the engine has its own thread and hands one `MountBatch` per commit to the main thread. A browser page has one thread, so the web build drives the same engine step by step from the page's event loop (`nsh_engine::LocalEngine`):
 
@@ -146,14 +148,13 @@ page and files named after their content.
 | `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
-| `nsh.<digest>.wasm` | A Rust app: the engine, the components and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli). A TSX app: the engine, the core, the runtime's modules and QuickJS without its compiler (about 15.1 MB, 4.6 MB gzipped, 3.4 MB with brotli). An app that imports only `nsh/base`'s controls, popups, toasts, dialogs, navigation and `Input`, and neither `zlib` nor `crypto`, gets the lite runtime: about 6.8 MB, 2.1 MB gzipped, 1.6 MB with brotli |
+| `nsh.<digest>.wasm` | The Rust engine, layout and components, plus a Rust app’s own crate. TSX runs in browser JavaScript; packaging selects the lite or full runtime from the APIs the app imports. |
 | `nsh-syntaxes.<digest>.bin` | The syntaxes code is highlighted with (bat's set: 0.92 MB, 0.8 MB with brotli), downloaded the first time a code block, an `Editor` or a `DiffView` shows code in a language |
 | `nsh-bindgen.<digest>.js` | The wasm-bindgen glue of an app whose crates call [browser APIs from Rust](#browser-apis-from-rust), minified |
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
-| `app.<digest>.nshc` | A TSX app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
-| `harden.<digest>.nshc` | With a TSX app, the [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
+| `app.<digest>.js` | The compiled TSX entry as an ES module, loaded by the browser. |
 | `host.<digest>.js` | The page's host, `nsh.json` `web.host` ([the host's functions](#the-hosts-functions)) |
-| `chunks/<name>.<digest>.nshc` | With a TSX app, what `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
+| `<name>.<digest>.js` | ES modules loaded on demand by `import()`. |
 | `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
 

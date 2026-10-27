@@ -118,7 +118,8 @@ final class Mounter {
     }
 
     final NshView host;
-    final float density;
+    /** Pixels per dp; {@link NshView} updates it when the display density changes. */
+    float density;
     final Context context;
     final Images images;
     final SparseArray<View> views = new SparseArray<>();
@@ -232,6 +233,17 @@ final class Mounter {
 
     private int px(float dp) {
         return Math.round(dp * density);
+    }
+
+    /** Keeps pixel-based native state in the new coordinate system. */
+    void setDensity(float next) {
+        float scale = next / density;
+        density = next;
+        for (int i = 0; i < views.size(); i++) {
+            View view = views.valueAt(i);
+            if (view instanceof ScrollBox) ((ScrollBox) view).rescale(scale);
+        }
+        for (int i = 0; i < modals.size(); i++) modals.valueAt(i).densityChanged();
     }
 
     void apply(byte[] bytes, Object[] objects, long seq) {

@@ -35,6 +35,7 @@ mod progress;
 mod radio;
 mod resizable;
 pub mod rich_editor;
+mod roving;
 mod sheet;
 mod slider;
 mod switch;

@@ -10,7 +10,7 @@
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
-//! dist/nsh/runtime/web/{nsh.wasm,nsh-lite.wasm,nsh-dev.wasm,nsh.js}  the web runtimes (published apps', the dev host's)
+//! dist/nsh/runtime/web/{nsh.wasm,nsh-browser-lite.wasm,nsh-dev.wasm,nsh.js}  the web runtimes (published apps', the dev host's)
 //! dist/nsh/runtime/web/nsh-syntaxes.bin                       the syntaxes they fetch to highlight code
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
@@ -139,8 +139,12 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     for (features, file) in [
         (&["--features", "bytecode-only"][..], "nsh.wasm"),
         (
-            &["--no-default-features", "--features", "bytecode-only"][..],
-            "nsh-lite.wasm",
+            &["--no-default-features", "--features", "browser"][..],
+            "nsh-browser.wasm",
+        ),
+        (
+            &["--no-default-features", "--features", "browser-core"][..],
+            "nsh-browser-lite.wasm",
         ),
         (&["--features", "dev"][..], "nsh-dev.wasm"),
     ] {
@@ -168,6 +172,20 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         &package_dir(&root, "two-face")?.join("generated/syntaxes-fancy-newlines.bin"),
         &out.join("runtime/web/nsh-syntaxes.bin"),
     )?;
+
+    for entry in fs::read_dir(root.join("crates/nsh-platform-web/web/browser"))? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            copy(
+                &entry.path(),
+                &out.join("runtime/web/browser").join(entry.file_name()),
+            )?;
+        }
+    }
 
     // Android runtimes. Windows machines often have no Android SDK: the
     // distribution is then made without them.

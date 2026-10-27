@@ -24,6 +24,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
+#[cfg(all(feature = "browser-core", not(feature = "js")))]
+mod browser;
+
 mod animation;
 mod canvas;
 mod encode;

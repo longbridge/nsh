@@ -18,7 +18,7 @@
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
 //! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
-//! runtime/web/nsh-lite.wasm            the same with `nsh/base`'s core only, no `zlib` / `crypto`
+//! runtime/web/nsh-browser-lite.wasm            the same with `nsh/base`'s core only, no `zlib` / `crypto`
 //! runtime/web/nsh.js                   the DOM runtime that loads it
 //! runtime/web/nsh-syntaxes.bin         the syntaxes it fetches to highlight code
 //! ```
@@ -149,12 +149,13 @@ pub(crate) fn cli_exe() -> std::io::Result<PathBuf> {
 }
 
 /// The Android runtime directory (`classes.dex`, `lib/<abi>/libnsh.so`),
-/// with development support or not.
-pub(crate) fn android(dev: bool) -> anyhow::Result<PathBuf> {
+/// with development support or not; a Rust app's library is built for
+/// `abis` (empty: every ABI of the prebuilt runtime).
+pub(crate) fn android(dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
     let prebuilt = prebuilt_android(dev)?;
     match crate::rust_app::current() {
         // The app's own library with the prebuilt Java runtime.
-        Some(app) => app.android(&prebuilt, dev),
+        Some(app) => app.android(&prebuilt, dev, abis),
         None => Ok(prebuilt),
     }
 }
@@ -319,14 +320,9 @@ pub(crate) fn package_dir(
 /// Which web runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WebKind {
-    /// Published apps' (`nsh package --target web`): without QuickJS'
-    /// parser (feature `bytecode-only`), it runs the bytecode the CLI
-    /// compiled. `nsh.wasm`.
-    Release,
-    /// [`WebKind::Release`] with `nsh/base`'s core part only and without
-    /// the standard modules `zlib` and `crypto` (`nsh-platform-web` without
-    /// its default features): what apps that use nothing else ship with
-    /// ([`crate::web::serves_lite`]). `nsh-lite.wasm`.
+    /// Trusted standalone apps, executed by browser JavaScript.
+    Browser,
+    /// Browser runtime with the core base components only.
     Lite,
     /// The development host's (`nsh dev`, `nsh run --target web`): it runs
     /// JS source and hot updates. `nsh-dev.wasm`.
@@ -338,8 +334,8 @@ impl WebKind {
     /// next to the build's output.
     pub(crate) fn file(self) -> &'static str {
         match self {
-            WebKind::Release => "nsh.wasm",
-            WebKind::Lite => "nsh-lite.wasm",
+            WebKind::Browser => "nsh-browser.wasm",
+            WebKind::Lite => "nsh-browser-lite.wasm",
             WebKind::Dev => "nsh-dev.wasm",
         }
     }
@@ -347,8 +343,8 @@ impl WebKind {
     /// The features `nsh-platform-web` is built with for it.
     pub(crate) fn features(self) -> &'static [&'static str] {
         match self {
-            WebKind::Release => &["--features", "bytecode-only"],
-            WebKind::Lite => &["--no-default-features", "--features", "bytecode-only"],
+            WebKind::Browser => &["--no-default-features", "--features", "browser"],
+            WebKind::Lite => &["--no-default-features", "--features", "browser-core"],
             WebKind::Dev => &["--features", "dev"],
         }
     }
@@ -364,8 +360,8 @@ pub(crate) fn package_web(lite: bool) -> anyhow::Result<(WebRuntime, WebKind)> {
         runtime.syntaxes = None;
         return Ok((runtime, WebKind::Lite));
     }
-    let runtime = web(WebKind::Release, true)?.context("no web runtime")?;
-    Ok((runtime, WebKind::Release))
+    let runtime = web(WebKind::Browser, true)?.context("no web runtime")?;
+    Ok((runtime, WebKind::Browser))
 }
 
 /// Whether there is a lite web runtime: in `NSH_RUNTIME` or the
@@ -642,9 +638,41 @@ fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<Pat
     )
 }
 
+/// The browser facade ships with the runtime, including registry-built apps.
+pub(crate) fn copy_browser_host(source: &Path, target: &Path) -> anyhow::Result<()> {
+    let from = source.join("browser");
+    let to = target.join("browser");
+    fs::create_dir_all(&to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::Platform;
+
+    #[test]
+    fn published_runtime_variants_use_browser_execution() {
+        use super::WebKind;
+        assert_eq!(
+            WebKind::Browser.features(),
+            ["--no-default-features", "--features", "browser"]
+        );
+        assert_eq!(
+            WebKind::Lite.features(),
+            ["--no-default-features", "--features", "browser-core"]
+        );
+        assert_eq!(WebKind::Lite.file(), "nsh-browser-lite.wasm");
+    }
 
     #[test]
     fn web_entropy_flags_preserve_existing_rustflags() {

@@ -106,76 +106,6 @@ impl WebTextEngine {
         self.width(&run.font, run.numeric.as_ref(), text)
     }
 
-    /// `pieces` cut where a link starts or ends, each with the innermost
-    /// link it is in, so a link draws as runs of its own (a press on them
-    /// goes to it). Words are cut after line breaking, which they keep.
-    fn split_at_links(
-        &self,
-        pieces: Vec<Part>,
-        styles: &[RunStyle],
-        links: &[(u32, u32)],
-    ) -> Vec<Part> {
-        let link_at = |index: u32| {
-            links
-                .iter()
-                .enumerate()
-                .filter(|(_, (start, end))| index >= *start && index < *end)
-                .min_by_key(|(_, (start, end))| end - start)
-                .and_then(|(i, _)| u16::try_from(i).ok())
-        };
-        let mut out = Vec::with_capacity(pieces.len());
-        for mut piece in pieces {
-            if piece.ellipsis {
-                out.push(piece);
-                continue;
-            }
-            piece.link = link_at(piece.start);
-            if piece.kind != AtomKind::Text {
-                out.push(piece);
-                continue;
-            }
-            let run = &styles[piece.style as usize];
-            loop {
-                let len = piece.text.encode_utf16().count() as u32;
-                let end = piece.start + len;
-                let Some(cut) = links
-                    .iter()
-                    .flat_map(|&(s, e)| [s, e])
-                    .filter(|&b| b > piece.start && b < end)
-                    .min()
-                else {
-                    break;
-                };
-                let mut units = 0;
-                let byte = piece
-                    .text
-                    .char_indices()
-                    .find(|(_, c)| {
-                        let at = units;
-                        units += c.len_utf16() as u32;
-                        piece.start + at >= cut
-                    })
-                    .map_or(piece.text.len(), |(i, _)| i);
-                let rest = piece.text.split_off(byte);
-                let width = self.run_width(run, &piece.text)
-                    + run.style.letter_spacing.0 * piece.text.chars().count() as f32;
-                let next = Part {
-                    text: rest,
-                    width: (piece.width - width).max(0.0),
-                    start: cut,
-                    link: link_at(cut),
-                    ..piece
-                };
-                out.push(Part {
-                    width,
-                    ..std::mem::replace(&mut piece, next)
-                });
-            }
-            out.push(piece);
-        }
-        out
-    }
-
     fn metrics(&self, font: &Arc<str>, size: f32) -> (f32, f32) {
         if let Some(&m) = self.metrics.borrow().get(font) {
             return m;
@@ -333,7 +263,7 @@ pub(crate) struct Prepared {
     no_wrap: bool,
     rtl: bool,
     /// The UTF-16 ranges of the text's links (`AttributedText::links`), in
-    /// their order: runs split where a link starts or ends.
+    /// their order.
     links: Box<[(u32, u32)]>,
 }
 
@@ -345,10 +275,15 @@ pub(crate) struct Run {
     pub(crate) y: f32,
     pub(crate) text: String,
     pub(crate) style: u16,
-    /// Offset of its first character (UTF-16 units).
-    pub(crate) start: u32,
-    /// The innermost link it is in: an index into `AttributedText::links`.
-    pub(crate) link: Option<u16>,
+    /// Offset of its first character (UTF-16 units); `None` when it begins
+    /// with a truncated line's `…`, which belongs to no offset.
+    pub(crate) start: Option<u32>,
+    /// Its characters in links: `(from, to, link)`, UTF-16 units in the
+    /// run and an index into `AttributedText::links` (the innermost).
+    /// They stay in the run, whose shaping and bidi order they keep.
+    pub(crate) links: Vec<(u32, u32, u16)>,
+    /// It ends with a truncated line's `…`, which belongs to no offset.
+    ellipsis: bool,
     /// What follows the run when the text is copied: the line's break (a
     /// newline, or the spaces a wrap dropped) after its last run.
     pub(crate) after: String,
@@ -455,8 +390,39 @@ struct Part {
     /// The `…` of a truncated last line, which is drawn but belongs to no
     /// offset.
     ellipsis: bool,
-    /// The innermost link it is in ([`Run::link`]).
-    link: Option<u16>,
+}
+
+/// The characters of a run starting at `start` that are in `links`:
+/// `(from, to, link)` in the run, each part in one innermost link.
+fn link_parts(links: &[(u32, u32)], start: u32, text: &str) -> Vec<(u32, u32, u16)> {
+    let end = start + text.encode_utf16().count() as u32;
+    let mut cuts: Vec<u32> = links
+        .iter()
+        .flat_map(|&(s, e)| [s, e])
+        .filter(|&b| b > start && b < end)
+        .collect();
+    cuts.push(start);
+    cuts.push(end);
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut parts: Vec<(u32, u32, u16)> = Vec::new();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let Some(link) = links
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, e))| from >= *s && from < *e)
+            .min_by_key(|(_, (s, e))| e - s)
+            .and_then(|(i, _)| u16::try_from(i).ok())
+        else {
+            continue;
+        };
+        match parts.last_mut() {
+            Some(last) if last.1 == from - start && last.2 == link => last.1 = to - start,
+            _ => parts.push((from - start, to - start, link)),
+        }
+    }
+    parts
 }
 
 impl WebTextEngine {
@@ -785,7 +751,6 @@ impl TextEngine for WebTextEngine {
                     kind: a.kind,
                     start: a.start,
                     ellipsis: false,
-                    link: None,
                 })
                 .collect();
             let mut width = line.width;
@@ -815,12 +780,8 @@ impl TextEngine for WebTextEngine {
                     kind: AtomKind::Text,
                     start: 0,
                     ellipsis: true,
-                    link: None,
                 });
                 width += ellipsis;
-            }
-            if !prepared.links.is_empty() {
-                pieces = self.split_at_links(pieces, &styles, &prepared.links);
             }
             let free = (size.width.0 - width).max(0.0);
             let align = match prepared.align {
@@ -847,7 +808,6 @@ impl TextEngine for WebTextEngine {
                     kind,
                     start,
                     ellipsis,
-                    link,
                 } = part;
                 let s = &styles[style as usize];
                 let attachment = matches!(kind, AtomKind::Attachment(..));
@@ -878,9 +838,10 @@ impl TextEngine for WebTextEngine {
                 let len = text.len();
                 let index = runs.len();
                 let (run, byte) = match runs.last_mut() {
-                    Some(r) if merge && r.style == style && r.link == link => {
+                    Some(r) if merge && r.style == style => {
                         let byte = r.text.len();
                         r.text.push_str(&text);
+                        r.ellipsis |= ellipsis;
                         (index.saturating_sub(1), byte)
                     }
                     _ => {
@@ -889,8 +850,9 @@ impl TextEngine for WebTextEngine {
                             y: baseline - s.ascent,
                             text,
                             style,
-                            start,
-                            link,
+                            start: (!ellipsis).then_some(start),
+                            links: Vec::new(),
+                            ellipsis,
                             after: String::new(),
                         });
                         (index, 0)
@@ -973,6 +935,17 @@ impl TextEngine for WebTextEngine {
             });
             y += line.height;
         }
+        if !prepared.links.is_empty() {
+            for run in &mut runs {
+                if let Some(start) = run.start {
+                    let text = match run.ellipsis {
+                        true => run.text.strip_suffix('…').unwrap_or(&run.text),
+                        false => &run.text,
+                    };
+                    run.links = link_parts(&prepared.links, start, text);
+                }
+            }
+        }
         TextLayout(Arc::new(WebLayout {
             runs,
             backgrounds,
@@ -1033,5 +1006,15 @@ impl TextEngine for WebTextEngine {
         // when the face finishes loading: `nsh_fonts_loaded`).
         self.clear_caches();
         Ok(())
+    }
+}
+
+/// Canvas drawings use the same font and numeric-variant measurements as text.
+#[cfg(all(feature = "browser-core", not(feature = "js")))]
+pub(crate) fn canvas_width(font: &nsh_core::canvas::CanvasFont, text: &str) -> f32 {
+    let css = crate::canvas::font(font);
+    match css::font_variant_numeric(font.variant) {
+        Some(numeric) => ffi::measure_numeric_text(&css, &numeric, text),
+        None => ffi::measure_text(&css, text),
     }
 }

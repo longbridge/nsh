@@ -9,6 +9,9 @@
 //! platform through a [`MountSink`]. The platform thread never blocks on
 //! the engine.
 
+#[cfg(all(feature = "browser", target_arch = "wasm32", not(feature = "js-core")))]
+pub mod browser;
+
 mod access;
 mod app_directory;
 mod cache;
@@ -761,7 +764,7 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
 }
 
 /// Native hosts choose these anchors before any application JavaScript runs.
-#[cfg(feature = "js-core")]
+#[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
@@ -893,6 +896,7 @@ enum Message {
     Frame,
     States(NodeId, u8),
     FontsChanged,
+    Remount,
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
     Fetch(Requester, u64, FetchEvent),
@@ -1058,6 +1062,13 @@ impl EngineControl {
     /// is measured again.
     pub fn fonts_changed(&self) {
         let _ = self.tx.send(Message::FontsChanged);
+    }
+
+    /// The platform's views get everything again and text is measured
+    /// again: the unit the platform converts values with changed (Android's
+    /// density). Send the new environment and size too.
+    pub fn remount(&self) {
+        let _ = self.tx.send(Message::Remount);
     }
 
     /// Records the engine's commits into `monitor` from now on (`None`:
@@ -1371,9 +1382,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
-        #[cfg(feature = "js-core")]
+        #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let system_tx = tx.clone();
-        #[cfg(feature = "js-core")]
+        #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
         let host_bridge = config.host.bridge(tx.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
@@ -1529,7 +1540,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
-                #[cfg(feature = "js-core")]
+                #[cfg(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32")))]
                 let system = {
                     script::SystemConfig {
                         access: (*access).clone(),
@@ -1546,7 +1557,10 @@ impl<M: TextEngine + 'static> Driver<M> {
                         host: Rc::new(host_bridge),
                     }
                 };
-                #[cfg(not(feature = "js-core"))]
+                #[cfg(not(any(
+                    feature = "js-core",
+                    all(feature = "browser", target_arch = "wasm32")
+                )))]
                 let system = script::SystemConfig;
                 let (script, eval_us) = Script::start(
                     bundle,
@@ -2559,6 +2573,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         Message::States(id, states) => state.core.set_states(id, states),
         Message::FontsChanged => state.core.fonts_changed(),
+        Message::Remount => state.core.remount(),
         Message::Fetch(who, hop, event) => {
             if let Some(event) = state.net.event(who, hop, event) {
                 match who {

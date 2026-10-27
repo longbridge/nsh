@@ -205,7 +205,9 @@ reasons: `reactive-components.md`.
     the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
     returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
     the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
-    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). Until its holder
+    when a view places a key twice, skipping those in list cells their lists freed: a cell whose row went still reads
+    the row now at its old index until the list binds it again, so it may place the key of a row that moved to another
+    cell, which keeps showing it; none placed: it waits out of the tree for the `Unrender`). Until its holder
     arrives a placeholder is empty, so a list cell holding one is not measured (`Core::cells_awaiting_renders`): its
     row keeps its estimate (or its last size) and stays in the window, and is measured in the commit the holder
     comes in; measured empty, a list in a view sized by its content would shrink that view's viewport to nothing
@@ -837,6 +839,17 @@ what changed.
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`element/back.rs`).
+- Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and
+  `keys::bind_while(focused, keys, handler)`, which binds them in an effect that returns early while it is false,
+  so the bindings of the global keymap come and go with the focus (`DataTable` does the same by hand).
+- Roving focus (`roving.rs`, WAI-ARIA's tab list and radio group): `Tabs` and `RadioGroup` provide a `Roving` through
+  context, and each `Tab` / `Radio` under one registers its ref, its current state (`selected`, `checked`), its
+  `disabled` and what moving to it does (a press, `Change(true)`); an item outside a group stays a stop of its own.
+  Only the stop is `focusable`: the item the focus is on, else the current one, else the first enabled, so Tab
+  passes the group in one step. While an item has the focus the group binds its arrows (and Home / End for tabs);
+  a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
+  `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates it.
+  Items are in the order they registered: the order the app's children were made.
 
 ## The JS face and the declarations
 

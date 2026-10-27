@@ -79,6 +79,10 @@ quote = "1"
 syn = { version = "2", features = ["full"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast", "zeroize"] }
 sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+hmac = "0.12"
+crc32c = "0.6"
 # The image disk cache (`nsh_core::image::DiskCache`): HTTP dates and entry checksums.
 httpdate = "1"
 crc32fast = "1"
