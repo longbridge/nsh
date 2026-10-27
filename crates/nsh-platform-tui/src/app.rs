@@ -339,14 +339,18 @@ impl AppView {
                 let Some(engine) = &self.surface.engine else {
                     return Handled::Ignored;
                 };
-                self.pointer.handle(
+                let handled = self.pointer.handle(
                     mouse,
                     self.area,
                     self.options.cells,
                     &self.hits,
-                    &self.tree,
+                    &mut self.tree,
                     &engine.control(),
-                )
+                );
+                if handled == Handled::Yes {
+                    self.surface.wake.notify();
+                }
+                handled
             }
             Input::Key {
                 key,
@@ -518,9 +522,12 @@ impl AppView {
             &mut self.hits,
             &mut self.geometry,
         );
-        if let Some(engine) = &self.surface.engine {
-            self.keyboard
-                .reconcile(&mut self.tree, &self.geometry, &engine.control());
+        if let Some(engine) = &self.surface.engine
+            && self
+                .keyboard
+                .reconcile(&mut self.tree, &self.geometry, &engine.control())
+        {
+            self.surface.wake.notify();
         }
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);

@@ -229,7 +229,18 @@ native pop sends Dismiss immediately. The shared Stack remembers native pops unt
 
 Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
 sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.
-The newest modal owns keyboard focus. A stack inside it gets back first; otherwise it receives RequestClose with
+Presenting a modal saves the previous focus and moves focus to its first focusable view in reading order; an
+empty modal has no focus. Keyboard traversal stays inside the newest modal, including when it has no controls.
+Closing a modal, natively or through an app update, restores the saved view only if it still exists, is focusable
+and has visible Cells. Otherwise focus is cleared, rather than moved to another page control. Nested modals keep
+this history per presentation, so closing several at once restores the page's focus.
+
+Mouse hit testing is also scoped to the newest modal, even when its container uses `pointerEvents: "box-none"` or
+`"none"`. A completed press on its own backdrop sends RequestClose with reason `backdrop`; the modal's
+`close_on_backdrop_press` also closes it natively and sends Dismiss. The release is consumed even if the modal
+closed in between, so it cannot press the underlying page. App-rendered backdrop controls keep their own handlers.
+
+A stack inside the newest modal gets back first; otherwise the modal receives RequestClose with
 reason `cancel`. `close_on_escape` also closes it natively and sends Dismiss. Modal sizes and zero insets use the
 same Reported contract, and first presentation sends Show. Transitions settle immediately.
 
@@ -277,8 +288,8 @@ Focus and focus-within states are reported through TrackStates and `EngineContro
 focus styles apply. Pressable views have no platform focus marker: their app-defined focus styles are the
 indicator, and their terminal cursor is hidden. `AppView::render` reserves the terminal cursor for a focused
 editable field's caret and respects `caret={false}`. A buffer-only Widget cannot position the terminal cursor.
-Removing a focused view or
-changing its focus scope clears focus; unfocused surfaces ignore keys.
+Removing an ordinary focused view clears focus. Modal presentation and closing use the focus history described
+above; unfocused surfaces ignore keys.
 
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it

@@ -13,6 +13,7 @@ use ratatui_widgets::{
 use crate::{CellSize, geometry::CellBounds, mount::Mounter, text::CellLayout};
 
 pub(crate) struct Hit {
+    pub(crate) node: NodeId,
     pub(crate) area: Rect,
     pub(crate) target: Option<NodeId>,
     pub(crate) origin: Point<Points>,
@@ -114,6 +115,7 @@ impl Painter<'_> {
         };
         if pointer && view.props.pointer_events != PointerEvents::BoxNone && !visible.is_empty() {
             self.hits.push(Hit {
+                node: id,
                 area: visible,
                 target: press.map(|p| p.0),
                 origin: press.map_or(origin, |p| p.1),

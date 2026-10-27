@@ -14,6 +14,15 @@ use crate::{Handled, key_scheme::Action, mount::Mounter, render::Geometry};
 #[derive(Default)]
 pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
+    modals: Vec<ModalFocus>,
+}
+
+#[derive(Clone, Copy)]
+struct ModalFocus {
+    id: NodeId,
+    parent: NodeId,
+    restore: Option<NodeId>,
+    initial: bool,
 }
 
 pub(crate) fn contains(tree: &Mounter, ancestor: NodeId, mut id: NodeId) -> bool {
@@ -34,11 +43,19 @@ impl Keyboard {
         tree: &Mounter,
         geometry: &'a [Geometry],
     ) -> Vec<&'a Geometry> {
-        let scope = crate::navigation::focus_scope(tree);
+        self.candidates_in(tree, geometry, crate::navigation::focus_scope(tree))
+    }
+
+    fn candidates_in<'a>(
+        &self,
+        tree: &Mounter,
+        geometry: &'a [Geometry],
+        scope: NodeId,
+    ) -> Vec<&'a Geometry> {
         let mut candidates: Vec<_> = geometry
             .iter()
             .filter(|g| {
-                contains(tree, scope, g.id)
+                input_scope(tree, g.id) == scope
                     && tree.get(g.id).is_some_and(|view| {
                         let editable = view.input.as_ref().is_some_and(|config| config.editable);
                         !view.props.accessibility.state.disabled
@@ -105,15 +122,76 @@ impl Keyboard {
         tree: &mut Mounter,
         geometry: &[Geometry],
         control: &EngineControl,
-    ) {
+    ) -> bool {
+        let old_focus = self.focused;
+        let active: Vec<_> = tree
+            .modals
+            .iter()
+            .copied()
+            .filter(|&id| crate::navigation::modal_visible(tree, id))
+            .collect();
+        if !self
+            .modals
+            .iter()
+            .map(|modal| modal.id)
+            .eq(active.iter().copied())
+        {
+            let previous = std::mem::take(&mut self.modals);
+            let mut scope = previous.last().map_or(ROOT_ID, |modal| modal.id);
+            if let Some(last) = previous.last()
+                && !active.contains(&last.id)
+            {
+                let (restore, parent) = restoration(last.restore, last.parent, &previous, &active);
+                scope = parent;
+                let restored = restore.filter(|&id| {
+                    self.candidates_in(tree, geometry, scope)
+                        .iter()
+                        .any(|g| g.id == id && !g.visible.is_empty())
+                });
+                self.focus(restored, tree, control);
+            }
+            for &id in &active {
+                if let Some(old) = previous.iter().find(|modal| modal.id == id) {
+                    let (restore, parent) =
+                        restoration(old.restore, old.parent, &previous, &active);
+                    self.modals.push(ModalFocus {
+                        restore,
+                        parent,
+                        ..*old
+                    });
+                } else {
+                    let first = self.candidates_in(tree, geometry, id).first().map(|g| g.id);
+                    let modal = ModalFocus {
+                        id,
+                        parent: scope,
+                        restore: self.focused,
+                        initial: first.is_none(),
+                    };
+                    self.focus(first, tree, control);
+                    if let Some(first) = first {
+                        reveal(tree, geometry, first);
+                    }
+                    self.modals.push(modal);
+                    scope = id;
+                }
+            }
+        }
         if self
             .focused
             .is_some_and(|id| !self.candidates(tree, geometry).iter().any(|g| g.id == id))
         {
             self.focus(None, tree, control);
-        } else {
-            self.sync_states(tree, control);
         }
+        if self.focused.is_none()
+            && self.modals.last().is_some_and(|modal| modal.initial)
+            && let Some(id) = self.candidates(tree, geometry).first().map(|g| g.id)
+        {
+            self.modals.last_mut().unwrap().initial = false;
+            self.focus(Some(id), tree, control);
+            reveal(tree, geometry, id);
+        }
+        self.sync_states(tree, control);
+        old_focus != self.focused || !tree.scrolled.is_empty()
     }
 
     pub(crate) fn cursor(&self, tree: &Mounter, geometry: &[Geometry]) -> Option<Position> {
@@ -161,7 +239,11 @@ impl Keyboard {
             Action::Next | Action::Previous | Action::Left | Action::Right => {
                 let candidates = self.candidates(tree, geometry);
                 if candidates.is_empty() {
-                    return Handled::Ignored;
+                    return if crate::navigation::focus_scope(tree) == ROOT_ID {
+                        Handled::Ignored
+                    } else {
+                        Handled::Yes
+                    };
                 }
                 let current = candidates.iter().position(|g| Some(g.id) == self.focused);
                 let next = match action {
@@ -201,8 +283,13 @@ impl Keyboard {
                 Handled::Yes
             }
             Action::Activate => {
-                let Some(g) = geometry.iter().find(|g| Some(g.id) == self.focused) else {
-                    return Handled::Ignored;
+                let candidates = self.candidates(tree, geometry);
+                let Some(g) = candidates.iter().find(|g| Some(g.id) == self.focused) else {
+                    return if crate::navigation::focus_scope(tree) == ROOT_ID {
+                        Handled::Ignored
+                    } else {
+                        Handled::Yes
+                    };
                 };
                 let Some(view) = tree.get(g.id) else {
                     return Handled::Ignored;
@@ -351,4 +438,33 @@ fn reveal(tree: &mut Mounter, geometry: &[Geometry], id: NodeId) {
             }
         }
     }
+}
+
+fn input_scope(tree: &Mounter, mut id: NodeId) -> NodeId {
+    while let Some(view) = tree.get(id) {
+        if view.kind == ViewKind::Modal {
+            return id;
+        }
+        let Some(parent) = view.parent else {
+            break;
+        };
+        id = parent;
+    }
+    ROOT_ID
+}
+
+fn restoration(
+    mut restore: Option<NodeId>,
+    mut parent: NodeId,
+    previous: &[ModalFocus],
+    active: &[NodeId],
+) -> (Option<NodeId>, NodeId) {
+    while parent != ROOT_ID && !active.contains(&parent) {
+        let Some(modal) = previous.iter().find(|modal| modal.id == parent) else {
+            return (None, ROOT_ID);
+        };
+        restore = modal.restore;
+        parent = modal.parent;
+    }
+    (restore, parent)
 }

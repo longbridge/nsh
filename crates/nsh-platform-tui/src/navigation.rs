@@ -61,6 +61,42 @@ fn visible(tree: &Mounter, mut id: NodeId) -> bool {
     }
 }
 
+pub(crate) enum CloseReason {
+    Cancel,
+    Backdrop,
+}
+
+pub(crate) fn request_close(
+    tree: &mut Mounter,
+    control: &EngineControl,
+    id: NodeId,
+    reason: CloseReason,
+) {
+    let Some(view) = tree.get_mut(id) else {
+        return;
+    };
+    let Some(modal) = &mut view.modal else {
+        return;
+    };
+    if modal.closed {
+        return;
+    }
+    let (reason, close) = match reason {
+        CloseReason::Cancel => ("cancel", modal.config.close_on_escape),
+        CloseReason::Backdrop => ("backdrop", modal.config.close_on_backdrop_press),
+    };
+    control.dispatch_event(
+        id,
+        EventKind::RequestClose,
+        EventPayload::Map(vec![("reason", PayloadValue::Str(reason.into()))]),
+    );
+    if close {
+        modal.closed = true;
+        view.concealed = true;
+        control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+    }
+}
+
 pub(crate) fn back(tree: &mut Mounter, control: &EngineControl, app_first: bool) -> bool {
     use nsh_core::navigation::{Back, back_target, innermost};
     let scope = focus_scope(tree);
@@ -125,20 +161,7 @@ pub(crate) fn back(tree: &mut Mounter, control: &EngineControl, app_first: bool)
             }
             control.dispatch_event(top, EventKind::Dismiss, EventPayload::None);
         }
-        Some(Back::Modal(id)) => {
-            control.dispatch_event(
-                id,
-                EventKind::RequestClose,
-                EventPayload::Map(vec![("reason", PayloadValue::Str("cancel".into()))]),
-            );
-            let view = tree.get_mut(id).unwrap();
-            let modal = view.modal.as_mut().unwrap();
-            if modal.config.close_on_escape {
-                modal.closed = true;
-                view.concealed = true;
-                control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
-            }
-        }
+        Some(Back::Modal(id)) => request_close(tree, control, id, CloseReason::Cancel),
         None => return false,
     }
     true

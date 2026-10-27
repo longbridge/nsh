@@ -91,10 +91,12 @@ pub enum Input {
 #[derive(Default)]
 pub(crate) struct Pointer {
     pressed: Option<(Press<NodeId>, Point<Points>)>,
+    backdrop: Option<NodeId>,
 }
 
 impl Pointer {
     pub(crate) fn cancel(&mut self, control: Option<&EngineControl>) {
+        self.backdrop = None;
         if let Some((mut press, _)) = self.pressed.take()
             && let Some(control) = control
         {
@@ -110,10 +112,41 @@ impl Pointer {
         area: Rect,
         cells: CellSize,
         hits: &[Hit],
-        tree: &Mounter,
+        tree: &mut Mounter,
         control: &EngineControl,
     ) -> Handled {
+        let scope = crate::navigation::focus_scope(tree);
+        let modal = scope != nsh_core::ROOT_ID;
+        let unused = if modal {
+            Handled::Yes
+        } else {
+            Handled::Ignored
+        };
+        if self
+            .pressed
+            .as_ref()
+            .is_some_and(|(press, _)| !crate::keyboard::contains(tree, scope, press.node))
+        {
+            self.cancel(Some(control));
+        }
         let position = Position::new(mouse.column, mouse.row);
+        let hit = hits.iter().rev().find(|hit| {
+            hit.area.contains(position) && crate::keyboard::contains(tree, scope, hit.node)
+        });
+        let backdrop = modal && hit.is_none_or(|hit| hit.node == scope && hit.target.is_none());
+        if matches!(mouse.kind, MouseKind::Up(MouseButton::Left))
+            && let Some(id) = self.backdrop.take()
+        {
+            if scope == id && area.contains(position) && backdrop {
+                crate::navigation::request_close(
+                    tree,
+                    control,
+                    id,
+                    crate::navigation::CloseReason::Backdrop,
+                );
+            }
+            return Handled::Yes;
+        }
         if !area.contains(position) {
             if matches!(mouse.kind, MouseKind::Up(MouseButton::Left)) {
                 self.cancel(Some(control));
@@ -124,16 +157,22 @@ impl Pointer {
             cells.width() * (f32::from(mouse.column - area.x) + 0.5),
             cells.height() * (f32::from(mouse.row - area.y) + 0.5),
         );
-        let hit = hits.iter().rev().find(|hit| hit.area.contains(position));
+        if backdrop {
+            if matches!(mouse.kind, MouseKind::Down(MouseButton::Left)) {
+                self.cancel(Some(control));
+                self.backdrop = Some(scope);
+            }
+            return Handled::Yes;
+        }
         match mouse.kind {
             MouseKind::Down(MouseButton::Left) => {
                 self.cancel(Some(control));
                 let Some((id, origin)) = hit.and_then(|hit| hit.target.map(|id| (id, hit.origin)))
                 else {
-                    return Handled::Ignored;
+                    return unused;
                 };
                 let Some(view) = tree.get(id) else {
-                    return Handled::Ignored;
+                    return unused;
                 };
                 let mut press = Press::new(id, id, view.events, view.props.long_press_delay, 0)
                     .clicked(mouse.modifiers, 1);
@@ -145,10 +184,10 @@ impl Pointer {
             }
             MouseKind::Up(MouseButton::Left) => {
                 let Some((mut press, origin)) = self.pressed.take() else {
-                    return Handled::Ignored;
+                    return unused;
                 };
                 if tree.get(press.node).is_none() {
-                    return Handled::Ignored;
+                    return unused;
                 }
                 let fire = hit.is_some_and(|hit| hit.target == Some(press.node));
                 for event in press.press_out(fire) {
@@ -156,7 +195,7 @@ impl Pointer {
                 }
                 Handled::Yes
             }
-            _ => Handled::Ignored,
+            _ => unused,
         }
     }
 }
