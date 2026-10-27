@@ -104,7 +104,7 @@ fn dragging_scroll_content_reveals_later_rows_without_pressing_them() {
         import { mount, signal, Scroll, View, Text } from "nsh";
         const offset = signal(0), presses = signal(0);
         mount(() => <View>
-            <Scroll style={{ width: 160, height: 48 }} onScroll={e => offset.set(e.y)}>
+            <Scroll style={{ width: 160, height: 48 }} onScroll={e => offset.set(e.offset.y)}>
                 <View onPress={() => presses.set(presses()+1)}>
                     <Text style={{ height: 16 }}>first</Text><Text style={{ height: 16 }}>second</Text>
                     <Text style={{ height: 16 }}>third</Text><Text style={{ height: 16 }}>fourth</Text>
