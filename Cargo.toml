@@ -25,6 +25,10 @@ unreachable_pub = "deny"
 private_interfaces = "deny"
 
 [workspace.dependencies]
+ratatui-core = { version = "0.1.2", features = ["std", "layout-cache", "underline-color"] }
+ratatui-widgets = { version = "0.3.2", default-features = false, features = ["std"] }
+ratatui-crossterm = "0.1.2"
+unicode-width = "0.2.2"
 unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
 nsh-core = { version = "0.3.0", path = "crates/nsh-core" }
@@ -40,6 +44,7 @@ nsh-platform-android = { version = "0.3.0", path = "crates/nsh-platform-android"
 nsh-platform-linux = { version = "0.3.0", path = "crates/nsh-platform-linux", default-features = false }
 nsh-platform-macos = { version = "0.3.0", path = "crates/nsh-platform-macos", default-features = false }
 nsh-platform-windows = { version = "0.3.0", path = "crates/nsh-platform-windows", default-features = false }
+nsh-platform-tui = { version = "0.3.0", path = "crates/nsh-platform-tui", default-features = false }
 nsh-dev = { version = "0.3.0", path = "crates/nsh-dev" }
 nsh-testing = { version = "0.3.0", path = "crates/nsh-testing", default-features = false }
 

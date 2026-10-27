@@ -1,0 +1,20 @@
+[package]
+name = "nsh-tui-host"
+description = "Development host that runs a prebuilt Native Shell bundle in a terminal."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nsh-platform-tui = { workspace = true, features = ["js", "run-app"] }
+nsh-engine.workspace = true
+ratatui-core.workspace = true
+ratatui-crossterm.workspace = true
+clap.workspace = true
+log.workspace = true

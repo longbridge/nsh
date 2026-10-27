@@ -1,0 +1,376 @@
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use nsh_core::prelude::*;
+use nsh_platform_tui::{App, AppOptions, AppView, Root};
+use ratatui_core::{backend::TestBackend, terminal::Terminal};
+
+#[component]
+fn Counter() -> impl IntoElement {
+    let count = signal(0);
+    view().flex_1().bg(nsh_core::color::rgb(0x123456)).child(
+        view()
+            .h(px(48.0))
+            .on_press(move |_: &()| count.update(|c| *c += 1))
+            .child(text(move || format!("Count {}", count.get()))),
+    )
+}
+
+fn surface() -> (AppView, crossbeam_channel::Receiver<()>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = AppOptions::default();
+    options.wake = Some(Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    options.cache = nsh_engine::CacheOptions::off();
+    (AppView::new(options), rx)
+}
+
+fn draw_until(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    expected: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let contents: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        if contents.contains(expected) {
+            return;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "expected {expected:?}, got {contents:?}"
+        );
+    }
+}
+
+#[test]
+fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Counter>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Count 0");
+    assert_eq!(
+        terminal.backend().buffer()[(0, 0)].bg,
+        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+    );
+    view.stop();
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert!(
+        !terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .any(|cell| cell.symbol() == "C")
+    );
+}
+
+fn mouse(kind: nsh_platform_tui::MouseKind, column: u16, row: u16) -> nsh_platform_tui::Input {
+    let mut mouse = nsh_platform_tui::MouseInput::default();
+    mouse.kind = kind;
+    mouse.column = column;
+    mouse.row = row;
+    nsh_platform_tui::Input::Mouse(mouse)
+}
+
+#[test]
+fn clicking_a_child_text_presses_its_button_in_an_offset_area() {
+    use nsh_platform_tui::{Handled, MouseButton, MouseKind};
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(50, 16)).unwrap();
+    let area = ratatui_core::layout::Rect::new(5, 3, 40, 12);
+    view.load(App::Rust(Root::new::<Counter>(|| ()))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal.draw(|frame| view.render(frame, area)).unwrap();
+        if terminal.backend().buffer()[(5, 3)].symbol() == "C" {
+            break;
+        }
+        rx.recv_deadline(deadline).unwrap();
+    }
+    assert_eq!(
+        view.handle(mouse(MouseKind::Down(MouseButton::Left), 0, 0)),
+        Handled::Ignored
+    );
+    assert_eq!(
+        view.handle(mouse(MouseKind::Down(MouseButton::Left), 6, 3)),
+        Handled::Yes
+    );
+    assert_eq!(
+        view.handle(mouse(MouseKind::Up(MouseButton::Left), 6, 3)),
+        Handled::Yes
+    );
+    loop {
+        terminal
+            .draw(|frame| frame.render_widget(&mut view, area))
+            .unwrap();
+        if terminal.backend().buffer()[(11, 3)].symbol() == "1" {
+            break;
+        }
+        rx.recv_deadline(deadline).unwrap();
+    }
+    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
+    assert_eq!(
+        view.handle(mouse(MouseKind::Down(MouseButton::Left), 6, 3)),
+        Handled::Yes
+    );
+    assert_eq!(
+        view.handle(mouse(MouseKind::Up(MouseButton::Left), 0, 0)),
+        Handled::Ignored
+    );
+    view.set_focused(false);
+    assert_eq!(
+        view.handle(nsh_platform_tui::Input::Key {
+            key: "Enter".into(),
+            modifiers: Default::default(),
+            release: false
+        }),
+        Handled::Ignored
+    );
+}
+
+#[component]
+fn Truncated() -> impl IntoElement {
+    text("ab cd ef").w(px(32.0)).number_of_lines(1)
+}
+
+#[test]
+fn truncated_text_draws_the_ellipsis_in_cells() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<Truncated>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ab…");
+}
+
+#[component]
+fn WindowSize() -> impl IntoElement {
+    text(move || format!("{}x{}", window().width.0, window().height.0))
+}
+
+#[test]
+fn rendering_a_new_area_resizes_the_engine_without_resize_input() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<WindowSize>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "320x192");
+    terminal.backend_mut().resize(30, 10);
+    terminal
+        .resize(ratatui_core::layout::Rect::new(0, 0, 30, 10))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "240x160");
+}
+
+#[test]
+fn appearance_callbacks_wait_for_render_and_idle_views_have_no_deadline() {
+    use std::{cell::RefCell, rc::Rc};
+    let (mut view, _) = surface();
+    let changes = Rc::new(RefCell::new(Vec::new()));
+    let recorded = changes.clone();
+    let thread = std::thread::current().id();
+    view.on_appearance_changed(move |appearance| {
+        assert_eq!(std::thread::current().id(), thread);
+        recorded.borrow_mut().push(appearance);
+    });
+    view.set_appearance(nsh_platform_tui::Appearance::Light);
+    assert!(changes.borrow().is_empty());
+    assert!(view.next_frame_deadline().is_some());
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert_eq!(&*changes.borrow(), &[nsh_platform_tui::Appearance::Light]);
+    assert!(view.next_frame_deadline().is_none());
+}
+
+#[cfg(feature = "run-app")]
+#[test]
+fn the_standalone_loop_does_not_draw_while_idle() {
+    use nsh_platform_tui::{RunEvent, run_app};
+    let mut view = AppView::default();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    let mut polls = 0;
+    run_app(&mut terminal, &mut view, |_| {
+        polls += 1;
+        Ok(if polls == 4 {
+            RunEvent::Exit
+        } else {
+            RunEvent::Idle
+        })
+    })
+    .unwrap();
+    let next = terminal.draw(|_| {}).unwrap();
+    assert_eq!(next.count, 1);
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn the_counter_example_changes_value_through_terminal_mouse_input() {
+    use nsh_platform_tui::{Bundle, Handled, MouseButton, MouseKind};
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        include_str!("../../../../examples/counter/App.tsx"),
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(80, 32)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "nsh counter");
+    draw_until(&mut view, &mut terminal, &rx, "Current value");
+    for (button, recent, value) in [
+        ("+1", "Recent values: 1", "1"),
+        ("−1", "Recent values: 2", "0"),
+        ("−1", "Recent values: 3", "-1"),
+    ] {
+        let buffer = terminal.backend().buffer();
+        let (x, y) = (0..32)
+            .find_map(|y| {
+                (0..79).find_map(|x| {
+                    let text =
+                        format!("{}{}", buffer[(x, y)].symbol(), buffer[(x + 1, y)].symbol());
+                    (text == button).then_some((x, y))
+                })
+            })
+            .unwrap_or_else(|| panic!("button {button} is visible"));
+        assert_eq!(
+            view.handle(mouse(MouseKind::Down(MouseButton::Left), x, y)),
+            Handled::Yes
+        );
+        assert_eq!(
+            view.handle(mouse(MouseKind::Up(MouseButton::Left), x, y)),
+            Handled::Yes
+        );
+        draw_until(&mut view, &mut terminal, &rx, recent);
+        let buffer = terminal.backend().buffer();
+        assert!((0..32).any(|y| {
+            (0..80)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim()
+                == value
+        }));
+    }
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn app_errors_are_delivered_on_the_rendering_thread() {
+    use std::{cell::RefCell, rc::Rc};
+    let (mut view, rx) = surface();
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let recorded = errors.clone();
+    let thread = std::thread::current().id();
+    view.on_app_error(move |error| {
+        assert_eq!(std::thread::current().id(), thread);
+        recorded.borrow_mut().push(error.message.clone());
+    });
+    view.load(nsh_platform_tui::Bundle::source(
+        "throw new Error('terminal callback');".into(),
+    ))
+    .unwrap();
+    assert!(errors.borrow().is_empty());
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while errors.borrow().is_empty() {
+        rx.recv_deadline(deadline).unwrap();
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    assert!(errors.borrow()[0].contains("terminal callback"));
+}
+
+#[component]
+fn Bordered() -> impl IntoElement {
+    view()
+        .w(px(48.0))
+        .h(px(48.0))
+        .border_1()
+        .rounded(px(8.0))
+        .bg(nsh_core::color::rgb(0x123456))
+        .border_color(nsh_core::color::rgb(0xffffff))
+}
+
+#[test]
+fn view_fills_and_rounded_borders_are_visible_cells() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<Bordered>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "╭────╮");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 2)].symbol(), "╰");
+    assert_eq!(buffer[(5, 2)].symbol(), "╯");
+    assert_eq!(
+        buffer[(2, 1)].bg,
+        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+    );
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn ellipsis_modes_keep_the_requested_end_of_the_text() {
+    for (mode, expected) in [
+        ("ellipsis", "abc…"),
+        ("ellipsis-start", "…def"),
+        ("ellipsis-middle", "ab…f"),
+        ("clip", "abcd"),
+    ] {
+        let source = format!(
+            r#"import {{ mount, Text }} from "nsh";
+            mount(() => <Text style={{{{ width: 32, numberOfLines: 1, textOverflow: "{mode}" }}}}>abcdef</Text>);"#
+        );
+        let code = nsh_bundler::compile_module("App.tsx", &source, &[]).unwrap();
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+        view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
+        draw_until(&mut view, &mut terminal, &rx, expected);
+    }
+}
+
+#[component]
+fn NativeLabel() -> impl IntoElement {
+    nsh_core::element::native("example.label")
+        .w(px(80.0))
+        .h(px(16.0))
+}
+
+#[test]
+fn registered_components_draw_in_their_assigned_area() {
+    struct Label;
+    impl nsh_platform_tui::NativeComponent for Label {
+        fn render(
+            &mut self,
+            area: ratatui_core::layout::Rect,
+            buffer: &mut ratatui_core::buffer::Buffer,
+        ) {
+            use ratatui_core::widgets::Widget;
+            ratatui_widgets::paragraph::Paragraph::new("Native").render(area, buffer);
+        }
+        fn set_props(&mut self, _: &[(Arc<str>, Option<nsh_core::JsonValue>)]) {}
+        fn command(&mut self, _: &nsh_core::Command) -> bool {
+            false
+        }
+    }
+    let (mut view, rx) = surface();
+    assert!(
+        view.register_component("nsh/reserved", Box::new(|| Box::new(Label)))
+            .is_err()
+    );
+    view.register_component("example.label", Box::new(|| Box::new(Label)))
+        .unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<NativeLabel>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Native");
+}
