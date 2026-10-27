@@ -98,17 +98,17 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         let swing = series.points.with(|ps| reach(ps, curve.get(), height));
         STROKE_ROOM + swing.max(-floor).max(floor - height).ceil()
     };
-    // Its shape: the top edge, down to the baseline and back.
+    // Its shape: the top edge, down to the baseline and back. A baseline
+    // at a value moves with the y scale's domain; the bottom edge stays.
     let shape = move |p: Painter, plot: PlotContext, points: &[Point<Points>]| {
         let (first, last) = (points[0], points[points.len() - 1]);
         let base = base(plot);
-        trace(
-            p.begin_path().move_to(first.x, first.y),
-            points,
-            curve.get(),
-        )
-        .line_to(last.x, px(base))
-        .line_to(first.x, px(base))
+        let p = plot.traced(p.begin_path(), true, true, |p| {
+            trace(p.move_to(first.x, first.y), points, curve.get())
+        });
+        plot.traced(p, true, y0.get().is_some(), |p| {
+            p.line_to(last.x, px(base)).line_to(first.x, px(base))
+        })
         .close_path()
     };
     let (background_class, background_style) = (props.background_class, props.background_style);
@@ -168,11 +168,9 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 .stroke_style_from_view(SvgPaint::None)
                 .line_width_from_view()
                 .line_dash_from_view();
-            trace(
-                p.begin_path().move_to(first.x, first.y),
-                &points,
-                curve.get(),
-            )
+            plot.traced(p.begin_path(), true, true, |p| {
+                trace(p.move_to(first.x, first.y), &points, curve.get())
+            })
             .stroke()
         }))
 }

@@ -4738,6 +4738,167 @@ fn base_plot_pie_radii_move_with_the_update_motion() {
     assert!(edges.iter().all(|e| e.1.is_some()), "{edges:?}");
 }
 
+const BASE_PLOT_DOMAIN_UPDATE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Line, Plot } from "nsh/base/plot";
+
+const ROWS = [{ t: 0, v: 0 }, { t: 1, v: 50 }, { t: 2, v: 100 }];
+
+function App() {
+  const top = signal(100);
+  setTimeout(() => top.set(200), 50);
+  return (
+    <View>
+      <Plot
+        data={ROWS}
+        x="t"
+        y="v"
+        xScale={{ type: "linear", domain: [0, top() / 50] }}
+        yScale={{ type: "linear", domain: [0, top()] }}
+        motion={{ update: { duration: 200, easing: "linear" } }}
+        style={{ width: 200, height: 100 }}
+      >
+        <Line curve="linear" />
+      </Plot>
+      <Plot
+        data={ROWS}
+        x="t"
+        y="v"
+        xScale={{ type: "linear", domain: [0, top() / 50] }}
+        yScale={{ type: "linear", domain: [0, top()] }}
+        style={{ width: 200, height: 100 }}
+      >
+        <Line curve="linear" />
+      </Plot>
+      <Text>{`top ${top()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A scale's domain changing (`motion.update`), as d3 transitions it: the
+/// marks are recorded once on the new scales, through a transform the
+/// platform's animator moves from the old domains to the new ones, so a
+/// point is where the interpolated domains put it (between its old place
+/// and its new one halfway through) and ends at its new place. Without an
+/// `update` timing, and with reduced motion, the new domain shows at once.
+#[test]
+fn base_plot_domains_move_with_the_update_motion() {
+    use nsh_core::{
+        animation::{AnimationOp, Animator, Driver},
+        canvas::{CanvasOp, Num},
+    };
+    let moves = |item: &MountItem| {
+        matches!(
+            item,
+            MountItem::Animation(AnimationOp::Start {
+                driver: Driver::Timing { duration_ms, .. },
+                ..
+            }) if *duration_ms == 200.0
+        )
+    };
+    let transform = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::Transform(m) => Some(*m),
+            _ => None,
+        })
+    };
+
+    let (_engine, rx) = start(BASE_PLOT_DOMAIN_UPDATE);
+    let mut all = until(&rx, |b| shows(b, "top 200"));
+    all.extend(until(&rx, |_| false));
+    let switched = all.iter().position(|b| shows(b, "top 200")).unwrap();
+    // The batches up to the move's start and its drawing through the
+    // transform (the move's end draws without one, once the platform
+    // reports it).
+    let mut animator = Animator::default();
+    let mut moving = None;
+    let mut started = false;
+    for batch in &all {
+        for item in &batch.items {
+            animator.apply(item);
+            started |= moves(item);
+        }
+        if let Some(drawn) = plot_drawings(std::slice::from_ref(batch))
+            .into_iter()
+            .find(|(_, d)| transform(d).is_some())
+        {
+            moving = Some(drawn);
+        }
+        if started && moving.is_some() {
+            break;
+        }
+    }
+    let (moving_id, drawing) = moving.expect("a mark drawn through the move");
+    // Its points on the new scales: x over 0 to 4, y over 0 to 200.
+    assert_eq!(
+        path_points(&drawing.ops),
+        [(0.0, 100.0), (50.0, 75.0), (100.0, 50.0)]
+    );
+    let m = transform(&drawing).unwrap();
+    let shown = |animator: &Animator, (x, y): (f32, f32)| {
+        let n = |n: Num| match n {
+            Num::Const(c) => c,
+            Num::Slot(s) => animator.value(drawing.slots[s as usize]),
+        };
+        (
+            n(m[0]) * x + n(m[2]) * y + n(m[4]),
+            n(m[1]) * x + n(m[3]) * y + n(m[5]),
+        )
+    };
+    let near = |(x, y): (f32, f32), (wx, wy): (f32, f32)| {
+        assert!(
+            (x - wx).abs() < 0.01 && (y - wy).abs() < 0.01,
+            "({x}, {y}) is not ({wx}, {wy})"
+        );
+    };
+    // At the start, the old domains: the middle row at x 1 of 2 and y 50
+    // of 100.
+    animator.tick(0.0);
+    near(shown(&animator, (50.0, 75.0)), (100.0, 50.0));
+    near(shown(&animator, (0.0, 100.0)), (0.0, 100.0));
+    // Halfway, the domains 0 to 3 and 0 to 150: between the two places.
+    animator.tick(0.1);
+    near(
+        shown(&animator, (50.0, 75.0)),
+        (200.0 / 3.0, 100.0 - 100.0 / 3.0),
+    );
+    near(shown(&animator, (100.0, 50.0)), (400.0 / 3.0, 100.0 / 3.0));
+    // At the end, the new places.
+    animator.tick(0.25);
+    near(shown(&animator, (50.0, 75.0)), (50.0, 75.0));
+    near(shown(&animator, (100.0, 50.0)), (100.0, 50.0));
+
+    // Without `update`: the new places at once, no transform.
+    let still: Vec<_> = plot_drawings(&all[switched..])
+        .into_iter()
+        .filter(|(id, _)| *id != moving_id)
+        .collect();
+    assert!(!still.is_empty());
+    assert!(still.iter().all(|(_, d)| transform(d).is_none()));
+    assert!(
+        still
+            .iter()
+            .any(|(_, d)| path_points(&d.ops) == [(0.0, 100.0), (50.0, 75.0), (100.0, 50.0)])
+    );
+
+    // Reduced motion: no move, no transform.
+    let environment = Environment {
+        reduce_motion: true,
+        ..Environment::default()
+    };
+    let (_engine, rx) = start_in(BASE_PLOT_DOMAIN_UPDATE, environment);
+    let mut all = until(&rx, |b| shows(b, "top 200"));
+    all.extend(until(&rx, |_| false));
+    assert!(!all.iter().flat_map(|b| b.items.iter()).any(moves));
+    assert!(
+        plot_drawings(&all)
+            .iter()
+            .all(|(_, d)| transform(d).is_none())
+    );
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 

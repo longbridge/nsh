@@ -148,18 +148,32 @@ pub fn Line(props: LineProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 let Some(first) = points.first() else {
                     return p;
                 };
-                let p = plot.clip(p, bleed).begin_path().move_to(first.x, first.y);
-                trace(p, &points, curve.get()).stroke()
+                let p = plot.clip(p, bleed).begin_path();
+                plot.traced(p, true, true, |p| {
+                    trace(p.move_to(first.x, first.y), &points, curve.get())
+                })
+                .stroke()
             },
         ))
         .child(when(
             move || dot.get() && series.is_some(),
             move || {
-                let points = series.expect("a series").points;
+                let (plot, points) = (plot.expect("a plot"), series.expect("a series").points);
                 each(
                     move || (0..points.get().len()).collect::<Vec<usize>>(),
                     |i| *i,
                     move |i, _| {
+                        // Its point, while the scales' domains move: the
+                        // dot moves with them from where the layout puts it.
+                        let at = point(animated_value(0.0), animated_value(0.0));
+                        effect(move || {
+                            let moving = plot.x_tween.moving.get() || plot.y_tween.moving.get();
+                            let p = points.with(|ps| ps.get(i.get()).copied());
+                            if let Some(p) = p.filter(|_| moving) {
+                                at.x.set(p.x.0);
+                                at.y.set(p.y.0);
+                            }
+                        });
                         view()
                             .absolute()
                             .w(px(0.0))
@@ -171,6 +185,8 @@ pub fn Line(props: LineProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                                 Some(p) => s.left(p.x).top(p.y),
                                 None => s,
                             })
+                            .bind_translate_x(&plot.x_tween.moved(&at.x))
+                            .bind_translate_y(&plot.y_tween.moved(&at.y))
                             .child(
                                 view()
                                     .flex_none()

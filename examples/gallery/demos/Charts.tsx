@@ -1,5 +1,5 @@
 import type { JSX } from "nsh";
-import { cleanup, reduceMotion, signal, Text, View } from "nsh";
+import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
@@ -62,6 +62,14 @@ const GUTTER = 58;
 const OPEN = 41.2;
 /** The first tick's time of day, in seconds. */
 const START = 10 * 3600 + 42 * 60;
+/** How a re-fit of the live plot's y domain glides: its marks over `motion.update`, the gutter with the layout. */
+const REFIT = { duration: 450, easing: "easeInOut" } as const;
+const refitLayout = {
+  duration: REFIT.duration,
+  update: { type: "easeInEaseOut" },
+  create: { type: "easeInEaseOut", property: "opacity" },
+  delete: { type: "easeInEaseOut", property: "opacity" },
+} as const;
 const clock = (t: number) => {
   const s = START + t;
   const two = (n: number) => String(n).padStart(2, "0");
@@ -73,7 +81,9 @@ const clock = (t: number) => {
  * right edge, its dot breathing while the stream runs, its price tagged in
  * the gutter at its height. The y domain holds still while the window fits
  * in it and re-fits only when the price leaves it or uses too little of it,
- * so the grid does not jump with every tick.
+ * so the grid does not jump with every tick; a re-fit glides, the line and
+ * the grid on the plot's `motion.update`, the gutter's labels and the
+ * newest dot with a layout animation of the same length.
  */
 function Live() {
   const next = random(29);
@@ -98,11 +108,13 @@ function Live() {
   const timer = setInterval(() => {
     if (!running()) return;
     const rows = [...points().slice(1), step()];
-    points.set(rows);
     const [lo, hi] = domain();
     const values = rows.map((r) => r.price);
     const [min, max] = [Math.min(...values), Math.max(...values)];
-    if (min < lo || max > hi || max - min < (hi - lo) * 0.3) domain.set(fit(rows));
+    const refit = min < lo || max > hi || max - min < (hi - lo) * 0.3;
+    if (refit && !reduceMotion()) LayoutAnimation.configureNext(refitLayout);
+    points.set(rows);
+    if (refit) domain.set(fit(rows));
   }, 1000);
   cleanup(() => clearInterval(timer));
 
@@ -151,7 +163,7 @@ function Live() {
           y="price"
           yScale={{ type: "linear", domain: domain() }}
           appearGeneration={1}
-          motion={{ appear: { duration: 900, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 36 } }}
+          motion={{ appear: { duration: 900, easing: "easeOut" }, update: REFIT, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 36 } }}
           accessibilityLabel={`NSHL, the last minute, ${fixed(last())}, ${signed((change() / OPEN) * 100)}% on the day`}
           accessibilityValue={{ text: hover() == null ? undefined : `${clock(points()[hover()!].t)}, ${fixed(points()[hover()!].price)}` }}
           crossLineClass="w-px h-full"

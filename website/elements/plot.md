@@ -335,7 +335,7 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 | Key | Type | What moves |
 |---|---|---|
 | `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |
@@ -343,6 +343,12 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 The motion runs on the platform's animator, with no JS per frame, and is complete at once for people who ask for
 reduced motion. A plot that a list makes again for a row that comes back draws in again; give it the row's key as its
 `appearGeneration`.
+
+A domain moves as d3 transitions a scale's domain: the scale in between places every value, so the marks keep their
+shapes, the grid lines and the hover's parts move with them, bars keep their corners, and a row that comes in with the
+new domain moves with the rest. A live chart that fits its y scale to its rows now and then (with some room, so the
+grid holds still between fits) glides to each new fit with an `update` timing. When the plot's size changes, the marks
+take the new size at once.
 
 It is the plot's own motion, the timings of what a chart moves: its marks' clip and its hover's parts. A view's
 entrances, exits and attention seekers are [`createMotion`](../modules/nsh.md#createmotion)'s presets and

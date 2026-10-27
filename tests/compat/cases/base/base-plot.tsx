@@ -17,7 +17,8 @@
 // `startAngle`, `endAngle`, `innerRadius`, `outerRadius`) over an `Arc`
 // reports the slice under the pointer, none in its hole, outside its ring
 // or past its last angle; its hole closes with `motion.update`, the pointer
-// finding the new ring at once.
+// finding the new ring at once. A sparkline's y domain, the extent of its
+// rows, moves to a new one with `motion.update` as rows come.
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
 
@@ -83,8 +84,9 @@ function App() {
       <View testID="pointer-tip" onPress={() => placement.set("pointer")} style={{ height: 20 }} />
       <View testID="more" onPress={() => rows.set([...rows(), { t: 20, price: 35, avg: 25 }])} style={{ height: 20 }} />
       <Text>{`rows ${rows().length}`}</Text>
-      {/* A sparkline: no pointer. */}
-      <Plot testID="spark" data={rows()} y="price" interactive={false} accessibilityLabel="Spark" onHoverChange={(index) => hovered.set(index)} style={{ width: 100, height: 20 }}>
+      {/* A sparkline: no pointer; its y domain, the extent of its rows,
+          glides to a new one as rows come (`motion.update`). */}
+      <Plot testID="spark" data={rows()} y="price" interactive={false} motion={{ update: { duration: 200, easing: "easeInOut" } }} accessibilityLabel="Spark" onHoverChange={(index) => hovered.set(index)} style={{ width: 100, height: 20 }}>
         <Line />
       </Plot>
       {/* Bars in bands: one standing alone, a stack beside it. */}

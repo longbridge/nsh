@@ -1171,7 +1171,9 @@ expect hovered 1
 event id:plot onHoverOut
 expect hovered null
 # A sparkline follows no pointer: it reports nothing, even once a press
-# that comes after the pointer has been handled.
+# that comes after the pointer has been handled. Its new row (35) widens
+# its y domain, which moves over `motion.update` (on the animator; the
+# layout and what it reports stay the same).
 prop id:spark accessibilityLabel Spark
 event id:spark onHoverMove position.x=90 position.y=10
 tap id:more
