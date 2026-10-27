@@ -183,10 +183,12 @@ pub(crate) fn run(
             entry,
             port,
             release,
-            limits,
-            trace,
-            fps,
-            points_per_cell.as_deref(),
+            HostFlags {
+                limits,
+                trace,
+                fps,
+                points_per_cell,
+            },
             &work,
         );
     }
@@ -532,14 +534,18 @@ fn run_tui(
     entry: &Path,
     port: u16,
     release: bool,
-    limits: Option<HostLimits>,
-    trace: bool,
-    fps: bool,
-    points_per_cell: Option<&str>,
+    flags: HostFlags,
     work: &Path,
 ) -> anyhow::Result<()> {
+    let HostFlags {
+        limits,
+        trace,
+        fps,
+        points_per_cell,
+    } = flags;
     let config = crate::package::read_config(entry)?;
     let cells = points_per_cell
+        .as_deref()
         .or(config.tui.points_per_cell.as_deref())
         .unwrap_or("8x16");
     parse_points_per_cell(cells).map_err(anyhow::Error::msg)?;

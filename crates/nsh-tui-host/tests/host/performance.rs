@@ -2,13 +2,15 @@ use std::{
     cell::RefCell,
     io::{self, Write},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
-use nsh_platform_tui::{
-    AppOptions, AppView, Bundle, FrameMetrics, Handled, Input, MeasuredBackend, MeasuredWriter,
-    MouseInput, MouseKind,
-};
+#[cfg(not(debug_assertions))]
+use std::time::Duration;
+
+use nsh_platform_tui::{AppOptions, AppView, MeasuredBackend, MeasuredWriter};
+#[cfg(not(debug_assertions))]
+use nsh_platform_tui::{Bundle, FrameMetrics, Handled, Input, MouseInput, MouseKind};
 use ratatui_core::{
     backend::{Backend, ClearType, TestBackend, WindowSize},
     buffer::Cell,
@@ -111,6 +113,7 @@ fn performance_counts_encoded_output_and_stops_refreshing_after_idle() {
     assert!(view.frame_metrics().is_none());
 }
 
+#[cfg(not(debug_assertions))]
 fn text(terminal: &TestTerminal) -> String {
     terminal
         .backend()
@@ -123,6 +126,7 @@ fn text(terminal: &TestTerminal) -> String {
         .collect()
 }
 
+#[cfg(not(debug_assertions))]
 fn draw(view: &mut AppView, terminal: &mut TestTerminal, capture: &Capture) -> FrameMetrics {
     capture.0.borrow_mut().clear();
     view.draw_terminal(terminal).unwrap();
@@ -130,12 +134,12 @@ fn draw(view: &mut AppView, terminal: &mut TestTerminal, capture: &Capture) -> F
 }
 
 #[test]
+#[cfg(not(debug_assertions))]
 #[ignore = "release-mode terminal scrolling baseline"]
 fn bench_terminal_scroll() {
     const FRAMES: usize = 240;
     const WARMUP: usize = 20;
     const BUDGET: Duration = Duration::from_millis(4);
-    assert!(!cfg!(debug_assertions), "run this benchmark with --release");
     let fixtures =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/performance");
     let mut over_budget = Vec::new();
