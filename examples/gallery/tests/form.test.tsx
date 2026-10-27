@@ -3,12 +3,12 @@
 import { beforeEach, describe, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
-describe("the Form demo", () => {
+describe("the Input demo", () => {
   // Each test starts on the demo, in an app of its own.
   let app: App;
   beforeEach(async () => {
     app = await open("../App.tsx", { clock: {} });
-    await app.press("label:Form");
+    await app.press("label:Input");
   });
 
   test("a controlled input shows what the app makes of each key", async () => {

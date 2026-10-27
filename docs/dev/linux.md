@@ -53,7 +53,9 @@ works and its runner only needs GTK.
   `mount.rs`). `invoke` closures must be `Send`, so they find their surface by key in a thread-local map; no globals
   are shared between surfaces.
 - **Text is typeset on the engine thread** with a Pango font map of the engine's own (Pango objects are not
-  thread-safe, and GTK's font map belongs to the main thread). The final layout is plain data, per glyph run the font's
+  thread-safe, and GTK's font map belongs to the main thread). App fonts are loaded into a fresh Fontconfig
+  configuration before it is attached to each map; configurations already used by shaping threads stay immutable.
+  The final layout is plain data, per glyph run the font's
   description, glyph ids and positions; the main thread loads the same fonts by description from GTK's font map and
   draws `gsk::TextNode`s where the engine put them. Hinted metrics and rounded positions are off on both sides, so
   what was measured is what is drawn (`text.rs`).

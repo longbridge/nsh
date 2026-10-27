@@ -1,8 +1,8 @@
 import type { JSX } from "nsh";
 import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 import { platform } from "nsh";
-import { alpha, Button, Card, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
+import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
 const pointer = platform.idiom === "desktop";
 const size = pointer ? { gap: 10, switch: "small" as const } : { gap: 12, switch: "regular" as const };
@@ -18,6 +18,10 @@ function random(seed: number) {
 
 /** Values on the axes: small, monospaced and faint, so the marks lead. */
 const axis = { fontSize: 10.5, fontFamily: mono, color: colors.faint, fontVariant: ["tabular-nums" as const] };
+/** An axis' labels under a plot: a line of `axis` text 8 below its edge. */
+const below = { ...axis, lineHeight: 13, paddingTop: 8 };
+/** The room under a plot for those labels: its margin. */
+const BELOW = 8 + 13;
 /** A tooltip's title: a small monospaced caps label over its values. */
 const tipTitle = { fontSize: 10, fontFamily: mono, letterSpacing: 0.8, color: colors.muted };
 /** A floating tooltip card. */
@@ -60,6 +64,8 @@ const CHANNEL = 10;
 const LIVE_HEIGHT = 176;
 /** The gutter right of the live plot: the y labels and the last price's tag. */
 const GUTTER = 58;
+/** The window's seconds, under its five ticks from the first row to the last. */
+const SECONDS = ["−60s", "−45s", "−30s", "−15s", "now"];
 /** The session's open. */
 const OPEN = 41.2;
 /** The first tick's time of day, in seconds. */
@@ -163,7 +169,7 @@ function Live() {
           onPress={() => running.set(!running())}
         />
       </View>
-      <View style={{ flexDirection: "row", marginTop: size.gap }}>
+      <View style={{ marginTop: size.gap }}>
         <Plot
           data={points()}
           y="price"
@@ -188,7 +194,7 @@ function Live() {
             if (index != null) tip.set(index);
           }}
           focusStyle={focusRing(4)}
-          style={{ flex: 1, height: LIVE_HEIGHT }}
+          style={{ height: LIVE_HEIGHT, marginRight: GUTTER, marginBottom: BELOW }}
         >
           <Grid y={grid()} style={{ stroke: colors.line }} />
           {/* The open: a faint dashed reference, while it is in view. */}
@@ -204,34 +210,32 @@ function Live() {
             </If>
             <View style={{ position: "absolute", left: -4.5, top: -4.5, width: 9, height: 9, borderRadius: 4.5, borderWidth: 2, borderColor: colors.inset, backgroundColor: toneColor(tone()) }} />
           </View>
-        </Plot>
-        {/* The gutter: the grid's values, and over them the last price's tag at its height. */}
-        <View style={{ width: GUTTER, height: LIVE_HEIGHT }}>
-          {grid()
-            .filter((v) => Math.abs(y(v) - y(last())) > 14)
-            .map((v) => (
-              <Text style={{ ...axis, position: "absolute", left: 10, top: y(v) - 7 }}>{fixed(v)}</Text>
-            ))}
+          {/* The gutter: the grid's values clear of the last price's tag, the tag at its height. */}
+          <PlotAxis
+            placement="right"
+            tickValues={grid().filter((v) => Math.abs(y(v) - y(last())) > 14)}
+            format={(v) => fixed(v)}
+            labelStyle={{ ...axis, paddingLeft: 10 }}
+          />
           <View
             style={{
               position: "absolute",
-              left: 6,
+              left: "100%",
+              marginLeft: 6,
               top: y(last()) - 10,
               height: 20,
               paddingHorizontal: 6,
               borderRadius: 6,
               justifyContent: "center",
               backgroundColor: toneColor(tone()),
+              pointerEvents: "none",
             }}
           >
             <Text style={{ fontSize: 11, fontFamily: mono, fontWeight: "600", color: colors.surface, fontVariant: ["tabular-nums"] }}>{fixed(last())}</Text>
           </View>
-        </View>
-      </View>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8, marginRight: GUTTER }}>
-        {["−60s", "−45s", "−30s", "−15s", "now"].map((label) => (
-          <Text style={axis}>{label}</Text>
-        ))}
+          {/* The window's seconds under it, the first and last at its ends. */}
+          <PlotAxis ticks={SECONDS.length} format={(_, i) => SECONDS[i]} labelStyle={below} />
+        </Plot>
       </View>
       <View style={{ marginTop: size.gap + 4 }}>
         <Figures>
@@ -342,7 +346,7 @@ function Depth() {
             if (index != null) tip.set(index);
           }}
           focusStyle={focusRing(4)}
-          style={{ height: DEPTH_HEIGHT }}
+          style={{ height: DEPTH_HEIGHT, marginBottom: BELOW }}
         >
           <Grid y={ticks(0, top(), 3)} style={{ stroke: colors.line }} />
           {/* The middle: a dashed hairline in the spread. */}
@@ -352,12 +356,10 @@ function Depth() {
           <Line y="bid" curve="stepAfter" style={{ stroke: toneColor("up"), strokeWidth: 1.5 }} hoverDotStyle={dot("bid", "up")} />
           <Line y="ask" curve="stepAfter" style={{ stroke: toneColor("down"), strokeWidth: 1.5 }} hoverDotStyle={dot("ask", "down")} />
           <Grid y={[0]} style={{ stroke: colors.border }} />
+          {/* The prices at the ends, and the middle a shade firmer. */}
+          <PlotAxis tickValues={[lo(), hi()]} format={(v) => fixed(v)} labelStyle={below} />
+          <PlotAxis tickValues={[MID]} format={(v) => fixed(v)} labelStyle={{ ...below, color: colors.muted }} />
         </Plot>
-      </View>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
-        <Text style={axis}>{fixed(lo())}</Text>
-        <Text style={{ ...axis, color: colors.muted }}>{fixed(MID)}</Text>
-        <Text style={axis}>{fixed(hi())}</Text>
       </View>
       {/* The balance: each side's share of what the book holds in view. */}
       <View style={{ marginTop: size.gap + 4, gap: 8 }}>
@@ -403,6 +405,8 @@ const VALUE_LO = Math.min(...EQUITY.map((d) => d.value)) * 0.97;
 const VALUE_HI = Math.max(...EQUITY.map((d) => d.value)) * 1.03;
 /** Where day `i` is across both plots (their rows are evenly spread). */
 const across = (i: number): `${number}%` => `${(i / (EQUITY.length - 1)) * 100}%`;
+/** The rows of the days the axis names: day 1, then days 30, 60, 90 and 120. */
+const DAYS = [0, 29, 59, 89, 119];
 
 /**
  * A portfolio's value over its drawdown: the equity curve, the worst run
@@ -493,7 +497,7 @@ function Drawdown() {
           dotClass="size-2 rounded-full border-2"
           onHoverChange={follow("water")}
           focusStyle={focusRing(4)}
-          style={{ height: WATER_HEIGHT }}
+          style={{ height: WATER_HEIGHT, marginBottom: BELOW }}
         >
           <Area
             y0={0}
@@ -501,20 +505,17 @@ function Drawdown() {
             hoverDotClass="hidden"
           />
           <Line style={{ stroke: toneColor("danger"), strokeWidth: 1.25 }} hoverDotStyle={{ backgroundColor: toneColor("danger"), borderColor: colors.inset }} />
-          {/* The floor's value, and the low marked where it is. */}
-          <Text style={{ ...axis, position: "absolute", left: 0, bottom: 2, pointerEvents: "none" }}>{`${DD_FLOOR}%`}</Text>
+          {/* The floor's value over its edge, and the low marked where it is. */}
+          <PlotAxis placement="left" labelPlacement="inside" tickValues={[DD_FLOOR]} format={(v) => `${v}%`} labelStyle={{ ...axis, paddingBottom: 2 }} />
           <View style={{ position: "absolute", left: across(TROUGH.day), top: (TROUGH.drawdown / DD_FLOOR) * WATER_HEIGHT, width: 0, height: 0, pointerEvents: "none" }}>
             <View style={{ position: "absolute", left: -3.5, top: -3.5, width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: colors.inset, backgroundColor: toneColor("danger") }} />
             {/* A width of its own: the zero-width anchor would wrap it at every break. */}
             <Text style={{ ...axis, position: "absolute", left: 8, top: -6, width: 64, color: toneColor("danger") }}>{`${signed(TROUGH.drawdown, 1)}%`}</Text>
           </View>
           {mark("water", "danger")}
+          {/* The days under both plots: the first, then every 30th. */}
+          <PlotAxis tickValues={DAYS} format={(v) => (v === 0 ? "Day 1" : String(v + 1))} labelStyle={below} />
         </Plot>
-      </View>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
-        {["Day 1", "30", "60", "90", "120"].map((label) => (
-          <Text style={axis}>{label}</Text>
-        ))}
       </View>
       <View style={{ marginTop: size.gap + 4 }}>
         <Figures>
@@ -535,10 +536,10 @@ const PERIODS = [
   { value: "week", label: "7d peak" },
 ] as const;
 type Period = (typeof PERIODS)[number]["value"];
-const RESOURCES: { name: string; tone: Tone; unit: string; total: number; used: Record<Period, number> }[] = [
-  { name: "Compute", tone: "accent", unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
-  { name: "Memory", tone: "info", unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
-  { name: "Network", tone: "warn", unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
+const RESOURCES: { name: string; color: string; unit: string; total: number; used: Record<Period, number> }[] = [
+  { name: "Compute", color: chart.s1, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
+  { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
+  { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
 const RINGS = pointer ? 164 : 172;
 /** Each ring's width and the gap between rings, in points. */
@@ -572,7 +573,7 @@ function Capacity() {
           style={{ width: RINGS, height: RINGS }}
         >
           {RESOURCES.map((r, i) => (
-            <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} style={{ fill: alpha(toneColor(r.tone), 0.13) }} />
+            <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} style={{ fill: alpha(r.color, 0.13) }} />
           ))}
           {RESOURCES.map((r, i) => (
             <Arc
@@ -580,7 +581,7 @@ function Capacity() {
               outerRadius={radii[i].outer}
               endAngle={share(r) * 2 * Math.PI}
               cornerRadius={RING_WIDTH / 2}
-              style={{ fill: toneColor(r.tone) }}
+              style={{ fill: r.color }}
             />
           ))}
           <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, pointerEvents: "none" }}>
@@ -592,7 +593,7 @@ function Capacity() {
           {RESOURCES.map((r) => (
             <View style={{ gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: toneColor(r.tone) }} />
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: r.color }} />
                 <Text style={{ flex: 1, fontSize: 13, color: colors.text }}>{r.name}</Text>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>{`${fixed(share(r) * 100, 0)}%`}</Text>
               </View>
@@ -640,7 +641,9 @@ function Revenue() {
   const shown = () => (hover() == null ? undefined : REGIONS[hover()!]);
   return (
     <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, the hovered slice lifted">
-      <View style={{ flexDirection: pointer ? "row" : "column", alignItems: "center", gap: pointer ? 24 : 16 }}>
+      {/* The legend sits beside the ring where the card has room for its
+          names and below it where it has not, never cutting a name short. */}
+      <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 24 : 16 }}>
         <Plot
           data={REGIONS}
           accessibilityLabel={`Revenue by region, ${money(REVENUE)} in all; largest North America at ${portion(482)}`}
@@ -670,7 +673,7 @@ function Revenue() {
             <Text style={{ fontSize: 20, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{money(shown()?.revenue ?? REVENUE)}</Text>
           </View>
         </Plot>
-        <View style={{ alignSelf: "stretch", flex: pointer ? 1 : undefined, justifyContent: "center", gap: 2 }}>
+        <View style={{ alignSelf: "stretch", flexGrow: 1, flexBasis: pointer ? 260 : undefined, justifyContent: "center", gap: 2 }}>
           {REGIONS.map((r, i) => (
             <View
               class="transition-opacity duration-150 motion-reduce:transition-none"
@@ -749,14 +752,14 @@ function Sales() {
         <Text style={{ fontSize: 12, color: colors.muted }}>{hover() == null ? `${shown().month}, the last month` : shown().month}</Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>
-        <Legend color={toneColor("accent")} label="Online" value={`${shown().online}k`} />
-        <Legend color={toneColor("info")} label="In store" value={`${shown().store}k`} />
+        <Legend color={chart.s1} label="Online" value={`${shown().online}k`} />
+        <Legend color={chart.s2} label="In store" value={`${shown().store}k`} />
       </View>
-      <View style={{ flexDirection: "row", gap: 8, marginTop: size.gap }}>
+      <View style={{ marginTop: size.gap }}>
         <Plot
           data={SALES}
           // Bands with half their gap at the ends: their middles divide
-          // the width evenly, under the month labels' equal cells.
+          // the width evenly, each month's label centered under its band.
           xScale={{ type: "band", paddingInner: 0.3, paddingOuter: 0.15, maxBandWidth: 56, groupPadding: 0.12 }}
           yScale={{ type: "linear", domain: [0, SALES_TOP] }}
           appearGeneration={stacked() ? 1 : 0}
@@ -768,7 +771,7 @@ function Sales() {
           crossLineStyle={{ backgroundColor: alpha(colors.text, 0.05) }}
           onHoverChange={(index) => hover.set(index)}
           focusStyle={focusRing(4)}
-          style={{ flex: 1, height: SALES_HEIGHT }}
+          style={{ height: SALES_HEIGHT, marginRight: AXIS + 8, marginBottom: BELOW }}
         >
           <Grid y={[40, 80, 120]} style={{ stroke: colors.line }} />
           <Grid y={[0]} style={{ stroke: colors.border }} />
@@ -780,7 +783,7 @@ function Sales() {
             inactiveOpacity={0.45}
             label={stacked() ? undefined : "online"}
             labelStyle={labelStyle}
-            style={{ fill: toneColor("accent") }}
+            style={{ fill: chart.s1 }}
           />
           <Bar
             value="store"
@@ -791,21 +794,12 @@ function Sales() {
             // Stacked, the top bar's label is the month's total.
             label={stacked() ? (d: Sale) => String(total(d)) : "store"}
             labelStyle={labelStyle}
-            style={{ fill: toneColor("info") }}
+            style={{ fill: chart.s2 }}
           />
+          {/* The grid's values right of it, as d3 writes them, and a month under each band. */}
+          <PlotAxis placement="right" tickValues={[0, 40, 80, 120]} labelStyle={{ ...axis, width: AXIS + 8, paddingLeft: 8, textAlign: "right" }} />
+          <PlotAxis format={(v) => MONTHS[v]} labelStyle={below} />
         </Plot>
-        {/* The y axis' labels at the grid's values. */}
-        <View style={{ width: AXIS, height: SALES_HEIGHT }}>
-          {[0, 40, 80, 120].map((v) => (
-            <Text style={{ ...axis, position: "absolute", right: 0, top: (1 - v / SALES_TOP) * SALES_HEIGHT - 7 }}>{String(v)}</Text>
-          ))}
-        </View>
-      </View>
-      {/* A month under each band: equal cells, as the bands' middles. */}
-      <View style={{ flexDirection: "row", marginTop: 8, marginRight: AXIS + 8 }}>
-        {MONTHS.map((m) => (
-          <Text style={{ ...axis, flex: 1, textAlign: "center" }}>{m}</Text>
-        ))}
       </View>
       <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 220 : undefined }}>
         <Segmented
@@ -831,8 +825,8 @@ function Sales() {
  * worst run shaded and the hovered day marked on both; capacity rings that
  * sweep in for each period; revenue as a donut whose hovered slice lifts;
  * and sales as bars side by side or stacked. Values on the axes are small
- * monospaced figures, grids hairlines, tooltips floating cards with a caps
- * title.
+ * monospaced figures the plots' `PlotAxis` parts lay along their edges,
+ * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
   return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales]} />;

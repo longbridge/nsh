@@ -105,7 +105,7 @@ const open = signal(false);
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape 和 Android 返回键会关闭它。 |
 | `closeOnPressOutside` | `.close_on_press_outside(..)` | `boolean` | `true` | 外部按压会关闭它。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（装着内容的盒子）的外观。 |
-| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的元素；它相对这个元素放置。 |
+| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的元素；它相对这个元素放置。弹出层打开时，它的 `aria-expanded:` 类和 `expandedStyle` 生效。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容。 |
 
 <a id="events"></a>

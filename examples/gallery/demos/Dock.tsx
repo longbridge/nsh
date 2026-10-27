@@ -83,6 +83,7 @@ function Editor(props: { panel: string }) {
         <Button
           onPress={() => edits.set(edits() + 1)}
           accessibilityLabel={`Edit ${title(props.panel)}`}
+          hoverStyle={{ opacity: 0.94 }}
           class="h-8 flex-row items-center gap-1.5 rounded-lg px-3 transition active:scale-[0.97]"
           style={{ backgroundColor: colors.accentFill, ...finish.accent }}
         >
@@ -159,6 +160,7 @@ function Tool(props: { label: string; name: string; onPress: () => void; on?: bo
       onPress={props.onPress}
       selected={props.on}
       accessibilityLabel={props.label}
+      hoverStyle={finish.hover}
       class="h-8 flex-row items-center gap-2 rounded-lg border border-border px-3 transition active:scale-[0.97]"
       style={{ backgroundColor: colors.raised, ...finish.raised }}
     >

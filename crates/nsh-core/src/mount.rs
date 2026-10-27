@@ -653,7 +653,7 @@ pub enum MountItem {
         /// View id.
         id: NodeId,
         /// The states.
-        states: u8,
+        states: u16,
     },
     /// Insert (or move) `child` into `parent`, below sibling `before` (or
     /// on top when `None`). Siblings rather than indices, so platform-owned

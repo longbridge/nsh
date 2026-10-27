@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "nsh/base/plot 的 Plot 组件及其图形 Line、Area、Bar、Grid、Pie 和 Arc：根据应用的数据行原生绘制图表，负责坐标轴的比例尺、指针下的数据行或扇区和动效，没有自己的外观。"
+description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Grid、Pie 和 Arc 以及 PlotAxis：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、指针下的数据行或扇区和动效，没有自己的外观。"
 order: 20.9
 group: base
 demo: el-plot
@@ -8,7 +8,7 @@ demo: el-plot
 
 # Plot
 
-Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）和坐标轴标签都由应用设置样式和内容。
+Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形；`PlotAxis` 用比例尺的刻度为一条边加上标签。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
 
 ```rust tabs
 use nsh_base::{
@@ -71,7 +71,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`、`Line`、`Area`、`Bar`、`Grid`、`Pie` 和 `Arc` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
+`Plot`、`Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc` 和 `PlotAxis` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
 
 ## Plot
 
@@ -188,7 +188,7 @@ band 比例尺像 d3 的 `scaleBand` 一样，按顺序为 plot 的每一行布�
 | 选项 | 默认值 | 说明 |
 |---|---|---|
 | `paddingInner` | `0` | 相邻条带之间的间隙，占每个条带步长的比例（0 到 1）。 |
-| `paddingOuter` | `0` | 第一个条带之前和最后一个条带之后的间隙，占一个步长的比例。取 `paddingInner` 的一半时，各条带的中线在 plot 上等距分布，正好位于等宽单元格里的标签之下。 |
+| `paddingOuter` | `0` | 第一个条带之前和最后一个条带之后的间隙，占一个步长的比例。取 `paddingInner` 的一半时，各条带的中线在 plot 上等距分布。 |
 | `maxBandWidth` | 无 | 条带的最大宽度（点）：宽 plot 上只有几个条带时保持窄，每个条带位于自己位置的中间。 |
 | `bandCount` | 行数 | 条带多于行数时布置的条带数：各行占据前面的条带，数据行增加时保持宽度和位置。 |
 | `groupPadding` | `0` | 同一条带里并排的柱子之间的间隙，占每根柱子位置的比例。 |
@@ -295,6 +295,51 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 
 饼图的数据行在坐标轴上没有位置，所以带饼图的 plot 通常把提示框放在指针旁边（`tooltipPlacement="pointer"`）：十字线和提示框跟随指针，没有悬停圆点。环形图中间的内容是应用自己叠放在 plot 上的元素（悬停扇区的数值或总数），图例也是，每个色块使用对应扇区的颜色。
 
+## PlotAxis
+
+`PlotAxis` 用某条边所对应比例尺的刻度为这条边加上标签：底边和顶边用 x 比例尺的刻度，左边和右边用 y 比例尺的刻度，就像 d3 的 `axisBottom`、`axisTop`、`axisLeft` 和 `axisRight`。刻度来自比例尺：`linear` 比例尺上是定义域内的整齐数值（1、2 或 5 乘以 10 的幂），`point` 或 `band` 比例尺上是数据行。标签是由 plot 的布局摆放的文字：应用决定它写什么、长什么样，布局负责把它放到位置上。每个标签沿边居中对齐自己的刻度，第一个和最后一个只向内移动必要的距离，从而留在 plot 的两端之内。
+
+```tsx
+import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+const rows = [
+  { day: "Mon", visitors: 1820 },
+  { day: "Tue", visitors: 2140 },
+  { day: "Wed", visitors: 1960 },
+  { day: "Thu", visitors: 2480 },
+  { day: "Fri", visitors: 2310 },
+];
+
+<Plot data={rows} y="visitors" yScale={{ type: "linear", domain: [0, 3000] }} class="mb-6 ml-10 h-40">
+  <Grid y={[0, 1000, 2000, 3000]} class="stroke-border" />
+  <Area class="fill-chart-1/20" />
+  <Line class="stroke-chart-1 stroke-2" />
+  {/* plot 左侧是 0、1,000、2,000 和 3,000，下方每行一个星期几。 */}
+  <PlotAxis placement="left" ticks={3} labelClass="pr-2 text-xs tabular-nums text-muted-foreground" />
+  <PlotAxis
+    format={(i) => rows[i].day}
+    labelClass="pt-2 text-xs text-muted-foreground"
+    tickClass="h-1 w-px bg-border"
+    lineClass="h-px bg-border"
+  />
+</Plot>
+```
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `placement` | `.placement(..)` | `"bottom" \| "top" \| "left" \| "right"` | `"bottom"` | 坐标轴所在的边：底边和顶边对应 x 比例尺的刻度，左边和右边对应 y 比例尺的刻度。 |
+| `labelPlacement` | `.label_placement(..)` | `"outside" \| "inside"` | `"outside"` | 标签的位置：在边的外侧、应用在 plot 周围留出的空间里，与图形互不遮挡；或在 plot 上沿边内侧排列，plot 保持完整的尺寸（在左边或右边时，每个标签位于自己网格线的上方）。 |
+| `ticks` | `.ticks(..)` | `number` | `linear` 比例尺上为 `10`，其他比例尺上为每一行 | 大约取多少个刻度：`linear` 比例尺上是定义域内的整齐数值，大约这么多个；`point` 或 `band` 比例尺上是从第一行到最后一行均匀分布的这么多行。 |
+| `tickValues` | `.tick_values(..)` | `number[]` | 无 | 刻度的数值，代替 `ticks`：比例尺上的值，`point` 或 `band` 比例尺上是行的序号（`[0, 3, 6]` 每三行标一次）。定义域内的每个值各有一个刻度。 |
+| `format` | `.format(..)` | `(value: number, index: number) => string` | 数值本身，带上刻度间距所需的小数位，千位分组 | 每个刻度的文字：应用以刻度的数值（`point` 或 `band` 比例尺上是行的序号）和它在坐标轴刻度中的序号为参数的函数。 |
+| `labelClass`、`labelStyle` | `.label_class(..)`、`.label_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | `label` 部件：每个刻度一段文字，字体、颜色和内边距由应用决定；朝向 plot 一侧的内边距就是它与边的距离（底部坐标轴用 `pt-2`）。 |
+| `tickClass`、`tickStyle` | `.tick_class(..)`、`.tick_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | `tick` 部件：每个刻度在边上一个视图，以刻度为中心，朝标签一侧延伸（底部坐标轴用 `h-1 w-px bg-border`）；设置样式后显示。 |
+| `lineClass`、`lineStyle` | `.line_class(..)`、`.line_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | `line` 部件：沿整条边、位于标签一侧的视图（底部坐标轴用 `h-px bg-border`）；设置样式后显示。 |
+
+标签在外侧时位于 plot 的外边距里，就像 d3 的坐标轴位于图表的边距里：plot 保持应用给它的尺寸，应用在坐标轴那一侧给它留出与标签一样深的外边距（下方是 `pt-2 text-xs` 的标签时用 `mb-6`），或者给它的父元素在那一侧加内边距。同一条边上的两个坐标轴各自标注自己的数值、使用自己的样式：比如区间两端的价格较淡，中间的较深。
+
+`format` 在刻度或函数变化时，于下一轮对每个刻度调用一次，绘制和跟随指针时从不调用：请保持它是纯函数（同一个数值得到同一段文字）。没有它时，刻度按 d3 的写法显示：`1,500`、`0.25`、`−2`。在 Rust 中，`plot_axis()` 创建坐标轴，`format` 是 `TickFormat::from_fn(|value, index| ..)`。坐标轴不接收指针，屏幕阅读器读出的是 plot 而不是它的标签。
+
 ## 动效
 
 动效由应用决定，默认没有：一切立即显示。`motion` 使用 [`nsh`](../modules/nsh.md#animation) 的时间参数（`{ duration, easing, delay }` 和 `{ stiffness, damping, mass }`）：
@@ -315,13 +360,13 @@ domain 的过渡与 d3 过渡比例尺 domain 的方式相同：每个数值都�
 
 ## 构建图表
 
-一个图表由 plot、它的图形以及应用自己放在周围的元素组成。应用要给 y 轴加标签时，为 y 比例尺指定 `domain`，标签就能对齐网格线的数值。悬停的十字线、圆点和提示框是 plot 的部件，由应用设置样式和内容；该行的数值显示在应用想放的地方。
+一个图表由 plot、它的图形、它的坐标轴以及应用自己放在周围的元素组成。为 y 比例尺指定 `domain`，并把网格线的数值交给它的坐标轴（`tickValues`），每个标签就正好对齐自己的网格线。悬停的十字线、圆点和提示框是 plot 的部件，由应用设置样式和内容；该行的数值显示在应用想放的地方。
 
 网格线用实线细线、底部基线稍深时最清楚，虚线就可以专门表示参考值（下例中的开盘价）。area 用朝基线渐隐的淡色比平涂更轻盈。每个系列的悬停圆点用该系列的颜色，描边用图表所在表面的颜色，从折线上“挖”出来；提示框位于 plot 顶部，在第一行和最后一行时也留在边缘以内，`domain` 在最高值之上留出空间，提示框就不会盖住折线。
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Area, Grid, Line, Plot } from "nsh/base/plot";
+import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
 
 type Row = { time: string; price: number };
 
@@ -336,54 +381,54 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
         <Text class="flex-1 text-sm text-muted-foreground">{shown().time}</Text>
         <Text class="text-right text-xl font-semibold tabular-nums text-foreground">{shown().price.toFixed(2)}</Text>
       </View>
-      <View class="flex-row gap-2">
-        <Plot
-          data={props.rows}
-          y="price"
-          yScale={{ type: "linear", domain: [props.low, props.high] }}
-          accessibilityLabel={`价格，从 ${props.rows[0].price} 到 ${props.rows[props.rows.length - 1].price}`}
-          accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
-          appearGeneration={props.rows.length}
-          motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
-          crossLineClass="w-px h-full bg-muted-foreground/50"
-          tooltipOffset={4}
-          tooltipContent={
-            <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
-              <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
-              <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
-            </View>
-          }
-          onHoverChange={(index) => hovered.set(index)}
-          class="h-48 flex-1"
-        >
-          <Grid y={[middle(), props.high]} class="stroke-border" />
-          {/* 朝基线渐隐的淡色。 */}
-          <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
-          <Grid y={[props.low]} class="stroke-muted-foreground/40" />
-          <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
-          <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
-        </Plot>
-        {/* y 轴标签，放在网格线的数值处（坐标轴图形推出之前先用 Text）。 */}
-        <View class="-my-2 w-8 justify-between">
-          {[props.high, middle(), props.low].map((v) => (
-            <Text class="text-right text-xs tabular-nums text-muted-foreground">{v.toFixed(0)}</Text>
-          ))}
-        </View>
-      </View>
-      <View class="mr-10 flex-row justify-between">
-        <Text class="text-xs text-muted-foreground">{props.rows[0].time}</Text>
-        <Text class="text-xs text-muted-foreground">{props.rows[props.rows.length - 1].time}</Text>
-      </View>
+      <Plot
+        data={props.rows}
+        y="price"
+        yScale={{ type: "linear", domain: [props.low, props.high] }}
+        accessibilityLabel={`价格，从 ${props.rows[0].price} 到 ${props.rows[props.rows.length - 1].price}`}
+        accessibilityValue={{ text: `${shown().time}, ${shown().price.toFixed(2)}` }}
+        appearGeneration={props.rows.length}
+        motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 300, damping: 30 } }}
+        crossLineClass="w-px h-full bg-muted-foreground/50"
+        tooltipOffset={4}
+        tooltipContent={
+          <View class="flex-row items-center gap-1.5 rounded-lg border border-border bg-popover px-2 py-1 shadow-md">
+            <View class="h-0.5 w-2.5 rounded-full bg-chart-1" />
+            <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
+          </View>
+        }
+        onHoverChange={(index) => hovered.set(index)}
+        class="mr-10 mb-6 h-48"
+      >
+        <Grid y={[middle(), props.high]} class="stroke-border" />
+        {/* 朝基线渐隐的淡色。 */}
+        <Area backgroundClass="bg-linear-to-b from-chart-1/20 to-transparent" />
+        <Grid y={[props.low]} class="stroke-muted-foreground/40" />
+        <Grid y={[props.rows[0].price]} class="stroke-muted-foreground" style={{ strokeDasharray: "3 3" }} />
+        <Line class="stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
+        {/* plot 右侧是网格线的数值，下方是第一行和最后一行的时间。 */}
+        <PlotAxis
+          placement="right"
+          tickValues={[props.low, middle(), props.high]}
+          format={(v) => v.toFixed(0)}
+          labelClass="pl-2 text-xs tabular-nums text-muted-foreground"
+        />
+        <PlotAxis
+          tickValues={[0, props.rows.length - 1]}
+          format={(i) => props.rows[i].time}
+          labelClass="pt-2 text-xs text-muted-foreground"
+        />
+      </Plot>
     </View>
   );
 }
 ```
 
-柱状图在柱子顶端圆角、底部方角时最清楚（`cornerRadii={{ topLeft: 4, topRight: 4 }}`；堆叠时只给最上面的柱子），同一条带里的柱子之间留一点空隙（`groupPadding`），悬停某一行时其他行的柱子变淡（`inactiveOpacity`）、它的条带上色（`crossLineClass`），数值用小号等宽数字放在柱子上方，堆叠时显示总数。`paddingOuter` 取 `paddingInner` 的一半时，条带的中线等距分布，应用放在等宽单元格里的标签正好在它们下方；`maxBandWidth` 让宽卡片里的少量柱子保持窄。
+柱状图在柱子顶端圆角、底部方角时最清楚（`cornerRadii={{ topLeft: 4, topRight: 4 }}`；堆叠时只给最上面的柱子），同一条带里的柱子之间留一点空隙（`groupPadding`），悬停某一行时其他行的柱子变淡（`inactiveOpacity`）、它的条带上色（`crossLineClass`），数值用小号等宽数字放在柱子上方，堆叠时显示总数。`paddingOuter` 取 `paddingInner` 的一半时，条带的中线等距分布，`PlotAxis` 把每个月份居中放在它的条带下方；`maxBandWidth` 让宽卡片里的少量柱子保持窄。
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Bar, Grid, Plot } from "nsh/base/plot";
+import { Bar, Grid, Plot, PlotAxis } from "nsh/base/plot";
 
 type Sale = { month: string; online: number; store: number };
 
@@ -406,7 +451,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
         onHoverChange={(index) => hovered.set(index)}
-        class="h-44"
+        class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />
         <Bar
@@ -429,13 +474,9 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
           labelClass="pb-1 text-[11px] tabular-nums text-muted-foreground"
           class="fill-chart-2"
         />
+        {/* 每个条带下方居中一个月份。 */}
+        <PlotAxis format={(i) => props.rows[i].month} labelClass="pt-2 text-xs text-muted-foreground" />
       </Plot>
-      {/* 每个条带下方一个月份：等宽单元格，与条带的中线对齐。 */}
-      <View class="flex-row">
-        {props.rows.map((r) => (
-          <Text class="flex-1 text-center text-xs text-muted-foreground">{r.month}</Text>
-        ))}
-      </View>
     </View>
   );
 }
@@ -445,7 +486,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
 
 ## 无障碍
 
-- plot 对屏幕阅读器是一个元素，角色为图像，读出应用的 `accessibilityLabel`；图形和悬停部件是它的组成部分，自己不读出任何内容。在标签中说明图表显示了什么以及值得注意的地方（范围、最高值），并用 `accessibilityValue` 给出指针下那一行的描述，屏幕阅读器就会随之读出数值。
+- plot 对屏幕阅读器是一个元素，角色为图像，读出应用的 `accessibilityLabel`；图形、坐标轴的标签和悬停部件是它的组成部分，自己不读出任何内容。在标签中说明图表显示了什么以及值得注意的地方（范围、最高值），并用 `accessibilityValue` 给出指针下那一行的描述，屏幕阅读器就会随之读出数值。
 - 在有指针的平台上（桌面、网页、配触控板的 iPad），指针下的行通过 `onHoverChange` 报告。触摸屏没有悬停：触摸用户需要的数值请用应用自己的元素显示；数字很重要时，再用文字或列表提供数据行。
 - 在饼图上，报告的行是指针下扇区所在的行：用 `accessibilityValue` 给出它的名称、数值和占比（`"团队版，340 个席位，34.0%"`），并在标签中说明总数和最大的份额。
 - plot 不接收点按，也不获得键盘焦点。
@@ -458,3 +499,4 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
 - 出现动效用平台动画器推动的值裁剪折线和区域、让柱子长出；柱子在悬停行以外变淡，是动画器根据悬停位置算出的不透明度；悬停部件是由动画器移动和淡入淡出的视图，动画器还根据 plot 和提示框的尺寸把提示框留在 plot 内。
 - area 的背景画在它自己的画布里，裁剪到 area 的形状，使用的渐变与平台为视图的 `bg-linear-*` 绘制的相同；它的类名变化（外观、`dark:`）只会重新发送绘图，不需要重新录制。
 - 饼图的每个扇区画在自己的画布里；指针下的扇区在 Rust 中根据扇区的角度和半径找出，它的抬起是一个半径、其他扇区的变淡是一个不透明度，都由动画器推动；出现动效的扫出也以同样方式推动扇区的角度，所以两者都不需要重新录制绘图。
+- 坐标轴的标签、刻度线和轴线是平台自己的文字和视图，由 Rust 中的布局根据 plot 的尺寸和比例尺摆放：plot 尺寸变化时它们随图形一起移动，定义域变化时标签会重新写出。

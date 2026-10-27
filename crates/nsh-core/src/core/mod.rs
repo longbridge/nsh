@@ -444,12 +444,12 @@ struct Node {
     /// Node props the classes set.
     class_props: Option<Box<ClassProps>>,
     /// Interaction states (`tailwind::state` bits).
-    states: u8,
+    states: u16,
     /// States the platform reports for the view.
-    tracked: u8,
+    tracked: u16,
     /// States it shows as a part of a control (`Prop::ProjectedStates`):
     /// its classes read them with its own, nothing else does.
-    projected: u8,
+    projected: u16,
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
@@ -1379,7 +1379,7 @@ impl<M: TextEngine> Core<M> {
     pub fn fonts_changed(&mut self) {
         self.zero_advances.clear();
         self.ch_changed(self.root);
-        self.measure_cache = MeasureCache::default();
+        self.measure_cache.clear();
         let blocks: Vec<Key> = self
             .nodes
             .iter()
@@ -3277,6 +3277,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Indeterminate, patch);
                 return Ok(());
             }
+            Prop::ExpandedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Expanded, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -3362,6 +3366,9 @@ impl<M: TextEngine> Core<M> {
                     |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::Mixed);
                 let indeterminate =
                     (is_mixed(&a.state) != is_mixed(&before.state)).then(|| is_mixed(&a.state));
+                let is_expanded = |s: &crate::AccessibilityState| s.expanded == Some(true);
+                let expanded = (is_expanded(&a.state) != is_expanded(&before.state))
+                    .then(|| is_expanded(&a.state));
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -3369,7 +3376,11 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
-                if selected.is_some() || checked.is_some() || indeterminate.is_some() {
+                if selected.is_some()
+                    || checked.is_some()
+                    || indeterminate.is_some()
+                    || expanded.is_some()
+                {
                     if flags != 0 {
                         self.mark(key, flags);
                     }
@@ -3381,6 +3392,9 @@ impl<M: TextEngine> Core<M> {
                     }
                     if let Some(indeterminate) = indeterminate {
                         self.set_indeterminate(key, indeterminate);
+                    }
+                    if let Some(expanded) = expanded {
+                        self.set_expanded(key, expanded);
                     }
                     return Ok(());
                 }
@@ -5106,13 +5120,40 @@ impl<M: TextEngine> Core<M> {
             })
     }
 
-    /// `layout`'s layout, rounded to whole points as Taffy's rounding pass
-    /// does ([`rounded`]).
+    /// `layout`'s layout, rounded to the surface's device pixels as Taffy's
+    /// rounding pass rounds to whole points ([`rounded`]).
     fn rounded_layout(&self, layout: LayoutId) -> taffy::Layout {
         rounded(
             self.layout.unrounded_layout(layout),
             self.layout_origin(layout),
+            self.pixel_ratio(),
         )
+    }
+
+    /// The device pixels per point layouts and text measurements are rounded
+    /// to: the environment's pixel ratio ([`MeasureCache::pixel_ratio`]).
+    fn pixel_ratio(&self) -> f32 {
+        self.measure_cache.pixel_ratio()
+    }
+
+    /// The surface's pixel ratio is now `ratio`: frames are rounded to its
+    /// device pixels and text is measured in them, so a new ratio measures
+    /// text again and sends every frame that moves.
+    fn pixel_ratio_changed(&mut self, ratio: f32) {
+        if !self.measure_cache.set_pixel_ratio(ratio) {
+            return;
+        }
+        self.fonts_changed();
+        let layouts: Vec<LayoutId> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.created)
+            .filter_map(|(_, n)| n.layout)
+            .collect();
+        for layout in layouts {
+            self.layout.mark_dirty(layout);
+        }
+        self.needs_layout = true;
     }
 
     /// Lays out the main tree if it changed. Returns true if it did.
@@ -5797,10 +5838,11 @@ impl<M: TextEngine> Core<M> {
             x: containing.x + unrounded.location.x,
             y: containing.y + unrounded.location.y,
         };
-        let l = rounded(unrounded, containing);
+        let ratio = self.pixel_ratio();
+        let l = rounded(unrounded, containing, ratio);
         let mut frame = rect(
-            l.location.x + round(containing.x) - round(origin.x),
-            l.location.y + round(containing.y) - round(origin.y),
+            l.location.x + round(containing.x, ratio) - round(origin.x, ratio),
+            l.location.y + round(containing.y, ratio) - round(origin.y, ratio),
             l.size.width,
             l.size.height,
         );
@@ -6493,45 +6535,57 @@ impl<M: TextEngine> Core<M> {
 const HIDDEN: f32 = 1.0e6;
 
 /// The content box (inside padding and border) of a laid-out node.
-/// Taffy's rounding of a coordinate.
-fn round(value: f32) -> f32 {
-    (value + 0.5).floor()
+/// Taffy's rounding of a coordinate, to the nearest device pixel of
+/// `ratio` pixels per point rather than to whole points: on a display whose
+/// ratio is not a whole number (Android's 2.625) whole points fall between
+/// pixels, so the platform rounding each view's frame to pixels in its parent
+/// would make a child a pixel taller than its parent (a scroll view then cuts
+/// its last row of pixels off).
+fn round(value: f32, ratio: f32) -> f32 {
+    (value * ratio + 0.5).floor() / ratio
+}
+
+/// `value` rounded up to a device pixel of `ratio` pixels per point. A
+/// value a hair over a whole pixel (`56.0 / 2.625 * 2.625` is
+/// `56.000004`) stays that pixel.
+fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
+    Points((value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio)
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds
-/// it, `origin` being the unrounded position of the node around it in its
+/// it, to device pixels of `ratio` pixels per point ([`round`]), `origin` being the unrounded position of the node around it in its
 /// layout root: edges are rounded where they are in the root, so adjacent
 /// views stay adjacent. The core rounds itself: Taffy's pass reaches the
 /// absolutely positioned nodes through their containing block's list,
 /// which it can leave holding removed nodes (a panic) or never fill (a
 /// hidden subtree's), while here every node is reached through its parent,
 /// its logical parent; out-of-flow offsets use their Taffy containing block.
-fn rounded(layout: &taffy::Layout, origin: taffy::Point<f32>) -> taffy::Layout {
+fn rounded(layout: &taffy::Layout, origin: taffy::Point<f32>, ratio: f32) -> taffy::Layout {
     let mut out = *layout;
     let (x, y) = (origin.x + layout.location.x, origin.y + layout.location.y);
-    out.location.x = round(x) - round(origin.x);
-    out.location.y = round(y) - round(origin.y);
-    out.size.width = round(x + layout.size.width) - round(x);
-    out.size.height = round(y + layout.size.height) - round(y);
-    out.scrollbar_size.width = round(layout.scrollbar_size.width);
-    out.scrollbar_size.height = round(layout.scrollbar_size.height);
-    out.border.left = round(x + layout.border.left) - round(x);
-    out.border.right =
-        round(x + layout.size.width) - round(x + layout.size.width - layout.border.right);
-    out.border.top = round(y + layout.border.top) - round(y);
-    out.border.bottom =
-        round(y + layout.size.height) - round(y + layout.size.height - layout.border.bottom);
-    out.padding.left = round(x + layout.padding.left) - round(x);
-    out.padding.right =
-        round(x + layout.size.width) - round(x + layout.size.width - layout.padding.right);
-    out.padding.top = round(y + layout.padding.top) - round(y);
-    out.padding.bottom =
-        round(y + layout.size.height) - round(y + layout.size.height - layout.padding.bottom);
+    out.location.x = round(x, ratio) - round(origin.x, ratio);
+    out.location.y = round(y, ratio) - round(origin.y, ratio);
+    out.size.width = round(x + layout.size.width, ratio) - round(x, ratio);
+    out.size.height = round(y + layout.size.height, ratio) - round(y, ratio);
+    out.scrollbar_size.width = round(layout.scrollbar_size.width, ratio);
+    out.scrollbar_size.height = round(layout.scrollbar_size.height, ratio);
+    out.border.left = round(x + layout.border.left, ratio) - round(x, ratio);
+    out.border.right = round(x + layout.size.width, ratio)
+        - round(x + layout.size.width - layout.border.right, ratio);
+    out.border.top = round(y + layout.border.top, ratio) - round(y, ratio);
+    out.border.bottom = round(y + layout.size.height, ratio)
+        - round(y + layout.size.height - layout.border.bottom, ratio);
+    out.padding.left = round(x + layout.padding.left, ratio) - round(x, ratio);
+    out.padding.right = round(x + layout.size.width, ratio)
+        - round(x + layout.size.width - layout.padding.right, ratio);
+    out.padding.top = round(y + layout.padding.top, ratio) - round(y, ratio);
+    out.padding.bottom = round(y + layout.size.height, ratio)
+        - round(y + layout.size.height - layout.padding.bottom, ratio);
     let o = layout.scrollable_overflow_rect;
-    out.scrollable_overflow_rect.left = round(x + o.left) - round(x);
-    out.scrollable_overflow_rect.right = round(x + o.right) - round(x);
-    out.scrollable_overflow_rect.top = round(y + o.top) - round(y);
-    out.scrollable_overflow_rect.bottom = round(y + o.bottom) - round(y);
+    out.scrollable_overflow_rect.left = round(x + o.left, ratio) - round(x, ratio);
+    out.scrollable_overflow_rect.right = round(x + o.right, ratio) - round(x, ratio);
+    out.scrollable_overflow_rect.top = round(y + o.top, ratio) - round(y, ratio);
+    out.scrollable_overflow_rect.bottom = round(y + o.bottom, ratio) - round(y, ratio);
     out
 }
 
@@ -6766,8 +6820,11 @@ fn measure_text<M: TextEngine>(
                 .prepared
                 .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
             let size = engine.measure(prepared, typed);
-            // Round up so rendering never truncates the last glyph.
-            let size = size.map(Points::ceil);
+            // Round up so rendering never truncates the last glyph, to a
+            // device pixel: to a whole point the box grows past the text by
+            // up to a point, all of it below the last line.
+            let ratio = cache.pixel_ratio();
+            let size = size.map(|v| ceil_to_pixel(v, ratio));
             cache.insert(cx.layout_hash, typed, size);
             size
         }

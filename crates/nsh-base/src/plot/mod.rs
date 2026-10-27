@@ -3,7 +3,8 @@
 //! data, the scales of its two axes, the pointer over it and its motion;
 //! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], and the radial
 //! [`Pie`] and [`Arc`]) draw what it holds, each a canvas filling the plot
-//! (a pie one per slice), natively: the rows are read once when the app
+//! (a pie one per slice), and its [`PlotAxis`]es label its edges with the
+//! ticks of its scales, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
 //! and the pointer, the hover's glide and fade, the appear and the scales'
 //! moves to new domains (`tween.rs`) run in Rust and on the platform's
@@ -19,6 +20,7 @@
 //! set) because its marks only make sense inside a plot.
 
 mod area;
+mod axis;
 mod bar;
 mod grid;
 mod line;
@@ -38,6 +40,10 @@ use nsh_core::{
 
 pub use self::{
     area::{Area, AreaElement, AreaProps, AreaY0, area},
+    axis::{
+        AxisLabelPlacement, AxisLabelStyle, AxisPlacement, PlotAxis, PlotAxisElement,
+        PlotAxisProps, TickFormat, plot_axis,
+    },
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
@@ -65,7 +71,8 @@ pub fn registry() -> Registry {
         .register::<Bar>()
         .register::<Grid>()
         .register::<Pie>()
-        .register::<Arc>();
+        .register::<Arc>()
+        .register::<PlotAxis>();
     registry
 }
 

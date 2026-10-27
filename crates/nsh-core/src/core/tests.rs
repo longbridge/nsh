@@ -5289,6 +5289,67 @@ fn selected_style_follows_the_accessibility_state() {
 }
 
 #[test]
+fn expanded_style_follows_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState, StyleValue as V};
+    // A popover's trigger: styled while its popup is open, its chevron by
+    // its group's state.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "group bg-zinc-200 aria-expanded:bg-emerald-500");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-aria-expanded:translate-x-4"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let state = |expanded| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            expanded,
+            ..AccessibilityState::default()
+        })),
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ExpandedStyle(patch(&[("opacity", V::Number(0.7))])),
+            },
+            state(Some(true)),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let trigger = view_style_of(&batch, 2).unwrap();
+    assert_eq!(trigger.background_color, Color(0x00bc_7dff));
+    assert_eq!(trigger.opacity, 0.7);
+    assert_eq!(
+        view_style_of(&batch, 3).unwrap().transform.ops()[0].value,
+        16.0
+    );
+    // The platform never tracks it.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id: 2, states } if states & crate::tailwind::state::EXPANDED != 0
+    )));
+    // Collapsed (`Some(false)`) is not expanded.
+    apply(&mut c, vec![state(Some(false))]);
+    let batch = c.commit().unwrap();
+    let trigger = view_style_of(&batch, 2).unwrap();
+    assert_eq!(trigger.background_color, Color(0xe4e4_e7ff));
+    assert_eq!(trigger.opacity, 1.0);
+    assert!(view_style_of(&batch, 3).unwrap().transform.ops().is_empty());
+}
+
+#[test]
 fn checked_style_follows_the_accessibility_state() {
     use crate::{AccessibilityProp, AccessibilityState, Checked, StyleValue as V};
     // A switch: the track by its checked state, the thumb by its group's.
@@ -16281,6 +16342,40 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 8), Some(rect(140.0, 80.0, 40.0, 20.0)));
+    // A trigger with padding and a border around its label: its whole box,
+    // so the overlay's start lines up with the trigger's edge.
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        2,
+        &[
+            ("paddingLeft", Number(10.0)),
+            ("paddingRight", Number(10.0)),
+            ("borderWidth", Number(1.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        14,
+        Tag::View,
+        12,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(12)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 80, 52 × 18) below the first one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.
@@ -16851,13 +16946,73 @@ fn image_scales_mount_the_variant_for_the_pixel_ratio() {
             )),
             "at {ratio}"
         );
-        // The size in points does not depend on the variant.
-        assert_eq!(
-            frame_of(&batch, 3).map(|f| f.size),
-            Some(crate::geometry::size_pt(40.0, 30.0)),
-            "at {ratio}"
+        // The size in points does not depend on the variant: 40 × 30, its
+        // edges on the device pixels of the ratio.
+        let size = frame_of(&batch, 3).expect("frame").size;
+        let pixel = 1.0 / ratio;
+        assert!(
+            (size.width.0 - 40.0).abs() <= pixel && (size.height.0 - 30.0).abs() <= pixel,
+            "at {ratio}: {size:?}"
         );
     }
+}
+
+#[test]
+fn rounding_lands_on_device_pixels() {
+    // At one pixel per point, Taffy's rounding to whole points.
+    for v in [0.0, 0.4, 0.5, 1.49, 120.6, -0.5] {
+        assert_eq!(super::round(v, 1.0), (v + 0.5).floor(), "{v}");
+    }
+    assert_eq!(super::ceil_to_pixel(Points(21.333_334), 1.0), Points(22.0));
+    // At 2.625: 21 points are 55.125 pixels, rounded up to 56.
+    let ratio = 2.625;
+    let up = super::ceil_to_pixel(Points(21.0), ratio);
+    assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
+    // 56 pixels measured stay 56, whatever `f32` makes of `56 / 2.625`.
+    let measured = Points(56.0 / ratio);
+    let up = super::ceil_to_pixel(measured, ratio);
+    assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
+    assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+}
+
+#[test]
+fn frames_stay_on_device_pixels_at_fractional_ratios() {
+    // A view 4 points down (10.5 pixels at 2.625) holding a child as tall as
+    // itself: rounded to whole points, the platform rounding each frame to
+    // pixels in its parent made the child 79 pixels in a 78 pixel parent.
+    let ratio = 2.625;
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = Vec::new();
+    for (id, parent) in [(2, ROOT_ID), (3, 2), (4, 3)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(style_op(2, &[("paddingTop", StyleValue::Number(4.0))]));
+    ops.push(style_op(3, &[("height", StyleValue::Number(30.0))]));
+    ops.push(style_op(4, &[("height", StyleValue::Number(30.0))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let pixels = |v: Points| v.0 * ratio;
+    let whole = |v: f32| (v - v.round()).abs() < 1.0e-3;
+    let outer = frame_of(&batch, 3).expect("outer frame");
+    let inner = frame_of(&batch, 4).expect("inner frame");
+    for v in [
+        outer.origin.y,
+        outer.size.height,
+        inner.origin.y,
+        inner.size.height,
+    ] {
+        assert!(whole(pixels(v)), "{} pixels", pixels(v));
+    }
+    assert_eq!(
+        pixels(outer.size.height).round(),
+        pixels(inner.size.height).round()
+    );
 }
 
 #[test]

@@ -650,7 +650,8 @@ browsers' touches into what phones report:
 - **Wheels and touchpads** (`wheel`) go to the innermost scroll view along their axis that can move that way (a
   vertical wheel scrolls a horizontal view when no vertical one can) and stay on it while events come within 200 ms;
   notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
-  event goes on to the page around (an embedding page scrolls). Ctrl + wheel (a touchpad's pinch) pinches the view
+  event goes on to the page around (an embedding page scrolls), unless it is over a dialog or an alert covering the
+  window (`dialogs: "viewport"`). Ctrl + wheel (a touchpad's pinch) pinches the view
   under the pointer and never zooms the page. Scroll events follow the desktop backends: touch drags send
   `onScrollDragStart` / `EndDrag`, glides and snaps `onMomentumStart` / `End`, every scroll ends with one
   `onScrollEnd` (the browser's `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
@@ -698,6 +699,31 @@ browsers' touches into what phones report:
   runtime renders in it. `slide` moves the dialog up from below the root's bottom edge (a fade with reduced motion),
   `fade` fades it; `onOpen` follows the transition. A dialog the app removes leaves the same way, then reports
   `onClose`.
+- **Dialogs over the window** (`createPlayer`'s `dialogs: "viewport"`, `viewportDialogs`): dialogs, sheets and alerts cover
+  the whole window, as iOS and Android present them from an app that embeds NSH in part of its screen. Each stays
+  where it is in the root, so its events, focus, `inert` and history are as above, and is a manual popover in the
+  browser's top layer (`raise`): above the page whatever the stacking contexts, transforms and clipping around the
+  container, newer ones above older ones (alerts are raised again over a dialog presented after them).
+  `.nsh-viewport` undoes the popover's own box and fills the window without its scroll bars: that size is the one
+  reported, with the window's safe area, and a `ResizeObserver` follows it (a page's scroll bar coming or going
+  changes it without a `resize`); `slide` starts below the window's bottom edge. Its views are a root view in the
+  window's coordinates, where the core places their overlays, so pointer positions on them (`pagePosition`, the
+  responder system's `pageX`) are the window's (`windowLayer`, `origin`; a pointer keeps the coordinates of the root
+  view it went down on). A wheel over it that nothing in it scrolls is prevented: the page does not scroll under it.
+  The layer has a blocking `wheel` listener of its own for that (`raise`): Chrome waits for the root's only over the
+  root's box and scrolls the page under the rest of the layer at once, its `wheel` event no longer cancelable.
+  Without popovers (before Chrome 114, Safari 17 and Firefox 125) they stay over the container, with a warning. The
+  page around is inert and its scrolling is locked until the last viewport layer closes. The app's window
+  (`windowSize()`) and `env(keyboard-inset-height)` stay the container's.
+  In an iframe the player elevates the iframe itself to a manual popover in its host document, preserving
+  its DOM and running engine. It pins the app at its original size and scaled position while the modal root
+  fills the enlarged iframe. Same-origin ancestor frames are elevated together; a cross-origin immediate
+  host registers `hostPlayerFrame(iframe)` and accepts requests only from that frame's window through a
+  transferred MessagePort. Install this host before loading the player. The last layer's removal, stop,
+  navigation or frame removal releases the host's size, focus, inert state and scroll lock. A host that
+  itself crosses another origin needs that outer embedder's cooperation; it cannot bypass that boundary.
+  `Sheet` uses a web modal root around its existing overlays, with its own animation and close lifecycle.
+  The documentation player enables viewport dialogs, so the website's iframe demos use this path.
 - **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every page
   above a stack's first and every dialog is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
   back button and the mouse's go back in the app; entries the app takes away itself are gone back over with
@@ -790,7 +816,8 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
   `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
   storage, private mode, quota) and hands failures back as messages.
-- **Alerts** (`AlertDialog`, both presentations) are drawn in the root: with the `desktop` idiom as the Linux and
+- **Alerts** (`AlertDialog`, both presentations) are drawn in the root (over the whole window with `dialogs:
+  "viewport"`, as dialogs are: under Input): with the `desktop` idiom as the Linux and
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
   and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.

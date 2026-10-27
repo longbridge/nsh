@@ -374,7 +374,12 @@ mod tests {
             .iter()
             .map(|s| s.export.clone())
             .collect();
-        assert_eq!(plot, ["Arc", "Area", "Bar", "Grid", "Line", "Pie", "Plot"]);
+        assert_eq!(
+            plot,
+            [
+                "Arc", "Area", "Bar", "Grid", "Line", "Pie", "Plot", "PlotAxis"
+            ]
+        );
     }
 
     /// The parts split `nsh/base` without overlap: together they export

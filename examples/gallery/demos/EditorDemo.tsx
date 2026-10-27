@@ -597,6 +597,8 @@ export function EditorDemo() {
     );
   }
 
+  // The toolbar menu shown: its trigger shows as selected while open.
+  const menuOpen = signal<"language" | "options" | null>(null);
   return (
     <View class="flex-1 bg-background">
       <View ref={(node: YNode) => (toolbar = node)} class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5">
@@ -605,11 +607,12 @@ export function EditorDemo() {
           margin={8}
           popupClass={popup}
           backdropClass="bg-black/40"
+          onOpenChange={(open) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View
               accessibilityLabel="Language"
               tooltip={<Tip label="Language" />}
-              class="h-7 flex-row items-center gap-1.5 rounded-md px-1.5 hover:bg-foreground/10 active:opacity-70"
+              class={`h-7 flex-row items-center gap-1.5 rounded-md px-1.5 active:opacity-70 ${menuOpen() === "language" ? "bg-accent" : "hover:bg-foreground/10"}`}
             >
               <Icon name="code" size={16} tint={colors.muted} />
               <Text class="text-xs font-medium text-foreground">{LANGUAGES.find((l) => l.value === language())!.label}</Text>
@@ -637,8 +640,13 @@ export function EditorDemo() {
           margin={8}
           popupClass={popup}
           backdropClass="bg-black/40"
+          onOpenChange={(open) => menuOpen.set(open ? "options" : null)}
           trigger={
-            <View accessibilityLabel="Editor options" tooltip={<Tip label="Editor options" />} class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
+            <View
+              accessibilityLabel="Editor options"
+              tooltip={<Tip label="Editor options" />}
+              class={`size-7 items-center justify-center rounded-md active:opacity-70 ${menuOpen() === "options" ? "bg-accent" : "hover:bg-foreground/10"}`}
+            >
               <Icon name="sliders" size={16} tint={colors.muted} />
             </View>
           }

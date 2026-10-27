@@ -108,7 +108,7 @@ For a list of actions use a [Menu](./menu.md), which becomes a sheet on phones; 
 | `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape and the Android back button close it. |
 | `closeOnPressOutside` | `.close_on_press_outside(..)` | `boolean` | `true` | A press outside closes it. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the popup, the box the content is in. |
-| `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it; it is placed against it. |
+| `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it; it is placed against it. While the popover is open its `aria-expanded:` classes and `expandedStyle` apply. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content. |
 
 ## Events

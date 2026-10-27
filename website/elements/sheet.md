@@ -116,3 +116,6 @@ on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 | `onOpen` | `.on_open(\|\| ..)` | It came in: it is all there. |
 | `onClose` | `.on_close(\|\| ..)` | It went: it is all gone. Also when the app closed it. |
 | `onCancel` | `.on_cancel(\|\| ..)` | The user tried to close it (Escape or back, a press on the backdrop, an enabled swipe), whether or not it closed. |
+
+On the web, embedding with `dialogs: "viewport"` presents the sheet and its backdrop over the host page,
+including a same-origin iframe. Cross-origin frames use [`hostPlayerFrame`](../docs/web.md#embed-it-in-a-page).
