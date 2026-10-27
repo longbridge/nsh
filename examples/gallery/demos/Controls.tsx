@@ -17,8 +17,8 @@ import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hove
  */
 const size =
   platform.idiom === "desktop"
-    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dash: 8, dot: 6, tabs: 30, line: 32, switch: "small" as const }
-    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dash: 10, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
+    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, switch: "small" as const }
+    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
 const pointer = platform.idiom === "desktop";
 
 /** A control's row: the control and its label, the whole row pressable. */
@@ -81,15 +81,16 @@ const box = (mark: Mark) => ({
   ...fill(mark !== null),
 });
 
-/** What a checkbox's box shows. */
+/** What a checkbox's box shows: a check or a dash, drawn with the same bold pen (about 2 pt at the desktop size). */
+const markWeight = 3.2;
 function BoxMark(props: { mark: Mark }) {
   return (
     <>
       <If when={props.mark === "check"}>
-        <Icon name="check" size={size.check} tint={colors.onAccent} />
+        <Icon name="check" size={size.check} tint={colors.onAccent} weight={markWeight} />
       </If>
       <If when={props.mark === "dash"}>
-        <View style={{ width: size.dash, height: 2, borderRadius: 1, backgroundColor: colors.onAccent }} />
+        <Icon name="minus" size={size.check} tint={colors.onAccent} weight={markWeight} />
       </If>
     </>
   );
