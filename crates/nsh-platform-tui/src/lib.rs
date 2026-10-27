@@ -18,6 +18,7 @@ mod render;
 mod run;
 mod surface;
 mod text;
+mod text_input;
 mod view;
 
 pub use nsh_core::platform::{Appearance, Locale};

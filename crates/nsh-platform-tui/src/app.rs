@@ -111,6 +111,9 @@ pub struct AppView {
     tree: Mounter,
     area: Rect,
     focused: bool,
+    clipboard: Arc<dyn nsh_core::clipboard::ClipboardBackend>,
+    kill: String,
+    field_drag: Option<(nsh_core::NodeId, ratatui_core::layout::Position)>,
     pointer: Pointer,
     hits: Vec<Hit>,
     geometry: Vec<crate::render::Geometry>,
@@ -137,6 +140,10 @@ impl AppView {
             reduce_motion: true,
             ..Default::default()
         };
+        let clipboard = options
+            .clipboard
+            .clone()
+            .unwrap_or_else(|| Arc::new(nsh_core::clipboard::MemoryClipboard::default()));
         let surface = Surface::default();
         surface.wake.set(options.wake.clone());
         Self {
@@ -151,6 +158,9 @@ impl AppView {
             tree: Mounter::default(),
             area: Rect::default(),
             focused: true,
+            clipboard,
+            kill: String::new(),
+            field_drag: None,
             pointer: Pointer::default(),
             hits: Vec::new(),
             geometry: Vec::new(),
@@ -185,13 +195,17 @@ impl AppView {
         config.data_dir = self.options.data_dir.clone();
         config.assets = self.options.assets.clone();
         config.storage = self.options.storage.clone();
-        config.clipboard = self.options.clipboard.clone();
+        config.clipboard = Some(self.clipboard.clone());
         config.host = self.options.host.clone();
         config.trace = self.options.trace;
         #[cfg(feature = "dev")]
         if let Some(test) = &self.test {
             test.model.set_up_engine(&mut config);
         }
+        self.clipboard = config
+            .clipboard
+            .clone()
+            .unwrap_or_else(|| Arc::new(nsh_core::clipboard::MemoryClipboard::default()));
         let cells = self.options.cells;
         let engine = Engine::start(
             config,
@@ -265,6 +279,7 @@ impl AppView {
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
         if !focused {
+            self.field_drag = None;
             if let Some(engine) = &self.surface.engine {
                 self.keyboard.focus(None, &mut self.tree, &engine.control());
             }
@@ -316,6 +331,7 @@ impl AppView {
         #[cfg(feature = "dev")]
         if (self.dev.is_some() || self.diagnostics.log_path.is_some())
             && self.focused
+            && (self.diagnostics.open || self.editing_field().is_none())
             && self.diagnostics.handle(&input)
         {
             self.pointer
@@ -336,6 +352,10 @@ impl AppView {
                 Handled::Yes
             }
             Input::Mouse(mouse) => {
+                if self.handle_field_mouse(mouse) {
+                    self.surface.wake.notify();
+                    return Handled::Yes;
+                }
                 let Some(engine) = &self.surface.engine else {
                     return Handled::Ignored;
                 };
@@ -379,7 +399,23 @@ impl AppView {
                 }
             }
             Input::KeyRepeat { key, modifiers } => self.handle_key(&key, modifiers, true),
-            Input::Paste(_) => Handled::Ignored,
+            Input::Paste(text) => {
+                let Some(id) = self.editing_field() else {
+                    return Handled::Ignored;
+                };
+                let Some(engine) = &self.surface.engine else {
+                    return Handled::Ignored;
+                };
+                let view = self.tree.get_mut(id).unwrap();
+                view.field.as_mut().unwrap().paste(
+                    view.input.as_ref().unwrap(),
+                    &text,
+                    id,
+                    &engine.control(),
+                );
+                self.surface.wake.notify();
+                Handled::Yes
+            }
         }
     }
 
@@ -396,6 +432,8 @@ impl AppView {
         };
         let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control) {
             Handled::Yes
+        } else if self.handle_field_key(key, stroke, &control) {
+            Handled::Yes
         } else if let Some(action) = crate::key_scheme::terminal(stroke) {
             self.keyboard
                 .action(action, &mut self.tree, &self.geometry, &control, modifiers)
@@ -406,6 +444,123 @@ impl AppView {
             self.surface.wake.notify();
         }
         handled
+    }
+
+    fn editing_field(&self) -> Option<nsh_core::NodeId> {
+        if !self.focused {
+            return None;
+        }
+        let id = self.keyboard.focused?;
+        let view = self.tree.get(id)?;
+        (view.input.as_ref().is_some_and(|config| config.editable)
+            && !view.props.accessibility.state.disabled)
+            .then_some(id)
+    }
+
+    fn handle_field_key(
+        &mut self,
+        key: &str,
+        stroke: nsh_core::keymap::Keystroke,
+        control: &nsh_engine::EngineControl,
+    ) -> bool {
+        let Some(id) = self.editing_field() else {
+            return false;
+        };
+        let view = self.tree.get_mut(id).unwrap();
+        let config = view.input.as_ref().unwrap();
+        let field = view.field.as_mut().unwrap();
+        if let Some(action) = crate::key_scheme::editing(stroke, config.multiline) {
+            if field.edit(
+                action,
+                stroke.modifiers.shift,
+                config,
+                &mut self.kill,
+                self.clipboard.as_ref(),
+                id,
+                control,
+            ) {
+                self.keyboard.focus(None, &mut self.tree, control);
+            }
+            true
+        } else if !stroke.modifiers.ctrl
+            && !stroke.modifiers.alt
+            && !stroke.modifiers.cmd
+            && matches!(stroke.key, nsh_core::keymap::Key::Char(_))
+        {
+            field.insert(config, key, true, id, control);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn handle_field_mouse(&mut self, mouse: crate::MouseInput) -> bool {
+        use crate::{MouseButton, MouseKind};
+        use ratatui_core::layout::Position;
+        let Some(engine) = &self.surface.engine else {
+            return false;
+        };
+        let control = engine.control();
+        let position = Position::new(mouse.column, mouse.row);
+        let scope = crate::navigation::focus_scope(&self.tree);
+        if let Some((id, last)) = self.field_drag {
+            if self.keyboard.focused != Some(id)
+                || !crate::keyboard::contains(&self.tree, scope, id)
+            {
+                self.field_drag = None;
+            } else if matches!(
+                mouse.kind,
+                MouseKind::Move | MouseKind::Up(MouseButton::Left)
+            ) {
+                if position != last
+                    && let Some(view) = self.tree.get_mut(id)
+                {
+                    let field = view.field.as_mut().unwrap();
+                    field.click(view.input.as_ref().unwrap(), position, true);
+                    field.report(id, &control, false);
+                }
+                self.field_drag = if matches!(mouse.kind, MouseKind::Up(_)) {
+                    None
+                } else {
+                    Some((id, position))
+                };
+                return true;
+            }
+        }
+        if !matches!(mouse.kind, MouseKind::Down(MouseButton::Left))
+            || !self.area.contains(position)
+        {
+            return false;
+        }
+        let hit = self.hits.iter().rev().find(|hit| {
+            hit.area.contains(position) && crate::keyboard::contains(&self.tree, scope, hit.node)
+        });
+        let id = hit.map(|hit| hit.node).filter(|&id| {
+            self.tree.get(id).is_some_and(|view| {
+                view.input.as_ref().is_some_and(|config| config.editable)
+                    && !view.props.accessibility.state.disabled
+            })
+        });
+        if let Some(id) = id {
+            self.pointer.cancel(Some(&control));
+            self.keyboard.focus(Some(id), &mut self.tree, &control);
+            let view = self.tree.get_mut(id).unwrap();
+            let field = view.field.as_mut().unwrap();
+            field.click(
+                view.input.as_ref().unwrap(),
+                position,
+                mouse.modifiers.shift,
+            );
+            field.report(id, &control, false);
+            self.field_drag = Some((id, position));
+            true
+        } else {
+            if self.editing_field().is_some() {
+                self.keyboard.focus(None, &mut self.tree, &control);
+                self.surface.wake.notify();
+            }
+            false
+        }
     }
 
     /// Applies complete pending batches, resizes to `area`, and draws into the frame.
@@ -544,6 +699,29 @@ impl AppView {
         {
             self.surface.wake.notify();
         }
+        if let Some(engine) = &self.surface.engine {
+            let control = engine.control();
+            for (id, focus) in std::mem::take(&mut self.tree.focus_requests) {
+                if focus
+                    && self
+                        .keyboard
+                        .candidates(&self.tree, &self.geometry)
+                        .iter()
+                        .any(|g| g.id == id && !g.visible.is_empty())
+                {
+                    self.keyboard.focus(Some(id), &mut self.tree, &control);
+                    self.surface.wake.notify();
+                } else if !focus && self.keyboard.focused == Some(id) {
+                    self.keyboard.focus(None, &mut self.tree, &control);
+                    self.surface.wake.notify();
+                }
+            }
+            if let Some(id) = self.keyboard.focused
+                && let Some(field) = self.tree.get_mut(id).and_then(|view| view.field.as_mut())
+            {
+                field.report(id, &control, false);
+            }
+        }
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);
         #[cfg(feature = "dev")]
@@ -580,6 +758,8 @@ impl AppView {
         self.hits.clear();
         self.geometry.clear();
         self.keyboard = Default::default();
+        self.kill.clear();
+        self.field_drag = None;
     }
 }
 

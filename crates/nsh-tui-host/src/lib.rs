@@ -10,6 +10,7 @@ use ratatui_core::{
 };
 use ratatui_crossterm::CrosstermBackend;
 
+mod clipboard;
 mod logging;
 mod shutdown;
 mod terminal;
@@ -55,6 +56,11 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
     options.data_dir = args.data_dir.clone().or_else(nsh_engine::data_dir);
     options.trace = args.trace;
     options.cells = args.points_per_cell;
+    let terminal_clipboard = (options.clipboard.is_none() && !args.headless)
+        .then(|| std::sync::Arc::new(clipboard::TerminalClipboard::default()));
+    if let Some(clipboard) = &terminal_clipboard {
+        options.clipboard = Some(clipboard.clone());
+    }
     let mut view = AppView::new(options);
     view.set_dev_log_path(log_file);
     let is_dev = args.bundle.is_none();
@@ -89,6 +95,9 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         let session = terminal::Session::enter()?;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         run(&mut terminal, &mut view, &args, |timeout| {
+            if let Some(clipboard) = &terminal_clipboard {
+                clipboard.flush();
+            }
             if !session.is_active() {
                 Err(io::Error::other("terminal session ended after a panic"))
             } else if shutdown::requested() || (!is_dev && failure.borrow().is_some()) {
@@ -97,6 +106,9 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
                 terminal::poll(timeout)
             }
         })?;
+        if let Some(clipboard) = &terminal_clipboard {
+            clipboard.flush();
+        }
     }
     let error = if is_dev {
         None

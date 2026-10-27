@@ -93,3 +93,112 @@ pub(crate) fn terminal(stroke: Keystroke) -> Option<Action> {
         _ => return None,
     })
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum EditAction {
+    Move(nsh_core::text_edit::Unit, bool),
+    Boundary(bool),
+    Document(bool),
+    Vertical(bool),
+    Delete(nsh_core::text_edit::Unit, bool),
+    KillLine(bool),
+    KillWord(bool),
+    KillWhitespaceWord,
+    ReadlineWord(bool),
+    Yank,
+    Transpose,
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
+    Undo,
+    Redo,
+    Enter(bool),
+    Leave,
+}
+
+pub(crate) fn editing(stroke: Keystroke, multiline: bool) -> Option<EditAction> {
+    use EditAction::*;
+    use nsh_core::text_edit::Unit::{Char, Word};
+    let Keystroke { key, modifiers: m } = stroke;
+    if m.cmd || (m.ctrl && m.shift && !m.alt && matches!(key, Key::Char(_))) {
+        return Some(match key {
+            Key::Char('a') => SelectAll,
+            Key::Char('c') => Copy,
+            Key::Char('x') => Cut,
+            Key::Char('v') => Paste,
+            Key::Char('z') => {
+                if m.shift {
+                    Redo
+                } else {
+                    Undo
+                }
+            }
+            _ => return None,
+        });
+    }
+    if m.ctrl && !m.alt && !m.shift {
+        return Some(match key {
+            Key::Char('a') => Boundary(false),
+            Key::Char('e') => Boundary(true),
+            Key::Char('f') => Move(Char, true),
+            Key::Char('b') => Move(Char, false),
+            Key::Char('d') => Delete(Char, true),
+            Key::Char('h') => Delete(Char, false),
+            Key::Char('k') => KillLine(true),
+            Key::Char('u') => KillLine(false),
+            Key::Char('w') => KillWhitespaceWord,
+            Key::Char('y') => Yank,
+            Key::Char('t') => Transpose,
+            Key::Char('g') => Leave,
+            Key::Char('n') if multiline => Vertical(true),
+            Key::Char('p') if multiline => Vertical(false),
+            Key::Char('v') => Paste,
+            Key::Char('z') => Undo,
+            Key::Insert => Copy,
+            Key::Home => Document(false),
+            Key::End => Document(true),
+            Key::Left => Move(Word, false),
+            Key::Right => Move(Word, true),
+            Key::Backspace => Delete(Word, false),
+            Key::Delete => Delete(Word, true),
+            _ => return None,
+        });
+    }
+    if m.alt && !m.ctrl {
+        return Some(match key {
+            Key::Char('f') => ReadlineWord(true),
+            Key::Right => Move(Word, true),
+            Key::Char('b') => ReadlineWord(false),
+            Key::Left => Move(Word, false),
+            Key::Char('d') => KillWord(true),
+            Key::Backspace => KillWord(false),
+            Key::Char('w') => Copy,
+            Key::Char(',') if m.shift => Document(false),
+            Key::Char('.') if m.shift => Document(true),
+            Key::Enter => Enter(true),
+            _ => return None,
+        });
+    }
+    if m.ctrl && m.shift && matches!(key, Key::Left | Key::Right) {
+        return Some(Move(Word, key == Key::Right));
+    }
+    if m.ctrl || m.alt {
+        return None;
+    }
+    Some(match key {
+        Key::Left => Move(Char, false),
+        Key::Right => Move(Char, true),
+        Key::Up if multiline => Vertical(false),
+        Key::Down if multiline => Vertical(true),
+        Key::Home => Boundary(false),
+        Key::End => Boundary(true),
+        Key::Backspace => Delete(Char, false),
+        Key::Delete if m.shift => Cut,
+        Key::Delete => Delete(Char, true),
+        Key::Insert if m.shift => Paste,
+        Key::Enter => Enter(m.shift),
+        Key::Escape => Leave,
+        _ => return None,
+    })
+}

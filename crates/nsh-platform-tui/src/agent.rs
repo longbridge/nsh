@@ -213,6 +213,7 @@ impl Native for TuiNative {
                 "a",
                 Modifiers {
                     ctrl: true,
+                    shift: true,
                     ..Default::default()
                 },
             ),
@@ -247,8 +248,16 @@ impl Native for TuiNative {
         self.input(Input::Paste(content.text.clone()))
     }
 
-    fn input_text(&self, _id: NodeId) -> Option<String> {
-        None
+    fn input_text(&self, id: NodeId) -> Option<String> {
+        self.on_view(move |view, _| {
+            view.tree
+                .get(id)?
+                .field
+                .as_ref()
+                .map(|field| field.model.text().to_owned())
+        })
+        .ok()
+        .flatten()
     }
 
     fn back(&self) -> Result<(), String> {

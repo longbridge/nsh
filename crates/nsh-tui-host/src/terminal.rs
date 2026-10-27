@@ -114,7 +114,7 @@ pub fn convert(event: event::Event) -> RunEvent {
             let release = key.kind == event::KeyEventKind::Release;
             if !release
                 && key.code == event::KeyCode::Char('c')
-                && key.modifiers.contains(event::KeyModifiers::CONTROL)
+                && key.modifiers == event::KeyModifiers::CONTROL
             {
                 return RunEvent::Exit;
             }

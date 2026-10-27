@@ -1,6 +1,7 @@
 //! Public terminal surface and cell text contracts.
 
 mod text;
+mod text_input;
 
 mod app;
 

@@ -93,6 +93,21 @@ impl Keyboard {
     ) {
         let old = self.focused;
         self.focused = id;
+        if old != id {
+            if let Some(field) = old
+                .and_then(|id| tree.get_mut(id))
+                .and_then(|v| v.field.as_mut())
+            {
+                field.focused = false;
+            }
+            if let Some(field) = id
+                .and_then(|id| tree.get_mut(id))
+                .and_then(|v| v.field.as_mut())
+            {
+                field.focused = true;
+                field.report(id.unwrap(), control, false);
+            }
+        }
         if let Some(focused) = id {
             let mut parent = Some(focused);
             while let Some(id) = parent {
@@ -467,10 +482,10 @@ impl Keyboard {
         if !input.editable || input.caret_hidden {
             return None;
         }
-        let g = geometry
+        let _ = geometry
             .iter()
             .find(|g| Some(g.id) == self.focused && !g.visible.is_empty())?;
-        Some(Position::new(g.visible.x, g.visible.y))
+        tree.get(self.focused?)?.field.as_ref()?.cursor()
     }
 
     pub(crate) fn shortcut(

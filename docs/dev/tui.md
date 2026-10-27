@@ -82,8 +82,8 @@ as the host's terminal input does. Pointer coordinates convert from content-rela
 including the embedding area's origin. Bounds follow rounded parent origins, scrolling, clipping and concealed
 screens. The agent drives press/release, motion, wheel events, individual keys and bracketed paste. Scroll
 requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
-is the platform's current input implementation: this adapter does not emulate missing input features. Field
-editing, richer pointer/scroll behavior and system dialogs are supplied by their respective platform tickets.
+is the platform's current input implementation: this adapter does not emulate missing input features. Richer pointer/scroll behavior and system dialogs are supplied by their respective platform tickets.
+Fields use the same editor for real keys, synthetic keys and bracketed paste.
 `setViewport` currently returns an error; select the initial viewport with `open(entry, { width, height })`.
 
 `app.screenshot(path?)` returns bytes and optionally writes them on the test machine, through the existing
@@ -179,7 +179,7 @@ session starts; restart the run after changing this setting.
 Every geometric projection uses **round-half-up**: `floor(points / points_per_cell + 0.5)`. A tie goes toward
 positive coordinates, including negative positions (`-0.5` becomes `0`). The embedding area's integer Cell origin
 is added after conversion. `geometry::CellBounds` is the common boundary for view frames and content boxes;
-input content boxes follow the same rule when the input renderer is added.
+input content boxes follow the same rule as text content boxes.
 
 A box first snaps its origin relative to its parent's snapped origin. Its right and bottom edges are then computed
 from that snapped origin plus its point width and height, using the same rounding rule. Children and content use
@@ -295,7 +295,8 @@ scrolling animations remain separate work.
 `key_scheme.rs` maps keystrokes to actions; `keyboard.rs` applies focus, activation and scrolling, and
 `navigation.rs` handles back. This keeps a future vim scheme independent of the actions, with one scheme selected
 today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy.
-The standalone host reserves Ctrl+C for exit and C-h e for diagnostics. While the diagnostics panel is open,
+The standalone host reserves Ctrl+C for exit. Outside fields, C-h e opens diagnostics; inside fields,
+C-h is Backspace (leave the field with Esc or C-g to open diagnostics). While the diagnostics panel is open,
 it owns keys and the app's field caret is hidden; closing it restores the caret when an editable field has focus.
 
 | Keys | Action |
@@ -304,7 +305,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Ctrl+P, Up, Shift+Tab | Previous focusable view |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
-| Esc, Ctrl+G | Go back through the app handler, stack or newest modal |
+| Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
 | Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
 | Ctrl+C | Quit |
@@ -323,8 +324,72 @@ The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes a
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
 without firing again. Navigation activation completes a press in one action; a later release does not press
 again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter and Ctrl+[/Esc can be
-indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation, field editing and
-the search Minibuffer are separate work; this slice adds navigation over fields, not editing their text.
+indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation and
+the search Minibuffer are separate work. Editing uses the keys below while a field is focused.
+
+## Text fields
+
+`text_input.rs` keeps one `nsh_core::text_edit::Model` per Input. The core model owns the text, byte selection,
+character/word boundaries, replacement, deletion and undo history. The backend maps the terminal Key scheme to
+those operations and projects text to Cells. `InputValue` updates are accepted only when their edit count is at
+least the local count; an equal value preserves the selection and undo history. Every local edit reports one
+`ChangeText` with the new count, including when the app has no change listener. Selection events use UTF-16
+positions; Cell columns and model byte offsets are never used as event offsets. Typed insertions and Backspace
+report `KeyPress`; Enter reports it before `SubmitEditing`. Focus changes use the shared keyboard Focus/Blur and
+tracked-state path. `autoFocus`, `focus()`, `blur()` and `setSelection` use the same field state.
+
+Tab / Shift+Tab enter and leave fields. C-n/C-p and Up/Down traverse controls in single-line fields; in multiline
+fields they move between visual lines, retaining the desired Cell column across short lines. A mouse press in a
+field positions its caret; dragging or Shift+click extends the selection. The last painted, clipped hit regions
+respect modal scope and `pointerEvents`. Esc / C-g clears field focus before a later cancellation reaches the app.
+App shortcuts run before editing, with the existing `When::Editing` policy.
+
+| Keys in a field | Action |
+|---|---|
+| C-a / C-e, Home / End | Start / end of the logical line |
+| C-f / C-b, Right / Left | Forward / back one core character boundary |
+| M-f / M-b | End of the next / start of the previous alphanumeric word (readline) |
+| Ctrl+Right / Ctrl+Left | Core desktop word boundaries, including trailing / leading whitespace |
+| Shift+arrows, Shift+Home/End | Extend the selection |
+| C-n / C-p, Down / Up (multiline) | Next / previous visual line |
+| C-d / Delete, C-h / Backspace | Delete forward / back |
+| C-k / C-u | Kill to line end / start; C-k at line end also kills the newline |
+| C-w / M-d | Kill back to the whitespace boundary / forward to the end of the next alphanumeric word |
+| C-y | Insert the last killed text, shared between fields of this surface |
+| C-t | Transpose the characters beside the caret, or the last two at the end |
+| Ctrl+Shift+C / Ctrl+Shift+X, Cmd+C / Cmd+X | Copy / cut the selection |
+| Ctrl+Insert / Shift+Delete, M-w | Copy / cut; M-w copies |
+| Ctrl+V, Cmd+V, Shift+Insert | Paste the clipboard text |
+| Ctrl+Shift+A, Cmd+A | Select all; the test agent's clear step uses Ctrl+Shift+A |
+| Ctrl+Z / Ctrl+Shift+Z, Cmd+Z / Cmd+Shift+Z | Undo / redo |
+| Ctrl+Home / Ctrl+End, M-< / M-> | Start / end of the text |
+| Enter | `InputConfig::submit()`: newline, submit, or submit and blur |
+| Shift+Enter / Alt+Enter (multiline) | Insert a newline even in a field configured to submit |
+| Esc / C-g | Leave the field |
+
+The readline word policies follow [GNU Readline's killing commands](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Killing.html);
+C-w treats punctuation within a whitespace-delimited word as part of that word. They choose a range using the
+core's character boundaries, then use the core Model for selection and deletion.
+
+The app's `InputContent` box defines padding and border offsets. Text is a Paragraph with the app's text style;
+empty fields show the placeholder and its color. Graphemes stay whole; wide graphemes occupy their display width,
+multiline fields wrap at Cell boundaries, and single-line fields scroll horizontally. The field scrolls its caret
+into sight vertically and horizontally. Selected glyphs are reversed. Masked fields show one `•` per grapheme and
+do not export their selection through copy/cut. `AppView::render` places the terminal cursor at the caret;
+`caret={false}` hides it. Input-method composition belongs to the terminal emulator; committed characters enter
+through the ordinary key/paste path.
+
+Bracketed paste is one model insertion and one ChangeText event; it is clipped by the core's
+UTF-16 `maxLength`. The core's `pasted` helper normalizes CRLF and single-line line breaks. `Paste` is reported
+before insertion, and `pasteBehavior="report"` reports without insertion.
+
+Fields share the exact `ClipboardBackend` passed to their engine, including the test agent's isolated clipboard.
+An embedder without one gets a memory clipboard. The standalone host supplies OSC 52: writes are base64 encoded,
+queued from engine calls and flushed between terminal frames so escape sequences cannot interleave. Its copied
+text is retained in process for reads, including over SSH. Before a local copy, it tries the available desktop
+reader (`pbpaste`, PowerShell's `Get-Clipboard`, `wl-paste` or `xclip`). Bracketed paste is the terminal emulator's
+clipboard delivery and does not require a remote read. OSC 52 delivery requires the user's terminal/multiplexer to
+permit clipboard writes; `nsh test` uses memory and never writes to the machine's clipboard.
 
 ## Degradation in this slice
 
@@ -338,6 +403,9 @@ the search Minibuffer are separate work; this slice adds navigation over fields,
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
+| Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
+| Input-method composition | Terminal emulator composition, committed text delivered to the field |
+| Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
 | Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
 | Scroll | Children translated by the current offset and clipped to the viewport |
@@ -346,7 +414,7 @@ the search Minibuffer are separate work; this slice adds navigation over fields,
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
-positions, top screens and their headers, modal cancellation, terminal navigation keys and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+positions, top screens and their headers, modal cancellation, terminal navigation and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
@@ -363,13 +431,17 @@ clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess 
 `NSH_RUNTIME` to check inherited input/output, file diagnostics (including `-v`) and Cell scale precedence and
 validation. These are additional ticket-02 seams. The test-agent acceptance seam is `nsh test --target tui`: the existing
 counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapshots after a press, and startup errors).
+The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
+engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry imports the
+unchanged `examples/tui-gallery` Form and checks invalid fields and successful account creation.
 The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
-cargo test -p nsh-platform-tui --features run-app --test tui
+cargo test -p nsh-platform-tui --features dev,run-app --test tui
 cargo test -p nsh-tui-host
 cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1

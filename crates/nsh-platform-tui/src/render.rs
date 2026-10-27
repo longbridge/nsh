@@ -242,12 +242,21 @@ impl Painter<'_> {
                         .render(text_area, self.buffer);
                 }
             }
+            if let (Some(field), Some(config)) = (&mut view.field, &view.input) {
+                let content = CellBounds::new(
+                    Bounds::new(origin + field.content.origin, field.content.size),
+                    self.cells,
+                    self.area,
+                );
+                field.draw(config, content, visible, self.buffer, opacity);
+            }
             if let Some(component) = &mut view.component {
                 component.render(visible, self.buffer);
             } else if !matches!(
                 view.kind,
                 ViewKind::View
                     | ViewKind::Text
+                    | ViewKind::Input
                     | ViewKind::Scroll
                     | ViewKind::Stack
                     | ViewKind::Screen
@@ -288,7 +297,7 @@ impl Painter<'_> {
     }
 }
 
-fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> Color {
+pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> Color {
     let packed = color.0;
     let alpha = (packed & 255) as f32 / 255.0 * opacity;
     let (r, g, b) = match background {

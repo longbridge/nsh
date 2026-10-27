@@ -20,6 +20,7 @@ pub(crate) struct Mounter {
     pub(crate) modals: Vec<NodeId>,
     pub(crate) pending_modals: Vec<NodeId>,
     pub(crate) back_requests: usize,
+    pub(crate) focus_requests: Vec<(NodeId, bool)>,
     unhandled: HashSet<Discriminant<MountItem>>,
     placeholders: HashSet<String>,
 }
@@ -39,6 +40,7 @@ impl Default for Mounter {
             modals: Vec::new(),
             pending_modals: Vec::new(),
             back_requests: 0,
+            focus_requests: Vec::new(),
             unhandled: HashSet::new(),
             placeholders: HashSet::new(),
         };
@@ -97,6 +99,7 @@ impl Mounter {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.focus_requests.clear();
         self.views.clear();
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
         self.appearance = None;
@@ -122,6 +125,7 @@ impl Mounter {
                         ViewKind::View
                             | ViewKind::Text
                             | ViewKind::Native
+                            | ViewKind::Input
                             | ViewKind::Scroll
                             | ViewKind::Stack
                             | ViewKind::Screen
@@ -192,9 +196,39 @@ impl Mounter {
                 MountItem::Keymap(keymap) => self.keymap = keymap,
                 MountItem::Input { id, config } => {
                     if let Some(view) = self.get_mut(id) {
+                        let auto_focus = config.auto_focus && view.input.is_none();
                         view.input = Some(config);
+                        if auto_focus {
+                            self.focus_requests.push((id, true));
+                        }
                     }
                 }
+                MountItem::InputValue { id, text, count } => {
+                    if let Some(field) = self.get_mut(id).and_then(|v| v.field.as_mut()) {
+                        field.set_value(&text, count);
+                    }
+                }
+                MountItem::InputContent { id, content } => {
+                    if let Some(field) = self.get_mut(id).and_then(|v| v.field.as_mut()) {
+                        field.content = content;
+                    }
+                }
+                MountItem::Command {
+                    id,
+                    command: Command::SetSelection { start, end },
+                } => {
+                    if let Some(field) = self.get_mut(id).and_then(|v| v.field.as_mut()) {
+                        field.select(start, end);
+                    }
+                }
+                MountItem::Command {
+                    id,
+                    command: Command::Focus,
+                } => self.focus_requests.push((id, true)),
+                MountItem::Command {
+                    id,
+                    command: Command::Blur,
+                } => self.focus_requests.push((id, false)),
                 MountItem::TrackStates { id, states } => {
                     if let Some(view) = self.get_mut(id) {
                         view.tracked = states;

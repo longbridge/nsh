@@ -3502,6 +3502,7 @@ dependencies = [
 name = "nsh-tui-host"
 version = "0.3.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "libc",
  "log",
