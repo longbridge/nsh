@@ -67,6 +67,7 @@ const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
 const COMPONENT_PROP_SLOTS: i32 = 34;
+const SHADER: i32 = 35;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -323,6 +324,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(CANVAS);
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
+            }
+            MountItem::Shader { id, layer } => {
+                // Java learns only whether the view shows a shader; the
+                // layer goes to the UI-thread renderer (`crate::shader`).
+                e.int(SHADER);
+                e.int(id as i32);
+                e.bool(layer.is_some());
+                e.animation.push(MountItem::Shader { id, layer });
             }
             MountItem::Overflow { id, extent } => {
                 e.int(OVERFLOW);
@@ -671,16 +680,6 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     });
     e.float(s.opacity);
     e.bool(s.overflow_hidden);
-    let shadow = s.shadow;
-    e.int(argb(shadow.color));
-    e.float(shadow.offset_x.0);
-    e.float(shadow.offset_y.0);
-    e.float(if shadow.is_visible() {
-        shadow.opacity
-    } else {
-        0.0
-    });
-    e.float(shadow.radius.0);
     for v in view_transform(&s.transform, |_| None) {
         e.float(v);
     }
@@ -763,11 +762,13 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                 e.float(y.0);
             }
         }
+        // Repeated by `Decor.Gradient.place`, over the box it knows.
+        e.bool(g.repeating);
         if g.has_lengths() {
             // Stops placed in points depend on the box, which `Decor`
             // knows when it draws: they go as written, their count
             // negated, each with its unit (0 spread, 1 fraction, 2
-            // points), and `Decor.Gradient.resolve` places them.
+            // points), and `Decor.Gradient.place` places them.
             e.int(-(g.stops.len() as i32));
             for s in &g.stops {
                 e.int(argb(s.color));
@@ -1202,6 +1203,8 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.auto_focus);
     e.bool(c.selection_color.is_some());
     e.int(c.selection_color.map_or(0, argb));
+    e.bool(c.caret_color.is_some());
+    e.int(c.caret_color.map_or(0, argb));
     // What return does: 0 submit, 1 submit and unfocus, 2 a line break.
     e.int(match c.submit() {
         SubmitBehavior::Submit => 0,

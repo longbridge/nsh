@@ -3,7 +3,7 @@
 //! `demos/Images.tsx`).
 
 use nsh_core::{
-    Points, Size,
+    Size,
     element::{AnyElement, Image, ImageProgress, ImageSize},
     prelude::*,
 };
@@ -92,7 +92,7 @@ fn resize_modes() -> AnyElement {
             view()
                 .flex_1()
                 .gap_2()
-                .child(frame(image(WIDE).resize_mode(mode)).h(px(140.0)))
+                .child(frame(image(WIDE).object_fit(mode)).h(px(140.0)))
                 .child(note(name, true))
         }))
     });
@@ -199,7 +199,7 @@ fn placeholders(seed: Signal<u32>) -> AnyElement {
                     })
                     .placeholder(LOGO)
                     .fade_duration(ms as f32)
-                    .resize_mode(ResizeMode::Cover),
+                    .object_fit(ResizeMode::Cover),
                 )
                 .h(px(100.0)),
             )
@@ -285,7 +285,7 @@ fn info() -> AnyElement {
                 .on_progress(move |e: &ImageProgress| {
                     progress.set(e.loaded / e.total.max(1.0));
                 })
-                .on_load(move |_: &Size<Points>| {
+                .on_load(move |_: &Size<DevicePixels>| {
                     status.set(if progress.get_untracked() == 0.0 {
                         "loaded (no download)"
                     } else {
@@ -361,7 +361,7 @@ fn events() -> AnyElement {
     let thumb = |image: Image| frame(image).w(px(96.0)).h(px(64.0));
     let loads = thumb(image(photo(1084, 600, 400)))
         .on_load_start(log("onLoadStart"))
-        .on_load(move |size: &Size<Points>| {
+        .on_load(move |size: &Size<DevicePixels>| {
             events.update(|e| e.push("onLoad"));
             loaded.set(format!("{}×{}", size.width.0, size.height.0));
         })

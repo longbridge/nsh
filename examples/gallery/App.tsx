@@ -45,7 +45,8 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     title: "Drawing and type",
     demos: [
       { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
-      { name: "Charts", detail: "A line and area plot with hover, grid lines and motion, sparklines in a list", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
+      { name: "Shaders", detail: "WGSL shaders on the GPU: noise, gradients, animated uniforms", icon: "spark", screen: lazy(() => import("./demos/Shaders").then((m) => m.Shaders)) },
+      { name: "Charts", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut and bars, built from plot parts", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
       { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
       { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
       { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
@@ -89,7 +90,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
         <IconTile name={props.demo.icon} size={38} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 16, fontWeight: "500", color: colors.text }}>{props.demo.name}</Text>
-          <Text numberOfLines={2} style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
+          <Text style={{ numberOfLines: 2, fontSize: 13, lineHeight: 18, color: colors.muted }}>
             {props.demo.detail}
           </Text>
         </View>
@@ -192,7 +193,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
       <Icon name={props.demo.icon} size={17} tint={active() ? colors.accent : colors.muted} />
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
         {props.demo.name}
       </Text>
     </View>
@@ -244,7 +245,7 @@ function Sidebar() {
           bottom: 0,
           left: 0,
           width: SIDEBAR,
-          transform: [{ translateX: slide }],
+          translate: [slide, 0],
           backgroundColor: colors.inset,
           borderRightWidth: 1,
           borderRightColor: colors.line,
@@ -291,10 +292,10 @@ function DemoPane() {
       <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <IconTile name={selected().icon} size={36} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text numberOfLines={1} style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>
+          <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
             {selected().name}
           </Text>
-          <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
             {selected().detail}
           </Text>
         </View>

@@ -341,12 +341,12 @@ See [Animation](../docs/animation.md) for the guide.
 | `opacity` | `.bind_opacity(&value)` | `style={{ opacity: value }}` |
 | `backgroundColor` | `.bind_background(&value.interpolate_colors(&[0.0, 1.0], &[white(), black()]))` | `style={{ backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ["#fff", "#000"] }) }}` |
 | `borderColor`, `color` | `.bind_border_color(&node)`, `.bind_color(&node)` | The same: a node of colors. `borderColor` colors every side; a `Text`'s `color` colors the whole text |
-| `shadowColor`, `shadowOpacity`, `shadowRadius` | `.bind_shadow_color(&node)`, `.bind_shadow_opacity(&value)`, `.bind_shadow_radius(&value)` | `style={{ shadowOpacity: value }}` (a node of colors for `shadowColor`) |
 | `transform` | `.bind_translate_x(&value)`, `.bind_translate_y`, `.bind_scale`, `.bind_rotate` (degrees) | `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY`, `rotateZ` steps: `transform: [{ translateX: value }]` |
 | Scroll position | `.scroll_value(&value)` on a scroll view or a list | `<Scroll scrollValue={value}>` and `<List scrollValue={value}>` write the scroll offset into it each frame |
 | Gestures | `.pan_values(Some(&x), Some(&y))`, `.pinch_value(&scale)`, `.rotation_value(&angle)` | `pan={{ x, y }}`, `pinch={{ scale }}`, `rotation={{ angle }}` on any element: the gesture writes the values directly (see [Touch and gestures](../docs/touch-and-gestures.md)) |
 | Where views stick | `.sticky().bind_sticky_top(&value)` (`.bind_sticky_left` in a horizontal scroll view), `.bind_sticky_header_offset(&value)` on a list | `style={{ position: "sticky", top: value }}`, `<List stickyHeaderOffset={value}>`: sticky views and headers stick that far from the start of the viewport, following the value every frame |
 | Canvas | an animated argument of a painter's call | Any number or color argument of a [canvas](./nsh-canvas.md) drawing call |
+| Shader | `.uniform(name, &value)` | A member of a [shader](../elements/shader.md)'s `struct Uniforms`: `uniforms={{ name: value }}` (numbers, or a node of colors for a `vec3f` / `vec4f`) |
 
 Other style properties take plain values; to animate the layout itself (sizes, positions in the flow), use [`LayoutAnimation`](#layoutanimation).
 
@@ -987,7 +987,12 @@ use nsh_core::platform::Os;
 
 let card = view().p_4();
 let card = match os() {
-    Os::Ios => card.shadow_color(black()).shadow_opacity(0.15).shadow_radius(px(8.0)),
+    Os::Ios => card.shadow([BoxShadow {
+        offset_y: px(2.0),
+        blur: px(8.0),
+        color: rgba(0x00000026).into(),
+        ..BoxShadow::default()
+    }]),
     Os::Android => card.elevation(px(4.0)),
     _ => card,
 };
@@ -995,7 +1000,7 @@ let card = match os() {
 
 ```tsx tabs
 const shadow = platform.select({
-  ios: { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8 },
+  ios: { boxShadow: "0px 2px 8px rgb(0 0 0 / 0.15)" },
   android: { elevation: 4 },
 });
 ```
@@ -1131,7 +1136,7 @@ pub fn App() -> impl IntoElement {
                 pos.set((x + e.gesture.delta.x.0, y + e.gesture.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
-                log::info!("released at {:.2} pt/ms", e.gesture.vx);
+                log::info!("released at {:.0} pt/s", e.gesture.vx);
             }),
     )
 }
@@ -1148,7 +1153,7 @@ function App() {
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => (start = pos()),
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(0)} pt/s`),
   });
   return (
     <View style={{ flex: 1 }}>
@@ -1204,7 +1209,7 @@ interface PanResponderGestureState {
   y0: number;
   dx: number;                  // distance moved since the grant
   dy: number;
-  vx: number;                  // velocity, points per millisecond
+  vx: number;                  // velocity, points per second
   vy: number;
   numberActiveTouches: number;
 }
@@ -1218,7 +1223,7 @@ Rust: `PanGesture`, with points as `Point<Points>`.
 | `moveX`, `moveY` | `position` | Latest position of the touches' centroid, in surface points. |
 | `x0`, `y0` | `origin` | Where the centroid was when the responder was granted. |
 | `dx`, `dy` | `delta` | Distance moved since the grant. |
-| `vx`, `vy` | `vx`, `vy` | Velocity in points per millisecond. |
+| `vx`, `vy` | `vx`, `vy` | Velocity in points per second. |
 | `numberActiveTouches` | `active_touches` | Fingers down. |
 
 ### Inside scroll views
@@ -1277,7 +1282,7 @@ const Clipboard: {
 
 interface ClipboardImage {
   url: string; // data:image/png;base64,…
-  size: { width: number; height: number }; // pixels
+  size: PixelSize;
 }
 ```
 
@@ -1556,7 +1561,7 @@ interface PickImagesOptions {
 
 interface PickedImage {
   file: File; // name, type, size in bytes and the bytes
-  size: { width: number; height: number }; // pixels, upright
+  size: PixelSize; // upright
 }
 ```
 
@@ -2497,10 +2502,11 @@ function Saved() {
 | `JSX` | The JSX namespace (`JSX.Element`) |
 | `YNode` | What a `ref` receives: focus, scroll and other commands. See [Elements](../elements/index.md) |
 | `ViewProps`, `TextProps`, `ImageProps`, `ScrollProps`, `CommonProps`, `TouchProps` | Props of host elements |
-| `ViewStyle`, `TextStyle`, `ImageStyle`, `LayoutStyle`, `StyleProp<T>` | Style objects; see the [style reference](./style-reference.md) |
+| `ViewStyle`, `TextStyle`, `InputStyle`, `ImageStyle`, `LayoutStyle`, `StyleProp<T>` | Style objects; see the [style reference](./style-reference.md) |
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `HoverEvent`, `ContextMenuEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
 | `Point`, `Size`, `Bounds`, `Edges`, `Modifiers` | The shapes payloads and props are made of, with GPUI's fields (`nsh_core::geometry`) |
+| `PixelSize` | An image's or a video's own size in pixels (`onLoad`, `Image.getSize`, the clipboard's and the picker's images), where `Size` is points |
 | `ImageAsset` | What importing an image file gives (`{ url, size: Size, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`, `AccessibilityState` | Accessibility props |

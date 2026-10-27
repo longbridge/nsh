@@ -130,6 +130,8 @@ pub(crate) struct ViewState {
     pub(crate) image: Option<crate::image::ImageState>,
     /// Canvas content.
     pub(crate) canvas: Option<crate::canvas::CanvasState>,
+    /// What a shader draws under the children ([`crate::shader`]).
+    pub(crate) shader: Option<crate::shader::ShaderState>,
     /// Text field (input views).
     pub(crate) input: Option<std::rc::Rc<crate::text_input::InputState>>,
     /// Hosted AppKit views.
@@ -163,6 +165,7 @@ impl ViewState {
             text: None,
             image: None,
             canvas: None,
+            shader: None,
             input: None,
             natives: Vec::new(),
             overflow: None,
@@ -186,16 +189,6 @@ impl ViewState {
                 .product()
         });
         self.anim.opacity.unwrap_or(self.style.opacity) * self.fade * live * filters
-    }
-
-    /// Its shadow, with animated color, opacity and radius.
-    pub(crate) fn shadow(&self) -> nsh_core::Shadow {
-        let mut s = self.style.shadow;
-        let a = &self.anim;
-        s.color = a.shadow_color.unwrap_or(s.color);
-        s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.unwrap_or(s.radius);
-        s
     }
 
     /// Its borders, with an animated color.

@@ -29,6 +29,7 @@ mod filesystem;
 #[cfg(feature = "js")]
 mod local_time;
 mod net;
+mod shader;
 mod storage;
 mod text;
 mod websocket;

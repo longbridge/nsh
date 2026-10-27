@@ -1,16 +1,17 @@
 # Elements and interaction
 
 Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Overlay`, `Image`,
-`List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
+`List`, `Canvas`, `Shader`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
 `InputAccessoryView` from `nsh/mobile`; only `If` and `Each` are globals.
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|
 | `<View>` | `NshView` (UIView) | `onPress` / `onLongPress` / `onPressDown` / `onPressUp`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`, `pan={{x, y}}` + `onPanStart` / `onPanEnd`, `pinch` / `rotation`; `desktop={{ windowDrag }}` (any element: pressing it drags the window; the platforms decide on the main thread from `ViewProps::window_drag`, the nearest view that sets it decides, inputs and views with press / touch handlers nearer than it stay clickable; `nsh/desktop`) |
-| `<Text>` | `TextView` (CTFrame) | nested `<Text>` is a span, other elements are inline attachments ([text.md](text.md)); `numberOfLines`, `ellipsizeMode`, `allowFontScaling`, `maxFontSizeMultiplier`, `adjustsFontSizeToFit` + `minimumFontScale`, `selectable` (range selection) + the `selectionColor` style key (`selection:text-*`), `onTextLayout` |
-| `<Image src>` | UIView + image CALayer | `src` is a URL or `import img from "./a.png"` (an asset descriptor with its size); `resizeMode`; `placeholder` (a URL or an asset, shown until the image loads), `blurRadius`, `fadeDuration`; `onLoadStart` / `onProgress` (`loaded` / `total` bytes) / `onLoad` (the source's pixel size) / `onError` / `onLoadEnd`; `tintColor`; animated GIF / WebP / APNG; `Image.getSize(src)` / `Image.prefetch(src)` |
+| `<Text>` | `TextView` (CTFrame) | nested `<Text>` is a span, other elements are inline attachments ([text.md](text.md)); the style keys `numberOfLines` and `textOverflow`, `allowFontScaling`, `maxFontSizeMultiplier`, `adjustsFontSizeToFit` + `minimumFontScale`, the style key `userSelect` (range selection) + `selectionColor` (`selection:text-*`), `onTextLayout` |
+| `<Image src>` | UIView + image CALayer | `src` is a URL or `import img from "./a.png"` (an asset descriptor with its size); the `objectFit` style (`object-*`); `placeholder` (a URL or an asset, shown until the image loads), `blurRadius`, `fadeDuration`; `onLoadStart` / `onProgress` (`loaded` / `total` bytes) / `onLoad` (the source's pixel size) / `onError` / `onLoadEnd`; `tintColor`; animated GIF / WebP / APNG; `Image.getSize(src)` / `Image.prefetch(src)` |
 | `<Scroll>` | UIScrollView | `horizontal`, `contentStyle` / `contentClass`, `refreshing` + `onRefresh` (with `refreshIndicator` + `pullValue` for an indicator of the app's own), `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
 | `<Canvas draw>` | `CanvasView` (drawRect replay) | see [canvas.md](canvas.md) |
+| `<Shader source>` | `NshView` + a sublayer with the rendered frame | a WGSL `shade(uv)` drawn under the children; `uniforms`, `paused`; see [shaders.md](shaders.md) |
 | `<List each>` | UIScrollView + recycled cells | see [scrolling-and-lists.md](scrolling-and-lists.md) |
 | `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onCaretMove` (where the caret is: `bounds` in the input, `pageBounds` in the root view; "Caret" below), `onPaste` + `pasteBehavior` (what was pasted, and whether the input inserts its text; "Paste" below), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caret` (`false` hides the caret), `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
 | `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerVisible`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`, in Rust `header_style_with(|s| ..)`: typed styles in `headerClass`'s place); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
@@ -19,7 +20,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
 | `<WebView>` | WKWebView (WebKit loaded on first use) | `src` (a URL) or `html` (inline HTML, shown instead of `src`) + `baseUrl`, `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.nsh.postMessage`), `onLoad*`, `onNavigationStateChange`; ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)` |
 | `nativeComponent` (`nsh`'s `nativeComponent`) | a `NshView` box filled by the registered component's view; own props may be bound to animated values | see [embedding.md](embedding.md) |
-| `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, `resizeMode`, `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
+| `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `src` (a URL), `paused`, `muted`, `volume`, `rate`, `repeat`, the `objectFit` style (`object-*`), `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
 On Android the same elements map to `Box` (ViewGroup), `TextBox`, `ImageBox`, `ScrollBox` (ScrollView), `InputBox` (EditText),
 `StackBox` (pages with a Toolbar, predictive back), `ModalHost` (a Dialog), `WebBox` (android.webkit.WebView) and `VideoBox`
@@ -53,7 +54,7 @@ the app's own: drawn in TSX with views, classes, canvases and native animations,
 (UISwitch / SeekBar wrappers and the like), and do not add styled widgets or compositions of existing primitives to
 the runtime (buttons, section lists, touchables, drawers, ...). React Native is a reference for which capabilities
 exist, not an API to be compatible with. Components that need core or native support are primitives of their own
-(`List`, `Canvas`, `WebView`, `Video`, `Overlay`; in
+(`List`, `Canvas`, `Shader`, `WebView`, `Video`, `Overlay`; in
 `nsh/base` `Input`, `NavStack`, `Dialog`; `InputAccessoryView` in `nsh/mobile`). Tags are PascalCase names
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
@@ -67,7 +68,7 @@ answered natively from props mounted beforehand, never by asking JS (blocking th
 and reorders fast input). Events tell JS afterwards. Existing answers: input `maxLength` (`shouldChangeCharactersIn`,
 `InputFilter`), `submitBehavior` (`textFieldShouldReturn`, `textView:shouldChangeTextInRange:`, Android's `OnEditorActionListener` and input connection, AppKit's `doCommandBySelector:`), `popOnSwipe` / `popOnBack` (`gestureRecognizerShouldBegin`,
 `navigationBar:shouldPopItem:`, Android `wantsBack()`: the `OnBackInvokedCallback` registration, or, where the window dispatches the back key instead (below 13, `enableOnBackInvokedCallback` off), taking the key in `NshView`'s unhandled key listener, before the activity's `onBackPressed`), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
-(`presentationControllerShouldDismiss`, the dialog's back), `pan` / `pinch` / `hitSlop` / `pointerEvents` /
+(`presentationControllerShouldDismiss`, the dialog's back), `pan` / `pinch` / `hitSlop` / the `pointerEvents` style /
 `keyboardShouldPersistTaps` / `panActivation` (recognizers), capabilities (`decidePolicyForNavigationAction`, `shouldOverrideUrlLoading`),
 `AlertDialog`'s `closeOnEscape` / `closeOnBackdropPress`. A new capability with such a callback gets a prop (a menu's items, a rule, a flag); what a prop cannot
 express is let through and corrected in the event afterwards (a controlled `value` in `onChange`). `BackHandler` is
@@ -153,9 +154,16 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows, Linux and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  A ref's `focus()` on a stop moves the keyboard focus to it as Tab does (`focus:`, `onFocus`; a popup gives it back to
+  its trigger), and `blur()` takes it off: `Command::Focus` / `Blur` reach the platforms for any view, and AppKit makes
+  the view first responder (`input::focus_control`, past a field that edits), the browser focuses the element with
+  `focusVisible` and treats it as keyboard focus whatever its heuristics say after a click (`focusPressable`), the
+  headless driver moves its focus (`focus_calls`); on a view that is not a stop it does nothing. Windows, Linux and
+  GPUI leave `focus()` on views to them; iOS and Android focus inputs only.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
-- **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also
+- **Imperative calls**: nodes have `focus()`, `blur()` (inputs, and views that take presses where they are stops of
+  the keyboard focus: "Keyboard focus" above) and `scrollTo({ x, y, animated })` (use `ref`); lists also
   `scrollToIndex({ index, viewPosition, viewOffset, animated })`, `scrollToEnd()`, `scrollToOffset()`; `Keyboard.dismiss()` (`nsh`).
   Commands run after the commit's other mount items; list scrolls are resolved by the core with the current item sizes.
 - **`measure()`** (on any node's ref) resolves, once the turn's changes are laid out, to `{ bounds, pagePosition }`
@@ -170,7 +178,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   right-to-left horizontal lists (scaleX −1). The answer settles the promise from the core's events
   (`JsEvent::Reply`), like a module call's (`nsh-js` `components.rs`). There is no `measureInWindow`: the root view is the window for a full-screen surface, and
   an embedding app knows where it put the surface.
-- **Touch** (React Native semantics): `pointerEvents`, `hitSlop`, `delayLongPress`, `android={{ ripple }}`
+- **Touch** (React Native semantics): the `pointerEvents` style key (`none` inherited as CSS's, `box-none` / `box-only`
+  React Native's, for the view alone), `hitSlop`, `delayLongPress`, `android={{ ripple }}`
   (`{ color, borderless, radius, foreground }`, Android only); press-in waits ~130ms inside scroll views; only the innermost
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
@@ -183,7 +192,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `none` views are not entered). Views whose children stay inside pay nothing; transforms that move a child out are
   not covered. What must show above everything whatever clips it (a popover, a menu) is an `<Overlay>` (below). Nested `<Text>` spans with press handlers
   are links: the core lists them in `AttributedText::links` (UTF-16 ranges) and the block's press recognizer routes a press to
-  the span under the finger (CoreText `CTLineGetStringIndexForPosition` / `Layout.getOffsetForHorizontal`).
+  the span under the finger (CoreText `CTLineGetStringIndexForPosition` / `Layout.getOffsetForHorizontal`). The web
+  wraps a link's characters in a span inside their run (`link_parts`, `nsh.js` `fillRun`), which keeps the run's shaping
+  and bidi order, and a press on it goes to the link (`linkPress`), its position in the text, as elsewhere.
 - **Raw touches and the responder system**: `onTouchStart/Move/End/Cancel` (+ `Capture`), `onStartShouldSetResponder`,
   `onMoveShouldSetResponder` (+ `Capture`), `onResponderGrant/Reject/Start/Move/End/Release/Terminate/TerminationRequest`, and
   `PanResponder.create` on top. A node with any of them listens to `onTouch` natively; one tracker per root view (surface,
@@ -248,13 +259,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
 - **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
-  subtrees built detached), sets taffy's `direction` (rows run from the right) and, right to left, swaps the left and right
-  properties (margins, paddings, insets, borders, corners — always: React Native's rule for style keys; Tailwind's
-  physical classes are resolved for the other side right to left, `tailwind::utilities::directed`, so they come out
-  where they say, as in a browser) and places the
-  start / end ones (`marginStart`, `start`, `borderTopEndRadius`, ...). A direction change swaps the current taffy style in place
-  (an involution), so authored styles need not be kept. Text: `auto` alignment is the right side right to left, left / right
-  swap, `writingDirection` sets the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:
+  subtrees built detached), sets taffy's `direction` (rows run from the right), keeps the left and right properties
+  where they say (margins, paddings, insets, borders, corners, in classes and style keys alike, as in a browser) and
+  places the logical ones (`marginStart`, `start`, `borderTopEndRadius`, `ms-*`, `start-*`, ...). A
+  direction change sets the direction in place and restyles the nodes with logical properties or `rtl:` classes. Text:
+  `auto`, `start` and `end` alignment follow the direction, `left` / `right` keep their side, `writingDirection` sets
+  the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:
   `semanticContentAttribute`, `View.setLayoutDirection`; Android apps need `android:supportsRtl`). Horizontal scroll views
   are laid out left to right and their children mirrored in the content by the core (a right-to-left row would overflow to
   negative offsets), starting at the right end and keeping their distance from it; horizontal lists are flipped natively

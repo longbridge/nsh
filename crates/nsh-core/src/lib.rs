@@ -45,6 +45,7 @@ pub mod resource;
 pub mod runtime;
 pub mod scroll;
 pub mod selection;
+pub mod shader;
 pub mod shape;
 pub mod storage;
 mod style;
@@ -98,16 +99,18 @@ pub use crate::{
         PointerEvents, Ripple, ViewProps,
     },
     style::{
-        BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, FontFamily,
-        FontVariant, ObjectPosition, PaintStyle, PatchValue, PositionAxis, Shadow, Style,
-        StyleDecl, StyleError, StyleKey, StylePatch, StyleValue, SvgPaint, TextAlign,
-        TextDecoration, TextShadow, TextStyle, TextTransform, TransformOrigin, VerticalAlign,
-        ViewStyle,
+        BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,
+        FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition, PaintStyle,
+        PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey, StylePatch,
+        StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
+        TransformOrigin, TransformProperty, VerticalAlign, ViewStyle,
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
         BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
         TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
     },
-    transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
+    transform::{
+        Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,
+    },
 };

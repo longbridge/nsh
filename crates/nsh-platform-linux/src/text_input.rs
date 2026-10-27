@@ -1101,9 +1101,7 @@ fn css(config: &InputConfig) -> String {
     let caret = if config.caret_hidden {
         "transparent".to_owned()
     } else {
-        config
-            .selection_color
-            .map_or_else(|| color.clone(), css_color)
+        config.caret_color.map_or_else(|| color.clone(), css_color)
     };
     let placeholder = config
         .placeholder_color

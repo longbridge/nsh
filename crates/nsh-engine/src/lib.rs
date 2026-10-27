@@ -18,6 +18,8 @@ mod local_storage;
 pub mod net;
 pub mod perf;
 mod script;
+#[cfg(feature = "shader")]
+pub mod shader;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js")]
@@ -597,6 +599,13 @@ pub trait MountSink: Send + 'static {
     /// latest size. A platform that waits for the layout at a new size, to
     /// show it in the frame the window takes the size, stops waiting here.
     fn resized(&self, _size: Size<Points>) {}
+
+    /// The engine has handled the first `events` events sent with
+    /// [`EngineControl::dispatch_event`]. Called after the commit of the
+    /// turn that handled them (what they changed came before), once per
+    /// turn. A platform holding typed text for the field an event may focus
+    /// gives it to the focused field from here.
+    fn handled(&self, _events: u64) {}
 
     /// The app imports chunk `id` of a split bundle (`import()`), which its
     /// [`Bundle`] does not hold: load it and hand it over with
@@ -1483,6 +1492,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             hover_moved: None,
             sets_seen: FxHashMap::default(),
             resized: None,
+            events_handled: 0,
+            events_reported: 0,
             pinned: config.pinned,
             host: config.host.clone(),
             url_opens: Vec::new(),
@@ -1594,6 +1605,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
+        state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
@@ -1780,6 +1792,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
+        state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
@@ -1883,6 +1896,10 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// Events received ([`EngineControl::dispatch_event`]), and the count
+    /// last reported ([`MountSink::handled`]).
+    events_handled: u64,
+    events_reported: u64,
 }
 
 /// Who made a request: JS (`fetch`), or a Rust component's task
@@ -2162,6 +2179,15 @@ impl<M: TextEngine> State<M> {
         }
     }
 
+    /// Tells the platform how many events were handled, once the commit
+    /// of what they changed is submitted.
+    fn report_handled(&mut self, sink: &dyn MountSink) {
+        if self.events_handled != self.events_reported {
+            self.events_reported = self.events_handled;
+            sink.handled(self.events_handled);
+        }
+    }
+
     /// Asks the platform for a frame when JS or a component's task waits
     /// for one.
     fn request_frame(&mut self, script: Option<&Script>, sink: &dyn MountSink) {
@@ -2414,6 +2440,7 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
         Message::Event(id, event, mut payload) => {
+            state.events_handled += 1;
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }

@@ -548,8 +548,11 @@ pub struct InputConfig {
     pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
-    /// Caret and selection color.
+    /// Selection highlight color (on iOS also the caret's, unless
+    /// [`InputConfig::caret_color`] is set: UIKit tints both with one).
     pub selection_color: Option<Color>,
+    /// Caret color; the platform's default when `None`.
+    pub caret_color: Option<Color>,
     /// What the input holds, for autofill.
     pub auto_fill: crate::ops::AutoFill,
     /// The text runs right to left.
@@ -599,6 +602,7 @@ impl Default for InputConfig {
             paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
             selection_color: None,
+            caret_color: None,
             auto_fill: crate::ops::AutoFill::Default,
             rtl: false,
             caret_hidden: false,
@@ -811,6 +815,16 @@ pub enum MountItem {
         id: NodeId,
         /// The drawing.
         drawing: Arc<crate::canvas::Drawing>,
+    },
+    /// What a shader view draws under its children (`None`: nothing); the
+    /// animated values among its uniforms come as
+    /// [`crate::animation::AnimationProp::CanvasArg`] bindings of its
+    /// [`crate::shader::ShaderLayer::slots`].
+    Shader {
+        /// The view.
+        id: NodeId,
+        /// The program and its uniforms.
+        layer: Option<Arc<crate::shader::ShaderLayer>>,
     },
     /// Bind visual properties to native animation nodes.
     AnimationBindings {

@@ -206,7 +206,7 @@ let composing = false;
 | `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 | `onCompositionChange` | `{ composing, text }` | 输入法的组字开始、变化或结束（见[输入法](#输入法)）。 |
 
-输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。焦点样式（Rust 中是 `.focus(|s| ..)`，TSX 中是 Tailwind 的 `focus:` 变体或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是 `.placeholder_color(..)`（样式键 `placeholderColor`，`placeholder:text-*`），光标和选区的颜色是 `.selection_color(..)`（`selectionColor`，`selection:text-*`）：
+输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。焦点样式（Rust 中是 `.focus(|s| ..)`，TSX 中是 Tailwind 的 `focus:` 变体或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是 `.placeholder_color(..)`（样式键 `placeholderColor`，`placeholder:text-*`），光标的颜色是 `.caret_color(..)`（`caretColor`，`caret-*`），选区高亮的颜色是 `.selection_color(..)`（`selectionColor`，`selection:text-*`）；UIKit 用同一种颜色绘制光标和选区，设置了光标颜色时以它为准：
 
 ```rust tabs
 input()
@@ -360,6 +360,8 @@ mount(SignIn);
 | `focus()` | `focus()` | 让输入框获得焦点并弹出键盘。 |
 | `blur()` | `blur()` | 让它失去焦点。 |
 | `set_selection(start, end)` | `setSelection(start, end?)` | 选中 `start..end`（UTF-16 码元）；两者相等时为光标（TSX：不传 `end`）。 |
+
+在 macOS 和 Web 上，可按压视图的 ref 的 `focus()` 和 `blur()` 也会像 Tab 一样移动键盘焦点（[键盘焦点](../elements/index.md#键盘焦点)）。
 
 Rust 中的 `dismiss_keyboard()` 和 TSX 中 `nsh` 的 `Keyboard.dismiss()` 让当前拥有焦点的输入框失去焦点：
 
@@ -680,7 +682,7 @@ function ChatScreen() {
 
 ### 键盘访问器
 
-Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration * 1000, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`env(keyboard-inset-height)` 就是这样做的。
+Rust 中的 `keyboard_height()` 和 `keyboard_duration()`，以及 TSX 中 `nsh` 的 `keyboardFrame()`（一个 `{ height, duration }`），都是响应式的：键盘伸入 surface 的高度（隐藏时为 0，包含被它盖住的底部安全区域）以及它的动画时长（毫秒）。需要自定义行为时读取它们，例如输入时隐藏浮动按钮，或调整面板尺寸。随它们变化的布局在键盘的曲线上做动画时，就与键盘一起移动：`LayoutAnimation.configureNext({ duration: keyboardFrame().duration, update: { type: "keyboard" } })`（Rust：`LayoutCurve::Keyboard`），`env(keyboard-inset-height)` 就是这样做的。
 
 ```rust tabs
 view().child(when(

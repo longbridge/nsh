@@ -186,12 +186,12 @@ Mind the drawing order: a dropdown is drawn over the siblings of its field only 
 
 ## pointerEvents
 
-Pointer events (`.pointer_events(..)`, `pointerEvents`) decide which views of a subtree can be the target of a touch. They are evaluated natively during hit testing, so they cost nothing per touch.
+The style key `pointerEvents` (`.pointer_events(..)` in Rust) decides which views of a subtree can be the target of a touch. It is evaluated natively during hit testing, so it costs nothing per touch.
 
 | Rust | TSX | The view | Its children |
 |---|---|---|---|
 | `PointerEvents::Auto` (default) | `"auto"` | Takes touches | Take touches |
-| `PointerEvents::None` | `"none"` | Never the target | Never the target: touches pass through to what is behind |
+| `PointerEvents::None` | `"none"` | Never the target | Never the target unless one sets `"auto"`: touches pass through to what is behind |
 | `PointerEvents::BoxNone` | `"box-none"` | Never the target | Take touches |
 | `PointerEvents::BoxOnly` | `"box-only"` | Takes touches | Never the target |
 
@@ -222,7 +222,7 @@ view().flex_1().child(map()).child(
 <View style={{ flex: 1 }}>
   <Map />
   {/* A floating toolbar: the empty area passes touches to the map. */}
-  <View pointerEvents="box-none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
+  <View style={{ pointerEvents: "box-none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
     <View onPress={locate} style={{ alignSelf: "flex-end", padding: 12, borderRadius: 24, backgroundColor: "#ffffff" }}>
       <Text>Locate</Text>
     </View>
@@ -230,7 +230,7 @@ view().flex_1().child(map()).child(
 </View>
 ```
 
-The Tailwind classes `pointer-events-none` and `pointer-events-auto` set the same thing; an explicit prop wins over the class.
+`"none"` is inherited as CSS's `pointer-events`: a view inside it that sets `"auto"` takes touches again. `"box-none"` and `"box-only"` apply to the view that sets them. The Tailwind classes `pointer-events-none` and `pointer-events-auto` set `"none"` and `"auto"`, and as a style key `pointerEvents` also takes state styles (`activeStyle`, ...) and variants.
 
 ## Native gestures: pan, pinch and rotation
 
@@ -277,7 +277,7 @@ function App() {
           x.spring(0, { velocity: e.velocityX });
           y.spring(0, { velocity: e.velocityY });
         }}
-        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", transform: [{ translateX: x }, { translateY: y }] }}
+        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", translate: [x, y] }}
       />
     </View>
   );
@@ -324,7 +324,7 @@ view()
     const projected = (e.valueX ?? 0) + e.velocityX * 0.2;
     x.spring(projected > 0 ? 140 : -140, { velocity: e.velocityX });
   }}
-  style={{ transform: [{ translateX: x }] }}
+  style={{ translate: [x, 0] }}
 />
 ```
 
@@ -548,7 +548,7 @@ fn ball() -> impl IntoElement {
             pos.set((x + d.x.0, y + d.y.0));
         })
         .on_responder_release(move |e: &ResponderEvent| {
-            log::info!("released at {} {} pt/ms", e.gesture.vx, e.gesture.vy)
+            log::info!("released at {} {} pt/s", e.gesture.vx, e.gesture.vy)
         })
 }
 ```
@@ -566,12 +566,12 @@ function Ball() {
       start = pos();
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/ms"),
+    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/s"),
   });
   return (
     <View
       {...responder.panHandlers}
-      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", transform: [{ translateX: pos().x }, { translateY: pos().y }] }}
+      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", translate: [pos().x, pos().y] }}
     />
   );
 }
@@ -587,7 +587,7 @@ The gesture state:
 | `position` | `moveX`, `moveY` | The latest position of the touches' centroid, in surface points. |
 | `origin` | `x0`, `y0` | Where the centroid was when the responder was granted. |
 | `delta` | `dx`, `dy` | Distance moved since the grant. |
-| `vx`, `vy` | `vx`, `vy` | Velocity, in points per **millisecond**. |
+| `vx`, `vy` | `vx`, `vy` | Velocity, in points per second. |
 | `active_touches` | `numberActiveTouches` | Fingers down. |
 
 `PanGesture::begin` and `PanGesture::update` follow a gesture from raw touches (`.on_touch`) in Rust. The TSX callbacks get `(event, gestureState)`: `onStartShouldSetPanResponder(Capture)`, `onMoveShouldSetPanResponder(Capture)`, `onPanResponderGrant`, `onPanResponderReject`, `onPanResponderStart`, `onPanResponderMove`, `onPanResponderEnd`, `onPanResponderRelease`, `onPanResponderTerminate`, `onPanResponderTerminationRequest` and `onShouldBlockNativeResponder`. The last one defaults to `true`: a granted PanResponder keeps native scroll views from taking its touches.
@@ -624,7 +624,7 @@ view()
 `PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
 
 > [!NOTE]
-> Velocities differ by API: the responder gesture's `vx` / `vy` are points per millisecond, while the pan end's velocity and a spring's or a decay's velocity are points per second. Multiply `vx` by 1000 before passing it to a spring.
+> Every velocity is in points per second: the responder gesture's `vx` / `vy`, a pan's velocity and a spring's or a decay's, so `vx` goes to a spring or a decay as it is.
 
 ## Why some answers are props
 

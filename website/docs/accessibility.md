@@ -52,7 +52,7 @@ view()
 | `.accessibility_value(..)` | `accessibilityValue` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed (Rust: its name). |
-| | `accessibilityElementsHidden` | `boolean` | Hides the view and its subtree from assistive technologies. |
+| `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | Hides the view and its subtree from assistive technologies. |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view (and its subtree) is exposed. |
 | | `android={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | Android: how changes of the view are announced to TalkBack. |
 | `.test_id(..)` | `testID` | `string` | An identifier for UI tests (the accessibility identifier on iOS, the resource id on Android); not read aloud. |

@@ -335,13 +335,15 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
         "focus",
         0,
         decl!("(): void"),
-        decl!("Focuses an `<Input>` (shows the keyboard)."),
+        decl!(
+            "Focuses an `<Input>` (shows the keyboard), or gives a view that takes presses the keyboard focus where Tab stops at it (macOS, the web), as Tab does: `focus:` styles, `onFocus`. A view `focusable={false}`, disabled or hidden stays unfocused."
+        ),
     ),
     (
         "blur",
         0,
         decl!("(): void"),
-        decl!("Unfocuses an `<Input>`."),
+        decl!("Unfocuses an `<Input>`, or takes the keyboard focus off a view that takes presses."),
     ),
     (
         "setSelection",
@@ -1102,7 +1104,7 @@ fn part_style(
     cx: *mut JsContext,
     name: &str,
     value: JsValue,
-) -> Result<Option<std::sync::Arc<nsh_core::StylePatch>>, JsValue> {
+) -> Result<Option<std::rc::Rc<nsh_core::StylePatch>>, JsValue> {
     // SAFETY: a context reference for the decoder, which reads a dup.
     let js_cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
     let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
@@ -1110,7 +1112,7 @@ fn part_style(
     let patch = crate::protocol::style_patch(&v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
     match patch {
-        Ok(patch) => Ok((!patch.is_empty()).then(|| std::sync::Arc::new(patch))),
+        Ok(patch) => Ok((!patch.is_empty()).then(|| std::rc::Rc::new(patch))),
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => Err(throw_type(cx, &format!("nsh: prop `{name}`: {e}"))),
     }
@@ -1288,8 +1290,8 @@ fn set_prop(
     {
         return set_event(cx, p, event, value);
     }
-    // Native animation nodes these props use, and a `tooltip`'s element,
-    // stay alive with the view.
+    // Native animation nodes these props use (a shader's `uniforms`
+    // hold them inside), and a `tooltip`'s element, stay alive with the view.
     if let Some(&key) = [
         "style",
         "pan",
@@ -1298,6 +1300,7 @@ fn set_prop(
         "scrollValue",
         "pullValue",
         "stickyHeaderOffset",
+        "uniforms",
         "tooltip",
     ]
     .iter()
@@ -4232,7 +4235,12 @@ mod tests {
             const i = element("input");
             i.focus();
             i.setSelection(2);
-            globalThis.keep = [s, i];
+            // A view that takes presses: the platforms move the keyboard
+            // focus to it, as Tab does.
+            const v = element("view");
+            v.focus();
+            v.blur();
+            globalThis.keep = [s, i, v];
             "#,
         )
         .unwrap();
@@ -4247,6 +4255,8 @@ mod tests {
                 "Command { id: 2, command: ScrollToIndex { index: 3, animated: true, view_position: 0%, view_offset: 0pt } }",
                 "Command { id: 4, command: Focus }",
                 "Command { id: 4, command: SetSelection { start: 2, end: 2 } }",
+                "Command { id: 6, command: Focus }",
+                "Command { id: 6, command: Blur }",
             ]
         );
     }

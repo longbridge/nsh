@@ -760,7 +760,8 @@ impl Input {
             TextAlign::Center => NSTextAlignment::Center,
             TextAlign::Right => NSTextAlignment::Right,
         };
-        let tint = config.selection_color.map(ui_color);
+        // UIKit tints the caret and the selection with one color.
+        let tint = config.caret_color.or(config.selection_color).map(ui_color);
         match &self.editor {
             Editor::Line(field) => {
                 field.setFont(Some(&font));

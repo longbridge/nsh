@@ -161,6 +161,7 @@ const KEYFRAMES = `
 .nsh-sticky { isolation: isolate; }
 .nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
 img.nsh-fill { pointer-events: none; }
+.nsh-shader { pointer-events: none; border-radius: inherit; }
 .nsh-fit-cover { object-fit: cover; }
 .nsh-fit-contain { object-fit: contain; }
 .nsh-fit-fill { object-fit: fill; }
@@ -418,6 +419,46 @@ function swapClass(el, slot, name) {
   el[slot] = name;
 }
 
+/** Fills a run with `text`, the characters of links (`parts`: `[from, to,
+ * link]`, UTF-16) in spans inside it that name their link (`links`):
+ * inline, they keep the run's shaping and bidi order. */
+function fillRun(run, text, parts, links) {
+  if (!parts) {
+    run.textContent = text;
+    return;
+  }
+  let at = 0;
+  for (const [from, to, link] of parts) {
+    if (from > at) run.append(text.slice(at, from));
+    const span = document.createElement("span");
+    span.textContent = text.slice(from, to);
+    span._link = links[link];
+    run.append(span);
+    at = to;
+  }
+  if (at < text.length) run.append(text.slice(at));
+}
+
+/** The text node and offset of character `offset` of a run. */
+function runPoint(run, offset) {
+  const walker = document.createTreeWalker(run, NodeFilter.SHOW_TEXT);
+  let node = null;
+  for (let next = walker.nextNode(); next; next = walker.nextNode()) {
+    node = next;
+    if (offset <= node.length) return [node, offset];
+    offset -= node.length;
+  }
+  return node ? [node, node.length] : [run, 0];
+}
+
+/** The offset in a run of a boundary (`container`, `offset`) inside it. */
+function runOffset(run, container, offset) {
+  const range = document.createRange();
+  range.setStart(run, 0);
+  range.setEnd(container, offset);
+  return range.toString().length;
+}
+
 let players = 0;
 
 /** How many players imported each wasm-bindgen glue, by URL. */
@@ -548,6 +589,20 @@ export async function createPlayer(container, options = {}) {
   return player;
 }
 
+/** A CSS color as `#rrggbb`, `#rrggbbaa` or `rgba(r,g,b,a)` (what the
+ * animator writes) in 0..1 components. */
+function parseCssColor(value) {
+  const v = String(value).trim();
+  if (v.startsWith("#")) {
+    const n = (i) => parseInt(v.slice(i, i + 2), 16) / 255;
+    return [n(1), n(3), n(5), v.length >= 9 ? n(7) : 1];
+  }
+  const m = v.match(/\(([^)]*)\)/);
+  if (!m) return [0, 0, 0, 0];
+  const p = m[1].split(",").map(Number);
+  return [p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1];
+}
+
 class Player {
   /** The player that last took input (keys go to it while nothing has the focus). */
   static active = null;
@@ -569,6 +624,8 @@ class Player {
     container.append(this.root);
     this.views = new Map();
     this.mouseTracked = new Set();
+    // Shader views (`op_sh`), drawn on one WebGL 2 context (`shaderGl`).
+    this.shaderViews = new Set();
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
@@ -887,6 +944,24 @@ class Player {
       }
       case "viewport":
         return [window.innerWidth, window.innerHeight];
+      case "text_bounds": {
+        // Characters `start..end` of a text view: their first box (on their
+        // first line), as the other platforms answer.
+        const el = this.views.get(query.id);
+        if (!el?.isConnected) return null;
+        for (const run of el.querySelectorAll(":scope > .nsh-run")) {
+          if (run._start == null) continue;
+          const from = Math.max(query.start - run._start, 0);
+          const to = Math.min(query.end - run._start, run.textContent.length);
+          if (from >= to) continue;
+          const range = document.createRange();
+          range.setStart(...runPoint(run, from));
+          range.setEnd(...runPoint(run, to));
+          const r = range.getBoundingClientRect();
+          return [r.left, r.top, r.width, r.height];
+        }
+        return null;
+      }
       case "input_text": {
         const field = this.views.get(query.id)?._field;
         return field ? field.value : null;
@@ -1540,6 +1615,7 @@ class Player {
     if (!el) return;
     this.views.delete(id);
     this.mouseTracked.delete(id);
+    if (el._shader) this.op_sh([, id, null]);
     if (el._video) {
       // A removed media element keeps playing until it is collected.
       clearInterval(el._progressTimer);
@@ -1588,6 +1664,7 @@ class Player {
       el._frameAnimation = a;
     }
     if (el._kind === "canvas") this.drawSoon(el);
+    if (el._shader) this.shaderDirty(el);
     if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h, this.screenInsets(screen));
   }
 
@@ -1639,6 +1716,10 @@ class Player {
   op_a([, id, prop, value]) {
     const el = this.view(id);
     if (!el) return;
+    if (prop.startsWith("canvas:") && el._shader) {
+      this.shaderSlot(el, Number(prop.slice(7)), value);
+      return;
+    }
     if (prop.startsWith("canvas:")) {
       el._slots[Number(prop.slice(7))] = isNaN(Number(value)) ? value : Number(value);
       this.drawSoon(el);
@@ -1666,7 +1747,7 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds, links]) {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
@@ -1678,12 +1759,16 @@ class Player {
         `border-radius:${r}px;background:${color}`;
       frag.append(box);
     }
-    for (const [x, y, text, style, after] of runs) {
+    // Nested texts that take presses: `[node, events]`, which runs name.
+    const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
+    for (const [x, y, text, style, start, parts, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
       span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
-      span.textContent = text;
+      fillRun(span, text, parts, spans);
+      // Where its characters are in the text (UTF-16, as JS strings).
+      span._start = start;
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
@@ -1827,10 +1912,8 @@ class Player {
       // `focus:` classes and `onFocus` follow the keyboard focus (the
       // browser draws a ring only then), not the focus a click would give.
       el.addEventListener("focus", () => {
-        if (!el.matches(":focus-visible")) return;
-        el._keyFocus = true;
-        this.setState(el, FOCUSED, true);
-        this.event(el._id, "onFocus");
+        if (!el._focusCall && !el.matches(":focus-visible")) return;
+        this.keyFocus(el);
       });
       el.addEventListener("blur", () => {
         this.setState(el, FOCUSED, false);
@@ -1840,6 +1923,31 @@ class Player {
       });
     }
     this.updateAria(el);
+  }
+
+  /** The keyboard focus reached pressable `el`: `focus:` and `onFocus`. */
+  keyFocus(el) {
+    el._keyFocus = true;
+    this.setState(el, FOCUSED, true);
+    this.event(el._id, "onFocus");
+  }
+
+  /** `focus()` on a view that is a stop of Tab: it takes the keyboard
+   * focus as Tab gives it, with the ring (`focusVisible`, where browsers
+   * take it) and `focus:` whatever the browser's heuristics decide after a
+   * click; one a click focused becomes keyboard focused. */
+  focusPressable(el) {
+    if (el.tabIndex !== 0) return;
+    if (document.activeElement === el) {
+      if (!el._keyFocus) this.keyFocus(el);
+      return;
+    }
+    el._focusCall = true;
+    try {
+      el.focus({ focusVisible: true });
+    } finally {
+      el._focusCall = false;
+    }
   }
 
   /** What touches on `el` leave to the browser: nothing on views with
@@ -1980,7 +2088,7 @@ class Player {
   // Images
 
   /**
-   * `src`, `resizeMode`, `placeholder` (shown until the image loads,
+   * `src`, `objectFit`, `placeholder` (shown until the image loads,
    * then faded out over `fadeDuration`), `blurRadius` (a CSS blur) and
    * `objectPosition` (CSS's, empty for the center).
    * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and
@@ -2069,6 +2177,198 @@ class Player {
     el._img.classList.add("nsh-hidden");
     if (el._events.has("onError")) this.event(el._id, "onError", { message: `failed to load ${el._src}` });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
+  }
+
+  // Shader views. Every shader view draws on one WebGL 2 context (a page
+  // gets few contexts): the program renders into its canvas at the view's
+  // size, and the picture moves to the view's own canvas, under its
+  // children and inside its rounded corners. A view renders when what it
+  // reads changed (size, uniforms, animated slots) or, reading the time,
+  // on every animation frame while it is in sight and not paused.
+
+  op_sh([, id, layer]) {
+    const el = this.view(id);
+    if (!el) return;
+    if (!layer) {
+      el._shaderCanvas?.remove();
+      el._shaderCanvas = null;
+      el._shaderObserver?.disconnect();
+      el._shader = null;
+      this.shaderViews.delete(el);
+      return;
+    }
+    const old = el._shader;
+    const words = new Uint32Array(layer.words);
+    // Animated slots keep their values while the program and slots stay.
+    if (old && old.layer.key === layer.key && JSON.stringify(old.layer.slots) === JSON.stringify(layer.slots)) {
+      for (const [word, kind] of layer.slots) {
+        const n = kind === 3 ? 3 : kind === 4 ? 4 : 1;
+        for (let i = 0; i < n; i++) words[word + i] = old.words[word + i];
+      }
+    }
+    const now = performance.now();
+    const kept = old ? old.kept + (old.since != null ? now - old.since : 0) : 0;
+    el._shader = { layer, words, kept, since: layer.paused ? null : now, dirty: true };
+    if (!el._shaderCanvas) {
+      const canvas = document.createElement("canvas");
+      canvas.className = "nsh-fill nsh-shader";
+      el.insertBefore(canvas, el.firstChild);
+      el._shaderCanvas = canvas;
+      el._shaderVisible = true;
+      if (typeof IntersectionObserver !== "undefined") {
+        el._shaderObserver = new IntersectionObserver((entries) => {
+          el._shaderVisible = entries[entries.length - 1].isIntersecting;
+          if (el._shaderVisible) this.shaderDirty(el);
+        });
+        el._shaderObserver.observe(el);
+      }
+    }
+    this.shaderViews.add(el);
+    this.shaderDirty(el);
+  }
+
+  /** Writes an animated value into its slot (`op_a`'s `canvas:N`): a number, or a CSS color. */
+  shaderSlot(el, slot, value) {
+    const s = el._shader;
+    const entry = s.layer.slots[slot];
+    if (!entry) return;
+    const [word, kind] = entry;
+    const f32 = new Float32Array(s.words.buffer);
+    if (kind >= 3) {
+      const c = parseCssColor(value);
+      for (let i = 0; i < (kind === 3 ? 3 : 4); i++) f32[word + i] = c[i];
+    } else if (kind === 0) {
+      f32[word] = Number(value);
+    } else {
+      s.words[word] = kind === 1 ? Math.trunc(Number(value)) | 0 : Math.max(0, Math.trunc(Number(value))) >>> 0;
+    }
+    this.shaderDirty(el);
+  }
+
+  shaderDirty(el) {
+    if (el._shader) el._shader.dirty = true;
+    if (this.shaderFrameQueued) return;
+    this.shaderFrameQueued = true;
+    requestAnimationFrame((t) => this.shaderFrame(t));
+  }
+
+  shaderFrame(t) {
+    this.shaderFrameQueued = false;
+    let again = false;
+    for (const el of this.shaderViews) {
+      const s = el._shader;
+      if (!el.isConnected || !s) continue;
+      const runs = s.layer.animated && s.since != null;
+      if (!el._shaderVisible || !(s.dirty || runs)) continue;
+      s.dirty = false;
+      this.renderShader(el, t);
+      again ||= runs;
+    }
+    if (again) {
+      this.shaderFrameQueued = true;
+      requestAnimationFrame((t) => this.shaderFrame(t));
+    }
+  }
+
+  /** The shared WebGL 2 context; `null` where there is none (said once). */
+  shaderGl() {
+    if (this._shaderGl !== undefined) return this._shaderGl;
+    const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: false });
+    if (!gl) console.warn("[nsh] shaders: no WebGL 2; shader views draw nothing");
+    this._shaderGl = gl;
+    this._shaderPrograms = new Map();
+    return gl;
+  }
+
+  shaderProgram(gl, layer) {
+    const cached = this._shaderPrograms.get(layer.key);
+    if (cached !== undefined) return cached;
+    const compile = (type, source) => {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.warn("[nsh] shader:", gl.getShaderInfoLog(shader));
+        return null;
+      }
+      return shader;
+    };
+    let program = null;
+    const vs = compile(gl.VERTEX_SHADER, layer.vs);
+    const fs = vs && compile(gl.FRAGMENT_SHADER, layer.fs);
+    if (fs) {
+      program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.warn("[nsh] shader:", gl.getProgramInfoLog(program));
+        program = null;
+      }
+    }
+    let entry = null;
+    if (program) {
+      const block = (name, binding) => {
+        if (!name) return null;
+        const index = gl.getUniformBlockIndex(program, name);
+        if (index === gl.INVALID_INDEX) return null;
+        gl.uniformBlockBinding(program, index, binding);
+        return gl.createBuffer();
+      };
+      entry = { program, builtins: block(layer.nsh, 0), uniforms: block(layer.u, 1), vao: gl.createVertexArray() };
+    }
+    this._shaderPrograms.set(layer.key, entry);
+    return entry;
+  }
+
+  renderShader(el, t) {
+    const s = el._shader;
+    const gl = this.shaderGl();
+    if (!gl || !el._frame) return;
+    const program = this.shaderProgram(gl, s.layer);
+    if (!program) return;
+    const [, , w, h] = el._frame;
+    let ratio = (devicePixelRatio || 1) * Math.min(4, this.zoomOf(el));
+    ratio = Math.min(ratio, 4096 / Math.max(w, h, 1));
+    const pw = Math.max(1, Math.round(w * ratio));
+    const ph = Math.max(1, Math.round(h * ratio));
+    const canvas = gl.canvas;
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    const time = (s.kept + (s.since != null ? t - s.since : 0)) / 1000;
+    gl.viewport(0, 0, pw, ph);
+    gl.useProgram(program.program);
+    gl.bindVertexArray(program.vao);
+    if (program.builtins) {
+      gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
+      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6)]), gl.DYNAMIC_DRAW);
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
+    }
+    if (program.uniforms) {
+      gl.bindBuffer(gl.UNIFORM_BUFFER, program.uniforms);
+      gl.bufferData(gl.UNIFORM_BUFFER, s.words, gl.DYNAMIC_DRAW);
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, 1, program.uniforms);
+    }
+    gl.disable(gl.BLEND);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const target = el._shaderCanvas;
+    if (target.width !== pw || target.height !== ph) {
+      target.width = pw;
+      target.height = ph;
+    }
+    if (canvas.transferToImageBitmap) {
+      target._bitmap ??= target.getContext("bitmaprenderer");
+      target._bitmap.transferFromImageBitmap(canvas.transferToImageBitmap());
+    } else {
+      target._2d ??= target.getContext("2d");
+      target._2d.clearRect(0, 0, pw, ph);
+      target._2d.drawImage(canvas, 0, 0);
+    }
   }
 
   // Scroll views
@@ -3676,7 +3976,10 @@ class Player {
   op_cmd([, id, name, ...args]) {
     const el = this.view(id);
     switch (name) {
-      case "focus": el?._field?.focus(); break;
+      case "focus":
+        if (el?._field) el._field.focus();
+        else if (el) this.focusPressable(el);
+        break;
       case "blur":
         if (el?._field) el._field.blur();
         else document.activeElement?.blur?.();
@@ -4692,11 +4995,11 @@ class Player {
     for (const run of this.root.querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
-      const node = run.firstChild;
-      if (!node) continue;
-      const text = node.data;
-      const from = range.startContainer === node ? range.startOffset : 0;
-      const to = range.endContainer === node ? range.endOffset : text.length;
+      // A link's characters are in a span inside the run.
+      const text = run.textContent;
+      if (!text) continue;
+      const from = run.contains(range.startContainer) ? runOffset(run, range.startContainer, range.startOffset) : 0;
+      const to = run.contains(range.endContainer) ? runOffset(run, range.endContainer, range.endOffset) : text.length;
       if (from >= to) continue;
       found = true;
       const area = this.areaOf(run.parentNode);
@@ -5024,7 +5327,7 @@ class Player {
     const p = {
       x, y, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
-      press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
+      press: isField ? null : this.linkPress(e.target, target) ?? chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       // What presses report: the modifier keys at the press and its clicks.
       modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       clicks: e.pointerType === "mouse" ? this.clickCount(x, y) : 1,
@@ -5048,6 +5351,20 @@ class Player {
     // A field in a draggable view still takes focus: preventing the default
     // keeps the browser from focusing it.
     if ((p.scroll || p.pan) && !isField) e.preventDefault();
+  }
+
+  /** The press target of a press on a link's run in text view `view`: the
+   * link's node, its events, placed as the text (as on the other
+   * platforms, a link's press reports positions in its text). */
+  linkPress(target, view) {
+    const link = target?._link;
+    if (!link || !PRESS_EVENTS.some((n) => link.events.has(n))) return null;
+    return {
+      _id: link.node,
+      _events: link.events,
+      _props: view._props,
+      getBoundingClientRect: () => view.getBoundingClientRect(),
+    };
   }
 
   pressIn(p) {

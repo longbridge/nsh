@@ -25,8 +25,9 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 
 ```
 crates/
-  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
+  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (CSS semantics, React Native's defaults for what nothing sets), Taffy layout (flex + grid + block, on the core's own layout tree: `core/layout_tree.rs`), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
+                       shaders (`shader.rs`: apps' WGSL `shade(uv)` checked with naga, uniforms packed, GLSL ES for the web);
                        CSS environment variables in padding and margin (`env(safe-area-inset-*)`, `env(keyboard-inset-height)`: `Core::sync_env`);
                        what iOS and Android share (`mobile.rs`: `nsh/mobile`'s `TabBar`, a native component the two backends register);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
@@ -75,7 +76,9 @@ crates/
                        the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
                        the globals `WebSocket`, `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
-  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
+  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform;
+                       feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
+                       wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
@@ -190,6 +193,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::elemen
 | units and geometry (`Points`, `Length`, `Bounds`, ...) | `docs/dev/geometry.md` |
 | scroll views, zooming, `List` | `docs/dev/scrolling-and-lists.md` |
 | animation, canvas, images | `docs/dev/animation.md`, `canvas.md`, `images.md` |
+| shaders: WGSL views, the renderer | `docs/dev/shaders.md` |
 | VM limits, capabilities, signed packages | `docs/dev/sandbox.md`, `signed-packages.md` |
 | packaging, the iOS / Android SDKs, native components | `docs/dev/embedding.md` |
 | `.nsh/types`, the dev server, hot reload | `docs/dev/tooling.md` |
@@ -361,11 +365,19 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `active:`), no built-in strings (every label comes from the app); system UI keeps the platform's look (iOS / Android
   headers; `AlertDialog`, drawn in the platform's dialog style where the system has no dialog to show). React Native and
   UIKit are references for which capabilities exist, not APIs to be compatible with.
-- **CSS and Tailwind as in a browser.** CSS values (colors, lengths, gradients, filters, shadows, transforms,
-  alignment keywords, ...) and Tailwind utilities and variants mean exactly what they mean in a browser and in
-  Tailwind CSS (v4); Tailwind's generated CSS is the reference for each utility. What NSH cannot support is
-  unsupported (an unknown class, a rejected value with a warning), never given a different meaning: nothing
-  NSH-specific, so there are no traps (`docs/dev/styles.md`).
+- **Styles: native first, in the forms people write.** One set of properties written three ways (Rust `Styled`,
+  `style` keys, Tailwind classes) means the same in each; the names are CSS's but for a few common forms. Each key takes the form most used and
+  easiest to write, CSS's by default: where common use and CSS differ, the common form wins (a `lineHeight` number is
+  points) and `docs/dev/styles.md` lists it. React Native is a reference for what is common, not an API to match: no
+  names or aliases for its sake. Tailwind (v4) utilities mean what Tailwind's generated CSS does. What NSH cannot
+  support is unsupported (an unknown class, a rejected value with a warning), never given another meaning. Past
+  that the design serves the native platforms and performance, not compatibility with the web: lengths are points,
+  unset properties take React Native's / Yoga's defaults, values that change take numbers and structured forms (JS
+  builds no strings), and what the platforms do that CSS cannot say is a registered extension key or class, named
+  apart from CSS's. Below TSX, values are typed: Rust's `Styled` and Tailwind classes lower to typed values (a core
+  type of their own where one is needed, as `LineHeight`), never to strings the core parses again; only a TSX
+  `style`'s values are parsed from strings. Frozen with the first recorded release as `docs/dev/styles.md` writes it ("Principles",
+  "Extensions").
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`
@@ -432,6 +444,19 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - New `pub struct` types use `#[non_exhaustive]` and implement `Default`, deriving it when possible.
 - Set only the fields needed and leave the rest at their defaults. Within the defining crate, use `..Default::default()`; callers in other crates start with `Type::default()` and assign fields, because non-exhaustive structs cannot be constructed with external struct literals.
 - New fields have sensible defaults so extending a struct does not break downstream construction.
+
+## Public Rust element API
+
+What apps call to build UI in Rust stays stable and strongly typed:
+
+- Element constructors take no content: `shader()`, then builder methods (`.source(program)`, `.uniform(..)`), so a
+  new input is a new method, never a changed signature. Existing constructors that take their content
+  (`canvas(painter)`, `video(url)`) are not a model for new ones.
+- Names NSH defines (style properties, built-in values) are typed; names the app defines in its own code (a
+  shader's uniforms, declared in its WGSL) are plain `&str`, as TSX's keys are, checked where they are defined.
+- Values are typed (`impl Into<UniformValue>`, `Hsla`, `Points`), not strings to parse.
+- No macros to make elements or set their props (declaring components with `#[component]` and its derives stays):
+  plain functions, methods and traits.
 
 ## Commits and pull requests
 

@@ -201,7 +201,9 @@ reasons: `reactive-components.md`.
     the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
     returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
     the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
-    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). Until its holder
+    when a view places a key twice, skipping those in list cells their lists freed: a cell whose row went still reads
+    the row now at its old index until the list binds it again, so it may place the key of a row that moved to another
+    cell, which keeps showing it; none placed: it waits out of the tree for the `Unrender`). Until its holder
     arrives a placeholder is empty, so a list cell holding one is not measured (`Core::cells_awaiting_renders`): its
     row keeps its estimate (or its last size) and stays in the window, and is measured in the commit the holder
     comes in; measured empty, a list in a view sized by its content would shrink that view's viewport to nothing
@@ -316,7 +318,7 @@ reasons: `reactive-components.md`.
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
-  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
+  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
   | `BackHandler.onBackPress(f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
@@ -603,8 +605,8 @@ copies into packages next to the imported assets, and whose fonts the engine reg
 follow Tailwind's default scale, independent of the app's Tailwind theme. They cover what classes and styles do:
 per-side borders and colors (`.border_t(px(6.0)).border_t_color(..)`), `.border_dashed()`, per-corner and start / end
 radii (`.rounded_tl(..)`, `.rounded_ss(..)`), `.border_curve(BorderCurve::Continuous)`; shadows of their own
-(`.shadow([BoxShadow { .. }])`, React Native's `.shadow_opacity(..).shadow_radius(..).shadow_offset(..)`,
-`.shadow_color(..)` for both and the presets), `.inset_shadow_sm()`, rings, outlines, text shadows; 3D transforms and
+(`.shadow([BoxShadow { .. }])`, `.shadow_color(..)` for them and the presets), `.inset_shadow_sm()`, rings, outlines,
+text shadows (`.text_shadow([TextShadow { .. }])`, the presets, `.text_shadow_color(..)`); 3D transforms and
 skews, `.transform_origin(..)` / `.origin_top_left()`, `.backface_hidden()`; decorations (`.underline().line_through()`
 draw both, `.text_decoration_wavy()`, `.text_decoration_color(..)`), `.uppercase()`, `.tabular_nums()`,
 `.writing_direction(..)`; gradients (`.bg_linear_to_br().gradient_from(..).gradient_via(..).gradient_to(..)`,
@@ -640,6 +642,9 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_checked(props.checked)` / `.project_indeterminate(props.indeterminate)` / `.project_disabled(props.disabled)`
   (`gpui-base`'s `SwitchThumb::new(checked)`, `CheckboxIndicator::state(..)`): the app writes `checked:` /
   `indeterminate:` / `disabled:` in the part's class, and only the control's root is an accessibility element.
+  `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
+  platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
+  no active descendant, and the platform's focus stays where it is.
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).
@@ -964,7 +969,7 @@ NSH's additions fit the same pieces: gpui-base expands the stack for hover and f
 a finger down on the stack (observed `onTouch`) expands it as the pointer does, so a toast being read or swiped is
 paused. A `Toast` takes a swipe (the core's responder, claimed once the pointer moved 10 points toward
 `swipeDirection` along its axis, so its buttons stay presses; released past `swipeThreshold`, measured from where the
-pointer went down, or flicked at 0.5 points per millisecond, it moves out and emits `DismissRequest`). The stack hears
+pointer went down, or flicked at 500 points per second, it moves out and emits `DismissRequest`). The stack hears
 Escape and back while it has children (an overlay of no size, `onCancel`), so nothing else loses them to an empty
 stack. A `Toast`'s `accessibilityLabel` is announced once as it mounts (`announce_for_accessibility`, every platform's
 announcement). The state classes are the app's look for the status: `startingClass` in the first frame while

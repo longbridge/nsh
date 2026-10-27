@@ -330,12 +330,12 @@ import { Animated, createAnimatedValue, createMotion, motions, Easing, LayoutAni
 | `opacity` | `.bind_opacity(&value)` | `style={{ opacity: value }}` |
 | `backgroundColor` | `.bind_background(&value.interpolate_colors(&[0.0, 1.0], &[white(), black()]))` | `style={{ backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ["#fff", "#000"] }) }}` |
 | `borderColor`、`color` | `.bind_border_color(&node)`、`.bind_color(&node)` | 同上：一个颜色节点。`borderColor` 为所有边着色；`Text` 的 `color` 为整段文本着色 |
-| `shadowColor`、`shadowOpacity`、`shadowRadius` | `.bind_shadow_color(&node)`、`.bind_shadow_opacity(&value)`、`.bind_shadow_radius(&value)` | `style={{ shadowOpacity: value }}`（`shadowColor` 用颜色节点） |
 | `transform` | `.bind_translate_x(&value)`、`.bind_translate_y`、`.bind_scale`、`.bind_rotate`（角度） | `translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`、`rotateX`、`rotateY`、`rotateZ`：`transform: [{ translateX: value }]` |
 | 滚动位置 | 滚动视图或列表上的 `.scroll_value(&value)` | `<Scroll scrollValue={value}>` 和 `<List scrollValue={value}>` 每帧把滚动偏移写入该值 |
 | 手势 | `.pan_values(Some(&x), Some(&y))`、`.pinch_value(&scale)`、`.rotation_value(&angle)` | 任意元素上的 `pan={{ x, y }}`、`pinch={{ scale }}`、`rotation={{ angle }}`：手势直接写入这些值（见[触摸与手势](../docs/touch-and-gestures.md)） |
 | 吸附位置 | `.sticky().bind_sticky_top(&value)`（横向滚动视图中为 `.bind_sticky_left`）、列表上的 `.bind_sticky_header_offset(&value)` | `style={{ position: "sticky", top: value }}`、`<List stickyHeaderOffset={value}>`：吸附视图和标题吸附在距视口起点这么远的位置，逐帧跟随该值 |
 | 画布 | 绘制调用中的动画参数 | [画布](./nsh-canvas.md)绘制调用中的任意数字或颜色参数 |
+| Shader | `.uniform(name, &value)` | [shader](../elements/shader.md) 的 `struct Uniforms` 成员：`uniforms={{ name: value }}`（数值，或用于 `vec3f` / `vec4f` 的颜色节点） |
 
 其他样式属性只接受普通值；如果要为布局本身（尺寸、在布局流中的位置）添加动画，请使用 [`LayoutAnimation`](#layoutanimation)。
 
@@ -976,7 +976,12 @@ use nsh_core::platform::Os;
 
 let card = view().p_4();
 let card = match os() {
-    Os::Ios => card.shadow_color(black()).shadow_opacity(0.15).shadow_radius(px(8.0)),
+    Os::Ios => card.shadow([BoxShadow {
+        offset_y: px(2.0),
+        blur: px(8.0),
+        color: rgba(0x00000026).into(),
+        ..BoxShadow::default()
+    }]),
     Os::Android => card.elevation(px(4.0)),
     _ => card,
 };
@@ -984,7 +989,7 @@ let card = match os() {
 
 ```tsx tabs
 const shadow = platform.select({
-  ios: { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8 },
+  ios: { boxShadow: "0px 2px 8px rgb(0 0 0 / 0.15)" },
   android: { elevation: 4 },
 });
 ```
@@ -1120,7 +1125,7 @@ pub fn App() -> impl IntoElement {
                 pos.set((x + e.gesture.delta.x.0, y + e.gesture.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
-                log::info!("released at {:.2} pt/ms", e.gesture.vx);
+                log::info!("released at {:.0} pt/s", e.gesture.vx);
             }),
     )
 }
@@ -1137,7 +1142,7 @@ function App() {
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => (start = pos()),
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(0)} pt/s`),
   });
   return (
     <View style={{ flex: 1 }}>
@@ -1193,7 +1198,7 @@ interface PanResponderGestureState {
   y0: number;
   dx: number;                  // 成为响应者以来移动的距离
   dy: number;
-  vx: number;                  // 速度，点/毫秒
+  vx: number;                  // 速度，点/秒
   vy: number;
   numberActiveTouches: number;
 }
@@ -1207,7 +1212,7 @@ Rust：`PanGesture`，位置为 `Point<Points>`。
 | `moveX`、`moveY` | `position` | 触点中心的最新位置，界面坐标（点）。 |
 | `x0`、`y0` | `origin` | 成为响应者时触点中心的位置。 |
 | `dx`、`dy` | `delta` | 成为响应者以来移动的距离。 |
-| `vx`、`vy` | `vx`、`vy` | 速度，单位为点/毫秒。 |
+| `vx`、`vy` | `vx`、`vy` | 速度，单位为点/秒。 |
 | `numberActiveTouches` | `active_touches` | 按下的手指数。 |
 
 ### 在滚动视图中
@@ -1266,7 +1271,7 @@ const Clipboard: {
 
 interface ClipboardImage {
   url: string; // data:image/png;base64,…
-  size: { width: number; height: number }; // 像素
+  size: PixelSize;
 }
 ```
 
@@ -1534,7 +1539,7 @@ interface PickImagesOptions {
 
 interface PickedImage {
   file: File; // 文件名、类型、字节数和字节
-  size: { width: number; height: number }; // 像素，方向已摆正
+  size: PixelSize; // 方向已摆正
 }
 ```
 
@@ -2473,10 +2478,11 @@ function Saved() {
 | `JSX` | JSX 命名空间（`JSX.Element`） |
 | `YNode` | `ref` 拿到的对象：聚焦、滚动等命令。见[元素](../elements/index.md) |
 | `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
-| `ViewStyle`、`TextStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
+| `ViewStyle`、`TextStyle`、`InputStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
 | `GestureResponderEvent`、`HoverEvent`、`ContextMenuEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
 | `Point`、`Size`、`Bounds`、`Edges`、`Modifiers` | 事件数据和属性所用的形状，字段与 GPUI 相同（`nsh_core::geometry`） |
+| `PixelSize` | 图片或视频自身的像素尺寸（`onLoad`、`Image.getSize`、剪贴板和照片选择器的图片）；`Size` 的单位是点 |
 | `ImageAsset` | 导入图片文件得到的对象（`{ url, size: Size, scales? }`；`scales` 列出它的[像素密度变体](../docs/images-and-assets.md#像素密度)） |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`、`AccessibilityState` | 无障碍属性 |

@@ -360,7 +360,7 @@ export function Controls() {
                 focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
-                <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
+                <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
                   {s().name}
                 </Text>
               </Tab>
@@ -407,7 +407,7 @@ export function Controls() {
           {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
           <View
             class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
+            style={{ width: size.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
           >
             <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>

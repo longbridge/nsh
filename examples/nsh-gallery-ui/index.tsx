@@ -163,7 +163,7 @@ export function Card(props: {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text numberOfLines={2} style={{ fontSize: 13, color: colors.muted }}>
+              <Text style={{ numberOfLines: 2, fontSize: 13, color: colors.muted }}>
                 {props.subtitle}
               </Text>
             </If>

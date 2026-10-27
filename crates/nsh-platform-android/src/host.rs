@@ -163,7 +163,7 @@ impl Host {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
-        *self.ui.lock().expect("ui") = UiAnimation::default();
+        self.ui.lock().expect("ui").reset();
         let mut cache = self.cache.lock().expect("cache options").clone();
         if cache.location == nsh_engine::CacheLocation::System {
             cache.location = match &self.system_cache_dir {
@@ -1509,9 +1509,36 @@ extern "system" fn Java_com_longbridge_nsh_Native_tick(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let mut ui = host.ui.lock().expect("ui");
-    ui.tick(host.epoch.elapsed().as_secs_f64());
+    let changed = ui.tick(host.epoch.elapsed().as_secs_f64());
     finish(host, &mut ui);
-    floats(&env, &ui.outputs())
+    // A frame only shader views asked for: no bound value moved.
+    let mut out = if changed || ui.animating() {
+        ui.outputs()
+    } else {
+        vec![0.0]
+    };
+    let shading = ui.shaders.render(host.view.as_obj());
+    out[0] = if ui.animating() || shading { 1.0 } else { 0.0 };
+    floats(&env, &out)
+}
+
+/// Shader view `id` (`Box.java`) is `width` × `height` pixels: its next
+/// frame is rendered at that size. Whether frames should come
+/// (`NshView.requestFrames`).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_shaderSize(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    width: jint,
+    height: jint,
+) -> jboolean {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let mut ui = host.ui.lock().expect("ui");
+    ui.shaders.resized(id as u32, width, height, host.density);
+    ui.shaders.wants_frame().into()
 }
 
 /// A scroll view moved: the engine (lists) and its scroll value learn the

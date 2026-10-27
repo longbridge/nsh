@@ -25,7 +25,7 @@ function DragCard() {
           ...ui().accentFill,
           alignItems: "center",
           justifyContent: "center",
-          transform: [{ translateX: x }, { translateY: y }],
+          translate: [x, y],
         }}
       >
         <Text style={{ color: ui().onAccent, fontWeight: "700" }}>Drag me</Text>
@@ -47,7 +47,7 @@ function ResponderDot() {
       state.set("dragging");
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(0)} pt/s`),
     onPanResponderTerminate: () => state.set("taken over"),
   });
   return (
@@ -63,7 +63,7 @@ function ResponderDot() {
             height: 50,
             borderRadius: 25,
             backgroundColor: ui().info,
-            transform: [{ translateX: pos().x }, { translateY: pos().y }],
+            translate: [pos().x, pos().y],
           }}
         />
       </View>
@@ -138,8 +138,7 @@ function App() {
         <Text style={{ color: ui().up }}>Under an overlay: {under()}</Text>
       </View>
       <View
-        pointerEvents="none"
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 3, borderColor: ui().warn, borderStyle: "dashed" }}
+        style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 3, borderColor: ui().warn, borderStyle: "dashed" }}
       />
     </View>
   );

@@ -303,7 +303,7 @@ const shown = hidden.mul(-1).add(56);
 
 <View style={{ flex: 1, overflow: "hidden" }}>
   <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, hidden.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -695,8 +695,8 @@ Once the newest message is in, stop loading: new messages then arrive at the sta
 
 | `viewabilityConfig` | Rust | Description |
 |---|---|---|
-| `itemVisiblePercentThreshold` | `Viewability { item_visible_percent, .. }` | Percent of an item that must be visible. |
-| `viewAreaCoveragePercentThreshold` | `Viewability { view_area_percent, .. }` | Percent of the viewport an item must cover. |
+| `itemVisibleThreshold` | `Viewability { item_visible_threshold, .. }` | How much of an item must be visible, from 0 to 1. |
+| `viewAreaCoverageThreshold` | `Viewability { view_area_coverage_threshold, .. }` | How much of the viewport an item must cover, from 0 to 1. |
 | `minimumViewTime` | `.minimum_view_time(Duration)` | Milliseconds an item must stay viewable before it is reported. |
 
 Without a threshold, any visible pixel counts.
@@ -707,7 +707,7 @@ let playing = signal(None::<usize>);
 virtual_list(count, move |at| video_card(videos.clone(), at))
     .estimated_item_size(px(300.0))
     .viewability(Viewability {
-        item_visible_percent: Some(60.0),
+        item_visible_threshold: Some(Percentage(0.6)),
         ..Viewability::default()
     })
     .minimum_view_time(Duration::from_millis(250))
@@ -723,7 +723,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
   estimatedItemSize={300}
   style={{ flex: 1 }}
   keyExtractor={(v) => v.slug}
-  viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 250 }}
+  viewabilityConfig={{ itemVisibleThreshold: 0.6, minimumViewTime: 250 }}
   onViewableItemsChange={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
 >
   {(v) => <VideoCard video={v()} />}

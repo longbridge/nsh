@@ -220,7 +220,7 @@ fn Grid() -> impl IntoElement {
         .row_gap(px(gap))
         .column_gap(px(gap))
         .viewability(Viewability {
-            item_visible_percent: Some(50.0),
+            item_visible_threshold: Some(Percentage(0.5)),
             ..Viewability::default()
         })
         .on_viewable_items_change(move |rows: &ViewableItems| visible.set(rows.viewable))
@@ -612,6 +612,7 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 .submit_behavior(SubmitBehavior::Submit)
                 .placeholder("Message")
                 .placeholder_color(|| color(colors::FAINT))
+                .caret_color(|| color(colors::ACCENT))
                 .selection_color(|| color(colors::ACCENT))
                 .return_key_type(ReturnKeyType::Send)
                 .flex_1()

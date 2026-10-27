@@ -698,7 +698,7 @@ public class NshView extends FrameLayout {
         java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
         float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
         Native.environment(handle, new float[] {
-            top / density, right / density, bottom / density, left / density, ime / density, keyboardDuration / 1000f, fontScale,
+            top / density, right / density, bottom / density, left / density, ime / density, (float) keyboardDuration, fontScale,
             android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == LAYOUT_DIRECTION_RTL ? 1 : 0,
             // "Remove animations" sets the animator scale to 0.
             android.provider.Settings.Global.getFloat(getContext().getContentResolver(),
@@ -863,6 +863,16 @@ public class NshView extends FrameLayout {
     private final Choreographer.FrameCallback jsFrame = nanos -> {
         if (handle != 0) Native.frame(handle);
     };
+
+    /**
+     * A shader view's new frame, called by libnsh on the UI thread during
+     * {@link Native#tick}: {@code pixels} (null for an empty frame) are only
+     * valid during the call.
+     */
+    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height) {
+        View v = mounter.view(id);
+        if (v instanceof Box) ((Box) v).shaderFrame(pixels, width, height);
+    }
 
     /** JS waits for a display frame (`requestAnimationFrame`). */
     void requestJsFrame() {

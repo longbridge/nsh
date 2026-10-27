@@ -147,12 +147,13 @@ pub(crate) fn cli_exe() -> std::io::Result<PathBuf> {
 }
 
 /// The Android runtime directory (`classes.dex`, `lib/<abi>/libnsh.so`),
-/// with development support or not.
-pub(crate) fn android(dev: bool) -> anyhow::Result<PathBuf> {
+/// with development support or not; a Rust app's library is built for
+/// `abis` (empty: every ABI of the prebuilt runtime).
+pub(crate) fn android(dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
     let prebuilt = prebuilt_android(dev)?;
     match crate::rust_app::current() {
         // The app's own library with the prebuilt Java runtime.
-        Some(app) => app.android(&prebuilt, dev),
+        Some(app) => app.android(&prebuilt, dev, abis),
         None => Ok(prebuilt),
     }
 }
