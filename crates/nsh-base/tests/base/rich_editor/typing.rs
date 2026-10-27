@@ -339,6 +339,16 @@ fn backspace_at_a_paragraph_start_joins_into_the_previous() {
     see(&mut app, "Sel 3-3");
 }
 
+#[test]
+fn typing_the_same_text_after_moving_the_caret_inserts_it() {
+    let mut app = start(paragraphs(&[""]));
+    app.type_text("id:editor", "a").unwrap();
+    see(&mut app, &doc("a"));
+    keys(&mut app, &["left"]);
+    app.type_text("id:editor", "a").unwrap();
+    see(&mut app, &doc("aa"));
+}
+
 // Composition.
 
 #[test]
