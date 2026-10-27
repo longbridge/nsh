@@ -293,7 +293,7 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | 键 | 类型 | 作用 |
 |---|---|---|
 | `appear` | timing | 有 `appearGeneration` 时图形逐渐绘出：折线和区域从起始边缘绘出，柱子从 `base` 长出（柱子设置 `stagger` 时依次长出）；饼图和 arc 的圆环从起点顺时针扫出。 |
-| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢。 |
+| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；以及它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）。 |
 | `enter` | timing | 指针移到 plot 上时，悬停部件淡入。 |
 | `exit` | timing | 指针离开后，悬停部件淡出。 |
 | `pointer` | spring | 指针在 plot 上移动时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起。 |

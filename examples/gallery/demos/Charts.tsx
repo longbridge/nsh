@@ -527,8 +527,9 @@ const RING_GAP = 5;
 
 /**
  * Capacity as rings: a track per resource and over it the share in use,
- * with round caps, sweeping in from 12 o'clock, again for each period;
- * the average in the middle and the figures beside, in the rings' colors.
+ * with round caps, sweeping in from 12 o'clock and then round to each
+ * period's load (`motion.update`); the average in the middle and the
+ * figures beside, in the rings' colors.
  */
 function Capacity() {
   const period = signal<Period>("now");
@@ -539,15 +540,14 @@ function Capacity() {
     const o = outer - i * (RING_WIDTH + RING_GAP);
     return { outer: o, inner: o - RING_WIDTH };
   });
-  const generation = () => PERIODS.findIndex((p) => p.value === period()) + 1;
   return (
     <Card icon="system" title="Capacity" subtitle="Rings of load against each resource's limit">
       <View style={{ flexDirection: pointer ? "row" : "column", alignItems: "center", gap: pointer ? 24 : 16 }}>
         <Plot
           data={RESOURCES}
           interactive={false}
-          appearGeneration={generation()}
-          motion={{ appear: { duration: 1100, easing: "easeOut" } }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 1100, easing: "easeOut" }, update: { duration: 700, easing: "easeInOut" } }}
           accessibilityLabel={`Capacity, ${PERIODS.find((p) => p.value === period())!.label}: ${RESOURCES.map((r) => `${r.name} ${fixed(share(r) * 100, 0)}%`).join(", ")}`}
           style={{ width: RINGS, height: RINGS }}
         >
