@@ -7,15 +7,18 @@ import { colors, finish } from "./theme";
  * shows a quiet number after a label): `nsh/base`'s `Tabs`, a tab per
  * segment, in the gallery's look. With a pointer it is as wide as its
  * labels (30 points high, 12-point type, the thumb's corners 6 and the
- * track's 9); on a touch screen its segments share the row equally.
+ * track's 9); on a touch screen, or with `fill`, it spans the row and its
+ * segments share it equally, their labels centered.
  */
 export function Segmented<T extends string>(props: {
   options: readonly { value: T; label: string; count?: number }[];
   value: T;
   onChange: (value: T) => void;
   size?: "small" | "regular";
+  fill?: boolean;
 }) {
   const pointer = platform.idiom === "desktop";
+  const spread = !pointer || !!props.fill;
   // Where each segment lies in the track, as the tabs report it.
   const spans = signal<{ x: number; width: number }[]>([]);
   // The segment pressed, until the app has the value: the thumb moves in a
@@ -41,7 +44,7 @@ export function Segmented<T extends string>(props: {
       style={{
         height,
         flexDirection: "row",
-        alignSelf: pointer ? "flex-start" : "stretch",
+        alignSelf: spread ? "stretch" : "flex-start",
         padding: inset,
         borderRadius: pointer ? 9 : 10,
         borderCurve: "continuous",
@@ -83,7 +86,7 @@ export function Segmented<T extends string>(props: {
             }}
             onLayout={(b) => measure(i(), b.origin.x, b.size.width)}
             style={{
-              ...(pointer ? { paddingHorizontal: 10 } : { flex: 1, paddingHorizontal: 8 }),
+              ...(spread ? { flex: 1, paddingHorizontal: 8 } : { paddingHorizontal: 10 }),
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",

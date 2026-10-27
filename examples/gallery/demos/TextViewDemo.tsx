@@ -407,7 +407,7 @@ export function TextViewDemo() {
   const tab = signal<Tab>("Markdown");
   const Shown = () => (
     <View style={{ gap: 16 }}>
-      <Segmented options={TABS} value={tab()} onChange={(t) => tab.set(t)} />
+      <Segmented options={TABS} value={tab()} onChange={(t) => tab.set(t)} fill />
       <Each of={TABS.filter((t) => t.value === tab())}>{(t) => t().body()}</Each>
     </View>
   );
