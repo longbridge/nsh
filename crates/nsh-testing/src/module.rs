@@ -887,6 +887,9 @@ pub struct SpanStyle {
     pub underline: bool,
     /// Whether it is struck through.
     pub line_through: bool,
+    /// The pointer over it: a nested text's `cursor`, `"auto"` where none
+    /// sets one.
+    pub cursor: String,
 }
 
 impl Default for SpanStyle {
@@ -906,6 +909,7 @@ impl From<nsh_core::ResolvedTextStyle> for SpanStyle {
             italic: style.italic,
             underline: style.decoration.underline,
             line_through: style.decoration.line_through,
+            cursor: style.cursor.name().into(),
         }
     }
 }

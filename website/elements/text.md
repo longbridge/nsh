@@ -93,6 +93,8 @@ leave spans as they are; spaces inside the span give the box room on its sides.
 ### Links
 
 A span with a press handler is a link: a press on its characters goes to the span, a press elsewhere to the paragraph.
+On the desktops and the web, the pointer over a span's characters shows the `cursor` the span sets, as over a view
+(`cursor: "help"`, `cursor-help`, `.cursor(Cursor::Help)`), and spans inside it share it unless they set their own.
 
 ```rust tabs
 text("By continuing you agree to the ")

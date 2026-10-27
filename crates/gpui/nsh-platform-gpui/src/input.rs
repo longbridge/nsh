@@ -640,30 +640,36 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
-/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
-/// view `view` that sets no cursor of its own: the pointer there wins over
-/// the I-beam of selectable text, as on the other desktops.
-fn over_link(view: &NshView, x: f32, y: f32) -> bool {
-    {
+/// The cursor over the character of text view `view` under `(x, y)` (root
+/// coordinates): the `cursor` of the span (nested `<Text>`) it is in, else,
+/// on a pressable link span of a text that sets no cursor of its own, the
+/// pointer, which wins over the I-beam of selectable text, as on the other
+/// desktops; `None` leaves it to the views.
+fn text_cursor(view: &NshView, x: f32, y: f32) -> Option<Cursor> {
+    let (cursors, links) = {
         let s = view.state();
-        if css_cursor(s.style.cursor).is_some()
-            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
-        {
-            return false;
-        }
+        let text = &s.text.as_ref()?.text;
+        (
+            text.has_cursors(),
+            css_cursor(s.style.cursor).is_none() && !text.links.is_empty(),
+        )
+    };
+    if !cursors && !links {
+        return None;
     }
     let (lx, ly) = local(view, x, y);
     let s = view.state();
-    let Some(text) = s.text.as_ref() else {
-        return false;
-    };
-    crate::text::char_at(&s, lx, ly)
-        .and_then(|i| text.text.link_at(i))
-        .is_some_and(|link| has_press(link.events))
+    let text = &s.text.as_ref()?.text;
+    let i = crate::text::char_at(&s, lx, ly)?;
+    css_cursor(text.cursor_at(i)).or_else(|| {
+        (links && text.link_at(i).is_some_and(|link| has_press(link.events)))
+            .then_some(Cursor::Hand)
+    })
 }
 
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
-/// else the innermost view's that has one.
+/// else its text's ([`text_cursor`]), else the innermost view's that has
+/// one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return Cursor::Arrow;
@@ -677,8 +683,8 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
             return c;
         }
     }
-    if over_link(&hit.view, x, y) {
-        return Cursor::Hand;
+    if let Some(c) = text_cursor(&hit.view, x, y) {
+        return c;
     }
     let in_area = crate::selectable_view::area_of(&hit.view).is_some();
     let mut view = Some(hit.view);

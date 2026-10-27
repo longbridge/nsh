@@ -659,6 +659,7 @@ impl Driver for Remote {
                 radius: nsh_core::Points::ZERO,
                 node: 0,
             }),
+            cursor: nsh_core::Cursor::parse(&span.cursor).unwrap_or_default(),
             ..ResolvedTextStyle::default()
         })
     }

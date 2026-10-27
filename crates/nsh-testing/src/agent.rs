@@ -562,6 +562,7 @@ impl Scene for Model {
         span.italic = style.italic;
         span.underline = style.decoration.underline;
         span.line_through = style.decoration.line_through;
+        span.cursor = style.cursor.name().into();
         Ok(span)
     }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {

@@ -83,6 +83,7 @@ Tailwind 类同样适用：`<Text class="bg-gray-100 rounded">`。内边距和�
 ### 链接
 
 带按压处理函数的片段就是链接：按在它的字符上由该片段处理，按在其他位置则由段落处理。
+在桌面平台和 Web 上，指针移到片段的字符上时显示片段设置的 `cursor`，与视图相同（`cursor: "help"`、`cursor-help`、`.cursor(Cursor::Help)`）；其中的片段沿用它，除非自己另行设置。
 
 ```rust tabs
 text("继续即表示你同意")

@@ -260,7 +260,7 @@ over the window wherever it is in the tree, header items and input accessories w
 the span around them), found by their characters (`text:`, a bare string) and pressed as the platform presses them:
 the events go to the span's node; they are not texts of their own (`texts()` lists the text view's).
 `Screen::span_style` reads the resolved style of characters a selector names (`id:<testID>` a nested text's test id,
-`text:<text>` where the text reads it), the first character's, including a nested text's background. `app.spanStyle`
+`text:<text>` where the text reads it), the first character's, including a nested text's background and cursor. `app.spanStyle`
 returns that style; on a real host the agent's model answers it (`TestStep::SpanStyle`, a `protocol::SpanStyle`). A span's test id is listed on its block's text (`AttributedText::test_ids`). Setting the id
 later updates the block's metadata and remounts its existing final layout, including fitted font sizes, without
 preparing or laying out the text again or reporting `onTextLayout`. Empty spans have no first character:

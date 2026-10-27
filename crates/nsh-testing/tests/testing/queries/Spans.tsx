@@ -9,7 +9,7 @@ mount(() => (
       See{" "}
       <Text
         testID={id()}
-        class="font-bold italic"
+        class="font-bold italic cursor-pointer"
         style={{
           color: "#123456",
           backgroundColor: "#fedcba",

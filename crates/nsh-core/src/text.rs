@@ -9,6 +9,7 @@ use std::{
 use rustc_hash::FxHashMap;
 
 use crate::{
+    effects::Cursor,
     geometry::{Bounds, Point, Points, Size, point, px, size},
     ops::{EventMask, NodeId},
     style::{
@@ -53,6 +54,10 @@ pub struct ResolvedTextStyle {
     pub font_variant: FontVariant,
     /// The background of the nested text this run is in (drawing only).
     pub background: Option<TextBackground>,
+    /// The pointer over its characters: the `cursor` of the nested text
+    /// this run is in, `Auto` where none sets one, which leaves it to the
+    /// text's view (drawing only).
+    pub cursor: Cursor,
 }
 
 /// The background of a nested `<Text>` (`backgroundColor` and
@@ -185,6 +190,7 @@ impl Default for ResolvedTextStyle {
             transform: TextTransform::None,
             font_variant: FontVariant(0),
             background: None,
+            cursor: Cursor::Auto,
         }
     }
 }
@@ -231,6 +237,7 @@ impl ResolvedTextStyle {
             transform: style.transform.unwrap_or(self.transform),
             font_variant: style.font_variant.unwrap_or(self.font_variant),
             background: self.background,
+            cursor: self.cursor,
         }
     }
 
@@ -521,6 +528,18 @@ impl AttributedText {
     /// The background of the character at the UTF-16 offset `index`.
     pub fn background_at(&self, index: u32) -> Option<TextBackground> {
         self.span_at(index)?.style.background
+    }
+
+    /// Whether a span sets the pointer over its characters
+    /// ([`ResolvedTextStyle::cursor`]).
+    pub fn has_cursors(&self) -> bool {
+        self.spans.iter().any(|s| s.style.cursor != Cursor::Auto)
+    }
+
+    /// The pointer over the character at the UTF-16 offset `index`: its
+    /// span's `cursor`, `Auto` where none sets one.
+    pub fn cursor_at(&self, index: u32) -> Cursor {
+        self.span_at(index).map_or(Cursor::Auto, |s| s.style.cursor)
     }
 
     /// Length of the text so far, in UTF-16 units.

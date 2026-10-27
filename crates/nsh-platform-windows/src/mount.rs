@@ -238,6 +238,13 @@ impl Mounter {
                 if let Some(view) = &self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
                     crate::text::set(view, text, layout, *content);
+                    // Its spans' cursors under a resting mouse, as a view's.
+                    if old
+                        .as_ref()
+                        .map_or(text.has_cursors(), |o| !same_cursors(o, text))
+                    {
+                        crate::input::cursor_changed(surface);
+                    }
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
@@ -528,4 +535,17 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::Command { id, .. } => Redraw::View(*id),
         MountItem::LayoutDirection { .. } | MountItem::Appearance { .. } => Redraw::Window,
     }
+}
+
+/// Whether two texts' spans set the same cursors over the same characters.
+fn same_cursors(a: &nsh_core::AttributedText, b: &nsh_core::AttributedText) -> bool {
+    fn cursors(
+        t: &nsh_core::AttributedText,
+    ) -> impl Iterator<Item = (u32, u32, nsh_core::Cursor)> + '_ {
+        t.spans
+            .iter()
+            .filter(|s| s.style.cursor != nsh_core::Cursor::Auto)
+            .map(|s| (s.start, s.end, s.style.cursor))
+    }
+    cursors(a).eq(cursors(b))
 }

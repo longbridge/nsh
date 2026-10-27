@@ -89,6 +89,15 @@
   inline box), rounded on every line (`box-decoration-break: clone`), drawn behind the selection and the glyphs. CoreText
   splits runs where the background's `NshBackground` attribute changes; the web emits the boxes as elements behind
   the runs.
+- **Span cursors**: `cursor` on a nested `<Text>` (its view style too) becomes `ResolvedTextStyle::cursor`, inherited
+  by the spans inside it as CSS inherits `cursor`; `Auto` leaves it to the text's view, and the block's own cursor
+  stays its view's. Drawing only (not in `layout_eq`): a change sends the text again without measuring it. The pointer
+  goes by the characters, as presses do: each desktop backend looks up the character under it (`char_at`) and shows
+  its span's cursor (`AttributedText::cursor_at`) before the pointer over a pressable link and the view chain's
+  cursors (macOS and GPUI `text_cursor`, Windows `cursor`; Linux sets the GTK widget's cursor from the span under the
+  mouse on each move and new text, `text_cursor`). The web writes it into the run's class, where the browser takes it
+  from the run under the pointer, and as `--nsh-span-cursor`, which the pointer of a link inside the run (`.nsh-link`)
+  gives way to. An inline view inside a span keeps its own cursor.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
   layout root at its content size (`update_attachments`), it becomes an object replacement character (U+FFFC,
   `AttributedText::attachments`) that the engine sizes to it (CTRunDelegate; Android a `ReplacementSpan`), so

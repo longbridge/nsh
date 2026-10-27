@@ -11,6 +11,7 @@ test("span styles follow ids and reject an emptied span", async () => {
     italic: true,
     underline: true,
     lineThrough: true,
+    cursor: "pointer",
   });
   expect(app.spanStyle("id:paragraph >> text:guide")).toEqual(style);
   await app.press("Rename ID");
@@ -19,4 +20,5 @@ test("span styles follow ids and reject an emptied span", async () => {
   await app.press("Empty span");
   expect(() => app.spanStyle("id:renamed")).toThrow(/no characters/);
   expect(app.spanStyle("text:See").underline).toBe(false);
+  expect(app.spanStyle("text:See").cursor).toBe("auto");
 });

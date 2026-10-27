@@ -207,6 +207,10 @@ impl Mounter {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
                     crate::text::set(view, text, layout, *content);
+                    // Its spans' cursors, before or after.
+                    if text.has_cursors() || old.as_ref().is_some_and(|o| o.has_cursors()) {
+                        crate::input::text_changed(surface, view);
+                    }
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }

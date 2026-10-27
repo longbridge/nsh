@@ -359,6 +359,10 @@ pub struct SpanStyle {
     pub underline: bool,
     /// Whether it is struck through.
     pub line_through: bool,
+    /// The pointer over it: a nested text's `cursor`, as CSS names it
+    /// (`"auto"` or empty where none sets one).
+    #[serde(default)]
+    pub cursor: String,
 }
 
 /// A step of a test on a host's app, named as `nsh/test` names them: views

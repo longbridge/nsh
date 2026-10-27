@@ -1856,7 +1856,12 @@ mod tests {
     #[component]
     fn Linked() -> impl IntoElement {
         text("See ")
-            .child(text("the guide").test_id("guide").underline())
+            .child(
+                text("the guide")
+                    .test_id("guide")
+                    .underline()
+                    .cursor_pointer(),
+            )
             .child(" or ")
             .child(text("this").test_id("marked").bg(rgb(0xfde68a)))
     }
@@ -1868,6 +1873,14 @@ mod tests {
         let screen = app.screen();
         assert!(screen.span_style("id:guide").unwrap().decoration.underline);
         assert_eq!(screen.span_style("id:guide").unwrap().background, None);
+        assert_eq!(
+            screen.span_style("id:guide").unwrap().cursor,
+            nsh_core::Cursor::Pointer
+        );
+        assert_eq!(
+            screen.span_style("id:marked").unwrap().cursor,
+            nsh_core::Cursor::Auto
+        );
         let marked = screen.span_style("id:marked").unwrap().background.unwrap();
         assert_eq!(marked.color, nsh_core::Color(0xfde6_8aff));
         assert_eq!(

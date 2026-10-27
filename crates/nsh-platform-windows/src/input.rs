@@ -666,8 +666,26 @@ fn view_cursor(s: &ViewState) -> Option<Cursor> {
     })
 }
 
+/// The `cursor` of the span (nested `<Text>`) under `(x, y)` (root
+/// coordinates) in a text view, `None` where none sets one.
+fn span_cursor(view: &NshView, x: f32, y: f32) -> Option<Cursor> {
+    if !view
+        .state()
+        .text
+        .as_ref()
+        .is_some_and(|t| t.text.has_cursors())
+    {
+        return None;
+    }
+    let (lx, ly) = local(view, x, y);
+    let s = view.state();
+    let i = crate::text::char_at(&s, lx, ly)?;
+    css_cursor(s.text.as_ref()?.text.cursor_at(i))
+}
+
 /// The cursor over `(x, y)` (root coordinates): the hosted item's there,
-/// else the innermost view's that has one.
+/// else the span's under it (a nested `<Text>`'s, as presses on its
+/// characters go to it), else the innermost view's that has one.
 pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return Cursor::Arrow;
@@ -680,6 +698,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         {
             return c;
         }
+    }
+    if let Some(c) = span_cursor(&hit.view, x, y) {
+        return c;
     }
     let mut view = Some(hit.view);
     while let Some(v) = view {

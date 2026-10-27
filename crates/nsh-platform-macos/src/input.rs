@@ -449,9 +449,13 @@ fn invisible_cursor() -> Retained<NSCursor> {
     NONE.with(Clone::clone)
 }
 
-/// The cursor over `hit`: the innermost view's that asks for one (the
+/// The cursor over `hit` at `(x, y)` (root coordinates): its text's under
+/// it ([`text_cursor`]), else the innermost view's that asks for one (the
 /// I-beam over selectable text).
-fn cursor_at(hit: &Hit) -> Cursor {
+fn cursor_at(surface: &Surface, hit: &Hit, x: f32, y: f32) -> Cursor {
+    if let Some(c) = text_cursor(surface, &hit.view, x, y) {
+        return c;
+    }
     chain(&hit.view)
         .iter()
         .find_map(|v| {
@@ -466,20 +470,31 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .unwrap_or(Cursor::Default)
 }
 
-/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
-/// view `view` that sets no cursor of its own: the pointer there wins over
-/// the I-beam of selectable text, as on the other desktops.
-fn over_link(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
-    {
+/// The cursor over the character of text view `view` under `(x, y)` (root
+/// coordinates): the `cursor` of the span (nested `<Text>`) it is in, else,
+/// on a pressable link span of a text that sets no cursor of its own, the
+/// pointer, which wins over the I-beam of selectable text, as on the other
+/// desktops; `None` leaves it to the views.
+fn text_cursor(surface: &Surface, view: &NshView, x: f32, y: f32) -> Option<Cursor> {
+    let (cursors, links) = {
         let s = view.state();
-        if cursor_of(s.style.cursor).is_some()
-            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
-        {
-            return false;
-        }
+        let text = &s.text.as_ref()?.text;
+        (
+            text.has_cursors(),
+            cursor_of(s.style.cursor).is_none() && !text.links.is_empty(),
+        )
+    };
+    if !cursors && !links {
+        return None;
     }
     let (lx, ly) = local(surface, view, x, y);
-    crate::text::link_at(&view.state(), lx, ly).is_some_and(|link| has_press(link.events))
+    let s = view.state();
+    let text = &s.text.as_ref()?.text;
+    let i = crate::text::char_at(&s, lx, ly)?;
+    cursor_of(text.cursor_at(i)).or_else(|| {
+        (links && text.link_at(i).is_some_and(|link| has_press(link.events)))
+            .then_some(Cursor::Pointer)
+    })
 }
 
 /// Sets the cursor for the mouse at `(x, y)` (hosted views set their own).
@@ -500,13 +515,7 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     }
     let cursor = match pick(&surface.root, x, y) {
         Some(hit) if hit.native => return,
-        Some(hit) => {
-            if over_link(surface, &hit.view, x, y) {
-                Cursor::Pointer
-            } else {
-                cursor_at(&hit)
-            }
-        }
+        Some(hit) => cursor_at(surface, &hit, x, y),
         None => Cursor::Default,
     };
     let cursor = ns_cursor(cursor);

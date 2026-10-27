@@ -717,6 +717,16 @@ fn text_css(
     if style.font_variant.0 & nsh_core::FontVariant::SMALL_CAPS != 0 {
         css.push_str("font-variant-caps:small-caps;");
     }
+    // A nested text's: over its runs, where the browser takes it from the
+    // run under the pointer, and over the links inside them, whose pointer
+    // (`.nsh-link`) gives way to `--nsh-span-cursor`.
+    if style.cursor != nsh_core::Cursor::Auto {
+        let _ = write!(
+            css,
+            "cursor:{0};--nsh-span-cursor:{0};",
+            style.cursor.name()
+        );
+    }
     if let Some(s) = shadow
         && !s.color.is_transparent()
     {

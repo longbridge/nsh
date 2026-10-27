@@ -206,7 +206,9 @@ img.nsh-fill { pointer-events: none; }
   resize: none; font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
 .nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .nsh-selectable ::selection { background: var(--nsh-selection, Highlight); }
-.nsh-link { cursor: pointer; }
+/* A pressable link's pointer, unless a span it is in sets a cursor: its
+   run's class gives that as --nsh-span-cursor. */
+.nsh-link { cursor: var(--nsh-span-cursor, pointer); }
 /* With the desktop idiom text is selectable as on a web page unless it is
    set off (selectable={false}) or inside something that takes presses
    or touches (nsh-press). */

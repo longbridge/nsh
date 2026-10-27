@@ -394,7 +394,7 @@ fn cursor_name(cursor: Cursor) -> Option<&'static str> {
 }
 
 fn update_cursor(view: &NshView) {
-    set_cursor(view, false);
+    set_cursor(view, None, false);
 }
 
 /// The cursor name of `view`, `over_link` when the mouse is on one of its
@@ -446,8 +446,10 @@ fn shows_ibeam_state(view: &NshView, s: &crate::view::ViewState) -> bool {
     s.text.is_some() && (crate::text::selectable(s) || crate::selectable_view::takes_part(view))
 }
 
-fn set_cursor(view: &NshView, over_link: bool) {
-    let name = cursor_of(view, over_link);
+/// Sets the cursor name of `view`: `span`'s, the cursor of the span under
+/// the mouse (a nested `<Text>`'s `cursor`), else [`cursor_of`]'s.
+fn set_cursor(view: &NshView, span: Option<&'static str>, over_link: bool) {
+    let name = span.or_else(|| cursor_of(view, over_link));
     let current = view.cursor().and_then(|c| c.name());
     if current.as_deref() != name {
         view.set_cursor_from_name(name);
@@ -958,26 +960,50 @@ fn chain(view: &NshView) -> Vec<NshView> {
 }
 
 /// A point in root coordinates in `view`'s.
-/// The cursor is per widget: a text with pressable link spans shows the
-/// pointer while the mouse at `(x, y)` (root coordinates) is on one, its
-/// own cursor elsewhere.
+/// The cursor is per widget: a text with pressable link spans or spans
+/// that set a cursor shows, while the mouse at `(x, y)` (root coordinates)
+/// is on one, the span's cursor or the pointer, its own cursor elsewhere.
 fn link_cursor(surface: &Surface, x: f32, y: f32) {
     let Some(hit) = pick(&surface.root, x, y) else {
         return;
     };
-    let view = &hit.view;
-    let over = {
+    let spans = hit
+        .view
+        .state()
+        .text
+        .as_ref()
+        .is_some_and(|t| !t.text.links.is_empty() || t.text.has_cursors());
+    if spans {
+        text_cursor(surface, &hit.view, x, y);
+    }
+}
+
+/// Sets the cursor of text view `view` for the mouse at `(x, y)` (root
+/// coordinates): the cursor of the span under it, the pointer on a
+/// pressable link span, its own elsewhere.
+fn text_cursor(surface: &Surface, view: &NshView, x: f32, y: f32) {
+    let (span, over) = {
         let s = view.state();
         let Some(text) = &s.text else { return };
-        if text.text.links.is_empty() {
-            return;
-        }
         let (lx, ly) = local(surface, view, x, y);
-        crate::text::char_at(&s, lx, ly)
-            .and_then(|i| text.text.link_at(i))
-            .is_some_and(|l| has_press(l.events))
+        match crate::text::char_at(&s, lx, ly) {
+            Some(i) => (
+                cursor_name(text.text.cursor_at(i)),
+                text.text.link_at(i).is_some_and(|l| has_press(l.events)),
+            ),
+            None => (None, false),
+        }
     };
-    set_cursor(view, over);
+    set_cursor(view, span, over);
+}
+
+/// The view's text changed, and its spans set cursors or did: the cursor
+/// for the mouse where it is.
+pub(crate) fn text_changed(surface: &Surface, view: &NshView) {
+    match surface.input.last.get() {
+        Some((x, y)) => text_cursor(surface, view, x, y),
+        None => update_cursor(view),
+    }
 }
 
 fn local(surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {

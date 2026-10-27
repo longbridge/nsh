@@ -30,6 +30,7 @@ use self::{
 };
 use crate::{
     animation::AnimationProp,
+    effects::Cursor,
     geometry::{Bounds, Percentage, Point, Points, Size, rect, size_pt},
     mount::{
         InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig, ScrollBehavior,
@@ -2790,11 +2791,12 @@ impl<M: TextEngine> Core<M> {
         } else {
             node.view_style != view
         };
-        // A span's background is part of its block's text.
-        let span_background_changed = node.inline
+        // A span's background and cursor are part of its block's text.
+        let span_changed = node.inline
             && node.kind == Kind::Text
-            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
-        let text_changed = node.text_style != text || span_background_changed;
+            && (span_background(&node.view_style, node.id) != span_background(&view, node.id)
+                || node.view_style.cursor != view.cursor);
+        let text_changed = node.text_style != text || span_changed;
         // What its children inherit as `currentColor`.
         let passed_color = |node: &Node, text: &TextStyle| text.color.or(node.inherited_color);
         let color_passed = passed_color(node, &node.text_style) != passed_color(node, &text);
@@ -5599,6 +5601,11 @@ impl<M: TextEngine> Core<M> {
                     let mut inner = style.inherit(&child.text_style);
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
+                    }
+                    // Over its characters and those of the spans inside it,
+                    // as CSS inherits `cursor`.
+                    if child.view_style.cursor != Cursor::Auto {
+                        inner.cursor = child.view_style.cursor;
                     }
                     self.collect_text(c, inner, out, alignments);
                     if pressable(child.events) {

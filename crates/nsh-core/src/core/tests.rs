@@ -953,6 +953,104 @@ fn span_backgrounds_style_their_characters() {
 }
 
 #[test]
+fn span_cursors_show_over_their_characters() {
+    // <Text cursor=text>a <Text cursor=pointer>b<Text bold>c</Text>
+    // <Text cursor=help>e</Text></Text> d</Text>
+    let mut c = core();
+    let text = |id: NodeId, text: &str| Op::CreateText {
+        id,
+        text: text.into(),
+    };
+    let insert = |parent: NodeId, child: NodeId| Op::Insert {
+        parent,
+        child,
+        before: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(2, &[("cursor", StyleValue::Str("text"))]),
+            text(3, "a "),
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(4, &[("cursor", StyleValue::Str("pointer"))]),
+            text(5, "b"),
+            Op::Create {
+                id: 6,
+                tag: Tag::Text,
+            },
+            style_op(6, &[("fontWeight", StyleValue::Str("bold"))]),
+            text(7, "c"),
+            Op::Create {
+                id: 9,
+                tag: Tag::Text,
+            },
+            style_op(9, &[("cursor", StyleValue::Str("help"))]),
+            text(10, "e"),
+            text(8, " d"),
+            insert(6, 7),
+            insert(9, 10),
+            insert(4, 5),
+            insert(4, 6),
+            insert(4, 9),
+            insert(2, 3),
+            insert(2, 4),
+            insert(2, 8),
+            insert(ROOT_ID, 2),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert_eq!(text.text, "a bce d");
+    let cursors: Vec<_> = text.spans.iter().map(|s| s.style.cursor).collect();
+    // The block's own cursor is its view's; the bold span inside the
+    // pointer one keeps the pointer, the one setting its own has it.
+    assert_eq!(
+        cursors,
+        [
+            Cursor::Auto,
+            Cursor::Pointer,
+            Cursor::Pointer,
+            Cursor::Help,
+            Cursor::Auto
+        ]
+    );
+    assert!(text.has_cursors());
+    assert_eq!(text.cursor_at(0), Cursor::Auto);
+    assert_eq!(text.cursor_at(3), Cursor::Pointer);
+    assert_eq!(text.cursor_at(4), Cursor::Help);
+    assert_eq!(view_style_of(&batch, 2).unwrap().cursor, Cursor::Text);
+
+    // Another cursor sends the text again without measuring it again.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("cursor", StyleValue::Str("grab"))])],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert_eq!(text.cursor_at(2), Cursor::Grab);
+    assert_eq!(text.cursor_at(4), Cursor::Help);
+    assert!(frame_of(&batch, 2).is_none());
+
+    // `auto` sets none.
+    apply(
+        &mut c,
+        vec![
+            style_op(4, &[("cursor", StyleValue::Str("auto"))]),
+            style_op(9, &[("cursor", StyleValue::Str("auto"))]),
+        ],
+    );
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert!(!text.has_cursors());
+}
+
+#[test]
 fn background_boxes_join_pieces_of_one_span() {
     let mut t = AttributedText::default();
     let plain = ResolvedTextStyle::default();
