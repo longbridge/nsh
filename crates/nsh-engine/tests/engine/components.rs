@@ -4814,6 +4814,160 @@ fn base_plot_arc_corners_are_rounded_and_clamped() {
     );
 }
 
+const BASE_PLOT_ARC_TWEEN: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Arc, Pie, Plot } from "nsh/base/plot";
+
+function App() {
+  const late = signal(false);
+  setTimeout(() => late.set(true), 50);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={late() ? [{ v: 1 }, { v: 1 }] : [{ v: 1 }, { v: 3 }]}
+        y="v"
+        motion={{ update: { duration: 250 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <Arc endAngle={late() ? Math.PI : Math.PI / 2} innerRadius={30} outerRadius={50} cornerRadius={10} />
+        <Pie innerRadius={10} outerRadius={20} />
+      </Plot>
+      <Text>{late() ? "late" : "early"}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The end of the rim (the first arc of its radius `rim`) of each plot
+/// drawing that has one: a constant, or the slot the animator moves.
+fn rim_ends(batches: &[MountBatch], rim: f32) -> Vec<(u32, nsh_core::canvas::Num)> {
+    use nsh_core::canvas::{CanvasOp, Num, PathOp};
+    plot_drawings(batches)
+        .iter()
+        .filter_map(|(id, d)| {
+            d.ops.iter().find_map(|op| match op {
+                CanvasOp::Path(PathOp::Arc {
+                    x: Num::Const(50.0),
+                    radius: Num::Const(r),
+                    end,
+                    ..
+                }) if *r == rim => Some((*id, *end)),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// The value of slot `slot` of view `view`'s drawing at each of `times`
+/// (seconds; the animations start at the first), with every animation of
+/// `all`.
+fn slot_at(all: &[MountBatch], view: u32, slot: u16, times: &[f64]) -> Vec<f32> {
+    use nsh_core::animation::{AnimationValue, Animator};
+    let mut animator = Animator::default();
+    for item in all.iter().flat_map(|b| b.items.iter()) {
+        animator.apply(item);
+    }
+    times
+        .iter()
+        .map(|&t| {
+            animator.tick(t);
+            let mut out = f32::NAN;
+            animator.write(
+                |id| (id == view).then_some(id),
+                |_, _, args| {
+                    if let Some((_, AnimationValue::Number(n))) = args.iter().find(|a| a.0 == slot)
+                    {
+                        out = *n;
+                    }
+                },
+            );
+            out
+        })
+        .collect()
+}
+
+/// An arc's and a pie's angles changing (`motion.update`, d3's
+/// `arcTween`): the angles move, not the outline, from the old ones to the
+/// new over the update's timing, the arc's round corners with them; a
+/// pie's slices move to their new shares. With reduced motion the new
+/// angles show at once.
+#[test]
+fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
+    use std::f32::consts::FRAC_PI_2;
+
+    use nsh_core::{
+        animation::{AnimationOp, Driver},
+        canvas::Num,
+    };
+    let updates = |b: &MountBatch| {
+        b.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Animation(AnimationOp::Start {
+                    driver: Driver::Timing { duration_ms, .. },
+                    ..
+                }) if *duration_ms == 250.0
+            )
+        })
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    // The rounded arc's rim ends `a` before its end: from a quarter to a
+    // half from 12 o'clock (0 and `PI / 2` on the canvas, less `a`).
+    let a = (10.0f32 / 40.0).asin();
+
+    let (_engine, rx) = start(BASE_PLOT_ARC_TWEEN);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(all.iter().any(updates), "the angles move over the update");
+    let switched = all.iter().position(|b| shows(b, "late")).unwrap();
+    let arc = rim_ends(&all[switched..], 40.0 + 10.0);
+    let [(arc, Num::Slot(end))] = arc[..] else {
+        panic!("the arc's rim, its end animated: {arc:?}")
+    };
+    let ends = slot_at(&all, arc, end, &[1.0, 1.125, 1.3]);
+    assert!(near(ends[0], -a), "{ends:?}");
+    assert!(
+        ends[1] > -a + 0.1 && ends[1] < FRAC_PI_2 - a - 0.1,
+        "{ends:?}"
+    );
+    assert!(near(ends[2], FRAC_PI_2 - a), "{ends:?}");
+    // The pie's first slice: from a quarter (its rim ending at 3 o'clock,
+    // the canvas's 0) to a half (6 o'clock).
+    let slices = rim_ends(&all[switched..], 20.0);
+    let (first, Num::Slot(end)) = slices[0] else {
+        panic!("the first slice's rim, its end animated: {slices:?}")
+    };
+    let ends = slot_at(&all, first, end, &[1.0, 1.3]);
+    assert!(near(ends[0], 0.0) && near(ends[1], FRAC_PI_2), "{ends:?}");
+
+    // Reduced motion: the new angles at once.
+    let environment = Environment {
+        reduce_motion: true,
+        ..Environment::default()
+    };
+    let (_engine, rx) = start_in(BASE_PLOT_ARC_TWEEN, environment);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(!all.iter().any(updates));
+    let arc = rim_ends(&all, 50.0);
+    assert!(
+        matches!(arc[..], [(_, Num::Const(end))] if near(end, FRAC_PI_2 - a)),
+        "{arc:?}"
+    );
+    let slices = rim_ends(&all, 20.0);
+    assert!(
+        matches!(slices[0], (_, Num::Const(end)) if near(end, FRAC_PI_2)),
+        "{slices:?}"
+    );
+    // The second slice ends at 12 o'clock again.
+    assert!(
+        matches!(slices[1], (_, Num::Const(end)) if near(end, 3.0 * FRAC_PI_2)),
+        "{slices:?}"
+    );
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 

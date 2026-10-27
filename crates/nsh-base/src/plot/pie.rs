@@ -280,7 +280,8 @@ impl Shape {
 /// `progress` has gone (0 to 1, on the platform's animator). The appear
 /// sweeps the angles from the ring's start, each `start + (angle - start)
 /// * progress` (`gpui-component`'s pie, `chart/pie_chart.rs:318-334`);
-/// `motion.update` moves the radii from the app's last ones.
+/// `motion.update` moves the angles and the radii from the app's last
+/// ones (d3's `arcTween`).
 #[derive(Clone, Copy)]
 struct Motion {
     progress: AnimatedNode,
@@ -301,24 +302,17 @@ impl Motion {
     }
 
     /// How a mark of `to` moves now: it sweeps in while the plot appears,
-    /// else it moves from the radii of `morph` while that runs.
+    /// else it moves from `from` while its update runs.
     fn of(
         plot: PlotContext,
         to: Shape,
         start: f32,
-        morph: Option<(Ring, AnimatedValue)>,
+        from: Option<(Shape, AnimatedNode)>,
     ) -> Option<Self> {
         if plot.appearing.get() {
             return Some(Self::sweep(plot.appear.progress(), to, start));
         }
-        morph.map(|(from, t)| Motion {
-            progress: *t.node(),
-            from: Shape {
-                inner: from.inner,
-                outer: from.outer,
-                ..to
-            },
-        })
+        from.map(|(from, progress)| Motion { progress, from })
     }
 }
 
@@ -667,24 +661,35 @@ fn sector(
     Some(p.close_path())
 }
 
-/// A radial mark's move to new radii (`motion.update`): the radii it moves
-/// from, while it runs, and how far it has gone, on the platform's
-/// animator. The plot's size changing moves nothing: only the app's radii.
-#[derive(Clone, Copy)]
-struct Morph {
-    from: Signal<Option<(DefiniteLength, DefiniteLength)>>,
+/// A radial mark's move to a new shape (`motion.update`, d3's
+/// `arcTween`): the app's shape it moves from, while it runs, and how far
+/// it has gone, on the platform's animator. The angles and the radii move,
+/// not the outline, so a ring sweeps round to its new end and a donut's
+/// hole opens. A change while one runs moves on from the shape that one
+/// was moving to. The plot's size changing moves nothing: only the app's
+/// shape.
+struct Update<S> {
+    from: Signal<Option<S>>,
     progress: AnimatedValue,
 }
 
-impl Morph {
-    /// Follows `inner` and `outer`, moving to each new pair with the
-    /// plot's `motion.update` (at once without one or with reduced motion).
-    fn new(plot: PlotContext, inner: Prop<DefiniteLength>, outer: Prop<DefiniteLength>) -> Self {
+impl<S> Clone for Update<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Update<S> {}
+
+impl<S: Clone + PartialEq + 'static> Update<S> {
+    /// Follows `shape`, moving to each new one with the plot's
+    /// `motion.update` (at once without one or with reduced motion).
+    fn new(plot: PlotContext, shape: impl Fn() -> S + 'static) -> Self {
         let from = signal(None);
         let progress = animated_value(1.0);
-        let last = stored(None::<(DefiniteLength, DefiniteLength)>);
+        let last = stored(None::<S>);
         effect(move || {
-            let to = (inner.get(), outer.get());
+            let to = shape();
             let Some(before) = last.get() else {
                 last.replace(Some(to));
                 return;
@@ -708,14 +713,30 @@ impl Morph {
                 _ => from.set(None),
             }
         });
-        Morph { from, progress }
+        Update { from, progress }
     }
 
-    /// The ring it moves from in a plot of `size`, and how far, while it
-    /// runs.
-    fn ring(&self, size: Size<Points>) -> Option<(Ring, AnimatedValue)> {
-        let (inner, outer) = self.from.get()?;
-        Some((Ring::of(size, inner, outer), self.progress))
+    /// The shape it moves from, and how far it has gone, while it runs.
+    fn from(&self) -> Option<(S, AnimatedNode)> {
+        Some((self.from.get()?, *self.progress.node()))
+    }
+}
+
+/// Where slice `row` moves from among the slices before a change, `from`:
+/// its own angles, or, for a slice new to the pie, none at all where the
+/// slice before it ended (the pie's `start` for the first), so it opens
+/// as its neighbours make room.
+fn slice_from(from: &[Slice], row: u32, start: f32) -> (f32, f32) {
+    match from.iter().find(|s| s.index == row) {
+        Some(s) => (s.start, s.end),
+        None => {
+            let at = from
+                .iter()
+                .rev()
+                .find(|s| s.index < row)
+                .map_or(start, |s| s.end);
+            (at, at)
+        }
     }
 }
 
@@ -857,8 +878,10 @@ pub struct PieProps {
 /// and its tooltip follows the pointer; that slice grows by `hoverLift`
 /// and the others fade by `hoverDim`, on the platform's animator with the
 /// plot's motion. The ring sweeps in from its first slice with the plot's
-/// appear; `cornerRadius` rounds each slice's corners. Its values take no
-/// part in the plot's scales.
+/// appear, and when the values or the radii change each slice moves from
+/// its old angles to its new ones with the plot's `motion.update` (d3's
+/// `arcTween`); `cornerRadius` rounds each slice's corners. Its values
+/// take no part in the plot's scales.
 #[component]
 pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Pie");
@@ -879,7 +902,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         }
     });
     let ring = computed(move || Ring::of(plot.size.get(), inner.get(), outer.get()));
-    let morph = Morph::new(plot, inner, outer);
+    let update = Update::new(plot, move || (inner.get(), outer.get(), slices.get()));
     plot.add_hit(move |at| {
         let from = start.get_untracked().0.min(end.get_untracked().0);
         slices.with_untracked(|all| ring.get_untracked().slice_at(all, from, at))
@@ -938,7 +961,11 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 let ring = ring.get();
                 let lift = lifts.then(|| lifted.mul(&plot.fade).mul(lift.get().0));
                 let to = Shape::new(ring, slice.start, slice.end);
-                let motion = Motion::of(plot, to, start.get().0, morph.ring(plot.size.get()));
+                let from = update.from().map(|((inner, outer, before), t)| {
+                    let (a, b) = slice_from(&before, row, start.get().0);
+                    (Shape::new(Ring::of(plot.size.get(), inner, outer), a, b), t)
+                });
+                let motion = Motion::of(plot, to, start.get().0, from);
                 paint(p, |p| {
                     sector(
                         p,
@@ -1013,16 +1040,22 @@ pub struct ArcProps {
 /// track and its value, or a ring behind a pie. It fills with its `fill`
 /// (`fill-*`; `currentColor` where none is set) and strokes with its
 /// `stroke` (none where none is set), as CSS inherits them from the plot,
-/// and sweeps in from `startAngle` with the plot's appear; `cornerRadius`
-/// rounds its corners. It is a shape, not a row: the pointer over it finds
-/// nothing.
+/// and sweeps in from `startAngle` with the plot's appear; when its angles
+/// or radii change it moves to the new ones with the plot's
+/// `motion.update` (d3's `arcTween`), so a gauge sweeps round to its new
+/// value. `cornerRadius` rounds its corners. It is a shape, not a row: the
+/// pointer over it finds nothing.
 #[component]
 pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Arc");
     let (start, end, corner) = (props.start_angle, props.end_angle, props.corner_radius);
     let (inner, outer) = (props.inner_radius, props.outer_radius);
     let ring = move |plot: PlotContext| Ring::of(plot.size.get(), inner.get(), outer.get());
-    let morph = plot.map(|plot| Morph::new(plot, inner, outer));
+    let update = plot.map(|plot| {
+        Update::new(plot, move || {
+            (inner.get(), outer.get(), start.get(), end.get())
+        })
+    });
     mark_canvas(
         plot,
         move || match plot {
@@ -1034,8 +1067,15 @@ pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             let ring = ring(plot);
             let (start, end) = (start.get().0, end.get().0);
             let to = Shape::new(ring, start, end);
-            let morph = morph.and_then(|m| m.ring(plot.size.get()));
-            let motion = Motion::of(plot, to, start, morph);
+            let from = update
+                .and_then(|u| u.from())
+                .map(|((inner, outer, a, b), t)| {
+                    (
+                        Shape::new(Ring::of(plot.size.get(), inner, outer), a.0, b.0),
+                        t,
+                    )
+                });
+            let motion = Motion::of(plot, to, start, from);
             paint(p, |p| {
                 sector(p, ring.center, to, None, 0.0, corner.get().0, motion)
             })
