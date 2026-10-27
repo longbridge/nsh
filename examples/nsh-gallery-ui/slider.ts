@@ -20,10 +20,10 @@ export const sliderValueClass = "w-[42px] text-right font-mono text-[11px] leadi
 export const sliderValueStyle = (): TextStyle => ({ color: alpha(colors.text, 0.6) });
 
 /**
- * A `Slider`'s parts (spread them: `<Slider {...sliderLook()}>`): a 4-point
- * rail sunk into the surface and a round thumb on it, 12 points with a
- * pointer (a 16-point band around the rail takes presses), 18 on a touch
- * screen (a 32-point band). Under the pointer the thumb lightens, the
+ * A `Slider`'s parts (spread them: `<Slider {...sliderLook()}>`): a rail
+ * sunk into the surface and a round thumb on it: a 6-point rail and a
+ * 14-point thumb with a pointer (a 20-point band around the rail takes
+ * presses), 8 and 20 on a touch screen (a 32-point band). Under the pointer the thumb lightens, the
  * keyboard's focus rings the rail in the theme's `ring`, a disabled slider
  * fades to 35% (transitions still with reduced motion).
  *
@@ -36,17 +36,17 @@ export const sliderValueStyle = (): TextStyle => ({ color: alpha(colors.text, 0.
 export function sliderLook(o: SliderLookOptions = {}) {
   const vertical = !!o.vertical;
   const pointer = platform.idiom === "desktop";
-  const thumb = pointer ? 12 : 18;
+  const thumb = pointer ? 14 : 20;
   // The band keeps half a thumb free at each end, so the thumbs stay inside.
   const band = vertical
-    ? `${pointer ? "w-4" : "w-8"} ${pointer ? "h-32" : "h-36"} items-center ${pointer ? "py-1.5" : "py-[9px]"}`
-    : `${pointer ? "h-4" : "h-8"} justify-center ${pointer ? "px-1.5" : "px-[9px]"}`;
+    ? `${pointer ? "w-5" : "w-8"} ${pointer ? "h-32" : "h-36"} items-center ${pointer ? "py-[7px]" : "py-[10px]"}`
+    : `${pointer ? "h-5" : "h-8"} justify-center ${pointer ? "px-[7px]" : "px-[10px]"}`;
   const focus = "focus-within:ring-2 focus-within:ring-ring/50 focus-within:ring-offset-2 focus-within:ring-offset-card";
   const fade = "transition duration-150 motion-reduce:transition-none";
   return {
     class: o.value ? "flex-row items-center gap-2" : undefined,
     trackClass: `${band} ${o.value ? "flex-1" : ""} cursor-pointer ${fade} disabled:opacity-35 disabled:cursor-not-allowed`,
-    indicatorClass: `${vertical ? "w-1 h-full" : "h-1"} rounded-full ${focus}`,
+    indicatorClass: `${vertical ? (pointer ? "w-1.5" : "w-2") + " h-full" : pointer ? "h-1.5" : "h-2"} rounded-full ${focus}`,
     get indicatorStyle(): ViewStyle {
       return {
         backgroundColor: colors.track,

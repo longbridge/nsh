@@ -12,7 +12,7 @@ let app: App;
 beforeEach(async () => {
   // A mouse to hover with, and a manual clock for the stream's ticks.
   app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {} });
-  await app.press("role:button[Charts]");
+  await app.press("role:button[Plot]");
   await app.waitFor("Live price");
 });
 

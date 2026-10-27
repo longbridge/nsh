@@ -9,7 +9,7 @@ const LINKS = "Links open a menu under the caret: read the NSH documentation, ed
 
 async function openDemo() {
   const app = await open("../App.tsx");
-  await app.press("role:button[Rich Editor]");
+  await app.press("role:button[RichEditor]");
   await app.waitFor(ITEM);
   return app;
 }

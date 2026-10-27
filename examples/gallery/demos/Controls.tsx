@@ -201,12 +201,26 @@ const LANGUAGES = [
 
 const titleOf = (items: { value: string; title: string }[], value: string | null) => items.find((i) => i.value === value)?.title ?? "None";
 
+/** The controls, one demo each in the sidebar. */
+export type Control =
+  | "Switch"
+  | "Checkbox"
+  | "Radio"
+  | "Tabs"
+  | "Select"
+  | "Collapsible"
+  | "Progress"
+  | "Slider"
+  | "NumberInput"
+  | "OtpInput";
+
 /**
- * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup`,
- * `Tab` and `Tabs`, `Select`, `Collapsible` in the settings, filters,
- * pickers, section switchers, choices and disclosures apps use them for.
+ * One of `nsh/base`'s controls (`Switch`, `Checkbox`, `Radio` and
+ * `RadioGroup`, `Tab` and `Tabs`, `Select`, `Collapsible`, `Progress`, `Slider`) in
+ * the settings, filters, pickers, section switchers, choices and disclosures apps use
+ * it for, above the last event it reported.
  */
-export function Controls() {
+export function Controls(props: { show: Control }) {
   const last = signal("—");
 
   function Settings() {
@@ -694,7 +708,8 @@ export function Controls() {
           indeterminate={props.indeterminate}
           // The label row first: the children follow the track.
           style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
-          trackStyle={{ height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.raised }}
+          // The slider's rail and fill, so a level and a transfer read alike.
+          trackStyle={{ height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.track, boxShadow: `inset 0 0 0 1px ${finish.track.borderColor}, ${finish.track.boxShadow}` }}
           indicatorClass={
             !props.indeterminate
               ? undefined
@@ -702,7 +717,7 @@ export function Controls() {
                 ? "w-1/3 translate-x-full"
                 : `w-1/3 transition-transform duration-700 ease-in-out ${end() ? "translate-x-[200%]" : "translate-x-0"}`
           }
-          indicatorStyle={{ height: 6, borderRadius: 3, backgroundColor: toneColor("accent") }}
+          indicatorStyle={{ height: 6, borderRadius: 3, ...sliderFill(0, 1) }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Label label={props.label} detail={props.detail} />
@@ -987,5 +1002,17 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Choices, Disclosure, Transfers, Levels, Quantities, Verify, Last]} />;
+  const cards = { Switch: Settings, Checkbox: Filter, Radio: Plans, Tabs: Sections, Select: Choices, Collapsible: Disclosure, Progress: Transfers, Slider: Levels, NumberInput: Quantities, OtpInput: Verify };
+  return <DemoPage cards={[cards[props.show], Last]} />;
 }
+
+export const SwitchDemo = () => <Controls show="Switch" />;
+export const CheckboxDemo = () => <Controls show="Checkbox" />;
+export const RadioDemo = () => <Controls show="Radio" />;
+export const TabsDemo = () => <Controls show="Tabs" />;
+export const SelectDemo = () => <Controls show="Select" />;
+export const CollapsibleDemo = () => <Controls show="Collapsible" />;
+export const ProgressDemo = () => <Controls show="Progress" />;
+export const SliderDemo = () => <Controls show="Slider" />;
+export const NumberInputDemo = () => <Controls show="NumberInput" />;
+export const OtpInputDemo = () => <Controls show="OtpInput" />;

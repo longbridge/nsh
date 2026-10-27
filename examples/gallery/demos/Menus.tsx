@@ -1,24 +1,19 @@
-import { type JSX, Scroll, signal, Text, View } from "nsh";
+import { type JSX, Scroll, signal, Text, token, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, Tip } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, Tip } from "../ui";
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
-/** The popup on desktops, the sheet at the bottom on touch screens. */
+const pointer = platform.idiom === "desktop";
+
+/** The popup on desktops (the floating tier: one edge, a soft shadow, 4
+ * points around 26-point items), the sheet at the bottom on touch screens. */
 const surface = () =>
-  platform.idiom === "desktop"
-    ? {
-        backgroundColor: colors.raised,
-        borderRadius: radius.inset,
-        borderWidth: 1,
-        borderColor: colors.border,
-        padding: 6,
-        minWidth: 220,
-        ...finish.raised,
-      }
+  pointer
+    ? { borderRadius: 10, borderWidth: 1, padding: 4, minWidth: 200, ...finish.menu }
     : {
         backgroundColor: colors.surface,
         borderTopLeftRadius: 20,
@@ -30,16 +25,13 @@ const surface = () =>
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 
-/** An item under the pointer, and pressed: the website's current item, a
- * citrus tint with a hairline of it (`global.css` `.sidebar-item.active`). */
-const hovered = () =>
-  isDark()
-    ? { backgroundColor: "rgba(200,242,109,0.08)", borderColor: "rgba(200,242,109,0.22)" }
-    : { backgroundColor: "rgba(124,170,20,0.10)", borderColor: "rgba(124,170,20,0.26)" };
-const pressed = () =>
-  isDark()
-    ? { backgroundColor: "rgba(200,242,109,0.14)", borderColor: "rgba(200,242,109,0.32)" }
-    : { backgroundColor: "rgba(124,170,20,0.16)", borderColor: "rgba(124,170,20,0.36)" };
+/** An item under the pointer or the keyboard, and pressed: a flat neutral
+ * fill, the theme's `accent`, a shade deeper when pressed. */
+const hovered = () => ({ backgroundColor: token("accent") });
+const pressed = () => ({ backgroundColor: alpha(colors.text, 0.1) });
+
+/** An item's height, corners and type. */
+const item = pointer ? { height: 26, radius: 6, font: 13, note: 11.5 } : { height: 46, radius: 10, font: 16, note: 14 };
 
 /** One row of a menu: a mark (a check, a dot, an icon), the label, a note (a shortcut, a value). */
 function Item(props: {
@@ -52,7 +44,6 @@ function Item(props: {
   danger?: boolean;
   keepOpen?: boolean;
 }) {
-  const height = platform.idiom === "desktop" ? 32 : 46;
   return (
     <MenuItem
       onSelect={props.onSelect}
@@ -61,11 +52,11 @@ function Item(props: {
       hoverStyle={hovered()}
       activeStyle={pressed()}
       disabledStyle={{ opacity: 0.35 }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, height: item.height, paddingHorizontal: 8, borderRadius: item.radius }}
     >
-      <Text style={{ flex: 1, fontSize: 14, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
+      <Text style={{ flex: 1, fontSize: item.font, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
       <If when={props.shortcut ?? props.note}>
-        <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.shortcut ?? props.note}</Text>
+        <Text style={{ fontSize: item.note, color: colors.faint }}>{props.shortcut ?? props.note}</Text>
       </If>
       {/* The check or the dot at the trailing edge. */}
       <If when={props.mark !== undefined}>
@@ -84,7 +75,6 @@ function Item(props: {
 
 /** The row that opens a submenu, and the row a sheet shows to come back. */
 function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boolean }) {
-  const height = platform.idiom === "desktop" ? 32 : 46;
   return (
     <Submenu
       disabled={props.disabled}
@@ -92,16 +82,16 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
         <View
           hoverStyle={hovered()}
           activeStyle={pressed()}
-          style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent", opacity: props.disabled ? 0.35 : 1 }}
+          style={{ flexDirection: "row", alignItems: "center", height: item.height, paddingHorizontal: 8, borderRadius: item.radius, opacity: props.disabled ? 0.35 : 1 }}
         >
-          <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
-          <Icon name="chevron" size={14} tint={colors.faint} />
+          <Text style={{ flex: 1, fontSize: item.font, color: colors.text }}>{props.label}</Text>
+          <Icon name="chevron" size={pointer ? 12 : 14} tint={colors.faint} />
         </View>
       }
       back={
-        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}>
+        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: item.height, paddingHorizontal: 8, borderRadius: item.radius }}>
           <Icon name="back" size={14} tint={colors.accent} />
-          <Text style={{ fontSize: 14, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
+          <Text style={{ fontSize: item.font, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
         </View>
       }
     >
@@ -113,28 +103,46 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
 /** A group's title: not an item, nothing to press. */
 function Label(props: { text: string }) {
   return (
-    <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4 }}>
-      {props.text.toUpperCase()}
+    <Text style={{ fontSize: pointer ? 11 : 13, fontWeight: "600", color: colors.faint, paddingHorizontal: 8, paddingTop: 6, paddingBottom: 2 }}>
+      {props.text}
     </Text>
   );
 }
 
 function Separator() {
-  return <MenuSeparator style={{ height: 1, marginVertical: 4, marginHorizontal: 4, backgroundColor: colors.line }} />;
+  // A groove: a hairline with a lip of light under it.
+  return (
+    <MenuSeparator
+      style={{ height: 1, marginTop: 4, marginBottom: 5, marginHorizontal: 4, backgroundColor: colors.line, boxShadow: `0 1px 0 ${isDark() ? "rgba(255,255,255,0.05)" : "#ffffff"}` }}
+    />
+  );
 }
 
-/** A chip that opens a menu. */
-function Chip(props: { label: string; icon?: "plus" | "search" | "star" }) {
+/** What opens a menu: a quiet menu bar title (`bar`), else a raised button. */
+function Chip(props: { label: string; icon?: "plus" | "search" | "star"; bar?: boolean }) {
   return (
     <View
-      activeStyle={{ backgroundColor: colors.border }}
-      hoverStyle={{ backgroundColor: colors.border }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: 12, height: 34, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.raised, ...finish.raised }}
+      hoverStyle={props.bar ? { backgroundColor: alpha(colors.text, 0.06) } : finish.hover}
+      activeStyle={props.bar ? { backgroundColor: alpha(colors.text, 0.1) } : finish.pressed}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        alignSelf: "flex-start",
+        height: pointer ? 28 : 36,
+        paddingHorizontal: props.bar ? 10 : pointer ? 10 : 14,
+        borderRadius: pointer ? 7 : 10,
+        borderWidth: 1,
+        ...(props.bar ? { borderColor: "transparent" } : { backgroundColor: colors.raised, ...finish.raised }),
+        transitionProperty: "background-color, border-color, box-shadow",
+        transitionDuration: 120,
+      }}
     >
       <If when={props.icon}>
-        <Icon name={props.icon!} size={14} tint={colors.muted} />
+        <Icon name={props.icon!} size={pointer ? 13 : 14} tint={colors.muted} />
       </If>
-      <Text style={{ fontSize: 14, fontWeight: "500", color: colors.text }}>{props.label}</Text>
+      <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text }}>{props.label}</Text>
     </View>
   );
 }
@@ -197,8 +205,8 @@ export function Menus() {
     const key = (k: string) => (platform.idiom === "desktop" ? keymap.label(k) : undefined);
     return (
       <Card icon="lists" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip label="File" />}>
+        <View style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip bar label="File" />}>
             <Item label="New document" shortcut={key("mod+alt+n")} onSelect={() => act("New document")} />
             <Item label="New window" onSelect={() => act("New window")} />
             <SubmenuOf label="Open recent">
@@ -222,7 +230,7 @@ export function Menus() {
             <Separator />
             <Item label="Delete document" danger onSelect={() => act("Delete document")} />
           </Menu>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Edit")} trigger={<Chip label="Edit" />}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Edit")} trigger={<Chip bar label="Edit" />}>
             <Item label={history().length ? `Undo ${history().at(-1)}` : "Undo"} shortcut={key("mod+alt+z")} disabled={history().length === 0} onSelect={undo} />
             <Item label={undone().length ? `Redo ${undone().at(-1)}` : "Redo"} shortcut={key("mod+alt+shift+z")} disabled={undone().length === 0} onSelect={redo} />
             <Separator />
@@ -231,7 +239,7 @@ export function Menus() {
             <Item label="Copy" onSelect={() => act("Copy")} />
             <Item label="Paste" onSelect={() => act("Paste")} />
           </Menu>
-          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("View")} trigger={<Chip label="View" />}>
+          <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("View")} trigger={<Chip bar label="View" />}>
             <Label text="Show" />
             <Item label="Sidebar" mark={sidebar() ? "check" : null} keepOpen onSelect={() => sidebar.set(!sidebar())} />
             <Item label="Status bar" mark={statusBar() ? "check" : null} keepOpen onSelect={() => statusBar.set(!statusBar())} />

@@ -47,7 +47,23 @@ export type IconName =
   | "replace"
   | "replace-all"
   | "diagnostics"
-  | "close";
+  | "close"
+  | "checkbox"
+  | "radio"
+  | "switch"
+  | "tabs"
+  | "collapsible"
+  | "progress"
+  | "chart"
+  | "layers"
+  | "document"
+  | "richtext"
+  | "diff"
+  | "table"
+  | "menu"
+  | "dock"
+  | "header"
+  | "terminal";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -70,6 +86,90 @@ const circle = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, f
 };
 
 const glyphs: Record<IconName, Draw> = {
+  checkbox: (c) => {
+    rect(c, 3.5, 3.5, 13, 13, 3);
+    line(c, [6.5, 10, 9, 12.5, 13.5, 7.5]);
+  },
+  radio: (c) => {
+    circle(c, 10, 10, 6.5);
+    circle(c, 10, 10, 2.4, true);
+  },
+  switch: (c) => {
+    rect(c, 2.5, 6, 15, 8, 4);
+    circle(c, 13.5, 10, 2.2, true);
+  },
+  tabs: (c) => {
+    rect(c, 2.5, 5, 15, 11, 2.5);
+    line(c, [2.5, 9, 17.5, 9]);
+    line(c, [8, 5, 8, 9]);
+  },
+  collapsible: (c) => {
+    line(c, [4, 5, 16, 5]);
+    line(c, [6, 9, 10, 13, 14, 9]);
+    line(c, [4, 16, 16, 16]);
+  },
+  progress: (c) => {
+    rect(c, 2.5, 8, 15, 4, 2);
+    line(c, [4.5, 10, 10.5, 10]);
+  },
+  chart: (c) => {
+    line(c, [3, 3, 3, 17, 17, 17]);
+    line(c, [6, 13, 9, 9, 12, 11, 16, 5]);
+  },
+  layers: (c) => {
+    line(c, [10, 3, 17, 7, 10, 11, 3, 7, 10, 3]);
+    line(c, [3, 10.5, 10, 14.5, 17, 10.5]);
+    line(c, [3, 14, 10, 18, 17, 14]);
+  },
+  document: (c) => {
+    rect(c, 4.5, 2.5, 11, 15, 2.5);
+    line(c, [7.5, 7, 12.5, 7]);
+    line(c, [7.5, 10, 12.5, 10]);
+    line(c, [7.5, 13, 10.5, 13]);
+  },
+  richtext: (c) => {
+    line(c, [4, 5, 4, 4, 12, 4, 12, 5]);
+    line(c, [8, 4, 8, 15]);
+    line(c, [6.5, 15, 9.5, 15]);
+    line(c, [13, 11, 17, 11]);
+    line(c, [13, 15, 17, 15]);
+  },
+  diff: (c) => {
+    line(c, [6, 3, 6, 9]);
+    line(c, [3, 6, 9, 6]);
+    line(c, [3, 15, 9, 15]);
+    line(c, [12, 3, 12, 17]);
+    line(c, [14, 7, 17, 7]);
+    line(c, [14, 13, 17, 13]);
+  },
+  table: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [2.5, 8, 17.5, 8]);
+    line(c, [2.5, 12.5, 17.5, 12.5]);
+    line(c, [8, 3.5, 8, 16.5]);
+  },
+  menu: (c) => {
+    rect(c, 3.5, 2.5, 13, 15, 2.5);
+    line(c, [6.5, 6.5, 13.5, 6.5]);
+    line(c, [6.5, 10, 13.5, 10]);
+    line(c, [6.5, 13.5, 11, 13.5]);
+  },
+  dock: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [7.5, 3.5, 7.5, 16.5]);
+    line(c, [7.5, 11, 17.5, 11]);
+  },
+  header: (c) => {
+    rect(c, 3.5, 2.5, 13, 15, 2.5);
+    line(c, [3.5, 7, 16.5, 7]);
+    line(c, [10, 10, 10, 15]);
+    line(c, [8, 13, 10, 15, 12, 13]);
+  },
+  terminal: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [6, 8, 8.5, 10, 6, 12]);
+    line(c, [10.5, 13, 14, 13]);
+  },
   photos: (c) => {
     rect(c, 3, 4, 14, 12, 3);
     line(c, [3, 13, 8, 9, 12, 12, 14, 10, 17, 13]);

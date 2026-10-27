@@ -126,10 +126,60 @@ export function IconTile(props: { name: IconName; tint?: string; size?: number }
   );
 }
 
+/** A pointer and a keyboard: the compact sizes of desktops. */
+const pointer = platform.idiom === "desktop";
+
 /**
- * A card: an optional icon, a title and a subtitle, something on the right
- * (a badge, an action), then the content on an inset surface (or bare with
- * `flush`).
+ * The page's density: compact with a pointer (desktops), roomier on a touch
+ * screen. Section titles, surfaces, rows and their padding take these, so a
+ * demo's sections read the same on every page.
+ */
+export const density = pointer
+  ? { title: 13, note: 12, body: 13, row: 36, pad: 14, gap: 12, surface: 10 }
+  : { title: 13, note: 13, body: 15, row: 48, pad: 16, gap: 12, surface: 16 };
+
+/**
+ * A section's title and what it shows, above its surface: 13 pt semibold on
+ * a desktop, 15 on a touch screen, `right` at the trailing
+ * edge (a badge, an action).
+ */
+function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX.Element }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: pointer ? 2 : 4 }}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text
+          style={
+            pointer
+              ? { fontSize: density.title, fontWeight: "600", color: colors.text }
+              : { fontSize: 15, fontWeight: "600", color: colors.text }
+          }
+        >
+          {props.title}
+        </Text>
+        <If when={props.subtitle}>
+          <Text style={{ fontSize: density.note, color: colors.muted }}>{props.subtitle}</Text>
+        </If>
+      </View>
+      {props.right}
+    </View>
+  );
+}
+
+/** The flat surface a section's content sits on: one hairline edge, no shadow. */
+const surface = (): ViewStyle => ({
+  backgroundColor: colors.surface,
+  borderRadius: density.surface,
+  borderCurve: "continuous",
+  borderWidth: 1,
+  borderColor: colors.border,
+  overflow: "hidden",
+});
+
+/**
+ * A section of a demo: its title and subtitle above, then one flat surface
+ * holding the content, padded (or bare with `flush`, for rows and stages that
+ * reach its edges). `icon` names what it shows for callers that list it; the
+ * section itself draws none.
  */
 export function Card(props: {
   icon?: IconName;
@@ -141,70 +191,34 @@ export function Card(props: {
   children: JSX.Element;
 }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
-    >
+    <View style={[{ gap: 8 }, props.style ?? null]}>
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
-          <If when={props.icon}>
-            <IconTile name={props.icon!} />
-          </If>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
-            <If when={props.subtitle}>
-              <Text style={{ numberOfLines: 2, fontSize: 13, color: colors.muted }}>
-                {props.subtitle}
-              </Text>
-            </If>
-          </View>
-          {props.right}
-        </View>
+        <SectionHead title={props.title!} subtitle={props.subtitle} right={props.right} />
       </If>
-      <If when={!props.flush} else={props.children}>
-        <Inset>{props.children}</Inset>
-      </If>
+      <View style={surface()}>
+        <If when={!props.flush} else={props.children}>
+          <Inset>{props.children}</Inset>
+        </If>
+      </View>
     </View>
   );
 }
 
-/** The darker surface inside a card. */
+/**
+ * A section's content area: padded and spaced, on the surface it sits on
+ * (no surface of its own, so sections never nest boxes).
+ */
 export function Inset(props: { gap?: number; padding?: number; children: JSX.Element }) {
-  return (
-    <View
-      style={{
-        backgroundColor: colors.inset,
-        borderRadius: radius.inset,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: colors.line,
-        ...finish.inset,
-        padding: props.padding ?? 14,
-        gap: props.gap ?? 12,
-      }}
-    >
-      {props.children}
-    </View>
-  );
+  return <View style={{ padding: props.padding ?? density.pad, gap: props.gap ?? density.gap }}>{props.children}</View>;
 }
 
 /** A caption row: a label on the left, a quieter note on the right. */
 export function Caption(props: { label: JSX.Element; note?: JSX.Element }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-      <Text style={{ flex: 1, fontSize: 14, color: colors.muted }}>{props.label}</Text>
+      <Text style={{ flex: 1, fontSize: density.body, color: colors.muted }}>{props.label}</Text>
       <If when={props.note}>
-        <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
+        <Text style={{ fontSize: density.note, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
       </If>
     </View>
   );
@@ -280,7 +294,7 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
       onPress={props.onPress}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
-        minHeight: 48,
+        minHeight: density.row,
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
@@ -294,9 +308,6 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 }
 
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
-
-/** A pointer and a keyboard: the compact sizes of desktops. */
-const pointer = platform.idiom === "desktop";
 
 /**
  * A button: 28 pt tall on a desktop, 40 on a touch screen (`small`: 36).
@@ -397,31 +408,18 @@ export function RoundButton(props: {
   );
 }
 
-/** A titled card of controls (the demos' sections). */
+/** A titled section of controls (the demos' sections): `Card`'s look, `note` at its trailing edge. */
 export function Section(props: { title: string; note?: string; style?: ViewStyle; children: JSX.Element }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
+    <Card
+      title={props.title}
+      right={
+        props.note ? <Text style={{ fontSize: density.note, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text> : undefined
+      }
+      style={props.style}
     >
-      <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
-        <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
-        <If when={props.note}>
-          <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
-        </If>
-      </View>
-      <Inset>{props.children}</Inset>
-    </View>
+      {props.children}
+    </Card>
   );
 }
 
