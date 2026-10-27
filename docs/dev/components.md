@@ -201,7 +201,9 @@ reasons: `reactive-components.md`.
     the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
     returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
     the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
-    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). Until its holder
+    when a view places a key twice, skipping those in list cells their lists freed: a cell whose row went still reads
+    the row now at its old index until the list binds it again, so it may place the key of a row that moved to another
+    cell, which keeps showing it; none placed: it waits out of the tree for the `Unrender`). Until its holder
     arrives a placeholder is empty, so a list cell holding one is not measured (`Core::cells_awaiting_renders`): its
     row keeps its estimate (or its last size) and stays in the window, and is measured in the commit the holder
     comes in; measured empty, a list in a view sized by its content would shrink that view's viewport to nothing

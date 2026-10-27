@@ -14869,7 +14869,8 @@ mod renders {
     }
 
     /// A popup's list: a scroll view as long as its rows (up to 300 pt),
-    /// the rows in its viewport, each drawn by the app's function.
+    /// the rows in its viewport, each drawn by the app's function, keyed by
+    /// their items' keys.
     #[derive(Clone, PartialEq, Props)]
     struct PickerProps {
         #[prop(default)]
@@ -14891,6 +14892,7 @@ mod renders {
                         }))
                     },
                 )
+                .keys(move || items.with(|i| i.iter().map(|i| split(i).0).collect::<Vec<_>>()))
                 .viewport(ListViewport::Parent),
             ),
         )
@@ -14986,6 +14988,82 @@ mod renders {
             let frame = frame_of(&batch, holder).expect("the holder is laid out");
             assert_eq!(frame.size.height.0, 16.0);
         }
+    }
+
+    #[test]
+    fn a_row_drawn_by_js_stays_in_its_cell_when_rows_before_it_go() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Picker>();
+        c.set_components(registry);
+        let fruits = [
+            "a:Apple", "b:Banana", "c:Cherry", "d:Date", "e:Elder", "f:Fig",
+        ];
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Picker>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::RustProp(
+                        "renderItem",
+                        Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                            "renderItem",
+                            2,
+                        )))),
+                    ),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: rust_prop::<PickerProps>("items", Some(json!(fruits))),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c).len(), 6);
+        for (i, fruit) in fruits.iter().enumerate() {
+            let (key, label) = split(fruit);
+            apply(&mut c, holder(10 * (i as NodeId + 1), &key, &label));
+        }
+        c.commit().unwrap();
+        let (elder, fig) = (parent_of(&c, 50).unwrap(), parent_of(&c, 60).unwrap());
+
+        // A filter keeps the last two: their cells move up to rows 0 and 1.
+        // The freed cells of Apple and Banana read the rows now at their
+        // old indices, Elder and Fig, and place them too; the rows' own
+        // cells keep showing them.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: rust_prop::<PickerProps>("items", Some(json!(["e:Elder", "f:Fig"]))),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            (parent_of(&c, 50), parent_of(&c, 60)),
+            (Some(elder), Some(fig)),
+            "{:?}",
+            batch.items
+        );
+        let mut renders = asked(&mut c);
+        renders.sort();
+        assert_eq!(
+            renders,
+            ["$unrender a", "$unrender b", "$unrender c", "$unrender d"]
+        );
     }
 
     /// A Rust view passing a closure: rendered on the spot.

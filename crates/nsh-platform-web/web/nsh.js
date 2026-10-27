@@ -419,6 +419,46 @@ function swapClass(el, slot, name) {
   el[slot] = name;
 }
 
+/** Fills a run with `text`, the characters of links (`parts`: `[from, to,
+ * link]`, UTF-16) in spans inside it that name their link (`links`):
+ * inline, they keep the run's shaping and bidi order. */
+function fillRun(run, text, parts, links) {
+  if (!parts) {
+    run.textContent = text;
+    return;
+  }
+  let at = 0;
+  for (const [from, to, link] of parts) {
+    if (from > at) run.append(text.slice(at, from));
+    const span = document.createElement("span");
+    span.textContent = text.slice(from, to);
+    span._link = links[link];
+    run.append(span);
+    at = to;
+  }
+  if (at < text.length) run.append(text.slice(at));
+}
+
+/** The text node and offset of character `offset` of a run. */
+function runPoint(run, offset) {
+  const walker = document.createTreeWalker(run, NodeFilter.SHOW_TEXT);
+  let node = null;
+  for (let next = walker.nextNode(); next; next = walker.nextNode()) {
+    node = next;
+    if (offset <= node.length) return [node, offset];
+    offset -= node.length;
+  }
+  return node ? [node, node.length] : [run, 0];
+}
+
+/** The offset in a run of a boundary (`container`, `offset`) inside it. */
+function runOffset(run, container, offset) {
+  const range = document.createRange();
+  range.setStart(run, 0);
+  range.setEnd(container, offset);
+  return range.toString().length;
+}
+
 let players = 0;
 
 /** How many players imported each wasm-bindgen glue, by URL. */
@@ -910,14 +950,13 @@ class Player {
         const el = this.views.get(query.id);
         if (!el?.isConnected) return null;
         for (const run of el.querySelectorAll(":scope > .nsh-run")) {
-          const node = run.firstChild;
-          if (!node || run._start == null) continue;
+          if (run._start == null) continue;
           const from = Math.max(query.start - run._start, 0);
-          const to = Math.min(query.end - run._start, node.length);
+          const to = Math.min(query.end - run._start, run.textContent.length);
           if (from >= to) continue;
           const range = document.createRange();
-          range.setStart(node, from);
-          range.setEnd(node, to);
+          range.setStart(...runPoint(run, from));
+          range.setEnd(...runPoint(run, to));
           const r = range.getBoundingClientRect();
           return [r.left, r.top, r.width, r.height];
         }
@@ -1722,15 +1761,14 @@ class Player {
     }
     // Nested texts that take presses: `[node, events]`, which runs name.
     const spans = (links ?? []).map(([node, events]) => ({ node, events: new Set(events) }));
-    for (const [x, y, text, style, start, link, after] of runs) {
+    for (const [x, y, text, style, start, parts, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
       span.className = name ? `nsh-run ${name}` : "nsh-run";
       span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
-      span.textContent = text;
+      fillRun(span, text, parts, spans);
       // Where its characters are in the text (UTF-16, as JS strings).
       span._start = start;
-      if (link != null) span._link = spans[link];
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
@@ -4957,11 +4995,11 @@ class Player {
     for (const run of this.root.querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
       if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
-      const node = run.firstChild;
-      if (!node) continue;
-      const text = node.data;
-      const from = range.startContainer === node ? range.startOffset : 0;
-      const to = range.endContainer === node ? range.endOffset : text.length;
+      // A link's characters are in a span inside the run.
+      const text = run.textContent;
+      if (!text) continue;
+      const from = run.contains(range.startContainer) ? runOffset(run, range.startContainer, range.startOffset) : 0;
+      const to = run.contains(range.endContainer) ? runOffset(run, range.endContainer, range.endOffset) : text.length;
       if (from >= to) continue;
       found = true;
       const area = this.areaOf(run.parentNode);
@@ -5319,7 +5357,7 @@ class Player {
    * link's node, its events, placed as the text (as on the other
    * platforms, a link's press reports positions in its text). */
   linkPress(target, view) {
-    const link = target?.closest?.(".nsh-run")?._link;
+    const link = target?._link;
     if (!link || !PRESS_EVENTS.some((n) => link.events.has(n))) return null;
     return {
       _id: link.node,

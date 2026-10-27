@@ -1250,6 +1250,14 @@ impl ListState {
         self.dirty = true;
     }
 
+    /// Whether cell `cell` is a slot's the list freed: bound to no item, it
+    /// still holds what it showed last until the list binds it again.
+    pub(super) fn frees(&self, cell: u32) -> bool {
+        self.slots
+            .iter()
+            .any(|s| s.cell == cell && s.index.is_none())
+    }
+
     pub(super) fn remove_cell(&mut self, cell: u32) {
         for slot in &mut self.slots {
             if slot.cell == cell {

@@ -60,7 +60,7 @@ crate，不含 QuickJS；站点里没有 `app.nshc` 和 `harden.nshc`；运行�
 同一个应用像 TSX 应用一样运行在 QuickJS 上，并导入 crate 的组件和模块。
 
 两种方式下，crate 的资源（`assets!()`）都会随应用的资源一起发布，其中的字体在第一帧之前加载。`nsh run --target web`
-期间，修改 crate 的 Rust 代码会重新构建运行时，已打开的页面会自动加载新的运行时；TSX 的修改仍然是热更新。
+期间，修改 crate 的 Rust 代码会重新构建运行时，已打开的页面会自动加载新的运行时；TSX 的修改仍然是热更新。开发运行时以增量方式构建，修改 crate 后约一秒即可就绪；`nsh package` 构建的发布版运行时则针对体积进行优化。
 
 要在包括 Web 在内的所有平台上运行的 Rust 代码，使用引擎提供的服务：`fetch(url).await` 通过与 JS `fetch` 相同的网络栈发出 HTTP
 请求（这里是浏览器的网络栈，遵循它的 CORS 规则）；`timer`、`set_timeout` 和 `set_interval` 用于等待；`nsh_core::time::Instant`
