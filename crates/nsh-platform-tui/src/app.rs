@@ -339,14 +339,29 @@ impl AppView {
                 let Some(engine) = &self.surface.engine else {
                     return Handled::Ignored;
                 };
-                let handled = self.pointer.handle(
-                    mouse,
-                    self.area,
-                    self.options.cells,
-                    &self.hits,
-                    &mut self.tree,
-                    &engine.control(),
-                );
+                let handled = if matches!(mouse.kind, crate::MouseKind::Wheel { .. }) {
+                    let handled = self.keyboard.wheel(
+                        mouse,
+                        self.area,
+                        self.options.cells,
+                        &self.hits,
+                        &mut self.tree,
+                        &self.geometry,
+                    );
+                    if handled == Handled::Yes {
+                        self.pointer.cancel(Some(&engine.control()));
+                    }
+                    handled
+                } else {
+                    self.pointer.handle(
+                        mouse,
+                        self.area,
+                        self.options.cells,
+                        &self.hits,
+                        &mut self.tree,
+                        &engine.control(),
+                    )
+                };
                 if handled == Handled::Yes {
                     self.surface.wake.notify();
                 }

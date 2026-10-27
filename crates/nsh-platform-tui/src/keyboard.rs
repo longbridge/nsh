@@ -31,6 +31,7 @@ struct ModalFocus {
 #[derive(Clone, Copy)]
 enum FocusPosition {
     Nearest,
+    RetainVisible,
     First,
     Last,
 }
@@ -314,15 +315,26 @@ impl Keyboard {
         else {
             return;
         };
+        if matches!(request.position, FocusPosition::RetainVisible)
+            && self
+                .focused
+                .is_some_and(|id| geometry.iter().any(|g| g.id == id && !g.visible.is_empty()))
+        {
+            return;
+        }
         let candidates: Vec<_> = self
             .candidates(tree, geometry)
             .into_iter()
-            .filter(|g| contains(tree, request.scroll, g.id) && !g.visible.is_empty())
+            .filter(|g| {
+                !g.visible.is_empty()
+                    && (matches!(request.position, FocusPosition::RetainVisible)
+                        || contains(tree, request.scroll, g.id))
+            })
             .collect();
         let next = match request.position {
             FocusPosition::First => candidates.first().copied(),
             FocusPosition::Last => candidates.last().copied(),
-            FocusPosition::Nearest => {
+            FocusPosition::Nearest | FocusPosition::RetainVisible => {
                 let anchor = Point::new(
                     viewport.bounds.left + request.anchor.x,
                     viewport.bounds.top + request.anchor.y,
@@ -330,7 +342,9 @@ impl Keyboard {
                 candidates.iter().copied().min_by_key(|g| {
                     let dx = (i32::from(g.visible.x) - anchor.x).unsigned_abs();
                     let dy = (i32::from(g.visible.y) - anchor.y).unsigned_abs();
-                    if scroll.horizontal {
+                    if matches!(request.position, FocusPosition::RetainVisible) {
+                        (dx.saturating_add(dy), dy)
+                    } else if scroll.horizontal {
                         (dx, dy)
                     } else {
                         (dy, dx)
@@ -343,6 +357,96 @@ impl Keyboard {
         if next.is_none() {
             self.pending_scroll_focus = Some(request);
         }
+    }
+
+    pub(crate) fn wheel(
+        &mut self,
+        mouse: crate::MouseInput,
+        area: ratatui_core::layout::Rect,
+        cells: crate::CellSize,
+        hits: &[crate::render::Hit],
+        tree: &mut Mounter,
+        geometry: &[Geometry],
+    ) -> Handled {
+        let crate::MouseKind::Wheel { x, y } = mouse.kind else {
+            return Handled::Ignored;
+        };
+        let position = Position::new(mouse.column, mouse.row);
+        if !area.contains(position) {
+            return Handled::Ignored;
+        }
+        let scope = crate::navigation::focus_scope(tree);
+        let unused = if scope == ROOT_ID {
+            Handled::Ignored
+        } else {
+            Handled::Yes
+        };
+        let Some(hit) = hits
+            .iter()
+            .rev()
+            .find(|hit| hit.area.contains(position) && contains(tree, scope, hit.node))
+        else {
+            return unused;
+        };
+        let (mut x, mut y) = (f32::from(x), f32::from(y));
+        if mouse.modifiers.shift {
+            x += y;
+            y = 0.0;
+        }
+        let delta = Point::new(cells.width() * x, cells.height() * y);
+        let mut views = Vec::new();
+        let mut id = hit.node;
+        while let Some(view) = tree.get(id) {
+            if view.scroll.is_some() {
+                views.push(id);
+            }
+            if id == scope {
+                break;
+            }
+            let Some(parent) = view.parent else {
+                break;
+            };
+            id = parent;
+        }
+        let target = nsh_core::input::scroll_target(
+            views,
+            delta.x,
+            delta.y,
+            |id| {
+                tree.get(*id)
+                    .and_then(|v| v.scroll.as_ref())
+                    .map(|s| s.horizontal)
+            },
+            |id| {
+                tree.get(*id).is_some_and(|v| {
+                    v.scroll
+                        .as_ref()
+                        .is_some_and(|s| s.can_scroll(v.frame.size, delta))
+                })
+            },
+        );
+        let Some(id) = target else {
+            return unused;
+        };
+        let scroll = tree.get(id).unwrap().scroll.as_ref().unwrap();
+        let to = if scroll.horizontal {
+            let direction = if scroll.mirrored && x != 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            scroll.x + cells.width() * if x != 0.0 { x * direction } else { y }
+        } else {
+            scroll.y + delta.y
+        };
+        if self
+            .focused
+            .is_some_and(|focused| contains(tree, id, focused))
+        {
+            self.queue_scroll_focus(geometry, id, FocusPosition::RetainVisible);
+        }
+        move_scroll(tree, id, to);
+        Handled::Yes
     }
 
     pub(crate) fn cursor(&self, tree: &Mounter, geometry: &[Geometry]) -> Option<Position> {

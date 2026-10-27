@@ -265,7 +265,18 @@ innermost first. Paging and endpoint keys act on the nearest Scroll around focus
 is none. Paging moves focus to the visible control nearest its old relative row in the viewport (relative column
 for horizontal scrolling); Home/End choose the first/last visible control after moving to the endpoint. Selection
 uses the next completed frame's geometry, and Enter never presses an off-screen control. These user-driven
-offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations remain separate work.
+offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment it.
+
+Each wheel step moves one Cell along the chosen axis. Shift sends vertical wheel steps horizontally. The core's
+`input::scroll_target` selects the innermost Scroll under the pointer that can move; at an edge the same-axis
+parent can take the event. This search stays inside the newest modal. A vertical wheel uses a horizontal view
+only when no surrounding Scroll takes the vertical axis. Disabled scroll views do not take the wheel.
+
+Wheel scrolling keeps the current keyboard focus while any of its Cells remain visible. If it leaves sight,
+focus moves to the nearest visible focusable view in the current focus scope, measured from its previous Cell
+position. A wheel event with no keyboard focus creates none. Focus selection uses the completed scrolled frame,
+so the next activation cannot target content that has left the viewport. Indicators, sticky cells, gestures and
+scrolling animations remain separate work.
 
 ## The terminal Key scheme
 

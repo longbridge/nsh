@@ -37,7 +37,7 @@ pub enum MouseKind {
     /// Motion, including motion with a button held.
     #[default]
     Move,
-    /// Wheel steps, positive right and down.
+    /// Wheel steps, positive right and down; one step moves one Cell on the selected axis.
     Wheel {
         /// Horizontal steps.
         x: i16,
