@@ -1145,6 +1145,37 @@ mod tests {
         assert!(blue_at(0.05) && blue_at(0.95), "{stops:?}");
     }
 
+    /// A hatch's copies stay in order over any box: a copy's first stop,
+    /// shifted by whole periods, rounds a hair before the one ending the
+    /// copy before it on most line lengths, and CoreGraphics draws stops
+    /// out of order as a smeared band.
+    #[test]
+    fn repeating_stops_stay_in_order() {
+        let (red, clear) = (Color(0xff00_004d), Color::TRANSPARENT);
+        let stop = |color, at: f32| ColorStop {
+            color,
+            position: Some(DefiniteLength::from(px(at))),
+        };
+        let hatch = Gradient {
+            kind: GradientKind::Linear { angle: deg(-45.0) },
+            stops: vec![
+                stop(red, 0.0),
+                stop(red, 1.0),
+                stop(clear, 1.0),
+                stop(clear, 6.0),
+            ],
+            repeating: true,
+        };
+        for width in 100..400 {
+            let box_size = size(px(width as f32 * 0.75), px(140.0));
+            let stops = hatch.unrolled_stops(box_size, percentage(1.0));
+            assert!(
+                stops.windows(2).all(|w| w[0].1 <= w[1].1),
+                "{width}: {stops:?}"
+            );
+        }
+    }
+
     /// Stops that do not repeat come out as resolved: a gradient that is
     /// not repeating (stops past the end too), and one whose period
     /// vanishes; a period of 1pt along a long line still repeats.
