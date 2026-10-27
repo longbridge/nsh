@@ -219,6 +219,50 @@ impl Painter<'_> {
                     }
                 }
             }
+            let outline = view.style.outline;
+            if outline.is_visible() {
+                let outset = outline.offset + outline.width;
+                let outline_bounds = CellBounds::new(
+                    Bounds::new(
+                        origin - Point::new(outset, outset),
+                        nsh_core::Size::new(
+                            view.frame.size.width + outset * 2.0,
+                            view.frame.size.height + outset * 2.0,
+                        ),
+                    ),
+                    self.cells,
+                    self.area,
+                );
+                let outline_area = outline_bounds.clipped(clip);
+                let mut sides = Borders::NONE;
+                if outline_bounds.top == i32::from(outline_area.y) {
+                    sides |= Borders::TOP;
+                }
+                if outline_bounds.bottom == i32::from(outline_area.bottom()) {
+                    sides |= Borders::BOTTOM;
+                }
+                if outline_bounds.left == i32::from(outline_area.x) {
+                    sides |= Borders::LEFT;
+                }
+                if outline_bounds.right == i32::from(outline_area.right()) {
+                    sides |= Borders::RIGHT;
+                }
+                Block::default()
+                    .borders(sides)
+                    .render(outline_area, self.buffer);
+                for y in outline_area.y..outline_area.bottom() {
+                    for x in outline_area.x..outline_area.right() {
+                        if (y == outline_area.y && sides.contains(Borders::TOP))
+                            || (y + 1 == outline_area.bottom() && sides.contains(Borders::BOTTOM))
+                            || (x == outline_area.x && sides.contains(Borders::LEFT))
+                            || (x + 1 == outline_area.right() && sides.contains(Borders::RIGHT))
+                        {
+                            let cell = &mut self.buffer[(x, y)];
+                            cell.set_fg(blend(outline.color, opacity, cell.bg));
+                        }
+                    }
+                }
+            }
             if let Some((layout, content)) = &view.text
                 && let Some(layout) = layout.downcast::<CellLayout>()
             {
