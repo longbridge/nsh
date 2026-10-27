@@ -79,9 +79,12 @@ storage, network routes, clipboard, environment pins and manual clocks use the s
 The private `TuiNative` posts requests to the view and wakes it. Rendering applies complete batches, draws, then
 services requests; a screenshot serializes that completed buffer. Input requests call `AppView::handle`, exactly
 as the host's terminal input does. Pointer coordinates convert from content-relative points to absolute Cells,
-including the embedding area's origin. Bounds follow rounded parent origins, scrolling, clipping and concealed
-screens. The agent drives press/release, motion, wheel events, individual keys and bracketed paste. Scroll
-requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
+including the embedding area's origin. `Native::bounds` uses the renderer's unclipped Cell geometry, including
+rounded parent origins, transforms and scroll offsets. Mounted controls outside a Scroll keep their bounds,
+including negative coordinates above its viewport, so the shared agent can scroll them into view before pressing.
+Concealed or hidden views have no rendered geometry. Pointer input still uses clipped hit regions, and text-span
+bounds describe visible characters. The agent drives press/release, motion, wheel events, individual keys and
+bracketed paste. Scroll requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
 is the platform's current input implementation: this adapter does not emulate missing input features. Richer pointer/scroll behavior and system dialogs are supplied by their respective platform tickets.
 Fields use the same editor for real keys, synthetic keys and bracketed paste.
 `setViewport` currently returns an error; select the initial viewport with `open(entry, { width, height })`.

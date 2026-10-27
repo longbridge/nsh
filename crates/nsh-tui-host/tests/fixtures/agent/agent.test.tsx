@@ -24,3 +24,15 @@ test("terminal screenshots capture styled Cells after real pointer input", async
 test("terminal startup reports app errors through the test agent", async () => {
   await expect(() => open("./error.tsx")).rejects.toThrow("terminal startup failure");
 });
+
+test("terminal mouse presses reveal mounted controls below and above the scroll viewport", async () => {
+  const app = await open("./Scroll.tsx", { width: 320, height: 160 });
+  const picture = JSON.parse(new TextDecoder().decode(new Uint8Array(await app.screenshot())));
+  const shown = picture.rows.map((row: { symbol: string }[]) => row.map(cell => cell.symbol).join("")).join("\n");
+  expect(app.texts()).toContain("Team");
+  expect(shown.includes("Team")).toBe(false);
+  await app.press("Team");
+  await app.waitFor("Pressed: Team");
+  await app.press("Start");
+  await app.waitFor("Pressed: Start");
+});
