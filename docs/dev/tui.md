@@ -512,7 +512,9 @@ counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapsho
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry imports the
 unchanged `examples/tui-gallery` Form and checks invalid fields and successful account creation.
-The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
+The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
+during and after the search. The host's unit checks cover crossterm conversion; its two ignored lifecycle checks
+require a real terminal.
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui
@@ -522,6 +524,7 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1
 cargo test -p nsh-tui-host --lib terminal::tests::panic_restores_raw_mode -- --ignored --nocapture --test-threads=1
