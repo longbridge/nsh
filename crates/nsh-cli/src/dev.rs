@@ -22,21 +22,6 @@ use crate::{build, logger, ui};
 
 /// File events arriving within this window are coalesced into one rebuild.
 const DEBOUNCE: Duration = Duration::from_millis(30);
-/// Ports tried after the requested one when it is taken.
-const PORT_ATTEMPTS: u16 = 10;
-
-/// The dev server's port: the one asked for (`--port`) and whether only that
-/// one will do (`--strict-port`, `NSH_STRICT_PORT`).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Port {
-    /// The port asked for.
-    pub(crate) number: u16,
-    /// Fail when it is taken instead of trying the next ones: something
-    /// else expects the server on it (a process manager that health-checks
-    /// it, a proxy). The server keeps its port for the whole session: a
-    /// change to the app's Rust code rebuilds in the same process.
-    pub(crate) strict: bool,
-}
 
 /// A running dev server plus the source watcher feeding it.
 pub(crate) struct DevSession {
@@ -63,7 +48,7 @@ impl DevSession {
     /// would (`--limits`), or with none, as an app on its own.
     pub(crate) fn start(
         entry: &Path,
-        port: Port,
+        port: u16,
         release: bool,
         limits: Option<nsh_core::js::HostLimits>,
     ) -> anyhow::Result<DevSession> {
@@ -435,36 +420,27 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
     ]
 }
 
-/// Starts the dev server on `port`, else (unless it is strict) on one of the
-/// [`PORT_ATTEMPTS`] after it.
-fn start_server(
-    port: Port,
-    assets_root: &Path,
-    devices: Arc<Devices>,
-) -> anyhow::Result<DevServer> {
-    let attempts = if port.strict { 1 } else { PORT_ATTEMPTS };
-    let mut last_err = None;
-    for number in port.number..port.number.saturating_add(attempts) {
-        let addr = SocketAddr::from(([0, 0, 0, 0], number));
-        let root = Some(assets_root.to_path_buf());
-        let devices = devices.clone();
-        match DevServer::start(addr, nsh_js::BYTECODE_VERSION, root, move |event| {
-            devices.on_event(event)
-        }) {
-            Ok(server) => return Ok(server),
-            Err(err) => last_err = Some(err),
-        }
+fn start_server(port: u16, assets_root: &Path, devices: Arc<Devices>) -> anyhow::Result<DevServer> {
+    if ui::stop_requested() {
+        anyhow::bail!("development session is stopping");
     }
-    let err = last_err.expect("at least one attempt");
-    if port.strict && err.kind() == std::io::ErrorKind::AddrInUse {
-        return Err(err).with_context(|| {
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    DevServer::start(
+        addr,
+        nsh_js::BYTECODE_VERSION,
+        Some(assets_root.to_path_buf()),
+        move |event| devices.on_event(event),
+    )
+    .map_err(|error| {
+        let message = if error.kind() == std::io::ErrorKind::AddrInUse {
             format!(
-                "start dev server: port {} is taken (--strict-port): stop what uses it or choose another --port",
-                port.number
+                "start dev server: port {port} is taken; stop what uses it or choose another --port"
             )
-        });
-    }
-    Err(err).context("start dev server")
+        } else {
+            format!("start dev server on port {port}")
+        };
+        anyhow::Error::new(error).context(message)
+    })
 }
 
 fn is_source(event: &notify::Event) -> bool {
@@ -586,65 +562,34 @@ fn lan_ips() -> Vec<Ipv4Addr> {
 
 #[cfg(test)]
 mod tests {
-    /// Takes a free port, as another program would: the dev server's own
-    /// address (all interfaces).
-    fn taken_port() -> std::net::TcpListener {
-        // Low enough that the ports tried after it exist.
-        loop {
-            let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
-            if listener.local_addr().unwrap().port() < u16::MAX - super::PORT_ATTEMPTS {
-                return listener;
-            }
-        }
-    }
-
     #[test]
-    fn strict_port_fails_naming_the_port_that_is_taken() {
-        let taken = taken_port();
-        let number = taken.local_addr().unwrap().port();
-        let port = super::Port {
-            number,
-            strict: true,
-        };
-        let dir = std::env::temp_dir();
-        let error = match super::start_server(port, &dir, Default::default()) {
-            Ok(server) => panic!("started on {}", server.local_addr()),
-            Err(error) => format!("{error:#}"),
-        };
-        assert!(
-            error.contains(&format!("port {number} is taken")),
-            "{error}"
+    fn occupied_port_fails_without_moving_or_stopping_the_listener() {
+        let taken = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
+        let port = taken.local_addr().unwrap().port();
+        let error = super::start_server(port, &std::env::temp_dir(), Default::default())
+            .err()
+            .expect("must not move to another port");
+        assert!(error.to_string().contains(&format!("port {port}")));
+        assert_eq!(
+            error
+                .root_cause()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::AddrInUse
         );
-        assert!(error.contains("--strict-port"), "{error}");
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
     }
 
     #[test]
-    fn strict_port_off_moves_on_to_the_next_free_port() {
-        let taken = taken_port();
-        let number = taken.local_addr().unwrap().port();
-        let port = super::Port {
-            number,
-            strict: false,
-        };
+    fn zero_allocates_a_port_and_an_explicit_port_is_kept() {
         let dir = std::env::temp_dir();
+        let server = super::start_server(0, &dir, Default::default()).unwrap();
+        let port = server.local_addr().port();
+        assert_ne!(port, 0);
+        drop(server);
         let server = super::start_server(port, &dir, Default::default()).unwrap();
-        let used = server.local_addr().port();
-        assert!(
-            used > number && used < number + super::PORT_ATTEMPTS,
-            "{used}"
-        );
-    }
-
-    #[test]
-    fn strict_port_on_a_free_port_uses_it() {
-        let free = taken_port().local_addr().unwrap().port();
-        let port = super::Port {
-            number: free,
-            strict: true,
-        };
-        let dir = std::env::temp_dir();
-        let server = super::start_server(port, &dir, Default::default()).unwrap();
-        assert_eq!(server.local_addr().port(), free);
+        assert_eq!(server.local_addr().port(), port);
     }
 
     #[test]

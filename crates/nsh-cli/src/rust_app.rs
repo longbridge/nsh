@@ -840,7 +840,17 @@ impl RustApp {
                 }
             })?;
         self.watch_with(&mut watcher)?;
-        for event in &rx {
+        loop {
+            if ui::stop_requested() {
+                return Ok(());
+            }
+            let event = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(event) => event,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    bail!("stopped watching the app's Rust code");
+                }
+            };
             // Reads (inotify reports them) change nothing.
             if !matches!(event.kind, notify::EventKind::Access(_))
                 && event.paths.iter().any(|p| self.is_rust(p))
@@ -851,7 +861,6 @@ impl RustApp {
                 return Ok(());
             }
         }
-        bail!("stopped watching the app's Rust code")
     }
 
     /// What the steps say they build: `the Rust crate charts`, `the Rust

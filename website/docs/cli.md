@@ -95,7 +95,7 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 |---|---|---|
 | `--target <TARGET>` | `macos` on macOS, `linux` on Linux, `windows` on Windows | `catalyst`: the Mac Catalyst host, an iPhone-sized window (390×844). `ios`: the host in an iOS simulator. `android`: the host on an Android device or emulator. `macos`: the AppKit host, a 1200×800 window ([macOS](./macos.md)). `linux`: the GTK host, a 390×844 window ([Linux](./linux.md)). `windows`: the Win32 host, a 1200×800 window ([Windows](./windows.md)). `gpui`: the GPUI host, a 1200×800 window, on macOS, Windows or Linux, showing a TSX app as GPUI apps that embed it show it ([GPUI](./gpui.md)). `web`: the dev server's page, at the address it prints ([Web](./web.md#develop-in-the-browser)). |
 | `--device <DEVICE>` | | iOS simulator to use, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
-| `--port <PORT>` | `8790` | Dev server port. If it is taken, the next free one is used. |
+| `--port <PORT>` | `8790` | Dev server port. Replaces the previous NSH development session on this port after its cleanup completes. |
 | `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. |
 | `--limits [<LIMITS>]` | | Runs the app as an app embedded in another one, within the limits its host app sets: `memory` and `stack` (in `KB`, `MB` or `GB`), `load` and `call` (in `ms` or `s`) and `nodes`, such as `--limits memory=128MB,call=500ms`. The ones left out keep the embedding defaults, which `--limits` alone runs with ([Sandbox and capabilities](./sandbox-and-capabilities.md#limits)). Without it the app runs on its own, as a packaged app does. TSX entries. |
 | `--trace` | | The host logs the timing of every commit (JS, layout, mount items) to the terminal. |
@@ -105,6 +105,8 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 | `--display <N>` | The main display | The display the window opens on, centered: `1` is the primary display (the one with the menu bar), `2` the next, and so on; a number with no display opens it on the main one (`--target macos`, TSX entries). |
 
 With `--target android`, the first device `adb devices` lists is used; the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
+
+A replacement waits up to ten seconds for the previous session to finish cleanup. A port occupied by another program, or an older NSH CLI, produces an error naming the port. Use distinct `--port` values to run several apps together; `--port 0` asks the OS for a free port.
 
 ## nsh dev
 

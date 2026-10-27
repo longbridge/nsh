@@ -9,6 +9,7 @@ mod build;
 mod cdp;
 mod check;
 mod dev;
+mod dev_port;
 mod entry;
 mod init;
 mod logger;
@@ -208,19 +209,9 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken, unless
-        /// `--strict-port`).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
-        /// Fail when the port is taken instead of using the next free one:
-        /// for a port something else expects the server on (a process
-        /// manager that health-checks it, a proxy).
-        #[arg(
-            long,
-            env = "NSH_STRICT_PORT",
-            value_parser = clap::builder::BoolishValueParser::new()
-        )]
-        strict_port: bool,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -254,19 +245,9 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken, unless
-        /// `--strict-port`).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
-        /// Fail when the port is taken instead of using the next free one:
-        /// for a port something else expects the server on (a process
-        /// manager that health-checks it, a proxy).
-        #[arg(
-            long,
-            env = "NSH_STRICT_PORT",
-            value_parser = clap::builder::BoolishValueParser::new()
-        )]
-        strict_port: bool,
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
@@ -542,6 +523,12 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         // keeps TypeScript tests (a `tsconfig.json` for them).
         types &= check::has_typescript(entry);
     }
+    // Own the port across builds and restarts, until every host and forwarding
+    // rule from this command has been cleaned up.
+    let _port = match &command {
+        Command::Run { port, .. } | Command::Dev { port, .. } => dev_port::Session::acquire(*port)?,
+        _ => None,
+    };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
     // tested, run and packaged.
     let rust_command = matches!(
@@ -597,6 +584,9 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     }
     let mut restarted = false;
     loop {
+        if ui::stop_requested() {
+            return Ok(());
+        }
         match app.describe() {
             Ok(sets) => set_app_sets(sets),
             // Its build failed and waited for the next change already.
@@ -669,7 +659,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Dev {
             entry,
             port,
-            strict_port,
             release,
             limits,
             target,
@@ -677,10 +666,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             server_only,
         } => {
             no_limits_for_rust(&entry, limits)?;
-            let port = dev::Port {
-                number: port,
-                strict: strict_port,
-            };
             if server_only {
                 let session = dev::DevSession::start(&entry, port, release, limits)?;
                 session.print_urls();
@@ -744,7 +729,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Run {
             entry,
             port,
-            strict_port,
             release,
             limits,
             trace,
@@ -758,10 +742,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             no_limits_for_rust(&entry, limits)?;
             run::run(
                 &entry,
-                dev::Port {
-                    number: port,
-                    strict: strict_port,
-                },
+                port,
                 release,
                 run::HostFlags { limits, trace, fps },
                 target,
@@ -916,54 +897,5 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use clap::{CommandFactory as _, Parser as _};
-
-    use super::{Cli, Command};
-
-    #[test]
-    fn strict_port_is_a_flag_of_run_and_dev_and_their_environment() {
-        let strict = |args: &[&str]| match Cli::try_parse_from(args).unwrap().command {
-            Command::Run { strict_port, .. } | Command::Dev { strict_port, .. } => strict_port,
-            _ => unreachable!(),
-        };
-        assert!(strict(&["nsh", "run", "--strict-port", "--target", "web"]));
-        assert!(strict(&["nsh", "dev", "app", "--strict-port"]));
-        let cli = Cli::command();
-        for name in ["run", "dev"] {
-            let command = cli.find_subcommand(name).unwrap();
-            let arg = command
-                .get_arguments()
-                .find(|a| a.get_id() == "strict_port")
-                .unwrap();
-            assert_eq!(arg.get_long(), Some("strict-port"), "{name}");
-            assert_eq!(
-                arg.get_env().and_then(|e| e.to_str()),
-                Some("NSH_STRICT_PORT"),
-                "{name}"
-            );
-            // The variable takes what `NSH_VERBOSE` takes: `1` / `0` as
-            // well as `true` / `false` (clap's default takes only those).
-            let values: Vec<_> = arg
-                .get_possible_values()
-                .iter()
-                .map(|v| v.get_name().to_owned())
-                .collect();
-            for value in ["1", "0", "true", "false"] {
-                assert!(
-                    values.iter().any(|v| v == value),
-                    "{name}: NSH_STRICT_PORT={value}"
-                );
-            }
-        }
-        // Off unless asked for (or NSH_STRICT_PORT is set, which the test
-        // environment does not do).
-        if std::env::var_os("NSH_STRICT_PORT").is_none() {
-            assert!(!strict(&["nsh", "run"]));
-        }
     }
 }
