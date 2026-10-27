@@ -897,7 +897,10 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> Tick {
             s.live.spin = ((now / 1000.0) as f32 * 2.0 * PI) % (2.0 * PI);
             overlays = true;
         }
-        (what_is_left(&s.live.phase, resampling, fading, spinning), overlays)
+        (
+            what_is_left(&s.live.phase, resampling, fading, spinning),
+            overlays,
+        )
     };
     if overlays {
         update_overlays(view);
@@ -2073,7 +2076,10 @@ mod tests {
             what_is_left(&Phase::AwaitMomentum { since: 0.0 }, false, true, false),
             Tick::Busy
         );
-        assert_eq!(what_is_left(&Phase::Momentum, false, true, false), Tick::Fading);
+        assert_eq!(
+            what_is_left(&Phase::Momentum, false, true, false),
+            Tick::Fading
+        );
     }
 
     #[test]
