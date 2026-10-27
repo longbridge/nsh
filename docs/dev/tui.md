@@ -262,8 +262,10 @@ applies the core's anchoring delta without clamping it. After applying pending b
 changed scroll view's final offset and applied-command count to the engine, which delivers scroll events and
 updates its view of the content. Keyboard movement reveals the focused control in its surrounding Scroll,
 innermost first. Paging and endpoint keys act on the nearest Scroll around focus, or the page's Scroll when there
-is none. These user-driven offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment
-it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations remain separate work.
+is none. Paging moves focus to the visible control nearest its old relative row in the viewport (relative column
+for horizontal scrolling); Home/End choose the first/last visible control after moving to the endpoint. Selection
+uses the next completed frame's geometry, and Enter never presses an off-screen control. These user-driven
+offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations remain separate work.
 
 ## The terminal Key scheme
 

@@ -120,3 +120,62 @@ fn returning_to_a_screen_does_not_restore_an_invisible_control() {
     key(&mut view, "Tab", false);
     draw_until(&mut view, &mut terminal, &rx, "focus A");
 }
+
+#[component]
+fn PagingFocus() -> impl IntoElement {
+    let focused = signal(-1);
+    let offset = signal(0);
+    let pressed = signal(-1);
+    view()
+        .flex_1()
+        .child(
+            text(move || {
+                format!(
+                    "focus {} offset {} pressed {}",
+                    focused.get(),
+                    offset.get(),
+                    pressed.get()
+                )
+            })
+            .h(px(16.0)),
+        )
+        .child(
+            scroll()
+                .w(px(160.0))
+                .h(px(48.0))
+                .on_scroll(move |event: &ScrollEvent| offset.set(event.offset.y.0 as i32))
+                .children((0..12).map(|index| {
+                    view()
+                        .h(px(16.0))
+                        .flex_shrink_0()
+                        .on_focus(move |_: &()| focused.set(index))
+                        .on_press(move |_: &()| pressed.set(index))
+                        .child(text(format!("row {index}")))
+                })),
+        )
+}
+
+#[test]
+fn paging_keeps_the_relative_focus_row_and_endpoints_choose_first_and_last() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<PagingFocus>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus -1 offset 0");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "focus 0 offset 0");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 0");
+    for (name, ctrl, expected) in [
+        ("PageDown", false, "focus 4 offset 48"),
+        ("Home", false, "focus 0 offset 0"),
+        ("End", false, "focus 11 offset 144"),
+        ("PageUp", false, "focus 8 offset 96"),
+        ("v", true, "focus 11 offset 144"),
+    ] {
+        key(&mut view, name, ctrl);
+        draw_until(&mut view, &mut terminal, &rx, expected);
+    }
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "pressed 11");
+}
