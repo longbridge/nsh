@@ -1508,9 +1508,18 @@ impl Mounter {
             (Command::Blur, Native::Input(input)) => {
                 input.editor_view().resignFirstResponder();
             }
-            // On the root: whatever is focused.
+            // On the root: whatever is focused, also in the modals this
+            // surface presents (UIKit hosts them outside the root view). Not
+            // the window's: that is the embedding app's too.
             (Command::Blur, native) if id == nsh_core::ROOT_ID => {
                 native.view().endEditing(true);
+                for slot in self.views.iter().flatten() {
+                    if let Native::Modal(modal) = &slot.native
+                        && modal.presented
+                    {
+                        modal.view.endEditing(true);
+                    }
+                }
             }
             (Command::ScrollTo { x, y, animated }, Native::Scroll(scroll)) => {
                 let inset = scroll.adjustedContentInset();
