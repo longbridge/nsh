@@ -170,7 +170,7 @@ const height = signal(40);
 <Input
   multiline
   onContentSizeChange={(e) => height.set(Math.min(120, Math.max(40, e.height + 16)))}
-  style={{ height: height(), paddingInline: 12, paddingBlock: 8 }}
+  style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
 />;
 ```
 

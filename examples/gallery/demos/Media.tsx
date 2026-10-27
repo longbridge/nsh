@@ -86,7 +86,7 @@ function Site() {
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          paddingInline: 14,
+          paddingHorizontal: 14,
           borderRadius: 20,
           backgroundColor: colors.inset,
           ...finish.track,

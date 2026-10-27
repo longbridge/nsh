@@ -63,7 +63,7 @@ function Inline() {
         {"Made with "}
         <Image src={logo} style={{ width: 18, height: 18, borderRadius: 5 }} />
         {" nsh. Status "}
-        <View style={{ backgroundColor: tints.up, borderRadius: 9, paddingInline: 8, height: 18, flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <View style={{ backgroundColor: tints.up, borderRadius: 9, paddingHorizontal: 8, height: 18, flexDirection: "row", alignItems: "center", gap: 4 }}>
           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.up }} />
           <Text style={{ color: colors.up, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 }}>LIVE</Text>
         </View>
@@ -74,7 +74,7 @@ function Inline() {
               backgroundColor: colors.raised,
               ...finish.raised,
               borderRadius: 11,
-              paddingInline: 9,
+              paddingHorizontal: 9,
               height: 22,
               justifyContent: "center",
               borderWidth: 1,
@@ -132,7 +132,7 @@ function Fonts() {
           <View
             style={{
               height: 48,
-              paddingInline: 14,
+              paddingHorizontal: 14,
               justifyContent: "center",
               borderRadius: radius.control,
               borderCurve: "continuous",

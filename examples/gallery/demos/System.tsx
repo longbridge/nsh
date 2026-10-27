@@ -129,7 +129,7 @@ function ActionRow(props: { first?: boolean; icon: IconName; tint: string; title
     <Press onPress={props.onPress} scale={0.98} accessibilityLabel={props.title}>
       <Row first={props.first}>
         <IconTile name={props.icon} tint={props.tint} size={34} />
-        <View style={{ flex: 1, gap: 1, paddingBlock: 8 }}>
+        <View style={{ flex: 1, gap: 1, paddingVertical: 8 }}>
           <Text style={{ fontSize: 15, color: colors.text }}>{props.title}</Text>
           <Text style={{ fontSize: 12, color: colors.muted }}>{props.detail}</Text>
         </View>
@@ -213,7 +213,7 @@ function Dialogs() {
         />
         <ActionRow icon="spark" tint={colors.warn} title="Toast" detail="nsh/base, every platform" onPress={() => void toast({ title: "Hello from a toast", description: "nsh/base's ToastManager, styled by the gallery" })} />
       </Inset>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 11, paddingTop: 12, paddingBottom: 11, minHeight: 44 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 11, paddingTop: 12, paddingBottom: 11, minHeight: 44 }}>
         <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>Answer</Text>
         <If when={answer()} else={<Text style={{ fontSize: 13, color: colors.faint }}>None yet</Text>}>
           <View style={{ scale: pop }}>

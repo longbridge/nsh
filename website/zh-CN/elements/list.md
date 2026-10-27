@@ -43,7 +43,7 @@ function App() {
   return (
     <List each={contacts} estimatedItemSize={56} style={{ flex: 1 }}>
       {(contact, index) => (
-        <View style={{ height: 56, paddingInline: 16, justifyContent: "center" }}>
+        <View style={{ height: 56, paddingHorizontal: 16, justifyContent: "center" }}>
           <Text style={{ fontSize: 16 }}>
             {index() + 1}. {contact().name}
           </Text>
@@ -93,7 +93,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `inverted` | `.inverted()` | `boolean` | `false` | 从末端开始布局，第 0 项在最后（聊天样式）：初始滚动到末端，内容变化时保持与末端的距离。 |
 | `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | 用于非倒序列表：位于内容末端或距末端不超过该点数时，内容增长或视口缩小时列表保持在末端；向上滚得更远时，可见内容保持不动。 |
 | `stickyHeaderIndices` | `.sticky_header_indices([..])` | `number[]` | | 滚动经过时吸附在起始端的条目（单列、非倒序）。 |
-| `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)`、`.row_gap(..)`、`.column_gap(..)` 等 | `ListContentStyle` | | 内容的内边距和间距（点）：`padding`、`paddingInline`、`paddingBlock`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`。 |
+| `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)`、`.row_gap(..)`、`.column_gap(..)` 等 | `ListContentStyle` | | 内容的内边距和间距（点）：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`。 |
 | `contentClass` | | `string` | | 以类名（`p-*`、`gap-*`）给出的内容内边距和间距；`contentStyle` 优先。 |
 | `header` | `.header(el)` | `ListSlot` | | 条目之前的内容：一个组件（`Header`）或一个元素（`<Header />`）。 |
 | `footer` | `.footer(el)` | `ListSlot` | | 条目之后的内容。 |

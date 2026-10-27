@@ -53,7 +53,7 @@ function App() {
         onLongPress={() => count.set(0)}
         activeStyle={{ opacity: 0.6 }}
         role="button"
-        style={{ paddingInline: 20, paddingBlock: 12, borderRadius: 10, backgroundColor: "#0969da" }}
+        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "#ffffff", fontWeight: "600" }}>Pressed {count()} times</Text>
       </View>

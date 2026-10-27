@@ -31,13 +31,13 @@ function App() {
       <Frame id="padding" style={{ padding: 10 }}>
         <View testID="padding-a" style={{ height: 20 }} />
       </Frame>
-      <Frame id="padding-axes" style={{ paddingInline: 20, paddingBlock: 5 }}>
+      <Frame id="padding-axes" style={{ paddingHorizontal: 20, paddingVertical: 5 }}>
         <View testID="padding-axes-a" style={{ height: 20 }} />
       </Frame>
       <Frame id="padding-sides" style={{ paddingLeft: 7, paddingRight: 9, paddingBottom: 30, justifyContent: "flex-end" }}>
         <View testID="padding-sides-a" style={{ height: 20 }} />
       </Frame>
-      <Frame id="padding-override" style={{ padding: 10, paddingInline: 2, paddingLeft: 6 }}>
+      <Frame id="padding-override" style={{ padding: 10, paddingHorizontal: 2, paddingLeft: 6 }}>
         <View testID="padding-override-a" style={{ height: 20 }} />
       </Frame>
       <Frame id="padding-percent" style={{ padding: "10%" }}>
@@ -54,7 +54,7 @@ function App() {
         <View testID="margin-a" style={{ height: 20, margin: 10 }} />
       </Frame>
       <Frame id="margin-axes">
-        <View testID="margin-axes-a" style={{ height: 20, marginInline: 20, marginBlock: 6 }} />
+        <View testID="margin-axes-a" style={{ height: 20, marginHorizontal: 20, marginVertical: 6 }} />
       </Frame>
       <Frame id="margin-sides" style={{ flexDirection: "row" }}>
         <Box id="margin-sides-a" style={{ marginRight: 15 }} />
@@ -65,18 +65,18 @@ function App() {
         <Box id="margin-bottom-b" />
       </Frame>
       <Frame id="margin-override">
-        <View testID="margin-override-a" style={{ height: 20, margin: 10, marginInline: 4, marginRight: 30 }} />
+        <View testID="margin-override-a" style={{ height: 20, margin: 10, marginHorizontal: 4, marginRight: 30 }} />
       </Frame>
       <Frame id="margin-percent">
         <Box id="margin-percent-a" style={{ margin: "5%" }} />
       </Frame>
       <Frame id="margin-auto">
-        <Box id="margin-auto-a" style={{ marginInline: "auto" }} />
+        <Box id="margin-auto-a" style={{ marginHorizontal: "auto" }} />
         <Box id="margin-auto-b" style={{ margin: "auto" }} />
       </Frame>
       <Frame id="margin-negative" style={{ flexDirection: "row" }}>
         <Box id="margin-negative-a" />
-        <Box id="margin-negative-b" style={{ marginLeft: -20, marginBlock: -5 }} />
+        <Box id="margin-negative-b" style={{ marginLeft: -20, marginVertical: -5 }} />
       </Frame>
       {/* minimum and maximum sizes */}
       <Frame id="min" style={{ alignItems: "flex-start" }}>

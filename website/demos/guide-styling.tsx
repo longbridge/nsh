@@ -56,7 +56,7 @@ function App() {
               onPress={() => picked.set(picked() === i() ? -1 : i())}
               style={[
                 desktop
-                  ? { height: size.control + 6, justifyContent: "center", paddingInline: 14, borderRadius: 8, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" }
+                  ? { height: size.control + 6, justifyContent: "center", paddingHorizontal: 14, borderRadius: 8, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" }
                   : { flex: 1, padding: 12, borderRadius: 10, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" },
                 picked() === i() && styles().selected,
               ]}

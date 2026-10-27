@@ -113,7 +113,7 @@ function Inbox() {
                 hoverStyle={selected() === id() ? undefined : hoverFill()}
                 style={{
                   height: size.row + 12,
-                  paddingInline: 12,
+                  paddingHorizontal: 12,
                   borderRadius: 8,
                   justifyContent: "center",
                   gap: 2,

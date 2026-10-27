@@ -119,7 +119,7 @@ view()
 | `fixed` | `position: "fixed"`：元素在其根视图（窗口或所在模态框）的范围内布局，位于该根视图的子元素之上，周围内容滚动时保持不动 |
 | `inset-<n>`、`inset-x-<n>`、`inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`、`right-<n>`、`bottom-<n>`、`left-<n>` | 对应的偏移 |
-| `start-<n>`、`end-<n>` | `insetInlineStart` / `insetInlineEnd`（随书写方向） |
+| `start-<n>`、`end-<n>` | `start` / `end`（随书写方向） |
 | `z-<n>`、`z-auto`、`z-[<n>]` | `zIndex`（`z-auto` 为 0） |
 | `visible` | `visibility: "visible"` |
 | `invisible`、`collapse` | `visibility: "hidden"`（保留空间） |
@@ -171,12 +171,12 @@ view()
 
 | Class | 设置 |
 |---|---|
-| `p-<n>`、`px-<n>`、`py-<n>` | `padding`、`paddingInline`、`paddingBlock` |
+| `p-<n>`、`px-<n>`、`py-<n>` | `padding`、`paddingHorizontal`、`paddingVertical` |
 | `pt-<n>`、`pr-<n>`、`pb-<n>`、`pl-<n>` | `paddingTop` / `Right` / `Bottom` / `Left` |
-| `ps-<n>`、`pe-<n>` | `paddingInlineStart`、`paddingInlineEnd`（随书写方向） |
-| `m-<n>`、`mx-<n>`、`my-<n>` | `margin`、`marginInline`、`marginBlock` |
+| `ps-<n>`、`pe-<n>` | `paddingStart`、`paddingEnd`（随书写方向） |
+| `m-<n>`、`mx-<n>`、`my-<n>` | `margin`、`marginHorizontal`、`marginVertical` |
 | `mt-<n>`、`mr-<n>`、`mb-<n>`、`ml-<n>` | `marginTop` / `Right` / `Bottom` / `Left` |
-| `ms-<n>`、`me-<n>` | `marginInlineStart`、`marginInlineEnd`（随书写方向） |
+| `ms-<n>`、`me-<n>` | `marginStart`、`marginEnd`（随书写方向） |
 
 ## 尺寸
 
@@ -319,7 +319,7 @@ view()
 | `border-none`、`border-hidden` | `borderStyle: "none"` / `"hidden"`：无论宽度类如何、顺序如何都没有边框（`md:border-solid` 会重新显示） |
 | `rounded`、`rounded-<size>`、`rounded-none`、`rounded-full`、`rounded-[<length>]` | `borderRadius`（不带值为 `sm`） |
 | `rounded-t-`、`-r-`、`-b-`、`-l-`、`-tl-`、`-tr-`、`-br-`、`-bl-` | 对应的角 |
-| `rounded-s-`、`-e-`、`-ss-`、`-se-`、`-es-`、`-ee-` | 起始 / 结束侧的角（随书写方向）：`borderStartStartRadius`、`borderStartEndRadius`、`borderEndStartRadius`、`borderEndEndRadius` |
+| `rounded-s-`、`-e-`、`-ss-`、`-se-`、`-es-`、`-ee-` | 起始 / 结束侧的角（随书写方向）：`borderTopStartRadius`、`borderTopEndRadius`、`borderBottomStartRadius`、`borderBottomEndRadius` |
 | `outline`、`outline-<n>`、`outline-[<length>]` | `outlineWidth`（不带值为 1），字符串中任何位置有样式类时用该样式，否则为实线（`outline-dashed outline-2` 是虚线，`outline-none outline-2` 不绘制） |
 | `outline-<color>` | `outlineColor` |
 | `outline-solid`、`outline-dashed`、`outline-dotted`、`outline-none`、`outline-hidden` | `outlineStyle`；只有样式类时宽度为 CSS 的 medium，即 3 点 |

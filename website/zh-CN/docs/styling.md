@@ -68,7 +68,7 @@ fn button(danger: bool, busy: Signal<bool>) -> View {
 
 ```tsx tabs
 const styles = {
-  button: { paddingInline: 16, paddingBlock: 10, borderRadius: 10, backgroundColor: "#0969da" },
+  button: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#0969da" },
   disabled: { opacity: 0.4 },
   danger: { backgroundColor: "#cf222e" },
 } as const;
@@ -92,7 +92,7 @@ view()
 
 TSX 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）；`null` 则设为默认值。在 Rust 中，同一属性后调用的方法优先于先调用的。
 
-在同一个样式中（一个对象，或合并成一个对象的数组），键的顺序不影响结果：更具体的属性优先于它的简写，`borderTopWidth` 优先于 `borderWidth`，`borderLeftColor` 优先于 `borderColor`，`marginTop` 优先于 `marginBlock`、再优先于 `margin`（padding 同理），`rowGap` 优先于 `gap`，`flexGrow` 优先于 `flex`，`gridColumnStart` 优先于 `gridColumn`。在其中把具体属性设为 `null` 时，显示简写的值。
+在同一个样式中（一个对象，或合并成一个对象的数组），键的顺序不影响结果：更具体的属性优先于它的简写，`borderTopWidth` 优先于 `borderWidth`，`borderLeftColor` 优先于 `borderColor`，`marginTop` 优先于 `marginVertical`、再优先于 `margin`（padding 同理），`rowGap` 优先于 `gap`，`flexGrow` 优先于 `flex`，`gridColumnStart` 优先于 `gridColumn`。在其中把具体属性设为 `null` 时，显示简写的值。
 
 ## 单位与取值
 
@@ -185,9 +185,9 @@ view()
 />
 ```
 
-- **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧；以及跟随[布局方向](./layout.md)的 `borderInlineStartWidth`、`borderInlineEndWidth`、`borderInlineStartColor`、`borderInlineEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
+- **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧；以及跟随[布局方向](./layout.md)的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
 - **颜色**：设置了宽度而没有设置颜色的边，用文字颜色绘制，与 CSS 的 `currentColor` 相同：`{ borderWidth: 1, color: "#0969da" }` 画出蓝色边框。
-- **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderStartStartRadius` / `borderStartEndRadius` / `borderEndStartRadius` / `borderEndEndRadius`（顶部起始、顶部结束、底部起始、底部结束；Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
+- **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius`（顶部起始、顶部结束、底部起始、底部结束；Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
 - **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`）绘制曲率平滑过渡到边的圆角，就像 iOS 应用图标，两个平台都支持。胶囊形状（`borderRadius` 为高度的一半）依然是胶囊。
 - **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。裁掉的部分在布局上同样被裁掉：它不会进入外层滚动视图的内容尺寸，所以一个盒子把子视图按更大的尺寸排版、再用 `transform` 缩小（transform 不影响布局）时，不会让滚动视图多出可滚动的范围。
 

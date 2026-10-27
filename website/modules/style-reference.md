@@ -77,7 +77,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 Style keys follow CSS, so a style and a class that name one property do the same thing:
 
 - **Layout direction.** A view that sets no `display` lays its children out in a column. `display: "flex"` is a row unless `flexDirection` is set, as in CSS and the `flex` class. `flexShrink` is `0` unless set.
-- **Physical and logical sides.** `left`, `right`, `marginLeft`, `paddingRight`, `borderLeftWidth`, `borderTopLeftRadius` and `textAlign: "left"` keep their side in right-to-left layouts. The `*Inline*` and `*Block*` keys (`marginInline`, `paddingBlock`, `marginInlineStart`, `insetInlineEnd`, `borderInlineStartWidth`, ...), the `borderStartStartRadius` family and `textAlign: "start" | "end"` follow the direction: inline start is the left in left-to-right layouts and the right in right-to-left ones.
+- **Physical and logical sides.** `left`, `right`, `marginLeft`, `paddingRight`, `borderLeftWidth`, `borderTopLeftRadius` and `textAlign: "left"` keep their side in right-to-left layouts. The start and end keys (`marginStart`, `paddingEnd`, `start`, `end`, `borderStartWidth`, ...), the `borderTopStartRadius` family and `textAlign: "start" | "end"` follow the direction: inline start is the left in left-to-right layouts and the right in right-to-left ones.
 - **Border colors.** A border or an outline whose width is set and whose color is not is drawn in the text color (CSS's `currentColor`).
 - **Transforms.** `translate`, `rotate` and `scale` are properties of their own, and `transform` takes CSS's string of functions or a list of steps whose amounts may be animated values. They compose in that order: `translate`, `rotate`, `scale`, then `transform`.
 
@@ -109,10 +109,10 @@ Layout is computed in Rust (flexbox and CSS grid). A view that sets no `display`
 | `right` | `DimensionValue` | `.right(…)` | Offset from the right edge, in either direction. |
 | `bottom` | `DimensionValue` | `.bottom(…)` | Offset from the bottom edge. |
 | `left` | `DimensionValue \| AnimatedNode` | `.left(…)`, `.bind_sticky_left(&node)` | Offset from the left edge, in either direction. On a sticky view in a horizontal scroll view, where it sticks, which an animated value moves every frame. |
-| `insetInlineStart` | `DimensionValue` | | Offset from the inline start edge: left in left-to-right layouts, right in right-to-left ones. |
-| `insetInlineEnd` | `DimensionValue` | | Offset from the inline end edge: right in left-to-right layouts, left in right-to-left ones. |
+| `start` | `DimensionValue` | | Offset from the inline start edge: left in left-to-right layouts, right in right-to-left ones. |
+| `end` | `DimensionValue` | | Offset from the inline end edge: right in left-to-right layouts, left in right-to-left ones. |
 | `zIndex` | `number` | `.z_index(z)` | Order among siblings (stable for equal values); also the native stacking order. |
-| `direction` | `"inherit" \| "ltr" \| "rtl"` | | Layout direction, inherited by default. As in CSS, `left` and `right` properties keep their sides right to left, while the inline start / end ones (`marginInlineStart`, `insetInlineEnd`, ...) take the sides the direction gives them. |
+| `direction` | `"inherit" \| "ltr" \| "rtl"` | | Layout direction, inherited by default. As in CSS, `left` and `right` properties keep their sides right to left, while the inline start / end ones (`marginStart`, `end`, ...) take the sides the direction gives them. |
 
 ### Flexbox
 
@@ -187,14 +187,14 @@ Margins accept `"auto"` (absorbs free space, as in flexbox) and negative values.
 | Key | Type | Rust | Description |
 |---|---|---|---|
 | `margin` | `DimensionValue \| EnvValue` | `.m(…)`, `.m_4()` | All four sides. |
-| `marginInline` | `DimensionValue \| EnvValue` | `.mx(…)` | Both inline sides: left and right. |
-| `marginBlock` | `DimensionValue \| EnvValue` | `.my(…)` | Both block sides: top and bottom. |
+| `marginHorizontal` | `DimensionValue \| EnvValue` | `.mx(…)` | Left and right. |
+| `marginVertical` | `DimensionValue \| EnvValue` | `.my(…)` | Top and bottom. |
 | `marginTop` | `DimensionValue \| EnvValue` | `.mt(…)` | Top. |
 | `marginRight` | `DimensionValue \| EnvValue` | `.mr(…)` | Right. |
 | `marginBottom` | `DimensionValue \| EnvValue` | `.mb(…)` | Bottom. |
 | `marginLeft` | `DimensionValue \| EnvValue` | `.ml(…)` | Left. |
-| `marginInlineStart` | `DimensionValue` | `.ms(…)` | Inline start: left in left-to-right layouts, right in right-to-left ones. |
-| `marginInlineEnd` | `DimensionValue` | `.me(…)` | Inline end: the opposite side of `marginInlineStart`. |
+| `marginStart` | `DimensionValue` | `.ms(…)` | Inline start: left in left-to-right layouts, right in right-to-left ones. |
+| `marginEnd` | `DimensionValue` | `.me(…)` | Inline end: the opposite side of `marginStart`. |
 
 ### Padding
 
@@ -203,14 +203,14 @@ The physical keys (all but `paddingStart` / `paddingEnd`) also take an `EnvValue
 | Key | Type | Rust | Description |
 |---|---|---|---|
 | `padding` | `LengthValue \| EnvValue` | `.p(…)`, `.p_4()` | All four sides. |
-| `paddingInline` | `LengthValue \| EnvValue` | `.px(…)` | Both inline sides: left and right. |
-| `paddingBlock` | `LengthValue \| EnvValue` | `.py(…)` | Both block sides: top and bottom. |
+| `paddingHorizontal` | `LengthValue \| EnvValue` | `.px(…)` | Left and right. |
+| `paddingVertical` | `LengthValue \| EnvValue` | `.py(…)` | Top and bottom. |
 | `paddingTop` | `LengthValue \| EnvValue` | `.pt(…)` | Top. |
 | `paddingRight` | `LengthValue \| EnvValue` | `.pr(…)` | Right. |
 | `paddingBottom` | `LengthValue \| EnvValue` | `.pb(…)` | Bottom. |
 | `paddingLeft` | `LengthValue \| EnvValue` | `.pl(…)` | Left. |
-| `paddingInlineStart` | `LengthValue` | `.ps(…)` | Inline start: left in left-to-right layouts, right in right-to-left ones. |
-| `paddingInlineEnd` | `LengthValue` | `.pe(…)` | Inline end: the opposite side of `paddingInlineStart`. |
+| `paddingStart` | `LengthValue` | `.ps(…)` | Inline start: left in left-to-right layouts, right in right-to-left ones. |
+| `paddingEnd` | `LengthValue` | `.pe(…)` | Inline end: the opposite side of `paddingStart`. |
 
 ## ViewStyle
 
@@ -240,15 +240,15 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 | `borderRightWidth` | `number` | `.border_r(w)` | Right side. |
 | `borderBottomWidth` | `number` | `.border_b(w)` | Bottom side. |
 | `borderLeftWidth` | `number` | `.border_l(w)` | Left side. |
-| `borderInlineStartWidth` | `number` | `.border_s(w)` | Inline start side (left in left-to-right layouts, right in right-to-left ones). |
-| `borderInlineEndWidth` | `number` | `.border_e(w)` | Inline end side. |
+| `borderStartWidth` | `number` | `.border_s(w)` | Inline start side (left in left-to-right layouts, right in right-to-left ones). |
+| `borderEndWidth` | `number` | `.border_e(w)` | Inline end side. |
 | `borderColor` | `ColorValue \| AnimatedNode` | `.border_color(c)`, `.bind_border_color(&node)` | Color of all four sides. Takes a native animated color. |
 | `borderTopColor` | `ColorValue` | `.border_t_color(c)` | Top side. |
 | `borderRightColor` | `ColorValue` | `.border_r_color(c)` | Right side. |
 | `borderBottomColor` | `ColorValue` | `.border_b_color(c)` | Bottom side. |
 | `borderLeftColor` | `ColorValue` | `.border_l_color(c)` | Left side. |
-| `borderInlineStartColor` | `ColorValue` | `.border_s_color(c)` | Inline start side. |
-| `borderInlineEndColor` | `ColorValue` | `.border_e_color(c)` | Inline end side. |
+| `borderStartColor` | `ColorValue` | `.border_s_color(c)` | Inline start side. |
+| `borderEndColor` | `ColorValue` | `.border_e_color(c)` | Inline end side. |
 | `borderStyle` | `"solid" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.border_solid()`, `.border_dashed()`, `.border_dotted()`, `.border_none()` | Line style. Default `"solid"`. `"none"` and `"hidden"` draw and lay out no border whatever the widths, set before or after, as in CSS. |
 
 A side whose width is set and whose color nothing sets is drawn in the text color, CSS's `currentColor`: `{ borderWidth: 1, color: "#2563eb" }` draws a blue border. Outlines take the text color the same way.
@@ -262,10 +262,10 @@ A side whose width is set and whose color nothing sets is drawn in the text colo
 | `borderTopRightRadius` | `number` | `.rounded_tr(r)` | Top-right corner. |
 | `borderBottomRightRadius` | `number` | `.rounded_br(r)` | Bottom-right corner. |
 | `borderBottomLeftRadius` | `number` | `.rounded_bl(r)` | Bottom-left corner. |
-| `borderStartStartRadius` | `number` | `.rounded_ss(r)` | Top corner on the inline start side. |
-| `borderStartEndRadius` | `number` | `.rounded_se(r)` | Top corner on the inline end side. |
-| `borderEndStartRadius` | `number` | `.rounded_es(r)` | Bottom corner on the inline start side. |
-| `borderEndEndRadius` | `number` | `.rounded_ee(r)` | Bottom corner on the inline end side. |
+| `borderTopStartRadius` | `number` | `.rounded_ss(r)` | Top corner on the inline start side. |
+| `borderTopEndRadius` | `number` | `.rounded_se(r)` | Top corner on the inline end side. |
+| `borderBottomStartRadius` | `number` | `.rounded_es(r)` | Bottom corner on the inline start side. |
+| `borderBottomEndRadius` | `number` | `.rounded_ee(r)` | Bottom corner on the inline end side. |
 | `borderCurve` | `"circular" \| "continuous"` | `.border_curve(curve)` | `"continuous"`: corners whose curvature eases into the edges, like iOS app icons. Where the box is too small the curve falls back to circular, so pills stay pills. Works on both platforms. |
 
 ### Outline

@@ -57,7 +57,7 @@ function Segments<T extends string>(props: { options: readonly T[]; value: T; on
               style={{
                 flex: 1,
                 alignItems: "center",
-                paddingBlock: 6,
+                paddingVertical: 6,
                 borderRadius: 8,
                 backgroundColor: on() ? ui().raised.backgroundColor : "transparent",
                 backgroundImage: on() ? ui().raised.backgroundImage : "none",

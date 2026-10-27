@@ -72,14 +72,14 @@ frame id:overflow-visible-a 0 0 400 20
 style id:overflow overflow hidden
 style id:overflow-visible overflow visible
 covers [styles] padding
-covers [styles] paddingInline
-covers [styles] paddingBlock
+covers [styles] paddingHorizontal
+covers [styles] paddingVertical
 covers [styles] paddingLeft
 covers [styles] paddingRight
 covers [styles] paddingBottom
 covers [styles] margin
-covers [styles] marginInline
-covers [styles] marginBlock
+covers [styles] marginHorizontal
+covers [styles] marginVertical
 covers [styles] marginRight
 covers [styles] marginBottom
 covers [styles] minWidth
@@ -137,12 +137,12 @@ frame id:ltr-padding-a 12 0 258 20
 frame id:rtl-padding-a 30 0 258 20
 frame id:rtl-padding-sides-a 12 0 258 20
 covers [styles] direction
-covers [styles] insetInlineStart
-covers [styles] insetInlineEnd
-covers [styles] marginInlineStart
-covers [styles] marginInlineEnd
-covers [styles] paddingInlineStart
-covers [styles] paddingInlineEnd
+covers [styles] start
+covers [styles] end
+covers [styles] marginStart
+covers [styles] marginEnd
+covers [styles] paddingStart
+covers [styles] paddingEnd
 # layout-flex
 tap id:case-layout-flex
 expect Flex layout

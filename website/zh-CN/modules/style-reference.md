@@ -77,7 +77,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 样式键遵循 CSS，因此指向同一属性的样式和类名效果相同：
 
 - **布局方向。** 未设置 `display` 的视图把子元素纵向排列。`display: "flex"` 是横向，除非设置了 `flexDirection`，与 CSS 和 `flex` 类相同。`flexShrink` 未设置时为 `0`。
-- **物理方向与逻辑方向。** `left`、`right`、`marginLeft`、`paddingRight`、`borderLeftWidth`、`borderTopLeftRadius` 和 `textAlign: "left"` 在从右到左布局中保持各自的一侧。`*Inline*` 和 `*Block*` 键（`marginInline`、`paddingBlock`、`marginInlineStart`、`insetInlineEnd`、`borderInlineStartWidth` 等）、`borderStartStartRadius` 一族以及 `textAlign: "start" | "end"` 跟随方向：行内起始侧在从左到右布局中是左侧，在从右到左布局中是右侧。
+- **物理方向与逻辑方向。** `left`、`right`、`marginLeft`、`paddingRight`、`borderLeftWidth`、`borderTopLeftRadius` 和 `textAlign: "left"` 在从右到左布局中保持各自的一侧。起止键（`marginStart`、`paddingEnd`、`start`、`end`、`borderStartWidth` 等）、`borderTopStartRadius` 一族以及 `textAlign: "start" | "end"` 跟随方向：行内起始侧在从左到右布局中是左侧，在从右到左布局中是右侧。
 - **边框颜色。** 设置了宽度而没有设置颜色的边框或轮廓线，用文字颜色绘制（CSS 的 `currentColor`）。
 - **变换。** `translate`、`rotate` 和 `scale` 各是独立的属性，`transform` 接受 CSS 的函数字符串，或一个数值可以是动画值的步骤列表。它们按这个顺序组合：`translate`、`rotate`、`scale`，最后是 `transform`。
 
@@ -109,10 +109,10 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `right` | `DimensionValue` | `.right(…)` | 距右边的偏移，两个方向都是如此。 |
 | `bottom` | `DimensionValue` | `.bottom(…)` | 距下边的偏移。 |
 | `left` | `DimensionValue \| AnimatedNode` | `.left(…)`、`.bind_sticky_left(&node)` | 距左边的偏移，两个方向都是如此。在横向滚动视图中的吸附视图上表示吸附的位置，动画值让它逐帧移动。 |
-| `insetInlineStart` | `DimensionValue` | | 距行内起始边的偏移：从左到右布局中为左，从右到左布局中为右。 |
-| `insetInlineEnd` | `DimensionValue` | | 距行内结束边的偏移：从左到右布局中为右，从右到左布局中为左。 |
+| `start` | `DimensionValue` | | 距行内起始边的偏移：从左到右布局中为左，从右到左布局中为右。 |
+| `end` | `DimensionValue` | | 距行内结束边的偏移：从左到右布局中为右，从右到左布局中为左。 |
 | `zIndex` | `number` | `.z_index(z)` | 在兄弟元素间的次序（值相同时保持原顺序），也是原生视图的叠放次序。 |
-| `direction` | `"inherit" \| "ltr" \| "rtl"` | | 布局方向，默认继承。与 CSS 一样，从右到左时 `left` 和 `right` 属性保持各自的一侧，行内起始 / 结束属性（`marginInlineStart`、`insetInlineEnd` 等）则取方向所给的那一侧。 |
+| `direction` | `"inherit" \| "ltr" \| "rtl"` | | 布局方向，默认继承。与 CSS 一样，从右到左时 `left` 和 `right` 属性保持各自的一侧，行内起始 / 结束属性（`marginStart`、`end` 等）则取方向所给的那一侧。 |
 
 ### Flexbox
 
@@ -187,14 +187,14 @@ view()
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
 | `margin` | `DimensionValue \| EnvValue` | `.m(…)`、`.m_4()` | 四边。 |
-| `marginInline` | `DimensionValue \| EnvValue` | `.mx(…)` | 行内方向的两侧：左右。 |
-| `marginBlock` | `DimensionValue \| EnvValue` | `.my(…)` | 块方向的两侧：上下。 |
+| `marginHorizontal` | `DimensionValue \| EnvValue` | `.mx(…)` | 左右。 |
+| `marginVertical` | `DimensionValue \| EnvValue` | `.my(…)` | 上下。 |
 | `marginTop` | `DimensionValue \| EnvValue` | `.mt(…)` | 上。 |
 | `marginRight` | `DimensionValue \| EnvValue` | `.mr(…)` | 右。 |
 | `marginBottom` | `DimensionValue \| EnvValue` | `.mb(…)` | 下。 |
 | `marginLeft` | `DimensionValue \| EnvValue` | `.ml(…)` | 左。 |
-| `marginInlineStart` | `DimensionValue` | `.ms(…)` | 行内起始侧：从左到右布局中为左，从右到左布局中为右。 |
-| `marginInlineEnd` | `DimensionValue` | `.me(…)` | 行内结束侧：与 `marginInlineStart` 相对的一边。 |
+| `marginStart` | `DimensionValue` | `.ms(…)` | 行内起始侧：从左到右布局中为左，从右到左布局中为右。 |
+| `marginEnd` | `DimensionValue` | `.me(…)` | 行内结束侧：与 `marginStart` 相对的一边。 |
 
 ### 内边距
 
@@ -203,14 +203,14 @@ view()
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
 | `padding` | `LengthValue \| EnvValue` | `.p(…)`、`.p_4()` | 四边。 |
-| `paddingInline` | `LengthValue \| EnvValue` | `.px(…)` | 行内方向的两侧：左右。 |
-| `paddingBlock` | `LengthValue \| EnvValue` | `.py(…)` | 块方向的两侧：上下。 |
+| `paddingHorizontal` | `LengthValue \| EnvValue` | `.px(…)` | 左右。 |
+| `paddingVertical` | `LengthValue \| EnvValue` | `.py(…)` | 上下。 |
 | `paddingTop` | `LengthValue \| EnvValue` | `.pt(…)` | 上。 |
 | `paddingRight` | `LengthValue \| EnvValue` | `.pr(…)` | 右。 |
 | `paddingBottom` | `LengthValue \| EnvValue` | `.pb(…)` | 下。 |
 | `paddingLeft` | `LengthValue \| EnvValue` | `.pl(…)` | 左。 |
-| `paddingInlineStart` | `LengthValue` | `.ps(…)` | 行内起始侧：从左到右布局中为左，从右到左布局中为右。 |
-| `paddingInlineEnd` | `LengthValue` | `.pe(…)` | 行内结束侧：与 `paddingInlineStart` 相对的一边。 |
+| `paddingStart` | `LengthValue` | `.ps(…)` | 行内起始侧：从左到右布局中为左，从右到左布局中为右。 |
+| `paddingEnd` | `LengthValue` | `.pe(…)` | 行内结束侧：与 `paddingStart` 相对的一边。 |
 
 ## ViewStyle
 
@@ -240,15 +240,15 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 | `borderRightWidth` | `number` | `.border_r(w)` | 右边。 |
 | `borderBottomWidth` | `number` | `.border_b(w)` | 下边。 |
 | `borderLeftWidth` | `number` | `.border_l(w)` | 左边。 |
-| `borderInlineStartWidth` | `number` | `.border_s(w)` | 行内起始边（从左到右布局中为左，从右到左布局中为右）。 |
-| `borderInlineEndWidth` | `number` | `.border_e(w)` | 行内结束边。 |
+| `borderStartWidth` | `number` | `.border_s(w)` | 行内起始边（从左到右布局中为左，从右到左布局中为右）。 |
+| `borderEndWidth` | `number` | `.border_e(w)` | 行内结束边。 |
 | `borderColor` | `ColorValue \| AnimatedNode` | `.border_color(c)`、`.bind_border_color(&node)` | 四边颜色。接受原生动画颜色。 |
 | `borderTopColor` | `ColorValue` | `.border_t_color(c)` | 上边。 |
 | `borderRightColor` | `ColorValue` | `.border_r_color(c)` | 右边。 |
 | `borderBottomColor` | `ColorValue` | `.border_b_color(c)` | 下边。 |
 | `borderLeftColor` | `ColorValue` | `.border_l_color(c)` | 左边。 |
-| `borderInlineStartColor` | `ColorValue` | `.border_s_color(c)` | 行内起始边。 |
-| `borderInlineEndColor` | `ColorValue` | `.border_e_color(c)` | 行内结束边。 |
+| `borderStartColor` | `ColorValue` | `.border_s_color(c)` | 行内起始边。 |
+| `borderEndColor` | `ColorValue` | `.border_e_color(c)` | 行内结束边。 |
 | `borderStyle` | `"solid" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.border_solid()`、`.border_dashed()`、`.border_dotted()`、`.border_none()` | 线型。默认 `"solid"`。`"none"` 和 `"hidden"` 与 CSS 一样，无论宽度在之前还是之后设置，都不绘制边框，也不占布局空间。 |
 
 设置了宽度而没有任何样式设置颜色的边，用文字颜色绘制，即 CSS 的 `currentColor`：`{ borderWidth: 1, color: "#2563eb" }` 画出蓝色边框。轮廓线同样取文字颜色。
@@ -262,10 +262,10 @@ view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x
 | `borderTopRightRadius` | `number` | `.rounded_tr(r)` | 右上角。 |
 | `borderBottomRightRadius` | `number` | `.rounded_br(r)` | 右下角。 |
 | `borderBottomLeftRadius` | `number` | `.rounded_bl(r)` | 左下角。 |
-| `borderStartStartRadius` | `number` | `.rounded_ss(r)` | 行内起始侧的上角。 |
-| `borderStartEndRadius` | `number` | `.rounded_se(r)` | 行内结束侧的上角。 |
-| `borderEndStartRadius` | `number` | `.rounded_es(r)` | 行内起始侧的下角。 |
-| `borderEndEndRadius` | `number` | `.rounded_ee(r)` | 行内结束侧的下角。 |
+| `borderTopStartRadius` | `number` | `.rounded_ss(r)` | 行内起始侧的上角。 |
+| `borderTopEndRadius` | `number` | `.rounded_se(r)` | 行内结束侧的上角。 |
+| `borderBottomStartRadius` | `number` | `.rounded_es(r)` | 行内起始侧的下角。 |
+| `borderBottomEndRadius` | `number` | `.rounded_ee(r)` | 行内结束侧的下角。 |
 | `borderCurve` | `"circular" \| "continuous"` | `.border_curve(curve)` | `"continuous"`：曲率平滑过渡到直边的圆角，类似 iOS 应用图标。盒子太小时退回普通圆角，所以胶囊形依然是胶囊形。两个平台都支持。 |
 
 ### 轮廓线

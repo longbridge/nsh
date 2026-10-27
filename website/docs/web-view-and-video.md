@@ -160,7 +160,7 @@ function Browser() {
   );
   return (
     <View style={{ flex: 1, paddingTop: 50 }}>
-      <Text style={{ lineClamp: 1, paddingInline: 12, color: "#57606a" }}>
+      <Text style={{ lineClamp: 1, paddingHorizontal: 12, color: "#57606a" }}>
         {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
       </Text>
       <WebView
@@ -261,7 +261,7 @@ function App() {
       <Text onPress={() => web.postMessage("hi from nsh")} style={{ padding: 16, color: "#0969da" }}>
         Post to the page
       </Text>
-      <Text style={{ paddingInline: 16 }}>Last message: {last()}</Text>
+      <Text style={{ paddingHorizontal: 16 }}>Last message: {last()}</Text>
     </View>
   );
 }

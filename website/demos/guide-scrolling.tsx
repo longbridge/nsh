@@ -44,7 +44,7 @@ function Pager() {
 function Cards() {
   return (
     <Scroll horizontal scrollbar={false} snapToInterval={152} decelerationRate="fast" style={{ height: 90 }}>
-      <View style={{ flexDirection: "row", gap: 12, paddingInline: 4 }}>
+      <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 4 }}>
         <Each of={Array.from({ length: 12 }, (_, i) => i)}>
           {(i) => (
             <View
@@ -87,7 +87,7 @@ function App() {
       <View
         style={{
           height: 48,
-          paddingInline: 16,
+          paddingHorizontal: 16,
           justifyContent: "center",
           backgroundColor: offset.interpolate({ inputRange: [0, 80], outputRange: [ui().page, ui().card.backgroundColor] }),
           borderBottomWidth: 1,
@@ -130,7 +130,7 @@ function App() {
                 <View
                   style={
                     desktop
-                      ? { ...ui().row, height: size.row, justifyContent: "center", paddingInline: 12, borderRadius: 8 }
+                      ? { ...ui().row, height: size.row, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8 }
                       : { ...ui().row, padding: 14, borderRadius: 12 }
                   }
                 >

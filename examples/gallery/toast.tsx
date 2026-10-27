@@ -97,8 +97,8 @@ function Item(props: { entry: ToastEntry }) {
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
-        paddingBlock: 12,
-        paddingInline: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
         borderRadius: radius.inset,
         borderWidth: 1,
         borderColor: colors.border,
@@ -117,7 +117,7 @@ function Item(props: { entry: ToastEntry }) {
           role="button"
           onPress={() => choose(props.entry.id, content().action!)}
           activeStyle={{ opacity: 0.7 }}
-          style={{ paddingInline: 10, height: 28, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.light }}
+          style={{ paddingHorizontal: 10, height: 28, justifyContent: "center", borderRadius: radius.control, backgroundColor: colors.light }}
         >
           <Text class="text-sm font-medium text-primary-foreground">{content().action}</Text>
         </View>
@@ -139,7 +139,7 @@ function Item(props: { entry: ToastEntry }) {
 export function Toaster() {
   return (
     <Overlay
-      style={{ pointerEvents: "box-none", left: 0, right: 0, bottom: 0, paddingInline: 16, paddingTop: 16, paddingBottom: safeArea().bottom + 16, alignItems: desktop() ? "flex-end" : "center" }}
+      style={{ pointerEvents: "box-none", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: safeArea().bottom + 16, alignItems: desktop() ? "flex-end" : "center" }}
     >
       <ToastStack
         placement={desktop() ? "bottomRight" : "bottomCenter"}

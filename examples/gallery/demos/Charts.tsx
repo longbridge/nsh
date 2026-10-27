@@ -166,7 +166,7 @@ export function Charts() {
             dotClass="size-2.5 rounded-full border-2"
             tooltipOffset={4}
             tooltipContent={
-              <View style={{ ...finish.menu, flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
+              <View style={{ ...finish.menu, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, height: 26, borderRadius: 8, borderWidth: 1 }}>
                 <TipValue value={count(rows()[tip()].visitors)} />
                 <TipValue value={count(other()[tip()].visitors)} dashed />
               </View>
@@ -272,7 +272,7 @@ export function Charts() {
                   alignItems: "center",
                   gap: 10,
                   height: pointer ? 30 : 36,
-                  paddingInline: 8,
+                  paddingHorizontal: 8,
                   borderRadius: 6,
                   backgroundColor: hover() === i ? alpha(colors.text, 0.05) : undefined,
                   opacity: hover() == null || hover() === i ? 1 : 0.45,

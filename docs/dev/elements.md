@@ -248,7 +248,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right), keeps the left and right properties
   where they say (margins, paddings, insets, borders, corners, in classes and style keys alike, as in a browser) and
-  places the logical ones (`marginInlineStart`, `insetInlineStart`, `borderStartEndRadius`, `ms-*`, `start-*`, ...). A
+  places the logical ones (`marginStart`, `start`, `borderTopEndRadius`, `ms-*`, `start-*`, ...). A
   direction change sets the direction in place and restyles the nodes with logical properties or `rtl:` classes. Text:
   `auto`, `start` and `end` alignment follow the direction, `left` / `right` keep their side, `writingDirection` sets
   the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:

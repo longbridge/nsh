@@ -60,7 +60,7 @@ function App() {
             fontWeight: "800",
             color: ui().onAccent,
             backgroundColor: "#c8f26d",
-            paddingInline: 10,
+            paddingHorizontal: 10,
             borderRadius: 8,
             textShadow: "2px 2px 4px rgba(255,255,255,0.55)",
           }}

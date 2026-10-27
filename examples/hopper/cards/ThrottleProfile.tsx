@@ -211,7 +211,7 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
         right: 0,
         top: 48,
         width: 210,
-        paddingBlock: 6,
+        paddingVertical: 6,
         borderRadius: radius.control,
         borderWidth: 1,
         borderColor: color.lineStrong,
@@ -226,7 +226,7 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
             activeStyle={{ backgroundColor: color.lineStrong }}
             role="menuitem"
             accessibilityState={{ checked: props.value === option().name }}
-            style={{ flexDirection: "row", alignItems: "center", height: 40, paddingInline: 14, gap: 8 }}
+            style={{ flexDirection: "row", alignItems: "center", height: 40, paddingHorizontal: 14, gap: 8 }}
           >
             <Text style={{ flex: 1, fontSize: 14, color: props.value === option().name ? color.accent : color.text }}>
               {option().label}

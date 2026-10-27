@@ -78,8 +78,8 @@ impl HostValue for ListContentStyle {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         let n = |key| points(input, key);
         let all = n("padding").unwrap_or_default();
-        let inline = n("paddingInline").unwrap_or(all);
-        let block = n("paddingBlock").unwrap_or(all);
+        let inline = n("paddingHorizontal").unwrap_or(all);
+        let block = n("paddingVertical").unwrap_or(all);
         let gap = n("gap").unwrap_or_default();
         Some(ListContentStyle {
             padding: EdgeInsets {
@@ -96,8 +96,8 @@ impl HostValue for ListContentStyle {
     fn ts_type(types: &mut TsTypes) -> String {
         types.declare("ListContentStyle", |_| {
             "/** Padding and gaps of a list's content (`contentStyle`). */\n\
-             export interface ListContentStyle {\n  padding?: number;\n  paddingInline?: number;\n  \
-             paddingBlock?: number;\n  paddingTop?: number;\n  paddingRight?: number;\n  \
+             export interface ListContentStyle {\n  padding?: number;\n  paddingHorizontal?: number;\n  \
+             paddingVertical?: number;\n  paddingTop?: number;\n  paddingRight?: number;\n  \
              paddingBottom?: number;\n  paddingLeft?: number;\n  gap?: number;\n  rowGap?: number;\n  \
              columnGap?: number;\n}"
                 .into()

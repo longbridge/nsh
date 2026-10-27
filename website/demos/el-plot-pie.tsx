@@ -149,7 +149,7 @@ function App() {
             {/* The legend: a key in each slice's color, the value and the
                 share at the trailing edge; the hovered part's row stands out. */}
             <View style={{ alignSelf: "stretch", flex: wide() ? 1 : undefined, gap: 2 }}>
-              <View style={{ flexDirection: "row", gap: 12, paddingInline: 8, paddingBottom: 4 }}>
+              <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 8, paddingBottom: 4 }}>
                 <View style={{ width: 8 }} />
                 <Text style={{ flex: 1, fontSize: 11, color: ui().faint }}>{breakdown() === "Channel" ? "Channel" : "Region"}</Text>
                 <Text style={{ fontSize: 11, color: ui().faint, ...num }}>Revenue</Text>
@@ -163,7 +163,7 @@ function App() {
                     alignItems: "center",
                     gap: 12,
                     height: size.rowSm,
-                    paddingInline: 8,
+                    paddingHorizontal: 8,
                     borderRadius: 6,
                     backgroundColor: hovered() === i ? tint(ui().text, 0.05) : undefined,
                     opacity: hovered() == null || hovered() === i ? 1 : 0.45,

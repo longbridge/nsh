@@ -530,8 +530,8 @@ impl Declaration {
                     | StyleKey::BorderRightWidth
                     | StyleKey::BorderBottomWidth
                     | StyleKey::BorderLeftWidth
-                    | StyleKey::BorderInlineStartWidth
-                    | StyleKey::BorderInlineEndWidth => {
+                    | StyleKey::BorderStartWidth
+                    | StyleKey::BorderEndWidth => {
                         out.push(Decl::CurrentColor(StyleKey::BorderColor))
                     }
                     StyleKey::OutlineWidth => out.push(Decl::CurrentColor(StyleKey::OutlineColor)),
@@ -1045,9 +1045,9 @@ pub trait Styled: Sized {
         /// Padding on all sides
         p => [Padding],
         /// Horizontal padding
-        px => [PaddingInline],
+        px => [PaddingHorizontal],
         /// Vertical padding
-        py => [PaddingBlock],
+        py => [PaddingVertical],
         /// Top padding
         pt => [PaddingTop],
         /// Right padding
@@ -1057,15 +1057,15 @@ pub trait Styled: Sized {
         /// Left padding
         pl => [PaddingLeft],
         /// Leading padding (left in left-to-right layouts)
-        ps => [PaddingInlineStart],
+        ps => [PaddingStart],
         /// Trailing padding
-        pe => [PaddingInlineEnd],
+        pe => [PaddingEnd],
         /// Margin on all sides
         m => [Margin],
         /// Horizontal margin
-        mx => [MarginInline],
+        mx => [MarginHorizontal],
         /// Vertical margin
-        my => [MarginBlock],
+        my => [MarginVertical],
         /// Top margin
         mt => [MarginTop],
         /// Right margin
@@ -1075,9 +1075,9 @@ pub trait Styled: Sized {
         /// Left margin
         ml => [MarginLeft],
         /// Leading margin
-        ms => [MarginInlineStart],
+        ms => [MarginStart],
         /// Trailing margin
-        me => [MarginInlineEnd],
+        me => [MarginEnd],
         /// Space between children
         gap => [Gap],
         /// Space between columns
@@ -2131,7 +2131,7 @@ pub trait Styled: Sized {
     /// The leading border's width (left in left-to-right layouts).
     fn border_s(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
         self.style().bind_value(width, |s, width: AbsoluteLength| {
-            s.number(StyleKey::BorderInlineStartWidth, points(width));
+            s.number(StyleKey::BorderStartWidth, points(width));
         });
         self
     }
@@ -2139,7 +2139,7 @@ pub trait Styled: Sized {
     /// The trailing border's width.
     fn border_e(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
         self.style().bind_value(width, |s, width: AbsoluteLength| {
-            s.number(StyleKey::BorderInlineEndWidth, points(width));
+            s.number(StyleKey::BorderEndWidth, points(width));
         });
         self
     }
@@ -2201,7 +2201,7 @@ pub trait Styled: Sized {
     /// The leading border's color.
     fn border_s_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
         self.style().bind_value(color, |s, color: AdaptiveColor| {
-            s.color(&[StyleKey::BorderInlineStartColor], color);
+            s.color(&[StyleKey::BorderStartColor], color);
         });
         self
     }
@@ -2209,7 +2209,7 @@ pub trait Styled: Sized {
     /// The trailing border's color.
     fn border_e_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
         self.style().bind_value(color, |s, color: AdaptiveColor| {
-            s.color(&[StyleKey::BorderInlineEndColor], color);
+            s.color(&[StyleKey::BorderEndColor], color);
         });
         self
     }
@@ -2324,7 +2324,7 @@ pub trait Styled: Sized {
     /// layouts; Tailwind's `rounded-ss`).
     fn rounded_ss(mut self, radius: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(radius, |s, radius: Length| {
-            s.lengths(&[StyleKey::BorderStartStartRadius], radius);
+            s.lengths(&[StyleKey::BorderTopStartRadius], radius);
         });
         self
     }
@@ -2332,7 +2332,7 @@ pub trait Styled: Sized {
     /// The top trailing corner's radius (`rounded-se`).
     fn rounded_se(mut self, radius: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(radius, |s, radius: Length| {
-            s.lengths(&[StyleKey::BorderStartEndRadius], radius);
+            s.lengths(&[StyleKey::BorderTopEndRadius], radius);
         });
         self
     }
@@ -2340,7 +2340,7 @@ pub trait Styled: Sized {
     /// The bottom trailing corner's radius (`rounded-ee`).
     fn rounded_ee(mut self, radius: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(radius, |s, radius: Length| {
-            s.lengths(&[StyleKey::BorderEndEndRadius], radius);
+            s.lengths(&[StyleKey::BorderBottomEndRadius], radius);
         });
         self
     }
@@ -2348,7 +2348,7 @@ pub trait Styled: Sized {
     /// The bottom leading corner's radius (`rounded-es`).
     fn rounded_es(mut self, radius: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(radius, |s, radius: Length| {
-            s.lengths(&[StyleKey::BorderEndStartRadius], radius);
+            s.lengths(&[StyleKey::BorderBottomStartRadius], radius);
         });
         self
     }
@@ -2358,8 +2358,8 @@ pub trait Styled: Sized {
         self.style().bind_value(radius, |s, radius: Length| {
             s.lengths(
                 &[
-                    StyleKey::BorderStartStartRadius,
-                    StyleKey::BorderEndStartRadius,
+                    StyleKey::BorderTopStartRadius,
+                    StyleKey::BorderBottomStartRadius,
                 ],
                 radius,
             );
@@ -2371,7 +2371,10 @@ pub trait Styled: Sized {
     fn rounded_e(mut self, radius: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(radius, |s, radius: Length| {
             s.lengths(
-                &[StyleKey::BorderStartEndRadius, StyleKey::BorderEndEndRadius],
+                &[
+                    StyleKey::BorderTopEndRadius,
+                    StyleKey::BorderBottomEndRadius,
+                ],
                 radius,
             );
         });

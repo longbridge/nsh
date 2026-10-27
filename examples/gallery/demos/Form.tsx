@@ -66,7 +66,7 @@ function Field(
             own.onBlur?.();
           }}
           {...input}
-          style={[{ flex: 1, paddingInline: 14, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
+          style={[{ flex: 1, paddingHorizontal: 14, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
         />
         <View
           style={{
@@ -105,8 +105,8 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
           flexDirection: "row",
           alignItems: "center",
           gap: 12,
-          paddingInline: 10,
-          paddingBlock: 8,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
           borderTopWidth: props.first ? 0 : 1,
           borderTopColor: colors.line,
         }}
@@ -475,8 +475,8 @@ function MessageBar() {
                     style={{
                       alignSelf: m().mine ? "flex-end" : "flex-start",
                       maxWidth: "80%",
-                      paddingInline: 14,
-                      paddingBlock: 10,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
                       borderRadius: 18,
                       borderCurve: "continuous",
                       borderBottomRightRadius: m().mine ? 6 : 18,
@@ -497,7 +497,7 @@ function MessageBar() {
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            paddingInline: 16,
+            paddingHorizontal: 16,
             paddingTop: 8,
             // Above the home indicator, unless the keyboard covers it.
             paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom),
@@ -519,7 +519,7 @@ function MessageBar() {
               selectionColor: colors.accent,
               flex: 1,
               height: 44,
-              paddingInline: 16,
+              paddingHorizontal: 16,
               fontSize: 15,
               color: colors.text,
               backgroundColor: colors.inset,
@@ -561,7 +561,7 @@ function SelectionDemo() {
         <If when={keys().length > 0} else={<Text style={{ fontSize: 13, color: colors.faint }}>Keys you press show here</Text>}>
           <Each of={keys()}>
             {(key) => (
-              <View style={{ minWidth: 28, height: 28, paddingInline: 8, borderRadius: 7, alignItems: "center", justifyContent: "center", backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, ...finish.raised }}>
+              <View style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 7, alignItems: "center", justifyContent: "center", backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, ...finish.raised }}>
                 <Text style={{ fontSize: 13, color: colors.text }}>{key() === " " ? "␣" : key()}</Text>
               </View>
             )}

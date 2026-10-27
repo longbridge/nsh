@@ -524,7 +524,7 @@ function Aurora() {
           <View
             style={{
               alignSelf: "flex-start",
-              paddingInline: 10,
+              paddingHorizontal: 10,
               height: 24,
               borderRadius: 12,
               justifyContent: "center",
@@ -779,7 +779,7 @@ function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
       <View
         style={{
           height: 36,
-          paddingInline: 14,
+          paddingHorizontal: 14,
           borderRadius: 18,
           justifyContent: "center",
           backgroundColor: props.active ? colors.light : colors.raised,
@@ -1115,7 +1115,7 @@ function HidingHeader() {
     <Card icon="scroll" title="Hiding header" subtitle="Hides as the list scrolls up, returns as it scrolls down">
       <View style={{ height: 300, borderRadius: radius.control, overflow: "hidden", backgroundColor: colors.background, ...finish.track }}>
         <Scroll style={{ flex: 1 }} scrollValue={scroll}>
-          <View style={{ paddingTop: H + 8, paddingInline: 8, paddingBottom: 8, gap: 6 }}>
+          <View style={{ paddingTop: H + 8, paddingHorizontal: 8, paddingBottom: 8, gap: 6 }}>
             <Each of={Array.from({ length: 30 }, (_, i) => i + 1)}>
               {(n) => (
                 <View
@@ -1124,7 +1124,7 @@ function HidingHeader() {
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 12,
-                    paddingInline: 12,
+                    paddingHorizontal: 12,
                     borderRadius: 12,
                     backgroundColor: colors.surface,
                     borderWidth: 1,
@@ -1149,7 +1149,7 @@ function HidingHeader() {
             flexDirection: "row",
             alignItems: "center",
             gap: 10,
-            paddingInline: 14,
+            paddingHorizontal: 14,
             backgroundColor: colors.raised,
             ...finish.raised,
             borderBottomWidth: 1,
@@ -1207,7 +1207,7 @@ function Layout() {
                 flexGrow: column() ? 0 : 1,
                 borderRadius: 12,
                 borderCurve: "continuous",
-                paddingInline: 10,
+                paddingHorizontal: 10,
                 justifyContent: "center",
                 backgroundColor: tones()[id() % tones().length],
                 ...finish.knob,

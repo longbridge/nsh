@@ -62,7 +62,7 @@ function App() {
         <View style={{ padding: 20, paddingTop: 4, gap: 8 }}>
           <Each of={messages()}>
             {(text) => (
-              <View style={{ ...ui().row, alignSelf: "flex-start", maxWidth: 320, borderRadius: 14, paddingInline: 12, paddingBlock: 8 }}>
+              <View style={{ ...ui().row, alignSelf: "flex-start", maxWidth: 320, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 }}>
                 <Text style={{ color: ui().text }}>{text()}</Text>
               </View>
             )}
@@ -70,7 +70,7 @@ function App() {
         </View>
       </Scroll>
 
-      <View style={{ flexDirection: "row", gap: 8, padding: 12, paddingInline: desktop ? 20 : 12, borderTopWidth: 1, borderTopColor: ui().border, backgroundColor: ui().page }}>
+      <View style={{ flexDirection: "row", gap: 8, padding: 12, paddingHorizontal: desktop ? 20 : 12, borderTopWidth: 1, borderTopColor: ui().border, backgroundColor: ui().page }}>
         <Input
           value={draft()}
           onChange={(text) => draft.set(text)}

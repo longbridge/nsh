@@ -80,8 +80,8 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
           flexDirection: "row",
           alignItems: "center",
           gap: 14,
-          paddingBlock: 12,
-          paddingInline: 12,
+          paddingVertical: 12,
+          paddingHorizontal: 12,
           borderTopWidth: props.first ? 0 : 1,
           borderTopColor: colors.line,
         }}
@@ -108,7 +108,7 @@ function Home() {
             {(group, g) => (
               <Appear index={g() + 1}>
                 <View style={{ gap: 8 }}>
-                  <View style={{ flexDirection: "row", alignItems: "baseline", paddingInline: 4 }}>
+                  <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 4 }}>
                     <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted, letterSpacing: 0.4 }}>
                       {group().title.toUpperCase()}
                     </Text>
@@ -188,7 +188,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
       class={active() ? "bg-accent" : "hover:bg-hover active:bg-accent"}
-      style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 10, borderRadius: radius.control, cursor: "pointer" }}
+      style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: radius.control, cursor: "pointer" }}
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
       <Icon name={props.demo.icon} size={17} tint={active() ? colors.accent : colors.muted} />
@@ -250,7 +250,7 @@ function Sidebar() {
           borderRightColor: colors.line,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 20, paddingTop: 20, paddingBottom: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
           <Logo size={32} />
           <View style={{ flex: 1, gap: 1 }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
@@ -259,11 +259,11 @@ function Sidebar() {
           <ThemeToggle />
         </View>
         <Scroll style={{ flex: 1 }}>
-          <View style={{ paddingInline: 12, paddingBottom: 16 }}>
+          <View style={{ paddingHorizontal: 12, paddingBottom: 16 }}>
             <Each of={groups}>
               {(group) => (
                 <View style={{ gap: 2 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "600", color: colors.faint, letterSpacing: 0.6, paddingInline: 10, paddingTop: 16, paddingBottom: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: colors.faint, letterSpacing: 0.6, paddingHorizontal: 10, paddingTop: 16, paddingBottom: 6 }}>
                     {group().title.toUpperCase()}
                   </Text>
                   <Each of={group().demos}>{(demo) => <SidebarRow demo={demo()} />}</Each>
@@ -272,7 +272,7 @@ function Sidebar() {
             </Each>
           </View>
         </Scroll>
-        <View style={{ paddingInline: 20, paddingBlock: 12, borderTopWidth: 1, borderTopColor: colors.line, gap: 2 }}>
+        <View style={{ paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.line, gap: 2 }}>
           <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>
             {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt
           </Text>
@@ -288,7 +288,7 @@ function DemoPane() {
   const group = () => groups.find((g) => g.demos.some((demo) => demo.name === selected().name))?.title ?? "Gallery";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingInline: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
+      <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <IconTile name={selected().icon} size={36} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ lineClamp: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>

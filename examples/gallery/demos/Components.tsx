@@ -26,7 +26,7 @@ function Field(props: InputProps) {
         caretColor: colors.accent,
         selectionColor: colors.accent,
         height: 48,
-        paddingInline: 14,
+        paddingHorizontal: 14,
         fontSize: 15,
         color: colors.text,
         backgroundColor: colors.field,
@@ -48,7 +48,7 @@ function Cell(props: { children: JSX.Element }) {
 function LinkRow(props: { icon: IconName; title: string; note: string; onPress: () => void }) {
   return (
     <Press onPress={props.onPress} scale={0.98} accessibilityLabel={props.title}>
-      <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 10, paddingBlock: 8 }}>
+      <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 10, paddingVertical: 8 }}>
         <IconTile name={props.icon} size={34} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
@@ -154,7 +154,7 @@ function PressableSheet() {
 /** A tile to press, with the prop it shows. */
 function Tile(props: { title: string; note: string; children?: JSX.Element }) {
   return (
-    <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 12, paddingBlock: 8 }}>
+    <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 8 }}>
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 15, color: colors.text }}>{props.title}</Text>
         <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.note}</Text>
@@ -222,8 +222,8 @@ function Accessory() {
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            paddingInline: 16,
-            paddingBlock: 8,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
             borderTopWidth: hairline(),
             borderTopColor: colors.border,
           }}

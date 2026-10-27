@@ -20,7 +20,12 @@
      where one is needed, as `LineHeight`), never to strings the core parses again; only a TSX `style`'s values are
      parsed from strings (in `nsh-js`'s decoding and `Style::set_key`).
 - **Forms past CSS's**, where the common form wins: a `lineHeight` number is points, as React Native's (CSS's is a
-  multiple of the font size, which strings say: `"1.5"`, `"150%"`, `"1.5em"`); lengths are numbers of points; unset
+  multiple of the font size, which strings say: `"1.5"`, `"150%"`, `"1.5em"`); both sides of an axis are
+  `marginHorizontal` / `marginVertical` / `paddingHorizontal` / `paddingVertical` (CSS's `margin-inline` / `-block`,
+  the same sides in NSH's horizontal text, by the names people read at once), and the sides by the direction are
+  `marginStart` / `marginEnd`, `paddingStart` / `paddingEnd`, `start` / `end`, `borderStartWidth` / `Color` and
+  `borderTopStartRadius` and its family (CSS's `margin-inline-start`, `inset-inline-start`, `border-start-start-radius`,
+  ..., shorter); lengths are numbers of points; unset
   properties keep React Native's / Yoga's defaults ("CSS's meanings" below).
 - **Extensions**, the keys and classes NSH has that CSS / Tailwind do not: `placeholderColor` (`<Input>`'s
   `InputStyle`), `selectionColor` (inputs and selectable texts), `tintColor` (`<Image>`; class `tint-*`),
@@ -165,9 +170,8 @@
 - **Right to left**, classes and style keys are physical as in a browser: `pl-*`, `ml-*`, `left-*`, `border-l*`,
   `rounded-l*` / `-tl` ..., `text-left` / `text-right` and `paddingLeft`, `left`, `borderTopLeftRadius`,
   `textAlign: "left"` ... keep their side. The logical ones take the side the direction gives them: the classes `ps-*`,
-  `ms-*`, `start-*`, `border-s*`, `rounded-s*`, `text-start` / `text-end` and CSS's logical properties among the style
-  keys (`marginInline` / `marginBlock`, `paddingInline` / `paddingBlock`, `marginInlineStart`, `paddingInlineEnd`,
-  `insetInlineStart`, `borderInlineStartWidth` / `Color`, `borderStartStartRadius`, ...; `textAlign: "start"` /
+  `ms-*`, `start-*`, `border-s*`, `rounded-s*`, `text-start` / `text-end` and the start / end style keys
+  (`marginStart`, `paddingEnd`, `start`, `borderStartWidth` / `Color`, `borderTopStartRadius`, ...; `textAlign: "start"` /
   `"end"`), which the core places with the node's resolved direction (`apply_direction`, from `Logical`; a direction
   change restyles the nodes that have them).
 - **SVG paint** (`fill`, `stroke`, `strokeWidth`, `strokeDasharray`; Tailwind's `fill-*`, `stroke-<color>`,
@@ -279,7 +283,7 @@ CSS's `env()` keeps content clear of system UI and the software keyboard, in pla
 | `keyboard-inset-height` | the VirtualKeyboard API's: the software keyboard's height over the surface, 0 while it is hidden |
 
 Supported on the physical padding and margin properties and their shorthands only (`padding`, `paddingTop`, ...,
-`paddingInline` / `paddingBlock`, the same for `margin`; Tailwind's `p*` / `m*` arbitrary values), with the
+`paddingHorizontal` / `paddingVertical`, the same for `margin`; Tailwind's `p*` / `m*` arbitrary values), with the
 values `env(name)`, `env(name, <length>)` (the fallback stands in for an unknown name, as in CSS), `calc(env(name) +
 <length>)` and `calc(<length> + env(name))` (white space around `+`, as CSS requires; Tailwind's arbitrary values may
 leave it out, `pt-[calc(env(safe-area-inset-top)+8px)]`, as Tailwind CSS adds it). A padding's length is not

@@ -5,7 +5,7 @@ import { button, buttonText, desktop, field, tint, ui, wide } from "./palette";
 /** A component: a function of its props, run once. */
 function Badge(props: { label: string; color?: string }) {
   return (
-    <View style={{ alignSelf: "flex-start", borderRadius: 999, paddingInline: 10, paddingBlock: 4, backgroundColor: props.color ?? tint(ui().accent, 0.14) }}>
+    <View style={{ alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: props.color ?? tint(ui().accent, 0.14) }}>
       <Text style={{ fontSize: 13, fontWeight: "600", color: ui().text }}>{props.label}</Text>
     </View>
   );

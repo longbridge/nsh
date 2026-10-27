@@ -100,7 +100,7 @@ badge()
 ```tsx tabs
 function Badge(props: { label: string; color?: string }) {
   return (
-    <View style={{ borderRadius: 999, paddingInline: 10, paddingBlock: 4, backgroundColor: props.color ?? "#ddf4ff" }}>
+    <View style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: props.color ?? "#ddf4ff" }}>
       <Text style={{ fontSize: 13, fontWeight: "600" }}>{props.label}</Text>
     </View>
   );

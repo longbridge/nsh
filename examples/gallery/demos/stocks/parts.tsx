@@ -201,8 +201,8 @@ export function Block(props: { title?: string; note?: JSX.Element; right?: JSX.E
   return (
     <View
       style={{
-        paddingInline: 16,
-        paddingBlock: 14,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
         gap: props.gap ?? 10,
         borderTopWidth: props.first ? 0 : 1,
         borderTopColor: colors.line,

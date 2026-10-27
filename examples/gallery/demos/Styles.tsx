@@ -40,7 +40,7 @@ function Tile(props: { label: string; code?: string; note?: string; onPress?: ()
       <View onPress={props.onPress} style={stage()}>
         {props.children}
       </View>
-      <View style={{ gap: 3, paddingInline: 2 }}>
+      <View style={{ gap: 3, paddingHorizontal: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text }}>{props.label}</Text>
         <If when={props.code}>
           <Text style={{ lineClamp: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
@@ -213,8 +213,8 @@ function Shadows() {
               backgroundColor: tints.up,
               borderTopLeftRadius: 14,
               borderBottomRightRadius: 14,
-              paddingInline: 14,
-              paddingBlock: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
             }}
           >
             Text corners
@@ -467,7 +467,7 @@ function Numerals() {
   );
 }
 
-/** Rows, `marginInlineStart` and text under a right-to-left layout: the app's
+/** Rows, `marginStart` and text under a right-to-left layout: the app's
  * language decides it, and `direction` sets a view's own. */
 function RightToLeft() {
   const rtl = signal(false);
@@ -492,8 +492,8 @@ function RightToLeft() {
                 alignItems: "center",
                 justifyContent: "center",
                 backgroundColor: colors[tones[i()]],
-                marginInlineStart: i() === 0 ? 16 : 0,
-                borderStartStartRadius: 22,
+                marginStart: i() === 0 ? 16 : 0,
+                borderTopStartRadius: 22,
               }}
             >
               <Text style={{ color: isDark() ? "#0c0d0f" : "#ffffff", fontWeight: "700", fontSize: 15 }}>{n()}</Text>
@@ -502,7 +502,7 @@ function RightToLeft() {
         </Each>
       </View>
       <Text style={{ fontSize: 15, lineHeight: 21, color: colors.text }}>
-        Text aligns to the start side; the first box has marginInlineStart 16 and a round top-start corner.
+        Text aligns to the start side; the first box has marginStart 16 and a round top-start corner.
       </Text>
       <Caption label="Horizontal scroll view" note={<Text style={{ fontFamily: mono }}>Scroll</Text>} />
       <Scroll horizontal scrollbar={false} style={{ height: 40 }}>
@@ -519,7 +519,7 @@ function RightToLeft() {
       <Caption label="Horizontal list" note={<Text style={{ fontFamily: mono }}>List</Text>} />
       <List each={Array.from({ length: 30 }, (_, i) => i + 1)} horizontal estimatedItemSize={46} scrollbar={false} style={{ height: 40 }}>
         {(n) => (
-          <View style={{ ...chip, marginInlineEnd: 6, backgroundColor: tints.accent }}>
+          <View style={{ ...chip, marginEnd: 6, backgroundColor: tints.accent }}>
             <Text style={{ fontSize: 13, color: colors.accent, fontVariant: ["tabular-nums"] }}>{String(n())}</Text>
           </View>
         )}

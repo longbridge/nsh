@@ -144,5 +144,5 @@ export function IconButton(props: { icon: LucideIconName; label: string; disable
 
 /** A thin vertical line between a toolbar's groups. */
 export function ToolbarSeparator() {
-  return <View style={{ width: 1, height: 20, marginInline: 4, backgroundColor: colors.border }} />;
+  return <View style={{ width: 1, height: 20, marginHorizontal: 4, backgroundColor: colors.border }} />;
 }

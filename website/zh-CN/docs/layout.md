@@ -101,8 +101,8 @@ view()
 | `width`、`height` | 点、相对父元素的百分比（`"50%"`）或 `"auto"` | `.w(px(120.0))`、`.h(relative(0.5))`、`.w_full()`、`.size(px(44.0))`、刻度方法 `.w_10()` 等 |
 | `minWidth`、`maxWidth`、`minHeight`、`maxHeight` | 点或百分比；`minWidth` / `minHeight` 还可以是 `"auto"`，即内容的最小尺寸 | `.min_w(..)`、`.max_w(..)`、`.min_h(..)`、`.max_h(..)` |
 | `aspectRatio` | 宽除以高：`1`、`16 / 9` | `.aspect_ratio(16.0 / 9.0)`、`.aspect_square()` |
-| `padding`、`paddingInline`、`paddingBlock`、`paddingTop` 等 | 点或百分比 | `.p(..)`、`.px(..)`、`.py(..)`、`.pt(..)` 等，以及刻度方法 `.p_4()`、`.px_2()` 等 |
-| `margin`、`marginInline`、`marginBlock`、`marginTop` 等 | 点、百分比或 `"auto"` | `.m(..)`、`.mx(..)`、`.my(..)`、`.mt(..)` 等，`.mx(auto())` |
+| `padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop` 等 | 点或百分比 | `.p(..)`、`.px(..)`、`.py(..)`、`.pt(..)` 等，以及刻度方法 `.p_4()`、`.px_2()` 等 |
+| `margin`、`marginHorizontal`、`marginVertical`、`marginTop` 等 | 点、百分比或 `"auto"` | `.m(..)`、`.mx(..)`、`.my(..)`、`.mt(..)` 等，`.mx(auto())` |
 
 在 Rust 中长度是类型化的：`px(16.0)` 是 16 点，`relative(0.5)` 是父元素的 50%，`auto()` 是 `auto`。刻度方法遵循 Tailwind 的间距刻度，每一级 4 点（`.p_4()` 是 16 点，`.gap_0p5()` 是 2 点）。
 
@@ -252,7 +252,7 @@ Tailwind 的断点（`sm:`、`md:` 等）以及 `portrait:` / `landscape:` 不�
 
 - 行从右侧开始排列；
 - `left` 和 `right` 与浏览器一样保持原侧，样式键和类都是如此：`paddingLeft`、`marginLeft`、`left`、`borderLeftWidth`、`borderTopLeftRadius`、`textAlign: "left"` 以及 `pl-4`、`ml-2`、`left-0`、`border-l`、`rounded-tl-lg`、`text-left` 仍在左侧；
-- 逻辑属性跟随方向，行内起始侧是右侧：`marginInlineStart`、`marginInlineEnd`、`paddingInlineStart`、`paddingInlineEnd`、`insetInlineStart`、`insetInlineEnd`、`borderInlineStartWidth`、`borderInlineEndColor`、`borderStartStartRadius` 等，以及 `textAlign: "start"` / `"end"`（类为 `ps-4`、`ms-2`、`start-0`、`border-s`、`rounded-ss-lg`、`text-start`；Rust 中为 `.ms(..)`、`.me(..)`、`.ps(..)`、`.pe(..)`、`.border_s(..)`、`.rounded_ss(..)` 等）；`marginInline` 和 `paddingInline` 同时设置两侧；
+- 逻辑属性跟随方向，行内起始侧是右侧：`marginStart`、`marginEnd`、`paddingStart`、`paddingEnd`、`start`、`end`、`borderStartWidth`、`borderEndColor`、`borderTopStartRadius` 等，以及 `textAlign: "start"` / `"end"`（类为 `ps-4`、`ms-2`、`start-0`、`border-s`、`rounded-ss-lg`、`text-start`；Rust 中为 `.ms(..)`、`.me(..)`、`.ps(..)`、`.pe(..)`、`.border_s(..)`、`.rounded_ss(..)` 等）；`marginHorizontal` 和 `paddingHorizontal` 同时设置两侧；
 - `textAlign: "auto"` 的文字右对齐，原生控件也会镜像。
 
 ```rust tabs
@@ -275,7 +275,7 @@ const rtl = signal(false);
 
 <View style={{ direction: rtl() ? "rtl" : "ltr" }}>
   <View style={{ flexDirection: "row", gap: 8 }}>
-    <View style={{ marginInlineStart: 16, borderStartStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
+    <View style={{ marginStart: 16, borderTopStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
   </View>
   <View onPress={() => rtl.set(!rtl())}>
     <Text>{rtl() ? "Right to left" : "Left to right"}</Text>

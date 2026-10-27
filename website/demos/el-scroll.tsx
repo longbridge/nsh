@@ -46,7 +46,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, paddingTop: 24, gap: 12 }}>
       {() =>
         wide() ? (
-          <View style={{ flex: 1, paddingInline: 20, paddingBottom: 20, gap: 14 }}>
+          <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 20, gap: 14 }}>
             <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>scroll</Text>
             <Text style={{ color: ui().muted }}>
               {desktop ? "Shift+wheel or swipe the trackpad across the pages; the wheel scrolls the rows" : "Swipe the pages and the rows"}
@@ -60,7 +60,7 @@ function App() {
                     <View style={{ padding: 12, gap: 6 }}>
                       <Each of={rows}>
                         {(n) => (
-                          <View style={{ ...ui().row, borderRadius: 8, height: size.row, paddingInline: 12, justifyContent: "center" }}>
+                          <View style={{ ...ui().row, borderRadius: 8, height: size.row, paddingHorizontal: 12, justifyContent: "center" }}>
                             <Text style={{ color: ui().text, fontSize: size.label }}>Row {n()}</Text>
                           </View>
                         )}
@@ -84,19 +84,19 @@ function App() {
           </View>
         ) : (
           <>
-            <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text, paddingInline: 20 }}>scroll</Text>
+            <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text, paddingHorizontal: 20 }}>scroll</Text>
 
-            <Text style={{ color: ui().muted, paddingInline: 20 }}>
+            <Text style={{ color: ui().muted, paddingHorizontal: 20 }}>
               Horizontal, pagingEnabled · page {page() + 1} · {desktop ? "Shift+wheel or swipe the trackpad" : "swipe"}
             </Text>
             {pager(12, { height: 140, flexGrow: 0 })}
 
-            <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingInline: 20 }}>
+            <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20 }}>
               <Text style={{ color: ui().muted }}>Vertical · y = {Math.round(y())}</Text>
               {toTop(false)}
             </View>
             <Scroll ref={scroller} style={{ flex: 1 }} scrollEventThrottle={16} onScroll={(e) => y.set(e.offset.y)}>
-              <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", paddingInline: 20, paddingBottom: 20, gap: 8 }}>
+              <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", paddingHorizontal: 20, paddingBottom: 20, gap: 8 }}>
                 <Each of={rows}>
                   {(n) => (
                     <View style={{ ...ui().row, borderRadius: 12, padding: 14 }}>

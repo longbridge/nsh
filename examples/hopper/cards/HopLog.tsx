@@ -169,7 +169,7 @@ export function HopLog(props: { onOpen?: () => void; rows?: number }) {
         <Each of={recent()} key={(h) => h.id}>
           {(hop, i) => (
             <Line first={i() === 0}>
-              <View style={{ flex: 1, gap: 2, paddingBlock: 8 }}>
+              <View style={{ flex: 1, gap: 2, paddingVertical: 8 }}>
                 <Text style={{ fontSize: 15, color: color.text }}>Hop {hop().id}</Text>
                 <Text style={{ fontSize: 13, color: color.muted }}>
                   {hop().note} · {ago(hop().at, now())}

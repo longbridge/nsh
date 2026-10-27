@@ -1275,14 +1275,14 @@ fn valid(decls: Vec<Decl>) -> Option<Vec<Decl>> {
                     | K::MaxHeight
                     | K::FlexBasis
                     | K::Padding
-                    | K::PaddingInline
-                    | K::PaddingBlock
+                    | K::PaddingHorizontal
+                    | K::PaddingVertical
                     | K::PaddingTop
                     | K::PaddingRight
                     | K::PaddingBottom
                     | K::PaddingLeft
-                    | K::PaddingInlineStart
-                    | K::PaddingInlineEnd
+                    | K::PaddingStart
+                    | K::PaddingEnd
                     | K::Gap
                     | K::RowGap
                     | K::ColumnGap
@@ -1291,17 +1291,17 @@ fn valid(decls: Vec<Decl>) -> Option<Vec<Decl>> {
                     | K::BorderRightWidth
                     | K::BorderBottomWidth
                     | K::BorderLeftWidth
-                    | K::BorderInlineStartWidth
-                    | K::BorderInlineEndWidth
+                    | K::BorderStartWidth
+                    | K::BorderEndWidth
                     | K::BorderRadius
                     | K::BorderTopLeftRadius
                     | K::BorderTopRightRadius
                     | K::BorderBottomRightRadius
                     | K::BorderBottomLeftRadius
-                    | K::BorderStartStartRadius
-                    | K::BorderStartEndRadius
-                    | K::BorderEndEndRadius
-                    | K::BorderEndStartRadius
+                    | K::BorderTopStartRadius
+                    | K::BorderTopEndRadius
+                    | K::BorderBottomEndRadius
+                    | K::BorderBottomStartRadius
                     | K::OutlineWidth
                     | K::FontSize
                     | K::LineHeight
@@ -1928,10 +1928,10 @@ fn filter(backdrop: bool, slot: u8, f: Filter) -> Decl {
 static PREFIXES: &[(&str, Handler)] = &[
     // Spacing.
     ("px", |t, v, n| {
-        one(spacing(K::PaddingInline, t, v, n, false)?)
+        one(spacing(K::PaddingHorizontal, t, v, n, false)?)
     }),
     ("py", |t, v, n| {
-        one(spacing(K::PaddingBlock, t, v, n, false)?)
+        one(spacing(K::PaddingVertical, t, v, n, false)?)
     }),
     ("pt", |t, v, n| one(spacing(K::PaddingTop, t, v, n, false)?)),
     ("pr", |t, v, n| {
@@ -1944,28 +1944,24 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(spacing(K::PaddingLeft, t, v, n, false)?)
     }),
     ("ps", |t, v, n| {
-        one(spacing(K::PaddingInlineStart, t, v, n, false)?)
+        one(spacing(K::PaddingStart, t, v, n, false)?)
     }),
-    ("pe", |t, v, n| {
-        one(spacing(K::PaddingInlineEnd, t, v, n, false)?)
-    }),
+    ("pe", |t, v, n| one(spacing(K::PaddingEnd, t, v, n, false)?)),
     ("p", |t, v, n| one(spacing(K::Padding, t, v, n, false)?)),
     ("mx", |t, v, n| {
-        one(spacing(K::MarginInline, t, v, n, true)?)
+        one(spacing(K::MarginHorizontal, t, v, n, true)?)
     }),
-    ("my", |t, v, n| one(spacing(K::MarginBlock, t, v, n, true)?)),
+    ("my", |t, v, n| {
+        one(spacing(K::MarginVertical, t, v, n, true)?)
+    }),
     ("mt", |t, v, n| one(spacing(K::MarginTop, t, v, n, true)?)),
     ("mr", |t, v, n| one(spacing(K::MarginRight, t, v, n, true)?)),
     ("mb", |t, v, n| {
         one(spacing(K::MarginBottom, t, v, n, true)?)
     }),
     ("ml", |t, v, n| one(spacing(K::MarginLeft, t, v, n, true)?)),
-    ("ms", |t, v, n| {
-        one(spacing(K::MarginInlineStart, t, v, n, true)?)
-    }),
-    ("me", |t, v, n| {
-        one(spacing(K::MarginInlineEnd, t, v, n, true)?)
-    }),
+    ("ms", |t, v, n| one(spacing(K::MarginStart, t, v, n, true)?)),
+    ("me", |t, v, n| one(spacing(K::MarginEnd, t, v, n, true)?)),
     ("m", |t, v, n| one(spacing(K::Margin, t, v, n, true)?)),
     ("gap-x", |t, v, _| {
         one(set(K::ColumnGap, spacing_value(t, v, false, false)?))
@@ -2017,16 +2013,16 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(set(K::Left, length_value(t, v, n, true)?))
     }),
     ("inset-s", |t, v, n| {
-        one(set(K::InsetInlineStart, length_value(t, v, n, true)?))
+        one(set(K::Start, length_value(t, v, n, true)?))
     }),
     ("inset-e", |t, v, n| {
-        one(set(K::InsetInlineEnd, length_value(t, v, n, true)?))
+        one(set(K::End, length_value(t, v, n, true)?))
     }),
     ("start", |t, v, n| {
-        one(set(K::InsetInlineStart, length_value(t, v, n, true)?))
+        one(set(K::Start, length_value(t, v, n, true)?))
     }),
     ("end", |t, v, n| {
-        one(set(K::InsetInlineEnd, length_value(t, v, n, true)?))
+        one(set(K::End, length_value(t, v, n, true)?))
     }),
     ("z", |_, v, n| {
         // `z-index` takes integers: bare positive ones, any arbitrary one.
@@ -2364,16 +2360,16 @@ static PREFIXES: &[(&str, Handler)] = &[
         radius(t, v, &[K::BorderBottomLeftRadius])
     }),
     ("rounded-ss", |t, v, _| {
-        radius(t, v, &[K::BorderStartStartRadius])
+        radius(t, v, &[K::BorderTopStartRadius])
     }),
     ("rounded-se", |t, v, _| {
-        radius(t, v, &[K::BorderStartEndRadius])
+        radius(t, v, &[K::BorderTopEndRadius])
     }),
     ("rounded-ee", |t, v, _| {
-        radius(t, v, &[K::BorderEndEndRadius])
+        radius(t, v, &[K::BorderBottomEndRadius])
     }),
     ("rounded-es", |t, v, _| {
-        radius(t, v, &[K::BorderEndStartRadius])
+        radius(t, v, &[K::BorderBottomStartRadius])
     }),
     ("rounded-t", |t, v, _| {
         radius(t, v, &[K::BorderTopLeftRadius, K::BorderTopRightRadius])
@@ -2392,10 +2388,10 @@ static PREFIXES: &[(&str, Handler)] = &[
         radius(t, v, &[K::BorderTopLeftRadius, K::BorderBottomLeftRadius])
     }),
     ("rounded-s", |t, v, _| {
-        radius(t, v, &[K::BorderStartStartRadius, K::BorderEndStartRadius])
+        radius(t, v, &[K::BorderTopStartRadius, K::BorderBottomStartRadius])
     }),
     ("rounded-e", |t, v, _| {
-        radius(t, v, &[K::BorderStartEndRadius, K::BorderEndEndRadius])
+        radius(t, v, &[K::BorderTopEndRadius, K::BorderBottomEndRadius])
     }),
     ("rounded", |t, v, _| radius(t, v, &[K::BorderRadius])),
     ("border-x", |t, v, _| {
@@ -2427,15 +2423,10 @@ static PREFIXES: &[(&str, Handler)] = &[
         border(t, v, &[K::BorderLeftWidth], &[K::BorderLeftColor])
     }),
     ("border-s", |t, v, _| {
-        border(
-            t,
-            v,
-            &[K::BorderInlineStartWidth],
-            &[K::BorderInlineStartColor],
-        )
+        border(t, v, &[K::BorderStartWidth], &[K::BorderStartColor])
     }),
     ("border-e", |t, v, _| {
-        border(t, v, &[K::BorderInlineEndWidth], &[K::BorderInlineEndColor])
+        border(t, v, &[K::BorderEndWidth], &[K::BorderEndColor])
     }),
     ("border", |t, v, _| {
         border(t, v, &[K::BorderWidth], &[K::BorderColor])
@@ -2731,8 +2722,8 @@ fn bare(theme: &Theme, u: &str, neg: bool) -> Option<Vec<Decl>> {
         "border-r" => border_widths(&[K::BorderRightWidth], 1.0),
         "border-b" => border_widths(&[K::BorderBottomWidth], 1.0),
         "border-l" => border_widths(&[K::BorderLeftWidth], 1.0),
-        "border-s" => border_widths(&[K::BorderInlineStartWidth], 1.0),
-        "border-e" => border_widths(&[K::BorderInlineEndWidth], 1.0),
+        "border-s" => border_widths(&[K::BorderStartWidth], 1.0),
+        "border-e" => border_widths(&[K::BorderEndWidth], 1.0),
         "outline" => outline_width(1.0),
         "rounded" => return radius(theme, "sm", &[K::BorderRadius]),
         "rounded-t" | "rounded-r" | "rounded-b" | "rounded-l" | "rounded-tl" | "rounded-tr"

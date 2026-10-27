@@ -82,14 +82,14 @@ covers [styles] borderTopRightRadius
 covers [styles] borderBottomRightRadius
 covers [styles] borderBottomLeftRadius
 covers [styles] borderCurve
-covers [styles] borderInlineStartWidth
-covers [styles] borderInlineEndWidth
-covers [styles] borderInlineStartColor
-covers [styles] borderInlineEndColor
-covers [styles] borderStartStartRadius
-covers [styles] borderStartEndRadius
-covers [styles] borderEndEndRadius
-covers [styles] borderEndStartRadius
+covers [styles] borderStartWidth
+covers [styles] borderEndWidth
+covers [styles] borderStartColor
+covers [styles] borderEndColor
+covers [styles] borderTopStartRadius
+covers [styles] borderTopEndRadius
+covers [styles] borderBottomEndRadius
+covers [styles] borderBottomStartRadius
 # paint-current-color
 tap id:case-paint-current-color
 expect Current color

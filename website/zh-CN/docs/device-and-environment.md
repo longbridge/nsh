@@ -55,7 +55,7 @@ import { colorScheme, fontScale, windowSize } from "nsh";
 
 function App() {
   return (
-    <View style={{ flex: 1, paddingTop: safeArea().top + 16, paddingInline: 16, backgroundColor: colorScheme() === "dark" ? "#0d1117" : "#ffffff" }}>
+    <View style={{ flex: 1, paddingTop: safeArea().top + 16, paddingHorizontal: 16, backgroundColor: colorScheme() === "dark" ? "#0d1117" : "#ffffff" }}>
       <Text style={{ color: colorScheme() === "dark" ? "#e6edf3" : "#1f2328" }}>
         {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt, text at {fontScale().toFixed(2)}×
       </Text>
@@ -386,7 +386,7 @@ import { pixelRatio } from "nsh";
 
 修改会立即生效，无需重启应用；本页的演示就在切换 `direction` 样式。
 
-用逻辑属性编写两个方向都适用的布局：Rust 中的 `ms` / `me` 和 `ps` / `pe`（与 Tailwind 同名），TSX 中 CSS 的 `marginInlineStart` / `marginInlineEnd`、`paddingInlineStart` / `paddingInlineEnd`、`insetInlineStart` / `insetInlineEnd`、`borderStartStartRadius`、`textAlign: "start"` 等，它们在从左到右布局中表示左和右，从右到左时则相反。`left` 和 `right`（`marginLeft`、`paddingRight`、`left`、`textAlign: "left"` 等）在两个方向上都保持各自的一侧，与 CSS 相同。`direction` 样式（`"inherit"`、`"ltr"`、`"rtl"`）可以为子树覆盖方向，例如让电话号码或播放器控件保持从左到右。Tailwind 的 `rtl:` 和 `ltr:` 变体按方向生效。
+用逻辑属性编写两个方向都适用的布局：Rust 中的 `ms` / `me` 和 `ps` / `pe`（与 Tailwind 同名），TSX 中的 `marginStart` / `marginEnd`、`paddingStart` / `paddingEnd`、`start` / `end`、`borderTopStartRadius`、`textAlign: "start"` 等，它们在从左到右布局中表示左和右，从右到左时则相反。`left` 和 `right`（`marginLeft`、`paddingRight`、`left`、`textAlign: "left"` 等）在两个方向上都保持各自的一侧，与 CSS 相同。`direction` 样式（`"inherit"`、`"ltr"`、`"rtl"`）可以为子树覆盖方向，例如让电话号码或播放器控件保持从左到右。Tailwind 的 `rtl:` 和 `ltr:` 变体按方向生效。
 
 在从右到左布局中，横向滚动视图和列表从最右端开始。在 Android 上，宿主应用必须在清单中声明 `android:supportsRtl="true"`，原生控件才会镜像。
 

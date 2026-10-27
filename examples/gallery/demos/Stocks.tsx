@@ -57,7 +57,7 @@ function Breadth(props: { market: Market }) {
   });
   const scale = () => Math.max(0.5, ...means().map(Math.abs)) * 1.1;
   return (
-    <View style={{ paddingInline: 16, paddingBottom: 14, gap: 10 }}>
+    <View style={{ paddingHorizontal: 16, paddingBottom: 14, gap: 10 }}>
       <View style={{ gap: 6 }}>
         <View style={{ flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", gap: 2 }}>
           <View style={{ flex: b().up, backgroundColor: colors.up }} />
@@ -97,7 +97,7 @@ function MarketStrip(props: { market: Market }) {
   };
   return (
     <View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, height: 56 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 56 }}>
         <View
           onPress={toggle}
           role="button"
@@ -284,7 +284,7 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
       accessibilityLabel={props.stock.name}
       accessibilityState={props.wide ? { selected: !!props.active } : undefined}
       class={props.wide ? (props.active ? "bg-accent" : "hover:bg-card") : undefined}
-      style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, cursor: props.wide ? "pointer" : undefined }}
+      style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, cursor: props.wide ? "pointer" : undefined }}
     >
       <If when={props.active}>
         <View style={{ position: "absolute", top: 14, bottom: 14, left: 0, width: 3, borderRadius: 1.5, backgroundColor: colors.accent }} />
@@ -381,7 +381,7 @@ export function Stocks() {
   const watchlist = (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <MarketStrip market={market} />
-      <View style={{ paddingInline: 16, paddingBottom: 6 }}>
+      <View style={{ paddingHorizontal: 16, paddingBottom: 6 }}>
         <Segmented options={options} value={filter()} onChange={(f) => filter.set(f)} size="small" />
       </View>
       <Scroll style={{ flex: 1 }}>
@@ -399,10 +399,10 @@ export function Stocks() {
             )}
           </Each>
           <If when={!rows().length}>
-            <Text style={{ paddingBlock: 32, textAlign: "center", fontSize: 14, color: colors.muted }}>Nothing here right now</Text>
+            <Text style={{ paddingVertical: 32, textAlign: "center", fontSize: 14, color: colors.muted }}>Nothing here right now</Text>
           </If>
         </View>
-        <Text style={{ paddingInline: 16, paddingTop: 16, paddingBottom: 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
           Simulated, fictional companies · tick 50 ms · {stats().ms.toFixed(2)} ms JS/tick · {stats().updates} quotes/s
         </Text>
       </Scroll>

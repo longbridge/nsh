@@ -105,7 +105,7 @@ function Quote(props: { market: Market; stock: Stock }) {
   });
   const sector = sectors.find((s) => s.id === props.stock.sector)!.label;
   return (
-    <View style={{ paddingInline: 16, paddingTop: 12, paddingBottom: 14, gap: 10 }}>
+    <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text style={{ lineClamp: 1, flex: 1, fontSize: 15, color: colors.muted }}>
           {props.stock.name}
@@ -269,7 +269,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
   };
   const stats = () => props.market.stats();
   const footer = (
-    <Text style={{ paddingInline: 16, paddingTop: 8, paddingBottom: 96 + insets().bottom, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>
+    <Text style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 96 + insets().bottom, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>
       simulated · {stats().ms.toFixed(2)} ms JS/tick · {stats().updates} quotes/s
     </Text>
   );
@@ -306,7 +306,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
         }
       >
         <Scroll style={{ flex: 1 }}>
-          <Text style={{ paddingInline: 16, paddingTop: 14, fontSize: 22, fontWeight: "700", letterSpacing: -0.3, color: colors.text }}>{props.stock.code}</Text>
+          <Text style={{ paddingHorizontal: 16, paddingTop: 14, fontSize: 22, fontWeight: "700", letterSpacing: -0.3, color: colors.text }}>{props.stock.code}</Text>
           <View style={{ flexDirection: split() ? "row" : "column", alignItems: split() ? "flex-start" : "stretch" }}>
             <View style={{ flex: split() ? 1 : undefined, minWidth: 0 }}>
               <Quote market={props.market} stock={props.stock} />
@@ -335,7 +335,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           flexDirection: "row",
           alignItems: "center",
           gap: 10,
-          paddingInline: 16,
+          paddingHorizontal: 16,
           paddingTop: 10,
           paddingBottom: 10 + insets().bottom,
           // Glass: the page shows through, blurred, as it scrolls under.

@@ -278,7 +278,7 @@ function App() {
                 // within the plot's width.
                 tooltipOffset={height + 9}
                 tooltipContent={
-                  <View style={{ ...ui().raised, height: 20, paddingInline: 6, borderRadius: 6, justifyContent: "center" }}>
+                  <View style={{ ...ui().raised, height: 20, paddingHorizontal: 6, borderRadius: 6, justifyContent: "center" }}>
                     <Text style={{ fontSize: 11, color: ui().text, ...num }}>{RANGES[range()].time(Math.min(tipRow(), rows().length - 1))}</Text>
                   </View>
                 }
@@ -306,7 +306,7 @@ function App() {
                   hoverDotStyle={{ backgroundColor: color(), borderColor: ui().card.backgroundColor }}
                 />
               </Plot>
-              <View style={{ justifyContent: "space-between", marginBlock: -7, width: 28 }}>
+              <View style={{ justifyContent: "space-between", marginVertical: -7, width: 28 }}>
                 {[hi(), (lo() + hi()) / 2, lo()].map((v) => (
                   <Text style={{ fontSize: 11, color: ui().muted, ...num }}>{label(v)}</Text>
                 ))}

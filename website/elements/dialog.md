@@ -76,7 +76,7 @@ function Example() {
           style={{
             flex: 1,
             gap: 12,
-            paddingInline: 20,
+            paddingHorizontal: 20,
             paddingTop: "calc(env(safe-area-inset-top) + 20px)",
             paddingBottom: "calc(env(safe-area-inset-bottom) + 20px)",
           }}

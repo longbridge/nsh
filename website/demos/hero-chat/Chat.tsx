@@ -306,7 +306,7 @@ export function Chat(props: { autoplay?: string } = {}) {
   const canSend = () => !!draft().trim() || !!attachment();
 
   const userRow = (m: () => User) => (
-    <View style={{ alignItems: "flex-end", paddingInline: 16, paddingBlock: 8, gap: 8 }}>
+    <View style={{ alignItems: "flex-end", paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}>
       <If when={m().image}>
         <Photo src={m().image!} width={220} height={165} />
       </If>
@@ -317,8 +317,8 @@ export function Chat(props: { autoplay?: string } = {}) {
         <View
           style={{
             maxWidth: "82%",
-            paddingInline: 14,
-            paddingBlock: 10,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
             borderRadius: 20,
             borderBottomRightRadius: 6,
             borderCurve: "continuous",
@@ -355,7 +355,7 @@ export function Chat(props: { autoplay?: string } = {}) {
     const md = () => (live() ? liveMd() : m().md);
     const waitingForWords = () => live() && !liveMd() && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
     return (
-      <View style={{ paddingInline: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 26 }}>
           <Avatar />
           <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().model}</Text>
@@ -445,7 +445,7 @@ export function Chat(props: { autoplay?: string } = {}) {
   };
 
   const empty = (
-    <View style={{ flex: 1, justifyContent: "center", paddingInline: 16, paddingBlock: 24, gap: 24 }}>
+    <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
         <Appear>
           <View style={{ alignItems: "center", gap: 12 }}>
             <IconTile name="spark" tint={colors.accent} size={56} />
@@ -584,7 +584,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                 alignItems: "center",
                 gap: 12,
                 minHeight: 48,
-                paddingInline: 14,
+                paddingHorizontal: 14,
                 borderRadius: radius.inset,
                 borderCurve: "continuous",
                 ...finish.menu,
@@ -636,12 +636,12 @@ export function Chat(props: { autoplay?: string } = {}) {
                 borderCurve: "continuous",
                 ...finish.menu,
                 borderWidth: 1,
-                paddingBlock: 6,
+                paddingVertical: 6,
                 maxHeight: 460,
                 overflow: "hidden",
               }}
             >
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.faint, paddingInline: 16, paddingTop: 8, paddingBottom: 4 }}>ADD AND REPLAY</Text>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.faint, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>ADD AND REPLAY</Text>
               <Scroll style={{ flexGrow: 0 }}>
                 <Each of={menuRows}>
                   {(row, i) => (
@@ -654,7 +654,7 @@ export function Chat(props: { autoplay?: string } = {}) {
                       activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
                       role="button"
                       accessibilityLabel={row().label}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingInline: 16 }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
                     >
                       <Glyph name={row().glyph} size={16} tint={i() === 0 ? colors.accent : colors.muted} />
                       <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{row().label}</Text>
@@ -669,14 +669,14 @@ export function Chat(props: { autoplay?: string } = {}) {
         {/* Suggestions while the conversation is empty. */}
         <If when={!messages().length}>
           <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
-            <View style={{ flexDirection: "row", gap: 8, paddingInline: 16, paddingBlock: 8 }}>
+            <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
               <Each of={chips}>
                 {(chip) => (
                   <Press onPress={() => play(chip().id)} hitSlop={4} accessibilityLabel={chip().label}>
                     <View
                       style={{
                         height: 36,
-                        paddingInline: 14,
+                        paddingHorizontal: 14,
                         borderRadius: 18,
                         justifyContent: "center",
                         ...finish.pill,
@@ -693,7 +693,7 @@ export function Chat(props: { autoplay?: string } = {}) {
         </If>
 
         {/* The composer. */}
-        <View style={{ paddingInline: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
           <If when={attachment()}>
             <Appear>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -723,7 +723,7 @@ export function Chat(props: { autoplay?: string } = {}) {
               placeholder={`Message ${model()}`}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, paddingInline: 10, paddingBlock: 10 }}
+              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View

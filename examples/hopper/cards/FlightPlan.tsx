@@ -19,7 +19,7 @@ function Coordinate(props: { axis: Axis; label: string; signed?: boolean }) {
           flexDirection: "row",
           alignItems: "center",
           height: 44,
-          paddingInline: 12,
+          paddingHorizontal: 12,
           borderRadius: radius.control,
           borderWidth: 1.5,
           borderColor: over() ? color.alert : focused() ? color.accent : color.line,
@@ -42,7 +42,7 @@ function Coordinate(props: { axis: Axis; label: string; signed?: boolean }) {
           keyboardType={props.signed ? "numbers-and-punctuation" : "number-pad"}
           returnKeyType="done"
           accessibilityLabel={`${props.label}, meters`}
-          style={{ selectionColor: color.accent, flex: 1, fontFamily: mono, fontSize: 15, color: color.text, paddingBlock: 6 }}
+          style={{ selectionColor: color.accent, flex: 1, fontFamily: mono, fontSize: 15, color: color.text, paddingVertical: 6 }}
         />
         <Text style={{ fontFamily: mono, fontSize: 13, color: color.faint }}>m</Text>
       </View>
@@ -53,7 +53,7 @@ function Coordinate(props: { axis: Axis; label: string; signed?: boolean }) {
 function Option(props: { title: string; detail: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean; first?: boolean }) {
   return (
     <Line first={props.first}>
-      <View style={{ flex: 1, gap: 2, paddingBlock: 10, opacity: props.disabled ? 0.5 : 1 }}>
+      <View style={{ flex: 1, gap: 2, paddingVertical: 10, opacity: props.disabled ? 0.5 : 1 }}>
         <Text style={{ fontSize: 15, color: color.text }}>{props.title}</Text>
         <Text style={{ fontSize: 12, color: color.muted }}>{props.detail}</Text>
       </View>

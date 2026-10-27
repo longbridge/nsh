@@ -228,12 +228,12 @@ export function Physics() {
           value={feel()}
           onChange={(f) => feel.set(f)}
         />
-        <View style={{ flexDirection: "row", paddingInline: 4 }}>
+        <View style={{ flexDirection: "row", paddingHorizontal: 4 }}>
           <Stat width="30%" label="Releases" value={String(releases())} />
           <Stat width="34%" label="Speed" value={`${speed()} pt/s`} tone={speed() > 1500 ? "warn" : undefined} />
           <Stat width="36%" label={mode() === "snap" ? "Corner" : "Spring"} value={mode() === "snap" ? corner() : `${feels[feel()].stiffness} / ${feels[feel()].damping}`} />
         </View>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingInline: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4 }}>
           <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>
             {mode() === "spring" ? "Springs home with the release velocity" : mode() === "coast" ? "Coasts to a stop, then springs home" : "Springs to the corner the fling points at"}
           </Text>

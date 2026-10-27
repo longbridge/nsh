@@ -51,7 +51,7 @@ function App() {
   // A phone: cards in one column, pull to refresh.
   const cards = () => (
     <View style={{ flex: 1, backgroundColor: ui().page, paddingTop: 24 }}>
-      <View style={{ paddingInline: 16, gap: 6, paddingBottom: 8 }}>
+      <View style={{ paddingHorizontal: 16, gap: 6, paddingBottom: 8 }}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>list</Text>
         <Text style={{ color: ui().muted }}>
           {trades().length} rows · onLoadMore {loads()}× · visible {visible()}
@@ -65,7 +65,7 @@ function App() {
         numColumns={1}
         estimatedItemSize={64}
         style={{ flex: 1 }}
-        contentStyle={{ paddingInline: 16, paddingTop: 4, paddingBottom: 16, gap: 8 }}
+        contentStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16, gap: 8 }}
         onLoadMore={loadMore}
         loadMoreThreshold={0.5}
         refreshing={refreshing()}
@@ -83,7 +83,7 @@ function App() {
             </View>
           </View>
         }
-        footer={<Text style={{ color: ui().faint, textAlign: "center", paddingBlock: 16 }}>{status()}</Text>}
+        footer={<Text style={{ color: ui().faint, textAlign: "center", paddingVertical: 16 }}>{status()}</Text>}
       >
         {(trade, index) => (
           <View style={{ ...ui().row, flex: 1, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 12 }}>
@@ -98,8 +98,8 @@ function App() {
               style={{
                 color: changeColor(trade()),
                 backgroundColor: tint(changeColor(trade()), 0.12),
-                paddingInline: 8,
-                paddingBlock: 3,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
                 borderRadius: 6,
                 overflow: "hidden",
                 fontWeight: "600",
@@ -132,7 +132,7 @@ function App() {
               alignItems: "center",
               gap: 12,
               height: size.rowSm,
-              paddingInline: 12,
+              paddingHorizontal: 12,
               borderBottomWidth: 1,
               borderBottomColor: ui().border,
               backgroundColor: ui().inset.backgroundColor,
@@ -141,7 +141,7 @@ function App() {
             <Text style={{ ...cell, width: lanes.index, textAlign: "right", fontSize: 12, fontWeight: "600", color: ui().muted }}>#</Text>
             <Text style={{ ...cell, flex: 1, fontSize: 12, fontWeight: "600", color: ui().muted }}>Symbol</Text>
             <Text style={{ ...cell, width: lanes.shares, textAlign: "right", fontSize: 12, fontWeight: "600", color: ui().muted }}>Shares</Text>
-            <Text style={{ ...cell, width: lanes.key, paddingInlineStart: 16, fontSize: 12, fontWeight: "600", color: ui().muted }}>Key</Text>
+            <Text style={{ ...cell, width: lanes.key, paddingStart: 16, fontSize: 12, fontWeight: "600", color: ui().muted }}>Key</Text>
             <Text style={{ ...cell, width: lanes.change, textAlign: "right", fontSize: 12, fontWeight: "600", color: ui().muted }}>Change</Text>
           </View>
           <List
@@ -157,7 +157,7 @@ function App() {
             onRefresh={refresh}
             viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
             onViewableItemsChange={viewable}
-            footer={<Text style={{ color: ui().faint, fontSize: 13, textAlign: "center", paddingBlock: 12 }}>{status()}</Text>}
+            footer={<Text style={{ color: ui().faint, fontSize: 13, textAlign: "center", paddingVertical: 12 }}>{status()}</Text>}
           >
             {(trade, index) => (
               <View
@@ -166,7 +166,7 @@ function App() {
                   alignItems: "center",
                   gap: 12,
                   height: size.row - 4,
-                  paddingInline: 12,
+                  paddingHorizontal: 12,
                   borderBottomWidth: 1,
                   borderBottomColor: ui().line,
                 }}
@@ -174,7 +174,7 @@ function App() {
                 <Text style={{ ...cell, width: lanes.index, textAlign: "right", color: ui().faint }}>{index()}</Text>
                 <Text style={{ ...cell, flex: 1, fontWeight: "600", color: ui().text }}>{trade().symbol}</Text>
                 <Text style={{ ...cell, width: lanes.shares, textAlign: "right", color: ui().text }}>{trade().shares}</Text>
-                <Text style={{ ...cell, width: lanes.key, paddingInlineStart: 16, color: ui().muted }}>{trade().id}</Text>
+                <Text style={{ ...cell, width: lanes.key, paddingStart: 16, color: ui().muted }}>{trade().id}</Text>
                 <Text style={{ ...cell, width: lanes.change, textAlign: "right", fontWeight: "600", color: changeColor(trade()) }}>
                   {trade().change >= 0 ? "+" : ""}
                   {trade().change.toFixed(1)}%

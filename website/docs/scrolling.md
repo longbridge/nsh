@@ -82,9 +82,9 @@ scroll().horizontal().scrollbar(false).child(
 
 ```tsx tabs
 <Scroll horizontal scrollbar={false}>
-  <View style={{ flexDirection: "row", gap: 8, paddingInline: 16 }}>
+  <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
     <Each of={["Today", "This week", "This month", "This year"]}>
-      {(label) => <Text style={{ paddingInline: 14, paddingBlock: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
+      {(label) => <Text style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
     </Each>
   </View>
 </Scroll>
@@ -228,7 +228,7 @@ scroll()
   disableIntervalMomentum
   scrollbar={false}
 >
-  <View style={{ flexDirection: "row", gap: 12, paddingInline: 16 }}>…</View>
+  <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 16 }}>…</View>
 </Scroll>
 ```
 
@@ -316,7 +316,7 @@ function App() {
         style={{
           height: 56,
           justifyContent: "center",
-          paddingInline: 16,
+          paddingHorizontal: 16,
           // Transparent at the top, white after 80 points.
           backgroundColor: offset.interpolate({ inputRange: [0, 80], outputRange: ["rgba(255,255,255,0)", "#ffffff"] }),
         }}

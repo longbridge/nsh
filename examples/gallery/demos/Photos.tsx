@@ -32,7 +32,7 @@ const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String
 function PhotoRow(props: { photo: Photo }) {
   return (
     <Press scale={0.985} accessibilityLabel={props.photo.title}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, height: 76 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 76 }}>
         <Image
           src={`https://picsum.photos/seed/${props.photo.id}/112/112`}
           style={{
@@ -81,7 +81,7 @@ function PhotoTile(props: { photo: Photo }) {
             ...finish.raised,
           }}
         />
-        <View style={{ gap: 3, paddingInline: 4, paddingBottom: 4 }}>
+        <View style={{ gap: 3, paddingHorizontal: 4, paddingBottom: 4 }}>
           <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
             <Text style={{ lineClamp: 1, flex: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>
               {props.photo.title}
@@ -131,7 +131,7 @@ export function Photos() {
   const hero = () => (
     <View
       style={{
-        paddingInline: wide ? 0 : 16,
+        paddingHorizontal: wide ? 0 : 16,
         paddingTop: wide ? 0 : 8,
         paddingBottom: 16,
         opacity: scrollY.interpolate({ inputRange: [0, 150], outputRange: [1, 0] }),
@@ -260,7 +260,7 @@ export function Photos() {
           left: 0,
           right: 0,
           height: 44,
-          paddingInline: 16,
+          paddingHorizontal: 16,
           flexDirection: "row",
           alignItems: "center",
           gap: 8,

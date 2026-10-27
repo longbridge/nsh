@@ -31,8 +31,8 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
           flexDirection: "row",
           alignItems: "center",
           gap: 12,
-          paddingInline: 10,
-          paddingBlock: 8,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
           borderTopWidth: props.first ? 0 : 1,
           borderTopColor: colors.line,
         }}
@@ -56,7 +56,7 @@ function Page(props: { intro: string; children?: JSX.Element }) {
     <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ padding: 16, paddingBottom: 40, gap: 16 }}>
         <Appear>
-          <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, paddingInline: 4 }}>{props.intro}</Text>
+          <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, paddingHorizontal: 4 }}>{props.intro}</Text>
         </Appear>
         <Appear index={1}>
           <Section title="Safe area" note="safeAreaInsets()">
@@ -84,7 +84,7 @@ function LargeTitle() {
                     height: 48,
                     flexDirection: "row",
                     alignItems: "center",
-                    paddingInline: 10,
+                    paddingHorizontal: 10,
                     borderTopWidth: i() === 1 ? 0 : 1,
                     borderTopColor: colors.line,
                   }}
@@ -233,7 +233,7 @@ function Unsaved() {
               caretColor: colors.accent,
               selectionColor: colors.accent,
               height: 48,
-              paddingInline: 14,
+              paddingHorizontal: 14,
               fontSize: 15,
               color: colors.text,
               backgroundColor: colors.field,
@@ -282,7 +282,7 @@ function Headerless() {
       <View style={{ flex: 1, backgroundColor: colors.background, ...safeAreaPadding }}>
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
-            <View style={{ gap: 8, paddingInline: 4, paddingTop: 12 }}>
+            <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 12 }}>
               <View style={{ flexDirection: "row" }}>
                 <Badge label="headerVisible={false}" tone="accent" />
               </View>
@@ -358,7 +358,7 @@ function ModalBody(props: { title: string; note: string; body: string; fullScree
     <View style={{ flex: 1, backgroundColor: colors.background, ...safeAreaPadding }}>
       <If when={props.fullScreen}><TitleBar /></If>
       <View style={{ flex: 1, padding: 16, gap: 16 }}>
-        <View style={{ gap: 8, paddingInline: 4, paddingTop: 8 }}>
+        <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
           <View style={{ flexDirection: "row" }}>
             <Badge label={props.note} tone="accent" />
           </View>

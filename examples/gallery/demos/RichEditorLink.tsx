@@ -68,7 +68,7 @@ export function LinkBubble(props: { menu: LinkMenu }) {
         when={menu.mode() === "edit"}
         else={
           <>
-            <Text style={{ lineClamp: 1, maxWidth: 260, paddingInline: 8, fontSize: 13, color: colors.info }}>
+            <Text style={{ lineClamp: 1, maxWidth: 260, paddingHorizontal: 8, fontSize: 13, color: colors.info }}>
               {menu.href()}
             </Text>
             <IconButton icon="pencil" label="Edit link" onPress={menu.edit} />

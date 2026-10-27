@@ -119,7 +119,7 @@ Arbitrary CSS properties (`[mask-type:luminance]`) are not supported.
 | `fixed` | `position: "fixed"`: an element laid out in its root view's box (the window or its modal) above that root view's children, in place while what is around it scrolls |
 | `inset-<n>`, `inset-x-<n>`, `inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`, `right-<n>`, `bottom-<n>`, `left-<n>` | the matching offset |
-| `start-<n>`, `end-<n>` | `insetInlineStart` / `insetInlineEnd` (direction-aware) |
+| `start-<n>`, `end-<n>` | `start` / `end` (direction-aware) |
 | `z-<n>`, `z-auto`, `z-[<n>]` | `zIndex` (`z-auto` is 0) |
 | `visible` | `visibility: "visible"` |
 | `invisible`, `collapse` | `visibility: "hidden"` (keeps its space) |
@@ -171,12 +171,12 @@ Scrolling is an element, not a class: `overflow-auto` and `overflow-scroll` are 
 
 | Class | Sets |
 |---|---|
-| `p-<n>`, `px-<n>`, `py-<n>` | `padding`, `paddingInline`, `paddingBlock` |
+| `p-<n>`, `px-<n>`, `py-<n>` | `padding`, `paddingHorizontal`, `paddingVertical` |
 | `pt-<n>`, `pr-<n>`, `pb-<n>`, `pl-<n>` | `paddingTop` / `Right` / `Bottom` / `Left` |
-| `ps-<n>`, `pe-<n>` | `paddingInlineStart`, `paddingInlineEnd` (direction-aware) |
-| `m-<n>`, `mx-<n>`, `my-<n>` | `margin`, `marginInline`, `marginBlock` |
+| `ps-<n>`, `pe-<n>` | `paddingStart`, `paddingEnd` (direction-aware) |
+| `m-<n>`, `mx-<n>`, `my-<n>` | `margin`, `marginHorizontal`, `marginVertical` |
 | `mt-<n>`, `mr-<n>`, `mb-<n>`, `ml-<n>` | `marginTop` / `Right` / `Bottom` / `Left` |
-| `ms-<n>`, `me-<n>` | `marginInlineStart`, `marginInlineEnd` (direction-aware) |
+| `ms-<n>`, `me-<n>` | `marginStart`, `marginEnd` (direction-aware) |
 
 ## Sizing
 
@@ -319,7 +319,7 @@ view()
 | `border-none`, `border-hidden` | `borderStyle: "none"` / `"hidden"`: no border whatever the width classes, in any order (`md:border-solid` shows it again) |
 | `rounded`, `rounded-<size>`, `rounded-none`, `rounded-full`, `rounded-[<length>]` | `borderRadius` (bare: `sm`) |
 | `rounded-t-`, `-r-`, `-b-`, `-l-`, `-tl-`, `-tr-`, `-br-`, `-bl-` | the matching corners |
-| `rounded-s-`, `-e-`, `-ss-`, `-se-`, `-es-`, `-ee-` | start / end corners (direction-aware): `borderStartStartRadius`, `borderStartEndRadius`, `borderEndStartRadius`, `borderEndEndRadius` |
+| `rounded-s-`, `-e-`, `-ss-`, `-se-`, `-es-`, `-ee-` | start / end corners (direction-aware): `borderTopStartRadius`, `borderTopEndRadius`, `borderBottomStartRadius`, `borderBottomEndRadius` |
 | `outline`, `outline-<n>`, `outline-[<length>]` | `outlineWidth` (bare: 1), solid unless a style class is anywhere in the string (`outline-dashed outline-2` is dashed, `outline-none outline-2` draws nothing) |
 | `outline-<color>` | `outlineColor` |
 | `outline-solid`, `outline-dashed`, `outline-dotted`, `outline-none`, `outline-hidden` | `outlineStyle`; a style alone is CSS's medium width, 3 points |

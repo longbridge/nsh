@@ -1001,7 +1001,7 @@ pub(crate) struct Pending {
     outline_hidden: bool,
     /// The border widths as set: top, right, bottom, left.
     border_widths: [Points; 4],
-    /// `borderInlineStartWidth`, `borderInlineEndWidth` as set.
+    /// `borderStartWidth`, `borderEndWidth` as set.
     border_logical: [Option<Points>; 2],
     /// `borderStyle: "none"` / `"hidden"`: every used width is 0.
     border_hidden: bool,
@@ -1213,8 +1213,8 @@ fn edges(key: StyleKey) -> &'static [usize] {
     use StyleKey as K;
     match key {
         K::Margin | K::Padding => &[0, 1, 2, 3],
-        K::MarginInline | K::PaddingInline => &[1, 3],
-        K::MarginBlock | K::PaddingBlock => &[0, 2],
+        K::MarginHorizontal | K::PaddingHorizontal => &[1, 3],
+        K::MarginVertical | K::PaddingVertical => &[0, 2],
         K::MarginTop | K::PaddingTop => &[0],
         K::MarginRight | K::PaddingRight => &[1],
         K::MarginBottom | K::PaddingBottom => &[2],
@@ -1256,23 +1256,23 @@ fn margin_edge(v: StyleValue<'_>) -> Result<(LengthPercentageAuto, Option<EnvVar
     Ok((lpa_or_zero(v)?, None))
 }
 
-/// Properties named by start and end (`marginInlineStart`, `borderStartEndRadius`
+/// Properties named by start and end (`marginStart`, `borderTopEndRadius`
 /// ...): left and right in left-to-right layouts, the other way around in
 /// right-to-left ones.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Logical {
-    /// `marginInlineStart`, `marginInlineEnd`.
+    /// `marginStart`, `marginEnd`.
     pub margin: [Option<LengthPercentageAuto>; 2],
-    /// `paddingInlineStart`, `paddingInlineEnd`.
+    /// `paddingStart`, `paddingEnd`.
     pub padding: [Option<LengthPercentage>; 2],
-    /// `insetInlineStart`, `insetInlineEnd`.
+    /// `start`, `end`.
     pub inset: [Option<LengthPercentageAuto>; 2],
-    /// `borderInlineStartWidth`, `borderInlineEndWidth`.
+    /// `borderStartWidth`, `borderEndWidth`.
     pub border_width: [Option<Points>; 2],
-    /// `borderInlineStartColor`, `borderInlineEndColor`.
+    /// `borderStartColor`, `borderEndColor`.
     pub border_color: [Option<Color>; 2],
-    /// `borderStartStartRadius`, `borderStartEndRadius`,
-    /// `borderEndEndRadius`, `borderEndStartRadius`.
+    /// `borderTopStartRadius`, `borderTopEndRadius`,
+    /// `borderBottomEndRadius`, `borderBottomStartRadius`.
     pub radius: [Option<Points>; 4],
 }
 
@@ -1484,15 +1484,15 @@ style_keys! {
     Bottom = "bottom": Layout "DimensionValue",
     Left = "left": Layout "DimensionValue | AnimatedNode" "An animated value only for a `position: \"sticky\"` view in a horizontal scroll view, as `top`.",
     Margin = "margin": Layout "DimensionValue | EnvValue",
-    MarginInline = "marginInline": Layout "DimensionValue | EnvValue",
-    MarginBlock = "marginBlock": Layout "DimensionValue | EnvValue",
+    MarginHorizontal = "marginHorizontal": Layout "DimensionValue | EnvValue",
+    MarginVertical = "marginVertical": Layout "DimensionValue | EnvValue",
     MarginTop = "marginTop": Layout "DimensionValue | EnvValue",
     MarginRight = "marginRight": Layout "DimensionValue | EnvValue",
     MarginBottom = "marginBottom": Layout "DimensionValue | EnvValue",
     MarginLeft = "marginLeft": Layout "DimensionValue | EnvValue",
     Padding = "padding": Layout "LengthValue | EnvValue",
-    PaddingInline = "paddingInline": Layout "LengthValue | EnvValue",
-    PaddingBlock = "paddingBlock": Layout "LengthValue | EnvValue",
+    PaddingHorizontal = "paddingHorizontal": Layout "LengthValue | EnvValue",
+    PaddingVertical = "paddingVertical": Layout "LengthValue | EnvValue",
     PaddingTop = "paddingTop": Layout "LengthValue | EnvValue",
     PaddingRight = "paddingRight": Layout "LengthValue | EnvValue",
     PaddingBottom = "paddingBottom": Layout "LengthValue | EnvValue",
@@ -1544,21 +1544,21 @@ style_keys! {
     GridRowEnd = "gridRowEnd": Layout "number | string",
     JustifyItems = "justifyItems": Layout "Align" "How grid items sit in their areas along the row.",
     JustifySelf = "justifySelf": Layout "Align | \"auto\"",
-    Direction = "direction": Layout "\"inherit\" | \"ltr\" | \"rtl\"" "Layout direction; inherited by default. As in CSS, `left` and `right` properties keep their sides right to left, while the `inlineStart` / `inlineEnd` ones (`marginInlineStart`, `insetInlineEnd`, ...) take the sides the direction gives them.",
-    MarginInlineStart = "marginInlineStart": Layout "DimensionValue",
-    MarginInlineEnd = "marginInlineEnd": Layout "DimensionValue",
-    PaddingInlineStart = "paddingInlineStart": Layout "LengthValue",
-    PaddingInlineEnd = "paddingInlineEnd": Layout "LengthValue",
-    InsetInlineStart = "insetInlineStart": Layout "DimensionValue" "Left in left-to-right layouts, right in right-to-left ones.",
-    InsetInlineEnd = "insetInlineEnd": Layout "DimensionValue",
-    BorderInlineStartWidth = "borderInlineStartWidth": View "number",
-    BorderInlineEndWidth = "borderInlineEndWidth": View "number",
-    BorderInlineStartColor = "borderInlineStartColor": View "ColorValue",
-    BorderInlineEndColor = "borderInlineEndColor": View "ColorValue",
-    BorderStartStartRadius = "borderStartStartRadius": View "number",
-    BorderStartEndRadius = "borderStartEndRadius": View "number",
-    BorderEndEndRadius = "borderEndEndRadius": View "number",
-    BorderEndStartRadius = "borderEndStartRadius": View "number",
+    Direction = "direction": Layout "\"inherit\" | \"ltr\" | \"rtl\"" "Layout direction; inherited by default. As in CSS, `left` and `right` properties keep their sides right to left, while the `inlineStart` / `inlineEnd` ones (`marginStart`, `end`, ...) take the sides the direction gives them.",
+    MarginStart = "marginStart": Layout "DimensionValue",
+    MarginEnd = "marginEnd": Layout "DimensionValue",
+    PaddingStart = "paddingStart": Layout "LengthValue",
+    PaddingEnd = "paddingEnd": Layout "LengthValue",
+    Start = "start": Layout "DimensionValue" "Left in left-to-right layouts, right in right-to-left ones.",
+    End = "end": Layout "DimensionValue",
+    BorderStartWidth = "borderStartWidth": View "number",
+    BorderEndWidth = "borderEndWidth": View "number",
+    BorderStartColor = "borderStartColor": View "ColorValue",
+    BorderEndColor = "borderEndColor": View "ColorValue",
+    BorderTopStartRadius = "borderTopStartRadius": View "number",
+    BorderTopEndRadius = "borderTopEndRadius": View "number",
+    BorderBottomEndRadius = "borderBottomEndRadius": View "number",
+    BorderBottomStartRadius = "borderBottomStartRadius": View "number",
     BackgroundColor = "backgroundColor": View "ColorValue | AnimatedNode",
     BorderRadius = "borderRadius": View "number",
     BorderTopLeftRadius = "borderTopLeftRadius": View "number",
@@ -1690,9 +1690,9 @@ pub enum PropertyValue {
     Lpa(LengthPercentageAuto),
     /// A length or a percentage (`padding`, `gap`).
     Lp(LengthPercentage),
-    /// [`PropertyValue::Lpa`] or unset (`marginInlineStart`).
+    /// [`PropertyValue::Lpa`] or unset (`marginStart`).
     OptLpa(Option<LengthPercentageAuto>),
-    /// [`PropertyValue::Lp`] or unset (`paddingInlineStart`).
+    /// [`PropertyValue::Lp`] or unset (`paddingStart`).
     OptLp(Option<LengthPercentage>),
     /// Points (`borderWidth`, `borderRadius`, `outlineWidth`).
     Points(Points),
@@ -1908,7 +1908,7 @@ impl StylePatch {
 
     /// Sets property `key` of the style object this patch records on
     /// `style`, and records it. As in React Native, a longhand
-    /// (`borderTopWidth`, `marginInline`, `flexGrow`, ...) wins over
+    /// (`borderTopWidth`, `marginHorizontal`, `flexGrow`, ...) wins over
     /// its shorthand (`borderWidth`, `margin`, `flex`) in one object
     /// whatever their order: a shorthand set after its longhands is
     /// recorded before them, and they apply again; a `null` longhand is
@@ -2087,8 +2087,8 @@ impl StyleKey {
             K::BorderRightWidth => K::BorderRightColor,
             K::BorderBottomWidth => K::BorderBottomColor,
             K::BorderLeftWidth => K::BorderLeftColor,
-            K::BorderInlineStartWidth => K::BorderInlineStartColor,
-            K::BorderInlineEndWidth => K::BorderInlineEndColor,
+            K::BorderStartWidth => K::BorderStartColor,
+            K::BorderEndWidth => K::BorderEndColor,
             K::OutlineWidth => K::OutlineColor,
             _ => return None,
         })
@@ -2101,25 +2101,25 @@ impl StyleKey {
         use StyleKey as K;
         match self {
             K::Margin => &[
-                K::MarginInline,
-                K::MarginBlock,
+                K::MarginHorizontal,
+                K::MarginVertical,
                 K::MarginTop,
                 K::MarginRight,
                 K::MarginBottom,
                 K::MarginLeft,
             ],
-            K::MarginInline => &[K::MarginLeft, K::MarginRight],
-            K::MarginBlock => &[K::MarginTop, K::MarginBottom],
+            K::MarginHorizontal => &[K::MarginLeft, K::MarginRight],
+            K::MarginVertical => &[K::MarginTop, K::MarginBottom],
             K::Padding => &[
-                K::PaddingInline,
-                K::PaddingBlock,
+                K::PaddingHorizontal,
+                K::PaddingVertical,
                 K::PaddingTop,
                 K::PaddingRight,
                 K::PaddingBottom,
                 K::PaddingLeft,
             ],
-            K::PaddingInline => &[K::PaddingLeft, K::PaddingRight],
-            K::PaddingBlock => &[K::PaddingTop, K::PaddingBottom],
+            K::PaddingHorizontal => &[K::PaddingLeft, K::PaddingRight],
+            K::PaddingVertical => &[K::PaddingTop, K::PaddingBottom],
             K::BorderWidth => &[
                 K::BorderTopWidth,
                 K::BorderRightWidth,
@@ -2249,8 +2249,8 @@ const CURRENT_KEYS: [StyleKey; 10] = [
     StyleKey::BorderRightColor,
     StyleKey::BorderBottomColor,
     StyleKey::BorderLeftColor,
-    StyleKey::BorderInlineStartColor,
-    StyleKey::BorderInlineEndColor,
+    StyleKey::BorderStartColor,
+    StyleKey::BorderEndColor,
     StyleKey::OutlineColor,
     StyleKey::BackgroundColor,
     StyleKey::TextDecorationColor,
@@ -2626,8 +2626,8 @@ impl StyleKey {
                 | K::Bottom
                 | K::Left
                 | K::Margin
-                | K::MarginInline
-                | K::MarginBlock
+                | K::MarginHorizontal
+                | K::MarginVertical
                 | K::MarginTop
                 | K::MarginRight
                 | K::MarginBottom
@@ -2636,8 +2636,8 @@ impl StyleKey {
             ) => PropertyValue::Lpa(len.lpa()),
             (
                 K::Padding
-                | K::PaddingInline
-                | K::PaddingBlock
+                | K::PaddingHorizontal
+                | K::PaddingVertical
                 | K::PaddingTop
                 | K::PaddingRight
                 | K::PaddingBottom
@@ -2647,13 +2647,10 @@ impl StyleKey {
                 | K::ColumnGap,
                 len,
             ) => PropertyValue::Lp(len.lp()?),
-            (
-                K::MarginInlineStart | K::MarginInlineEnd | K::InsetInlineStart | K::InsetInlineEnd,
-                len,
-            ) => PropertyValue::OptLpa(Some(len.lpa())),
-            (K::PaddingInlineStart | K::PaddingInlineEnd, len) => {
-                PropertyValue::OptLp(Some(len.lp()?))
+            (K::MarginStart | K::MarginEnd | K::Start | K::End, len) => {
+                PropertyValue::OptLpa(Some(len.lpa()))
             }
+            (K::PaddingStart | K::PaddingEnd, len) => PropertyValue::OptLp(Some(len.lp()?)),
             (K::LineHeight, Len::Px(n)) => PropertyValue::LineHeight(LineHeight::Points(px(n))),
             (K::LineHeight, Len::Pct(f)) => PropertyValue::LineHeight(LineHeight::Em(f)),
             (key, Len::Px(n)) => key.number_value(n)?,
@@ -2755,8 +2752,8 @@ impl StyleKey {
                 v => opt_number(v)?.map(of),
             }),
             K::Margin
-            | K::MarginInline
-            | K::MarginBlock
+            | K::MarginHorizontal
+            | K::MarginVertical
             | K::MarginTop
             | K::MarginRight
             | K::MarginBottom
@@ -2765,8 +2762,8 @@ impl StyleKey {
                 (v, None) => PropertyValue::Lpa(v),
             },
             K::Padding
-            | K::PaddingInline
-            | K::PaddingBlock
+            | K::PaddingHorizontal
+            | K::PaddingVertical
             | K::PaddingTop
             | K::PaddingRight
             | K::PaddingBottom
@@ -2790,15 +2787,15 @@ impl StyleKey {
                 Some("rtl") => Some(true),
                 Some(_) => return Err(StyleError::InvalidValue),
             }),
-            K::MarginInlineStart | K::MarginInlineEnd | K::InsetInlineStart | K::InsetInlineEnd => {
+            K::MarginStart | K::MarginEnd | K::Start | K::End => {
                 PropertyValue::OptLpa(opt_lpa(value)?)
             }
-            K::PaddingInlineStart | K::PaddingInlineEnd => PropertyValue::OptLp(opt_lp(value)?),
-            K::BorderInlineStartWidth | K::BorderInlineEndWidth => {
+            K::PaddingStart | K::PaddingEnd => PropertyValue::OptLp(opt_lp(value)?),
+            K::BorderStartWidth | K::BorderEndWidth => {
                 PropertyValue::OptPoints(opt_points(value)?.map(|w| w.max(Points::ZERO)))
             }
-            K::BorderInlineStartColor
-            | K::BorderInlineEndColor
+            K::BorderStartColor
+            | K::BorderEndColor
             | K::BackgroundColor
             | K::BorderColor
             | K::BorderTopColor
@@ -2812,10 +2809,10 @@ impl StyleKey {
             | K::PlaceholderColor
             | K::SelectionColor
             | K::CaretColor => PropertyValue::Color(color(value)?),
-            K::BorderStartStartRadius
-            | K::BorderStartEndRadius
-            | K::BorderEndEndRadius
-            | K::BorderEndStartRadius
+            K::BorderTopStartRadius
+            | K::BorderTopEndRadius
+            | K::BorderBottomEndRadius
+            | K::BorderBottomStartRadius
             | K::BorderTopLeftRadius
             | K::BorderTopRightRadius
             | K::BorderBottomRightRadius
@@ -3377,8 +3374,8 @@ impl Style {
             StyleKey::BorderRightColor => self.view.borders.colors[1] = color,
             StyleKey::BorderBottomColor => self.view.borders.colors[2] = color,
             StyleKey::BorderLeftColor => self.view.borders.colors[3] = color,
-            StyleKey::BorderInlineStartColor => self.logical.border_color[0] = Some(color),
-            StyleKey::BorderInlineEndColor => self.logical.border_color[1] = Some(color),
+            StyleKey::BorderStartColor => self.logical.border_color[0] = Some(color),
+            StyleKey::BorderEndColor => self.logical.border_color[1] = Some(color),
             StyleKey::TextDecorationColor => self.text.decoration_color = Some(color),
             StyleKey::CaretColor => self.text.caret_color = Some(color),
             _ => debug_assert!(false, "set_color({key:?})"),
@@ -3469,8 +3466,8 @@ impl Style {
             (K::Left, V::Lpa(v)) => l.inset.left = *v,
             (
                 K::Margin
-                | K::MarginInline
-                | K::MarginBlock
+                | K::MarginHorizontal
+                | K::MarginVertical
                 | K::MarginTop
                 | K::MarginRight
                 | K::MarginBottom
@@ -3490,8 +3487,8 @@ impl Style {
             }
             (
                 K::Padding
-                | K::PaddingInline
-                | K::PaddingBlock
+                | K::PaddingHorizontal
+                | K::PaddingVertical
                 | K::PaddingTop
                 | K::PaddingRight
                 | K::PaddingBottom
@@ -3525,20 +3522,20 @@ impl Style {
             (K::ZIndex, V::Number(n)) => self.z_index = n.0 as i32,
             (K::VerticalAlign, V::VerticalAlign(v)) => self.vertical_align = *v,
             (K::Direction, V::OptBool(v)) => self.direction = *v,
-            (K::MarginInlineStart, V::OptLpa(v)) => self.logical.margin[0] = *v,
-            (K::MarginInlineEnd, V::OptLpa(v)) => self.logical.margin[1] = *v,
-            (K::PaddingInlineStart, V::OptLp(v)) => self.logical.padding[0] = *v,
-            (K::PaddingInlineEnd, V::OptLp(v)) => self.logical.padding[1] = *v,
-            (K::InsetInlineStart, V::OptLpa(v)) => self.logical.inset[0] = *v,
-            (K::InsetInlineEnd, V::OptLpa(v)) => self.logical.inset[1] = *v,
-            (K::BorderInlineStartWidth, V::OptPoints(w)) => self.set_logical_border_width(0, *w),
-            (K::BorderInlineEndWidth, V::OptPoints(w)) => self.set_logical_border_width(1, *w),
-            (K::BorderInlineStartColor, V::Color(c)) => self.logical.border_color[0] = *c,
-            (K::BorderInlineEndColor, V::Color(c)) => self.logical.border_color[1] = *c,
-            (K::BorderStartStartRadius, V::OptPoints(r)) => self.logical.radius[0] = *r,
-            (K::BorderStartEndRadius, V::OptPoints(r)) => self.logical.radius[1] = *r,
-            (K::BorderEndEndRadius, V::OptPoints(r)) => self.logical.radius[2] = *r,
-            (K::BorderEndStartRadius, V::OptPoints(r)) => self.logical.radius[3] = *r,
+            (K::MarginStart, V::OptLpa(v)) => self.logical.margin[0] = *v,
+            (K::MarginEnd, V::OptLpa(v)) => self.logical.margin[1] = *v,
+            (K::PaddingStart, V::OptLp(v)) => self.logical.padding[0] = *v,
+            (K::PaddingEnd, V::OptLp(v)) => self.logical.padding[1] = *v,
+            (K::Start, V::OptLpa(v)) => self.logical.inset[0] = *v,
+            (K::End, V::OptLpa(v)) => self.logical.inset[1] = *v,
+            (K::BorderStartWidth, V::OptPoints(w)) => self.set_logical_border_width(0, *w),
+            (K::BorderEndWidth, V::OptPoints(w)) => self.set_logical_border_width(1, *w),
+            (K::BorderStartColor, V::Color(c)) => self.logical.border_color[0] = *c,
+            (K::BorderEndColor, V::Color(c)) => self.logical.border_color[1] = *c,
+            (K::BorderTopStartRadius, V::OptPoints(r)) => self.logical.radius[0] = *r,
+            (K::BorderTopEndRadius, V::OptPoints(r)) => self.logical.radius[1] = *r,
+            (K::BorderBottomEndRadius, V::OptPoints(r)) => self.logical.radius[2] = *r,
+            (K::BorderBottomStartRadius, V::OptPoints(r)) => self.logical.radius[3] = *r,
 
             // View
             (K::BackgroundColor, V::Color(c)) => {
@@ -4008,7 +4005,7 @@ mod tests {
             .unwrap();
         assert_eq!(s.layout.margin.bottom, LengthPercentageAuto::length(-4.0));
         // Shorthands set every edge they cover.
-        s.set("paddingInline", k("env(safe-area-inset-right)"))
+        s.set("paddingHorizontal", k("env(safe-area-inset-right)"))
             .unwrap();
         assert_eq!(s.pending.env.padding[1], Some(SafeAreaInsetRight));
         assert_eq!(s.pending.env.padding[3], Some(SafeAreaInsetRight));
@@ -4269,10 +4266,10 @@ mod tests {
         in_any_order(
             &[
                 ("marginTop", Number(1.0)),
-                ("marginBlock", Number(2.0)),
+                ("marginVertical", Number(2.0)),
                 ("margin", Number(3.0)),
                 ("marginLeft", Number(4.0)),
-                ("marginInline", Number(5.0)),
+                ("marginHorizontal", Number(5.0)),
             ],
             |s| {
                 let m = s.layout.margin;
@@ -4287,7 +4284,7 @@ mod tests {
             &[
                 ("paddingRight", Number(1.0)),
                 ("padding", Number(3.0)),
-                ("paddingBlock", Number(2.0)),
+                ("paddingVertical", Number(2.0)),
             ],
             |s| {
                 let p = s.layout.padding;
@@ -4364,7 +4361,7 @@ mod tests {
                     ("borderStyle", Str(none)),
                     ("borderWidth", Number(3.0)),
                     ("borderTopWidth", Number(4.0)),
-                    ("borderInlineStartWidth", Number(5.0)),
+                    ("borderStartWidth", Number(5.0)),
                 ],
                 |s| {
                     assert!(!s.view.borders.is_visible());
@@ -4378,7 +4375,7 @@ mod tests {
         // A later style showing it again gets the widths back.
         let mut s = Style::default();
         s.set("borderWidth", Number(3.0)).unwrap();
-        s.set("borderInlineEndWidth", Number(1.0)).unwrap();
+        s.set("borderEndWidth", Number(1.0)).unwrap();
         s.set("borderStyle", Str("none")).unwrap();
         s.set("borderStyle", Str("dashed")).unwrap();
         assert_eq!(s.view.borders.widths.to_array(), [px(3.0); 4]);

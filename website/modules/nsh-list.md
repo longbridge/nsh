@@ -29,7 +29,7 @@ function App() {
   return (
     <List each={contacts} estimatedItemSize={48} style={{ flex: 1 }}>
       {(item, index) => (
-        <View style={{ height: 48, paddingInline: 16, justifyContent: "center", backgroundColor: index() % 2 ? "#f8fafc" : "#fff" }}>
+        <View style={{ height: 48, paddingHorizontal: 16, justifyContent: "center", backgroundColor: index() % 2 ? "#f8fafc" : "#fff" }}>
           <Text>{item().name}</Text>
         </View>
       )}
@@ -69,7 +69,7 @@ element takes, which go to the list's scroll view.
 | `separator` | `ListSlot` | | Rendered between items (one column). |
 | `keyExtractor` | `(item: T, index: number) => string` | `item.key`, `item.id`, or the index | The key of an item in viewability tokens. |
 | `initialScrollIndex` | `number` | | Scrolls to this item before the first frame. |
-| `contentStyle` | `ListContentStyle` | | Padding and gaps of the content: `padding`, `paddingInline`, `paddingBlock`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap` (numbers). |
+| `contentStyle` | `ListContentStyle` | | Padding and gaps of the content: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap` (numbers). |
 | `contentClass` | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (give it a size: `flex: 1` or a height). |
 | `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |

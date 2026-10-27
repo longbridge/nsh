@@ -42,7 +42,7 @@ export function PageHeader(props: {
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
-        paddingInline: 12,
+        paddingHorizontal: 12,
         backgroundColor: props.transparent ? "transparent" : (props.background ?? colors.background),
         borderBottomWidth: props.transparent || props.background ? 0 : 1,
         borderBottomColor: colors.line,
@@ -62,7 +62,7 @@ export function PageHeader(props: {
           <Text style={{ fontSize: 14, fontWeight: "500", color: tint() }}>Back</Text>
         </View>
       </If>
-      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", paddingInline: back() || props.left ? 0 : 4 }}>
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", paddingHorizontal: back() || props.left ? 0 : 4 }}>
         {props.center ?? (
           <Text style={{ lineClamp: 1, flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>
             {props.title}

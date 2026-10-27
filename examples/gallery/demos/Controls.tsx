@@ -27,7 +27,7 @@ const row = (first: boolean) => ({
   flexDirection: "row" as const,
   alignItems: "center" as const,
   gap: size.gap,
-  paddingBlock: size.padding,
+  paddingVertical: size.padding,
   borderTopWidth: first ? 0 : 1,
   borderTopColor: colors.line,
 });
@@ -43,9 +43,9 @@ const BLEED = 8;
  */
 const hoverRow = (first: boolean, start = 0) => ({
   ...row(true),
-  marginInline: -BLEED,
-  paddingInlineStart: BLEED + start,
-  paddingInlineEnd: BLEED,
+  marginHorizontal: -BLEED,
+  paddingStart: BLEED + start,
+  paddingEnd: BLEED,
   paddingTop: size.padding + (first ? 0 : 1),
   borderRadius: BLEED,
 });
@@ -370,7 +370,7 @@ export function Controls() {
         <View>
           <Each of={shown().rows}>
             {(r, i) => (
-              <View style={{ ...row(i() === 0), minHeight: size.line, paddingBlock: 0 }}>
+              <View style={{ ...row(i() === 0), minHeight: size.line, paddingVertical: 0 }}>
                 <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{r()[0]}</Text>
                 <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"] }}>{r()[1]}</Text>
               </View>
@@ -420,7 +420,7 @@ export function Controls() {
           <Collapsible
             open={storage()}
             content={
-              <View style={{ paddingInlineStart: size.gap, paddingBottom: size.padding }}>
+              <View style={{ paddingStart: size.gap, paddingBottom: size.padding }}>
                 <Each of={USAGE}>
                   {(u) => (
                     <View style={{ flexDirection: "row", alignItems: "center", minHeight: size.line }}>

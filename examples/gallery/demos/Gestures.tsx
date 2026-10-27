@@ -316,7 +316,7 @@ function PressEvents() {
           <Icon name="star" size={24} tint={colors.warn} />
         </View>
       </View>
-      <Text onPress={() => fire("text")} activeStyle={{ opacity: 0.3 }} style={{ alignSelf: "flex-start", fontSize: 15, color: colors.accent, paddingBlock: 12 }}>
+      <Text onPress={() => fire("text")} activeStyle={{ opacity: 0.3 }} style={{ alignSelf: "flex-start", fontSize: 15, color: colors.accent, paddingVertical: 12 }}>
         Pressable text, dimmed while pressed
       </Text>
     </Card>

@@ -68,7 +68,7 @@ fn button(danger: bool, busy: Signal<bool>) -> View {
 
 ```tsx tabs
 const styles = {
-  button: { paddingInline: 16, paddingBlock: 10, borderRadius: 10, backgroundColor: "#0969da" },
+  button: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#0969da" },
   disabled: { opacity: 0.4 },
   danger: { backgroundColor: "#cf222e" },
 } as const;
@@ -92,7 +92,7 @@ view()
 
 When a TSX element has both, `style` wins over `class`: classes are applied first, then the inline style on top. A key set to `undefined` sets nothing (`backgroundColor: active ? accent : undefined` keeps the class color when inactive); `null` sets the default. In Rust, a later method wins over an earlier one for the same property.
 
-Within one style (an object, or an array merged into one), the order of the keys makes no difference: a more specific property wins over its shorthand, `borderTopWidth` over `borderWidth`, `borderLeftColor` over `borderColor`, `marginTop` over `marginBlock` over `margin` (padding alike), `rowGap` over `gap`, `flexGrow` over `flex`, `gridColumnStart` over `gridColumn`. A specific property set to `null` there shows the shorthand's value.
+Within one style (an object, or an array merged into one), the order of the keys makes no difference: a more specific property wins over its shorthand, `borderTopWidth` over `borderWidth`, `borderLeftColor` over `borderColor`, `marginTop` over `marginVertical` over `margin` (padding alike), `rowGap` over `gap`, `flexGrow` over `flex`, `gridColumnStart` over `gridColumn`. A specific property set to `null` there shows the shorthand's value.
 
 ## Units and values
 
@@ -185,9 +185,9 @@ view()
 />
 ```
 
-- **Widths and colors** per side: `borderTopWidth`, `borderRightWidth`, ..., `borderTopColor`, ..., which keep their side in either direction; and `borderInlineStartWidth`, `borderInlineEndWidth`, `borderInlineStartColor`, `borderInlineEndColor`, which follow the [layout direction](./layout.md#right-to-left) (`.border_t(..)`, `.border_t_color(..)`, `.border_s(..)`, `.border_e_color(..)`, ... in Rust).
+- **Widths and colors** per side: `borderTopWidth`, `borderRightWidth`, ..., `borderTopColor`, ..., which keep their side in either direction; and `borderStartWidth`, `borderEndWidth`, `borderStartColor`, `borderEndColor`, which follow the [layout direction](./layout.md#right-to-left) (`.border_t(..)`, `.border_t_color(..)`, `.border_s(..)`, `.border_e_color(..)`, ... in Rust).
 - **The color** of a side whose width is set and whose color is not is the text color, as CSS's `currentColor`: `{ borderWidth: 1, color: "#0969da" }` draws a blue border.
-- **Radii** per corner: `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomRightRadius`, `borderBottomLeftRadius`, and `borderStartStartRadius` / `borderStartEndRadius` / `borderEndStartRadius` / `borderEndEndRadius` (top start, top end, bottom start, bottom end), which follow the [layout direction](./layout.md#right-to-left) (`.rounded_tl(..)`, ..., `.rounded_ss(..)`, `.rounded_se(..)`, `.rounded_es(..)`, `.rounded_ee(..)` in Rust, and the presets `.rounded_lg()`, `.rounded_full()`, ...).
+- **Radii** per corner: `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomRightRadius`, `borderBottomLeftRadius`, and `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius` (top start, top end, bottom start, bottom end), which follow the [layout direction](./layout.md#right-to-left) (`.rounded_tl(..)`, ..., `.rounded_ss(..)`, `.rounded_se(..)`, `.rounded_es(..)`, `.rounded_ee(..)` in Rust, and the presets `.rounded_lg()`, `.rounded_full()`, ...).
 - **`borderCurve: "continuous"`** (`.border_curve(BorderCurve::Continuous)`) draws corners whose curvature eases into the edges, like iOS app icons, on both platforms. A pill (`borderRadius` of half the height) stays a pill.
 - **`overflow: "hidden"`** (`.overflow_hidden()`) clips children to the rounded shape. What it clips away is clipped in layout too: it does not reach an enclosing scroll view's content size, so a box that lays a child out wider than itself and scales it down with a `transform` (transforms do not affect layout) leaves the scroll view alone.
 

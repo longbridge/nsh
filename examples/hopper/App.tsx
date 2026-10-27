@@ -35,7 +35,7 @@ function Header(props: { title: string; back?: boolean }) {
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        paddingInline: 12,
+        paddingHorizontal: 12,
         backgroundColor: color.page,
         borderBottomWidth: 1,
         borderBottomColor: color.line,

@@ -41,7 +41,7 @@ function App() {
   return (
     <List each={items} estimatedItemSize={52} style={{ flex: 1, backgroundColor: "#ffffff" }}>
       {(item) => (
-        <View style={{ paddingInline: 16, paddingBlock: 16, borderBottomWidth: 1, borderBottomColor: "#eaeef2" }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#eaeef2" }}>
           <Text style={{ fontSize: 16 }}>{item().title}</Text>
         </View>
       )}
@@ -435,8 +435,8 @@ function Chat() {
             style={{
               alignSelf: m().mine ? "flex-end" : "flex-start",
               maxWidth: "75%",
-              paddingInline: 12,
-              paddingBlock: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
               borderRadius: 14,
               backgroundColor: m().mine ? "#0969da" : "#eaeef2",
             }}
@@ -454,7 +454,7 @@ function Chat() {
           submitBehavior="submit"
           returnKeyType="send"
           placeholder="Message"
-          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingInline: 12, paddingBlock: 8 }}
+          style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
         />
       </View>
     </View>
@@ -516,7 +516,7 @@ virtual_list(count, move |at| {
   decelerationRate="fast"
   scrollbar={false}
   style={{ height: 140 }}
-  contentStyle={{ paddingInline: 16, gap: 12 }}
+  contentStyle={{ paddingHorizontal: 16, gap: 12 }}
 >
   {(card) => <View style={{ width: 220, height: 140, borderRadius: 14, backgroundColor: card().color }} />}
 </List>

@@ -57,14 +57,14 @@ function App() {
           testID="ltr"
           style={{
             height: 8,
-            borderInlineStartWidth: 3,
-            borderInlineEndWidth: 5,
-            borderInlineStartColor: "#112233",
-            borderInlineEndColor: "#445566",
-            borderStartStartRadius: 1,
-            borderStartEndRadius: 2,
-            borderEndEndRadius: 3,
-            borderEndStartRadius: 4,
+            borderStartWidth: 3,
+            borderEndWidth: 5,
+            borderStartColor: "#112233",
+            borderEndColor: "#445566",
+            borderTopStartRadius: 1,
+            borderTopEndRadius: 2,
+            borderBottomEndRadius: 3,
+            borderBottomStartRadius: 4,
           }}
         />
       </View>
@@ -73,14 +73,14 @@ function App() {
           testID="rtl"
           style={{
             height: 8,
-            borderInlineStartWidth: 3,
-            borderInlineEndWidth: 5,
-            borderInlineStartColor: "#112233",
-            borderInlineEndColor: "#445566",
-            borderStartStartRadius: 1,
-            borderStartEndRadius: 2,
-            borderEndEndRadius: 3,
-            borderEndStartRadius: 4,
+            borderStartWidth: 3,
+            borderEndWidth: 5,
+            borderStartColor: "#112233",
+            borderEndColor: "#445566",
+            borderTopStartRadius: 1,
+            borderTopEndRadius: 2,
+            borderBottomEndRadius: 3,
+            borderBottomStartRadius: 4,
           }}
         />
         <View

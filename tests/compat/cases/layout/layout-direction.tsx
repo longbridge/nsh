@@ -63,17 +63,17 @@ function App() {
       </Frame>
       {/* inline start and end insets */}
       <Frame id="ltr-inset" style={{ direction: "ltr" }}>
-        <Box id="ltr-inset-start" style={{ position: "absolute", insetInlineStart: 10 }} />
-        <Box id="ltr-inset-end" style={{ position: "absolute", insetInlineEnd: 10, top: 30 }} />
-        <View testID="ltr-inset-both" style={{ position: "absolute", insetInlineStart: 20, insetInlineEnd: 40, top: 60, height: 20 }} />
+        <Box id="ltr-inset-start" style={{ position: "absolute", start: 10 }} />
+        <Box id="ltr-inset-end" style={{ position: "absolute", end: 10, top: 30 }} />
+        <View testID="ltr-inset-both" style={{ position: "absolute", start: 20, end: 40, top: 60, height: 20 }} />
       </Frame>
       <Frame id="rtl-inset" style={{ direction: "rtl" }}>
-        <Box id="rtl-inset-start" style={{ position: "absolute", insetInlineStart: 10 }} />
-        <Box id="rtl-inset-end" style={{ position: "absolute", insetInlineEnd: 10, top: 30 }} />
-        <View testID="rtl-inset-both" style={{ position: "absolute", insetInlineStart: 20, insetInlineEnd: 40, top: 60, height: 20 }} />
+        <Box id="rtl-inset-start" style={{ position: "absolute", start: 10 }} />
+        <Box id="rtl-inset-end" style={{ position: "absolute", end: 10, top: 30 }} />
+        <View testID="rtl-inset-both" style={{ position: "absolute", start: 20, end: 40, top: 60, height: 20 }} />
       </Frame>
       <Frame id="rtl-inset-percent" style={{ direction: "rtl" }}>
-        <Box id="rtl-inset-percent-a" style={{ position: "absolute", insetInlineStart: "10%" }} />
+        <Box id="rtl-inset-percent-a" style={{ position: "absolute", start: "10%" }} />
       </Frame>
       {/* left and right right to left, and the inline start over left */}
       <Frame id="rtl-sides" style={{ direction: "rtl" }}>
@@ -81,26 +81,26 @@ function App() {
         <Box id="rtl-sides-right" style={{ position: "absolute", right: 10, top: 30 }} />
       </Frame>
       <Frame id="start-wins">
-        <Box id="start-wins-a" style={{ position: "absolute", left: 5, insetInlineStart: 20 }} />
+        <Box id="start-wins-a" style={{ position: "absolute", left: 5, start: 20 }} />
       </Frame>
-      {/* marginInlineStart and marginInlineEnd */}
+      {/* marginStart and marginEnd */}
       <Frame id="ltr-margin" style={{ direction: "ltr", flexDirection: "row" }}>
-        <Box id="ltr-margin-a" style={{ marginInlineStart: 10, marginInlineEnd: 15 }} />
+        <Box id="ltr-margin-a" style={{ marginStart: 10, marginEnd: 15 }} />
         <Box id="ltr-margin-b" />
       </Frame>
       <Frame id="rtl-margin" style={{ direction: "rtl", flexDirection: "row" }}>
-        <Box id="rtl-margin-a" style={{ marginInlineStart: 10, marginInlineEnd: 15 }} />
+        <Box id="rtl-margin-a" style={{ marginStart: 10, marginEnd: 15 }} />
         <Box id="rtl-margin-b" />
       </Frame>
       <Frame id="rtl-margin-right" style={{ direction: "rtl", flexDirection: "row" }}>
         <Box id="rtl-margin-right-a" style={{ marginRight: 15 }} />
         <Box id="rtl-margin-right-b" />
       </Frame>
-      {/* paddingInlineStart and paddingInlineEnd */}
-      <Frame id="ltr-padding" style={{ direction: "ltr", paddingInlineStart: 12, paddingInlineEnd: 30 }}>
+      {/* paddingStart and paddingEnd */}
+      <Frame id="ltr-padding" style={{ direction: "ltr", paddingStart: 12, paddingEnd: 30 }}>
         <View testID="ltr-padding-a" style={{ height: 20 }} />
       </Frame>
-      <Frame id="rtl-padding" style={{ direction: "rtl", paddingInlineStart: 12, paddingInlineEnd: 30 }}>
+      <Frame id="rtl-padding" style={{ direction: "rtl", paddingStart: 12, paddingEnd: 30 }}>
         <View testID="rtl-padding-a" style={{ height: 20 }} />
       </Frame>
       <Frame id="rtl-padding-sides" style={{ direction: "rtl", paddingLeft: 12, paddingRight: 30 }}>

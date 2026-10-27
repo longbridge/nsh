@@ -99,7 +99,7 @@ export function StorageDemo() {
             accessibilityLabel="Note"
             style={{
               height: 120,
-              paddingInline: 14,
+              paddingHorizontal: 14,
               paddingTop: 12,
               paddingBottom: 12,
               fontSize: 15,

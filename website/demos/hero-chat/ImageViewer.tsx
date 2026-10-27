@@ -140,7 +140,7 @@ export function ImageViewer(props: { image: TextViewImage | null; onClose: () =>
         </View>
         {shown()?.alt ? (
           <View
-            style={{ pointerEvents: "none", position: "absolute", left: 0, right: 0, bottom: 0, paddingInline: 24, paddingTop: 32, paddingBottom: safeArea().bottom + 20 }}
+            style={{ pointerEvents: "none", position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 24, paddingTop: 32, paddingBottom: safeArea().bottom + 20 }}
           >
             <Text style={{ fontSize: 14, lineHeight: 20, textAlign: "center", color: "rgba(255,255,255,0.85)" }}>{shown()?.alt}</Text>
           </View>

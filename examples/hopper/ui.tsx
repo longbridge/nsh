@@ -86,7 +86,7 @@ export function Panel(props: {
         boxShadow: "0px 8px 18px rgb(0 0 0 / 0.35)",
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 11, paddingTop: 11, paddingBottom: 13 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 13 }}>
         <View style={tile}>
           <Icon name={props.icon} size={19} tint={color.accent} />
         </View>
@@ -156,8 +156,8 @@ export function Pill(props: { label: string; tone?: "neutral" | "accent" | "caut
         textTransform: "uppercase",
         textAlign: "center",
         width: props.width,
-        paddingInline: 8,
-        paddingBlock: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
         borderRadius: 7,
         borderWidth: 1,
         borderColor: tone() === "neutral" ? color.lineStrong : ink(),
@@ -233,8 +233,8 @@ export function Line(props: { first?: boolean; selected?: boolean; children: JSX
         alignItems: "center",
         gap: 12,
         minHeight: 50,
-        paddingInline: 8,
-        marginInline: -8,
+        paddingHorizontal: 8,
+        marginHorizontal: -8,
         borderRadius: 10,
         borderTopWidth: props.first ? 0 : 1,
         borderTopColor: color.line,

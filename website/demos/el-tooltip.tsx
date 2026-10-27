@@ -18,7 +18,7 @@ function Tool(props: {
       <View
         onPress={props.onPress}
         accessibilityLabel={props.label}
-        {...button("secondary", { align: "center", style: { width: desktop ? 36 : 52, height: desktop ? 36 : 52, paddingInline: 0 } })}
+        {...button("secondary", { align: "center", style: { width: desktop ? 36 : 52, height: desktop ? 36 : 52, paddingHorizontal: 0 } })}
         tooltip={
           <Tooltip
             open={props.pinned || hovered()}
@@ -30,7 +30,7 @@ function Tool(props: {
               hovered.set(open);
               props.onOpenChange(open, reason);
             }}
-            style={{ backgroundColor: ui().text, borderRadius: 7, paddingInline: 10, paddingBlock: 6 }}
+            style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 }}
           >
             <Text style={{ fontSize: 13, color: ui().page }}>{props.hint}</Text>
           </Tooltip>
@@ -60,7 +60,7 @@ function App() {
   const pin = () => (
     <View
       tooltip={
-        <Tooltip style={{ backgroundColor: ui().text, borderRadius: 7, paddingInline: 10, paddingBlock: 6 }}>
+        <Tooltip style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 }}>
           <Text style={{ fontSize: 13, color: ui().page }}>Shows every tooltip without a pointer</Text>
         </Tooltip>
       }

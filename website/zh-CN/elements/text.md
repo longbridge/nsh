@@ -133,7 +133,7 @@ text("基于 ")
   {"基于 "}
   <Image src={logo} style={{ width: 18, height: 18, borderRadius: 4 }} />
   {" NSH 构建。状态 "}
-  <View style={{ backgroundColor: "#1a7f37", borderRadius: 9, paddingInline: 7, height: 18, justifyContent: "center" }}>
+  <View style={{ backgroundColor: "#1a7f37", borderRadius: 9, paddingHorizontal: 7, height: 18, justifyContent: "center" }}>
     <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "700" }}>LIVE</Text>
   </View>
 </Text>

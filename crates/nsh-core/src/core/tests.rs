@@ -2704,8 +2704,8 @@ fn bench_cell_relayout() {
                 ("flexDirection", StyleValue::Str("row")),
                 ("alignItems", StyleValue::Str("center")),
                 ("gap", StyleValue::Number(12.0)),
-                ("paddingInline", StyleValue::Number(16.0)),
-                ("paddingBlock", StyleValue::Number(8.0)),
+                ("paddingHorizontal", StyleValue::Number(16.0)),
+                ("paddingVertical", StyleValue::Number(8.0)),
             ]),
             patch: StylePatch::default(),
         },
@@ -3465,9 +3465,9 @@ fn right_to_left_layouts() {
             ],
         ),
     ];
-    // Two boxes in a row: the first with `marginInlineStart`, the second
+    // Two boxes in a row: the first with `marginStart`, the second
     // with `marginLeft`, which keeps its side right to left (CSS).
-    for (id, key) in [(3, "marginInlineStart"), (4, "marginLeft")] {
+    for (id, key) in [(3, "marginStart"), (4, "marginLeft")] {
         ops.push(Op::Create { id, tag: Tag::View });
         ops.push(style_op(
             id,
@@ -3538,7 +3538,7 @@ fn right_to_left_layouts() {
                 6,
                 &[
                     ("width", n(20.0)),
-                    ("insetInlineStart", n(5.0)),
+                    ("start", n(5.0)),
                     ("position", s("absolute")),
                 ],
             ),
@@ -4118,7 +4118,7 @@ fn right_to_left_horizontal_scrolls() {
             &[
                 ("width", n(150.0)),
                 ("height", n(50.0)),
-                ("paddingInlineStart", n(10.0)),
+                ("paddingStart", n(10.0)),
             ],
         ),
     ];

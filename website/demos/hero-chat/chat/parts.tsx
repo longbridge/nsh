@@ -68,7 +68,7 @@ export function ActionButton(props: { glyph: GlyphName; label: string; active?: 
 /** A row between days. */
 export function DateSeparator(props: { label: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, paddingBlock: 12 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 }}>
       <View style={{ flex: 1, height: 1, backgroundColor: colors.line }} />
       <Text style={{ fontSize: 12, fontWeight: "500", color: colors.faint }}>{props.label}</Text>
       <View style={{ flex: 1, height: 1, backgroundColor: colors.line }} />
@@ -196,7 +196,7 @@ function ToolBody(props: { tool: Tool }) {
   if (kind === "search")
     return (
       <If when={search().state === "done"}>
-        <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingBlock: 4 }}>
+        <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingVertical: 4 }}>
           <Each of={search().sources}>{(source, i) => <SourceRow source={source()} index={i()} />}</Each>
         </View>
       </If>
@@ -240,7 +240,7 @@ function ToolBody(props: { tool: Tool }) {
         <Text style={{ userSelect: "text", fontFamily: mono, fontSize: 12, lineHeight: 18, color: isDark() ? "#c9cdd3" : colors.code }}>{code().code}</Text>
       </View>
       <If when={code().state === "done"}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingInline: 12, height: 44, borderTopWidth: 1, borderTopColor: colors.line }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, height: 44, borderTopWidth: 1, borderTopColor: colors.line }}>
           <Text style={{ fontSize: 13, color: colors.muted }}>Output</Text>
           <Text style={{ userSelect: "text", flex: 1, fontFamily: mono, fontSize: 14, color: colors.up }}>{code().output}</Text>
           <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>exit 0 · {code().ms} ms</Text>
@@ -252,7 +252,7 @@ function ToolBody(props: { tool: Tool }) {
 
 function SourceRow(props: { source: Source; index: number }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingInline: 12 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 12 }}>
       <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: toneTint(props.source.tone), alignItems: "center", justifyContent: "center" }}>
         <Text style={{ fontSize: 12, fontWeight: "700", color: toneColor(props.source.tone) }}>{props.source.site[0].toUpperCase()}</Text>
       </View>
@@ -289,7 +289,7 @@ export function ErrorRow(props: { message: string; onRetry: () => void }) {
         <View
           style={{
             height: 36,
-            paddingInline: 14,
+            paddingHorizontal: 14,
             borderRadius: 18,
             flexDirection: "row",
             alignItems: "center",

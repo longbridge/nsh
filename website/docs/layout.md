@@ -101,8 +101,8 @@ Because minimum sizes default to 0, a `flex: 1` text in a row shrinks and wraps 
 | `width`, `height` | Points, a percentage of the parent (`"50%"`), or `"auto"` | `.w(px(120.0))`, `.h(relative(0.5))`, `.w_full()`, `.size(px(44.0))`, the steps `.w_10()`, ... |
 | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Points or percentages; `minWidth` / `minHeight` also `"auto"`, the content's smallest size | `.min_w(..)`, `.max_w(..)`, `.min_h(..)`, `.max_h(..)` |
 | `aspectRatio` | Width divided by height: `1`, `16 / 9` | `.aspect_ratio(16.0 / 9.0)`, `.aspect_square()` |
-| `padding`, `paddingInline`, `paddingBlock`, `paddingTop`, ... | Points or percentages | `.p(..)`, `.px(..)`, `.py(..)`, `.pt(..)`, ..., and the steps `.p_4()`, `.px_2()`, ... |
-| `margin`, `marginInline`, `marginBlock`, `marginTop`, ... | Points, percentages, or `"auto"` | `.m(..)`, `.mx(..)`, `.my(..)`, `.mt(..)`, ..., `.mx(auto())` |
+| `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, ... | Points or percentages | `.p(..)`, `.px(..)`, `.py(..)`, `.pt(..)`, ..., and the steps `.p_4()`, `.px_2()`, ... |
+| `margin`, `marginHorizontal`, `marginVertical`, `marginTop`, ... | Points, percentages, or `"auto"` | `.m(..)`, `.mx(..)`, `.my(..)`, `.mt(..)`, ..., `.mx(auto())` |
 
 In Rust a length is typed: `px(16.0)` is 16 points, `relative(0.5)` is 50% of the parent, `auto()` is `auto`. The step methods follow Tailwind's spacing scale of 4 points per step (`.p_4()` is 16 points, `.gap_0p5()` 2 points).
 
@@ -252,7 +252,7 @@ The app's layout direction follows the system language, and a view's `direction`
 
 - rows run from the right;
 - `left` and `right` keep their sides, as in a browser, in style keys and classes alike: `paddingLeft`, `marginLeft`, `left`, `borderLeftWidth`, `borderTopLeftRadius`, `textAlign: "left"` and `pl-4`, `ml-2`, `left-0`, `border-l`, `rounded-tl-lg`, `text-left` stay on the left;
-- the logical properties follow the direction, inline start being the right side: `marginInlineStart`, `marginInlineEnd`, `paddingInlineStart`, `paddingInlineEnd`, `insetInlineStart`, `insetInlineEnd`, `borderInlineStartWidth`, `borderInlineEndColor`, `borderStartStartRadius`, ..., `textAlign: "start"` / `"end"` (`ps-4`, `ms-2`, `start-0`, `border-s`, `rounded-ss-lg`, `text-start` as classes; `.ms(..)`, `.me(..)`, `.ps(..)`, `.pe(..)`, `.border_s(..)`, `.rounded_ss(..)`, ... in Rust); `marginInline` and `paddingInline` set both sides;
+- the logical properties follow the direction, inline start being the right side: `marginStart`, `marginEnd`, `paddingStart`, `paddingEnd`, `start`, `end`, `borderStartWidth`, `borderEndColor`, `borderTopStartRadius`, ..., `textAlign: "start"` / `"end"` (`ps-4`, `ms-2`, `start-0`, `border-s`, `rounded-ss-lg`, `text-start` as classes; `.ms(..)`, `.me(..)`, `.ps(..)`, `.pe(..)`, `.border_s(..)`, `.rounded_ss(..)`, ... in Rust); `marginHorizontal` and `paddingHorizontal` set both sides;
 - text with `textAlign: "auto"` aligns right, and native controls mirror.
 
 ```rust tabs
@@ -275,7 +275,7 @@ const rtl = signal(false);
 
 <View style={{ direction: rtl() ? "rtl" : "ltr" }}>
   <View style={{ flexDirection: "row", gap: 8 }}>
-    <View style={{ marginInlineStart: 16, borderStartStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
+    <View style={{ marginStart: 16, borderTopStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
   </View>
   <View onPress={() => rtl.set(!rtl())}>
     <Text>{rtl() ? "Right to left" : "Left to right"}</Text>
