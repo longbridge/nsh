@@ -121,6 +121,10 @@ pub(crate) struct Geometry {
     pub(crate) measure: Option<Measure>,
 }
 
+/// The caret's height in the font's ascender and descender: about one em
+/// for common fonts, whose ascender and descender span some 1.2 em.
+const CARET_EM: f32 = 0.85;
+
 /// A place a point lands on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Hit {
@@ -198,9 +202,10 @@ impl Geometry {
         ))
     }
 
-    /// The drawn caret at `pos`: as tall as the line's glyphs (ascender
-    /// and descender), centred in the line's leading, as a browser draws
-    /// it, rather than the whole line box [`Self::caret_rect`] gives.
+    /// The drawn caret at `pos`: about the font's em tall (the ascender
+    /// and descender less their own gap, as gpui-kit's input draws 0.85 of
+    /// a normal line), centred in the line, rather than the whole line box
+    /// [`Self::caret_rect`] gives.
     pub(crate) fn caret_glyph_rect(
         &self,
         pos: usize,
@@ -213,7 +218,7 @@ impl Geometry {
         let Some(line) = line_of(&geo.lines, t, affinity).map(|i| &geo.lines[i]) else {
             return Some(b);
         };
-        let glyphs = line.ascender + line.descender;
+        let glyphs = (line.ascender + line.descender) * CARET_EM;
         if glyphs <= px(0.0) || glyphs >= line.height {
             return Some(b);
         }

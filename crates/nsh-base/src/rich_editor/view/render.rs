@@ -1160,10 +1160,15 @@ fn caret(rv: Rv) -> impl IntoElement {
             return None;
         }
         let b = rv.caret_glyph_rect()?;
+        // On whole device pixels: a caret between pixels is drawn smeared
+        // over two, wider or narrower as it moves (gpui-kit's fix).
+        let snap = nsh_core::element::ambient::round_to_nearest_pixel;
+        let width =
+            snap(px(CARET_WIDTH)).max(px(1.0 / nsh_core::element::ambient::pixel_ratio().max(1.0)));
         Some(part(
             rect(Bounds::new(
-                Point::new(b.origin.x - px(CARET_WIDTH / 2.0), b.origin.y),
-                Size::new(px(CARET_WIDTH), b.size.height),
+                Point::new(snap(b.origin.x - width * 0.5), snap(b.origin.y)),
+                Size::new(width, snap(b.size.height)),
             ))
             .bg(move || theme().foreground)
             .opacity(move || {
