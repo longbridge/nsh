@@ -8,7 +8,7 @@ use crate::{
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
     StatusBarSetting, StatusBarStyle, Viewability,
     element::TsTypes,
-    geometry::{Bounds, Points, point, size},
+    geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
@@ -132,8 +132,9 @@ impl HostValue for StatusBarSetting {
 impl HostValue for Viewability {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         Some(Viewability {
-            view_area_percent: number(input, "viewAreaCoveragePercentThreshold"),
-            item_visible_percent: number(input, "itemVisiblePercentThreshold"),
+            view_area_coverage_threshold: number(input, "viewAreaCoverageThreshold")
+                .map(Percentage),
+            item_visible_threshold: number(input, "itemVisibleThreshold").map(Percentage),
         })
     }
 

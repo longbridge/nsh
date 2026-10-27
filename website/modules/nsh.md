@@ -1135,7 +1135,7 @@ pub fn App() -> impl IntoElement {
                 pos.set((x + e.gesture.delta.x.0, y + e.gesture.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
-                log::info!("released at {:.2} pt/ms", e.gesture.vx);
+                log::info!("released at {:.0} pt/s", e.gesture.vx);
             }),
     )
 }
@@ -1152,7 +1152,7 @@ function App() {
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => (start = pos()),
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => console.log(`released at ${g.vx.toFixed(0)} pt/s`),
   });
   return (
     <View style={{ flex: 1 }}>
@@ -1208,7 +1208,7 @@ interface PanResponderGestureState {
   y0: number;
   dx: number;                  // distance moved since the grant
   dy: number;
-  vx: number;                  // velocity, points per millisecond
+  vx: number;                  // velocity, points per second
   vy: number;
   numberActiveTouches: number;
 }
@@ -1222,7 +1222,7 @@ Rust: `PanGesture`, with points as `Point<Points>`.
 | `moveX`, `moveY` | `position` | Latest position of the touches' centroid, in surface points. |
 | `x0`, `y0` | `origin` | Where the centroid was when the responder was granted. |
 | `dx`, `dy` | `delta` | Distance moved since the grant. |
-| `vx`, `vy` | `vx`, `vy` | Velocity in points per millisecond. |
+| `vx`, `vy` | `vx`, `vy` | Velocity in points per second. |
 | `numberActiveTouches` | `active_touches` | Fingers down. |
 
 ### Inside scroll views
@@ -1281,7 +1281,7 @@ const Clipboard: {
 
 interface ClipboardImage {
   url: string; // data:image/png;base64,…
-  size: { width: number; height: number }; // pixels
+  size: PixelSize;
 }
 ```
 
@@ -1560,7 +1560,7 @@ interface PickImagesOptions {
 
 interface PickedImage {
   file: File; // name, type, size in bytes and the bytes
-  size: { width: number; height: number }; // pixels, upright
+  size: PixelSize; // upright
 }
 ```
 
@@ -2505,6 +2505,7 @@ function Saved() {
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `HoverEvent`, `ContextMenuEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
 | `Point`, `Size`, `Bounds`, `Edges`, `Modifiers` | The shapes payloads and props are made of, with GPUI's fields (`nsh_core::geometry`) |
+| `PixelSize` | An image's or a video's own size in pixels (`onLoad`, `Image.getSize`, the clipboard's and the picker's images), where `Size` is points |
 | `ImageAsset` | What importing an image file gives (`{ url, size: Size, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`, `AccessibilityState` | Accessibility props |
