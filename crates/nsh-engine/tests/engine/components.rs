@@ -3491,6 +3491,190 @@ fn a_base_number_input_steps_its_field_and_refuses_text_that_is_no_number() {
     assert_eq!(text_of(&after).map(|(t, _)| t).as_deref(), Some("7.5"));
 }
 
+const BASE_OTP_INPUT: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { OtpInput } from "nsh/base";
+
+function App() {
+  const code = signal("");
+  const completes = signal<string[]>([]);
+  return (
+    <View>
+      <OtpInput
+        testID="otp"
+        length={4}
+        groups={2}
+        value={code()}
+        onChange={(next) => code.set(next)}
+        onComplete={({ value }) => completes.set([...completes(), value])}
+        accessibilityLabel="Code"
+        class="flex-row w-[200px] h-[40px]"
+        groupClass="flex-row"
+        cellClass="w-[40px] h-[40px] opacity-50 focus:opacity-100"
+        caretClass="w-[2px] h-[20px]"
+      />
+      <Text>{`Code: ${code()}`}</Text>
+      <Text>{`Completes: ${completes().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `OtpInput`: one native field over the cells, set up for
+/// one-time codes, the only element screen readers get; the cell that
+/// takes the next digit `focus:` while the field has the focus, with the
+/// caret in it; the app's code in the cells, `onComplete` once full.
+#[test]
+fn a_base_otp_input_types_into_one_field_over_its_cells() {
+    use nsh_core::{AutoFill, ViewKind};
+    let (engine, rx) = start(BASE_OTP_INPUT);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Code: "));
+    let created = |kind: ViewKind| -> Vec<u32> {
+        first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create { id, kind: k } if *k == kind => Some(*id),
+                _ => None,
+            })
+            .collect()
+    };
+    let children = |parent: u32| -> Vec<u32> {
+        let views = created(ViewKind::View);
+        first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .collect()
+    };
+    let props_of = |id: u32| {
+        first.items.iter().find_map(|i| match i {
+            MountItem::ViewProps { id: v, props } if *v == id => Some(props.clone()),
+            _ => None,
+        })
+    };
+    let root = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("otp") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the input's root");
+
+    // The field: over the whole input, set up for a code, named for screen
+    // readers.
+    let [field] = created(ViewKind::Input)[..] else {
+        panic!("one field");
+    };
+    let config = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Input { id, config } if *id == field => Some(config.clone()),
+            _ => None,
+        })
+        .expect("the field's config");
+    assert_eq!(config.keyboard, nsh_core::KeyboardType::Number);
+    assert_eq!(config.auto_fill, AutoFill::OneTimeCode);
+    assert!(config.caret_hidden);
+    assert!(!config.auto_correct);
+    assert!(!config.secure);
+    assert_eq!(
+        props_of(field).unwrap().accessibility.label.as_deref(),
+        Some("Code")
+    );
+    let all = std::slice::from_ref(&first);
+    let frame = |id| frame_of(all, id).expect("a frame");
+    assert_eq!(frame(field).size, frame(root).size);
+    assert_eq!(
+        frame(field).origin,
+        nsh_core::geometry::point(px(0.0), px(0.0))
+    );
+
+    // Two groups of two cells, hidden from screen readers.
+    // In the order they are laid out, left to right (the batch inserts
+    // siblings in an order of its own).
+    let in_row = |mut views: Vec<u32>| {
+        views.sort_by(|a, b| frame(*a).origin.x.0.total_cmp(&frame(*b).origin.x.0));
+        views
+    };
+    let groups = in_row(children(root));
+    assert_eq!(groups.len(), 2);
+    for group in &groups {
+        assert!(props_of(*group).unwrap().accessibility.hidden);
+    }
+    let cells: Vec<u32> = groups.iter().flat_map(|g| in_row(children(*g))).collect();
+    assert_eq!(cells.len(), 4);
+    assert!(frame(groups[1]).origin.x > frame(groups[0]).origin.x);
+    let opacity = |batches: &[MountBatch], cell: u32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == cell => Some(style.opacity),
+                _ => None,
+            })
+    };
+    for cell in &cells {
+        assert_eq!(opacity(all, *cell), Some(0.5));
+    }
+
+    // The focus: the first cell is `focus:`, with the caret in it.
+    engine
+        .control()
+        .dispatch_event(field, EventKind::Focus, EventPayload::None);
+    let after = until(&rx, |b| {
+        opacity(std::slice::from_ref(b), cells[0]).is_some()
+    });
+    assert_eq!(opacity(&after, cells[0]), Some(1.0));
+    assert!(after.iter().flat_map(|b| b.items.iter()).any(|i| matches!(
+        i,
+        MountItem::Insert { parent, .. } if *parent == cells[0]
+    )));
+
+    // Typing: the app's code fills the cells; the next cell is `focus:`.
+    let edit = |text: &str, count: u32| {
+        engine.control().dispatch_event(
+            field,
+            EventKind::ChangeText,
+            EventPayload::Text {
+                text: text.into(),
+                count,
+            },
+        )
+    };
+    edit("1２", 1);
+    let after = until(&rx, |b| shows(b, "Code: 12"));
+    assert!(after.iter().any(|b| shows(b, "1")));
+    assert!(after.iter().any(|b| shows(b, "2")));
+    assert_eq!(opacity(&after, cells[0]), Some(0.5));
+    assert_eq!(opacity(&after, cells[2]), Some(1.0));
+    // The full-width digit goes back to the field as an ASCII one.
+    assert!(after.iter().flat_map(|b| b.items.iter()).any(|i| matches!(
+        i,
+        MountItem::InputValue { id, text, .. } if *id == field && text == "12"
+    )));
+
+    // Full: reported once, the last cell `focus:`.
+    edit("1234", 2);
+    let after = until(&rx, |b| shows(b, "Completes: 1234"));
+    assert!(after.iter().any(|b| shows(b, "Code: 1234")));
+    assert_eq!(opacity(&after, cells[3]), Some(1.0));
+}
+
 const TAB_BAR: &str = r##"import { mount, signal } from "nsh";
 import { TabBar } from "nsh/mobile";
 

@@ -1,5 +1,5 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, NumberInput, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
@@ -734,6 +734,57 @@ export function Controls() {
     );
   }
 
+  function Verify() {
+    const CODE = "246810";
+    const code = signal("");
+    const verdict = signal("");
+    // The cell that takes the next digit shows the focus ring while the
+    // code has the focus; the caret blinks there (steady with reduced
+    // motion: the input's own).
+    const cell = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
+    return (
+      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them">
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <OtpInput
+            length={6}
+            groups={2}
+            value={code()}
+            onChange={(next) => {
+              code.set(next);
+              verdict.set("");
+              last.set(`Code: ${next || "empty"}`);
+            }}
+            onComplete={({ value }) => {
+              verdict.set(value === CODE ? "Verified" : "That code is not right");
+              last.set(`Code complete: ${value}`);
+            }}
+            accessibilityLabel="Verification code, 6 digits"
+            class="flex-row items-center gap-3"
+            groupClass="flex-row gap-1.5"
+            cellClass={`${cell} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2`}
+            cellStyle={{ ...finish.inset, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.line }}
+            caretClass="w-0.5 h-6 rounded-full"
+            caretStyle={{ backgroundColor: colors.text }}
+          />
+          <Text style={{ fontSize: size.detail, color: verdict() === "Verified" ? toneColor("up") : verdict() ? toneColor("down") : colors.muted }}>
+            {verdict() || `The code is ${CODE}`}
+          </Text>
+          <Button
+            label="Clear"
+            variant="secondary"
+            size={size.switch}
+            disabled={code() === ""}
+            onPress={() => {
+              code.set("");
+              verdict.set("");
+              last.set("Code: cleared");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -742,5 +793,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Quantities, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Quantities, Verify, Last]} />;
 }
