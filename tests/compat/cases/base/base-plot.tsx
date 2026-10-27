@@ -4,9 +4,10 @@
 // (`accessibilityLabel`, `accessibilityValue`), the row nearest the pointer
 // (`onHoverChange`) with its parts (`crossLineClass`, `dotClass`,
 // `tooltipContent`, `tooltipPlacement`, `tooltipOffset`) and `motion`, and
-// its marks `Grid` (`x`, `y`), `Area` (`y1`, `y0`, `curve`, a gradient
-// `background`, its own `hoverDot`) and `Line` (`y` as a field and as a
-// function, `data` / `x` of its own, `curve`, `dot`, its own `hoverDot`),
+// its marks `Grid` (`x`, `y`), `Area` (`y1`, `y0` as a value, a field and
+// a function, `curve`, a gradient `background`, its own `hoverDot`) and
+// `Line` (`y` as a field and as a function, `data` / `x` of its own,
+// `curve`, `dot`, its own `hoverDot`),
 // painted with the paint style keys, the plot a stop of the keyboard
 // focus (its ring the app's `focusStyle`) whose rows a screen reader's
 // increment and decrement step through; and `Bar` on a `band` scale (`value`,
@@ -90,6 +91,11 @@ function App() {
       {/* A sparkline: no pointer. */}
       <Plot testID="spark" data={rows()} y="price" interactive={false} accessibilityLabel="Spark" onHoverChange={(index) => hovered.set(index)} style={{ width: 100, height: 20 }}>
         <Line />
+      </Plot>
+      {/* A band: its bottom edge a value of each row (a field, a function). */}
+      <Plot testID="band" data={rows()} y="price" interactive={false} accessibilityLabel="Band" style={{ width: 100, height: 20 }}>
+        <Area y0="avg" curve="linear" />
+        <Area y1="avg" y0={(d: Row) => d.avg - 2} />
       </Plot>
       {/* Bars in bands: one standing alone, a stack beside it. */}
       <Plot

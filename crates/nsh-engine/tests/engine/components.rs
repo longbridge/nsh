@@ -4085,6 +4085,83 @@ fn base_plot_marks_draw_the_edges_of_their_data() {
     assert!(!plot_drawings(&after).is_empty());
 }
 
+const BASE_PLOT_BAND: &str = r##"import { mount, View } from "nsh";
+import { Area, Plot } from "nsh/base/plot";
+
+type Day = { hi: number; lo: number | null };
+
+function App() {
+  const days: Day[] = [
+    { hi: 30, lo: 10 },
+    { hi: 40, lo: 20 },
+    { hi: 30, lo: null },
+    { hi: 20, lo: 0 },
+  ];
+  return (
+    <View>
+      {/* A band: the bottom edge a field of each row, a row without one skipped. */}
+      <Plot data={days} y="hi" style={{ width: 200, height: 100 }}>
+        <Area y0="lo" curve="linear" />
+      </Plot>
+      {/* A number: a constant baseline. */}
+      <Plot data={[{ v: 10 }, { v: 20 }]} y="v" style={{ width: 200, height: 100 }}>
+        <Area y0={0} curve="linear" />
+      </Plot>
+      {/* A function of each row, with steps. */}
+      <Plot data={[{ hi: 20 }, { hi: 50 }]} style={{ width: 200, height: 100 }}>
+        <Area y1="hi" y0={(d: { hi: number }) => d.hi - 10} curve="stepAfter" />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Area`'s `y0` of each row (d3's `area().y0(accessor)`): the bottom edge
+/// goes back through those values with the area's curve, a row without one
+/// is skipped on both edges, and the values widen the y domain; a number
+/// is still a constant baseline in the domain.
+#[test]
+fn a_base_plot_area_with_a_y0_of_each_row_is_a_band() {
+    let (_engine, rx) = start(BASE_PLOT_BAND);
+    // The function's values come a turn after the rows.
+    let steps = [
+        (0.0, 75.0),
+        (200.0, 75.0),
+        (200.0, 0.0),
+        (200.0, 25.0),
+        (200.0, 100.0),
+        (0.0, 100.0),
+    ];
+    let batches = until_drawn(&rx, |d| path_points(&d.ops).starts_with(&steps));
+    let latest = plot_drawings(&batches);
+    let [(_, band), (_, base), (_, stepped)] = &latest[..] else {
+        panic!("three areas: {latest:?}")
+    };
+    // The domain is 0 (the lowest `lo`) to 40: the top edge through `hi`,
+    // then back through `lo` from the last row, the third row (no `lo`)
+    // on neither edge.
+    assert_eq!(
+        path_points(&band.ops)[..6],
+        [
+            (0.0, 25.0),
+            (66.666664, 0.0),
+            (200.0, 50.0),
+            (200.0, 100.0),
+            (66.666664, 50.0),
+            (0.0, 75.0)
+        ]
+    );
+    // A number: down to its value, 0, which the domain takes in.
+    assert_eq!(
+        path_points(&base.ops)[..4],
+        [(0.0, 50.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)]
+    );
+    // The function's: 10 to 50, the bottom edge stepping as the top one.
+    assert_eq!(path_points(&stepped.ops)[..6], steps);
+}
+
 const BASE_PLOT_MOTION: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Line, Plot } from "nsh/base/plot";
 

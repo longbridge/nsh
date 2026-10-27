@@ -24,24 +24,26 @@ use super::{
     geometry::{DOC, InlineMap, Run},
     node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
+    table,
 };
 use crate::{
     input,
     rich_editor::{
         model::{Mark, Node, utf16_len},
         state::{Decoration, DecorationKind},
+        tables::{CellSelection, TableRole, table_role},
     },
     theme,
 };
 
 /// The caret's width.
-const CARET_WIDTH: f32 = 2.0;
+const CARET_WIDTH: f32 = 1.5;
 
 /// The gap cursor's width (prosemirror-gapcursor's).
 const GAP_WIDTH: f32 = 20.0;
 
 /// `el` with part `part`'s classes and style.
-fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
+pub(crate) fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
     let props = rv.props;
     el.app_class(move || props.classes.with(|c| c.part(part).cloned()))
         .inline_style(move || {
@@ -79,6 +81,7 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
             .flex_1()
             .on_scroll(move |e: &ScrollEvent| {
                 scroll_rv.scroll_y.set(e.offset.y);
+                scroll_rv.scrolled.set(e.offset.y);
                 scroll_rv.viewport.set(e.size);
             })
             .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
@@ -91,11 +94,16 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
 fn content(rv: Rv) -> impl IntoElement {
     let desktop = is_desktop();
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
+    let over = rv.clone();
+    let placed = rv.clone();
     let height = rv.content_height;
     part(
         view()
             .element_ref(&rv.content)
-            .on_layout(move |b: &Bounds<Points>| height.set(b.size.height))
+            .on_layout(move |b: &Bounds<Points>| {
+                height.set(b.size.height);
+                placed.place();
+            })
             .relative()
             .cursor(Cursor::Text),
         &rv,
@@ -104,6 +112,12 @@ fn content(rv: Rv) -> impl IntoElement {
     .on(EventKind::PressDown, move |p: &EventPayload| {
         if let (true, EventPayload::Press(e)) = (desktop, p) {
             down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1));
+        }
+    })
+    // Where the pointer is, for drags the app starts from a page point.
+    .on(EventKind::MouseMove, move |p: &EventPayload| {
+        if let EventPayload::Mouse(e) = p {
+            over.note_pointer(e.position, e.page_position);
         }
     })
     .on(EventKind::Press, move |p: &EventPayload| {
@@ -126,6 +140,7 @@ fn content(rv: Rv) -> impl IntoElement {
     .on_responder_terminate(move |_: &ResponderEvent| end.release())
     .child(selection_rects(rv.clone()))
     .child(blocks(rv.clone(), DOC))
+    .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
@@ -262,6 +277,13 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         Some(_) => wrapper.relative().child(marker(rv.clone(), item)),
         None => wrapper,
     };
+    // Tables are grids of their cells (`table.rs`).
+    let wrapper = match (table_role(first.node.ty()), &kind) {
+        (_, Kind::View(_)) => wrapper,
+        (Some(TableRole::Table), _) => table::grid(wrapper, &rv, item),
+        (Some(TableRole::Cell | TableRole::HeaderCell), _) => table::cell(wrapper, &rv, item),
+        _ => wrapper,
+    };
     let task = render_kind(&first.node) == Some("task");
     let content = match kind {
         Kind::View(view) => Some(node_view_block(rv.clone(), item, view).into_element()),
@@ -328,8 +350,10 @@ fn task_checkbox(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
             .unwrap_or(false)
     };
     let press_rv = rv.clone();
-    // The part is the checkbox's box; the checkbox fills it.
+    // The part is the checkbox's box; the checkbox fills it. The box
+    // follows the item's state, so the app's `checked:` classes show it.
     view()
+        .project_checked(checked)
         .app_class(move || props.classes.with(|c| c.part(Part::TaskCheckbox).cloned()))
         .inline_style(move || {
             props
@@ -398,9 +422,9 @@ fn marker_kind(node: &Node) -> Option<ListMarker> {
 }
 
 /// The text of `it`'s marker: a bullet by its depth among bulleted lists
-/// (disc, circle, square, as a browser draws them), or its number from
+/// (disc, circle, square, around again deeper), or its number from
 /// the list's start (`extra.listMarkerStart` names that attribute,
-/// `order` by default).
+/// `order` by default; 1., a., i. by depth).
 fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     let state = rv.st.borrow();
     let at = state.doc().resolve(it.pos).ok()?;
@@ -415,22 +439,66 @@ fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
                 .and_then(Value::as_str)
                 .unwrap_or("start");
             let start = list.attrs().get(attr).and_then(Value::as_i64).unwrap_or(1);
-            Some(format!("{}.", start + at.index(at.depth) as i64))
+            let n = start + at.index(at.depth) as i64;
+            // Nested numbered lists count 1., a., i. in turn, as Google Docs
+            // and Notion do, so each level reads apart.
+            let depth = (0..at.depth)
+                .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Ordered))
+                .count();
+            let label = match (depth % 3, n) {
+                (1, 1..) => alpha(n as u64),
+                (2, 1..) => roman(n as u64),
+                _ => n.to_string(),
+            };
+            Some(format!("{label}."))
         }
         ListMarker::Bullet => {
             let depth = (0..at.depth)
                 .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Bullet))
                 .count();
-            Some(
-                match depth {
-                    0 => "•",
-                    1 => "◦",
-                    _ => "▪",
-                }
-                .to_owned(),
-            )
+            // Disc, circle, square, and around again deeper down.
+            Some(["•", "◦", "▪"][depth % 3].to_owned())
         }
     }
+}
+
+/// `n` in lower-case letters: a … z, aa, ab, ….
+fn alpha(mut n: u64) -> String {
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push(b'a' + (n % 26) as u8);
+        n /= 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// `n` in lower-case Roman numerals.
+fn roman(mut n: u64) -> String {
+    const DIGITS: [(u64, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut out = String::new();
+    for (value, digits) in DIGITS {
+        while n >= value {
+            out.push_str(digits);
+            n -= value;
+        }
+    }
+    out
 }
 
 /// A list item's marker: in the indent before its content, its end
@@ -984,7 +1052,9 @@ fn selection_rects(rv: Rv) -> impl IntoElement {
         let (from, to, text) = {
             let state = rv.st.borrow();
             let s = state.selection();
-            (s.from(), s.to(), s.as_node().is_none())
+            // Selected cells are painted in the cells (`selectedCell`).
+            let cells = s.as_custom::<CellSelection>().is_some();
+            (s.from(), s.to(), s.as_node().is_none() && !cells)
         };
         if from == to || !text {
             return Vec::new();
@@ -1061,8 +1131,11 @@ fn drop_cursor(rv: Rv) -> impl IntoElement {
                 Size::new(line.size.width, px(CARET_WIDTH)),
             )
         };
+        // Tests find the line mid-drag by its id (`nsh/test`'s `dragAndHold`).
         Some(part(
-            rect(b).bg(move || theme().foreground),
+            rect(b)
+                .test_id("rich-editor-drop-cursor")
+                .bg(move || theme().foreground),
             &rv,
             Part::DropCursor,
         ))
@@ -1086,11 +1159,16 @@ fn caret(rv: Rv) -> impl IntoElement {
         if !empty_text {
             return None;
         }
-        let b = rv.caret_rect()?;
+        let b = rv.caret_glyph_rect()?;
+        // On whole device pixels: a caret between pixels is drawn smeared
+        // over two, wider or narrower as it moves (gpui-kit's fix).
+        let snap = nsh_core::element::ambient::round_to_nearest_pixel;
+        let width =
+            snap(px(CARET_WIDTH)).max(px(1.0 / nsh_core::element::ambient::pixel_ratio().max(1.0)));
         Some(part(
             rect(Bounds::new(
-                Point::new(b.origin.x - px(CARET_WIDTH / 2.0), b.origin.y),
-                Size::new(px(CARET_WIDTH), b.size.height),
+                Point::new(snap(b.origin.x - width * 0.5), snap(b.origin.y)),
+                Size::new(width, snap(b.size.height)),
             ))
             .bg(move || theme().foreground)
             .opacity(move || {
@@ -1179,7 +1257,7 @@ fn sink(rv: Rv) -> impl IntoElement {
             composition.composition_changed(c.composing, &c.text)
         })
         .on_key_press(move |k: &str| key.sink_key(k))
-        .on_paste(move |p: &PasteEvent| paste.paste(&p.text, &p.html))
+        .on_paste(move |p: &PasteEvent| paste.paste_event(p))
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))
 }
@@ -1304,5 +1382,19 @@ mod tests {
         let inline = inline_of(&p, 1, &[]);
         assert_eq!(inline.pieces, [Piece::Filler]);
         assert_eq!(inline.map.to_text(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::{alpha, roman};
+
+    #[test]
+    fn nested_numbers_count_in_letters_and_roman_numerals() {
+        assert_eq!(alpha(1), "a");
+        assert_eq!(alpha(26), "z");
+        assert_eq!(alpha(28), "ab");
+        assert_eq!(roman(4), "iv");
+        assert_eq!(roman(14), "xiv");
     }
 }

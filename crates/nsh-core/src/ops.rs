@@ -744,6 +744,14 @@ pub enum EventPayload {
     Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
+    /// [`Self::FileDrop`] with where the files were let go, in the
+    /// window's coordinates, from backends that know it.
+    FileDropAt {
+        /// The files' URLs, as [`Self::FileDrop`]'s.
+        uris: Vec<String>,
+        /// The drop point in the window's coordinates.
+        page_position: Point<Points>,
+    },
     /// What the user pasted into an input.
     Paste(Box<PasteEvent>),
     /// The lines of a text block.
