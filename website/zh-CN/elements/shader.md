@@ -155,7 +155,7 @@ fn ripple(program: Shader) -> impl IntoElement {
     wave.timing(1.0, 2200.0, Easing::Linear);
     shader()
         .source(program)
-        .animated_uniform(Ripple::Wave, &wave)
+        .uniform(Ripple::Wave, &wave)
         .uniform(Ripple::Center, [0.5_f32, 0.5])
         .h(px(200.0))
 }
@@ -214,7 +214,7 @@ shader 接受 [view](./view.md) 的属性，另外还有：
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `source` | `.source(program)` | `string` | 定义 `fn shade(uv: vec2f) -> vec4f` 的 WGSL 源码。Rust 用 `Shader::compile(source)` 编译。 |
-| `uniforms` | `.uniform(name, value)`、`.animated_uniform(name, &value)` | `Record<string, ShaderUniform>` | `struct Uniforms` 各成员的值，按名称：数、颜色、动画值以及它们的列表。 |
+| `uniforms` | `.uniform(name, value)` | `Record<string, ShaderUniform>` | `struct Uniforms` 各成员的值，按名称：数、颜色、动画值以及它们的列表。 |
 | `paused` | `.paused(bool)` | `boolean` | 停止 `nsh.time` 的时钟。默认 `false`。 |
 
 ## 错误
@@ -250,8 +250,7 @@ shader 每个显示帧最多绘制一次，并且只在显示的内容变化时�
 
 | 方法 | 说明 |
 |---|---|
-| `.uniform(name, value)` | 设置 `struct Uniforms` 的一个成员，用应用实现了 `UniformName` 的枚举的一个变体命名（也可以是 `&str`）：一个数、一个 `Color` 或 `Hsla`、`[f32; 2]` / `[f32; 3]` / `[f32; 4]`，或一个 `Vec<UniformValue>`。绑定的值（`move \|\| …`）变化时重新设置。 |
-| `.animated_uniform(name, &value)` | 把一个成员（一个数，或 `vec3f` / `vec4f` 颜色）绑定到动画值。 |
+| `.uniform(name, value)` | 设置 `struct Uniforms` 的一个成员，用应用实现了 `UniformName` 的枚举的一个变体命名（也可以是 `&str`）：一个数、一个 `Color` 或 `Hsla`、`[f32; 2]` / `[f32; 3]` / `[f32; 4]`，或一个 `Vec<UniformValue>`。绑定的值（`move \|\| …`）变化时重新设置；动画值（`&wave`：一个数，或用于 `vec3f` / `vec4f` 的颜色）在原生侧逐帧驱动它。 |
 | `.paused(bool)` | 停止 `nsh.time` 的时钟；可绑定。 |
 
 子元素用 `.child(..)` 添加，样式用常用的类型化方法。

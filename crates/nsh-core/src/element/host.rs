@@ -366,6 +366,41 @@ pub fn shader() -> ShaderView {
 }
 
 crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
+
+/// A value [`ShaderView::uniform`] takes ([`IntoUniform`]).
+pub struct Uniform(UniformSource);
+
+enum UniformSource {
+    Value(super::Reactive<crate::shader::UniformValue>),
+    Animated(super::AnimatedNode),
+}
+
+/// What [`ShaderView::uniform`] takes: a number, a color or a list, bound
+/// or not, or an animated value (`&AnimatedValue`, `&AnimatedNode`).
+pub trait IntoUniform {
+    /// As a [`Uniform`].
+    fn into_uniform(self) -> Uniform;
+}
+
+impl<T: IntoReactive<crate::shader::UniformValue>> IntoUniform for T {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Value(self.into_reactive()))
+    }
+}
+
+impl IntoUniform for &super::AnimatedValue {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Animated(super::Animated::animated_node(
+            self,
+        )))
+    }
+}
+
+impl IntoUniform for &super::AnimatedNode {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Animated(*self))
+    }
+}
 crate::static_reactive!(
     crate::shader::UniformValue: crate::shader::UniformValue,
     f32,
@@ -388,15 +423,32 @@ impl ShaderView {
 
     /// Sets the member `name` of the shader's `struct Uniforms`, usually a
     /// variant of the app's enum of them
-    /// ([`UniformName`](crate::shader::UniformName)): a number, a color or a
-    /// list (a vector, an array of `vec4f`). A bound value sets it again
-    /// when it changes; [`Self::animated_uniform`] moves one natively.
+    /// ([`UniformName`](crate::shader::UniformName)), to `value`
+    /// ([`IntoUniform`]): a number, a color or a list (a vector, an array of
+    /// `vec4f`), which a bound value (`move || …`) sets again when it
+    /// changes; or an animated value (`&wave`, a number, or colors for a
+    /// `vec3f` / `vec4f`), which the platform writes on every frame it
+    /// changes, without the engine (one whose owner is gone counts as 0).
     pub fn uniform(
         mut self,
         name: impl crate::shader::UniformName,
-        value: impl IntoReactive<crate::shader::UniformValue>,
+        value: impl IntoUniform,
     ) -> Self {
         let name: Arc<str> = name.name().into();
+        let value = match value.into_uniform().0 {
+            UniformSource::Value(value) => value,
+            UniformSource::Animated(node) => {
+                let value = match node.live() {
+                    Some(node) => {
+                        let id = node.id();
+                        self.0.attrs.bound.push(node);
+                        crate::shader::UniformValue::Animated(id)
+                    }
+                    None => crate::shader::UniformValue::Number(0.0),
+                };
+                super::Reactive::Static(value)
+            }
+        };
         self.0.bind_attr(value, move |attrs, value| {
             let mut uniforms = attrs
                 .props
@@ -413,26 +465,6 @@ impl ShaderView {
             set_in(&mut attrs.props, Prop::Uniforms(uniforms));
         });
         self
-    }
-
-    /// Binds the member `name` (a number, or a `vec3f` / `vec4f` color) to
-    /// the animated value `value`: the platform writes it on every frame it
-    /// changes and draws again, without the engine. One whose owner is gone
-    /// counts as 0.
-    pub fn animated_uniform(
-        mut self,
-        name: impl crate::shader::UniformName,
-        value: &impl super::Animated,
-    ) -> Self {
-        let value = match value.animated_node().live() {
-            Some(node) => {
-                let id = node.id();
-                self.0.attrs.bound.push(node);
-                crate::shader::UniformValue::Animated(id)
-            }
-            None => crate::shader::UniformValue::Number(0.0),
-        };
-        self.uniform(name, value)
     }
 
     /// Stops its clock (`nsh.time` keeps its value), or starts it again.

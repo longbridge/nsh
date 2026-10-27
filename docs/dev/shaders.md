@@ -95,9 +95,9 @@ back.
 
 In JS, `uniforms` is decoded natively (`host_values.rs`, `impl HostValue for ShaderUniforms`): numbers, CSS color
 strings, animated nodes and lists of them, two levels deep. `dom.rs` keeps the animation nodes a view's `uniforms`
-holds alive with the view. In Rust, `ShaderView::uniform(name, value)` takes anything `IntoReactive<UniformValue>`
-(numbers, `Color`, `Hsla`, `[f32; 2..4]`, lists; a bound value sets it again when it changes) and
-`ShaderView::animated_uniform(name, &value)` binds an animated value, keeping its node alive with the element.
+holds alive with the view. In Rust, `ShaderView::uniform(name, value)` takes any `IntoUniform`: anything
+`IntoReactive<UniformValue>` (numbers, `Color`, `Hsla`, `[f32; 2..4]`, lists; a bound value sets it again when it
+changes) or an animated value (`&AnimatedValue`, `&AnimatedNode`), whose node it keeps alive with the element.
 
 ## The renderer (`nsh_engine::shader`)
 

@@ -168,7 +168,7 @@ fn ripple(program: Shader) -> impl IntoElement {
     wave.timing(1.0, 2200.0, Easing::Linear);
     shader()
         .source(program)
-        .animated_uniform(Ripple::Wave, &wave)
+        .uniform(Ripple::Wave, &wave)
         .uniform(Ripple::Center, [0.5_f32, 0.5])
         .h(px(200.0))
 }
@@ -230,7 +230,7 @@ A shader takes the props of a [view](./view.md) plus:
 | Prop | Rust | Type | Description |
 |---|---|---|---|
 | `source` | `.source(program)` | `string` | The WGSL source defining `fn shade(uv: vec2f) -> vec4f`. Rust compiles it with `Shader::compile(source)`. |
-| `uniforms` | `.uniform(name, value)`, `.animated_uniform(name, &value)` | `Record<string, ShaderUniform>` | The values of the members of `struct Uniforms`, by name: numbers, colors, animated values and lists of them. |
+| `uniforms` | `.uniform(name, value)` | `Record<string, ShaderUniform>` | The values of the members of `struct Uniforms`, by name: numbers, colors, animated values and lists of them. |
 | `paused` | `.paused(bool)` | `boolean` | Stops the clock of `nsh.time`. Default `false`. |
 
 ## Errors
@@ -277,8 +277,7 @@ share it: it is cheap to clone. The program may be bound, `.source(move || …)`
 
 | Method | Description |
 |---|---|
-| `.uniform(name, value)` | Sets a member of `struct Uniforms`, named by a variant of the app's enum that implements `UniformName` (or a `&str`): a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes. |
-| `.animated_uniform(name, &value)` | Binds a member (a number, or a `vec3f` / `vec4f` color) to an animated value. |
+| `.uniform(name, value)` | Sets a member of `struct Uniforms`, named by a variant of the app's enum that implements `UniformName` (or a `&str`): a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes; an animated value (`&wave`: a number, or colors for a `vec3f` / `vec4f`) moves it on every frame, natively. |
 | `.paused(bool)` | Stops the clock of `nsh.time`; bindable. |
 
 Children are added with `.child(..)`, styles with the usual typed methods.
