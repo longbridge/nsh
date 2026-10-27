@@ -237,6 +237,7 @@ pub(super) struct Diagnostics {
     pub(super) open: bool,
     pub(super) refresh: Instant,
     pub(super) reload: bool,
+    pub(super) toggle_perf: bool,
     prefix: bool,
     errors: VecDeque<String>,
     lines: String,
@@ -251,6 +252,7 @@ impl Default for Diagnostics {
             open: false,
             refresh: Instant::now(),
             reload: false,
+            toggle_perf: false,
             prefix: false,
             errors: VecDeque::new(),
             lines: String::new(),
@@ -298,6 +300,10 @@ impl Diagnostics {
         }
         if self.prefix {
             self.prefix = false;
+            if key == "p" && !modifiers.ctrl && !modifiers.alt && !modifiers.cmd {
+                self.toggle_perf = true;
+                return true;
+            }
             if key == "e" && !modifiers.ctrl && !modifiers.alt && !modifiers.cmd {
                 self.open = !self.open;
                 self.follow = true;
@@ -392,7 +398,9 @@ impl Diagnostics {
         Paragraph::new(self.lines.as_str())
             .scroll(self.scroll)
             .render(body, buffer);
-        Paragraph::new("Esc/C-g close | r reload | arrows/PgUp/PgDn scroll | C-h e logs")
-            .render(hint, buffer);
+        Paragraph::new(
+            "Esc/C-g close | r reload | arrows/PgUp/PgDn scroll | C-h e logs | C-h p performance",
+        )
+        .render(hint, buffer);
     }
 }

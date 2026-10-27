@@ -76,7 +76,7 @@ pub(crate) struct HostFlags {
     pub(crate) limits: Option<HostLimits>,
     /// Log per-commit timings.
     pub(crate) trace: bool,
-    /// The performance monitor (the macOS host's).
+    /// The selected host's performance monitor.
     pub(crate) fps: bool,
     /// Terminal Cell dimensions, overriding nsh.json.
     pub(crate) points_per_cell: Option<String>,
@@ -166,11 +166,11 @@ pub(crate) fn run(
     if fps
         && !matches!(
             target,
-            Target::Macos | Target::Linux | Target::Ios | Target::Windows
+            Target::Macos | Target::Linux | Target::Ios | Target::Windows | Target::Tui
         )
     {
         bail!(
-            "--fps needs --target macos, linux, windows or ios (the other hosts have no performance monitor yet)"
+            "--fps needs --target macos, linux, windows, ios or tui (the other hosts have no performance monitor yet)"
         );
     }
     window.check(target, crate::rust_app::is_root(entry))?;
@@ -185,6 +185,7 @@ pub(crate) fn run(
             release,
             limits,
             trace,
+            fps,
             points_per_cell.as_deref(),
             &work,
         );
@@ -533,6 +534,7 @@ fn run_tui(
     release: bool,
     limits: Option<HostLimits>,
     trace: bool,
+    fps: bool,
     points_per_cell: Option<&str>,
     work: &Path,
 ) -> anyhow::Result<()> {
@@ -564,6 +566,9 @@ fn run_tui(
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(diagnostics);
+    if fps {
+        command.arg("--fps");
+    }
     if trace {
         command.arg("--trace");
     }

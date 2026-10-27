@@ -67,6 +67,8 @@ pub struct AppOptions {
     pub clipboard: Option<Arc<dyn nsh_core::clipboard::ClipboardBackend>>,
     /// Log engine timings through `nsh::perf`.
     pub trace: bool,
+    /// Show the terminal frame monitor.
+    pub fps: bool,
     /// Root linked into an app-specific development host.
     #[cfg(feature = "dev")]
     pub root: Option<nsh_engine::Root>,
@@ -88,6 +90,7 @@ impl Default for AppOptions {
             assets: None,
             clipboard: None,
             trace: false,
+            fps: false,
             #[cfg(feature = "dev")]
             root: None,
         }
@@ -101,6 +104,8 @@ type TextErrorCallback = Box<dyn FnMut(&str)>;
 #[non_exhaustive]
 pub struct AppView {
     options: AppOptions,
+    perf: Option<crate::perf::Monitor>,
+    output: crate::perf::SharedOutput,
     #[cfg(feature = "dev")]
     dev: Option<dev::DevSession>,
     #[cfg(feature = "dev")]
@@ -146,7 +151,11 @@ impl AppView {
             .unwrap_or_else(|| Arc::new(nsh_core::clipboard::MemoryClipboard::default()));
         let surface = Surface::default();
         surface.wake.set(options.wake.clone());
+        let output = crate::perf::SharedOutput::default();
+        output.enabled.set(options.fps);
         Self {
+            perf: options.fps.then(crate::perf::Monitor::new),
+            output,
             options,
             #[cfg(feature = "dev")]
             dev: None,
@@ -219,6 +228,9 @@ impl AppView {
         if let Some(test) = &self.test {
             test.model.engine_started(engine.control());
         }
+        if let Some(perf) = &self.perf {
+            engine.control().set_perf_monitor(Some(perf.engine.clone()));
+        }
         self.surface.engine = Some(engine);
         self.surface.inbox = inbox;
         Ok(())
@@ -240,6 +252,82 @@ impl AppView {
     #[cfg(feature = "dev")]
     pub fn set_dev_log_path(&mut self, path: PathBuf) {
         self.diagnostics.log_path = Some(path);
+    }
+
+    /// Shows or hides the performance line. Hiding it drops all samples and timers.
+    pub fn set_fps_monitor(&mut self, enabled: bool) {
+        if enabled == self.perf.is_some() {
+            return;
+        }
+        self.perf = enabled.then(crate::perf::Monitor::new);
+        self.output.enabled.set(enabled);
+        if let Some(engine) = &self.surface.engine {
+            engine
+                .control()
+                .set_perf_monitor(self.perf.as_ref().map(|p| p.engine.clone()));
+        }
+        self.surface.wake.notify();
+    }
+
+    /// The shared engine monitor while the performance line is enabled.
+    pub fn perf_monitor(&self) -> Option<Arc<nsh_engine::perf::PerfMonitor>> {
+        self.perf.as_ref().map(|p| p.engine.clone())
+    }
+
+    /// Timings and output of the last completed `draw_terminal`, if monitoring is enabled.
+    pub fn frame_metrics(&self) -> Option<crate::FrameMetrics> {
+        self.perf.as_ref().and_then(|p| p.last)
+    }
+
+    /// Wraps the host's backend to count the actual Cell diff without scanning the buffer again.
+    pub fn measure_backend<B>(&self, backend: B) -> crate::MeasuredBackend<B> {
+        self.output.cells.set(Some(0));
+        crate::MeasuredBackend {
+            inner: backend,
+            output: self.output.clone(),
+        }
+    }
+
+    /// Wraps the terminal writer to count successful bytes, including escape sequences.
+    pub fn measure_writer<W>(&self, writer: W) -> crate::MeasuredWriter<W> {
+        self.output.bytes.set(Some(0));
+        crate::MeasuredWriter {
+            inner: writer,
+            output: self.output.clone(),
+        }
+    }
+
+    /// Draws a full-terminal surface and completes its optional performance sample after flushing.
+    /// Embedders owning a larger layout may still use `render` or the Widget interface.
+    pub fn draw_terminal<B: ratatui_core::backend::Backend>(
+        &mut self,
+        terminal: &mut ratatui_core::terminal::Terminal<B>,
+    ) -> Result<(), B::Error> {
+        if self.perf.is_none() {
+            terminal.draw(|frame| self.render(frame, frame.area()))?;
+            return Ok(());
+        }
+        let app_frame = self
+            .surface
+            .deadline()
+            .is_some_and(|due| due <= Instant::now())
+            || terminal.size()? != self.area.into();
+        self.output.bytes.set(self.output.bytes.get().map(|_| 0));
+        self.output.cells.set(self.output.cells.get().map(|_| 0));
+        let mut flush = None;
+        terminal.draw(|frame| {
+            self.render(frame, frame.area());
+            flush = Some(Instant::now());
+        })?;
+        let at = Instant::now();
+        if let Some(perf) = &mut self.perf {
+            let mut sample = perf.pending;
+            sample.flush = at.duration_since(flush.unwrap());
+            sample.bytes = self.output.bytes.get();
+            sample.cells = self.output.cells.get();
+            perf.finish(at, sample, app_frame);
+        }
+        Ok(())
     }
 
     /// The channel shared with the running app.
@@ -311,7 +399,10 @@ impl AppView {
 
     /// Earliest requested render, or no deadline while idle. Pending commits are due now.
     pub fn next_frame_deadline(&self) -> Option<Instant> {
-        let deadline = self.surface.deadline();
+        let mut deadline = self.surface.deadline();
+        if let Some(refresh) = self.perf.as_ref().and_then(|p| p.refresh) {
+            deadline = Some(deadline.map_or(refresh, |due| due.min(refresh)));
+        }
         #[cfg(feature = "dev")]
         if self.diagnostics.open {
             return Some(deadline.map_or(self.diagnostics.refresh, |due| {
@@ -336,6 +427,9 @@ impl AppView {
         {
             self.pointer
                 .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+            if std::mem::take(&mut self.diagnostics.toggle_perf) {
+                self.set_fps_monitor(self.perf.is_none());
+            }
             if self.diagnostics.reload {
                 self.diagnostics.reload = false;
                 if let Some(mut dev) = self.dev.take() {
@@ -587,6 +681,7 @@ impl AppView {
     }
 
     fn draw(&mut self, area: Rect, buffer: &mut Buffer) {
+        let started = self.perf.as_ref().map(|_| Instant::now());
         self.surface.begin_frame();
         #[cfg(feature = "dev")]
         if let Some(mut dev) = self.dev.take() {
@@ -686,6 +781,13 @@ impl AppView {
         if let Some(engine) = &self.surface.engine {
             crate::navigation::report_shown(&mut self.tree, &engine.control());
         }
+        let drawing = started.map(|start| {
+            let now = Instant::now();
+            if let Some(perf) = &mut self.perf {
+                perf.pending.apply = now.duration_since(start);
+            }
+            now
+        });
         render::draw(
             &mut self.tree,
             buffer,
@@ -726,6 +828,10 @@ impl AppView {
         }
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);
+        if let (Some(drawing), Some(perf)) = (drawing, &mut self.perf) {
+            perf.pending.draw = drawing.elapsed();
+            perf.draw(area, buffer);
+        }
         #[cfg(feature = "dev")]
         {
             let requests: Vec<_> = self

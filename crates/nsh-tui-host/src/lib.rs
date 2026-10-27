@@ -32,6 +32,9 @@ struct Args {
     data_dir: Option<PathBuf>,
     #[arg(long)]
     trace: bool,
+    /// Show frame timings and terminal output (C-h p toggles).
+    #[arg(long)]
+    fps: bool,
     /// Render to an in-memory terminal (used by nsh test).
     #[arg(long, requires = "dev_server")]
     headless: bool,
@@ -55,6 +58,7 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
     options.limits = Limits::standalone();
     options.data_dir = args.data_dir.clone().or_else(nsh_engine::data_dir);
     options.trace = args.trace;
+    options.fps = args.fps;
     options.cells = args.points_per_cell;
     let terminal_clipboard = (options.clipboard.is_none() && !args.headless)
         .then(|| std::sync::Arc::new(clipboard::TerminalClipboard::default()));
@@ -82,7 +86,8 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
             }
             None => (100, 40),
         };
-        let mut terminal = Terminal::new(TestBackend::new(columns, rows)).unwrap();
+        let mut terminal =
+            Terminal::new(view.measure_backend(TestBackend::new(columns, rows))).unwrap();
         run(&mut terminal, &mut view, &args, |timeout| {
             std::thread::sleep(timeout);
             Ok(if shutdown::requested() {
@@ -93,7 +98,9 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         })?;
     } else {
         let session = terminal::Session::enter()?;
-        let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+        let mut terminal = Terminal::new(
+            view.measure_backend(CrosstermBackend::new(view.measure_writer(io::stdout()))),
+        )?;
         run(&mut terminal, &mut view, &args, |timeout| {
             if let Some(clipboard) = &terminal_clipboard {
                 clipboard.flush();

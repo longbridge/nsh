@@ -38,7 +38,7 @@ pub fn run_app<B: Backend>(
                     .next_frame_deadline()
                     .is_some_and(|due| due <= Instant::now())
             {
-                terminal.draw(|frame| view.render(frame, frame.area()))?;
+                view.draw_terminal(terminal)?;
                 redraw = false;
             }
             if view.exit_requested() {

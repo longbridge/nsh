@@ -375,3 +375,36 @@ The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so de
   debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
   both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes
   after `+1`. Single runs establish unchanged work counts; timings are a smoke check, not a benchmark.
+
+## Terminal frame budget
+
+The terminal budget is **apply + draw p95 below 4 ms per frame at 200 × 60 Cells**, in a release build.
+The ignored host test follows the `bench_gallery_scroll` pattern:
+
+```sh
+cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --ignored --nocapture --test-threads=1
+```
+
+It loads the terminal gallery's actual `LongList` and `Page` components (500 rows), then a DataTable with
+10,000 rows and 24 columns, through `AppView`. Each workload scrolls by three rows per frame, reversing every
+100 frames. It discards 20 warm-up frames and measures 240 frames with a 16 ms wait between frames for engine
+work. Loading, bundling and waits are outside the samples. Median and nearest-rank p95 cover apply + draw;
+phase means identify apply, draw and flush costs. It prints mean bytes and changed Cells per frame, then fails
+if either workload exceeds the p95 budget. The flushed buffer must show the initial content and then scroll
+away from it, so an empty screen cannot establish a baseline.
+
+The backend is ratatui's `TestBackend`; the same diff also passes through `CrosstermBackend` into memory to
+count its encoded bytes. Those include cursor and style escapes, and the monitor's line. The reported flush
+cost includes this test transport and encoding, not a terminal emulator, SSH or a real stdout write. The live
+monitor measures the real writer. Apply + draw excludes the monitor's formatting, ratatui's diff and flushing.
+
+| Workload (200 × 60 Cells) | Apply + draw median / p95 | Apply / draw / flush means | Bytes / Cells per frame |
+|---|---|---|---|
+| Terminal Long list, 500 rows | Pending main-session release run | Pending | Pending |
+| DataTable, 10,000 × 24 | Pending main-session release run | Pending | Pending |
+
+No measured baseline or budget pass is claimed yet: ticket 20's worker is restricted to `cargo check`.
+The main session must run the command above and replace the pending entries with its machine, revision and
+results, including the phase breakdown if the budget fails. Tickets changing terminal rendering, input or layout
+bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
+commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.

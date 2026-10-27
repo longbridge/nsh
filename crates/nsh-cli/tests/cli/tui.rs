@@ -99,3 +99,16 @@ fn tui_rejects_invalid_cell_dimensions_before_launching() {
     let output = run(&app, &["--points-per-cell", "0x16"]);
     assert!(!output.status.success());
 }
+
+#[test]
+fn tui_forwards_the_performance_monitor_flag_to_the_host() {
+    let app = app("{}");
+    let output = run(&app, &["--fps"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shown = String::from_utf8(output.stdout).unwrap();
+    assert!(shown.contains("--fps"), "{shown}");
+}

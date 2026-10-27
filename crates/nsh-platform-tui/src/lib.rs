@@ -14,6 +14,7 @@ mod keyboard;
 mod mount;
 mod native;
 mod navigation;
+mod perf;
 mod render;
 #[cfg(feature = "run-app")]
 mod run;
@@ -34,3 +35,5 @@ pub use crate::{
     native::{ComponentFactory, NativeComponent},
     text::{CellTextEngine, PreparedText},
 };
+
+pub use perf::{FrameMetrics, MeasuredBackend, MeasuredWriter};

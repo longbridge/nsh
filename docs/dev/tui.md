@@ -25,7 +25,7 @@ setting in ticket 09; captured wheel events keep the three-row/six-column behavi
 
 `C-h e` toggles the logs and errors panel. Escape, `C-g` or `q` closes it; arrows and PageUp/PageDown scroll,
 Home/End select the start/end, and `r` reloads the latest build. Errors open the panel automatically and the next
-update closes it. Ordinary builds and connection messages stay in the log. With the panel closed, the app owns
+update closes it. Ordinary builds and connection messages stay in the log. With both diagnostics and the performance line closed, the app owns
 every row. The panel reads at most 64 KiB from the log tail every 250 ms while open; its recent error history keeps
 at most 256 lines of 4096 characters each. Control characters are removed before drawing diagnostics.
 
@@ -42,6 +42,37 @@ or verified-package path, owned by the packaging work. Direct hosts without `--l
 `nsh-tui-host-<pid>.log` in the system temporary directory, visible through the same panel. `--trace` includes
 the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
 app data. A source-bundle failure exits after terminal restoration; a development session stays open for a fix.
+
+## Performance monitor and frame budget
+
+```sh
+./target/debug/nsh run examples/tui-gallery --target tui --fps
+cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --ignored --nocapture --test-threads=1
+```
+
+`--fps` enables a single line at the top right; `C-h p` toggles it beside `C-h e`. These prefixes apply outside
+editable fields and inside diagnostics; a field keeps C-h as Backspace. The line shows active FPS (`idle` after
+a second with no app frames), mean frame time and p95, mean apply / draw / flush milliseconds, and mean bytes
+and changed Cells per frame. It logs the same line through `nsh::perf`, visible in `C-h e`. Long lines clip to
+the terminal width. The readings update once a second while active, with one final idle update; HUD-only
+refreshes never count as app frames and idle monitoring schedules no recurring draws.
+
+`perf.rs` retains 120 application frames. Apply includes draining pending work, callbacks and scroll reports;
+draw includes surface painting and focus reconciliation; flush includes ratatui's diff, encoding and the
+writer's flush. HUD formatting is outside those phases. Cells count the backend's actual diff iterator, including
+wide-character handling; bytes count successful writer output, including ANSI escapes. Output means include
+the HUD when it is part of an app frame. An uninstrumented transport displays `-` for its unknown counters.
+`PerfMonitor` supplies the active FPS and engine timings (its four cold frames are skipped for FPS); the
+terminal phase history includes every app frame. The budget and baseline are in [Performance](performance.md#terminal-frame-budget).
+Changes to terminal rendering, input or layout include before / after benchmark numbers and trace counts.
+
+For a full-terminal embedder, enable `AppOptions::fps` or call `AppView::set_fps_monitor(bool)`, wrap the
+writer with `view.measure_writer(writer)` and the backend with `view.measure_backend(backend)`, then draw with
+`view.draw_terminal(&mut terminal)` (as `run_app` does). The adapters remain pass-through while the monitor is
+hidden: no timers, clock reads, history, diff scans or output counting are added on that path. `frame_metrics()`
+returns the last completed frame's `FrameMetrics`; `perf_monitor()` exposes the shared engine monitor for tools.
+Disabling drops the monitor and detaches it from the engine; enabling starts a fresh history. Ordinary `render`
+and Widget embedding keep the same layout API; full transport timings require `draw_terminal`.
 
 ## Development sessions
 
@@ -429,6 +460,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 
 | Feature | Terminal representation |
 |---|---|
+| Performance monitor | One corner line, toggled by `C-h p` or enabled by `--fps`; idle draws stop and readings also go to `nsh::perf` |
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
