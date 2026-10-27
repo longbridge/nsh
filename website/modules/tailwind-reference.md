@@ -246,12 +246,12 @@ Container widths (points): `3xs` 256, `2xs` 288, `xs` 320, `sm` 384, `md` 448, `
 | `align-baseline`, `align-text-top`, `align-text-bottom`, `align-middle` | `verticalAlign` (views and images inside a text) |
 | `uppercase`, `lowercase`, `capitalize`, `normal-case` | `textTransform` |
 | `truncate` | one line, tail ellipsis, no wrapping, `overflow: hidden` (on a view: its texts do not wrap) |
-| `line-clamp-<n>`, `line-clamp-none` | `lineClamp` (`none` shows every line) |
+| `line-clamp-<n>`, `line-clamp-none` | `numberOfLines` (`none` shows every line) |
 | `text-ellipsis`, `text-clip` | `textOverflow: "ellipsis"` / `"clip"` |
 | `whitespace-nowrap`, `text-nowrap` | lines never wrap; on a view, the lines of the texts in it (inherited, as CSS's `white-space`) |
 | `whitespace-normal`, `text-wrap`, `text-balance`, `text-pretty` | lines wrap (balancing is not done) |
-| `select-text`, `select-none` | `userSelect: "text"` / `"none"`; on a view, of the texts in it that set none |
-| `select-auto` | `userSelect: "auto"`: the view around it decides, as CSS's `user-select: auto` (`select-none md:select-auto`) |
+| `select-text`, `select-none` | `selectable: true` / `"none"`; on a view, of the texts in it that set none |
+| `select-auto` | `selectable` unset: the view around it decides, as CSS's `user-select: auto` (`select-none md:select-auto`) |
 
 ### Decoration and shadow
 

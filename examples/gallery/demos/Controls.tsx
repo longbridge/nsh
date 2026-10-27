@@ -360,7 +360,7 @@ export function Controls() {
                 focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
-                <Text style={{ lineClamp: 1, fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
+                <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
                   {s().name}
                 </Text>
               </Tab>

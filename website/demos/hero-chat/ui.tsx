@@ -393,7 +393,7 @@ export function Card(props: {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text style={{ lineClamp: 2, fontSize: 13, color: colors.muted }}>
+              <Text style={{ numberOfLines: 2, fontSize: 13, color: colors.muted }}>
                 {props.subtitle}
               </Text>
             </If>
@@ -741,7 +741,7 @@ export function Segmented<T extends string>(props: {
           >
             <Text
               style={{
-                lineClamp: 1,
+                numberOfLines: 1,
                 fontSize: props.size === "small" ? 13 : 14,
                 fontWeight: "500",
                 color: props.value === option().value ? colors.text : colors.muted,

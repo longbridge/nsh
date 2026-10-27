@@ -526,6 +526,7 @@ fn decode_style<'js>(
                 string = value.as_string().expect("string").to_string()?;
                 StyleValue::Str(&string)
             }
+            Type::Bool => StyleValue::Bool(value.as_bool().unwrap_or_default()),
             Type::Null | Type::Undefined => StyleValue::Null,
             _ => {
                 warnings.warn(format!("style `{key}`: unsupported value type"));

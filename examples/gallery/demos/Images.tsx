@@ -18,7 +18,7 @@ const frame = () => ({ borderRadius: radius.control, borderCurve: "continuous", 
 /** A quiet label under a tile (`code` for API values). */
 function Note(props: { children: string; code?: boolean }) {
   return (
-    <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted, fontFamily: props.code ? mono : undefined, fontVariant: ["tabular-nums"], textAlign: "center" }}>
+    <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted, fontFamily: props.code ? mono : undefined, fontVariant: ["tabular-nums"], textAlign: "center" }}>
       {props.children}
     </Text>
   );
@@ -323,7 +323,7 @@ function Events() {
         </View>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={{ fontSize: 15, color: colors.text }}>example.invalid</Text>
-          <Text style={{ lineClamp: 3, fontSize: 13, color: colors.danger }}>{failed()}</Text>
+          <Text style={{ numberOfLines: 3, fontSize: 13, color: colors.danger }}>{failed()}</Text>
         </View>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" }}>

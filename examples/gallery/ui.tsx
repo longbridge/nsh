@@ -64,7 +64,7 @@ export function PageHeader(props: {
       </If>
       <View style={{ flex: 1, flexDirection: "row", alignItems: "center", paddingHorizontal: back() || props.left ? 0 : 4 }}>
         {props.center ?? (
-          <Text style={{ lineClamp: 1, flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>
+          <Text style={{ numberOfLines: 1, flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>
             {props.title}
           </Text>
         )}

@@ -5601,7 +5601,7 @@ fn text_shrinks_to_fit_its_lines() {
             style: style(&[
                 ("width", StyleValue::Number(60.0)),
                 ("fontSize", StyleValue::Number(20.0)),
-                ("lineClamp", StyleValue::Number(1.0)),
+                ("numberOfLines", StyleValue::Number(1.0)),
             ]),
             patch: Default::default(),
         },
@@ -5656,9 +5656,9 @@ fn styles_clamp_cut_and_select_texts_and_say_which_views_take_touches() {
         Op::SetStyle {
             id: 2,
             style: style(&[
-                ("lineClamp", StyleValue::Number(2.0)),
+                ("numberOfLines", StyleValue::Number(2.0)),
                 ("textOverflow", StyleValue::Str("ellipsis-middle")),
-                ("userSelect", StyleValue::Str("text")),
+                ("selectable", StyleValue::Bool(true)),
             ]),
             patch: Default::default(),
         },
@@ -14463,7 +14463,7 @@ mod builders {
             .child(text("flip").on_press(move || flipped.set(true)))
             .child(
                 text("lines")
-                    .line_clamp(move || if flipped.get() { 2_u32 } else { 1 })
+                    .number_of_lines(move || if flipped.get() { 2_u32 } else { 1 })
                     .style_when(flipped, |s| s.select_text())
                     .max_font_size_multiplier(move || if flipped.get() { 3.0_f32 } else { 1.5 }),
             )

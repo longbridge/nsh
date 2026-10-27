@@ -16,7 +16,7 @@
 //! explicit `lineHeight` spreads evenly above and below it, and an
 //! attachment stands on the baseline. DirectWrite only breaks lines: it
 //! lays them out on a fixed pitch ([`PITCH`]), which makes its own height
-//! limit cut after exactly `lineClamp` lines, and the lines are stacked
+//! limit cut after exactly `numberOfLines` lines, and the lines are stacked
 //! again from the spans they hold.
 //!
 //! Colors and decorations are not part of a layout: the core reuses a
@@ -91,8 +91,8 @@ use crate::{
 
 /// The line pitch DirectWrite lays lines out on, and the baseline in each
 /// line: any constant works, since lines are stacked again from their
-/// spans; a fixed pitch makes `lineClamp` lines exactly
-/// `lineClamp * PITCH` tall for DirectWrite's height limit (and its
+/// spans; a fixed pitch makes `numberOfLines` lines exactly
+/// `numberOfLines * PITCH` tall for DirectWrite's height limit (and its
 /// ellipsis).
 const PITCH: f32 = 1024.0;
 const PITCH_BASELINE: f32 = 768.0;

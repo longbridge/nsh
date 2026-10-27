@@ -1236,14 +1236,14 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             .cursor_pointer()
             .child(
                 text(label)
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .text_size(px(14.0))
                     .style_when(selected, |s| s.font_weight(FontWeight::SEMIBOLD))
                     .text_color(colors::TEXT),
             )
             .child(
                 text(prompt)
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .text_size(px(12.0))
                     .text_color(colors::MUTED),
             )

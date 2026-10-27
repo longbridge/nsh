@@ -1304,7 +1304,7 @@ fn ghost(ed: Ed) -> impl IntoElement {
             .left(Length::from(at.x))
             .top(Length::from(at.y))
             .h(Length::from(lh))
-            .line_clamp(1)
+            .number_of_lines(1)
             .text_color(move || theme().muted_foreground)
             .when(mid_line || rest.is_some(), |t| {
                 t.bg(move || theme().background)
@@ -1512,13 +1512,13 @@ fn row(
             text(kind)
                 .flex_none()
                 .w(Length::from(size.kind))
-                .line_clamp(1)
+                .number_of_lines(1)
                 .text_color(move || theme().muted_foreground),
             props,
             &[EditorPart::CompletionKind],
         ));
     }
-    let label = text("").flex_none().line_clamp(1).children(
+    let label = text("").flex_none().number_of_lines(1).children(
         runs(&item.label, &hit.highlights)
             .into_iter()
             .map(|(run, matched)| {
@@ -1544,7 +1544,7 @@ fn row(
                 .flex_1()
                 .min_w(px(0.0))
                 .text_right()
-                .line_clamp(1)
+                .number_of_lines(1)
                 .text_color(move || theme().muted_foreground),
             props,
             &[EditorPart::CompletionDetail],

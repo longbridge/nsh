@@ -114,7 +114,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
         <IconTile name={props.icon} size={34} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
-          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.note}
           </Text>
         </View>

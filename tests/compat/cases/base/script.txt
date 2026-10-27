@@ -489,11 +489,11 @@ expect Math block: x^2
 expect Image Logo: https://example.com/logo.png
 tap label:Logo
 expect Image pressed: Logo
-# Parts styled by `classes` and `styles`; `selectable` (its texts' `userSelect`).
+# Parts styled by `classes` and `styles`; `selectable` (its texts' `selectable`).
 style text:"Classed heading" color #ff0000ff
 style text:"Classed heading" fontWeight 600
 style text:"Styled paragraph." color #00ff00ff
-style text:"Styled paragraph." userSelect text
+style text:"Styled paragraph." selectable true
 # The static functions.
 expect Plain: a b
 expect Parsed: 1 paragraph
@@ -536,13 +536,13 @@ prop id:area selectableView true
 prop id:inner selectableView true
 prop id:own selectableView true
 noprop id:area-doc selectableView
-# Texts join the area unless they say `userSelect: "none"`.
-nostyle text:"Area first text" userSelect
-nostyle text:"Area item" userSelect
-style text:"Area label" userSelect none
-nostyle text:"Inner text" userSelect
-style text:"Own selection" userSelect text
-nostyle text:"Outside text" userSelect
+# Texts join the area unless they say `selectable: false`.
+nostyle text:"Area first text" selectable
+nostyle text:"Area item" selectable
+style text:"Area label" selectable false
+nostyle text:"Inner text" selectable
+style text:"Own selection" selectable true
+nostyle text:"Outside text" selectable
 # base-popups
 tap id:case-base-popups
 # Shown at first: a controlled popover, one with `defaultOpen`, a tooltip

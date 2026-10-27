@@ -88,7 +88,7 @@ export function Physics() {
           <IconTile name="physics" tint={colors.accent} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>Drag and release</Text>
-            <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
+            <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
               {hint("Tap to pulse, long press to reset", "Click to pulse, press and hold to reset")}
             </Text>
           </View>

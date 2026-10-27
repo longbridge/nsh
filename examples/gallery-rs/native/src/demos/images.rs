@@ -43,7 +43,7 @@ fn frame(image: Image) -> Image {
 /// A quiet label under a tile (`code` for API values).
 fn note(content: impl Into<SharedString>, code: bool) -> AnyElement {
     text(content.into())
-        .line_clamp(1)
+        .number_of_lines(1)
         .text_size(px(13.0))
         .text_color(colors::MUTED)
         .when(code, |t| t.font_family(MONO))
@@ -444,7 +444,7 @@ fn events() -> AnyElement {
                 .child(label(
                     "example.invalid",
                     text(failed)
-                        .line_clamp(3)
+                        .number_of_lines(3)
                         .text_size(px(13.0))
                         .text_color(colors::DANGER)
                         .into_element(),

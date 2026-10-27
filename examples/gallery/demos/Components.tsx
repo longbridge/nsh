@@ -52,7 +52,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; onPress: 
         <IconTile name={props.icon} size={34} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
-          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.note}
           </Text>
         </View>
@@ -347,10 +347,10 @@ function PlatformInfo() {
         <Each of={rows()}>
           {(row, i) => (
             <Row first={i() === 0}>
-              <Text style={{ lineClamp: 1, flex: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
+              <Text style={{ numberOfLines: 1, flex: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
                 {row()[0]}
               </Text>
-              <Text style={{ lineClamp: 1, fontSize: 14, color: colors.text, fontVariant: ["tabular-nums"] }}>
+              <Text style={{ numberOfLines: 1, fontSize: 14, color: colors.text, fontVariant: ["tabular-nums"] }}>
                 {row()[1]}
               </Text>
             </Row>

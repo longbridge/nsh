@@ -977,7 +977,7 @@ impl Prepared {
         (ascent, descent)
     }
 
-    /// Lines past `lineClamp` get an ellipsis of their own kind.
+    /// Lines past `numberOfLines` get an ellipsis of their own kind.
     fn ellipsizes(&self) -> bool {
         self.text.max_lines > 0 && self.text.ellipsize != EllipsizeMode::Clip
     }

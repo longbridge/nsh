@@ -17,7 +17,7 @@ function Specimen(props: { label: string; code?: string; first?: boolean; childr
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, color: colors.muted }}>{props.label}</Text>
         <If when={props.code}>
-          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.code}
           </Text>
         </If>
@@ -181,29 +181,29 @@ function Scaling() {
 
 function Truncation() {
   return (
-    <Card icon="lists" title="Truncation" subtitle="lineClamp and textOverflow">
-      <Specimen label="Two lines, tail" code="lineClamp: 2" first>
-        <Text style={[body(), { lineClamp: 2 }]}>
+    <Card icon="lists" title="Truncation" subtitle="numberOfLines and textOverflow">
+      <Specimen label="Two lines, tail" code="numberOfLines: 2" first>
+        <Text style={[body(), { numberOfLines: 2 }]}>
           {LOREM}
         </Text>
       </Specimen>
       <Specimen label="One line, head" code={`textOverflow: "ellipsis-start"`}>
-        <Text style={[body(), { lineClamp: 1, textOverflow: "ellipsis-start" }]}>
+        <Text style={[body(), { numberOfLines: 1, textOverflow: "ellipsis-start" }]}>
           {LOREM}
         </Text>
       </Specimen>
       <Specimen label="One line, middle" code={`textOverflow: "ellipsis-middle"`}>
-        <Text style={[body(), { lineClamp: 1, textOverflow: "ellipsis-middle" }]}>
+        <Text style={[body(), { numberOfLines: 1, textOverflow: "ellipsis-middle" }]}>
           {LOREM}
         </Text>
       </Specimen>
       <Specimen label="One line, clip" code={`textOverflow: "clip"`}>
-        <Text style={[body(), { lineClamp: 1, textOverflow: "clip" }]}>
+        <Text style={[body(), { numberOfLines: 1, textOverflow: "clip" }]}>
           {LOREM}
         </Text>
       </Specimen>
       <Specimen label="Centered, three lines" code={`textAlign="center"`}>
-        <Text style={{ lineClamp: 3, ...body(), textAlign: "center", color: colors.muted }}>
+        <Text style={{ numberOfLines: 3, ...body(), textAlign: "center", color: colors.muted }}>
           {LOREM} {LOREM}
         </Text>
       </Specimen>
@@ -225,13 +225,13 @@ function Cjk() {
       <Specimen label="Japanese: kana, kanji and Latin">
         <Text style={body()}>{JAPANESE}</Text>
       </Specimen>
-      <Specimen label="Two lines, tail" code="lineClamp: 2">
-        <Text style={[body(), { lineClamp: 2 }]}>
+      <Specimen label="Two lines, tail" code="numberOfLines: 2">
+        <Text style={[body(), { numberOfLines: 2 }]}>
           {CHINESE}
         </Text>
       </Specimen>
       <Specimen label="One line, middle" code={`textOverflow: "ellipsis-middle"`}>
-        <Text style={[body(), { lineClamp: 1, textOverflow: "ellipsis-middle" }]}>
+        <Text style={[body(), { numberOfLines: 1, textOverflow: "ellipsis-middle" }]}>
           {JAPANESE}
         </Text>
       </Specimen>
@@ -251,8 +251,8 @@ function RightToLeft() {
       <Specimen label="Hebrew">
         <Text style={body()}>שלום! הגרסה 2.0 של nsh זמינה עכשיו (גם ב-Linux).</Text>
       </Specimen>
-      <Specimen label="One line, tail" code="lineClamp: 1">
-        <Text style={[body(), { lineClamp: 1 }]}>
+      <Specimen label="One line, tail" code="numberOfLines: 1">
+        <Text style={[body(), { numberOfLines: 1 }]}>
           {ARABIC}
         </Text>
       </Specimen>

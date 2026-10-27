@@ -54,7 +54,7 @@ function Apogees() {
         }}
       />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ lineClamp: 1, flex: 1, fontSize: 13, color: color.muted }}>
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: color.muted }}>
           Hop {hop().id} · <Text style={{ fontFamily: mono, color: color.text }}>{Math.round(hop().apogee)} m</Text> · {hop().note}
         </Text>
         <If when={picked() !== null}>

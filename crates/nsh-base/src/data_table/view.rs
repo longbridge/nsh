@@ -818,7 +818,10 @@ fn row_number(dt: Dt, row: Memo<Option<usize>>) -> impl IntoElement {
         props,
         DataTablePart::RowHeader,
     )
-    .child(text(move || row.get().map(|r| format!("{}", r + 1)).unwrap_or_default()).line_clamp(1))
+    .child(
+        text(move || row.get().map(|r| format!("{}", r + 1)).unwrap_or_default())
+            .number_of_lines(1),
+    )
 }
 
 /// What marks a cell besides its row.
@@ -961,7 +964,7 @@ fn cell(
                 (Some(row), Some(def)) => text_dt.cell_text(row, def),
                 _ => SharedString::default(),
             })
-            .line_clamp(1)
+            .number_of_lines(1)
             .min_w(px(0.0)),
         )
     }
@@ -1185,7 +1188,7 @@ fn group_cell(dt: Dt, group: GroupCell, which: Region, w: Windows) -> impl IntoE
         props,
         DataTablePart::GroupCell,
     )
-    .child(text(group.label.clone()).line_clamp(1))
+    .child(text(group.label.clone()).number_of_lines(1))
 }
 
 /// The title of a column.
@@ -1387,7 +1390,7 @@ fn title_content(
         // The title takes the room the sort button leaves, aligned as the
         // column's cells.
         text(move || label_dt.title(def))
-            .line_clamp(1)
+            .number_of_lines(1)
             .flex_1()
             .min_w(px(0.0))
             .map(move |t| match align {

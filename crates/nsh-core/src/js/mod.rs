@@ -104,7 +104,12 @@ mod tests {
         }
         assert!(!style.contains("backdropMaterial"));
         // Style keys, not props.
-        for key in ["lineClamp", "textOverflow", "userSelect", "pointerEvents"] {
+        for key in [
+            "numberOfLines",
+            "textOverflow",
+            "selectable",
+            "pointerEvents",
+        ] {
             assert!(style.contains(&format!("  {key}?: ")), "{key}");
         }
         let text = style.find("export interface TextStyle").unwrap();

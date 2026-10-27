@@ -396,7 +396,7 @@ function Network() {
               <Appear index={i()}>
                 <Row first={i() === 0}>
                   <Text style={{ width: 28, fontSize: 13, color: colors.accent, fontVariant: ["tabular-nums"] }}>{`#${post().id}`}</Text>
-                  <Text style={{ lineClamp: 1, flex: 1, fontSize: 15, color: colors.text }}>
+                  <Text style={{ numberOfLines: 1, flex: 1, fontSize: 15, color: colors.text }}>
                     {post().title}
                   </Text>
                 </Row>
@@ -408,7 +408,7 @@ function Network() {
       <If when={status()}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: toneColor(status()!.tone) }} />
-          <Text style={{ lineClamp: 2, flex: 1, fontSize: 13, color: toneColor(status()!.tone), fontVariant: ["tabular-nums"] }}>
+          <Text style={{ numberOfLines: 2, flex: 1, fontSize: 13, color: toneColor(status()!.tone), fontVariant: ["tabular-nums"] }}>
             {status()!.text}
           </Text>
         </View>

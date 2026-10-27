@@ -54,7 +54,7 @@ function Header(props: { title: string; back?: boolean }) {
           <Text style={{ fontSize: 15, color: color.accent }}>Back</Text>
         </View>
       </If>
-      <Text style={{ lineClamp: 1, flex: 1, fontSize: 17, fontWeight: "600", color: color.text }}>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 17, fontWeight: "600", color: color.text }}>
         {props.title}
       </Text>
     </View>

@@ -60,7 +60,7 @@ export function createBanner() {
       </View>
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onLight }}>{message().title}</Text>
-        <Text style={{ lineClamp: 1, fontSize: 13, color: isDark() ? "#4a4e55" : "#a4a8ae" }}>
+        <Text style={{ numberOfLines: 1, fontSize: 13, color: isDark() ? "#4a4e55" : "#a4a8ae" }}>
           {message().detail}
         </Text>
       </View>

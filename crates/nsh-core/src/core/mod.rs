@@ -4582,7 +4582,7 @@ impl<M: TextEngine> Core<M> {
     /// color change keeps both and just needs a new final layout.
     fn rebuild_text(&mut self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
-        // Its own style's and classes' (`lineClamp`, `textOverflow`).
+        // Its own style's and classes' (`numberOfLines`, `textOverflow`).
         let class = node.class_props.as_deref();
         let max_lines = class.and_then(|c| c.number_of_lines).unwrap_or(0);
         let ellipsize = class.and_then(|c| c.ellipsize).unwrap_or_default();

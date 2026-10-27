@@ -170,7 +170,7 @@ function App() {
                   }}
                 >
                   <View class={KEYS[i % KEYS.length]} style={{ width: 8, height: 8, borderRadius: 2 }} />
-                  <Text style={{ lineClamp: 1, flex: 1, fontSize: size.label - 1, color: ui().text }}>{p.name}</Text>
+                  <Text style={{ numberOfLines: 1, flex: 1, fontSize: size.label - 1, color: ui().text }}>{p.name}</Text>
                   <Text style={{ fontSize: size.label - 1, color: ui().text, ...num }}>{money(p.revenue)}</Text>
                   <Text style={{ width: 52, fontSize: size.label - 1, color: ui().muted, ...num }}>{percent(share(p))}</Text>
                 </View>

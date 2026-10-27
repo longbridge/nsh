@@ -181,7 +181,7 @@ function Timeline() {
               <Text
                 style={{
                   pointerEvents: "none",
-                  lineClamp: 1,
+                  numberOfLines: 1,
                   position: "absolute",
                   left: 0,
                   right: 0,

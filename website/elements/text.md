@@ -78,7 +78,7 @@ text("Run ")
 ```
 
 ```tsx tabs
-<Text style={{ userSelect: "text", fontSize: 15, lineHeight: 22 }}>
+<Text style={{ selectable: true, fontSize: 15, lineHeight: 22 }}>
   {"Run "}
   <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
     {" cargo test "}
@@ -151,7 +151,7 @@ text("Made with ")
 </Text>
 ```
 
-Attachments cut off by `lineClamp` or an ellipsis are hidden. Copying a selectable text leaves them out.
+Attachments cut off by `numberOfLines` or an ellipsis are hidden. Copying a selectable text leaves them out.
 
 ### Whitespace
 
@@ -165,17 +165,17 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Text
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `lineClamp` (style) | `.line_clamp(n)`, `.truncate()` | `number \| "none"` | `"none"` | The most lines shown; `"none"` or `0` shows them all. |
-| `textOverflow` (style) | `.text_overflow(EllipsizeMode::Middle)` | `"ellipsis" \| "clip" \| "ellipsis-start" \| "ellipsis-middle"` | `"ellipsis"` | How text that does not fit `lineClamp` is cut: an ellipsis at its end, at its start or in its middle, or clipped. |
+| `numberOfLines` (style) | `.number_of_lines(n)`, `.truncate()` | `number` | `0` | The most lines shown; `0` shows them all. |
+| `textOverflow` (style) | `.text_overflow(EllipsizeMode::Middle)` | `"ellipsis" \| "clip" \| "ellipsis-start" \| "ellipsis-middle"` | `"ellipsis"` | How text that does not fit `numberOfLines` is cut: an ellipsis at its end, at its start or in its middle, or clipped. |
 | `allowFontScaling` | `.allow_font_scaling(..)` | `boolean` | `true` | Follow the system text size setting. |
 | `maxFontSizeMultiplier` | `.max_font_size_multiplier(..)` | `number` | `0` | The upper bound of the system scale; `0` is none. |
-| `adjustsFontSizeToFit` | `.shrink_to_fit(min_scale)` | `boolean` | `false` | Shrink the font until the text fits its lines (`lineClamp`) and its box. |
+| `adjustsFontSizeToFit` | `.shrink_to_fit(min_scale)` | `boolean` | `false` | Shrink the font until the text fits its lines (`numberOfLines`) and its box. |
 | `minimumFontScale` | `.shrink_to_fit(min_scale)` | `number` | | How far `adjustsFontSizeToFit` shrinks at most (0..1; at least 0.1). |
-| `userSelect` (style) | `.select_text()`, `.select_none()` | `"auto" \| "none" \| "text"` | `"auto"` | `"text"`: the user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. `"auto"` takes the setting of the views around the text; with none set, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `"none"` keeps it unselectable there too. |
+| `selectable` (style) | `.select_text()`, `.select_none()` | `boolean` | unset | `true`: the user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. Unset takes the setting of the views around the text; with none set, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `false` keeps it unselectable there too. |
 | `selectionColor` (style) | `.selection_color(..)` | `ColorValue` | the platform's accent | The selection's highlight and handles. |
 | `onTextLayout` | | `(e: { lines: TextLayoutLine[] }) => void` | | The laid-out lines after each layout. |
 
-The Tailwind classes `select-text`, `select-none` and `select-auto` set `userSelect`, `line-clamp-*` sets `lineClamp`, `text-ellipsis` and `text-clip` set `textOverflow`, and `truncate` is one line cut with an ellipsis. The selection's highlight and handles take the style key
+The Tailwind classes `select-text`, `select-none` and `select-auto` set `selectable`, `line-clamp-*` sets `numberOfLines`, `text-ellipsis` and `text-clip` set `textOverflow`, and `truncate` is one line cut with an ellipsis. The selection's highlight and handles take the style key
 `selectionColor` (`selection:text-*`), the platform's accent by default.
 
 ## Text styles
@@ -183,10 +183,10 @@ The Tailwind classes `select-text`, `select-none` and `select-auto` set `userSel
 `TextStyle` adds to the view styles: `color`, `fontSize`, `fontWeight` (`"normal"`, `"bold"` or 100–900), `fontStyle`,
 `fontFamily`, `lineHeight`, `letterSpacing`, `textAlign`, `textAlignVertical`, `textTransform`, `textDecorationLine`,
 `textDecorationColor`, `textDecorationStyle`, `textDecorationThickness`, `textUnderlineOffset`, `textShadow` (CSS's
-`text-shadow`), `fontVariant`, `writingDirection`, `lineClamp` and `textOverflow`. In Rust they are `Styled` methods:
+`text-shadow`), `fontVariant`, `writingDirection`, `numberOfLines` and `textOverflow`. In Rust they are `Styled` methods:
 `.text_color(..)`, `.text_size(..)` (or `.text_sm()`, `.text_lg()`, …), `.font_weight(FontWeight::SEMIBOLD)`,
 `.italic()`, `.font_family(..)`, `.line_height(..)`, `.letter_spacing(..)`, `.text_center()`, `.uppercase()`,
-`.underline()`, `.line_through()`, `.tabular_nums()`, `.line_clamp(..)` and the rest. See the
+`.underline()`, `.line_through()`, `.tabular_nums()`, `.number_of_lines(..)` and the rest. See the
 [style reference](../modules/style-reference.md#textstyle) and [text](../docs/text.md).
 
 The font family is a system family or a font file of the app:

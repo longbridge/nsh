@@ -89,7 +89,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
         <IconTile name={props.demo.icon} size={38} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 16, fontWeight: "500", color: colors.text }}>{props.demo.name}</Text>
-          <Text style={{ lineClamp: 2, fontSize: 13, lineHeight: 18, color: colors.muted }}>
+          <Text style={{ numberOfLines: 2, fontSize: 13, lineHeight: 18, color: colors.muted }}>
             {props.demo.detail}
           </Text>
         </View>
@@ -192,7 +192,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
       <Icon name={props.demo.icon} size={17} tint={active() ? colors.accent : colors.muted} />
-      <Text style={{ lineClamp: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
         {props.demo.name}
       </Text>
     </View>
@@ -291,10 +291,10 @@ function DemoPane() {
       <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <IconTile name={selected().icon} size={36} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ lineClamp: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
+          <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
             {selected().name}
           </Text>
-          <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
             {selected().detail}
           </Text>
         </View>

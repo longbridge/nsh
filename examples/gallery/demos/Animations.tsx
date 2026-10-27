@@ -204,7 +204,7 @@ function PresetTile(props: { name: MotionName; tone: string; onPlay: (status: st
         >
           <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: onTone(), opacity: 0.85 }} />
         </View>
-        <Text style={{ lineClamp: 1, fontSize: 12, fontFamily: mono, color: looping() ? colors.text : colors.muted }}>
+        <Text style={{ numberOfLines: 1, fontSize: 12, fontFamily: mono, color: looping() ? colors.text : colors.muted }}>
           {props.name}
         </Text>
       </View>
@@ -743,7 +743,7 @@ function EasingRace() {
         <Each of={curves}>
           {(c, i) => (
             <View style={{ flexDirection: "row", alignItems: "center", height: 26, gap: 10 }}>
-              <Text style={{ lineClamp: 1, width: 84, fontSize: 13, color: colors.muted }}>
+              <Text style={{ numberOfLines: 1, width: 84, fontSize: 13, color: colors.muted }}>
                 {c().name}
               </Text>
               <View onLayout={i() === 0 ? measure : undefined} style={{ flex: 1, height: 12, justifyContent: "center" }}>

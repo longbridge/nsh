@@ -107,7 +107,7 @@ function Quote(props: { market: Market; stock: Stock }) {
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ lineClamp: 1, flex: 1, fontSize: 15, color: colors.muted }}>
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 15, color: colors.muted }}>
           {props.stock.name}
         </Text>
         <Text style={{ fontSize: 13, color: colors.faint }}>{sector}</Text>

@@ -70,7 +70,7 @@ export function Segmented<T extends string>(props: {
           >
             <Text
               style={{
-                lineClamp: 1,
+                numberOfLines: 1,
                 fontSize: props.size === "small" ? 13 : 14,
                 fontWeight: "500",
                 color: props.value === option().value ? colors.text : colors.muted,

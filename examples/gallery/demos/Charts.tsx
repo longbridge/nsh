@@ -279,7 +279,7 @@ export function Charts() {
                 }}
               >
                 <View class={KEYS[i]} style={{ width: 8, height: 8, borderRadius: 2 }} />
-                <Text style={{ lineClamp: 1, flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
+                <Text style={{ numberOfLines: 1, flex: 1, fontSize: size.detail + 1, color: colors.text }}>{r.name}</Text>
                 <Text style={{ fontSize: size.detail + 1, color: colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>{money(r.revenue)}</Text>
                 <Text style={{ width: 48, fontSize: size.detail + 1, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{share(r.revenue)}</Text>
               </View>

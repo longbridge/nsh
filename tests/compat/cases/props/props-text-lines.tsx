@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): what decides
-// a `<Text>`'s lines as the platform receives it: the styles `lineClamp`
-// (the lines also decide its height), `textOverflow` and `userSelect`, and
+// a `<Text>`'s lines as the platform receives it: the styles `numberOfLines`
+// (the lines also decide its height), `textOverflow` and `selectable`, and
 // the prop `adjustsFontSizeToFit`, which shrinks the font until
 // the text fits, at most to `minimumFontScale` (text that fits keeps its
 // size). Its script
@@ -12,22 +12,22 @@ const LONG = "One two three four five six seven eight nine ten eleven twelve";
 function App() {
   return (
     <View style={{ flex: 1, paddingTop: 64, alignItems: "flex-start" }}>
-      <Text testID="two" style={{ lineClamp: 2, width: 100, fontSize: 10, lineHeight: 12 }}>
+      <Text testID="two" style={{ numberOfLines: 2, width: 100, fontSize: 10, lineHeight: 12 }}>
         {LONG}
       </Text>
       <Text testID="all" style={{ width: 100, fontSize: 10, lineHeight: 12 }}>
         {LONG}
       </Text>
-      <Text testID="head" style={{ lineClamp: 1, textOverflow: "ellipsis-start" }}>
+      <Text testID="head" style={{ numberOfLines: 1, textOverflow: "ellipsis-start" }}>
         Head
       </Text>
-      <Text testID="selectable" style={{ userSelect: "text" }}>
+      <Text testID="selectable" style={{ selectable: true }}>
         Selectable
       </Text>
       <Text
         testID="fit"
         adjustsFontSizeToFit={true}
-        style={{ lineClamp: 1, width: 100, fontSize: 20 }}
+        style={{ numberOfLines: 1, width: 100, fontSize: 20 }}
       >
         Fits
       </Text>
@@ -35,7 +35,7 @@ function App() {
         testID="fit-min"
         adjustsFontSizeToFit={true}
         minimumFontScale={0.5}
-        style={{ lineClamp: 1, width: 100, fontSize: 20 }}
+        style={{ numberOfLines: 1, width: 100, fontSize: 20 }}
       >
         {LONG}
       </Text>

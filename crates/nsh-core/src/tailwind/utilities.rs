@@ -1145,7 +1145,7 @@ fn arb(key: StyleKey, s: &str) -> Option<Decl> {
 
 /// `line-clamp-*` (0: none).
 fn clamp(lines: u32) -> Decl {
-    Decl::Set(K::LineClamp, PropertyValue::LineClamp(Some(lines)))
+    Decl::Set(K::NumberOfLines, PropertyValue::LineClamp(Some(lines)))
 }
 
 /// `text-ellipsis`, `text-clip`.
@@ -1826,9 +1826,9 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         ),
         // `user-select` of a text that says `auto` is its parent's: the
         // classes of the views around it reach it (`Core::rebuild_text`).
-        "select-none" => Decl::Set(K::UserSelect, PropertyValue::OptBool(Some(false))),
-        "select-text" => Decl::Set(K::UserSelect, PropertyValue::OptBool(Some(true))),
-        "select-auto" => Decl::Set(K::UserSelect, PropertyValue::OptBool(None)),
+        "select-none" => Decl::Set(K::Selectable, PropertyValue::OptBool(Some(false))),
+        "select-text" => Decl::Set(K::Selectable, PropertyValue::OptBool(Some(true))),
+        "select-auto" => Decl::Set(K::Selectable, PropertyValue::OptBool(None)),
         "space-x-reverse" => Decl::Prop(PropDecl::SpaceReverse(false)),
         "space-y-reverse" => Decl::Prop(PropDecl::SpaceReverse(true)),
         // Images.

@@ -37,7 +37,7 @@ view()
             .flex_1()
             .gap_0p5()
             .child(text(name).font_weight(FontWeight::SEMIBOLD))
-            .child(text(message).text_color(rgb(0x6e7781)).line_clamp(1)),
+            .child(text(message).text_color(rgb(0x6e7781)).number_of_lines(1)),
     )
     .child(text(time).text_color(rgb(0x6e7781)))
 ```
@@ -47,7 +47,7 @@ view()
   <Image src={avatar} style={{ width: 40, height: 40, borderRadius: 20 }} />
   <View style={{ flex: 1, gap: 2 }}>
     <Text style={{ fontWeight: "600" }}>{props.name}</Text>
-    <Text style={{ lineClamp: 1, color: "#6e7781" }}>{props.message}</Text>
+    <Text style={{ numberOfLines: 1, color: "#6e7781" }}>{props.message}</Text>
   </View>
   <Text style={{ color: "#6e7781" }}>{props.time}</Text>
 </View>

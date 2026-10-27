@@ -302,20 +302,20 @@ covers [props] zoomScale
 covers [props] scrollValue
 # props-text-lines
 tap id:case-props-text-lines
-style id:two lineClamp 2
-style id:all lineClamp none
+style id:two numberOfLines 2
+style id:all numberOfLines 0
 frame id:two 0 64 100 24
 frame id:all 0 88 100 48
 style id:head textOverflow ellipsis-start
 style id:plain textOverflow ellipsis
-style id:selectable userSelect text
-nostyle id:plain userSelect
+style id:selectable selectable true
+nostyle id:plain selectable
 # Shrunk to fit: at most to minimumFontScale; what fits keeps its size.
 style id:fit fontSize 20
 style id:fit-min fontSize 10
-covers [styles] lineClamp
+covers [styles] numberOfLines
 covers [styles] textOverflow
-covers [styles] userSelect
+covers [styles] selectable
 covers [props] adjustsFontSizeToFit
 covers [props] minimumFontScale
 # props-view-accessibility

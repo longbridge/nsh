@@ -246,12 +246,12 @@ view()
 | `align-baseline`、`align-text-top`、`align-text-bottom`、`align-middle` | `verticalAlign`（文本中的视图和图片） |
 | `uppercase`、`lowercase`、`capitalize`、`normal-case` | `textTransform` |
 | `truncate` | 单行、尾部省略、不换行、`overflow: hidden`（用在视图上时：其中的文本不换行） |
-| `line-clamp-<n>`、`line-clamp-none` | `lineClamp`（`none` 显示全部行） |
+| `line-clamp-<n>`、`line-clamp-none` | `numberOfLines`（`none` 显示全部行） |
 | `text-ellipsis`、`text-clip` | `textOverflow: "ellipsis"` / `"clip"` |
 | `whitespace-nowrap`、`text-nowrap` | 不换行；用在视图上时，作用于其中文本的行（与 CSS 的 `white-space` 一样会继承） |
 | `whitespace-normal`、`text-wrap`、`text-balance`、`text-pretty` | 正常换行（不做行平衡） |
-| `select-text`、`select-none` | `userSelect: "text"` / `"none"`；用在视图上时，作用于其中未自行设置的文本 |
-| `select-auto` | `userSelect: "auto"`：由外层视图决定，与 CSS 的 `user-select: auto` 一样（`select-none md:select-auto`） |
+| `select-text`、`select-none` | `selectable: true` / `"none"`；用在视图上时，作用于其中未自行设置的文本 |
+| `select-auto` | 不设 `selectable`：由外层视图决定，与 CSS 的 `user-select: auto` 一样（`select-none md:select-auto`） |
 
 ### 装饰线与阴影
 

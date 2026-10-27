@@ -451,7 +451,7 @@ export function EditorDemo() {
               autoCorrect={false}
               class={field}
             />
-            <Text style={{ lineClamp: 1 }} class="px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
+            <Text style={{ numberOfLines: 1 }} class="px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
               {matches()}
             </Text>
             <Tool label="Match case" name="Aa" on={caseSensitive()} onPress={() => caseSensitive.set(!caseSensitive())} />
@@ -586,7 +586,7 @@ export function EditorDemo() {
               class="flex-row gap-2 px-3 py-1 hover:bg-foreground/10 active:bg-foreground/15"
             >
               <Dot severity={p().diagnostic.severity} />
-              <Text style={{ lineClamp: 1 }} class="flex-1 text-xs text-foreground">
+              <Text style={{ numberOfLines: 1 }} class="flex-1 text-xs text-foreground">
                 {p().diagnostic.message}
               </Text>
               <Text class="font-mono text-[11px] tabular-nums text-muted-foreground">{`${p().diagnostic.range.start.line + 1}:${p().diagnostic.range.start.column + 1}`}</Text>
@@ -681,7 +681,7 @@ export function EditorDemo() {
           backdropClass="bg-black/40"
           renderTab={(tab) => (
             <View class="h-7 flex-row items-center gap-2 px-3">
-              <Text style={{ lineClamp: 1 }} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>
+              <Text style={{ numberOfLines: 1 }} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>
                 {tab.panel === "editor" ? fileOf(language()) : `Problems ${problems().length}`}
               </Text>
               <If when={tab.active}>
@@ -787,22 +787,22 @@ export function EditorDemo() {
       </If>
 
       <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1">
-        <Text style={{ lineClamp: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
           {caret()}
         </Text>
-        <Text style={{ lineClamp: 1 }} class="font-mono text-[11px] text-destructive">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-destructive">
           {plural(count("error"), "error")}
         </Text>
-        <Text style={{ lineClamp: 1 }} class="font-mono text-[11px] text-warn">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-warn">
           {plural(count("warning"), "warning")}
         </Text>
-        <Text style={{ lineClamp: 1 }} class="font-mono text-[11px] text-info">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-info">
           {plural(count("info"), "info")}
         </Text>
-        <Text style={{ lineClamp: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
+        <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {last()}
         </Text>
-        <Text style={{ lineClamp: 1 }} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
+        <Text style={{ numberOfLines: 1 }} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {typescript() && analyzing() ? "Analyzing…" : LANGUAGES.find((l) => l.value === language())!.label}
         </Text>
         <IconTool label="Toggle problems" icon="diagnostics" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />

@@ -113,7 +113,7 @@ fn card(
                         )
                         .child(
                             text(subtitle)
-                                .line_clamp(2)
+                                .number_of_lines(2)
                                 .font_family(MONO)
                                 .text_xs()
                                 .line_height(px(16.0))
@@ -338,7 +338,7 @@ fn stats() -> AnyElement {
             )
             .child(
                 text(note)
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .text_xs()
                     .tabular_nums()
                     .text_color(tone),
@@ -798,7 +798,7 @@ fn typography() -> AnyElement {
     card(
         IconName::Text,
         "Typography",
-        ".font_weight(..) .letter_spacing(..) .text_decoration_*() .line_clamp(..)",
+        ".font_weight(..) .letter_spacing(..) .text_decoration_*() .number_of_lines(..)",
         [
             text("Display")
                 .text_3xl()
@@ -868,7 +868,7 @@ fn typography() -> AnyElement {
                 "number_of_lines(1): a single line that is far too long to fit in the card cut \
                  with an ellipsis",
             )
-            .line_clamp(1)
+            .number_of_lines(1)
             .text_size(px(13.0))
             .text_color(ZINC.shade(500))
             .into_element(),
@@ -877,7 +877,7 @@ fn typography() -> AnyElement {
                  main thread; typed styles reach it through the same style path as everything \
                  else, so the third line of this paragraph never shows.",
             )
-            .line_clamp(2)
+            .number_of_lines(2)
             .text_size(px(13.0))
             // `leading-relaxed`: 1.625 × 13 pt.
             .line_height(px(21.125))

@@ -1314,7 +1314,7 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
                         .top(Length::from(b.origin.y))
                         .w(Length::from(b.size.width))
                         .h(Length::from(b.size.height))
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .overflow_hidden()
                         .pointer_events(PointerEvents::None)
                         .text_color(move || theme().muted_foreground.opacity(0.6)),

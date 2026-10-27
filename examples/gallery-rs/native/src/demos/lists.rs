@@ -406,7 +406,7 @@ fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
                 )
                 .child(
                     text(move || person().note)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(13.0))
                         .text_color(colors::MUTED),
                 ),

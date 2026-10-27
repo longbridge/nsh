@@ -419,7 +419,7 @@ For animations driven by values, gestures or springs, use [`nsh`'s animation API
 |---|---|---|---|
 | `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...` (every CSS cursor keyword, and `"none"`) | `.cursor(Cursor)`, `.cursor_pointer()` | The pointer shape over the view, for pointers (iPad trackpads, Mac Catalyst, desktops). |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `.pointer_events(PointerEvents::BoxNone)` | Which touches the view and the views in it take (`pointer-events-none`, `pointer-events-auto`). `"none"`: none, for the views in it too unless one sets `"auto"`, inherited as in CSS. `"box-none"`: none on the view itself, the views in it take theirs; `"box-only"`: the view itself takes them, the views in it none (both React Native's, for the view only). Default `"auto"`. See [touch and gestures](../docs/touch-and-gestures.md#pointerevents). |
-| `userSelect` | `"auto" \| "none" \| "text"` | `.select_text()`, `.select_none()` | Whether a `<Text>` can be selected and copied (`"text"`, `select-text`) or not (`"none"`, `select-none`); a view's reaches the texts in it that set none. `"auto"` (`select-auto`), the default, leaves it to the view around it, else to the platform. See [text](../elements/text.md). |
+| `selectable` | `boolean` | `.select_text()`, `.select_none()` | Whether a `<Text>` can be selected and copied (`true`, `select-text`) or not (`false`, `select-none`); a view's reaches the texts in it that set none. Unset (`select-auto`), the default, leaves it to the view around it, else to the platform. See [text](../elements/text.md). |
 
 ### SVG paint
 
@@ -465,7 +465,7 @@ Text styles apply to `<Text>` and `<Input>`. They are also inherited, as in CSS:
 
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `lineClamp` | `number \| "none"` | `.line_clamp(n)`, `.truncate()` | The most lines a `<Text>` shows (`line-clamp-*`); `"none"` (`line-clamp-none`) or `0`, the default, shows them all. `truncate` is one line cut with an ellipsis. |
+| `numberOfLines` | `number` | `.number_of_lines(n)`, `.truncate()` | The most lines a `<Text>` shows (CSS's `line-clamp`, `line-clamp-*`); `0` (`line-clamp-none`), the default, shows them all. `truncate` is one line cut with an ellipsis. |
 | `textOverflow` | `"ellipsis" \| "clip" \| "ellipsis-start" \| "ellipsis-middle"` | `.text_overflow(EllipsizeMode::Middle)` | How a clamped `<Text>` is cut: an ellipsis at its end (`"ellipsis"`, `text-ellipsis`, the default), clipped (`"clip"`, `text-clip`), or the ellipsis at its start or in its middle (file paths). |
 
 ### Decoration

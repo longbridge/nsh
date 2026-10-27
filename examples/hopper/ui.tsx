@@ -92,7 +92,7 @@ export function Panel(props: {
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ color: color.text, fontSize: 17, fontWeight: "600", letterSpacing: -0.2 }}>{props.title}</Text>
-          <Text style={{ lineClamp: 1, color: color.muted, fontSize: 13 }}>
+          <Text style={{ numberOfLines: 1, color: color.muted, fontSize: 13 }}>
             {props.status}
           </Text>
         </View>

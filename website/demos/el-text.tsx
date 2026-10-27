@@ -32,7 +32,7 @@ function App() {
 
         <View style={{ height: 1, backgroundColor: ui().line }} />
 
-        <Text style={{ lineClamp: lines(), fontSize: 15, color: ui().text }}>
+        <Text style={{ numberOfLines: lines(), fontSize: 15, color: ui().text }}>
           {LONG}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
@@ -44,7 +44,7 @@ function App() {
           </View>
         </View>
 
-        <Text style={{ lineClamp: 1, textOverflow: "ellipsis-middle", fontSize: 15, color: ui().muted }}>
+        <Text style={{ numberOfLines: 1, textOverflow: "ellipsis-middle", fontSize: 15, color: ui().muted }}>
           {LONG}
         </Text>
 

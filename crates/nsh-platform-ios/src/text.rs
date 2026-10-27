@@ -1189,7 +1189,7 @@ impl TextEngine for CoreTextEngine {
         if prepared.max_lines > 0 {
             lines.truncate(prepared.max_lines as usize);
         }
-        // Text left over (cut by `lineClamp` or the box): ellipsize the
+        // Text left over (cut by `numberOfLines` or the box): ellipsize the
         // last line.
         if let Some(last) = lines.last_mut() {
             // SAFETY: a valid line.

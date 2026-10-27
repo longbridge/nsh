@@ -137,7 +137,7 @@ pub(crate) fn file_chip(file: &FileRef, on_remove: Option<Listener<()>>) -> View
                 .gap(px(1.0))
                 .child(
                     text(file.name)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(14.0))
                         .text_color(colors::TEXT)
                         .max_w(px(170.0)),
@@ -255,7 +255,7 @@ pub(crate) fn tool_card(tool: ReadSignal<Tool>) -> View {
                         )
                         .child(
                             text(move || head.with(|h| h.2.clone()))
-                                .line_clamp(1)
+                                .number_of_lines(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                         ),
@@ -443,7 +443,7 @@ fn source_row(source: &Source, index: usize) -> View {
                 .gap(px(1.0))
                 .child(
                     text(source.title)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(14.0))
                         .text_color(colors::TEXT),
                 )

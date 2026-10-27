@@ -120,7 +120,7 @@ pub fn browser() -> impl IntoElement {
                     None => String::new(),
                 })
             })
-            .line_clamp(1)
+            .number_of_lines(1)
             .px(px(12.0))
             .text_color(rgb(0x57606a)),
         )
@@ -155,7 +155,7 @@ function Browser() {
   );
   return (
     <View style={{ flex: 1, paddingTop: 50 }}>
-      <Text style={{ lineClamp: 1, paddingHorizontal: 12, color: "#57606a" }}>
+      <Text style={{ numberOfLines: 1, paddingHorizontal: 12, color: "#57606a" }}>
         {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
       </Text>
       <WebView

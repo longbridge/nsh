@@ -90,7 +90,7 @@
   `Tokens::over`), `Core::class_tokens_changed` drops the cached strings that name tokens and resolves
   their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Settings
-  that are props in React Native are style keys here, as in CSS (`lineClamp`, `textOverflow`, `userSelect`,
+  that are props in React Native are style keys here, as in CSS (`numberOfLines`, `textOverflow`, `selectable`,
   `pointerEvents`, `objectFit`; `line-clamp-*`, `truncate`, `text-ellipsis`, `select-*`, `pointer-events-*`,
   `object-*`), and the inline style wins over their classes as over any; `whitespace-nowrap` is class-only. `caret-*`,
   `placeholder:text-*` / `selection:bg-*` set the `caretColor`, `placeholderColor` / `selectionColor` style keys (the caret and the selection highlight are apart; UIKit tints both

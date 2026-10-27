@@ -95,7 +95,7 @@ function Site() {
         }}
       >
         <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: state()?.loading ? colors.warn : colors.up }} />
-        <Text style={{ lineClamp: 1, textOverflow: "ellipsis-middle", flex: 1, fontSize: 15, color: colors.muted }}>
+        <Text style={{ numberOfLines: 1, textOverflow: "ellipsis-middle", flex: 1, fontSize: 15, color: colors.muted }}>
           {host()}
         </Text>
       </View>

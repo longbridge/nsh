@@ -2156,7 +2156,7 @@ pub enum Prop {
     #[prop(js = "maxFontSizeMultiplier", min = 0, on = TEXT | INPUT)]
     MaxFontSizeMultiplier(f32),
     /// `adjustsFontSizeToFit`: shrink the font until the text fits its lines
-    /// (`lineClamp`) and box.
+    /// (`numberOfLines`) and box.
     #[prop(js = "adjustsFontSizeToFit", on = TEXT)]
     AdjustsFontSizeToFit(bool),
     /// `minimumFontScale`: how far `adjustsFontSizeToFit` shrinks at most (0..1).

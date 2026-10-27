@@ -373,7 +373,7 @@ export function Chat() {
             borderColor: colors.border,
           }}
         >
-          <Text style={{ userSelect: "text", fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
+          <Text style={{ selectable: true, fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
         </View>
       </If>
       <If when={m().waiting}>
@@ -440,7 +440,7 @@ export function Chat() {
             <If when={reasoning()?.open}>
               <View style={{ flexDirection: "row", gap: 12, paddingLeft: 7 }}>
                 <View style={{ width: 2, borderRadius: 1, backgroundColor: colors.border }} />
-                <Text style={{ userSelect: "text", flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
+                <Text style={{ selectable: true, flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
               </View>
             </If>
           </View>
@@ -860,10 +860,10 @@ export function Chat() {
               class={current() === chip().id ? "bg-accent" : "hover:bg-card active:bg-accent"}
               style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.control, gap: 2, cursor: "pointer" }}
             >
-              <Text style={{ lineClamp: 1, fontSize: 14, fontWeight: current() === chip().id ? "600" : "400", color: colors.text }}>
+              <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: current() === chip().id ? "600" : "400", color: colors.text }}>
                 {chip().label}
               </Text>
-              <Text style={{ lineClamp: 1, fontSize: 12, color: colors.muted }}>
+              <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>
                 {scenarios.find((x) => x.id === chip().id)?.prompt ?? "Weeks of messages, loaded at once"}
               </Text>
             </View>

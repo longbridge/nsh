@@ -144,7 +144,7 @@ text("Made with ")
 </Text>
 ```
 
-被 `lineClamp` 或省略号截掉的行内元素会被隐藏；复制文字时也不会包含它们。
+被 `numberOfLines` 或省略号截掉的行内元素会被隐藏；复制文字时也不会包含它们。
 
 样式键 `verticalAlign` 决定行内元素在所在行中的位置，与 CSS 的 `vertical-align` 摆放图片的方式一致：`"baseline"`（默认）让元素底边落在基线上，`"text-top"` 和 `"text-bottom"` 让元素顶边或底边对齐文本字体的顶部或底部，`"middle"` 让元素中心位于基线上方半个 x 高度处。元素超出字体的部分会撑高所在行。段首图标若要像 Android 的 `ImageSpan` 那样与文字底部对齐，使用 `"text-bottom"`。对应的类是 `align-baseline`、`align-text-top`、`align-text-bottom` 和 `align-middle`；Rust 中是同名的 `.align_text_bottom()` 等方法。
 
@@ -205,32 +205,32 @@ text("Shadow")
 ## 截断
 
 ```rust tabs
-text(long_description).line_clamp(2)
-text(file_path).line_clamp(1).text_overflow(EllipsizeMode::Middle)
+text(long_description).number_of_lines(2)
+text(file_path).number_of_lines(1).text_overflow(EllipsizeMode::Middle)
 ```
 
 ```tsx tabs
-<Text style={{ lineClamp: 2 }}>{longDescription}</Text>
-<Text style={{ lineClamp: 1, textOverflow: "ellipsis-middle" }}>{filePath}</Text>
+<Text style={{ numberOfLines: 2 }}>{longDescription}</Text>
+<Text style={{ numberOfLines: 1, textOverflow: "ellipsis-middle" }}>{filePath}</Text>
 ```
 
 | 样式键 / 属性 | Rust | 说明 |
 |---|---|---|
-| `lineClamp`（样式） | `.line_clamp(n)` | 最多显示的行数；`"none"` 或 `0`（默认）显示全部行 |
+| `numberOfLines`（样式） | `.number_of_lines(n)` | 最多显示的行数；`0`（默认）显示全部行 |
 | `textOverflow`（样式） | `.text_overflow(EllipsizeMode::Middle)` | 放不下时如何截断：省略号在末尾（`"ellipsis"`，默认）、开头（`"ellipsis-start"`）或中间（`"ellipsis-middle"`），或者 `"clip"` 直接裁掉 |
 | `adjustsFontSizeToFit` | `.shrink_to_fit(min_scale)` | 缩小字号，直到文字能放进其行数和框内 |
 | `minimumFontScale` | | `adjustsFontSizeToFit` 最多能缩小到的比例（0–1） |
 
 ```rust tabs
 text(move || total.get())
-    .line_clamp(1)
+    .number_of_lines(1)
     .shrink_to_fit(0.5)
     .text_size(px(48.0))
     .w(px(200.0))
 ```
 
 ```tsx tabs
-<Text adjustsFontSizeToFit minimumFontScale={0.5} style={{ lineClamp: 1, fontSize: 48, width: 200 }}>
+<Text adjustsFontSizeToFit minimumFontScale={0.5} style={{ numberOfLines: 1, fontSize: 48, width: 200 }}>
   {total()}
 </Text>
 ```
@@ -260,16 +260,16 @@ text("Tab label").max_font_size_multiplier(1.3).text_size(px(13.0))
 
 ## 选择
 
-样式键 `userSelect: "text"`（`.select_text()`，类 `select-text`）允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`.selection_color(..)`、`selection:text-*`）设置高亮和选择柄的颜色。设在视图上的 `userSelect` 作用于其中未自行设置的文本。
+样式键 `selectable: true`（`.select_text()`，类 `select-text`）允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`.selection_color(..)`、`selection:text-*`）设置高亮和选择柄的颜色。设在视图上的 `selectable` 作用于其中未自行设置的文本。
 
-在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`userSelect: "none"`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
+在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`selectable: false`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
 
 ```rust tabs
 text(order_number).select_text().selection_color(rgb(0x7c3aed))
 ```
 
 ```tsx tabs
-<Text style={{ userSelect: "text", selectionColor: "#7c3aed" }}>{orderNumber}</Text>
+<Text style={{ selectable: true, selectionColor: "#7c3aed" }}>{orderNumber}</Text>
 ```
 
 要在代码中复制（比如“复制”按钮），在 Rust 中使用 `set_clipboard(..)`，在 TSX 中使用 [`Clipboard`](../modules/nsh.md#clipboard)。

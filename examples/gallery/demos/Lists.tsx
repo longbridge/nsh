@@ -196,7 +196,7 @@ function Contacts() {
                   <Text style={{ fontSize: 15, color: colors.text }}>
                     {person().first} <Text style={{ fontWeight: "600" }}>{person().last}</Text>
                   </Text>
-                  <Text style={{ lineClamp: 1, fontSize: 13, color: colors.muted }}>
+                  <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
                     {person().note}
                   </Text>
                 </View>

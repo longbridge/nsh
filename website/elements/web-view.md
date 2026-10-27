@@ -20,7 +20,7 @@ fn browser() -> impl IntoElement {
     let title = signal(SharedString::from("Loading…"));
     view()
         .flex_1()
-        .child(text(title).line_clamp(1))
+        .child(text(title).number_of_lines(1))
         .child(
             web_view("https://example.com")
                 .flex_1()
@@ -36,7 +36,7 @@ function Browser() {
   const nav = signal<WebViewNavigation | null>(null);
   return (
     <View style={{ flex: 1 }}>
-      <Text style={{ lineClamp: 1 }}>{nav()?.title ?? "Loading…"}</Text>
+      <Text style={{ numberOfLines: 1 }}>{nav()?.title ?? "Loading…"}</Text>
       <WebView
         src="https://example.com"
         style={{ flex: 1 }}

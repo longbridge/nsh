@@ -43,12 +43,12 @@ function Tile(props: { label: string; code?: string; note?: string; onPress?: ()
       <View style={{ gap: 3, paddingHorizontal: 2 }}>
         <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text }}>{props.label}</Text>
         <If when={props.code}>
-          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted, fontFamily: mono }}>
             {props.code}
           </Text>
         </If>
         <If when={props.note}>
-          <Text style={{ lineClamp: 1, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>
+          <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>
             {props.note}
           </Text>
         </If>

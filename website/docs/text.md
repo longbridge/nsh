@@ -146,7 +146,7 @@ text("Made with ")
 </Text>
 ```
 
-Inline elements cut off by `lineClamp` or an ellipsis are hidden; copying the text leaves them out.
+Inline elements cut off by `numberOfLines` or an ellipsis are hidden; copying the text leaves them out.
 
 The style key `verticalAlign` places an inline element in its line, as CSS's `vertical-align` places an image:
 `"baseline"` (the default) stands its bottom on the baseline, `"text-top"` and `"text-bottom"` put its top or bottom
@@ -213,32 +213,32 @@ text("Shadow")
 ## Truncation
 
 ```rust tabs
-text(long_description).line_clamp(2)
-text(file_path).line_clamp(1).text_overflow(EllipsizeMode::Middle)
+text(long_description).number_of_lines(2)
+text(file_path).number_of_lines(1).text_overflow(EllipsizeMode::Middle)
 ```
 
 ```tsx tabs
-<Text style={{ lineClamp: 2 }}>{longDescription}</Text>
-<Text style={{ lineClamp: 1, textOverflow: "ellipsis-middle" }}>{filePath}</Text>
+<Text style={{ numberOfLines: 2 }}>{longDescription}</Text>
+<Text style={{ numberOfLines: 1, textOverflow: "ellipsis-middle" }}>{filePath}</Text>
 ```
 
 | Style key / prop | Rust | Description |
 |---|---|---|
-| `lineClamp` (style) | `.line_clamp(n)` | The most lines shown; `"none"` or `0` (default) shows them all |
+| `numberOfLines` (style) | `.number_of_lines(n)` | The most lines shown; `0` (default) shows them all |
 | `textOverflow` (style) | `.text_overflow(EllipsizeMode::Middle)` | How text that does not fit is cut: an ellipsis at the end (`"ellipsis"`, default), at the start (`"ellipsis-start"`) or in the middle (`"ellipsis-middle"`), or `"clip"` |
 | `adjustsFontSizeToFit` | `.shrink_to_fit(min_scale)` | Shrink the font until the text fits its lines and box |
 | `minimumFontScale` | | How far `adjustsFontSizeToFit` may shrink (0–1) |
 
 ```rust tabs
 text(move || total.get())
-    .line_clamp(1)
+    .number_of_lines(1)
     .shrink_to_fit(0.5)
     .text_size(px(48.0))
     .w(px(200.0))
 ```
 
 ```tsx tabs
-<Text adjustsFontSizeToFit minimumFontScale={0.5} style={{ lineClamp: 1, fontSize: 48, width: 200 }}>
+<Text adjustsFontSizeToFit minimumFontScale={0.5} style={{ numberOfLines: 1, fontSize: 48, width: 200 }}>
   {total()}
 </Text>
 ```
@@ -268,16 +268,16 @@ Prefer limiting the scale over turning it off: large text is an accessibility se
 
 ## Selection
 
-The style key `userSelect: "text"` (`.select_text()`, the class `select-text`) lets the user select and copy the text, as in the system's own text views: a long press selects the word under the finger, the handles move the selection's ends, and the edit menu offers Copy and Select All (iOS adds Look Up, Translate and Share; Android Share). A selection stays inside one text block. The style key `selectionColor` (`.selection_color(..)`, `selection:text-*`) colors the highlight and the handles. `userSelect` set on a view reaches the texts inside it that set none.
+The style key `selectable: true` (`.select_text()`, the class `select-text`) lets the user select and copy the text, as in the system's own text views: a long press selects the word under the finger, the handles move the selection's ends, and the edit menu offers Copy and Select All (iOS adds Look Up, Translate and Share; Android Share). A selection stays inside one text block. The style key `selectionColor` (`.selection_color(..)`, `selection:text-*`) colors the highlight and the handles. `selectable` set on a view reaches the texts inside it that set none.
 
-In desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers, such as buttons and pressable rows); `userSelect: "none"` (`.select_none()`, the class `select-none`) keeps a text unselectable there. Phone and tablet browsers follow the native rule.
+In desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers, such as buttons and pressable rows); `selectable: false` (`.select_none()`, the class `select-none`) keeps a text unselectable there. Phone and tablet browsers follow the native rule.
 
 ```rust tabs
 text(order_number).select_text().selection_color(rgb(0x7c3aed))
 ```
 
 ```tsx tabs
-<Text style={{ userSelect: "text", selectionColor: "#7c3aed" }}>{orderNumber}</Text>
+<Text style={{ selectable: true, selectionColor: "#7c3aed" }}>{orderNumber}</Text>
 ```
 
 To copy from code (a Copy button), use `set_clipboard(..)` in Rust or [`Clipboard`](../modules/nsh.md#clipboard) in TSX.

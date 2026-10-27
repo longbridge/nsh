@@ -516,7 +516,7 @@ fn link_row(
                     )
                     .child(
                         text(note)
-                            .line_clamp(1)
+                            .number_of_lines(1)
                             .text_size(px(12.0))
                             .text_color(colors::FAINT)
                             .font_family(MONO),

@@ -57,7 +57,7 @@ fn App() -> impl IntoElement {
             .child(each(
                 move || posts.get().unwrap_or_default(),
                 |post| post.id,
-                |post, _| text(move || post.with(|p| p.title.clone())).line_clamp(1),
+                |post, _| text(move || post.with(|p| p.title.clone())).number_of_lines(1),
             )),
     )
 }
@@ -79,7 +79,7 @@ function App() {
     <Scroll style={{ flex: 1 }}>
       <View style={{ padding: 16, paddingTop: 60, gap: 8 }}>
         <Text style={{ color: "#57606a" }}>{posts.loading() ? "loading…" : String(posts.error() ?? "")}</Text>
-        <Each of={posts() ?? []}>{(post) => <Text style={{ lineClamp: 1 }}>{post().title}</Text>}</Each>
+        <Each of={posts() ?? []}>{(post) => <Text style={{ numberOfLines: 1 }}>{post().title}</Text>}</Each>
       </View>
     </Scroll>
   );

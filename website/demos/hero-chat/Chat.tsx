@@ -328,7 +328,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             borderColor: colors.border,
           }}
         >
-          <Text style={{ userSelect: "text", fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
+          <Text style={{ selectable: true, fontSize: 15, lineHeight: 21, color: colors.text }}>{m().text}</Text>
         </View>
       </If>
       <If when={m().waiting}>
@@ -370,7 +370,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             content={
               <View style={{ flexDirection: "row", gap: 12, paddingLeft: 7 }}>
                 <View style={{ width: 2, borderRadius: 1, backgroundColor: colors.border }} />
-                <Text style={{ userSelect: "text", flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
+                <Text style={{ selectable: true, flex: 1, fontSize: 14, lineHeight: 20, color: colors.muted }}>{reasoning()?.text}</Text>
               </View>
             }
           >

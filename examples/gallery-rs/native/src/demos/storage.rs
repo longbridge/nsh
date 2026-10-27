@@ -151,7 +151,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
             Row::new(i.get_untracked() == 0)
                 .child(
                     text(entry.with_untracked(|e| e.0.clone()))
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .flex_1()
                         .text_size(px(14.0))
                         .text_color(colors::TEXT)

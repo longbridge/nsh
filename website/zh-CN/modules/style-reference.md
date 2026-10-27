@@ -419,7 +419,7 @@ view()
 |---|---|---|---|
 | `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | `.cursor(Cursor)`、`.cursor_pointer()` | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。 |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `.pointer_events(PointerEvents::BoxNone)` | 视图及其中的视图接收哪些触摸（`pointer-events-none`、`pointer-events-auto`）。`"none"`：都不接收，其中的视图也不接收，除非某个视图设置了 `"auto"`，与 CSS 一样会继承。`"box-none"`：视图本身不接收，其中的视图照常接收；`"box-only"`：视图本身接收，其中的视图都不接收（两者都来自 React Native，只作用于该视图）。默认为 `"auto"`。见 [触摸与手势](../docs/touch-and-gestures.md#pointerevents)。 |
-| `userSelect` | `"auto" \| "none" \| "text"` | `.select_text()`、`.select_none()` | `<Text>` 能否被选择和复制：`"text"`（`select-text`）可以，`"none"`（`select-none`）不可以；设在视图上时，作用于其中未自行设置的文本。`"auto"`（`select-auto`）为默认值，交给外层视图决定，没有则由平台决定。见 [text](../elements/text.md)。 |
+| `selectable` | `boolean` | `.select_text()`、`.select_none()` | `<Text>` 能否被选择和复制：`true`（`select-text`）可以，`false`（`select-none`）不可以；设在视图上时，作用于其中未自行设置的文本。不设置（`select-auto`）为默认值，交给外层视图决定，没有则由平台决定。见[文本](../elements/text.md)。 |
 
 ### SVG 绘制
 
@@ -464,7 +464,7 @@ CSS 中 SVG 图形的绘制属性：任何元素都可以设置，并像在浏�
 
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
-| `lineClamp` | `number \| "none"` | `.line_clamp(n)`、`.truncate()` | `<Text>` 最多显示的行数（`line-clamp-*`）；`"none"`（`line-clamp-none`）或 `0` 为默认值，显示全部行。`truncate` 是单行并以省略号截断。 |
+| `numberOfLines` | `number` | `.number_of_lines(n)`、`.truncate()` | `<Text>` 最多显示的行数（CSS 的 `line-clamp`，`line-clamp-*`）；`0`（`line-clamp-none`）为默认值，显示全部行。`truncate` 是单行并以省略号截断。 |
 | `textOverflow` | `"ellipsis" \| "clip" \| "ellipsis-start" \| "ellipsis-middle"` | `.text_overflow(EllipsizeMode::Middle)` | 受行数限制的 `<Text>` 如何截断：省略号在末尾（`"ellipsis"`，`text-ellipsis`，默认）、直接裁掉（`"clip"`，`text-clip`），或省略号在开头或中间（如文件路径）。 |
 
 ### 装饰线

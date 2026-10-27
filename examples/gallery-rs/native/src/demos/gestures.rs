@@ -370,7 +370,7 @@ fn TouchPad() -> impl IntoElement {
             )
             .child(
                 text(entry(|e| e.1.clone().into()))
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .flex_1()
                     .text_size(px(13.0))
                     .text_color(if i == 0 { colors::TEXT } else { colors::FAINT })
@@ -563,7 +563,7 @@ fn PressEvents() -> impl IntoElement {
                     }
                 })
             })
-            .line_clamp(1)
+            .number_of_lines(1)
             .text_size(px(12.0))
             .font_family(MONO)
             .text_color(colors::FAINT),

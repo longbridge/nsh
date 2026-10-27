@@ -654,7 +654,7 @@ fn PlatformInfo() -> impl IntoElement {
         Row::new(i == 0)
             .child(
                 text(name)
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .flex_1()
                     .text_size(px(12.0))
                     .text_color(colors::MUTED)
@@ -662,7 +662,7 @@ fn PlatformInfo() -> impl IntoElement {
             )
             .child(
                 text(value)
-                    .line_clamp(1)
+                    .number_of_lines(1)
                     .text_size(px(14.0))
                     .text_color(colors::TEXT)
                     .tabular_nums(),
@@ -737,7 +737,7 @@ fn link_row(
                     )
                     .child(
                         text(prop)
-                            .line_clamp(1)
+                            .number_of_lines(1)
                             .text_size(px(12.0))
                             .text_color(colors::FAINT)
                             .font_family(MONO),

@@ -64,7 +64,7 @@ fn specimen(
                 )
                 .children(code.map(|code| {
                     text(code)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(12.0))
                         .text_color(colors::FAINT)
                         .font_family(MONO)
@@ -325,16 +325,16 @@ fn scaling() -> Card {
 
 /// Lines and ellipsis modes.
 fn truncation() -> Card {
-    let lorem = |mode: EllipsizeMode| body(LOREM).line_clamp(1).text_overflow(mode);
+    let lorem = |mode: EllipsizeMode| body(LOREM).number_of_lines(1).text_overflow(mode);
     Card::new()
         .icon(IconName::Lists)
         .title("Truncation")
-        .subtitle("lineClamp and textOverflow")
+        .subtitle("numberOfLines and textOverflow")
         .child(specimen(
             "Two lines, tail",
-            Some("lineClamp: 2"),
+            Some("numberOfLines: 2"),
             true,
-            body(LOREM).line_clamp(2),
+            body(LOREM).number_of_lines(2),
         ))
         .child(specimen(
             "One line, head",
@@ -359,7 +359,7 @@ fn truncation() -> Card {
             Some("textAlign=\"center\""),
             false,
             body(format!("{LOREM} {LOREM}"))
-                .line_clamp(3)
+                .number_of_lines(3)
                 .text_center()
                 .text_color(colors::MUTED),
         ))
@@ -381,16 +381,16 @@ fn cjk() -> Card {
         ))
         .child(specimen(
             "Two lines, tail",
-            Some("lineClamp: 2"),
+            Some("numberOfLines: 2"),
             false,
-            body(CHINESE).line_clamp(2),
+            body(CHINESE).number_of_lines(2),
         ))
         .child(specimen(
             "One line, middle",
             Some("textOverflow: \"ellipsis-middle\""),
             false,
             body(JAPANESE)
-                .line_clamp(1)
+                .number_of_lines(1)
                 .text_overflow(EllipsizeMode::Middle),
         ))
 }
@@ -421,9 +421,9 @@ fn right_to_left() -> Card {
         ))
         .child(specimen(
             "One line, tail",
-            Some("lineClamp: 1"),
+            Some("numberOfLines: 1"),
             false,
-            body(ARABIC).line_clamp(1),
+            body(ARABIC).number_of_lines(1),
         ))
 }
 

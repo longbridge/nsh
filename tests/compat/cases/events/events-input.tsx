@@ -85,7 +85,7 @@ function App() {
         style={{ width: 300, height: 40, placeholderColor: "#888888", caretColor: "#0066ff", selectionColor: "#ff6600" }}
       />
       <Input testID="fixed" readonly defaultValue="Fixed" style={{ width: 300, height: 40 }} />
-      <Text testID="pick" style={{ userSelect: "text", selectionColor: "#00aa00" }}>
+      <Text testID="pick" style={{ selectable: true, selectionColor: "#00aa00" }}>
         Selectable
       </Text>
     </View>

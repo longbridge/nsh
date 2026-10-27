@@ -2862,19 +2862,19 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Its texts can be selected and copied (`userSelect: "text"`,
+    /// Its texts can be selected and copied (`selectable: true`,
     /// Tailwind's `select-text`).
     fn select_text(mut self) -> Self {
         self.style()
-            .value(StyleKey::UserSelect, PropertyValue::OptBool(Some(true)));
+            .value(StyleKey::Selectable, PropertyValue::OptBool(Some(true)));
         self
     }
 
-    /// Its texts cannot be selected (`userSelect: "none"`, Tailwind's
+    /// Its texts cannot be selected (`selectable: false`, Tailwind's
     /// `select-none`).
     fn select_none(mut self) -> Self {
         self.style()
-            .value(StyleKey::UserSelect, PropertyValue::OptBool(Some(false)));
+            .value(StyleKey::Selectable, PropertyValue::OptBool(Some(false)));
         self
     }
 
@@ -3778,11 +3778,14 @@ pub trait Styled: Sized {
         self
     }
 
-    /// At most `lines` lines (`lineClamp`; 0: no limit), the last one cut
+    /// At most `lines` lines (`numberOfLines`; 0: no limit), the last one cut
     /// as [`Styled::text_overflow`] says.
-    fn line_clamp(mut self, lines: impl IntoReactive<u32>) -> Self {
+    fn number_of_lines(mut self, lines: impl IntoReactive<u32>) -> Self {
         self.style().bind_value(lines, |s, lines: u32| {
-            s.value(StyleKey::LineClamp, PropertyValue::LineClamp(Some(lines)));
+            s.value(
+                StyleKey::NumberOfLines,
+                PropertyValue::LineClamp(Some(lines)),
+            );
         });
         self
     }
@@ -3802,7 +3805,7 @@ pub trait Styled: Sized {
 
     /// One line, cut with an ellipsis (Tailwind's `truncate`).
     fn truncate(self) -> Self {
-        self.line_clamp(1u32)
+        self.number_of_lines(1u32)
             .text_overflow(crate::EllipsizeMode::Tail)
     }
 

@@ -218,7 +218,7 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
                     .on_press(move || cx.emit(SegmentedEvent::Change(i)))
                     .child(
                         text(option.label)
-                            .line_clamp(1)
+                            .number_of_lines(1)
                             .text_size(px(if small { 13.0 } else { 14.0 }))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(move || {

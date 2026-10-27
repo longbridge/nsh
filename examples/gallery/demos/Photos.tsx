@@ -47,7 +47,7 @@ function PhotoRow(props: { photo: Photo }) {
           }}
         />
         <View style={{ flex: 1, gap: 4, alignSelf: "stretch", justifyContent: "center", borderBottomWidth: 1, borderBottomColor: colors.line }}>
-          <Text style={{ lineClamp: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>
+          <Text style={{ numberOfLines: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>
             {props.photo.title}
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -83,14 +83,14 @@ function PhotoTile(props: { photo: Photo }) {
         />
         <View style={{ gap: 3, paddingHorizontal: 4, paddingBottom: 4 }}>
           <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-            <Text style={{ lineClamp: 1, flex: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>
+            <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>
               {props.photo.title}
             </Text>
             <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>#{props.photo.id}</Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: toneColor(props.photo.tone) }} />
-            <Text style={{ lineClamp: 1, fontSize: 12, color: colors.muted }}>
+            <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>
               {props.photo.author} · {compact(props.photo.views)} views
             </Text>
           </View>

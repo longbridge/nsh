@@ -102,7 +102,7 @@ fn row(photo: Memo<Option<Photo>>) -> impl IntoElement {
                         .border_b_color(colors::LINE)
                         .child(
                             text(field(|p| p.title.clone()))
-                                .line_clamp(1)
+                                .number_of_lines(1)
                                 .text_size(px(15.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors::TEXT),
@@ -183,7 +183,7 @@ fn tile(photo: Memo<Option<Photo>>) -> impl IntoElement {
                                 .gap_2()
                                 .child(
                                     text(field(|p| p.title.clone()))
-                                        .line_clamp(1)
+                                        .number_of_lines(1)
                                         .flex_1()
                                         .text_size(px(14.0))
                                         .font_weight(FontWeight::SEMIBOLD)
@@ -210,7 +210,7 @@ fn tile(photo: Memo<Option<Photo>>) -> impl IntoElement {
                                     text(field(|p| {
                                         format!("{} · {} views", p.author, compact(p.views))
                                     }))
-                                    .line_clamp(1)
+                                    .number_of_lines(1)
                                     .text_size(px(12.0))
                                     .text_color(colors::MUTED),
                                 ),

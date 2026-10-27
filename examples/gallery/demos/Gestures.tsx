@@ -209,7 +209,7 @@ function TouchPad() {
             {(entry, i) => (
               <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                 <Text style={{ width: 52, fontSize: 12, fontFamily: mono, color: i() === 0 ? colors.accent : colors.faint }}>{entry().name}</Text>
-                <Text style={{ lineClamp: 1, flex: 1, fontSize: 13, color: i() === 0 ? colors.text : colors.faint, fontVariant: ["tabular-nums"] }}>
+                <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: i() === 0 ? colors.text : colors.faint, fontVariant: ["tabular-nums"] }}>
                   {entry().text}
                 </Text>
               </View>
@@ -278,7 +278,7 @@ function PressEvents() {
           )}
         </Each>
       </View>
-      <Text style={{ lineClamp: 1, fontSize: 12, fontFamily: mono, color: colors.faint }}>
+      <Text style={{ numberOfLines: 1, fontSize: 12, fontFamily: mono, color: colors.faint }}>
         {log().join(" · ") || "No events yet"}
       </Text>
       <View style={{ flexDirection: "row", gap: 10 }}>

@@ -92,14 +92,14 @@ fn tile(
                 )
                 .children(code.map(|code| {
                     text(code)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(12.0))
                         .text_color(colors::MUTED)
                         .font_family(MONO)
                 }))
                 .children(note.map(|note| {
                     text(note)
-                        .line_clamp(1)
+                        .number_of_lines(1)
                         .text_size(px(12.0))
                         .text_color(colors::FAINT)
                         .tabular_nums()
