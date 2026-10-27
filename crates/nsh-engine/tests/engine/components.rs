@@ -6272,3 +6272,59 @@ fn base_plot_domains_move_with_the_update_motion() {
             .all(|(_, d)| transform(d).is_none())
     );
 }
+
+const BASE_PLOT_AXIS_GLIDE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Line, Plot, PlotAxis } from "nsh/base/plot";
+
+function App() {
+  const top = signal(2);
+  setTimeout(() => top.set(4), 50);
+  return (
+    <View>
+      <Plot
+        data={[{ t: 0, v: 0 }, { t: 2, v: 1 }]}
+        x="t"
+        y="v"
+        xScale={{ type: "linear", domain: [0, top()] }}
+        motion={{ update: { duration: 200, easing: "linear" } }}
+        style={{ width: 200, height: 100 }}
+      >
+        <Line curve="linear" />
+        <PlotAxis tickValues={[2]} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Text>{`top ${top()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A `PlotAxis` glides with its domain (`motion.update`), as d3's axis
+/// transitions: a tick is laid out at its place on the new scale and
+/// moved from where the old domain put it. The tick at 2 of 0 to 4 sits
+/// at 100 of 200; it starts 100 further on, at 2 of 0 to 2, and ends in
+/// its place.
+#[test]
+fn base_plot_axis_moves_with_the_domain() {
+    use nsh_core::animation::Animator;
+    let (_engine, rx) = start(BASE_PLOT_AXIS_GLIDE);
+    let mut all = until(&rx, |b| shows(b, "top 4"));
+    all.extend(until(&rx, |_| false));
+    let mut animator = Animator::default();
+    for item in all.iter().flat_map(|b| b.items.iter()) {
+        animator.apply(item);
+    }
+    let moved = |animator: &mut Animator, t: f64| {
+        animator.tick(t);
+        let mut out = Vec::new();
+        animator.write(Some, |_, values, _| {
+            out.extend(values.transform.iter().flatten().copied())
+        });
+        out
+    };
+    let start = moved(&mut animator, 0.0);
+    assert!(start.iter().any(|&x| (x - 100.0).abs() < 0.01), "{start:?}");
+    let end = moved(&mut animator, 0.25);
+    assert!(end.iter().all(|&x| x.abs() < 0.01), "{end:?}");
+}

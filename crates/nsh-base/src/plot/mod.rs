@@ -103,8 +103,8 @@ pub struct PlotMotion {
     /// slice or a gauge sweeping round to its new value, d3's `arcTween`),
     /// and a linear scale's domain (the app's `domain`, or the extent of
     /// the marks' values as rows come), interpolated as d3 transitions a
-    /// scale's domain, so the marks keep their shapes, the grid lines and
-    /// the hover's parts move with them, and new rows come in with the rest.
+    /// scale's domain, so the marks keep their shapes, the grid lines, the
+    /// axes' ticks and labels and the hover's parts move with them, and new rows come in with the rest.
     /// None by default: the new shape shows at once. `gpui-base` has no
     /// such motion.
     pub update: Option<Timing>,
