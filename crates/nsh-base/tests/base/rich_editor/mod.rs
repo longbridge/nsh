@@ -132,15 +132,22 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 }
 
 fn start(doc: Value) -> Headless {
+    start_on(doc, Os::Linux, false)
+}
+
+/// [`start`] on `os`; in a browser, on an Apple platform or not
+/// (`apple_keyboard`).
+fn start_on(doc: Value, os: Os, apple_keyboard: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
         // Made in the engine, so its keymaps are the platform's the engine
-        // says (Linux), not the machine's.
+        // says, not the machine's.
         ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
             session: Some(session(doc.clone())),
         }))
     };
-    config.environment.os = Os::Linux;
+    config.environment.os = os;
+    config.environment.apple_keyboard = apple_keyboard;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ready").unwrap();
@@ -201,6 +208,30 @@ fn mod_b_toggles_bold() {
     see(&mut app, "Bold 1");
     keys(&mut app, &["mod+b"]);
     see(&mut app, "Bold 0");
+}
+
+#[test]
+fn a_browser_on_a_mac_takes_apples_keys() {
+    let mut app = start_on(paragraphs(&["one two"]), Os::Web, true);
+    app.type_text("id:editor", "").unwrap();
+    keys(&mut app, &["cmd+right"]);
+    see(&mut app, "Sel 8-8");
+    keys(&mut app, &["alt+left"]);
+    see(&mut app, "Sel 5-5");
+    keys(&mut app, &["cmd+left"]);
+    see(&mut app, "Sel 1-1");
+    keys(&mut app, &["cmd+a", "cmd+b"]);
+    see(&mut app, "Bold 1");
+    keys(&mut app, &["cmd+z"]);
+    see(&mut app, "Bold 0");
+}
+
+#[test]
+fn a_browser_elsewhere_takes_pc_keys() {
+    let mut app = start_on(paragraphs(&["word"]), Os::Web, false);
+    app.type_text("id:editor", "").unwrap();
+    keys(&mut app, &["ctrl+a", "ctrl+b"]);
+    see(&mut app, "Bold 1");
 }
 
 #[test]

@@ -1158,42 +1158,50 @@ final class Mounter {
         updateHover(id, v);
     }
 
-    private static final long HOVER_EVENTS =
-            (1L << Native.HOVER_IN) | (1L << Native.HOVER_OUT) | (1L << Native.HOVER_MOVE);
+    private static final long MOUSE_EVENTS =
+            (1L << Native.MOUSE_ENTER) | (1L << Native.MOUSE_LEAVE) | (1L << Native.MOUSE_MOVE);
 
     /**
-     * Mice and styluses hovering `v`: its `hover:` state and its hover events
-     * (moves come with no button down).
+     * Mice and styluses hovering `v`: its `hover:` state and its mouse events
+     * (`onMouseEnter`, `onMouseMove`, `onMouseLeave`; hover events come with no
+     * button down).
      */
     private void updateHover(int id, View v) {
-        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & HOVER_EVENTS) == 0) {
+        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & MOUSE_EVENTS) == 0) {
             v.setOnHoverListener(null);
             return;
         }
         v.setOnHoverListener((view, e) -> {
             int action = e.getActionMasked();
+            int kind;
             if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) {
                 reportState(id, STATE_HOVERED, true);
-                if (wants(id, Native.HOVER_IN)) event(id, Native.HOVER_IN);
+                kind = Native.MOUSE_ENTER;
             } else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) {
                 reportState(id, STATE_HOVERED, false);
-                if (wants(id, Native.HOVER_OUT)) event(id, Native.HOVER_OUT);
+                kind = Native.MOUSE_LEAVE;
+            } else if (action == android.view.MotionEvent.ACTION_HOVER_MOVE) {
+                kind = Native.MOUSE_MOVE;
+            } else {
                 return false;
             }
-            if (wants(id, Native.HOVER_MOVE)) hoverMove(id, view, e);
+            if (wants(id, kind)) mouse(id, kind, view, e);
+            // The movement that brings the pointer in is a move too, as on
+            // the desktops and in the DOM.
+            if (kind == Native.MOUSE_ENTER && wants(id, Native.MOUSE_MOVE)) mouse(id, Native.MOUSE_MOVE, view, e);
             return false;
         });
     }
 
-    /** `onHoverMove`: where the pointer is in `v` and in its root view (dp). */
-    private void hoverMove(int id, View v, android.view.MotionEvent e) {
+    /** Mouse event `kind`: where the pointer is in `v` and in its root view (dp). */
+    private void mouse(int id, int kind, View v, android.view.MotionEvent e) {
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] at = new int[2], rootAt = new int[2];
         v.getLocationOnScreen(at);
         root.getLocationOnScreen(rootAt);
         float d = density;
-        Native.hover(handle(), id, e.getX() / d, e.getY() / d,
+        Native.mouse(handle(), id, kind, e.getX() / d, e.getY() / d,
                 (e.getX() + at[0] - rootAt[0]) / d, (e.getY() + at[1] - rootAt[1]) / d,
                 modifiers(e.getMetaState()));
     }

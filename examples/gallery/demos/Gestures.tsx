@@ -1,4 +1,4 @@
-import { Canvas, cleanup, type GestureResponderEvent, Image, signal, Text, View } from "nsh";
+import { Canvas, cleanup, type GestureResponderEvent, Image, type MouseButton, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { PanResponder } from "nsh";
 import { Icon, type IconName } from "../icons";
@@ -415,23 +415,23 @@ function PointerEvents() {
   );
 }
 
-/** The mouse over a view: it comes in, moves and leaves (desktops). */
+/** The mouse over a view: it comes in, moves (a button down too) and leaves (desktops). */
 function Hover() {
   const over = signal(false);
-  const at = signal({ x: 0, y: 0 });
+  const at = signal<{ x: number; y: number; button: MouseButton | null }>({ x: 0, y: 0, button: null });
   return (
     <Card icon="gestures" title="Hover" subtitle={hint("A pointer over a view: iPad, desktops", "The mouse over a view")} right={<Badge label={over() ? "Over" : "Away"} tone={over() ? "accent" : "neutral"} />}>
       <View
         testID="hover-pad"
-        onHoverIn={() => over.set(true)}
-        onHoverOut={() => over.set(false)}
-        onHoverMove={(e) => at.set({ x: Math.round(e.position.x), y: Math.round(e.position.y) })}
+        onMouseEnter={() => over.set(true)}
+        onMouseLeave={() => over.set(false)}
+        onMouseMove={(e) => at.set({ x: Math.round(e.position.x), y: Math.round(e.position.y), button: e.pressedButton })}
         class="hover:bg-card"
         style={{ ...stage(), height: 100, alignItems: "center", justifyContent: "center" }}
       >
-        <Text style={{ fontSize: 14, color: colors.muted }}>{over() ? `Pointer at ${at().x}, ${at().y}` : "Pointer away"}</Text>
+        <Text style={{ fontSize: 14, color: colors.muted }}>{over() ? `Pointer at ${at().x}, ${at().y}${at().button ? `, ${at().button} button down` : ""}` : "Pointer away"}</Text>
       </View>
-      <Api label="In, move and out" api="onHoverIn · onHoverMove · onHoverOut" />
+      <Api label="Enter, move and leave" api="onMouseEnter · onMouseMove · onMouseLeave" />
     </Card>
   );
 }

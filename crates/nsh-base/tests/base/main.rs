@@ -8,6 +8,7 @@ mod editor_completion;
 mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
+mod number_input;
 mod plot;
 mod radio;
 mod resizable;

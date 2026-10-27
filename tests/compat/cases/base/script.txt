@@ -1022,6 +1022,86 @@ covers [props] Progress.trackStyle
 covers [props] Progress.indicatorClass
 covers [props] Progress.indicatorStyle
 
+# base-number-input
+tap id:case-base-number-input
+# The field: a spin button with its label and its value between `min` and
+# `max`, between the decrement and the increment the app fills.
+expect Quantity 2
+prop label:Quantity role spinbutton
+prop label:Quantity accessibilityValue min=0 max=10 now=2 text=2
+prop label:Quantity value 2
+frame label:Quantity 30 0 100 30
+style label:Quantity backgroundColor #eeeeeeff
+frame parent:text:Less 0 0 30 30
+style parent:text:Less backgroundColor #ff0000ff
+frame parent:text:More 130 0 30 30
+style parent:text:More backgroundColor #00ff00ff
+# A screen reader's increment, then the buttons: a step of 0.5 each, which
+# the app passes back and the field shows.
+event label:Quantity onAccessibilityAction actionName=increment
+expect Quantity 2.5
+prop label:Quantity accessibilityValue min=0 max=10 now=2.5 text=2.5
+prop label:Quantity value 2.5
+tap text:More
+expect Quantity 3
+tap text:Less
+expect Quantity 2.5
+# Its own value: typing reports the number the field reads as, leaving
+# the field holds it to `max`, Enter submits it. The buttons on the right,
+# the increment over the decrement.
+prop label:Amount value 4
+prop label:Amount placeholder Amount
+# Its prefix and suffix around the field.
+expect about
+expect kg
+frame parent:text:Up 0 0 30 15
+frame parent:text:Down 0 15 30 15
+style parent:parent:text:Up backgroundColor #0000ffff
+event label:Amount onFocus
+type label:Amount 0
+expect Amount 40
+event label:Amount onBlur
+expect Amount 10
+prop label:Amount value 10
+expect Events focus blur
+event label:Amount onSubmit text=10
+expect Events focus blur submit 10
+tap text:Down
+expect Amount 9
+# `disabled`: dimmed for screen readers, `disabled:` on its buttons (20
+# wide). `readonly`: its field read-only.
+prop label:Locked accessibilityState disabled=true
+frame parent:text:"Locked less" 0 0 20 30
+frame parent:text:"Locked more" 120 0 20 30
+prop label:Fixed readonly true
+covers [nsh/base] NumberInput
+covers [props] value
+covers [props] NumberInput.defaultValue
+covers [props] NumberInput.min
+covers [props] NumberInput.max
+covers [props] NumberInput.step
+covers [props] disabled
+covers [props] readonly
+covers [props] placeholder
+covers [props] accessibilityLabel
+covers [props] NumberInput.controlsRight
+covers [props] NumberInput.inputClass
+covers [props] NumberInput.inputStyle
+covers [props] NumberInput.decrementButtonClass
+covers [props] NumberInput.decrementButtonStyle
+covers [props] NumberInput.incrementButtonClass
+covers [props] NumberInput.incrementButtonStyle
+covers [props] NumberInput.controlsClass
+covers [props] NumberInput.controlsStyle
+covers [props] NumberInput.decrementButton
+covers [props] NumberInput.incrementButton
+covers [props] NumberInput.prefix
+covers [props] NumberInput.suffix
+covers [events] onChange
+covers [events] onFocus
+covers [events] onBlur
+covers [events] onSubmit
+
 # base-slider
 tap id:case-base-slider
 # Each thumb an adjustable element with its label and value, placed by
@@ -1134,7 +1214,7 @@ frame id:plot 0 20 200 100
 # The rows' x on a linear scale of 0 to 40: at 0, 50 and 100 points. The
 # row nearest the pointer, reported when it changes, none once it leaves;
 # the app's value for screen readers and its tooltip follow.
-event id:plot onHoverMove position.x=45 position.y=10
+event id:plot onMouseMove position.x=45 position.y=10
 expect hovered 1
 expect tip 1
 prop id:plot accessibilityValue text=row1
@@ -1154,21 +1234,21 @@ frame parent:parent:id:tip 0 6 40 16
 # above the pointer in its lower half and below it in the upper one,
 # `tooltipOffset` away.
 tap id:pointer-tip
-event id:plot onHoverMove position.x=45 position.y=80
+event id:plot onMouseMove position.x=45 position.y=80
 frame parent:parent:id:tip 6 -22 40 16
-event id:plot onHoverMove position.x=45 position.y=10
+event id:plot onMouseMove position.x=45 position.y=10
 frame parent:parent:id:tip 6 6 40 16
-event id:plot onHoverMove position.x=90 position.y=10
+event id:plot onMouseMove position.x=90 position.y=10
 expect hovered 2
 prop id:plot accessibilityValue text=row2
-event id:plot onHoverOut
+event id:plot onMouseLeave
 expect hovered null
 # New rows: the plot reads them again.
 tap id:more
 expect rows 4
-event id:plot onHoverMove position.x=60 position.y=10
+event id:plot onMouseMove position.x=60 position.y=10
 expect hovered 1
-event id:plot onHoverOut
+event id:plot onMouseLeave
 expect hovered null
 # The keyboard: a stop of the focus that takes no presses, its ring the
 # app's `focusStyle`; its arrow keys are bound while it has the focus.
@@ -1188,14 +1268,14 @@ event id:plot onAccessibilityAction actionName=increment
 expect hovered 1
 event id:plot onAccessibilityAction actionName=decrement
 expect hovered 0
-event id:plot onHoverOut
+event id:plot onMouseLeave
 expect hovered null
 # A sparkline follows no pointer: it reports nothing, even once a press
 # that comes after the pointer has been handled.
 prop id:spark accessibilityLabel Spark
 noprop id:spark focusable
 noprop id:spark accessibilityActions
-event id:spark onHoverMove position.x=90 position.y=10
+event id:spark onMouseMove position.x=90 position.y=10
 tap id:more
 expect rows 5
 expect hovered null
@@ -1209,33 +1289,33 @@ event id:pie onAccessibilityAction actionName=increment
 expect slice 0
 event id:pie onAccessibilityAction actionName=increment
 expect slice 1
-event id:pie onHoverOut
+event id:pie onMouseLeave
 expect slice null
-event id:pie onHoverMove position.x=55 position.y=80
+event id:pie onMouseMove position.x=55 position.y=80
 expect slice 1
-event id:pie onHoverMove position.x=75 position.y=55
+event id:pie onMouseMove position.x=75 position.y=55
 expect slice 0
-event id:pie onHoverMove position.x=35 position.y=75
+event id:pie onMouseMove position.x=35 position.y=75
 expect slice 2
 # Past its last angle, above 9 o'clock: none.
-event id:pie onHoverMove position.x=25 position.y=45
+event id:pie onMouseMove position.x=25 position.y=45
 expect slice null
 # In the hole (`innerRadius`, 40% of 50) and past the rim (`outerRadius`,
 # 80%): none.
-event id:pie onHoverMove position.x=55 position.y=80
+event id:pie onMouseMove position.x=55 position.y=80
 expect slice 1
-event id:pie onHoverMove position.x=55 position.y=55
+event id:pie onMouseMove position.x=55 position.y=55
 expect slice null
-event id:pie onHoverMove position.x=55 position.y=80
+event id:pie onMouseMove position.x=55 position.y=80
 expect slice 1
-event id:pie onHoverMove position.x=55 position.y=95
+event id:pie onMouseMove position.x=55 position.y=95
 expect slice null
 # The hole closes (`motion.update` moves the drawing): near the center is
 # the first slice now.
-event id:pie onHoverMove position.x=57 position.y=53
+event id:pie onMouseMove position.x=57 position.y=53
 expect slice null
 tap id:hole
-event id:pie onHoverMove position.x=57 position.y=53
+event id:pie onMouseMove position.x=57 position.y=53
 expect slice 0
 covers [nsh/base/plot] Pie
 covers [nsh/base/plot] Arc
@@ -1279,10 +1359,10 @@ frame parent:text:w5 265 55 0 0
 # The hover finds the band under the pointer; the cross line is as wide
 # as the band and as tall as the plot (the sibling below the tooltip:
 # bars have no hover dots).
-event id:bars onHoverMove position.x=160 position.y=10
+event id:bars onMouseMove position.x=160 position.y=10
 expect bar 1
 frame below:parent:parent:parent:id:bar-tip 0 0 60 80
-event id:bars onHoverOut
+event id:bars onMouseLeave
 expect bar null
 # Bars across: bands of 20 down the plot, the values along x (0 to 20 over
 # 100), each label after its bar's end, centered on the bar.
@@ -1527,10 +1607,10 @@ expect Value: none
 # The mouse resting over `let` reports a hover there once its delay
 # runs out: the character, its word and no diagnostic; leaving the text
 # ends it.
-event text:"let x = 1;" onHoverMove position.x=1 position.y=5
+event text:"let x = 1;" onMouseMove position.x=1 position.y=5
 wait 200
 expect Hover: 0:0 0-3 0
-event text:"let x = 1;" onHoverOut
+event text:"let x = 1;" onMouseLeave
 expect Hover: ended
 # The ref puts the caret at the line's end, reported with every
 # selection (the primary last).
@@ -1646,24 +1726,24 @@ style span:unused color #00ff00ff
 style span:legacy textDecorationLine underline line-through
 # Resting over the unnecessary code reports its diagnostic with its tags,
 # its code's page and the place related to it.
-event text:"unused = legacy();" onHoverMove position.x=1 position.y=5
+event text:"unused = legacy();" onMouseMove position.x=1 position.y=5
 wait 200
 expect Tagged: never read unnecessary https://eslint.org/docs/latest/rules/no-unused-vars declared here file:///lib.ts 2
 # The sixth editor goes to definitions. Without Mod the pointer asks
 # nothing; with Mod (Command here) held over `goto` it asks at once, and
 # the app's answer underlines the word.
-event text:"goto target();" onHoverMove position.x=1 position.y=5
+event text:"goto target();" onMouseMove position.x=1 position.y=5
 wait 50
 expect Defined: none
-event text:"goto target();" onHoverMove position.x=1 position.y=5 modifiers.platform=true
+event text:"goto target();" onMouseMove position.x=1 position.y=5 modifiers.platform=true
 expect Defined: 1 hover 0 0-4
 # Moving inside the word asks nothing more; hiding the link and holding
 # Mod over the word again asks again.
-event text:"goto target();" onHoverMove position.x=2 position.y=6 modifiers.platform=true
+event text:"goto target();" onMouseMove position.x=2 position.y=6 modifiers.platform=true
 wait 50
 expect Defined: 1 hover 0 0-4
 tap id:hide-link
-event text:"goto target();" onHoverMove position.x=2 position.y=6 modifiers.platform=true
+event text:"goto target();" onMouseMove position.x=2 position.y=6 modifiers.platform=true
 expect Defined: 2 hover 0 0-4
 # The command asks at the caret, inside `target`.
 tap id:go-to-definition

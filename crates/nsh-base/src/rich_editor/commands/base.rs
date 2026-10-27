@@ -1445,15 +1445,11 @@ pub fn base_keymap() -> Vec<(String, BoxCommand)> {
     }
 }
 
-/// Whether the editor runs on an Apple platform: the engine's OS (the web
-/// runtime on a Mac, a headless run that says another platform), or
-/// outside an engine the one this was built for.
+/// Whether the editor's keys follow Apple's conventions: the engine's OS,
+/// or in a browser the platform it runs on (a headless run says either),
+/// or outside an engine the one this was built for.
 pub(crate) fn apple() -> bool {
-    use nsh_core::platform::Os;
-    match nsh_core::prelude::try_os() {
-        Some(os) => matches!(os, Os::MacOs | Os::Ios),
-        None => cfg!(any(target_os = "macos", target_os = "ios")),
-    }
+    nsh_core::prelude::try_apple_keys().unwrap_or(cfg!(any(target_os = "macos", target_os = "ios")))
 }
 
 #[cfg(test)]

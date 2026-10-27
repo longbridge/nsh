@@ -2113,7 +2113,7 @@ impl<M: TextEngine> Core<M> {
         }
         // The host listens to its component's events and to JS's.
         let js = top_js.unwrap_or(inst.js_events);
-        self.apply_handlers(host, &el, old_events | js, js, inst);
+        self.apply_handlers(host, host, &el, old_events | js, js, inst);
         let mut events = EventMask::default();
         for (kind, _) in &el.handlers {
             events.set(*kind, true);
@@ -2498,8 +2498,13 @@ impl<M: TextEngine> Core<M> {
 
     /// Registers `el`'s handlers for node `id` and listens to their events
     /// (plus `extra`, what JS listens to on a host); returns the mask.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the installed node and its owning view"
+    )]
     fn apply_handlers(
         &mut self,
+        host: NodeId,
         id: NodeId,
         el: &ElNode,
         old: EventMask,
@@ -2507,6 +2512,7 @@ impl<M: TextEngine> Core<M> {
         inst: &mut Instance,
     ) -> EventMask {
         let mut mask = extra;
+        self.initialize_layout_listeners(host, id, el, old, inst);
         // A node made again (its region ran again) hears what this run
         // gives it, not also what the runs before gave it.
         if old.bits() != 0 {
@@ -2534,6 +2540,41 @@ impl<M: TextEngine> Core<M> {
             });
         }
         mask
+    }
+
+    /// Queues the current frame for listeners belonging to a new region run.
+    pub(super) fn initialize_layout_listeners(
+        &mut self,
+        host: NodeId,
+        id: NodeId,
+        el: &ElNode,
+        old: EventMask,
+        inst: &Instance,
+    ) {
+        // Only listeners of a new owner need the kept node's initial
+        // frame. A listener passed in from outside the region stays live.
+        if old.contains(EventKind::Layout)
+            && let Ok(key) = self.key(id)
+        {
+            let frame = self.nodes[key as usize].frame;
+            if !frame.origin.x.0.is_nan() {
+                for (kind, listener) in &el.handlers {
+                    if *kind == EventKind::Layout
+                        && !inst
+                            .handlers
+                            .iter()
+                            .any(|(n, k, old)| *n == id && *k == *kind && old.same_owner(listener))
+                    {
+                        self.events.push(JsEvent::LayoutListener {
+                            host,
+                            id,
+                            listener: listener.clone(),
+                            frame,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     fn reconcile_children(
@@ -3665,7 +3706,7 @@ impl<M: TextEngine> Core<M> {
                 text.clone(),
             );
         }
-        let events = self.apply_handlers(id, &el, old_events, EventMask::default(), inst);
+        let events = self.apply_handlers(host, id, &el, old_events, EventMask::default(), inst);
         let new_children = std::mem::take(&mut el.children);
         let children = self.reconcile_children(id, old_children, new_children, host, inst);
         let list = match virtual_list {
@@ -4237,6 +4278,11 @@ impl<M: TextEngine> Core<M> {
     pub fn component_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
         let _entered = self.components.runtime.enter();
         let handled = self.dispatch_event(id, kind, payload);
+        self.flush_component_emits();
+        handled
+    }
+
+    fn flush_component_emits(&mut self) {
         // What views' listeners emitted reaches its listeners (JS hears it
         // in this turn).
         loop {
@@ -4248,7 +4294,29 @@ impl<M: TextEngine> Core<M> {
                 self.route_emit(host, event);
             }
         }
-        handled
+    }
+
+    /// Initializes one newly installed layout listener of a kept node.
+    /// The engine delivers this in event order, without notifying the
+    /// node's retained listeners or its JS handlers.
+    #[doc(hidden)]
+    pub fn component_layout(
+        &mut self,
+        host: NodeId,
+        id: NodeId,
+        listener: &Listener<EventPayload>,
+        frame: crate::Bounds<Points>,
+    ) {
+        let _entered = self.components.runtime.enter();
+        let installed = self.components.instances.get(&host).is_some_and(|inst| {
+            inst.handlers.iter().any(|(n, kind, current)| {
+                *n == id && *kind == EventKind::Layout && current.ptr_eq(listener)
+            })
+        });
+        if installed {
+            self.run_listener(host, listener, &EventPayload::Layout(frame));
+            self.flush_component_emits();
+        }
     }
 
     fn dispatch_event(&mut self, id: NodeId, kind: EventKind, payload: &EventPayload) -> bool {
@@ -4262,7 +4330,7 @@ impl<M: TextEngine> Core<M> {
             return false;
         }
         // Hints follow the pointer on their anchors, whoever else listens.
-        if matches!(kind, EventKind::HoverIn | EventKind::HoverOut) {
+        if matches!(kind, EventKind::MouseEnter | EventKind::MouseLeave) {
             self.overlay_hover(id, kind);
         }
         if self.platform_event(id, kind, payload) {
