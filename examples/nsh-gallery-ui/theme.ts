@@ -77,9 +77,9 @@ function tokens<K extends string>(names: Record<K, keyof Tokens>): Record<K, str
 /**
  * The shared example UI's look: a graphite page (or a paper one in light
  * appearance), cards with an inset surface, tabular numbers and one citrus
- * accent, its colors the tokens of `theme.json`. Sizes are for phones:
- * 16 pt gutters, 44 pt touch targets, 15 pt body text. The desktop layout
- * (`desktop`) keeps them and puts more side by side.
+ * accent, its colors the tokens of `theme.json`. Desktops are compact
+ * (28-point controls, 13-point labels), touch screens roomier (36 to 40
+ * points).
  */
 export const colors: Palette = tokens<keyof Palette>({
   background: "background",
@@ -133,11 +133,15 @@ export interface Finish {
 }
 
 /**
- * Light and depth: gentle top-to-bottom gradients, a highlight along top
- * edges and soft shadows, so cards, controls and buttons read as surfaces.
+ * Light and depth, kept quiet: one-color edges (corners join cleanly), a
+ * hard 1-point drop under what stands up and a 1-point inner shade in what
+ * is sunk; only floating surfaces (menus, glass) cast a soft
+ * shadow. `hover` and `pressed` are a raised control's states, `fill` a
+ * slider's or a meter's run of the accent.
  */
-export const finish = themed<Record<"card" | "inset" | "field" | "raised" | "light" | "accent" | "track" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>>(finishes.dark, finishes.light
-);
+export const finish = themed<
+  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>
+>(finishes.dark, finishes.light);
 
 export type Tone = "neutral" | "accent" | "info" | "warn" | "danger" | "up" | "down";
 
@@ -185,9 +189,15 @@ export const motion = {
 export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
 
 /**
- * The keyboard focus (`focusStyle`): a 2-point ring of `info` inside the
- * view's edge, so a card's rounded clip does not cut it (`offset` 2 puts it
- * outside, around a filled button).
+ * The keyboard focus (`focusStyle`): the edge turns the theme's muted olive
+ * `ring` and a 3-point halo of it lies around the view (`offset` moves the
+ * halo out from the edge).
  */
-export const focusRing = (offset = -2): ViewStyle => ({ outlineStyle: "solid", outlineWidth: 2, outlineColor: colors.info, outlineOffset: offset });
+export const focusRing = (offset = 0): ViewStyle => ({
+  borderColor: token("ring"),
+  outlineStyle: "solid",
+  outlineWidth: 3,
+  outlineColor: isDark() ? "rgba(170,210,90,0.10)" : "rgba(150,190,70,0.15)",
+  outlineOffset: offset,
+});
 

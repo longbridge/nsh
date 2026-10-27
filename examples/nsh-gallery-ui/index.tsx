@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, finish, focusRing, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -295,10 +295,15 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
+/** A pointer and a keyboard: the compact sizes of desktops. */
+const pointer = platform.idiom === "desktop";
+
 /**
- * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
- * `primary` is light (the main action), `secondary` dark, `accent` citrus
- * (the theme's `brand-fill`). A `color` fills it with that color instead.
+ * A button: 28 pt tall on a desktop, 40 on a touch screen (`small`: 36).
+ * `primary` and `accent` are the citrus fill (the main action), `secondary`
+ * a raised neutral, `ghost` bare until the pointer is over it. A `color`
+ * fills it with that color instead. Under the pointer a raised button
+ * lightens, pressed it sinks (an inner shade, and 3% smaller).
  */
 export function Button(props: {
   label: string;
@@ -316,9 +321,17 @@ export function Button(props: {
   // role); the look below is the gallery's own.
   const scale = createAnimatedValue(1);
   const variant = () => props.variant ?? "primary";
-  const bg = () =>
-    props.color ?? (variant() === "primary" ? colors.light : variant() === "accent" ? colors.accentFill : variant() === "ghost" ? "transparent" : colors.raised);
-  const fg = () => (props.color ? "#ffffff" : variant() === "primary" ? colors.onLight : variant() === "accent" ? colors.onAccent : colors.text);
+  const filled = () => !props.color && (variant() === "primary" || variant() === "accent");
+  const height = () => (pointer ? 28 : small() ? 36 : 40);
+  const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : colors.text);
+  const look = (): ViewStyle =>
+    props.color
+      ? { backgroundColor: props.color, borderColor: "transparent" }
+      : variant() === "ghost"
+        ? { backgroundColor: "transparent", borderColor: "transparent" }
+        : filled()
+          ? finish.accent
+          : finish.raised;
   return (
     <BaseButton
       onPress={props.onPress}
@@ -326,37 +339,31 @@ export function Button(props: {
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.label}
-      hoverStyle={props.disabled ? undefined : { opacity: 0.88 }}
-      focusStyle={focusRing(2)}
-      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }], borderRadius: small() ? 8 : radius.control }}
+      hoverStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
+      activeStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.88 } : finish.pressed}
+      focusStyle={focusRing()}
+      style={{
+        flex: props.flex,
+        height: height(),
+        paddingHorizontal: pointer ? 12 : 16,
+        borderRadius: radius.control,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: pointer ? 6 : 8,
+        ...look(),
+        opacity: props.disabled ? 0.4 : 1,
+        transform: [{ scale }],
+        transitionProperty: "background-color, border-color, box-shadow, opacity",
+        transitionDuration: 120,
+      }}
     >
-      <View
-        style={{
-          height: small() ? 32 : 44,
-          paddingHorizontal: small() ? 12 : 18,
-          borderRadius: small() ? 8 : radius.control,
-          borderCurve: "continuous",
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: small() ? 6 : 8,
-          backgroundColor: bg(),
-          ...(props.color || variant() === "ghost"
-            ? {}
-            : variant() === "primary"
-              ? finish.light
-              : variant() === "accent"
-                ? finish.accent
-                : finish.raised),
-          borderWidth: variant() === "secondary" || variant() === "ghost" ? 1 : 0,
-          borderColor: colors.border,
-        }}
-      >
-        <If when={props.icon}>
-          <Icon name={props.icon!} size={small() ? 14 : 16} tint={fg()} />
-        </If>
-        <Text style={{ fontSize: small() ? 13 : 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
-      </View>
+      <If when={props.icon}>
+        <Icon name={props.icon!} size={pointer ? 14 : 16} tint={fg()} />
+      </If>
+      <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: fg() }}>{props.label}</Text>
     </BaseButton>
   );
 }
@@ -369,7 +376,7 @@ export function RoundButton(props: {
   disabled?: boolean;
   onPress: () => void;
 }) {
-  const size = props.size ?? 44;
+  const size = props.size ?? (pointer ? 28 : 40);
   const primary = () => (props.variant ?? "primary") === "primary";
   return (
     <Press onPress={props.onPress} disabled={props.disabled} scale={0.92} accessibilityLabel={props.label}>
@@ -380,10 +387,8 @@ export function RoundButton(props: {
           borderRadius: size / 2,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: primary() ? colors.light : colors.raised,
-          ...(primary() ? finish.light : finish.pill),
-          borderWidth: primary() ? 0 : 1,
-          borderColor: primary() ? colors.border : finish.pill.borderColor,
+          borderWidth: 1,
+          ...(primary() ? finish.accent : finish.raised),
         }}
       >
         <Icon name={props.icon} size={size * 0.42} tint={primary() ? colors.onLight : colors.text} />
@@ -431,8 +436,8 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
       checked={props.value}
       onChange={props.onChange}
       accessibilityLabel={props.label}
-      // 8 pt more to press on every side (the hit slop of a 30 pt track),
-      // without taking more room.
+      // 8 pt more to press on every side (a hit slop around the small
+      // track), without taking more room.
       style={{ margin: -8, padding: 8 }}
       trackStyle={look.trackStyle}
       thumbStyle={look.thumbStyle}
@@ -441,16 +446,17 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
 }
 
 /**
- * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
- * track that turns citrus and a knob that springs across, both natively.
- * `on` is the value the app owns: the knob follows it, from a press or from
- * elsewhere. `small` is 38 × 22, for pointer-sized rows. Read the styles in
- * JSX, so the appearance is followed.
+ * The gallery's switch, as the styles of `Switch`'s parts: a track sunk
+ * into the surface that turns citrus, and a knob that springs across, both
+ * natively. The knob keeps its size on and off; on, it is white with an
+ * olive edge. `on` is the value the app owns: the knob follows it, from a
+ * press or from elsewhere. 28 × 16 on a desktop; on a touch screen 42 × 24
+ * (`small`: 34 × 20). Read the styles in JSX, so the appearance is followed.
  */
 export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
   // The track's size and inset, and the knob: it travels what is left inside
   // the border and the padding.
-  const [width, height, inset, knob] = size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
+  const [width, height, inset, knob] = pointer ? [28, 16, 1, 12] : size === "small" ? [34, 20, 1, 16] : [42, 24, 1, 20];
   const t = createAnimatedValue(on() ? 1 : 0);
   const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
   let shown = on();
@@ -471,19 +477,28 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
         padding: inset,
         backgroundColor: t.interpolate({ inputRange: [0, 1], outputRange: [colors.track, colors.accentFill] }),
         borderWidth: 1,
-        borderColor: colors.border,
-        ...finish.track,
+        borderColor: on() ? finish.fill.borderColor : finish.track.borderColor,
+        boxShadow: on() ? finish.fill.boxShadow : finish.track.boxShadow,
+        transitionProperty: "border-color, box-shadow",
+        transitionDuration: 150,
       };
     },
     get thumbStyle(): ViewStyle {
+      const edge = on() ? (isDark() ? "#8db536" : "#8fb536") : undefined;
       return {
         width: knob,
         height: knob,
         borderRadius: knob / 2,
-        backgroundColor: on() ? colors.onAccent : colors.knob,
-        // A drop of glass: a specular top over the knob's color.
-        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
-        boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
+        borderWidth: 1,
+        ...finish.knob,
+        ...(on()
+          ? {
+              backgroundColor: "#ffffff",
+              backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f7f9f2 100%)",
+              borderColor: edge,
+              boxShadow: "0 1px 0 rgba(60,90,0,0.18)",
+            }
+          : {}),
         transform: [{ translateX: x }],
       };
     },
@@ -493,17 +508,17 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
 /** A horizontal meter with an optional marker (a limit). */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
   return (
-    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.raised }}>
+    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.track, borderWidth: 1, ...finish.track }}>
       <View
         style={{
           width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: 6,
-          borderRadius: 3,
-          backgroundColor: toneColor(props.tone ?? "accent"),
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: props.tone && props.tone !== "accent" ? toneColor(props.tone) : colors.accentFill,
         }}
       />
       <If when={props.marker !== undefined}>
-        <View style={{ position: "absolute", left: `${(props.marker ?? 0) * 100}%`, top: -3, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.text }} />
+        <View style={{ position: "absolute", left: `${(props.marker ?? 0) * 100}%`, top: -4, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.text }} />
       </If>
     </View>
   );

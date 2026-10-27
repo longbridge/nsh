@@ -1,4 +1,4 @@
-import { effect, signal, Text, View } from "nsh";
+import { effect, platform, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { Tab, Tabs } from "nsh/base";
 import { colors, finish, motion } from "./theme";
@@ -21,9 +21,10 @@ export function Segmented<T extends string>(props: {
   // border (an absolute child's containing block is the padding box), so
   // the segments share what is left of the measured width after both.
   const border = 1;
-  const inset = 3;
+  const inset = 2;
   const segment = () => (width() - 2 * (border + inset)) / Math.max(1, props.options.length);
-  const height = props.size === "small" ? 32 : 40;
+  // Compact with a pointer, roomier for a finger.
+  const height = platform.idiom === "desktop" ? (props.size === "small" ? 26 : 28) : props.size === "small" ? 32 : 36;
   // The first placement jumps; later ones spring.
   let placed = false;
   effect(() => {
@@ -40,11 +41,12 @@ export function Segmented<T extends string>(props: {
         height,
         flexDirection: "row",
         padding: inset,
-        borderRadius: height / 2,
-        backgroundColor: colors.inset,
+        borderRadius: 9,
+        borderCurve: "continuous",
+        backgroundColor: colors.track,
         boxShadow: finish.track.boxShadow,
         borderWidth: border,
-        borderColor: colors.border,
+        borderColor: finish.track.borderColor,
       }}
     >
       <View
@@ -55,9 +57,10 @@ export function Segmented<T extends string>(props: {
           left: inset,
           bottom: inset,
           width: segment(),
-          borderRadius: (height - 2 * (border + inset)) / 2,
-          ...finish.pill,
+          borderRadius: 7,
+          borderCurve: "continuous",
           borderWidth: 1,
+          ...finish.raised,
           transform: [{ translateX: x }],
         }}
       />
@@ -71,7 +74,7 @@ export function Segmented<T extends string>(props: {
             <Text
               style={{
                 numberOfLines: 1,
-                fontSize: props.size === "small" ? 13 : 14,
+                fontSize: platform.idiom === "desktop" || props.size === "small" ? 13 : 14,
                 fontWeight: "500",
                 color: props.value === option().value ? colors.text : colors.muted,
               }}
