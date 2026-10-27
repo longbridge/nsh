@@ -16,6 +16,8 @@ import BaseDock from "./base-dock";
 import BaseEditor from "./base-editor";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
+import BaseNumberInput from "./base-number-input";
+import BaseOtpInput from "./base-otp-input";
 import BasePopups from "./base-popups";
 import BasePlot from "./base-plot";
 import BaseProgress from "./base-progress";
@@ -25,6 +27,7 @@ import BaseResizable from "./base-resizable";
 import BaseRichEditorExtensions from "./base-rich-editor-extensions";
 import BaseRichEditorKit from "./base-rich-editor-kit";
 import BaseRichEditorSession from "./base-rich-editor-session";
+import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseSelectableView from "./base-selectable-view";
@@ -47,6 +50,8 @@ const cases: Record<string, () => JSX.Element> = {
   "base-editor": BaseEditor,
   "base-nav-page": BaseNavPage,
   "base-nav-stack": BaseNavStack,
+  "base-number-input": BaseNumberInput,
+  "base-otp-input": BaseOtpInput,
   "base-popups": BasePopups,
   "base-safe-area-keyboard": BaseSafeAreaKeyboard,
   "base-text-view": BaseTextView,
@@ -59,6 +64,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-kit": BaseRichEditorKit,
   "base-rich-editor-session": BaseRichEditorSession,
   "base-rich-editor-view": BaseRichEditorView,
+  "base-rich-editor-tables": BaseRichEditorTables,
   "base-tabs": BaseTabs,
   "base-collapsible": BaseCollapsible,
   "base-plot": BasePlot,

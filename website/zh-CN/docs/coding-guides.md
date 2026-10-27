@@ -882,7 +882,7 @@ const liked = signal<Set<number>>(new Set());
 | 值的变化 | `on<Value>Change(next, details?)` | `onChange(text)`、`onOpenChange(open, reason)` |
 | 其他事件 | `on<Event>`，现在时，一个对象 | `onPress()`、`onSubmit({ text })` |
 | 阶段 | `<act>Start`、`<act>End` | `onPanStart`、`onLoadStart` |
-| 指针位于视图上方 | `In` / `Out` | `onHoverIn`、`onHoverOut` |
+| 鼠标位于视图上方 | `Enter` / `Move` / `Leave`，与 DOM 相同 | `onMouseEnter`、`onMouseMove`、`onMouseLeave` |
 | 开始监听 | 返回 `() => void` | `keymap.bind(..)` |
 | 环境中的值 | 访问器，旁边是 `set<Value>` | `colorScheme()`、`setColorScheme` |
 | 只读的布尔值 | `is<Adjective>`、`has<Noun>` | `isAvailable` |
@@ -931,8 +931,8 @@ Rust 构建器消费并返回 `Self`，以它设置的 prop 命名，不加 `set
   字段（`onLinkPress({ url })`），这样以后增加字段只是一次添加；没有内容可报告的事件不传参数。
 - 以动作命名，不用过去时，也不用请求：`onPress`、`onClose`、`onCancel`、`onBackPress`。
 - 当动作有名字时，以意图而不是几何位置命名：`onLoadMore`，而不是“到达了末尾”。
-- 生命周期成对使用 `onOpen` / `onClose`；阶段用 `Start` / `End`，从不用 `Begin`；指针位于视图上方是 `onHoverIn` /
-  `onHoverOut`，文件拖过视图是 `Enter` / `Leave`。
+- 生命周期成对使用 `onOpen` / `onClose`；阶段用 `Start` / `End`，从不用 `Begin`；鼠标位于视图上方是 `onMouseEnter` /
+  `onMouseMove` / `onMouseLeave`（与 DOM 的名称相同），文件拖过视图是 `Enter` / `Leave`。
 - 在文档中说明回调是在组件自身状态变化之前还是之后运行，以及它是否可能重入组件。
 
 ### 文档与界面文案

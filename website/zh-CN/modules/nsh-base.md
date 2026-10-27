@@ -7,7 +7,7 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
@@ -32,6 +32,7 @@ import {
   DockArea,
   Editor,
   Menu,
+  OtpInput,
   Progress,
   MenuItem,
   MenuSeparator,
@@ -43,6 +44,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
   Sheet,
+  NumberInput,
   Slider,
   Submenu,
   Switch,
@@ -100,10 +102,12 @@ import type {
   NavPageProps,
   NavStackProps,
   NavStackState,
+  OtpInputProps,
   ProgressProps,
   StatusBar,
   RadioGroupProps,
   RadioProps,
+  NumberInputProps,
   SliderProps,
   SliderScale,
   SliderValue,
@@ -134,7 +138,9 @@ import type {
 | [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
 | [`Tab`](../elements/tabs.md)、[`Tabs`](../elements/tabs.md) | `tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表；选中哪一个由应用持有，内容也由应用显示。 |
 | [`Collapsible`](../elements/collapsible.md) | `collapsible()` | 内容可展开和收起的区域；`open` 和触发它的控件由应用持有。 |
+| [`OtpInput`](../elements/otp-input.md) | `otp_input()` | 显示在应用设置样式的格子里的一次性验证码；`value` 由应用持有，填满时 `onComplete` 通知应用。 |
 | [`Progress`](../elements/progress.md) | `progress()` | 进度条；`value`（0 到 100）和 `indeterminate` 由应用持有。 |
+| [`NumberInput`](../elements/number-input.md) | `number_input()` | 在输入框里输入、或用按钮和按键步进的数字；`value` 由应用持有（或由输入框从 `defaultValue` 起自己保存）。 |
 | [`Slider`](../elements/slider.md) | `slider()` | 沿轨道选取一个值或两个值组成的范围；`value` 由应用持有（或由滑块从 `defaultValue` 起自己保存）。 |
 | [`ResizablePanelGroup`、`ResizablePanel`](../elements/resizable.md) | `h_resizable()`、`v_resizable()`、`resizable_panel()` | 并排或上下排列的面板，用户拖动它们之间的手柄调整大小。 |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区；它的布局是应用的数据。 |
@@ -200,12 +206,26 @@ import type {
 由应用持有；屏幕阅读器得到进度条角色、范围和数值，不确定时没有数值，此时指示条的宽度和动效由应用决定。见
 [Progress](../elements/progress.md)。
 
+### NumberInput
+
+在输入框里输入或步进的数字，没有外观：输入框（`Input`）、它前面的减少按钮和后面的增加按钮（或用 `controlsRight` 把两个按钮竖着放在右边）。`value`（一个数字或
+`null`；也可以由输入框从 `defaultValue` 起自己保存）由应用持有，输入框读出的数字通过 `onChange` 报告。输入框只接受数字或正在输入成数字的文本，其他键盘的数字和符号
+也算；按钮、Up / Down 和 Page Up / Page Down 按 `step` 步进并保留小数位，止于 `min` 和 `max`，离开输入框时输入的值会被限制在这个范围内。输入框对屏幕阅读器是
+一个数值调节框（spin button），它的增加和减少操作会步进数值。见 [NumberInput](../elements/number-input.md)。
+
 ### Slider
 
 沿轨道选取一个值或两个值组成的范围，没有外观：接收按压和拖动的轨道、轨道里映射数值的指示条，以及指示条上的范围和每个值一个的滑块。`value`（一个数字或
 `[start, end]`；也可以由滑块从 `defaultValue` 起自己保存）由应用持有，每个新值触发 `onChange`（从 `min` 起按 `step` 对齐），每次修改结束触发一次
 `onChangeEnd`；`scale` 让数值线性分布或按数量级分布，`axis` 决定轨道水平还是垂直。每个滑块对屏幕阅读器都是带自己数值的可调节元素，是键盘焦点的一站，
 并按 WAI-ARIA 的滑块按键移动。见 [Slider](../elements/slider.md)。
+
+### OtpInput
+
+定长的数字一次性验证码，没有外观：一个原生文本框覆盖在格子之上接收键盘输入，因此打字、粘贴、数字键盘和系统的验证码自动填充
+都是平台自己的，屏幕阅读器也只看到一个文本框。只有数字能输入，最多 `length` 位；退格键删除最后一位。`value` 由应用持有（或给
+`defaultValue`），应用接收 `onChange` 和 `onComplete`，并为格子（接收下一位数字的格子带 `focus:`）、分组和光标设置样式。见
+[OtpInput](../elements/otp-input.md)。
 
 ### Plot（`nsh/base/plot`）
 
@@ -398,6 +418,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [`BackHandler`](./nsh-mobile.md#backhandler)：`BackHandler` 及其他 Android 专用 API。

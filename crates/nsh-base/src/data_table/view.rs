@@ -285,8 +285,14 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                 // (a `tab_stop` focus handle): its keys follow.
                                 .on_focus(move || focus.set_focus(true))
                                 .on_blur(move || blur.set_focus(false))
-                                .on_hover_move(move |e: &HoverEvent| hover.hover_at(e.position))
-                                .on_hover_out(move || {
+                                // The hovered row stays put while a drag
+                                // selects or moves.
+                                .on_mouse_move(move |e: &MouseEvent| {
+                                    if e.pressed_button.is_none() {
+                                        hover.hover_at(e.position);
+                                    }
+                                })
+                                .on_mouse_leave(move |_: &MouseEvent| {
                                     if leave.hover.get_untracked().is_some() {
                                         leave.hover.set(None);
                                     }

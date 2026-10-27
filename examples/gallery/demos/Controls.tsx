@@ -1,5 +1,5 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
@@ -17,8 +17,8 @@ import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hove
  */
 const size =
   platform.idiom === "desktop"
-    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dash: 8, dot: 6, tabs: 30, line: 32, switch: "small" as const }
-    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dash: 10, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
+    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, switch: "small" as const }
+    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
 const pointer = platform.idiom === "desktop";
 
 /** A control's row: the control and its label, the whole row pressable. */
@@ -81,15 +81,16 @@ const box = (mark: Mark) => ({
   ...fill(mark !== null),
 });
 
-/** What a checkbox's box shows. */
+/** What a checkbox's box shows: a check or a dash, drawn with the same bold pen (about 2 pt at the desktop size). */
+const markWeight = 3.2;
 function BoxMark(props: { mark: Mark }) {
   return (
     <>
       <If when={props.mark === "check"}>
-        <Icon name="check" size={size.check} tint={colors.onAccent} />
+        <Icon name="check" size={size.check} tint={colors.onAccent} weight={markWeight} />
       </If>
       <If when={props.mark === "dash"}>
-        <View style={{ width: size.dash, height: 2, borderRadius: 1, backgroundColor: colors.onAccent }} />
+        <Icon name="minus" size={size.check} tint={colors.onAccent} weight={markWeight} />
       </If>
     </>
   );
@@ -630,6 +631,160 @@ export function Controls() {
     );
   }
 
+  function Quantities() {
+    const seats = signal<number | null>(2);
+    const price = signal<number | null>(24.5);
+    const locked = signal(false);
+    // One recessed well per input: a stronger border under the pointer and
+    // the keyboard's focus ring while its field edits (`focus-within:`);
+    // the buttons light up under the pointer and while pressed (still with
+    // reduced motion) and fade where a step does nothing (at the minimum
+    // or maximum) or while the input is locked, without their hover.
+    const frame = [
+      pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+      "flex-row items-stretch overflow-hidden border border-input bg-field",
+      "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+    ].join(" ");
+    const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+    const field = () => ({
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 8,
+      fontSize: size.label,
+      color: colors.text,
+      placeholderColor: colors.faint,
+      fontVariant: ["tabular-nums" as const],
+    });
+    /** A step button's glyph: the gallery's icon, in the muted text color. */
+    function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+      return <Icon name={props.name} size={props.size} tint={colors.muted} />;
+    }
+    /** A quantity: its label and the input at the trailing edge. */
+    function Amount(props: { label: string; detail: string; first?: boolean; children: JSX.Element }) {
+      return (
+        <View style={row(!!props.first)}>
+          <Label label={props.label} detail={props.detail} />
+          <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+        </View>
+      );
+    }
+    const show = (v: number | null) => (v === null ? "none" : `${v}`);
+    return (
+      <Card icon="controls" title="Number input" subtitle="Typed or stepped: the app owns the value">
+        <View>
+          <Amount first label="Seats" detail="1 to 8 per booking">
+            <NumberInput
+              value={seats()}
+              min={1}
+              max={8}
+              disabled={locked()}
+              accessibilityLabel="Seats"
+              onChange={(next) => {
+                seats.set(next);
+                last.set(`Seats: ${show(next)}`);
+              }}
+              class={`${frame} disabled:opacity-50`}
+              inputStyle={{ ...field(), textAlign: "center" }}
+              decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
+              incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
+              decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
+              incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
+            />
+          </Amount>
+          <Amount label="Price" detail="Steps of 0.5">
+            <NumberInput
+              value={price()}
+              min={0}
+              step={0.5}
+              placeholder="Free"
+              accessibilityLabel="Price"
+              controlsRight
+              onChange={(next) => {
+                price.set(next);
+                last.set(`Price: ${show(next)}`);
+              }}
+              class={frame}
+              inputStyle={{ ...field(), paddingLeft: 4 }}
+              controlsClass={`${pointer ? "w-6" : "w-9"} border-l border-line`}
+              incrementButtonClass={`flex-1 ${press} border-b border-line`}
+              decrementButtonClass={`flex-1 ${press}`}
+              incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
+              decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
+              prefix={
+                <View style={{ height: "100%", justifyContent: "center", paddingLeft: 10 }}>
+                  <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>$</Text>
+                </View>
+              }
+            />
+          </Amount>
+        </View>
+        <View style={{ flexDirection: "row", gap: size.gap, marginTop: size.padding, alignSelf: pointer ? "flex-start" : "stretch" }}>
+          <Button
+            label={locked() ? "Unlock seats" : "Lock seats"}
+            variant="secondary"
+            size={size.switch}
+            flex={pointer ? undefined : 1}
+            onPress={() => {
+              locked.set(!locked());
+              last.set(locked() ? "Seats: locked" : "Seats: unlocked");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
+  function Verify() {
+    const CODE = "246810";
+    const code = signal("");
+    const verdict = signal("");
+    // The cell that takes the next digit shows the focus ring while the
+    // code has the focus; the caret blinks there (steady with reduced
+    // motion: the input's own).
+    const cell = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
+    return (
+      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them">
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <OtpInput
+            length={6}
+            groups={2}
+            value={code()}
+            onChange={(next) => {
+              code.set(next);
+              verdict.set("");
+              last.set(`Code: ${next || "empty"}`);
+            }}
+            onComplete={({ value }) => {
+              verdict.set(value === CODE ? "Verified" : "That code is not right");
+              last.set(`Code complete: ${value}`);
+            }}
+            accessibilityLabel="Verification code, 6 digits"
+            class="flex-row items-center gap-3"
+            groupClass="flex-row gap-1.5"
+            cellClass={`${cell} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2`}
+            cellStyle={{ ...finish.inset, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.line }}
+            caretClass="w-0.5 h-6 rounded-full"
+            caretStyle={{ backgroundColor: colors.text }}
+          />
+          <Text style={{ fontSize: size.detail, color: verdict() === "Verified" ? toneColor("up") : verdict() ? toneColor("down") : colors.muted }}>
+            {verdict() || `The code is ${CODE}`}
+          </Text>
+          <Button
+            label="Clear"
+            variant="secondary"
+            size={size.switch}
+            disabled={code() === ""}
+            onPress={() => {
+              code.set("");
+              verdict.set("");
+              last.set("Code: cleared");
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -638,5 +793,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Transfers, Levels, Quantities, Verify, Last]} />;
 }

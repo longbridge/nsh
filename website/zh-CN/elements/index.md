@@ -90,12 +90,14 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
 | `<Input>` | `nsh_base::input()` | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
+| `<OtpInput>` | `nsh_base::otp_input()` | 固定位数的一次性验证码，输入、粘贴或自动填充到格子里 | [OtpInput](./otp-input.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Radio>`、`<RadioGroup>` | `nsh_base::radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组 | [Radio](./radio.md) |
 | `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
 | `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
 | `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
+| `<NumberInput>` | `nsh_base::number_input()` | 在输入框里输入、或用按钮和按键步进的数字 | [NumberInput](./number-input.md) |
 | `<Slider>` | `nsh_base::slider()` | 沿轨道选取一个值或两个值组成的范围 | [Slider](./slider.md) |
 | `<Plot>`、`<Line>`、`<Area>`、`<Bar>`、`<Grid>`、`<Pie>`、`<Arc>`（`nsh/base/plot`） | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | 图表的框架与图形，根据应用的数据行原生绘制 | [Plot](./plot.md) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
@@ -187,13 +189,13 @@ view()
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `onHoverIn` | `.on_hover_in(..)` | `() => void` | 鼠标移到视图或其内部的视图上。 |
-| `onHoverMove` | `.on_hover_move(..)` | `(e: HoverEvent) => void` | 没有按下按键时，鼠标在视图（或其内部的视图）上移动，或鼠标停在那里时按下或松开了修饰键。 |
-| `onHoverOut` | `.on_hover_out(..)` | `() => void` | 鼠标离开视图及其内部的视图，或离开窗口。 |
+| `onMouseEnter` | `.on_mouse_enter(..)` | `(e: MouseEvent) => void` | 鼠标移到视图或其内部的视图上（DOM 的 `mouseenter`）。 |
+| `onMouseMove` | `.on_mouse_move(..)` | `(e: MouseEvent) => void` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键（DOM 的 `mousemove`）。 |
+| `onMouseLeave` | `.on_mouse_leave(..)` | `(e: MouseEvent) => void` | 鼠标离开视图及其内部的视图，或离开窗口；`e` 是鼠标最后所在的位置（DOM 的 `mouseleave`）。 |
 
-与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知应用，触摸从不触发；按着按键移动属于触摸（`onTouchMove`、响应者系统）。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 和 Windows 上要等到鼠标下一次移动。
+与 CSS 的 `:hover` 和 DOM 的 `mouseenter` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onMouseEnter`（由外向内；`onMouseLeave` 由内向外）。事件在发生之后才通知应用，触摸从不触发。从鼠标下方移除的视图会收到 `onMouseLeave`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 
-`HoverEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），以及按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键）；Rust 中为 `position`、`page_position` 和 `modifiers`。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onHoverOut` 之前到达，因此处理函数可以在每次移动时重绘：
+`MouseEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键），以及 `pressedButton`：按下的按键（`"left"`、`"right"`、`"middle"`、`"back"` 或 `"forward"`，即 GPUI 的 `MouseButton`），没有按键时为 `null`；Rust 中为 `position`、`page_position`、`modifiers` 和 `pressed_button`。在桌面平台和 Web 上，拖动同时也是触摸（`onTouchMove`、响应者系统），它的移动带着 `pressedButton` 到达 `onMouseMove`：只跟随悬停的反馈跳过这些移动即可；iOS 和 Android 的悬停报告的是没有按键按下的指针。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onMouseLeave` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```rust tabs
 // 图表上的十字线。
@@ -201,8 +203,8 @@ let at = signal(None::<Points>);
 
 view()
     .h(px(200.0))
-    .on_hover_move(move |e: &HoverEvent| at.set(Some(e.position.x)))
-    .on_hover_out(move || at.set(None))
+    .on_mouse_move(move |e: &MouseEvent| at.set(Some(e.position.x)))
+    .on_mouse_leave(move |_: &MouseEvent| at.set(None))
     .child(when(move || at.get().is_some(), move || {
         view()
             .absolute()
@@ -218,7 +220,7 @@ view()
 // 图表上的十字线。
 const at = signal<number | null>(null);
 
-<View onHoverMove={(e) => at.set(e.position.x)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+<View onMouseMove={(e) => at.set(e.position.x)} onMouseLeave={() => at.set(null)} style={{ height: 200 }}>
   <If when={at() !== null}>
     <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
   </If>

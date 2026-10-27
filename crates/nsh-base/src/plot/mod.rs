@@ -34,7 +34,7 @@ use nsh_core::{
 };
 
 pub use self::{
-    area::{Area, AreaElement, AreaProps, area},
+    area::{Area, AreaElement, AreaProps, AreaY0, area},
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
@@ -675,8 +675,9 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             size.set(b.size);
             place.plot_is(b.size);
         })
-        .on_hover_move(move |e: &HoverEvent| {
-            if !interactive.get_untracked() {
+        // Hovering, not dragging: a drag leaves the hover where it was.
+        .on_mouse_move(move |e: &MouseEvent| {
+            if !interactive.get_untracked() || e.pressed_button.is_some() {
                 return;
             }
             place.pointer_at(e.position.y.0);
@@ -708,7 +709,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             });
             follow(nearest, None);
         })
-        .on_hover_out(move || follow(None, None))
+        .on_mouse_leave(move |_: &MouseEvent| follow(None, None))
         .child(props.children)
         // The hover's parts, over the marks; they take no pointer, so the
         // plot keeps the hover.

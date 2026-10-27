@@ -303,6 +303,17 @@ pub fn measure_text(font: &str, text: &str) -> Points {
     text_metrics(font, text).width
 }
 
+/// Captures the platform text measurer while a component's runtime is entered.
+/// The returned function can also be called by synchronous JS session queries,
+/// where the Rust reactive runtime is not entered.
+pub fn text_measurer() -> impl Fn(&str, &str) -> Points + Clone {
+    let measure = with_data(|d| d.ambient.measure.clone()).expect("the core sets the text engine");
+    move |font, text| {
+        let font = CanvasFont::parse(font).unwrap_or_default();
+        measure(&font, text).width
+    }
+}
+
 /// How `text` sits on one line in `font` (the CSS `font` shorthand; an
 /// invalid one measures in `10px sans-serif`), by the platform's text
 /// engine: its width and the font's ascent, descent and line height, to
@@ -754,12 +765,20 @@ pub struct KeyOptions {
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
-/// the OS, or for a browser the platform it runs on.
-fn apple_keys() -> bool {
+/// the OS, or for a browser the platform it runs on
+/// ([`crate::keymap::apple_keys`]).
+pub fn apple_keys() -> bool {
     let (os, apple) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| (e.os, e.apple_keyboard));
     crate::keymap::apple_keys(os, apple)
+}
+
+/// [`apple_keys`] where an engine runs, else `None` (as [`try_os`]).
+pub fn try_apple_keys() -> Option<bool> {
+    super::reactive::try_with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .flatten()
+        .map(|env| env.with_untracked(|e| crate::keymap::apple_keys(e.os, e.apple_keyboard)))
 }
 
 /// Runs `handler` when `keystroke` is pressed while the current owner
@@ -845,4 +864,24 @@ pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{element::Runtime, geometry::px};
+
+    #[test]
+    fn captured_text_measurer_works_without_runtime_entry() {
+        let runtime = Runtime::default();
+        runtime.set_measure(Rc::new(|_, text| crate::canvas::TextMetrics {
+            width: px(text.chars().count() as f32),
+            ..Default::default()
+        }));
+        let measure = {
+            let _entered = runtime.enter();
+            text_measurer()
+        };
+        assert_eq!(measure("16px sans-serif", "选择 text"), px(7.0));
+    }
 }

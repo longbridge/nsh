@@ -1282,7 +1282,7 @@ opt-level = 3
                  bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\
                  browser = [\"nsh-platform-web/browser\"]\n\
                  # The development host's: what `nsh test --target web` asks about.\n\
-                 dev = [\"nsh-platform-web/dev\"]\n\n\
+                 dev = [\"nsh-platform-web/dev\", \"nsh-platform-web/base-full\", \"nsh-platform-web/std-zlib\", \"nsh-platform-web/std-crypto\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\nnsh-platform-web = {}\n",
                 self.bin("web"),
@@ -1420,6 +1420,7 @@ opt-level = 3
                 } => source.join("crates/nsh-platform-web/web/nsh.js"),
                 Nsh::Registry => out.join("nsh.js"),
             },
+            syntaxes: crate::runtime::syntaxes_in(&out),
         };
         if !build {
             return Ok((runtime.wasm.exists() && runtime.js.exists()).then_some(runtime));
@@ -1434,7 +1435,9 @@ opt-level = 3
         // nor hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Browser => &["--features", "browser"],
+            crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => {
+                &["--features", "browser"]
+            }
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -1469,37 +1472,18 @@ opt-level = 3
             fs::copy(&js, &runtime.js)
                 .with_context(|| format!("copy {} to {}", js.display(), runtime.js.display()))?;
         }
+        // The syntaxes the module leaves out, as this workspace resolves them.
+        runtime.syntaxes = Some(crate::runtime::write_syntaxes(
+            &self.workspace.join("Cargo.toml"),
+            &out,
+        )?);
         Ok(Some(runtime))
     }
 
     /// The directory Cargo unpacked nsh's crate `name` (from crates.io, at
     /// [`VERSION`]) into for the workspace, as `cargo metadata` reports it.
     fn registry_crate(&self, name: &str) -> anyhow::Result<PathBuf> {
-        let output = Command::new(cargo())
-            .args(["metadata", "--format-version", "1", "--manifest-path"])
-            .arg(self.workspace.join("Cargo.toml"))
-            .output()
-            .context("run cargo metadata")?;
-        if !output.status.success() {
-            bail!(
-                "cargo metadata of {}:\n{}",
-                self.workspace.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        let metadata: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
-        metadata["packages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["name"].as_str() == Some(name) && p["version"].as_str() == Some(VERSION))
-            .and_then(|p| {
-                Path::new(p["manifest_path"].as_str()?)
-                    .parent()
-                    .map(Path::to_path_buf)
-            })
-            .with_context(|| format!("the workspace resolves no {name} {VERSION}"))
+        crate::runtime::package_dir(&self.workspace.join("Cargo.toml"), name, Some(VERSION))
     }
 
     /// The workspace of the app's GPUI development host
@@ -1901,7 +1885,16 @@ opt-level = 3
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
             fs::create_dir_all(&dir)?;
-            install(&lib, &dir.join("libnsh.so"))?;
+            let dest = dir.join("libnsh.so");
+            if dev {
+                install(&lib, &dest)?;
+            } else {
+                // Without its symbol tables and debug info, which APKs
+                // store uncompressed; `symbols/<abi>` keeps them, for
+                // `ndk-stack` and Play Console.
+                let symbols = out.join("symbols").join(&abi).join("libnsh.so");
+                install_stripped(&lib, &dest, &symbols, |from, to| sdk.strip(from, to))?;
+            }
         }
         Ok(out)
     }
@@ -2136,11 +2129,33 @@ fn check_specifiers(crates: &[AppCrate], sets: &[SetDescription]) -> anyhow::Res
 
 /// Copies `from` to `to` when it is newer.
 fn install(from: &Path, to: &Path) -> anyhow::Result<()> {
-    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
-    if modified(to).is_some() && modified(to) >= modified(from) {
+    if up_to_date(to, from) {
         return Ok(());
     }
     fs::copy(from, to).with_context(|| format!("copy {} to {}", from.display(), to.display()))?;
+    Ok(())
+}
+
+/// Whether `file` exists and is no older than `source`.
+fn up_to_date(file: &Path, source: &Path) -> bool {
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    modified(file).is_some() && modified(file) >= modified(source)
+}
+
+/// Installs both release artifacts. Older CLIs copied an unstripped library
+/// to `to`; its timestamp alone cannot establish that stripping has run.
+fn install_stripped(
+    from: &Path,
+    to: &Path,
+    symbols: &Path,
+    strip: impl FnOnce(&Path, &Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    if up_to_date(to, from) && up_to_date(symbols, from) {
+        return Ok(());
+    }
+    fs::create_dir_all(symbols.parent().context("symbols directory")?)?;
+    strip(from, to)?;
+    fs::copy(from, symbols)?;
     Ok(())
 }
 
@@ -2184,7 +2199,7 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
     match kind {
-        crate::runtime::WebKind::Browser => "web",
+        crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => "web",
         crate::runtime::WebKind::Dev => "web-dev",
     }
 }
@@ -2194,6 +2209,56 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{AppCrate, Nsh, RootConfig, RustApp};
+
+    #[test]
+    fn release_libraries_upgrade_old_caches_and_restore_symbols() {
+        use std::{
+            fs,
+            time::{Duration, SystemTime},
+        };
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.nsh")
+            .join(format!("strip-cache-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("linked.so");
+        let dest = dir.join("libnsh.so");
+        let symbols = dir.join("symbols/libnsh.so");
+        fs::write(&source, b"complete library").unwrap();
+        let old = SystemTime::now() - Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        // The old CLI copied the complete library after Cargo linked it.
+        fs::copy(&source, &dest).unwrap();
+        assert!(super::up_to_date(&dest, &source));
+        let strip = |_: &Path, to: &Path| -> anyhow::Result<()> {
+            fs::write(to, b"stripped library")?;
+            Ok(())
+        };
+        super::install_stripped(&source, &dest, &symbols, strip).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"stripped library");
+        assert_eq!(fs::read(&symbols).unwrap(), b"complete library");
+        // A complete cache avoids running the NDK again.
+        super::install_stripped(&source, &dest, &symbols, |_, _| panic!("cache miss")).unwrap();
+        // Losing the symbol backup repairs both artifacts, even with a fresh APK library.
+        fs::remove_file(&symbols).unwrap();
+        super::install_stripped(&source, &dest, &symbols, strip).unwrap();
+        assert_eq!(fs::read(&symbols).unwrap(), b"complete library");
+        // A stale backup must also be refreshed.
+        fs::File::options()
+            .write(true)
+            .open(&symbols)
+            .unwrap()
+            .set_modified(old - Duration::from_secs(60))
+            .unwrap();
+        super::install_stripped(&source, &dest, &symbols, strip).unwrap();
+        assert!(super::up_to_date(&symbols, &source));
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     /// An app in `dir` with `crates` (package, directory), built against
     /// this checkout.

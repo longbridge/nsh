@@ -582,8 +582,8 @@ impl Node {
         }
         // A disabled view still shows its hint, as the desktops' do.
         if self.overlay_watched & overlay::watch::HINT != 0 {
-            events.set(EventKind::HoverIn, true);
-            events.set(EventKind::HoverOut, true);
+            events.set(EventKind::MouseEnter, true);
+            events.set(EventKind::MouseLeave, true);
         }
         events
     }
@@ -1539,17 +1539,10 @@ impl<M: TextEngine> Core<M> {
                 let node = &mut self.nodes[key as usize];
                 let before = node.events;
                 node.events.set(event, enabled);
-                // A listener added after layout still learns the frame.
                 if event == EventKind::Layout && enabled && !before.contains(event) {
-                    let f = node.frame;
-                    if !f.origin.x.0.is_nan() {
-                        self.events.push(crate::element::JsEvent::Event(
-                            id,
-                            event,
-                            EventPayload::Layout(f),
-                        ));
-                    }
+                    self.report_frame(key);
                 }
+                let node = &self.nodes[key as usize];
                 if node.events != before {
                     let relink = node.inline && (pressable(before) || pressable(node.events));
                     self.mark(key, dirty::EVENTS);
@@ -3417,6 +3410,9 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderVisible(v) => c.header_visible = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
+                        ScreenProp::HidesBottomBarWhenPushed(v) => {
+                            c.hides_bottom_bar_when_pushed = v
+                        }
                         ScreenProp::HeaderBackTitle(v) => c.back_title = v,
                         ScreenProp::HeaderBackVisible(v) => c.back_visible = v,
                         ScreenProp::HeaderRightSystemItem(v) => c.right_system_item = v,
@@ -5865,6 +5861,19 @@ impl<M: TextEngine> Core<M> {
             }
             self.nodes[key as usize].children = children;
             self.update_overflow(key);
+        }
+    }
+
+    /// Queues node `key`'s frame for its layout listeners once it was laid
+    /// out: a listener added after layout still learns the frame.
+    fn report_frame(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if !node.frame.origin.x.0.is_nan() {
+            self.events.push(crate::element::JsEvent::Event(
+                node.id,
+                EventKind::Layout,
+                EventPayload::Layout(node.frame),
+            ));
         }
     }
 

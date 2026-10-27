@@ -11,17 +11,18 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
-    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, HoverEvent, Hsla, ImageSource,
-    ListContentStyle, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
+    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
+    MouseEvent, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
 /// writes the signals it captured. It runs under the owner current when it
-/// was made (the component, region or row whose view made it), so what it
-/// makes (signals, animated values, element refs, tasks) is that owner's
-/// and goes with it; once that owner is disposed it no longer runs.
+/// was made (the component, the run of a region or the row whose view made
+/// it), so what it makes (signals, animated values, element refs, tasks) is
+/// that owner's and goes with it; once that owner is disposed it no longer
+/// runs, not even for an event already queued for its node.
 pub struct Listener<E: ?Sized> {
     f: Rc<dyn Fn(&E)>,
     owner: super::Owner,
@@ -38,6 +39,16 @@ impl<E: ?Sized + 'static> Listener<E> {
             f,
             owner: super::Owner::current_or_detached(),
         }
+    }
+
+    /// Whether both listeners belong to the same region run or component.
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        self.owner == other.owner
+    }
+
+    /// Whether this is the same installed callback (including its owner).
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        self.same_owner(other) && Rc::ptr_eq(&self.f, &other.f)
     }
 
     /// Calls it with `event`, under its owner; not once that owner is
@@ -964,6 +975,48 @@ impl JsValue for Style {
     }
 }
 
+/// The style of a component's part that shows or edits text (a number
+/// input's field): a [`Style`] whose TypeScript type takes the text styles
+/// too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`,
+/// `placeholderColor`), as the part is a text or an input. Its setter takes
+/// the typed styles' closure, as a `Style`'s does; the part applies it with
+/// [`Element::inline_style`] (it is `Into<Style>`).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TextPartStyle(pub Style);
+
+impl From<Style> for TextPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for TextPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<TextPartStyle> for Style {
+    fn from(style: TextPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for TextPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
 impl<T: Element> Styled for T {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.node().style
@@ -1197,37 +1250,32 @@ pub trait Interactive: Element {
         )
     }
 
-    /// The mouse came over it or an element inside it (never on touches).
-    fn on_hover_in<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The mouse came over it or an element inside it (never on touches):
+    /// where (the DOM's `mouseenter`).
+    fn on_mouse_enter<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
-            EventKind::HoverIn,
-            events::typed(listener.into_listener(), events::unit),
+            EventKind::MouseEnter,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
-    /// The mouse left it and the elements inside it, or the window.
-    fn on_hover_out<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The mouse left it and the elements inside it, or the window: where
+    /// it was last (the DOM's `mouseleave`).
+    fn on_mouse_leave<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
-            EventKind::HoverOut,
-            events::typed(listener.into_listener(), events::unit),
+            EventKind::MouseLeave,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
-    /// The mouse moved over it (or an element inside it) with no button
-    /// down: where, in it and in its root view, at most once per frame.
-    fn on_hover_move<M>(self, listener: impl IntoListener<HoverEvent, M>) -> Self {
-        self.on(
-            EventKind::HoverMove,
-            events::typed(listener.into_listener(), events::hover),
-        )
-    }
-
-    /// The mouse moved inside it, including while dragging: local coordinates
-    /// in points, at most once per frame (desktops and web).
-    fn on_mouse_move<M>(self, listener: impl IntoListener<crate::Point<crate::Points>, M>) -> Self {
+    /// The mouse moved over it (or an element inside it), with or without
+    /// a button down ([`MouseEvent::pressed_button`]), or a modifier key
+    /// changed while it rests there with none down: where, in it and in its
+    /// root view, at most once per frame.
+    fn on_mouse_move<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
             EventKind::MouseMove,
-            events::typed(listener.into_listener(), events::mouse_position),
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 

@@ -133,7 +133,8 @@ impl Native {
 #[derive(Default)]
 struct Gestures {
     press: Option<Retained<PressRecognizer>>,
-    /// Reports `hover:` and the hover events (pointers).
+    /// Reports `hover:` and the mouse events (pointers): `onMouseEnter`,
+    /// `onMouseMove`, `onMouseLeave`.
     hover: Option<Retained<objc2_ui_kit::UIHoverGestureRecognizer>>,
     /// `onContextMenu`: secondary clicks (iPad pointers, Mac Catalyst's
     /// mouse).
@@ -561,6 +562,8 @@ pub(crate) struct Mounter {
     hosts: rustc_hash::FxHashMap<NodeId, NodeId>,
     /// Stacks whose screens changed in the current batch.
     dirty_stacks: Vec<NodeId>,
+    /// A retained tab changed visibility; sync the newly visible stack.
+    bottom_bar_dirty: bool,
     /// Stacks whose screens changed during a push or pop transition: they
     /// catch up when it ends (UIKit breaks transitions that start while
     /// another one is running).
@@ -661,6 +664,7 @@ impl Mounter {
             shaders: crate::shader::Shaders::new(&target_for_link),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
+            bottom_bar_dirty: false,
             deferred_stacks: Vec::new(),
             dirty_headers: Vec::new(),
             dirty_modals: Vec::new(),
@@ -1389,7 +1393,11 @@ impl Mounter {
                     ..
                 }) = self.slot_mut(id)
                 {
+                    let hides = config.hides_bottom_bar_when_pushed;
                     screen.config = *config;
+                    // Before the push that shows it: `willShow` reads this the
+                    // moment the screen goes on the stack.
+                    screen.set_hides_bottom_bar(hides);
                     self.dirty_headers.push(id);
                     if let Some(&stack) = self.hosts.get(&id) {
                         self.dirty_stacks.push(stack);
@@ -2077,6 +2085,12 @@ impl Mounter {
     fn set_view_style(&mut self, id: NodeId, style: ViewStyle) {
         let mtm = self.mtm;
         let target = self.target.clone();
+        if self
+            .slot(id)
+            .is_some_and(|s| s.style.hidden != style.hidden)
+        {
+            self.bottom_bar_dirty = true;
+        }
         let Some(s) = self.slot_mut(id) else { return };
         let view = s.native.view().retain();
         let layer = view.layer();
@@ -2215,7 +2229,8 @@ impl Mounter {
     }
 
     /// A pointer (an iPad's, a Mac's mouse) entered (`Began`), moved over
-    /// or left view `id`, at `in_window` (the window's coordinates).
+    /// (`Changed`) or left view `id`, at `in_window` (the window's
+    /// coordinates): `onMouseEnter`, `onMouseMove`, `onMouseLeave`.
     pub(crate) fn hover(
         &mut self,
         id: NodeId,
@@ -2231,30 +2246,30 @@ impl Mounter {
         let Some(events) = self.slot(id).map(|s| s.events) else {
             return;
         };
-        let changed = match state {
-            UIGestureRecognizerState::Began => Some(EventKind::HoverIn),
+        // The movement that brings the pointer in is a move too, as on the
+        // desktops and in the DOM.
+        let kinds: &[EventKind] = match state {
+            UIGestureRecognizerState::Began => &[EventKind::MouseEnter, EventKind::MouseMove],
+            UIGestureRecognizerState::Changed => &[EventKind::MouseMove],
             UIGestureRecognizerState::Ended | UIGestureRecognizerState::Cancelled => {
-                Some(EventKind::HoverOut)
+                &[EventKind::MouseLeave]
             }
-            _ => None,
+            _ => return,
         };
-        if let Some(kind) = changed.filter(|k| events.contains(*k)) {
-            self.control.dispatch_event(id, kind, EventPayload::None);
-        }
-        if !on || !events.contains(EventKind::HoverMove) {
+        if !kinds.iter().any(|&k| events.contains(k)) {
             return;
         }
         let Some(view) = self.slot(id).map(|s| s.native.view().retain()) else {
             return;
         };
         let (position, page_position) = self.pointer_positions(&view, in_window);
-        let event = nsh_core::HoverEvent {
-            position,
-            page_position,
-            modifiers: key_modifiers(modifiers),
-        };
-        self.control
-            .dispatch_event(id, EventKind::HoverMove, EventPayload::Hover(event));
+        // A hover recognizer only reports a pointer with no button down.
+        let event =
+            nsh_core::MouseEvent::new(position, page_position, key_modifiers(modifiers), None);
+        for &kind in kinds.iter().filter(|&&k| events.contains(k)) {
+            self.control
+                .dispatch_event(id, kind, EventPayload::Mouse(event));
+        }
     }
 
     /// A secondary click on view `id`, at `in_window` (the window's
@@ -2750,10 +2765,7 @@ impl Mounter {
             press.set_own(own_press, handles_press);
             press.set_long_press_delay(slot.long_press_delay);
         }
-        let wants_hover = slot.tracked & nsh_core::tailwind::state::HOVERED != 0
-            || events.contains(EventKind::HoverIn)
-            || events.contains(EventKind::HoverOut)
-            || events.contains(EventKind::HoverMove);
+        let wants_hover = nsh_core::input::hoverable(slot.tracked, events);
         toggle(&mut slot.gestures.hover, wants_hover, view, || {
             // SAFETY: `handleHover:` is implemented by the target, which
             // outlives the recognizer.
@@ -3003,12 +3015,22 @@ impl Mounter {
                     _ => None,
                 });
             stack.reconcile(&screens, leaving);
+            // A page whose options arrive while it is already on screen: the
+            // stack itself does not change, and the bar still has to follow.
+            stack.sync_bottom_bar();
             if let Some(Slot {
                 native: Native::Stack(stack),
                 ..
             }) = self.slot_mut(id)
             {
                 stack.contain();
+            }
+        }
+        if std::mem::take(&mut self.bottom_bar_dirty) {
+            for slot in self.views.iter().flatten() {
+                if let Native::Stack(stack) = &slot.native {
+                    stack.sync_bottom_bar();
+                }
             }
         }
         let mut headers = std::mem::take(&mut self.dirty_headers);

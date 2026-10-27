@@ -117,6 +117,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
+  check the entire ancestor chain before a stack updates a shared system tab bar, including from transition
+  callbacks. Visibility changes synchronize the newly visible stack after the batch. `TabBar.hidden` and the
+  visible stack's request are independent reasons: each updates its own state, and either keeps the bar hidden.
+
 - **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
   the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
   `system_tab_bar.rs`, fill the immediate host's bounds exactly during layout, and report intrinsic height with

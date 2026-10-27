@@ -1197,12 +1197,18 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
             obj.set("clickCount", *clicks)?;
         }
-        EventPayload::Hover(nsh_core::HoverEvent {
-            position,
-            page_position,
-            modifiers,
-        })
-        | EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+        EventPayload::Mouse(e) => {
+            obj.set("position", point_object(cx, e.position)?)?;
+            obj.set("pagePosition", point_object(cx, e.page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, &e.modifiers)?)?;
+            // `null` with no button down, as declared (an absent field
+            // would read `undefined`).
+            match e.pressed_button {
+                Some(button) => obj.set("pressedButton", button.name())?,
+                None => obj.set("pressedButton", Value::new_null(cx.clone()))?,
+            }
+        }
+        EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
             position,
             page_position,
             modifiers,
@@ -1211,12 +1217,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("pagePosition", point_object(cx, *page_position)?)?;
             obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
         }
-        EventPayload::FileDrop(uris) => {
+        EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
                 list.set(index, uri.as_str())?;
             }
             obj.set("uris", list)?;
+            if let EventPayload::FileDropAt { page_position, .. } = payload {
+                obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            }
         }
         // The bytes cross natively: each file is a `File` over them.
         EventPayload::Paste(paste) => {
@@ -2093,19 +2102,20 @@ const report = (v) => text(String(v));
     }
 
     #[test]
-    fn hover_payload_has_both_positions_and_the_modifiers() {
+    fn mouse_payload_has_both_positions_the_modifiers_and_the_button() {
         let host = Host::new().unwrap();
-        let event = nsh_core::HoverEvent {
-            position: point(px(3.0), px(4.5)),
-            page_position: point(px(30.0), px(40.5)),
-            modifiers: nsh_core::keymap::Modifiers {
+        let event = nsh_core::MouseEvent::new(
+            point(px(3.0), px(4.5)),
+            point(px(30.0), px(40.5)),
+            nsh_core::keymap::Modifiers {
                 shift: true,
                 cmd: true,
                 ..Default::default()
             },
-        };
+            Some(nsh_core::MouseButton::Left),
+        );
         host.cx.with(|cx| {
-            let value = payload_object(&cx, &EventPayload::Hover(event)).unwrap();
+            let value = payload_object(&cx, &EventPayload::Mouse(event)).unwrap();
             let obj = value.as_object().unwrap();
             let num = |o: &str, k: &str| {
                 let o: rquickjs::Object = obj.get(o).unwrap();
@@ -2126,6 +2136,11 @@ const report = (v) => text(String(v));
             );
             assert!(flag("shift") && flag("platform"));
             assert!(!flag("alt") && !flag("control"));
+            assert_eq!(obj.get::<_, String>("pressedButton").unwrap(), "left");
+            let none = nsh_core::MouseEvent::default();
+            let value = payload_object(&cx, &EventPayload::Mouse(none)).unwrap();
+            let pressed: Value = value.as_object().unwrap().get("pressedButton").unwrap();
+            assert!(pressed.is_null());
         });
     }
 

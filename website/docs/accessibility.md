@@ -70,6 +70,8 @@ The most useful ones:
 - `"switch"`, `"checkbox"`, `"radio"` with `accessibilityState.checked`.
 - `"adjustable"` for sliders and steppers, with `accessibilityValue` and the `increment` / `decrement` actions
   (each thumb of a [`Slider`](../elements/slider.md) is one).
+- `"spinbutton"` for a field that holds a number the user can also step, with the same value and actions (the
+  field of a [`NumberInput`](../elements/number-input.md)).
 - `"image"` for meaningful images, with a label; decorative images should be hidden instead.
 
 ```rust tabs

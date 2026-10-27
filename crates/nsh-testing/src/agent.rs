@@ -937,6 +937,11 @@ pub trait Native: Send + Sync {
         let _ = at;
         Err("this platform has no mouse".into())
     }
+    /// The input that has the keyboard focus, where the platform can tell:
+    /// a paste into it needs no press (one would move its caret).
+    fn focused(&self) -> Option<NodeId> {
+        None
+    }
     /// Pastes `content` into the focused input, as the user's paste does
     /// with it on the clipboard (the system's clipboard stays as it was).
     fn paste(&self, content: &nsh_core::PasteEvent) -> Result<(), String> {
@@ -964,6 +969,32 @@ pub trait Native: Send + Sync {
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         let _ = keys;
         Err("this platform's test agent presses no hardware keys: run the test headless".into())
+    }
+    /// Drags from `from` to `to` as [`Native::drag`] does, keeping the
+    /// button down until [`Native::drop_at`].
+    fn drag_and_hold(&self, from: Point<Points>, to: Point<Points>) -> Result<(), String> {
+        let _ = (from, to);
+        Err("`dragAndHold` runs headless and on Linux for now".into())
+    }
+    /// Drops local files (`file:` URLs) at `at`, as a file manager's drag
+    /// does.
+    fn drop_files(&self, at: Point<Points>, uris: Vec<String>) -> Result<(), String> {
+        let _ = (at, uris);
+        Err("`dropFiles` runs headless and on Linux for now".into())
+    }
+    /// Lets go of the button [`Native::drag_and_hold`] holds, at `at`.
+    fn drop_at(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("`drop` runs headless and on Linux for now".into())
+    }
+    /// Holds modifier keys down (`down`) or lets go of them: the presses,
+    /// drags and hovers until then carry them. One that cannot refuses it.
+    fn hold_keys(&self, keys: &str, down: bool) -> Result<(), String> {
+        let _ = (keys, down);
+        Err(
+            "holding keys (`keyboard.down` / `keyboard.up`) runs headless and on Linux for now"
+                .into(),
+        )
     }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);
@@ -1168,6 +1199,8 @@ pub struct Agent {
     native: Box<dyn Native>,
     /// The window's size the scene was told last.
     viewport: Mutex<Option<Size<Points>>>,
+    /// Where a `dragAndHold` left the pointer down.
+    held: Mutex<Option<Point<Points>>>,
 }
 
 impl Agent {
@@ -1177,6 +1210,7 @@ impl Agent {
             scene,
             native,
             viewport: Mutex::new(None),
+            held: Mutex::new(None),
         }
     }
 
@@ -1237,6 +1271,18 @@ impl Agent {
                     .and_then(|()| self.settled()),
             ),
             TestStep::OpenedUrls => self.scene.opened_urls().map(Value::from),
+            TestStep::DragAndHold { selector, x, y } => done(self.drag_and_hold(&selector, x, y)),
+            TestStep::Drop => done(self.drop_held()),
+            TestStep::DropFiles { selector, uris } => done(
+                self.find(&selector, "view", PickTarget::View)
+                    .and_then(|(_, at)| self.native.drop_files(at, uris))
+                    .and_then(|()| self.settled()),
+            ),
+            TestStep::HoldKeys { keys, down } => done(
+                self.native
+                    .hold_keys(&keys, down)
+                    .and_then(|()| self.settled()),
+            ),
             TestStep::PressKey { keys } => {
                 done(self.native.press_keys(&keys).and_then(|()| self.settled()))
             }
@@ -1665,7 +1711,12 @@ impl Agent {
     }
 
     fn paste(&self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
-        self.focus(selector)?;
+        // As the user pastes into the field they are in: a press first
+        // would move its caret, collapsing a selection the paste replaces.
+        let (id, _) = self.find(selector, "input", PickTarget::Input)?;
+        if self.native.focused() != Some(id) {
+            self.focus(selector)?;
+        }
         self.native.paste(content)?;
         self.settled()
     }
@@ -1710,6 +1761,26 @@ impl Agent {
         }
         let (_, at) = self.find(selector, "view", PickTarget::View)?;
         self.native.hover(at)?;
+        self.settled()
+    }
+
+    fn drag_and_hold(&self, selector: &str, x: f32, y: f32) -> Result<(), String> {
+        self.drop_held().ok();
+        let (_, at) = self.find(selector, "view", PickTarget::View)?;
+        let to = Point::new(at.x + Points(x), at.y + Points(y));
+        self.native.drag_and_hold(at, to)?;
+        *self.held.lock().unwrap() = Some(to);
+        self.settled()
+    }
+
+    fn drop_held(&self) -> Result<(), String> {
+        let at = self
+            .held
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or("`drop()` comes after `dragAndHold`: no pointer is down")?;
+        self.native.drop_at(at)?;
         self.settled()
     }
 

@@ -57,6 +57,39 @@ pub(super) fn trace(mut p: Painter, points: &[Point<Points>], curve: Curve) -> P
     p
 }
 
+/// Records the path [`trace`] records through `points`, the other way:
+/// from the last point (already moved or lined to) back to the first, so
+/// the bottom edge of a band follows the same curve as its top edge (d3's
+/// area traces its `y0` line in reverse with the area's curve).
+pub(super) fn trace_back(mut p: Painter, points: &[Point<Points>], curve: Curve) -> Painter {
+    let n = points.len();
+    match curve {
+        Curve::Linear => {
+            for q in points[..n - 1].iter().rev() {
+                p = p.line_to(q.x, q.y);
+            }
+        }
+        Curve::StepAfter => {
+            for w in points.windows(2).rev() {
+                p = p.line_to(w[1].x, w[0].y).line_to(w[0].x, w[0].y);
+            }
+        }
+        // `trace`'s cubics, each from its end to its start: the same
+        // control points, in the other order.
+        Curve::Natural => {
+            for i in (0..n - 1).rev() {
+                let p0 = points[i.saturating_sub(1)];
+                let (p1, p2) = (points[i], points[i + 1]);
+                let p3 = points[(i + 2).min(n - 1)];
+                let c1 = point(p1.x + (p2.x - p0.x) / 6.0, p1.y + (p2.y - p0.y) / 6.0);
+                let c2 = point(p2.x - (p3.x - p1.x) / 6.0, p2.y - (p3.y - p1.y) / 6.0);
+                p = p.bezier_curve_to(c2, c1, p1);
+            }
+        }
+    }
+    p
+}
+
 /// The props of [`Line`].
 #[derive(Debug, Clone, PartialEq, Props)]
 #[props(generic)]
@@ -117,7 +150,7 @@ pub fn Line(props: LineProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         style: props.hover_dot_style,
     };
     let series = plot.map(|plot| {
-        let series = Series::new(plot, props.data, props.x, props.y);
+        let series = Series::new(plot, props.data, props.x, props.y, || None);
         series.join(plot, || None, hover_dot);
         series
     });
