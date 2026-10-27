@@ -7,7 +7,7 @@ when it exits. It loads source bundles directly or connects to the CLI's develop
 
 ```sh
 cargo build -p nsh-cli -p nsh-tui-host
-./target/debug/nsh run examples/tui-gallery --target tui
+./target/debug/nsh run examples/gallery --target tui
 ./target/debug/nsh run examples/counter --target tui --points-per-cell 8x16
 ```
 
@@ -107,23 +107,14 @@ expect(picture.rows[0][0].symbol).toBe("A");
 
 ## The example app
 
-`examples/tui-gallery` is the reference for how an app designed for the Terminal idiom looks; the platform
-restyles nothing, so the look is the app's own, after Emacs's dired, magit and ibuffer:
-
-- Dense and text first: sizes in whole Cells (8 points across, 16 down), at most one Cell of padding, one blank
-  row between sections.
-- Section headings are bold text, not bordered cards; a header line names the page, a rule of `─` below it.
-- Buttons are text, `[ OK ]`; switches `[on ]` / `[off]`, checkboxes `[x]`, radios `(*)`, levels `━━━──`.
-- One accent color marks what is selected or active (a selected row also gets a `▸` marker); green and red only
-  carry a value's meaning.
-- Separators are drawn with line characters (`─`, `│`, borders); there are no filled blocks. The pages set no
-  background, so the terminal's own shows through, and the palette follows the light or dark appearance. The only
-  fill is a dialog's (`nsh/base`'s `Dialog`, so the platform's modal focus and Esc apply), which has to hide the
-  rows under it.
+The terminal's demo is the official `examples/gallery`, the same code every platform runs, so a page can be
+compared side by side with the others. Its look is the gallery's own (`examples/nsh-gallery-ui`); the terminal
+backend restyles nothing and only projects it to Cells.
 
 ```sh
-./target/debug/nsh build examples/tui-gallery --out .nsh/tui-gallery
-./target/debug/nsh-tui-host --bundle .nsh/tui-gallery/bundle.js
+./target/debug/nsh run examples/gallery --target tui
+./target/debug/nsh build examples/gallery --out .nsh/gallery
+./target/debug/nsh-tui-host --bundle .nsh/gallery/bundle.js
 ```
 
 ## Architecture
@@ -473,8 +464,8 @@ clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess 
 validation. These are additional ticket-02 seams. The test-agent acceptance seam is `nsh test --target tui`: the existing
 counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapshots after a press, and startup errors).
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
-engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry imports the
-unchanged `examples/tui-gallery` Form and checks invalid fields and successful account creation.
+engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
+its own, checks invalid fields and successful account creation.
 The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
