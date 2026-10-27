@@ -14,6 +14,8 @@ use crate::{Handled, key_scheme::Action, mount::Mounter, render::Geometry};
 #[derive(Default)]
 pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
+    /// The text of the last search match outside any control; traversal continues from it.
+    pub(crate) search_point: Option<NodeId>,
     modals: Vec<ModalFocus>,
     screens: Vec<NodeId>,
     screen_focus: Vec<(NodeId, Option<NodeId>)>,
@@ -93,6 +95,7 @@ impl Keyboard {
     ) {
         let old = self.focused;
         self.focused = id;
+        self.search_point = None;
         if old != id {
             if let Some(field) = old
                 .and_then(|id| tree.get_mut(id))
@@ -139,6 +142,28 @@ impl Keyboard {
             if let Some(id) = id {
                 control.dispatch_event(id, EventKind::Focus, EventPayload::None);
             }
+        }
+    }
+
+    /// Focuses the control around a search match, or none, keeping the match's text as the search point.
+    pub(crate) fn focus_match(
+        &mut self,
+        text: NodeId,
+        tree: &mut Mounter,
+        geometry: &[Geometry],
+        control: &EngineControl,
+    ) {
+        self.pending_scroll_focus = None;
+        let candidates = self.candidates(tree, geometry);
+        let mut ancestor = Some(text);
+        while let Some(id) = ancestor
+            && !candidates.iter().any(|g| g.id == id)
+        {
+            ancestor = tree.get(id).and_then(|view| view.parent);
+        }
+        self.focus(ancestor, tree, control);
+        if ancestor.is_none() {
+            self.search_point = Some(text);
         }
     }
 
@@ -530,8 +555,20 @@ impl Keyboard {
                     };
                 }
                 let current = candidates.iter().position(|g| Some(g.id) == self.focused);
-                let next = match action {
-                    Action::Next | Action::Previous => nsh_core::input::tab_stop(
+                let point = self
+                    .search_point
+                    .and_then(|id| geometry.iter().find(|g| g.id == id))
+                    .map(|g| (g.bounds.top, g.bounds.left));
+                let next = match (action, point) {
+                    (Action::Next, Some(point)) if current.is_none() => candidates
+                        .iter()
+                        .position(|g| (g.bounds.top, g.bounds.left) >= point)
+                        .or(Some(0)),
+                    (Action::Previous, Some(point)) if current.is_none() => candidates
+                        .iter()
+                        .rposition(|g| (g.bounds.top, g.bounds.left) < point)
+                        .or(Some(candidates.len() - 1)),
+                    (Action::Next | Action::Previous, _) => nsh_core::input::tab_stop(
                         current,
                         candidates.len(),
                         matches!(action, Action::Previous),
@@ -677,6 +714,7 @@ impl Keyboard {
                 tree.exit = true;
                 Handled::Yes
             }
+            Action::Search(_) => Handled::Ignored,
         }
     }
 }
@@ -714,10 +752,19 @@ pub(crate) fn move_scroll(
 }
 
 fn reveal(tree: &mut Mounter, geometry: &[Geometry], id: NodeId) {
-    let Some(target) = geometry.iter().find(|g| g.id == id) else {
-        return;
-    };
-    let mut origin = target.frame.origin;
+    if let Some(target) = geometry.iter().find(|g| g.id == id) {
+        reveal_frame(tree, geometry, id, target.frame);
+    }
+}
+
+/// Scrolls the Scroll views around `id` until `frame`, in the surface's points, is in sight.
+pub(crate) fn reveal_frame(
+    tree: &mut Mounter,
+    geometry: &[Geometry],
+    id: NodeId,
+    frame: nsh_core::Bounds<nsh_core::Points>,
+) {
+    let mut origin = frame.origin;
     let mut parent = tree.get(id).and_then(|view| view.parent);
     while let Some(id) = parent {
         let view = tree.get(id).unwrap();
@@ -733,14 +780,14 @@ fn reveal(tree: &mut Mounter, geometry: &[Geometry], id: NodeId) {
         let (start, len, viewport, offset) = if horizontal {
             (
                 relative.x,
-                target.frame.size.width,
+                frame.size.width,
                 view.frame.size.width,
                 scroll.x,
             )
         } else {
             (
                 relative.y,
-                target.frame.size.height,
+                frame.size.height,
                 view.frame.size.height,
                 scroll.y,
             )
@@ -757,7 +804,7 @@ fn reveal(tree: &mut Mounter, geometry: &[Geometry], id: NodeId) {
     }
 }
 
-fn input_scope(tree: &Mounter, mut id: NodeId) -> NodeId {
+pub(crate) fn input_scope(tree: &Mounter, mut id: NodeId) -> NodeId {
     while let Some(view) = tree.get(id) {
         if view.kind == ViewKind::Modal {
             return id;

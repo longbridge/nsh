@@ -5,6 +5,7 @@
 //! into the area supplied by the app. [`CellTextEngine`] measures on the
 //! same fixed grid that drawing and input use.
 
+mod animation;
 mod app;
 mod canvas;
 mod geometry;
@@ -17,6 +18,7 @@ mod navigation;
 mod render;
 #[cfg(feature = "run-app")]
 mod run;
+mod search;
 mod selection;
 mod surface;
 mod text;

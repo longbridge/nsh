@@ -3,6 +3,8 @@
 mod text;
 mod text_input;
 
+#[cfg(feature = "js")]
+mod animation;
 mod app;
 
 mod canvas;
@@ -13,3 +15,4 @@ mod navigation;
 mod page_background;
 mod pointer;
 mod scroll;
+mod search;

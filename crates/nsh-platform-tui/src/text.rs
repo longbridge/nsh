@@ -28,11 +28,11 @@ impl CellTextEngine {
 }
 
 #[derive(Clone)]
-struct Glyph {
-    text: Arc<str>,
+pub(crate) struct Glyph {
+    pub(crate) text: Arc<str>,
     start: u32,
     end: u32,
-    width: usize,
+    pub(crate) width: usize,
     style: Style,
 }
 
@@ -46,8 +46,15 @@ pub struct PreparedText {
 
 pub(crate) struct CellLayout {
     pub(crate) paragraph: Paragraph<'static>,
+    /// The displayed rows, kept for searching the text on screen.
+    pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
     pub(crate) glyphs: Vec<(nsh_core::Bounds<Points>, std::ops::Range<u32>)>,
+}
+
+pub(crate) struct Row {
+    pub(crate) indent: usize,
+    pub(crate) glyphs: Vec<Glyph>,
 }
 
 fn glyphs(text: &AttributedText) -> Vec<Glyph> {
@@ -196,6 +203,7 @@ impl TextEngine for CellTextEngine {
         let glyphs = &text.glyphs;
         let text = &text.text;
         let mut lines = Vec::new();
+        let mut displayed = Vec::new();
         let mut metrics = Vec::new();
         let mut selection_glyphs = Vec::new();
         let mut offset = 0;
@@ -249,13 +257,18 @@ impl TextEngine for CellTextEngine {
                 spans.push(Span::raw(" ".repeat(indent)));
             }
             spans.extend(
-                row.into_iter()
+                row.iter()
                     .map(|g| Span::styled(g.text.to_string(), g.style)),
             );
             lines.push(Line::from(spans));
+            displayed.push(Row {
+                indent,
+                glyphs: row,
+            });
         }
         TextLayout(Arc::new(CellLayout {
             paragraph: Paragraph::new(lines),
+            rows: displayed,
             metrics,
             glyphs: selection_glyphs,
         }))

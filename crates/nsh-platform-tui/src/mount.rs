@@ -131,7 +131,15 @@ impl Mounter {
                         view.gestures = values;
                     }
                 }
-                MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+                MountItem::Animation(_) | MountItem::LayoutAnimation(_) => {}
+                MountItem::AnimationBindings { id, .. } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.animated = Default::default();
+                        if let Some(canvas) = &mut view.canvas {
+                            canvas.args.clear();
+                        }
+                    }
+                }
                 MountItem::Create { id, kind } => {
                     if !matches!(
                         kind,
@@ -400,6 +408,9 @@ impl Mounter {
             }
         }
         crate::navigation::end_batch(self);
+    }
+
+    pub(crate) fn collect_page_backgrounds(&mut self) {
         self.page_backgrounds.clear();
         collect_page_backgrounds(&self.views, ROOT_ID, &mut self.page_backgrounds);
     }
@@ -413,7 +424,10 @@ fn collect_page_backgrounds(views: &[Option<NshView>], id: NodeId, colors: &mut 
         || view.parent == Some(ROOT_ID)
         || matches!(view.kind, ViewKind::Screen | ViewKind::Modal)
     {
-        let fill = view.style.background_color;
+        let fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
         if !fill.is_transparent() && !colors.contains(&fill) {
             colors.push(fill);
         }
