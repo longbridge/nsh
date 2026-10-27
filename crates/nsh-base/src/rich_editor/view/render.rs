@@ -422,9 +422,9 @@ fn marker_kind(node: &Node) -> Option<ListMarker> {
 }
 
 /// The text of `it`'s marker: a bullet by its depth among bulleted lists
-/// (disc, circle, square, as a browser draws them), or its number from
+/// (disc, circle, square, around again deeper), or its number from
 /// the list's start (`extra.listMarkerStart` names that attribute,
-/// `order` by default).
+/// `order` by default; 1., a., i. by depth).
 fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     let state = rv.st.borrow();
     let at = state.doc().resolve(it.pos).ok()?;
@@ -439,22 +439,66 @@ fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
                 .and_then(Value::as_str)
                 .unwrap_or("start");
             let start = list.attrs().get(attr).and_then(Value::as_i64).unwrap_or(1);
-            Some(format!("{}.", start + at.index(at.depth) as i64))
+            let n = start + at.index(at.depth) as i64;
+            // Nested numbered lists count 1., a., i. in turn, as Google Docs
+            // and Notion do, so each level reads apart.
+            let depth = (0..at.depth)
+                .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Ordered))
+                .count();
+            let label = match (depth % 3, n) {
+                (1, 1..) => alpha(n as u64),
+                (2, 1..) => roman(n as u64),
+                _ => n.to_string(),
+            };
+            Some(format!("{label}."))
         }
         ListMarker::Bullet => {
             let depth = (0..at.depth)
                 .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Bullet))
                 .count();
-            Some(
-                match depth {
-                    0 => "•",
-                    1 => "◦",
-                    _ => "▪",
-                }
-                .to_owned(),
-            )
+            // Disc, circle, square, and around again deeper down.
+            Some(["•", "◦", "▪"][depth % 3].to_owned())
         }
     }
+}
+
+/// `n` in lower-case letters: a … z, aa, ab, ….
+fn alpha(mut n: u64) -> String {
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push(b'a' + (n % 26) as u8);
+        n /= 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// `n` in lower-case Roman numerals.
+fn roman(mut n: u64) -> String {
+    const DIGITS: [(u64, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut out = String::new();
+    for (value, digits) in DIGITS {
+        while n >= value {
+            out.push_str(digits);
+            n -= value;
+        }
+    }
+    out
 }
 
 /// A list item's marker: in the indent before its content, its end
@@ -1333,5 +1377,19 @@ mod tests {
         let inline = inline_of(&p, 1, &[]);
         assert_eq!(inline.pieces, [Piece::Filler]);
         assert_eq!(inline.map.to_text(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::{alpha, roman};
+
+    #[test]
+    fn nested_numbers_count_in_letters_and_roman_numerals() {
+        assert_eq!(alpha(1), "a");
+        assert_eq!(alpha(26), "z");
+        assert_eq!(alpha(28), "ab");
+        assert_eq!(roman(4), "iv");
+        assert_eq!(roman(14), "xiv");
     }
 }

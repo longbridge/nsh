@@ -66,7 +66,7 @@ pub struct RichEditorClasses {
     /// A node a node selection holds (after its node's classes).
     #[prop(skip_none)]
     pub selected_node: Option<SharedString>,
-    /// The marker of a list's item (`•`, `◦`, `▪` by depth, or `1.`), for
+    /// The marker of a list's item (`•`, `◦`, `▪` by depth, or `1.`, `a.`, `i.`), for
     /// lists whose node spec's `extra.listMarker` is `"bullet"` or
     /// `"ordered"`: placed in the indent before the item, its end against
     /// it (in the list's indent, the list's node classes', as a browser
