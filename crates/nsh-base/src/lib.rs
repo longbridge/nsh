@@ -1,6 +1,6 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a
+//! controls (`Button`, `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
 //! `RadioGroup`, `Slider`, `Switch`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
@@ -21,6 +21,7 @@ mod button;
 mod calendar;
 mod checkbox;
 mod collapsible;
+mod color_picker;
 mod combobox;
 mod data_table;
 mod date_picker;
@@ -77,6 +78,13 @@ pub use crate::{
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
+    color_picker::{
+        ColorArea, ColorAreaElement, ColorAreaProps, ColorChannel, ColorField, ColorFieldElement,
+        ColorFieldProps, ColorFormat, ColorPicker, ColorPickerElement, ColorPickerEvent,
+        ColorPickerProps, ColorSlider, ColorSliderElement, ColorSliderProps, ColorSpace,
+        ColorSwatch, ColorSwatchElement, ColorSwatchEvent, ColorSwatchProps, color_area,
+        color_field, color_picker, color_slider, color_swatch,
+    },
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
@@ -207,7 +215,8 @@ pub mod parts {
     use nsh_core::element::Registry;
 
     use crate::{
-        AlertDialog, Button, Calendar, Checkbox, Collapsible, Combobox, ContextMenu, DataTable,
+        AlertDialog, Button, Calendar, Checkbox, Collapsible, ColorArea, ColorField, ColorPicker,
+        ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable,
         DatePicker, DiffView, DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput,
         OtpInput, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
         Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
@@ -233,7 +242,7 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// checkboxes, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
+    /// checkboxes, color pickers, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
     /// menus, popovers, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
@@ -251,6 +260,11 @@ pub mod parts {
             .register::<Collapsible>()
             .register::<DatePicker>()
             .register::<Combobox>()
+            .register::<ColorPicker>()
+            .register::<ColorArea>()
+            .register::<ColorSlider>()
+            .register::<ColorField>()
+            .register::<ColorSwatch>()
             .register::<Select>()
             .register::<NumberInput>()
             .register::<OtpInput>()
@@ -350,6 +364,11 @@ mod tests {
                 "Calendar",
                 "Checkbox",
                 "Collapsible",
+                "ColorArea",
+                "ColorField",
+                "ColorPicker",
+                "ColorSlider",
+                "ColorSwatch",
                 "Combobox",
                 "ContextMenu",
                 "DataTable",

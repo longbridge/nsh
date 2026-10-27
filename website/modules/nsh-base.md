@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField` and `ColorSwatch`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -25,7 +25,8 @@ from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 
 ```rust tabs
 use nsh_base::{
-    MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog, diff_view, dock_area, editor,
+    MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, color_area, color_field, color_picker,
+    color_slider, color_swatch, dialog, diff_view, dock_area, editor,
     calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, v_resizable,
 };
 ```
@@ -36,6 +37,11 @@ import {
   Button,
   Checkbox,
   Collapsible,
+  ColorArea,
+  ColorField,
+  ColorPicker,
+  ColorSlider,
+  ColorSwatch,
   ContextMenu,
   createNavStack,
   DataTable,
@@ -91,6 +97,14 @@ import type {
   ButtonProps,
   CheckboxProps,
   CollapsibleProps,
+  ColorAreaProps,
+  ColorChannel,
+  ColorFieldProps,
+  ColorFormat,
+  ColorPickerProps,
+  ColorSliderProps,
+  ColorSpace,
+  ColorSwatchProps,
   DialogChangeReason,
   DataTableColumn,
   DataTableProps,
@@ -183,6 +197,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`NumberInput`](../elements/number-input.md) | `number_input()` | A number typed in a field or stepped with buttons and keys; the app owns `value` (or the input keeps its own from `defaultValue`). |
 | [`Scrollbar`](../elements/scrollbar.md) | `scrollbar()` | A scroll bar of the app's own look for the scroll view or list it names (`scroll`); its thumb follows the content and its drags and presses scroll it. |
 | [`Slider`](../elements/slider.md) | `slider()` | A value, or a range of two, picked along a track; the app owns `value` (or the slider keeps its own from `defaultValue`). |
+| [`ColorPicker`, `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`](../elements/color-picker.md) | `color_picker()`, `color_area()`, `color_slider()`, `color_field()`, `color_swatch()` | A color picker and its parts: a saturation and brightness area, sliders of any channel of RGB, HSL, HSB or OKLCH and of the alpha, fields of the color or a channel, swatches; the app owns `value` (or the picker keeps its own from `defaultValue`). |
 | [`ResizablePanelGroup`, `ResizablePanel`](../elements/resizable.md) | `h_resizable()`, `v_resizable()`, `resizable_panel()` | Panels side by side or stacked, with handles the user drags to resize them. |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | A workspace of splits, tab groups and edge docks the user arranges; its layout is the app's data. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
@@ -325,6 +340,15 @@ there. `mode` shows it while the content scrolls (until `motion.idle` after), wh
 or always; `axis` makes it horizontal. `Scrollbar.setTheme` gives every scroll view and list a bar of the app's look
 over its viewport, with none to place, and a view takes a theme of its own as its `scrollbar` prop. See
 [Scrollbar](../elements/scrollbar.md).
+### ColorPicker
+
+A color picker with no look: the root holds the color and the parts inside it show and change it, laid out by the app.
+`ColorArea` is HSB's saturation and brightness, `ColorSlider` any channel of RGB, HSL, HSB or OKLCH or the alpha
+(horizontal or vertical), `ColorField` the color in any CSS form or a channel's number, `ColorSwatch` a preset a press
+picks or a preview of the color. The app owns `value` (or the picker keeps its own from `defaultValue`) and hears
+`onChange` and `onChangeEnd` with the color and its text as `format` writes it; the picker keeps each space's
+channels as the user set them. The thumbs are adjustable elements for screen readers and stops of the keyboard focus.
+See [ColorPicker](../elements/color-picker.md).
 
 ### OtpInput
 
@@ -536,7 +560,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and
   [Input](../elements/input.md).
