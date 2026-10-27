@@ -21,13 +21,13 @@ _Avoid_: pixel, character, block
 
 **Key scheme**:
 The set of keys a terminal surface is operated with when the app binds none of them: moving between what can be
-pressed or typed in, scrolling, searching, running commands, going back, editing text. The Emacs key scheme is
-the first; a vim one may follow.
+pressed or typed in, scrolling, searching, going back, editing text. The terminal key scheme, after readline and
+terminal tools such as fzf and less, is the first; a vim one may follow.
 _Avoid_: keymap (the app's own shortcuts), keybindings, mode
 
 **Minibuffer**:
-The one-line input a terminal surface shows at its bottom only while the user searches the screen or runs a
-command, and removes when done; the terminal backend has no permanent chrome.
+The one-line input a terminal surface shows at its bottom only while the user searches the screen, and removes
+when done; the terminal backend has no permanent chrome.
 _Avoid_: command line, status line, mode line, echo area
 
 **Page background**:
