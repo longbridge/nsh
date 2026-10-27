@@ -23,6 +23,8 @@ const DARK = {
   violet: "#bb9af7",
   /** Only for what must hide the page under it (a dialog). */
   page: "#0f1115",
+  /** The row or button the keyboard focus is on. */
+  focus: "#262c3a",
 };
 
 const LIGHT: typeof DARK = {
@@ -36,6 +38,7 @@ const LIGHT: typeof DARK = {
   warn: "#9a6700",
   violet: "#8250df",
   page: "#ffffff",
+  focus: "#e6edf7",
 };
 
 type Palette = typeof DARK;
@@ -105,7 +108,7 @@ export function DemoPage(props: { demo: Demo; children: JSX.Element }) {
 /** A button as text, `[ OK ]`: the accent and bold while active. */
 export function Button(props: { label: string; onPress: () => void; tone?: string; active?: boolean }) {
   return (
-    <View onPress={props.onPress} role="button" accessibilityLabel={props.label} style={{ height: 16 }}>
+    <View onPress={props.onPress} role="button" accessibilityLabel={props.label} style={{ height: 16 }} focusStyle={{ backgroundColor: colors.focus }}>
       <Text style={{ fontWeight: props.active ? "700" : "400", color: props.active ? colors.accent : (props.tone ?? colors.text) }}>
         {`[ ${props.label} ]`}
       </Text>

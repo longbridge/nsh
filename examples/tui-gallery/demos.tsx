@@ -171,7 +171,7 @@ export function Watchlist() {
               const isSortKey = () => c.key !== null && sort().key === c.key;
               const arrow = () => (isSortKey() ? (sort().descending ? " ▼" : " ▲") : "");
               return (
-                <View onPress={c.key ? () => toggleSort(c.key!) : undefined} style={{ width: c.width, paddingHorizontal: 8 }}>
+                <View focusStyle={{ backgroundColor: colors.focus }} onPress={c.key ? () => toggleSort(c.key!) : undefined} style={{ width: c.width, paddingHorizontal: 8 }}>
                   <Text style={{ fontWeight: "700", color: isSortKey() ? colors.accent : colors.text, textAlign: c.right ? "right" : "left" }}>
                     {c.label + arrow()}
                   </Text>
@@ -188,7 +188,7 @@ export function Watchlist() {
             const tone = () => (pct() >= 0 ? colors.up : colors.down);
             const isSelected = () => selected() === q().symbol;
             return (
-              <View onPress={() => selected.set(isSelected() ? null : q().symbol)} style={{ flexDirection: "row", height: 16 }}>
+              <View focusStyle={{ backgroundColor: colors.focus }} onPress={() => selected.set(isSelected() ? null : q().symbol)} style={{ flexDirection: "row", height: 16 }}>
                 <Text style={{ width: MARKER_WIDTH, color: colors.accent }}>{isSelected() ? "▸" : " "}</Text>
                 <Text style={{ width: 72, paddingHorizontal: 8, fontWeight: "700", color: isSelected() ? colors.accent : colors.text }}>{q().symbol}</Text>
                 <Text style={{ numberOfLines: 1, width: 144, paddingHorizontal: 8, color: isSelected() ? colors.accent : colors.muted }}>
@@ -296,7 +296,7 @@ export function Form() {
           />
         </Field>
         <Field label="Newsletter">
-          <View onPress={() => subscribe.set(!subscribe())} role="checkbox" style={{ flexDirection: "row", gap: 8 }}>
+          <View focusStyle={{ backgroundColor: colors.focus }} onPress={() => subscribe.set(!subscribe())} role="checkbox" style={{ flexDirection: "row", gap: 8 }}>
             <Text style={{ color: subscribe() ? colors.accent : colors.muted }}>{subscribe() ? "[x]" : "[ ]"}</Text>
             <Text style={{ color: colors.text }}>Send me the monthly notes</Text>
           </View>
@@ -327,7 +327,7 @@ export function Form() {
 /** A switch as text: `[on ]` in the accent, `[off]` faint. */
 function Switch(props: { value: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
-    <View onPress={() => props.onChange(!props.value)} role="switch" style={{ flexDirection: "row", gap: 8, height: 16 }}>
+    <View focusStyle={{ backgroundColor: colors.focus }} onPress={() => props.onChange(!props.value)} role="switch" style={{ flexDirection: "row", gap: 8, height: 16 }}>
       <Text style={{ fontWeight: props.value ? "700" : "400", color: props.value ? colors.accent : colors.faint }}>
         {props.value ? "[on ]" : "[off]"}
       </Text>
@@ -375,7 +375,7 @@ export function Controls() {
           <View>
             <Each of={["Free", "Pro", "Team"]}>
               {(name) => (
-                <View onPress={() => plan.set(name())} role="radio" style={{ flexDirection: "row", gap: 8, height: 16 }}>
+                <View focusStyle={{ backgroundColor: colors.focus }} onPress={() => plan.set(name())} role="radio" style={{ flexDirection: "row", gap: 8, height: 16 }}>
                   <Text style={{ color: plan() === name() ? colors.accent : colors.faint }}>{plan() === name() ? "(*)" : "( )"}</Text>
                   <Text style={{ color: plan() === name() ? colors.text : colors.muted }}>{name()}</Text>
                 </View>
@@ -560,7 +560,7 @@ export function LongList() {
             const it = item();
             const ticked = () => done().has(it.id);
             return (
-              <View onPress={() => toggle(it.id)} style={{ flexDirection: "row", height: 16, gap: 16 }}>
+              <View focusStyle={{ backgroundColor: colors.focus }} onPress={() => toggle(it.id)} style={{ flexDirection: "row", height: 16, gap: 16 }}>
                 <Text style={{ width: 48, textAlign: "right", color: colors.faint }}>{String(it.id)}</Text>
                 <Text style={{ color: ticked() ? colors.accent : colors.faint }}>{ticked() ? "*" : " "}</Text>
                 <Text style={{ flex: 1, color: ticked() ? colors.accent : colors.text }}>{it.title}</Text>
