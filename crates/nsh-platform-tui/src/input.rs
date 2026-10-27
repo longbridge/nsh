@@ -75,6 +75,13 @@ pub enum Input {
         /// True for a release when the terminal reports it.
         release: bool,
     },
+    /// A repeated key press identified by the terminal protocol.
+    KeyRepeat {
+        /// Key name, as for `Key`.
+        key: String,
+        /// Held modifiers.
+        modifiers: Modifiers,
+    },
     /// One bracketed paste.
     Paste(String),
     /// The embedding application gave or removed keyboard focus.

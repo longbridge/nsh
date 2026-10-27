@@ -4,6 +4,7 @@ mod text;
 
 mod app;
 
+mod keyboard;
 mod navigation;
 mod page_background;
 mod scroll;

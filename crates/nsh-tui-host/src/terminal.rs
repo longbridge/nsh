@@ -124,11 +124,18 @@ pub fn convert(event: event::Event) -> RunEvent {
             if key.code == event::KeyCode::BackTab {
                 modifiers.shift = true;
             }
-            RunEvent::Input(Input::Key {
-                key: name,
-                modifiers,
-                release,
-            })
+            if key.kind == event::KeyEventKind::Repeat {
+                RunEvent::Input(Input::KeyRepeat {
+                    key: name,
+                    modifiers,
+                })
+            } else {
+                RunEvent::Input(Input::Key {
+                    key: name,
+                    modifiers,
+                    release,
+                })
+            }
         }
     }
 }
@@ -165,6 +172,44 @@ mod tests {
         assert!(matches!(
             convert(event::Event::Key(key)),
             RunEvent::Input(Input::Key { release: true, .. })
+        ));
+    }
+
+    #[test]
+    fn control_meta_and_navigation_keys_keep_their_identity() {
+        for (code, held, name) in [
+            (event::KeyCode::Char('n'), event::KeyModifiers::CONTROL, "n"),
+            (event::KeyCode::Char('v'), event::KeyModifiers::ALT, "v"),
+            (event::KeyCode::Char('<'), event::KeyModifiers::ALT, "<"),
+            (
+                event::KeyCode::PageDown,
+                event::KeyModifiers::NONE,
+                "PageDown",
+            ),
+            (event::KeyCode::BackTab, event::KeyModifiers::NONE, "Tab"),
+        ] {
+            let RunEvent::Input(Input::Key {
+                key,
+                modifiers,
+                release,
+            }) = convert(event::Event::Key(event::KeyEvent::new(code, held)))
+            else {
+                panic!("key input");
+            };
+            assert_eq!(key, name);
+            assert_eq!(modifiers.ctrl, held.contains(event::KeyModifiers::CONTROL));
+            assert_eq!(modifiers.alt, held.contains(event::KeyModifiers::ALT));
+            assert_eq!(modifiers.shift, code == event::KeyCode::BackTab);
+            assert!(!release);
+        }
+        let key = event::KeyEvent::new_with_kind(
+            event::KeyCode::Char('n'),
+            event::KeyModifiers::CONTROL,
+            event::KeyEventKind::Repeat,
+        );
+        assert!(matches!(
+            convert(event::Event::Key(key)),
+            RunEvent::Input(Input::KeyRepeat { .. })
         ));
     }
 

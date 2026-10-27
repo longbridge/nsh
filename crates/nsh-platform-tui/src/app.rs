@@ -95,6 +95,8 @@ pub struct AppView {
     focused: bool,
     pointer: Pointer,
     hits: Vec<Hit>,
+    geometry: Vec<crate::render::Geometry>,
+    keyboard: crate::keyboard::Keyboard,
     environment: Environment,
     appearance_changed: bool,
     on_error: Option<TextErrorCallback>,
@@ -127,6 +129,8 @@ impl AppView {
             focused: true,
             pointer: Pointer::default(),
             hits: Vec::new(),
+            geometry: Vec::new(),
+            keyboard: Default::default(),
             environment,
             appearance_changed: false,
             on_error: None,
@@ -206,6 +210,10 @@ impl AppView {
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
         if !focused {
+            if let Some(engine) = &self.surface.engine {
+                self.keyboard.focus(None, &mut self.tree, &engine.control());
+            }
+            self.surface.wake.notify();
             self.pointer
                 .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
         }
@@ -261,13 +269,55 @@ impl AppView {
                     &engine.control(),
                 )
             }
-            Input::Key { .. } | Input::Paste(_) => Handled::Ignored,
+            Input::Key {
+                key,
+                modifiers,
+                release,
+            } => {
+                if release {
+                    Handled::Ignored
+                } else {
+                    self.handle_key(&key, modifiers, false)
+                }
+            }
+            Input::KeyRepeat { key, modifiers } => self.handle_key(&key, modifiers, true),
+            Input::Paste(_) => Handled::Ignored,
         }
+    }
+
+    fn handle_key(&mut self, key: &str, modifiers: crate::Modifiers, repeat: bool) -> Handled {
+        if !self.focused {
+            return Handled::Ignored;
+        }
+        let Some(engine) = &self.surface.engine else {
+            return Handled::Ignored;
+        };
+        let control = engine.control();
+        let Some(stroke) = crate::key_scheme::keystroke(key, modifiers) else {
+            return Handled::Ignored;
+        };
+        let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control) {
+            Handled::Yes
+        } else if let Some(action) = crate::key_scheme::terminal(stroke) {
+            self.keyboard
+                .action(action, &mut self.tree, &self.geometry, &control, modifiers)
+        } else {
+            Handled::Ignored
+        };
+        if handled == Handled::Yes {
+            self.surface.wake.notify();
+        }
+        handled
     }
 
     /// Applies complete pending batches, resizes to `area`, and draws into the frame.
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         self.draw(area, frame.buffer_mut());
+        if self.focused
+            && let Some(cursor) = self.keyboard.cursor(&self.geometry)
+        {
+            frame.set_cursor_position(cursor);
+        }
     }
 
     fn size(&self) -> Size<Points> {
@@ -308,6 +358,11 @@ impl AppView {
             }
         }
         self.tree.scrolled.clear();
+        if let Some(engine) = &self.surface.engine {
+            for _ in 0..std::mem::take(&mut self.tree.back_requests) {
+                crate::navigation::back(&mut self.tree, &engine.control(), false);
+            }
+        }
         if let Some(appearance) = self.tree.appearance.take() {
             self.set_appearance(appearance);
         }
@@ -338,7 +393,12 @@ impl AppView {
             area,
             self.options.cells,
             &mut self.hits,
+            &mut self.geometry,
         );
+        if let Some(engine) = &self.surface.engine {
+            self.keyboard
+                .reconcile(&mut self.tree, &self.geometry, &engine.control());
+        }
     }
 
     /// Stops the engine, drops queued commits, and clears the surface's app-owned state.
@@ -348,6 +408,8 @@ impl AppView {
         self.surface.stop();
         self.tree.clear();
         self.hits.clear();
+        self.geometry.clear();
+        self.keyboard = Default::default();
     }
 }
 

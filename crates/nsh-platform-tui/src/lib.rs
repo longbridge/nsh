@@ -8,6 +8,8 @@
 mod app;
 mod geometry;
 mod input;
+mod key_scheme;
+mod keyboard;
 mod mount;
 mod native;
 mod navigation;

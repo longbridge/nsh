@@ -49,8 +49,8 @@ function Home() {
     <NavPage title="Gallery" header={<Header title="NSH Gallery" detail="for the terminal" />}>
       <Page>
         <Text style={{ color: colors.muted }}>
-          The same TSX, signals, flexbox and navigation as on iOS, Android, desktop and the web, drawn with Cells. Tab
-          or C-n / C-p moves to a demo, RET or a click opens it, C-g or Esc goes back.
+          The same TSX, signals, flexbox and navigation as on iOS, Android, desktop and the web, drawn with Cells. Use Tab /
+          Shift+Tab, C-n / C-p or ↓ / ↑ to move between demos. Enter or a click opens one; Esc or C-g goes back. C-c quits.
         </Text>
         <Each of={numbered}>
           {(group) => (

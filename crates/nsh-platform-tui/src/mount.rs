@@ -12,10 +12,14 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    pub(crate) keymap: std::sync::Arc<nsh_core::keymap::Keymap>,
     pub(crate) page_backgrounds: Vec<Color>,
     pub(crate) scrolled: Vec<NodeId>,
     pub(crate) dirty_stacks: Vec<NodeId>,
     pub(crate) dirty_screens: Vec<NodeId>,
+    pub(crate) modals: Vec<NodeId>,
+    pub(crate) pending_modals: Vec<NodeId>,
+    pub(crate) back_requests: usize,
     unhandled: HashSet<Discriminant<MountItem>>,
     placeholders: HashSet<String>,
 }
@@ -27,10 +31,14 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            keymap: Default::default(),
             page_backgrounds: Vec::new(),
             scrolled: Vec::new(),
             dirty_stacks: Vec::new(),
             dirty_screens: Vec::new(),
+            modals: Vec::new(),
+            pending_modals: Vec::new(),
+            back_requests: 0,
             unhandled: HashSet::new(),
             placeholders: HashSet::new(),
         };
@@ -72,6 +80,8 @@ impl Mounter {
     }
 
     fn detach(&mut self, id: NodeId) {
+        self.modals.retain(|&modal| modal != id);
+        self.pending_modals.retain(|&modal| modal != id);
         let parent = self.get_mut(id).and_then(|view| {
             if matches!(view.kind, ViewKind::Screen | ViewKind::HeaderItem) {
                 view.concealed = true;
@@ -91,11 +101,15 @@ impl Mounter {
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
         self.appearance = None;
         self.exit = false;
+        self.keymap = Default::default();
         self.unhandled.clear();
         self.placeholders.clear();
         self.scrolled.clear();
         self.dirty_stacks.clear();
         self.dirty_screens.clear();
+        self.modals.clear();
+        self.pending_modals.clear();
+        self.back_requests = 0;
         self.page_backgrounds.clear();
     }
 
@@ -112,6 +126,7 @@ impl Mounter {
                             | ViewKind::Stack
                             | ViewKind::Screen
                             | ViewKind::HeaderItem
+                            | ViewKind::Modal
                     ) && self.placeholders.insert(format!("{kind:?}"))
                     {
                         log::warn!("terminal: {kind:?} shown as a placeholder");
@@ -123,6 +138,8 @@ impl Mounter {
                     child,
                     before,
                 } => {
+                    let was_attached = self.get(child).is_some_and(|v| v.parent.is_some());
+                    let modal_position = self.modals.iter().position(|&id| id == child);
                     self.detach(child);
                     if self.get(parent).is_none() || self.get(child).is_none() {
                         continue;
@@ -134,6 +151,21 @@ impl Mounter {
                         .unwrap_or(siblings.len());
                     siblings.insert(index, child);
                     self.children_changed(parent);
+                    if let Some(view) = self.get_mut(child)
+                        && let Some(modal) = &mut view.modal
+                    {
+                        if !was_attached {
+                            modal.closed = false;
+                            modal.shown = false;
+                            modal.reported = Default::default();
+                        }
+                        view.concealed = modal.closed;
+                        if let Some(index) = modal_position {
+                            self.modals.insert(index.min(self.modals.len()), child);
+                        } else {
+                            self.pending_modals.push(child);
+                        }
+                    }
                 }
                 MountItem::Remove { id } => self.detach(id),
                 MountItem::Delete { id } => {
@@ -155,6 +187,18 @@ impl Mounter {
                 MountItem::ViewProps { id, props } => {
                     if let Some(view) = self.get_mut(id) {
                         view.props = *props;
+                    }
+                }
+                MountItem::Keymap(keymap) => self.keymap = keymap,
+                MountItem::Input { id, config } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.input = Some(config);
+                    }
+                }
+                MountItem::TrackStates { id, states } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.tracked = states;
+                        view.states &= states;
                     }
                 }
                 MountItem::Events { id, events } => {
@@ -232,6 +276,15 @@ impl Mounter {
                         }
                     }
                 }
+                MountItem::ModalConfig { id, config } => {
+                    if let Some(modal) = self.get_mut(id).and_then(|v| v.modal.as_mut()) {
+                        modal.config = config;
+                    }
+                }
+                MountItem::Command {
+                    command: Command::Back,
+                    ..
+                } => self.back_requests += 1,
                 MountItem::ScreenConfig { id, config } => {
                     if let Some(screen) = self.get_mut(id).and_then(|view| view.screen.as_mut()) {
                         screen.config = *config;

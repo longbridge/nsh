@@ -114,7 +114,8 @@ card's color. Other fills keep the app's colors, including colors that differ by
 
 The attached tree's page colors are collected after each complete mount batch, before drawing. This makes
 matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
-remain transparent. The Emacs Key scheme, Minibuffer and mouse-capture changes are separate interaction work.
+remain transparent. The terminal Key scheme is described below; the Minibuffer and mouse-capture controls are
+separate interaction work.
 
 ## Navigation stacks
 
@@ -131,8 +132,18 @@ content inserted later. Header items draw their children directly, without a pla
 Before drawing, attached, visible screens report their stack's point size and zero insets. A screen's
 `navigation::Reported::update` suppresses unchanged reports; a change sends `set_root_size`, and an inset change
 also sends the core's Insets event. A hidden screen, including one inside a concealed outer screen, is not
-reported until it becomes visible. Returning by key, modal presentation and `onDismiss` remain in the rest of the
-navigation ticket.
+reported until it becomes visible.
+
+`Esc` and `C-g` use `navigation::back_target`. Without a modal, the app's `onBackPress` hears the request first;
+a declined request returns as `Command::Back`, which proceeds directly to navigation. Otherwise the innermost
+stack takes it: its top screen receives BackRequest when listened for, `prevent_back` keeps it in place, and a
+native pop sends Dismiss immediately. The shared Stack remembers native pops until the app removes those screens.
+
+Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
+sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.
+The newest modal owns keyboard focus. A stack inside it gets back first; otherwise it receives RequestClose with
+reason `cancel`. `close_on_escape` also closes it natively and sends Dismiss. Modal sizes and zero insets use the
+same Reported contract, and first presentation sends Show. Transitions settle immediately.
 
 ## Scroll content
 
@@ -147,8 +158,43 @@ update its axis, extent and behavior data. `ScrollTo` from the core, including a
 resolved `scrollToEnd`, moves immediately within the content limits in this reduced-motion slice. `ScrollBy`
 applies the core's anchoring delta without clamping it. After applying pending batches, the surface reports each
 changed scroll view's final offset and applied-command count to the engine, which delivers scroll events and
-updates its view of the content. Wheel and key scrolling, indicators, sticky cells, gestures and scrolling
-animations remain in the rest of the scrolling ticket.
+updates its view of the content. Keyboard movement reveals the focused control in its surrounding Scroll,
+innermost first. Paging and endpoint keys act on the nearest Scroll around focus, or the page's Scroll when there
+is none. These user-driven offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment
+it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations remain separate work.
+
+## The terminal Key scheme
+
+`key_scheme.rs` maps keystrokes to actions; `keyboard.rs` applies focus, activation and scrolling, and
+`navigation.rs` handles back. This keeps a future vim scheme independent of the actions, with one scheme selected
+today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy.
+The standalone host retains its Ctrl+C exit handling.
+
+| Keys | Action |
+|---|---|
+| Ctrl+N, Down, Tab | Next focusable view |
+| Ctrl+P, Up, Shift+Tab | Previous focusable view |
+| Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
+| Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
+| Esc, Ctrl+G | Go back through the app handler, stack or newest modal |
+| Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
+| Alt+<, Home / Alt+>, End | Scroll to the start / end |
+| Ctrl+C | Quit |
+
+Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
+left-to-right Cell order. Traversal wraps at the ends; horizontal movement stays on overlapping row ranges.
+Concealed screens supply no candidates. When a modal is open, candidates come only from the newest modal.
+Focus and focus-within states are reported through TrackStates and `EngineControl::set_states`, so the app's
+focus styles apply. The platform adds no highlight: `AppView::render` puts the terminal cursor on the focused
+view's first visible Cell. A buffer-only Widget cannot position the terminal cursor. Removing a focused view or
+changing its focus scope clears focus; unfocused surfaces ignore keys.
+
+The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
+`Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
+without firing again. Navigation activation completes a press in one action; a later release does not press
+again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter and Ctrl+[/Esc can be
+indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation, field editing and
+the search Minibuffer are separate work; this slice adds navigation over fields, not editing their text.
 
 ## Degradation in this slice
 
@@ -163,10 +209,11 @@ animations remain in the rest of the scrolling ticket.
 | Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
+| Modal | A surface-sized root above the page, with its own focus scope |
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
-positions, top screens and their headers, and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+positions, top screens and their headers, modal cancellation, terminal navigation keys and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 

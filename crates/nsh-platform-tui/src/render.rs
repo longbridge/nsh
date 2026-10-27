@@ -18,10 +18,20 @@ pub(crate) struct Hit {
     pub(crate) origin: Point<Points>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct Geometry {
+    pub(crate) id: NodeId,
+    pub(crate) bounds: CellBounds,
+    pub(crate) visible: Rect,
+    pub(crate) frame: Bounds<Points>,
+    pub(crate) scroll_origin: Point<Points>,
+}
+
 struct Painter<'a> {
     tree: &'a mut Mounter,
     buffer: &'a mut Buffer,
     hits: &'a mut Vec<Hit>,
+    geometry: &'a mut Vec<Geometry>,
     area: Rect,
     cells: CellSize,
     page_backgrounds: &'a [nsh_core::Color],
@@ -33,19 +43,28 @@ pub(crate) fn draw(
     area: Rect,
     cells: CellSize,
     hits: &mut Vec<Hit>,
+    geometry: &mut Vec<Geometry>,
 ) {
     hits.clear();
+    geometry.clear();
     let clip = area.intersection(buffer.area);
     let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
-    Painter {
+    let mut painter = Painter {
         tree,
         buffer,
         hits,
+        geometry,
         area,
         cells,
         page_backgrounds: &page_backgrounds,
+    };
+    painter.view(ROOT_ID, Point::default(), clip, 1.0, true, None);
+    let modals = painter.tree.modals.clone();
+    for modal in modals {
+        if crate::navigation::modal_visible(painter.tree, modal) {
+            painter.view(modal, Point::default(), clip, 1.0, true, None);
+        }
     }
-    .view(ROOT_ID, Point::default(), clip, 1.0, true, None);
     tree.page_backgrounds = page_backgrounds;
 }
 
@@ -73,6 +92,16 @@ impl Painter<'_> {
         );
         let origin = bounds.origin(self.cells, self.area);
         let visible = bounds.clipped(clip);
+        self.geometry.push(Geometry {
+            id,
+            bounds,
+            visible,
+            frame: Bounds::new(origin, view.frame.size),
+            scroll_origin: view
+                .scroll
+                .as_ref()
+                .map_or_else(Point::default, |scroll| scroll.origin()),
+        });
         let pointer = pointer && view.props.pointer_events != PointerEvents::None;
         let press = if pointer
             && view.props.pointer_events != PointerEvents::BoxNone
@@ -94,7 +123,7 @@ impl Painter<'_> {
         let children_clip = if view.style.overflow_hidden
             || matches!(
                 view.kind,
-                ViewKind::Scroll | ViewKind::Stack | ViewKind::Screen
+                ViewKind::Scroll | ViewKind::Stack | ViewKind::Screen | ViewKind::Modal
             ) {
             visible
         } else {
@@ -221,6 +250,7 @@ impl Painter<'_> {
                     | ViewKind::Stack
                     | ViewKind::Screen
                     | ViewKind::HeaderItem
+                    | ViewKind::Modal
             ) {
                 let title = view
                     .component_name
@@ -237,6 +267,13 @@ impl Painter<'_> {
         let children = view.children.len();
         for index in 0..children {
             let child = self.tree.get(id).unwrap().children[index];
+            if self
+                .tree
+                .get(child)
+                .is_some_and(|v| v.kind == ViewKind::Modal)
+            {
+                continue;
+            }
             self.view(
                 child,
                 child_origin,
