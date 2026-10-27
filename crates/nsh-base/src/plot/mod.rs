@@ -34,7 +34,7 @@ use nsh_core::{
 };
 
 pub use self::{
-    area::{Area, AreaElement, AreaProps, area},
+    area::{Area, AreaElement, AreaProps, AreaY0, area},
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},

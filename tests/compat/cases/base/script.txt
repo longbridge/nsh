@@ -1177,6 +1177,9 @@ event id:spark onHoverMove position.x=90 position.y=10
 tap id:more
 expect rows 5
 expect hovered null
+# A band (`y0` a field, a function of the row): its rows decoded, the
+# app's label.
+prop id:band accessibilityLabel Band
 # A pie: the slice under the pointer, its row's index. Its angles run
 # clockwise from 12 o'clock: from 3 o'clock (`startAngle`) to 9
 # (`endAngle`), the third row's share the half after 6 o'clock, the
@@ -1229,6 +1232,7 @@ covers [props] Line.hoverDotClass
 covers [props] Line.hoverDotStyle
 covers [props] Area.hoverDotClass
 covers [props] Area.hoverDotStyle
+covers [props] Area.y0
 covers [props] Plot.interactive
 covers [events] Plot.onHoverChange
 # Bars on a band scale laid out for 4 bands of 100 (`paddingInner` 0.2,
