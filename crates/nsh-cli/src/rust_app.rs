@@ -1433,7 +1433,11 @@ opt-level = 3
         // nor hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Release => &["--features", "bytecode-only"],
+            // An app's own runtime serves its whole set (`package_web`
+            // never asks it for the lite one).
+            crate::runtime::WebKind::Release | crate::runtime::WebKind::Lite => {
+                &["--features", "bytecode-only"]
+            }
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -2144,7 +2148,7 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
     match kind {
-        crate::runtime::WebKind::Release => "web",
+        crate::runtime::WebKind::Release | crate::runtime::WebKind::Lite => "web",
         crate::runtime::WebKind::Dev => "web-dev",
     }
 }

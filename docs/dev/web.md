@@ -7,11 +7,12 @@ User-facing page: `website/docs/web.md`.
 
 ## Two runtimes
 
-The crate builds two runtimes that differ in QuickJS only:
+The crate builds three runtimes:
 
 | | Built with | Runs | Ships in |
 |---|---|---|---|
 | `nsh.wasm` | feature `bytecode-only` | bytecode only: no QuickJS parser and compiler (0.17 MB less) | published apps (`nsh package --target web`), the website's player and gallery |
+| `nsh-lite.wasm` | `--no-default-features --features bytecode-only` | as `nsh.wasm`, with `nsh/base`'s core part only and without `zlib` and `crypto` (2.14 MB gzipped instead of 4.63) | published apps that use nothing else ("The lite runtime") |
 | `nsh-dev.wasm` | default features | JS source and bytecode, hot updates | the development host (`nsh dev`, `nsh run --target web`) |
 
 The playground's `nsh-playground.wasm` (feature `compiler`) also has the parser: it compiles in the page.
@@ -102,6 +103,21 @@ build to the same file) and takes `nsh.js` from the crate.
 player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities,
 a source map and the app's id (for its storage); `nsh_bundle_harden` the hardening's bytecode.
 
+### The lite runtime
+
+`nsh package --target web` ships `nsh-lite.wasm` (as the site's `nsh.<digest>.wasm`) to an app the lite runtime
+serves (`web::serves_lite`): from `nsh/base` it imports only exports of its core part (`nsh_base::parts::core`: the
+controls, popups, toasts, alerts, navigation and `Input`), nothing of `nsh/base/plot`, `zlib` or `crypto`, never reads
+the global `crypto` and imports no computed specifier, as the bundle's `native_use` says (`native-pipeline.md`).
+Every other app ships the full `nsh.wasm`, and so does an app with Rust components of its own, whose runtime is built
+for it (`rust_app.rs`). The lite runtime is `nsh-platform-web` without its default features `base-full` (its
+`ui_sets()` default is `nsh_base::registry_of([parts::core])`), `std-zlib` and `std-crypto`: the code of the other
+parts and modules is not in it, and it carries no syntaxes file (nothing in it highlights code).
+
+On 2026-10-27 `examples/counter` and `examples/hopper` ship it: 6.76 MB, 2.14 MB gzipped, 1.59 MB with brotli,
+against 15.10 MB, 4.63 MB and 3.38 MB for the full runtime. `cargo xtask dist` builds both; in a checkout the CLI
+builds the one it needs.
+
 ### What a published app downloads
 
 `examples/gallery` as `nsh package --target web` publishes it (2026-10; `gzip -9`, `brotli -q 11`). Each demo is a
@@ -129,7 +145,7 @@ The syntaxes code is highlighted with are a file of their own, `nsh-syntaxes.<di
 gzipped, 0.80 MB with brotli: two-face's dump compresses each syntax already), fetched the first time a `TextView`
 code block, an `Editor` or a `DiffView` highlights a language (`nsh_core::runtime_data`, the page's `data`; Text View
 and Editor in the gallery). Kept in the module, they made every first load 0.83 MB larger gzipped: on 2026-10-27 the
-gallery's `nsh.wasm` went from 15.09 MB (5.16 MB gzipped, 3.92 MB with brotli) to 14.17 MB (4.33 MB, 3.12 MB).
+gallery's `nsh.wasm` went from 16.02 MB (5.46 MB gzipped, 4.18 MB with brotli) to 15.10 MB (4.63 MB, 3.38 MB).
 
 The app's own share of the first load went from 676 KB (195 KB with brotli) to 91 KB (24 KB). The wasm is now nearly all of the first load. `nsh.js` is minified at package time
 (`nsh_bundler::minify_module`: oxc's minifier, local names mangled, property names kept, since the mounter looks its

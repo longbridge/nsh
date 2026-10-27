@@ -10,7 +10,7 @@
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
-//! dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          the web runtimes (published apps', the dev host's)
+//! dist/nsh/runtime/web/{nsh.wasm,nsh-lite.wasm,nsh-dev.wasm,nsh.js}  the web runtimes (published apps', the dev host's)
 //! dist/nsh/runtime/web/nsh-syntaxes.bin                       the syntaxes they fetch to highlight code
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
@@ -132,10 +132,16 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     }
 
     // The web runtimes: the same files on every machine. Published apps'
-    // (no QuickJS parser: bytecode only) and the development host's (JS
-    // source and hot updates). Both build to the same file, copied in turn.
+    // (no QuickJS parser: bytecode only), the lite one for those that use
+    // only `nsh/base`'s core and neither `zlib` nor `crypto`, and the
+    // development host's (JS source and hot updates). They build to the same
+    // file, copied in turn.
     for (features, file) in [
         (&["--features", "bytecode-only"][..], "nsh.wasm"),
+        (
+            &["--no-default-features", "--features", "bytecode-only"][..],
+            "nsh-lite.wasm",
+        ),
         (&["--features", "dev"][..], "nsh-dev.wasm"),
     ] {
         let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));

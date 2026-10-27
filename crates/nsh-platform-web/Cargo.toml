@@ -12,7 +12,13 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js", "std-zlib", "std-crypto"]
+default = ["js", "base-full", "std-zlib", "std-crypto"]
+# Every part of `nsh/base` (`nsh_base::registry()`). Without it the runtime
+# serves its core part only: `nsh-lite.wasm`, built `--no-default-features
+# --features bytecode-only`, which `nsh package --target web` ships to apps
+# that import nothing else of it, `zlib` or `crypto` (2.1 MB gzipped, the
+# full runtime 4.6 MB).
+base-full = []
 # JS apps (`nsh_start`, bundles, hot updates, chunks) on QuickJS. Without
 # it the module runs a Rust app only (`nsh_start_rust`, `rust_app!`) and
 # links no QuickJS.

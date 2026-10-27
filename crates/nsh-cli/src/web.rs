@@ -31,10 +31,12 @@
 //! which the web build's 32-bit QuickJS reads as the 64-bit hosts do.
 
 use std::{
+    collections::BTreeSet,
     fmt::Write as _,
     fs,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::Duration,
 };
 
@@ -95,7 +97,9 @@ pub(crate) fn package(
             missing.join(", ")
         );
     }
-    let runtime = runtime::web(runtime::WebKind::Release, true)?.context("no web runtime")?;
+    // The lite runtime when the app uses nothing it leaves out.
+    let lite = built.native_use.as_ref().is_some_and(serves_lite);
+    let (runtime, kind) = runtime::package_web(lite)?;
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {
@@ -216,15 +220,58 @@ pub(crate) fn package(
         .as_deref(),
     });
     fs::write(dir.join("index.html"), html)?;
+    let which = match kind {
+        runtime::WebKind::Lite => ", the lite runtime",
+        _ => "",
+    };
     step.done(format!(
         "packaged {}{}",
         ui::path(&dir),
-        ui::dim(format!(", {}", ui::bytes(dir_size(&dir))))
+        ui::dim(format!(", {}{which}", ui::bytes(dir_size(&dir))))
     ));
     if options.run {
         serve(&dir)?;
     }
     Ok(())
+}
+
+/// Whether the lite web runtime ([`runtime::WebKind::Lite`]) serves an app
+/// that uses `uses` of the native modules: nothing of `nsh/base` beyond its
+/// core part, neither `nsh/base/plot`, `zlib` nor `crypto`, no global
+/// `crypto` and no `import()` of a computed specifier. What the bundler
+/// cannot tell apart counts as everything, so the answer is never yes for
+/// an app that needs more.
+pub(crate) fn serves_lite(uses: &nsh_bundler::NativeUse) -> bool {
+    if uses.global_crypto || uses.computed_import {
+        return false;
+    }
+    uses.imports
+        .iter()
+        .all(|(module, imported)| match module.as_str() {
+            "zlib" | "crypto" | "nsh/base/plot" => false,
+            nsh_base::SPECIFIER => match imported {
+                nsh_bundler::Imported::All => false,
+                nsh_bundler::Imported::Names(names) => {
+                    names.iter().all(|name| core_exports().contains(name))
+                }
+            },
+            _ => true,
+        })
+}
+
+/// What `nsh/base`'s core part exports (`nsh_base::parts::core`, with
+/// the navigation and `Input` every set has).
+fn core_exports() -> &'static BTreeSet<String> {
+    static EXPORTS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    EXPORTS.get_or_init(|| {
+        let set = nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part]);
+        let mut names: BTreeSet<String> =
+            set.specs().iter().map(|s| s.export.to_string()).collect();
+        names.extend(set.class_specs().iter().map(|c| c.name.to_owned()));
+        names.extend(set.module_specs().iter().map(|m| m.name.to_owned()));
+        names.extend(set.native_value_names().iter().map(|n| (*n).to_owned()));
+        names
+    })
 }
 
 /// Serves the site `dir` on this machine, as a CDN would (`nsh_dev::SiteServer`),
@@ -840,6 +887,48 @@ mod tests {
         .unwrap();
         assert!(with_page_host(base(), &entry).is_err());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn uses(imports: &[(&str, Option<&[&str]>)]) -> nsh_bundler::NativeUse {
+        let mut uses = nsh_bundler::NativeUse::default();
+        for (module, names) in imports {
+            let imported = match names {
+                Some(names) => {
+                    nsh_bundler::Imported::Names(names.iter().map(|n| n.to_string()).collect())
+                }
+                None => nsh_bundler::Imported::All,
+            };
+            uses.imports.insert(module.to_string(), imported);
+        }
+        uses
+    }
+
+    #[test]
+    fn the_lite_runtime_serves_apps_using_the_core_of_nsh_base_only() {
+        let core: &[&str] = &["Button", "Switch", "Tabs", "Tab", "NavStack", "AlertDialog"];
+        assert!(serves_lite(&uses(&[("nsh", Some(&["mount", "View"]))])));
+        assert!(serves_lite(&uses(&[
+            ("nsh", Some(&["mount"])),
+            ("nsh/base", Some(core)),
+            ("buffer", None),
+            ("nsh/image", None),
+        ])));
+        for imports in [
+            &[("nsh/base", Some(&["Button", "Editor"][..]))][..],
+            &[("nsh/base", Some(&["TextView"][..]))],
+            &[("nsh/base", None)],
+            &[("nsh/base/plot", Some(&["Plot"][..]))],
+            &[("zlib", Some(&["gzipSync"][..]))],
+            &[("crypto", Some(&["createHash"][..]))],
+        ] {
+            assert!(!serves_lite(&uses(imports)), "{imports:?}");
+        }
+        let mut crypto = uses(&[("nsh", Some(&["mount"]))]);
+        crypto.global_crypto = true;
+        assert!(!serves_lite(&crypto));
+        let mut computed = uses(&[]);
+        computed.computed_import = true;
+        assert!(!serves_lite(&computed));
     }
 
     #[test]

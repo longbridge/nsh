@@ -116,7 +116,20 @@ pub fn set_ui_sets(sets: Vec<Registry>) {
 fn ui_sets() -> Vec<Registry> {
     UI_SETS
         .with(|s| s.borrow().clone())
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+        .unwrap_or_else(|| vec![base_set()])
+}
+
+/// `nsh/base`: every part of it.
+#[cfg(feature = "base-full")]
+fn base_set() -> Registry {
+    nsh_base::registry()
+}
+
+/// `nsh/base` in the lite runtime (feature `base-full` off): its core part,
+/// so the other parts' code stays out of the module.
+#[cfg(not(feature = "base-full"))]
+fn base_set() -> Registry {
+    nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])
 }
 
 /// Makes this module an app's web runtime that serves `$sets` (an

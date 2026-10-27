@@ -18,6 +18,7 @@
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
 //! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
+//! runtime/web/nsh-lite.wasm            the same with `nsh/base`'s core only, no `zlib` / `crypto`
 //! runtime/web/nsh.js                   the DOM runtime that loads it
 //! runtime/web/nsh-syntaxes.bin         the syntaxes it fetches to highlight code
 //! ```
@@ -315,13 +316,18 @@ pub(crate) fn package_dir(
         })
 }
 
-/// Which web runtime: the two differ in QuickJS only.
+/// Which web runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WebKind {
     /// Published apps' (`nsh package --target web`): without QuickJS'
     /// parser (feature `bytecode-only`), it runs the bytecode the CLI
     /// compiled. `nsh.wasm`.
     Release,
+    /// [`WebKind::Release`] with `nsh/base`'s core part only and without
+    /// the standard modules `zlib` and `crypto` (`nsh-platform-web` without
+    /// its default features): what apps that use nothing else ship with
+    /// ([`crate::web::serves_lite`]). `nsh-lite.wasm`.
+    Lite,
     /// The development host's (`nsh dev`, `nsh run --target web`): it runs
     /// JS source and hot updates. `nsh-dev.wasm`.
     Dev,
@@ -333,9 +339,51 @@ impl WebKind {
     pub(crate) fn file(self) -> &'static str {
         match self {
             WebKind::Release => "nsh.wasm",
+            WebKind::Lite => "nsh-lite.wasm",
             WebKind::Dev => "nsh-dev.wasm",
         }
     }
+
+    /// The features `nsh-platform-web` is built with for it.
+    pub(crate) fn features(self) -> &'static [&'static str] {
+        match self {
+            WebKind::Release => &["--features", "bytecode-only"],
+            WebKind::Lite => &["--no-default-features", "--features", "bytecode-only"],
+            WebKind::Dev => &["--features", "dev"],
+        }
+    }
+}
+
+/// The web runtime `nsh package --target web` ships: the lite one when
+/// `lite` (the app uses nothing else) and this CLI has one (its
+/// distribution's, or this checkout's, built now), else the full one.
+pub(crate) fn package_web(lite: bool) -> anyhow::Result<(WebRuntime, WebKind)> {
+    if lite && crate::rust_app::current().is_none() && has_lite()? {
+        let mut runtime = web(WebKind::Lite, true)?.context("no web runtime")?;
+        // It has nothing that highlights code.
+        runtime.syntaxes = None;
+        return Ok((runtime, WebKind::Lite));
+    }
+    let runtime = web(WebKind::Release, true)?.context("no web runtime")?;
+    Ok((runtime, WebKind::Release))
+}
+
+/// Whether there is a lite web runtime: in `NSH_RUNTIME` or the
+/// distribution, or a checkout that builds one.
+fn has_lite() -> anyhow::Result<bool> {
+    if let Some(root) = env::var_os("NSH_RUNTIME") {
+        return Ok(PathBuf::from(root)
+            .join("web")
+            .join(WebKind::Lite.file())
+            .exists());
+    }
+    let exe = cli_exe()?;
+    let bin = exe.parent().context("cli has no parent directory")?;
+    Ok(bin
+        .join("../runtime/web")
+        .join(WebKind::Lite.file())
+        .exists()
+        || checkout(bin).is_some())
 }
 
 /// The web runtime ([`WebRuntime`]) of `kind`. In a checkout it is built
@@ -392,10 +440,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
         .context("cli is not in a target directory")?
         .join(WASM)
         .join("web");
-    let features: &[&str] = match kind {
-        WebKind::Release => &["--features", "bytecode-only"],
-        WebKind::Dev => &["--features", "dev"],
-    };
+    let features = kind.features();
     if build {
         let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
         let mut command = Command::new(&cargo);

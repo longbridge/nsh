@@ -146,7 +146,7 @@ page and files named after their content.
 | `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
-| `nsh.<digest>.wasm` | A Rust app: the engine, the components and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli). A TSX app: the engine, the core, the runtime's modules and QuickJS without its compiler (about 14.2 MB, 4.3 MB gzipped, 3.1 MB with brotli) |
+| `nsh.<digest>.wasm` | A Rust app: the engine, the components and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli). A TSX app: the engine, the core, the runtime's modules and QuickJS without its compiler (about 15.1 MB, 4.6 MB gzipped, 3.4 MB with brotli). An app that imports only `nsh/base`'s controls, popups, toasts, dialogs, navigation and `Input`, and neither `zlib` nor `crypto`, gets the lite runtime: about 6.8 MB, 2.1 MB gzipped, 1.6 MB with brotli |
 | `nsh-syntaxes.<digest>.bin` | The syntaxes code is highlighted with (bat's set: 0.92 MB, 0.8 MB with brotli), downloaded the first time a code block, an `Editor` or a `DiffView` shows code in a language |
 | `nsh-bindgen.<digest>.js` | The wasm-bindgen glue of an app whose crates call [browser APIs from Rust](#browser-apis-from-rust), minified |
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
@@ -215,7 +215,7 @@ The output directory holds:
 
 | File | What it is |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | The runtime of published apps (about 14.2 MB, 4.3 MB gzipped, 3.1 MB with brotli; built with the `web` profile), shared by the player and the gallery |
+| `gallery/nsh.<digest>.wasm` | The runtime of published apps (about 15.1 MB, 4.6 MB gzipped, 3.4 MB with brotli; built with the `web` profile), shared by the player and the gallery |
 | `gallery/nsh-syntaxes.<digest>.bin` | The syntaxes the runtime highlights code with, fetched the first time a demo shows code in a language |
 | `nsh-playground.wasm` | The same plus NSH's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
 | `gallery/nsh.<digest>.js` | The DOM runtime (minified): loads the wasm, applies batches, turns input into events |
