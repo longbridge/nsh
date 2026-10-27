@@ -74,6 +74,42 @@ returns the last completed frame's `FrameMetrics`; `perf_monitor()` exposes the 
 Disabling drops the monitor and detaches it from the engine; enabling starts a fresh history. Ordinary `render`
 and Widget embedding keep the same layout API; full transport timings require `draw_terminal`.
 
+## Terminal lifetime and idle waits
+
+On Unix, SIGHUP, SIGTERM and SIGINT request shutdown. The host checks the flag before and after input waits
+and while waiting for a full output queue. A disconnected stdin/stdout (`POLLHUP`, `POLLERR`, `POLLNVAL`),
+loss of the input TTY, or a read/write error ends the run loop. Interactive runs require a live terminal on
+stdin; `--headless` continues to accept redirected or closed input.
+
+The Unix session saves the descriptor flags and enables nonblocking input/output. It uses crossterm 0.29's
+`use-dev-tty` reader: its EOF/error path returns to the bounded poll, whereas the default mio reader can keep
+reading zero bytes or EIO forever, never returning to the host's signal check. The event parsing and conversion
+remain crossterm's. On non-macOS Unix, the reader's millisecond poll truncation can spin over a fractional
+millisecond; decoding is capped at 50 microseconds and `run_app` sleeps the remainder of its 16 ms wait.
+On macOS the reader uses select with microsecond waits. Neither path retries a failed host poll.
+
+Terminal and OSC 52 writes share the cancellable output path, with buffered frame encoding. Output backpressure
+waits for writability in 16 ms slices and checks shutdown between waits; errors propagate. Once the loop ends,
+writer destructors stop writing. The session attempts mouse/alternate-screen/cursor restoration with nonblocking
+writes, restores raw-mode settings, then restores the original descriptor flags. Cleanup does not wait for a
+hung-up or full output queue. Signals do only an atomic store; cleanup runs on the host thread.
+
+`run_app` honors the remainder of a poll that returns `Idle` early, capped by the next frame deadline, so
+spurious wakeups do not turn into a busy loop. Engine wakeups coalesce until rendering, animation deadlines are
+consumed by a frame, and the performance HUD stops scheduling after its idle update. Pending work still has an
+immediate deadline. The maximum sleep remains 16 ms; headless hosts use the same loop and sleep contract.
+
+The host integration binary has private-PTY regressions for each stop signal, partial input, hangup with and
+without a controlling terminal, closed stdin, and shutdown with a full output queue. They require exit within
+one second and check restoration where the terminal still exists. Each test kills and reaps its child on failure.
+
+```sh
+CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test -p nsh-tui-host --test host lifecycle -- --test-threads=1
+CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
+```
+
+See [idle CPU measurement](performance.md#terminal-idle-cpu) for the sample window and pending results.
+
 ## Development sessions
 
 Feature `dev` adds `AppView::connect_dev_server`. The shared `nsh-dev::DevClient` reports `HostPlatform::Tui`,

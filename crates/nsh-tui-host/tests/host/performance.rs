@@ -226,3 +226,45 @@ fn bench_terminal_scroll() {
         "apply + draw p95 exceeds 4 ms: {over_budget:?}; inspect phase means above"
     );
 }
+
+#[test]
+fn idle_polling_sleeps_even_if_the_transport_returns_early() {
+    use nsh_platform_tui::{RunEvent, run_app};
+    let mut view = AppView::default();
+    let mut terminal = terminal(&view, Capture::default());
+    let mut polls = 0;
+    let started = Instant::now();
+    run_app(&mut terminal, &mut view, |wait| {
+        assert!(
+            !wait.is_zero(),
+            "a settled surface must request a blocking wait"
+        );
+        polls += 1;
+        Ok(if polls == 4 {
+            RunEvent::Exit
+        } else {
+            RunEvent::Idle
+        })
+    })
+    .unwrap();
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(40),
+        "early idle returns must not create a busy loop"
+    );
+}
+
+#[test]
+fn a_terminal_poll_error_stops_the_loop_without_retrying() {
+    let mut view = AppView::default();
+    let mut terminal = terminal(&view, Capture::default());
+    let mut polls = 0;
+    let result = nsh_platform_tui::run_app(&mut terminal, &mut view, |_| {
+        polls += 1;
+        Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "terminal disconnected",
+        ))
+    });
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(polls, 1);
+}

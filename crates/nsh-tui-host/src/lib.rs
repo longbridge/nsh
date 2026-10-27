@@ -98,23 +98,35 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         })?;
     } else {
         let session = terminal::Session::enter()?;
-        let mut terminal = Terminal::new(
-            view.measure_backend(CrosstermBackend::new(view.measure_writer(io::stdout()))),
-        )?;
-        run(&mut terminal, &mut view, &args, |timeout| {
-            if let Some(clipboard) = &terminal_clipboard {
-                clipboard.flush();
-            }
+        let mut terminal = Terminal::new(view.measure_backend(CrosstermBackend::new(
+            io::BufWriter::new(view.measure_writer(terminal::Output)),
+        )))?;
+        let result = run(&mut terminal, &mut view, &args, |timeout| {
             if !session.is_active() {
                 Err(io::Error::other("terminal session ended after a panic"))
             } else if shutdown::requested() || (!is_dev && failure.borrow().is_some()) {
                 Ok(RunEvent::Exit)
             } else {
+                if let Some(clipboard) = &terminal_clipboard {
+                    clipboard.flush()?;
+                }
                 terminal::poll(timeout)
             }
-        })?;
-        if let Some(clipboard) = &terminal_clipboard {
-            clipboard.flush();
+        });
+        let result = result.and_then(|()| {
+            if !shutdown::requested()
+                && let Some(clipboard) = &terminal_clipboard
+            {
+                clipboard.flush()?;
+            }
+            Ok(())
+        });
+        let interrupted = shutdown::requested();
+        // Ratatui and buffered writers can write during Drop. Only the session's bounded,
+        // best-effort restoration may write once the run loop has ended.
+        shutdown::request_exit();
+        if !interrupted {
+            result?;
         }
     }
     let error = if is_dev {

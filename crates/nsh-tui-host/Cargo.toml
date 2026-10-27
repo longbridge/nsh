@@ -27,6 +27,8 @@ nsh-bundler = { workspace = true, features = ["bundle"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+# Its bounded poll reader returns on EOF; the default mio reader can spin inside read.
+crossterm = { workspace = true, features = ["use-dev-tty"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Console"] }

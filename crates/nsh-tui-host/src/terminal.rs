@@ -1,5 +1,5 @@
 use std::{
-    io::{self, stdout},
+    io::{self, Write},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -12,20 +12,65 @@ use ratatui_crossterm::crossterm::{cursor, event, execute, style::Print, termina
 
 const ENABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007h";
 const DISABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007l";
+// filedescriptor's non-macOS Unix poll rounds down to milliseconds and spins
+// through the fractional remainder. Let run_app sleep instead of paying that tail.
+#[cfg(all(unix, not(target_os = "macos")))]
+const DECODE_POLL: Duration = Duration::from_micros(50);
+
+#[cfg(unix)]
+mod unix;
 
 pub(crate) struct Session {
     active: Arc<AtomicBool>,
+    #[cfg(unix)]
+    _transport: unix::Transport,
+}
+
+pub(crate) struct Output;
+
+impl Write for Output {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        #[cfg(unix)]
+        {
+            unix::write(bytes)
+        }
+        #[cfg(not(unix))]
+        {
+            io::stdout().write(bytes)
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            io::stdout().flush()
+        }
+    }
 }
 
 fn restore(active: &AtomicBool) {
     if !active.swap(false, Ordering::AcqRel) {
         return;
     }
-    // Try every restoration even when a disconnected terminal rejects one.
-    let _ = execute!(stdout(), event::DisableMouseCapture);
-    let _ = execute!(stdout(), Print(DISABLE_ALTERNATE_SCROLL));
-    let _ = execute!(stdout(), terminal::LeaveAlternateScreen);
-    let _ = execute!(stdout(), cursor::Show);
+    let mut bytes = Vec::new();
+    let _ = execute!(
+        bytes,
+        event::DisableMouseCapture,
+        Print(DISABLE_ALTERNATE_SCROLL),
+        terminal::LeaveAlternateScreen,
+        cursor::Show
+    );
+    #[cfg(unix)]
+    unix::restore(&bytes);
+    #[cfg(not(unix))]
+    {
+        let _ = io::stdout().write_all(&bytes);
+        let _ = io::stdout().flush();
+    }
     let _ = terminal::disable_raw_mode();
 }
 
@@ -37,6 +82,8 @@ impl Session {
     pub(crate) fn enter() -> io::Result<Self> {
         let session = Self {
             active: Arc::new(AtomicBool::new(true)),
+            #[cfg(unix)]
+            _transport: unix::Transport::enter()?,
         };
         let previous = std::panic::take_hook();
         let active = session.active.clone();
@@ -46,7 +93,7 @@ impl Session {
         }));
         terminal::enable_raw_mode()?;
         execute!(
-            stdout(),
+            Output,
             terminal::EnterAlternateScreen,
             Print(ENABLE_ALTERNATE_SCROLL),
             event::EnableMouseCapture,
@@ -63,7 +110,25 @@ impl Drop for Session {
 }
 
 pub(crate) fn poll(timeout: Duration) -> io::Result<RunEvent> {
-    if event::poll(timeout)? {
+    if crate::shutdown::requested() {
+        return Ok(RunEvent::Exit);
+    }
+    #[cfg(unix)]
+    if unix::disconnected()? {
+        return Ok(RunEvent::Exit);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let timeout = timeout.min(DECODE_POLL);
+    let available = event::poll(timeout)?;
+    if crate::shutdown::requested() {
+        return Ok(RunEvent::Exit);
+    }
+    #[cfg(unix)]
+    if unix::disconnected()? {
+        return Ok(RunEvent::Exit);
+    }
+    if available {
+        // A successful poll queues the event, so this read does not wait on the terminal.
         Ok(convert(event::read()?))
     } else {
         Ok(RunEvent::Idle)

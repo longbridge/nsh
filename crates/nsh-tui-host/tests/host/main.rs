@@ -7,3 +7,6 @@ mod dev;
 mod text_input;
 
 mod performance;
+
+#[cfg(unix)]
+mod lifecycle;

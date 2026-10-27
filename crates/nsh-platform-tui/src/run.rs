@@ -48,12 +48,23 @@ pub fn run_app<B: Backend>(
                 due.saturating_duration_since(Instant::now())
                     .min(POLL_INTERVAL)
             });
+            let waiting = Instant::now();
             match poll(wait)? {
                 RunEvent::Input(input) => {
                     view.handle(input);
                 }
                 RunEvent::Redraw => redraw = true,
-                RunEvent::Idle => {}
+                RunEvent::Idle => {
+                    // Interrupted or filtered input may return early. Honor the remaining wait
+                    // unless engine work arrived, rather than polling again in a tight loop.
+                    let remaining = wait.saturating_sub(waiting.elapsed());
+                    let remaining = view.next_frame_deadline().map_or(remaining, |due| {
+                        remaining.min(due.saturating_duration_since(Instant::now()))
+                    });
+                    if !remaining.is_zero() {
+                        std::thread::sleep(remaining);
+                    }
+                }
                 RunEvent::Exit => return Ok(()),
             }
         }

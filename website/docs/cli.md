@@ -109,6 +109,8 @@ With `--target android`, the first device `adb devices` lists is used; the dev s
 
 With `--target tui`, the app runs in the current terminal with hot updates on save. CLI and host diagnostics go to the app's `.nsh/tui.log`. Press `C-h e` for logs and errors, Escape or `C-g` to close the panel, and `r` to reload. App errors open the panel automatically; an update restores the app display. Each Cell defaults to 8×16 points. `--points-per-cell 10x20` takes precedence over `"tui": { "pointsPerCell": "10x20" }` in `nsh.json`; both dimensions must be finite and positive, and apply when the run starts. Rust apps run their root in a generated terminal development host and rebuild/restart when Rust code changes.
 
+On Unix, the terminal host exits on SIGHUP, SIGTERM, SIGINT or terminal disconnection and restores the terminal settings that remain accessible. Idle apps sleep between input checks; interactive runs use live terminal input, and `--headless` accepts redirected input for tests.
+
 ## nsh dev
 
 ```sh

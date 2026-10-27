@@ -408,3 +408,30 @@ The main session must run the command above and replace the pending entries with
 results, including the phase breakdown if the budget fails. Tickets changing terminal rendering, input or layout
 bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
 commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.
+
+
+## Terminal idle CPU
+
+```sh
+CARGO_TARGET_DIR=/Users/griffin/github/nsh/target cargo test --release -p nsh-tui-host --test host bench_terminal_idle_cpu -- --ignored --nocapture --test-threads=1
+```
+
+This ignored benchmark starts the actual host binary on a private 100 × 24 PTY with a static Text app. It
+runs once with the monitor hidden and once with `--fps`, lets startup and the idle HUD update settle for two
+seconds, then measures five seconds. CPU is the child's user + system CPU time divided by elapsed wall time
+(percent of one core), read through `proc_pid_rusage` on macOS or `/proc/<pid>/stat` on Linux. It reports terminal
+bytes during the same window, requires zero bytes and CPU below 2%, then sends SIGTERM and requires exit within
+one second. The separate lifecycle regressions close the PTY and check that the process exits, rather than
+measuring a disconnected process that should no longer exist.
+
+| Static app, 100 × 24 Cells | Idle CPU, one core | Bytes in 5 s |
+|---|---|---|
+| Monitor hidden | Pending main-session measurement | Pending |
+| `--fps`, after idle update | Pending main-session measurement | Pending |
+
+The reported incident was 10–45% CPU per orphan after a tmux terminal was killed, with SIGTERM unable to end it.
+Source inspection found crossterm's default Unix read loop retrying EOF/EIO without returning to the host's
+shutdown flag. The fix selects its bounded reader, checks terminal lifetime, and makes input/output cancellable.
+No post-fix CPU result or runtime pass is claimed here: the worker is restricted to `cargo check`. Record the
+benchmark's output, machine and revision in this table after the main session runs it. Repeat the same command
+before and after future scheduler or transport changes; the CPU sample excludes startup and termination.

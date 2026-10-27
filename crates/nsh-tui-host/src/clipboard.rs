@@ -1,7 +1,7 @@
 //! The host owns terminal output; fields and app clipboard calls share this backend.
 
 use std::{
-    io::Write,
+    io::{self, BufWriter, Write},
     process::{Command, Stdio},
     sync::Mutex,
 };
@@ -22,7 +22,7 @@ struct State {
 }
 
 impl TerminalClipboard {
-    pub(crate) fn flush(&self) {
+    pub(crate) fn flush(&self) -> io::Result<()> {
         let pending = self
             .state
             .lock()
@@ -30,13 +30,11 @@ impl TerminalClipboard {
             .pending
             .take();
         let Some(encoded) = pending else {
-            return;
+            return Ok(());
         };
-        let mut output = std::io::stdout().lock();
-        if let Err(error) = write!(output, "\x1b]52;c;{encoded}\x07").and_then(|()| output.flush())
-        {
-            log::warn!("terminal clipboard write failed: {error}");
-        }
+        let mut output = BufWriter::new(crate::terminal::Output);
+        write!(output, "\x1b]52;c;{encoded}\x07")?;
+        output.flush()
     }
 }
 

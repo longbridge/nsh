@@ -108,6 +108,8 @@ nsh run my-app/App.tsx --target web
 
 使用 `--target tui` 时，应用在当前终端中运行，保存源文件时热更新。CLI 和宿主的诊断日志写入应用的 `.nsh/tui.log`；按 `C-h e` 查看日志与错误，按 Escape 或 `C-g` 关闭面板，按 `r` 重新加载。应用错误会自动打开面板，更新后恢复应用画面。每个单元格默认是 8×16 点；`--points-per-cell 10x20` 优先于 `nsh.json` 中的 `"tui": { "pointsPerCell": "10x20" }`，宽高均须是有限正数，重启运行后生效。Rust 应用在为它生成的终端开发宿主中运行根组件，Rust 代码保存后重新构建并重启。
 
+在 Unix 上，终端宿主收到 SIGHUP、SIGTERM、SIGINT 或终端断开时退出，并恢复仍可访问的终端设置。应用空闲时在输入检查之间休眠；交互运行使用有效的终端输入，测试使用 `--headless` 接受重定向输入。
+
 ## nsh dev
 
 ```sh
