@@ -70,6 +70,7 @@ pub(crate) mod task;
 pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
+pub(crate) mod watch;
 
 /// Whether this build carries the text of declarations: the documentation
 /// and TypeScript of the specs, which only make `.nsh/types`. The

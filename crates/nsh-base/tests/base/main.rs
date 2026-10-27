@@ -14,6 +14,7 @@ mod plot;
 mod radio;
 mod resizable;
 mod rich_editor;
+mod scrollbar;
 mod select;
 mod sheet;
 mod slider;

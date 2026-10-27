@@ -4334,6 +4334,7 @@ impl<M: TextEngine> Core<M> {
         // Hints follow the pointer on their anchors, whoever else listens.
         if matches!(kind, EventKind::MouseEnter | EventKind::MouseLeave) {
             self.overlay_hover(id, kind);
+            self.watch_hover_event(id, kind);
         }
         if self.platform_event(id, kind, payload) {
             return true;

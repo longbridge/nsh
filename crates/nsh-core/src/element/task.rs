@@ -241,6 +241,8 @@ pub(crate) struct Executor {
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
+    /// The views' watches of nodes they did not make.
+    pub(crate) watches: Rc<RefCell<super::watch::Watches>>,
     /// The timers tasks wait for ([`super::timer`]), soonest first: the core
     /// fires them as they come due, and the engine's loop wakes for the
     /// soonest, as it does for JS's timers.

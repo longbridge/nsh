@@ -826,6 +826,69 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     });
 }
 
+/// Watches the scroll view or list `target` names while the current owner
+/// lives: `handler` hears its offset, content size and viewport (zoomed, as
+/// `on_scroll` reports them) when it is first found and whenever one of
+/// them changes, whether or not anything listens to its `on_scroll`. A
+/// view of the app's own that follows a scroll view it did not make (a
+/// scroll bar) watches it this way.
+///
+/// `target` is asked again in every commit (untracked), so a ref set later
+/// in the same render is found when its element is mounted; while it names
+/// no scroll view, nothing is heard. The handler runs at the end of the
+/// commit round that saw the change, and what it changes goes out in the
+/// same batch.
+pub fn watch_scroll(
+    target: impl Fn() -> Option<NodeId> + 'static,
+    handler: impl Fn(&crate::element::ScrollEvent) + 'static,
+) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |e: &crate::element::ScrollEvent| owner.run(|| handler(e)));
+    add_watch(Rc::new(target), super::watch::WatchHandler::Scroll(handler));
+}
+
+/// Watches the mouse entering (`true`) and leaving (`false`) the element
+/// `target` names while the current owner lives, whether or not it listens
+/// to `on_mouse_enter` itself (the desktops and the web; a hover mode of a
+/// scroll bar over a scroll view it did not make). `target` is resolved as
+/// [`watch_scroll`]'s is.
+pub fn watch_hover(
+    target: impl Fn() -> Option<NodeId> + 'static,
+    handler: impl Fn(bool) + 'static,
+) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |inside: bool| owner.run(|| handler(inside)));
+    add_watch(Rc::new(target), super::watch::WatchHandler::Hover(handler));
+}
+
+impl super::NodeRef {
+    /// Scrolls the scroll view (or list, along its axis) to a content
+    /// offset, as [`super::ElementRef::scroll_to`] does: for a view holding
+    /// a node, not a ref (a prop a JS `ref` fills, a watch's target).
+    pub fn scroll_to(&self, offset: crate::geometry::Point<Points>, animated: bool) {
+        act(Action::Command(
+            self.0,
+            Command::ScrollTo {
+                x: offset.x,
+                y: offset.y,
+                animated,
+            },
+        ));
+    }
+}
+
+fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::WatchHandler) {
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add(target, handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove(id);
+            drop(removed);
+        }
+    });
+}
+
 /// `keystroke` as menus and hints show it here (TS: `keymap.label`):
 /// `"⇧⌘L"` on Apple platforms (and in a browser on one), `"Ctrl+Shift+L"`
 /// elsewhere, for `"mod+shift+l"`.
