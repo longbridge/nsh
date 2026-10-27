@@ -385,7 +385,8 @@ The ignored host test follows the `bench_gallery_scroll` pattern:
 cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --ignored --nocapture --test-threads=1
 ```
 
-It loads the terminal gallery's actual `LongList` and `Page` components (500 rows), then a DataTable with
+It loads a pinned copy of the former terminal gallery's `LongList` and `Page` layout (500 rows, dark palette,
+from revision `945be71d`, retained in `tests/fixtures/performance/LongList.tsx`), then a DataTable with
 10,000 rows and 24 columns, through `AppView`. Each workload scrolls by three rows per frame, reversing every
 100 frames. It discards 20 warm-up frames and measures 240 frames with a 16 ms wait between frames for engine
 work. Loading, bundling and waits are outside the samples. Median and nearest-rank p95 cover apply + draw;

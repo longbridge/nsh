@@ -123,6 +123,7 @@ pub struct AppView {
     hits: Vec<Hit>,
     geometry: Vec<crate::render::Geometry>,
     keyboard: crate::keyboard::Keyboard,
+    minibuffer: crate::search::Minibuffer,
     environment: Environment,
     appearance_changed: bool,
     on_error: Option<TextErrorCallback>,
@@ -174,6 +175,7 @@ impl AppView {
             hits: Vec::new(),
             geometry: Vec::new(),
             keyboard: Default::default(),
+            minibuffer: Default::default(),
             environment,
             appearance_changed: false,
             on_error: None,
@@ -367,6 +369,7 @@ impl AppView {
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
         if !focused {
+            self.minibuffer.end();
             self.field_drag = None;
             if let Some(engine) = &self.surface.engine {
                 self.keyboard.focus(None, &mut self.tree, &engine.control());
@@ -422,7 +425,8 @@ impl AppView {
         #[cfg(feature = "dev")]
         if (self.dev.is_some() || self.diagnostics.log_path.is_some())
             && self.focused
-            && (self.diagnostics.open || self.editing_field().is_none())
+            && (self.diagnostics.open
+                || (self.editing_field().is_none() && !self.minibuffer.is_open()))
             && self.diagnostics.handle(&input)
         {
             self.pointer
@@ -439,6 +443,19 @@ impl AppView {
             }
             self.surface.wake.notify();
             return Handled::Yes;
+        }
+        if self.minibuffer.is_open() {
+            match &input {
+                Input::Paste(text) => {
+                    self.search(|minibuffer, scene| minibuffer.paste(text, scene));
+                    return Handled::Yes;
+                }
+                Input::Mouse(_) => {
+                    self.minibuffer.end();
+                    self.surface.wake.notify();
+                }
+                _ => {}
+            }
         }
         match input {
             Input::Focus(focused) => {
@@ -524,9 +541,20 @@ impl AppView {
         let Some(stroke) = crate::key_scheme::keystroke(key, modifiers) else {
             return Handled::Ignored;
         };
+        if self.minibuffer.is_open()
+            && let Some(crate::search::Outcome::Consumed) =
+                self.search(|minibuffer, scene| minibuffer.key(key, stroke, scene))
+        {
+            return Handled::Yes;
+        }
         let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control)
             || self.handle_field_key(key, stroke, &control)
         {
+            Handled::Yes
+        } else if let Some(crate::key_scheme::Action::Search(forward)) =
+            crate::key_scheme::terminal(stroke)
+        {
+            self.search(|minibuffer, scene| minibuffer.start(forward, scene));
             Handled::Yes
         } else if let Some(action) = crate::key_scheme::terminal(stroke) {
             self.keyboard
@@ -538,6 +566,24 @@ impl AppView {
             self.surface.wake.notify();
         }
         handled
+    }
+
+    fn search<R>(
+        &mut self,
+        act: impl FnOnce(&mut crate::search::Minibuffer, &mut crate::search::Scene) -> R,
+    ) -> Option<R> {
+        let control = self.surface.engine.as_ref()?.control();
+        let mut scene = crate::search::Scene {
+            tree: &mut self.tree,
+            geometry: &self.geometry,
+            keyboard: &mut self.keyboard,
+            control: &control,
+            cells: self.options.cells,
+            area: self.area,
+        };
+        let result = act(&mut self.minibuffer, &mut scene);
+        self.surface.wake.notify();
+        Some(result)
     }
 
     fn editing_field(&self) -> Option<nsh_core::NodeId> {
@@ -667,7 +713,10 @@ impl AppView {
             return;
         }
         if self.focused
-            && let Some(cursor) = self.keyboard.cursor(&self.tree, &self.geometry)
+            && let Some(cursor) = self
+                .minibuffer
+                .cursor()
+                .or_else(|| self.keyboard.cursor(&self.tree, &self.geometry))
         {
             frame.set_cursor_position(cursor);
         }
@@ -781,6 +830,7 @@ impl AppView {
         if let Some(engine) = &self.surface.engine {
             crate::navigation::report_shown(&mut self.tree, &engine.control());
         }
+        self.surface.animate(&mut self.tree);
         let drawing = started.map(|start| {
             let now = Instant::now();
             if let Some(perf) = &mut self.perf {
@@ -826,6 +876,8 @@ impl AppView {
                 field.report(id, &control, false);
             }
         }
+        self.minibuffer
+            .draw(&self.tree, &self.geometry, self.options.cells, area, buffer);
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);
         if let (Some(drawing), Some(perf)) = (drawing, &mut self.perf) {
@@ -866,6 +918,7 @@ impl AppView {
         self.hits.clear();
         self.geometry.clear();
         self.keyboard = Default::default();
+        self.minibuffer = Default::default();
         self.kill.clear();
         self.field_drag = None;
     }

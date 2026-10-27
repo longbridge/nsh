@@ -7,7 +7,7 @@ when it exits. It loads source bundles directly or connects to the CLI's develop
 
 ```sh
 cargo build -p nsh-cli -p nsh-tui-host
-./target/debug/nsh run examples/tui-gallery --target tui
+./target/debug/nsh run examples/gallery --target tui
 ./target/debug/nsh run examples/counter --target tui --points-per-cell 8x16
 ```
 
@@ -46,7 +46,7 @@ app data. A source-bundle failure exits after terminal restoration; a developmen
 ## Performance monitor and frame budget
 
 ```sh
-./target/debug/nsh run examples/tui-gallery --target tui --fps
+./target/debug/nsh run examples/gallery --target tui --fps
 cargo test --release -p nsh-tui-host --test host bench_terminal_scroll -- --ignored --nocapture --test-threads=1
 ```
 
@@ -57,7 +57,7 @@ and changed Cells per frame. It logs the same line through `nsh::perf`, visible 
 the terminal width. The readings update once a second while active, with one final idle update; HUD-only
 refreshes never count as app frames and idle monitoring schedules no recurring draws.
 
-`perf.rs` retains 120 application frames. Apply includes draining pending work, callbacks and scroll reports;
+`perf.rs` retains 120 application frames. Apply includes draining pending work, callbacks, scroll reports and native animation evaluation;
 draw includes surface painting and focus reconciliation; flush includes ratatui's diff, encoding and the
 writer's flush. HUD formatting is outside those phases. Cells count the backend's actual diff iterator, including
 wide-character handling; bytes count successful writer output, including ANSI escapes. Output means include
@@ -174,23 +174,14 @@ expect(picture.rows[0][0].symbol).toBe("A");
 
 ## The example app
 
-`examples/tui-gallery` is the reference for how an app designed for the Terminal idiom looks; the platform
-restyles nothing, so the look is the app's own, after Emacs's dired, magit and ibuffer:
-
-- Dense and text first: sizes in whole Cells (8 points across, 16 down), at most one Cell of padding, one blank
-  row between sections.
-- Section headings are bold text, not bordered cards; a header line names the page, a rule of `─` below it.
-- Buttons are text, `[ OK ]`; switches `[on ]` / `[off]`, checkboxes `[x]`, radios `(*)`, levels `━━━──`.
-- One accent color marks what is selected or active (a selected row also gets a `▸` marker); green and red only
-  carry a value's meaning.
-- Separators are drawn with line characters (`─`, `│`, borders); there are no filled blocks. The pages set no
-  background, so the terminal's own shows through, and the palette follows the light or dark appearance. The only
-  fill is a dialog's (`nsh/base`'s `Dialog`, so the platform's modal focus and Esc apply), which has to hide the
-  rows under it.
+The terminal's demo is the official `examples/gallery`, the same code every platform runs, so a page can be
+compared side by side with the others. Its look is the gallery's own (`examples/nsh-gallery-ui`); the terminal
+backend restyles nothing and only projects it to Cells.
 
 ```sh
-./target/debug/nsh build examples/tui-gallery --out .nsh/tui-gallery
-./target/debug/nsh-tui-host --bundle .nsh/tui-gallery/bundle.js
+./target/debug/nsh run examples/gallery --target tui
+./target/debug/nsh build examples/gallery --out .nsh/gallery
+./target/debug/nsh-tui-host --bundle .nsh/gallery/bundle.js
 ```
 
 ## Architecture
@@ -214,7 +205,7 @@ restyles nothing, so the look is the app's own, after Emacs's dired, magit and i
   keyboard focus and cancel a pending press.
 - **Scheduling is passive.** The wake callback only schedules a render on the embedding thread. Wakeups coalesce
   until rendering begins. `next_frame_deadline` is immediate for pending messages, timed for an engine display
-  frame request, and `None` while idle. Error and appearance callbacks run during render on the embedding thread.
+  frame request or native animation, and `None` while idle. Error and appearance callbacks run during render on the embedding thread.
   `Widget for &mut AppView` follows the same batch and drawing path for buffer-only callers.
 - **The terminal transport stays in the host.** The library depends on `ratatui-core` 0.1 and `ratatui-widgets`
   0.3, the crates behind ratatui 0.30. Feature `run-app` adds a generic loop over `Terminal<B>` and a polling
@@ -228,7 +219,7 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. The terminal idiom, animation and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
+component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
 
 ## Points per Cell
 
@@ -275,9 +266,10 @@ view fill of exactly the same RGBA color. These fills draw `Color::Reset`, so th
 background. A matching fill resets the background even when it lies over a colored card; it does not inherit that
 card's color. Other fills keep the app's colors, including colors that differ by a single channel value.
 
-The attached tree's page colors are collected after each complete mount batch, before drawing. This makes
-matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
-remain transparent. The terminal Key scheme is described below; the Minibuffer and mouse-capture controls are
+The attached tree's page colors are collected before drawing, after complete mount batches and animated values
+have been applied. This makes matching independent of paint order and follows style changes, animation frames,
+detachments and app replacement. Transparent fills
+remain transparent. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
 separate interaction work.
 
 ## Navigation stacks
@@ -358,6 +350,36 @@ position. A wheel event with no keyboard focus creates none. Focus selection use
 so the next activation cannot target content that has left the viewport. Indicators, sticky cells, gestures and
 scrolling animations remain separate work.
 
+## Native animations
+
+The retained tree owns one core `animation::Animator`. Every mount item feeds it, including deletion and binding
+changes. `AppView::render` and its buffer-only Widget path tick it with monotonic seconds, write `AnimValues` and
+canvas slots, then send its finished runs and value reads through `EngineControl::animations_finished`. Timing,
+springs, decay, composites and native keyframes use the core's drivers. Replacing or stopping an app clears the
+graph and its deadline. Replacing bindings clears their old overrides, so ordinary styles become visible again.
+
+Active drivers request the next render in 16 ms through `next_frame_deadline`; they have their own deadline,
+separate from the engine's display-frame request. Embedders arm a timer for that deadline after rendering. The
+standalone loop already uses this contract. Once the graph finishes or is stopped, it schedules no further
+frames. The test agent reports the graph's actual animation state when settling input.
+
+Animated opacity multiplies through descendants. Background, border and text colors override their style values;
+text fields keep their placeholder color. Colors blend with the current Cell background. Page backgrounds keep
+their terminal-default treatment as their animated color changes. Canvas numeric and color slots are evaluated
+on the same frame, including the slots used by drawing transforms.
+
+`animation.rs` composes two-dimensional view transforms in CSS order around `transformOrigin`, including bound
+steps. Translation snaps to Cells; scale, rotation and skew project each view and content box to its axis-aligned
+Cell extent. Descendants inherit the transform, and clipping, focus geometry and hit regions use those projected
+boxes. Text keeps upright, unscaled terminal glyphs inside its projected box; borders remain Cell-aligned.
+Canvas paths receive the composed affine transform on the braille grid, including after a canvas `setTransform`.
+Depth rotation and perspective are Decorative features left out silently.
+
+The environment reports reduced motion. Navigation, modal transitions, layout animations and style transitions
+take their final state immediately. Motions honor reduced motion through the core; explicit `Animated` and
+animated-value drivers run as written, so entrance fades such as the gallery's `Appear` finish visible and
+completion callbacks and promises resolve normally.
+
 ## Canvases
 
 `canvas.rs` replays a canvas's `Drawing` against a small 2D context onto a grid of braille dots, 2 across and 4
@@ -409,6 +431,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
 | Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
+| Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Quit |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
@@ -425,8 +448,44 @@ The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes a
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
 without firing again. Navigation activation completes a press in one action; a later release does not press
 again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter and Ctrl+[/Esc can be
-indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation and
-the search Minibuffer are separate work. Editing uses the keys below while a field is focused.
+indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control (the host's raw mode turns
+the tty's own flow control off). Kitty negotiation is separate work. Editing uses the keys below while a field
+is focused.
+
+## The Minibuffer
+
+`search.rs` searches the text on screen incrementally, as readline's and Emacs's incremental searches do:
+`C-s` forward, `C-r` backward. The app's shortcuts are matched first, so an app that binds either key keeps it;
+inside a field both still search. While searching, the Minibuffer owns the keys:
+
+| Keys while searching | Action |
+|---|---|
+| Characters, bracketed paste | Extend the query; the current match stays while it still matches, else the next one in the search's direction is taken |
+| Ctrl+S / Ctrl+R | Next / previous match; with an empty query, search for the previous search's query |
+| Backspace, Ctrl+H | Return to the query and match before the last key |
+| Enter | End the search at the match |
+| Esc, Ctrl+G | Cancel: restore the focus, the search point and the Scroll offsets from before the search |
+| Other keys, mouse input, losing focus | End the search at the match; the key or mouse input then acts as usual |
+
+The search reads the rows the Cell text engine laid out for the Text views of the current focus scope (the
+newest modal, else the page), including text scrolled out of a Scroll's viewport; concealed screens and hidden
+views supply none. Field contents and canvas text are not searched. A match lies within one displayed row and is
+compared grapheme by grapheme; a query without capitals ignores case (smart case). Matches are ordered by Cell
+position, top to bottom and left to right, and the order wraps at both ends. A search starts at the focused
+control (inclusive), at the search point, or at the first / last match when there is neither.
+
+A match moves keyboard focus to the nearest focusable view around it (a button's label focuses the button) and
+reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
+at the default scale) as focus traversal does. A match in other text clears focus and
+becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
+control after or before it in reading order.
+
+While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
+default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
+with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are reversed.
+The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
+Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
+row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
 
 ## Text fields
 
@@ -506,10 +565,15 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
+| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
-| Shadows, blur, materials, gradients, transforms and blend modes | Decorative features left out silently in this slice |
+| Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
+| 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
+| Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |
+| Navigation, modal, layout and style transitions | Final state applied immediately under reduced motion |
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
 | Modal | A surface-sized root above the page, with its own focus scope |
@@ -521,7 +585,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
-positions, top screens and their headers, modal cancellation, terminal navigation and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
+positions, top screens and their headers, modal cancellation, terminal navigation, search and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
 an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
@@ -541,8 +605,13 @@ clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess 
 validation. These are additional ticket-02 seams. The test-agent acceptance seam is `nsh test --target tui`: the existing
 counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapshots after a press, and startup errors).
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
-engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry imports the
-unchanged `examples/tui-gallery` Form and checks invalid fields and successful account creation.
+engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
+its own, checks invalid fields and successful account creation.
+The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
+during and after the search.
+The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
+app replacement, binding removal, page backgrounds, transform geometry and presses, and canvas slots. The
+`animation` host fixture checks final Cells and callbacks through `nsh test --target tui`.
 The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
 
 ```sh
@@ -553,6 +622,8 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/animation --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1
 cargo test -p nsh-tui-host --lib terminal::tests::panic_restores_raw_mode -- --ignored --nocapture --test-threads=1

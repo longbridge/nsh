@@ -76,6 +76,12 @@ pub(super) fn write(bytes: &[u8]) -> io::Result<usize> {
                 "terminal host is shutting down",
             ));
         }
+        if disconnected()? {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal disconnected",
+            ));
+        }
         // SAFETY: bytes is readable for its length; stdout is nonblocking for the session's lifetime.
         let written =
             unsafe { libc::write(libc::STDOUT_FILENO, bytes.as_ptr().cast(), bytes.len()) };

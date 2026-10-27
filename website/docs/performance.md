@@ -239,7 +239,7 @@ nsh run App.tsx --target macos --fps --release
 `--target windows --fps` log the same readings once a second, with the time of each phase of a frame;
 `nsh test --target linux --fps -v` (or `windows`) takes them while a test drives the app.
 
-On the terminal target, `nsh run examples/tui-gallery --target tui --fps` shows one line in a corner.
+On the terminal target, `nsh run examples/gallery --target tui --fps` shows one line in a corner.
 `C-h p` toggles it outside text fields. It shows active FPS, `idle` when the app rests, frame time and p95,
 apply / draw / flush times, bytes written and changed Cells per frame. The same readings appear in the
 `C-h e` log panel. Measuring is enabled only while the line is shown.
