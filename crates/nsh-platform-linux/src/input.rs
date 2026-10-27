@@ -712,15 +712,33 @@ pub(crate) enum Simulated {
     ContextMenu(f32, f32),
 }
 
+#[cfg(feature = "dev")]
+thread_local! {
+    /// The modifier keys a test holds down (`keyboard.down`), which its
+    /// simulated presses and hovers carry.
+    static HELD: std::cell::Cell<gdk::ModifierType> = const { std::cell::Cell::new(gdk::ModifierType::empty()) };
+}
+
+/// Holds (`down`) or lets go of `keys` for the simulated pointer.
+#[cfg(feature = "dev")]
+pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
+    HELD.with(|held| {
+        let mut now = held.get();
+        now.set(keys, down);
+        held.set(now);
+    });
+}
+
 /// Feeds a simulated pointer action through the same path as real input.
 #[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
+    let held = HELD.with(std::cell::Cell::get);
     match action {
         Simulated::Down(x, y) => {
             // Simulated drags carry no state: the button held is recorded.
             surface.input.button.set(Some(MouseButton::Left));
-            down(surface, Key::Mouse, x, y, time, gdk::ModifierType::empty());
+            down(surface, Key::Mouse, x, y, time, held);
         }
         Simulated::Up(x, y) => {
             release_buttons(surface);
@@ -745,15 +763,12 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             wheel_input(surface, x, y, dx, dy, time, step);
         }
         Simulated::Hover(x, y) => {
-            surface
-                .input
-                .last_state
-                .set(Some(gdk::ModifierType::empty()));
+            surface.input.last_state.set(Some(held));
             hover(surface, x, y);
-            mouse_moved(surface, x, y, gdk::ModifierType::empty());
+            mouse_moved(surface, x, y, held);
         }
         Simulated::ContextMenu(x, y) => {
-            context_menu(surface, x, y, gdk::ModifierType::empty());
+            context_menu(surface, x, y, held);
         }
     }
 }

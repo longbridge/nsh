@@ -607,8 +607,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::FileDrop,
         on::ALL,
-        "(e: { uris: string[] }) => void",
-        "Local file URLs dropped on this desktop destination.",
+        "(e: { uris: string[]; pagePosition?: { x: number; y: number } }) => void",
+        "Local file URLs dropped on this desktop destination; `pagePosition`: where, in the window's coordinates, on backends that know it (Linux).",
     ),
     (
         EventKind::Layout,

@@ -247,6 +247,11 @@ pub struct Headless {
     errors: Receiver<AppError>,
     /// The app's errors seen while waiting, for the next check.
     seen: Vec<AppError>,
+    /// The modifier keys held down (`keyboard.down`), which presses,
+    /// drags and hovers carry.
+    held: nsh_core::keymap::Modifiers,
+    /// The finger a `dragAndHold` left down, until `drop()`.
+    finger: Option<pointer::Finger>,
     screen: Screen,
     animator: Animator,
     dialogs: Dialogs,
@@ -296,6 +301,8 @@ impl Headless {
             batches,
             errors,
             seen: Vec::new(),
+            held: nsh_core::keymap::Modifiers::default(),
+            finger: None,
             screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
@@ -1142,7 +1149,7 @@ impl Headless {
     }
 
     /// A press at `at` in `view` (else the view's center), in that view
-    /// and in the root, with no modifier keys. Presses on one view within
+    /// and in the root, with the modifier keys held (`keyboard.down`). Presses on one view within
     /// [`CLICK_INTERVAL`] of each other count up (`clicks` 2 is a double
     /// press), as the platforms count them. `None` when the view has no
     /// bounds.
@@ -1175,7 +1182,7 @@ impl Headless {
                 Points(bounds.origin.x.0 + position.x.0),
                 Points(bounds.origin.y.0 + position.y.0),
             ),
-            modifiers: nsh_core::keymap::Modifiers::default(),
+            modifiers: self.held,
             clicks,
         })
     }

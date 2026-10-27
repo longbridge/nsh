@@ -36,7 +36,7 @@ use nsh_core::{
 };
 
 pub use self::{
-    area::{Area, AreaElement, AreaProps, area},
+    area::{Area, AreaElement, AreaProps, AreaY0, area},
     axis::{
         AxisLabelPlacement, AxisLabelStyle, AxisPlacement, PlotAxis, PlotAxisElement,
         PlotAxisProps, TickFormat, plot_axis,

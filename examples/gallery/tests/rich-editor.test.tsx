@@ -4,6 +4,7 @@
 import { expect, open, test } from "nsh/test";
 
 const ITEM = "Tab indents an item, Shift-Tab outdents it";
+const DETAILS = "Drag to select past the editor's edge and the document scrolls along. The zoom button in the toolbar gives the editor the whole screen.";
 const LINKS = "Links open a menu under the caret: read the NSH documentation, edit it, or remove it. Select text and press Mod-K to link it.";
 
 async function openDemo() {
@@ -81,9 +82,16 @@ test("the zoom gives the editor the whole window, and the document stays", async
   expect(app.count("text:▪")).toBe(2);
 });
 
+/** The words the line under the editor counts. */
+function words(app: { texts(): string[] }): number {
+  const line = app.texts().find((t) => /^\d+ words · \d+ characters$/.test(t)) ?? "";
+  return Number(line.split(" ")[0]);
+}
+
 test("HTML copied from a page keeps its formatting when pasted", async () => {
   const app = await openDemo();
   await app.press(ITEM);
+  const before = words(app);
   // As a browser copies a selection: plain text and the same as HTML.
   await app.paste("label:Document", {
     text: "Pasted title\nSome strong words",
@@ -93,11 +101,34 @@ test("HTML copied from a page keeps its formatting when pasted", async () => {
   });
   // The heading's text joins the item the caret is in (an open slice), the
   // paragraph is a block of its own; marks keep their formatting.
-  await app.waitFor("147 words · 811 characters");
+  // Four words more: "Pasted title" and "Some strong words", whose last
+  // joins the word after the caret.
+  await app.waitFor(`text:/^${before + 4} words · /`);
   const texts = app.texts();
   expect(texts.some((t) => t.endsWith("Pasted title"))).toBe(true);
   expect(texts.some((t) => t.startsWith("Some strong words"))).toBe(true);
   expect(app.spanStyle("text:strong").fontWeight).toBe(700);
   expect(app.spanStyle("text:Some strong").fontWeight).toBe(400);
   expect(app.spanStyle("text:words >> nth=0").italic).toBe(true);
+});
+
+test("a table inserted from the toolbar takes text, Tab moves between its cells, and rows are added", async () => {
+  const app = await openDemo();
+  await app.press(DETAILS);
+  await app.press("role:button[Insert table]");
+  // The table's buttons show while the selection is in it.
+  await app.waitFor("role:button[Add row after]");
+  await app.type("label:Document", "Plan");
+  await app.waitFor("Plan");
+  await app.keyboard.press("tab");
+  await app.type("label:Document", "Done");
+  await app.waitFor("Done");
+  await app.press("role:button[Add row after]");
+  // As Markdown: the new table's header row, its two rows and the one added.
+  await app.press("text:Markdown");
+  await app.waitFor("id:markdown-source");
+  const source = app.texts().find((t) => t.startsWith("# Release notes")) ?? "";
+  expect(/\|\s*Plan\s*\|\s*Done\s*\|/.test(source)).toBe(true);
+  // The document's own table (four lines) and the new one (five).
+  expect(source.split("\n").filter((line) => line.startsWith("|")).length).toBe(9);
 });
