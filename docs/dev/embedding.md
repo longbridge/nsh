@@ -26,6 +26,10 @@
   the generated Android runtimes' build scripts. `cargo xtask android` checks every linked library's LOAD alignment
   with the NDK's `llvm-objdump` before copying it into the runtime; `cargo xtask dist` uses the same checked libraries
   for the APK runtimes and AARs. APK ZIP alignment is checked separately by `zipalign -c -P 16 -v 4 <app.apk>`.
+- Release runtimes' `lib/<abi>/libnsh.so` is stripped with the NDK's `llvm-strip --strip-unneeded` (a quarter of each
+  library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
+  keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
+  it packages and extracts the symbols itself.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform

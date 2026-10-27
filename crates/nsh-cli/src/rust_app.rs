@@ -1831,7 +1831,18 @@ opt-level = 3
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
             let dir = out.join("lib").join(&abi);
             fs::create_dir_all(&dir)?;
-            install(&lib, &dir.join("libnsh.so"))?;
+            let dest = dir.join("libnsh.so");
+            if dev {
+                install(&lib, &dest)?;
+            } else if !up_to_date(&dest, &lib) {
+                // Without its symbol tables and debug info, which APKs
+                // store uncompressed; `symbols/<abi>` keeps them, for
+                // `ndk-stack` and Play Console.
+                let symbols = out.join("symbols").join(&abi);
+                fs::create_dir_all(&symbols)?;
+                fs::copy(&lib, symbols.join("libnsh.so"))?;
+                sdk.strip(&lib, &dest)?;
+            }
         }
         Ok(out)
     }
@@ -2066,12 +2077,17 @@ fn check_specifiers(crates: &[AppCrate], sets: &[SetDescription]) -> anyhow::Res
 
 /// Copies `from` to `to` when it is newer.
 fn install(from: &Path, to: &Path) -> anyhow::Result<()> {
-    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
-    if modified(to).is_some() && modified(to) >= modified(from) {
+    if up_to_date(to, from) {
         return Ok(());
     }
     fs::copy(from, to).with_context(|| format!("copy {} to {}", from.display(), to.display()))?;
     Ok(())
+}
+
+/// Whether `file` exists and is no older than `source`.
+fn up_to_date(file: &Path, source: &Path) -> bool {
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    modified(file).is_some() && modified(file) >= modified(source)
 }
 
 /// The cargo to run.

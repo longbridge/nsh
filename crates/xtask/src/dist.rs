@@ -9,7 +9,8 @@
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
-//! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
+//! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
+//!                                                              symbols/<abi>/libnsh.so (with symbols)
 //! dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          the web runtimes (published apps', the dev host's)
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
@@ -171,10 +172,12 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         let dest = out.join("runtime/android").join(name);
         copy(&built.join("classes.dex"), &dest.join("classes.dex"))?;
         for abi in &abis {
-            copy(
-                &built.join("lib").join(abi).join("libnsh.so"),
-                &dest.join("lib").join(abi).join("libnsh.so"),
-            )?;
+            for dir in ["lib", "symbols"] {
+                copy(
+                    &built.join(dir).join(abi).join("libnsh.so"),
+                    &dest.join(dir).join(abi).join("libnsh.so"),
+                )?;
+            }
         }
         let aar = out
             .join("embed/android")
@@ -268,9 +271,11 @@ fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Res
     )?;
     fs::write(work.join("R.txt"), "")?;
     copy(&built.join("classes.jar"), &work.join("classes.jar"))?;
+    // With their symbols: the app's Gradle build strips what it packages
+    // and keeps them for its crash reports.
     for abi in abis {
         copy(
-            &built.join("lib").join(abi).join("libnsh.so"),
+            &built.join("symbols").join(abi).join("libnsh.so"),
             &work.join("jni").join(abi).join("libnsh.so"),
         )?;
     }
