@@ -1,4 +1,4 @@
-// The Controls demo's Select card: a sort order chosen with a press or the
+// The Select demo: a sort order chosen with a press or the
 // keys, a font list with sections, search, an empty state and a font that
 // is not installed, and a language the organization sets (disabled). On a
 // phone (headless runs are touch screens) the list is a sheet; on a
@@ -11,7 +11,7 @@ describe("on a phone", () => {
   let app: App;
   beforeEach(async () => {
     app = await open("../App.tsx", { clock: {} });
-    await app.press("role:button[Controls]");
+    await app.press("role:button[Select]");
     await app.waitFor("role:combobox[Sort by]");
   });
 
@@ -89,7 +89,7 @@ describe("on a desktop", () => {
   let app: App;
   beforeEach(async () => {
     app = await open("../App.tsx", { platform: "macos", width: 1200, height: 800, clock: {} });
-    await app.press("role:button[Controls]");
+    await app.press("role:button[Select]");
     await app.waitFor("role:combobox[Sort by]");
   });
 

@@ -273,6 +273,7 @@ test("the keyboard moves through the plans and the tabs, each one stop of Tab", 
   await desk.waitFor("Continue: Team, $12 / mo");
   // On to the tabs, entered at the selected one (Overview): the arrows
   // select as they move.
+  await desk.back();
   await desk.press("role:button[Tabs]");
   await desk.waitFor("Visitors");
   tabs = 0;

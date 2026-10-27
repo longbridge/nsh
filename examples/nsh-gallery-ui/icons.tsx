@@ -54,6 +54,7 @@ export type IconName =
   | "radio"
   | "switch"
   | "tabs"
+  | "select"
   | "collapsible"
   | "progress"
   | "chart"
@@ -127,6 +128,12 @@ const glyphs: Record<IconName, Draw> = {
     rect(c, 2.5, 5, 15, 11, 2.5);
     line(c, [2.5, 9, 17.5, 9]);
     line(c, [8, 5, 8, 9]);
+  },
+  select: (c) => {
+    // A closed field and its up / down chevrons.
+    rect(c, 2.5, 5.5, 15, 9, 2.5);
+    line(c, [12, 9, 13.75, 7.5, 15.5, 9]);
+    line(c, [12, 11, 13.75, 12.5, 15.5, 11]);
   },
   collapsible: (c) => {
     line(c, [4, 5, 16, 5]);
