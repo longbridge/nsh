@@ -444,12 +444,12 @@ struct Node {
     /// Node props the classes set.
     class_props: Option<Box<ClassProps>>,
     /// Interaction states (`tailwind::state` bits).
-    states: u8,
+    states: u16,
     /// States the platform reports for the view.
-    tracked: u8,
+    tracked: u16,
     /// States it shows as a part of a control (`Prop::ProjectedStates`):
     /// its classes read them with its own, nothing else does.
-    projected: u8,
+    projected: u16,
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
@@ -3277,6 +3277,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Indeterminate, patch);
                 return Ok(());
             }
+            Prop::ExpandedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Expanded, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -3362,6 +3366,9 @@ impl<M: TextEngine> Core<M> {
                     |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::Mixed);
                 let indeterminate =
                     (is_mixed(&a.state) != is_mixed(&before.state)).then(|| is_mixed(&a.state));
+                let is_expanded = |s: &crate::AccessibilityState| s.expanded == Some(true);
+                let expanded = (is_expanded(&a.state) != is_expanded(&before.state))
+                    .then(|| is_expanded(&a.state));
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -3369,7 +3376,11 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
-                if selected.is_some() || checked.is_some() || indeterminate.is_some() {
+                if selected.is_some()
+                    || checked.is_some()
+                    || indeterminate.is_some()
+                    || expanded.is_some()
+                {
                     if flags != 0 {
                         self.mark(key, flags);
                     }
@@ -3381,6 +3392,9 @@ impl<M: TextEngine> Core<M> {
                     }
                     if let Some(indeterminate) = indeterminate {
                         self.set_indeterminate(key, indeterminate);
+                    }
+                    if let Some(expanded) = expanded {
+                        self.set_expanded(key, expanded);
                     }
                     return Ok(());
                 }

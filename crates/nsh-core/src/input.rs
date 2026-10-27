@@ -220,7 +220,7 @@ pub struct Link {
     /// The events it listens to.
     pub events: EventMask,
     /// The interaction states it tracks.
-    pub tracked: u8,
+    pub tracked: u16,
     /// Its native gesture values.
     pub values: GestureValues,
     /// It scrolls: horizontally or not.
@@ -234,7 +234,7 @@ impl Link {
     pub fn new(
         id: NodeId,
         events: EventMask,
-        tracked: u8,
+        tracked: u16,
         values: GestureValues,
         scroll: Option<bool>,
         pan_activation: Option<PanActivation>,
@@ -457,7 +457,7 @@ pub fn released_inside(local: Point<Points>, size: Size<Points>, slop: EdgeInset
 
 /// Interaction states `states` with `bit` set (or cleared), when the view
 /// tracks it and they change.
-pub fn next_states(tracked: u8, states: u8, bit: u8, on: bool) -> Option<u8> {
+pub fn next_states(tracked: u16, states: u16, bit: u16, on: bool) -> Option<u16> {
     if tracked & bit == 0 {
         return None;
     }
@@ -468,7 +468,7 @@ pub fn next_states(tracked: u8, states: u8, bit: u8, on: bool) -> Option<u8> {
 /// Whether hovering a view that tracks `tracked` and listens to `events`
 /// matters: for its `hover:` styles (the `HOVERED` state) or its
 /// `onMouseEnter` / `onMouseLeave` / `onMouseMove`.
-pub fn hoverable(tracked: u8, events: EventMask) -> bool {
+pub fn hoverable(tracked: u16, events: EventMask) -> bool {
     tracked & HOVERED != 0
         || events.contains(EventKind::MouseEnter)
         || events.contains(EventKind::MouseLeave)

@@ -202,7 +202,7 @@ pub struct Attrs {
     pub(crate) selectable_view: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
-    pub(crate) projected_states: u8,
+    pub(crate) projected_states: u16,
     /// Where a JS renderer's content goes (the element is its
     /// placeholder: [`super::Renderer::render`]).
     pub(crate) render: Option<super::renderer::RenderAt>,
@@ -1699,6 +1699,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// An app's style while expanded (`accessibility_state` `expanded`: a
+    /// `Popover`'s or `Menu`'s trigger while its popup is open), as
+    /// `aria-expanded:` classes apply.
+    fn expanded_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::EXPANDED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::ExpandedStyle(patch))
+        });
+        self
+    }
+
     /// Styles it as checked while `checked` holds (its `checked:` classes
     /// and [`Self::checked_style`]), as a part of a control that is: a
     /// switch's track and thumb, a checkbox's mark (`gpui-base`'s
@@ -1748,7 +1758,7 @@ pub trait Interactive: Element {
 }
 
 /// Sets or clears `bit` of the states an element shows as a part.
-fn project(a: &mut Attrs, bit: u8, on: bool) {
+fn project(a: &mut Attrs, bit: u16, on: bool) {
     if on {
         a.projected_states |= bit;
     } else {

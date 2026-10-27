@@ -1778,7 +1778,7 @@ pub extern "C" fn nsh_root_size(
 /// classes).
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
-    send(|app| app.control.set_states(id, states as u8))
+    send(|app| app.control.set_states(id, states as u16))
 }
 
 /// The surface was resized (points).

@@ -2942,6 +2942,81 @@ function App() {
 mount(App);
 "##;
 
+const EXPANDED_TRIGGER: &str = r##"import { mount, Text, View } from "nsh";
+import { Popover } from "nsh/base";
+
+mount(() => (
+  <Popover
+    trigger={
+      <View
+        testID="trigger"
+        class="bg-white aria-expanded:bg-black"
+        expandedStyle={{ opacity: 0.5 }}
+      >
+        <Text>Details</Text>
+      </View>
+    }
+  >
+    <Text>Body</Text>
+  </Popover>
+));
+"##;
+
+/// A popover's trigger takes its `aria-expanded:` classes and its
+/// `expandedStyle` while the popover is open, and drops them when it
+/// closes: the core follows the expanded state the popover sets.
+#[test]
+fn a_popovers_trigger_is_styled_while_open() {
+    let (engine, rx) = start_in(
+        EXPANDED_TRIGGER,
+        Environment {
+            os: nsh_engine::Os::Windows,
+            ..Environment::default()
+        },
+    );
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let trigger = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("trigger") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the trigger");
+    let style = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == trigger => Some(style.clone()),
+                _ => None,
+            })
+    };
+    let closed = style(std::slice::from_ref(&first)).expect("styled");
+    assert_eq!(closed.background_color.0, 0xffff_ffff);
+    assert_eq!(closed.opacity, 1.0);
+    let press = || {
+        engine
+            .control()
+            .dispatch_event(trigger, EventKind::Press, EventPayload::None)
+    };
+    press();
+    let opened = until(&rx, |b| shows(b, "Body"));
+    let open = style(&opened).expect("restyled");
+    assert_eq!(open.background_color.0, 0x0000_00ff);
+    assert_eq!(open.opacity, 0.5);
+    press();
+    let closed = until(&rx, |b| {
+        style(std::slice::from_ref(b)).is_some_and(|s| s.opacity == 1.0)
+    });
+    assert_eq!(style(&closed).unwrap().background_color.0, 0xffff_ffff);
+}
+
 /// A popup reports a change of its open state before its lifecycle
 /// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
 /// there or all gone, also where that is at once (no motion).

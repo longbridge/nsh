@@ -123,7 +123,7 @@ import { ContextMenu, MenuItem } from "nsh/base";
 | `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（桌面）或 sheet（手机），以及子菜单的弹出层。 |
 | `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 手机：sheet 后面的背景层。 |
-| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开它的元素。 |
+| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开它的元素。菜单打开时，它的 `aria-expanded:` 类和 `expandedStyle` 生效。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 条目，每次打开时创建。 |
 
 ### ContextMenu

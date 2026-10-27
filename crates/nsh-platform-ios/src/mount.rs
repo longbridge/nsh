@@ -467,9 +467,9 @@ struct Slot {
     /// The image (not its placeholder) is shown.
     image_shown: bool,
     /// Interaction states the core wants reported (`tailwind::state`).
-    tracked: u8,
+    tracked: u16,
     /// Current interaction states.
-    states: u8,
+    states: u16,
 }
 
 impl Slot {
@@ -2204,7 +2204,7 @@ impl Mounter {
     }
 
     /// The core asked for the states of `id` it reads (`active:`, ...).
-    fn track_states(&mut self, id: NodeId, states: u8) {
+    fn track_states(&mut self, id: NodeId, states: u16) {
         let Some(s) = self.slot_mut(id) else { return };
         if s.tracked == states {
             return;
@@ -2215,7 +2215,7 @@ impl Mounter {
     }
 
     /// An interaction state of `id` changed: tells the core if it reads it.
-    fn report_state(&mut self, id: NodeId, bit: u8, on: bool) {
+    fn report_state(&mut self, id: NodeId, bit: u16, on: bool) {
         let Some(s) = self.slot_mut(id) else { return };
         let states = if on { s.states | bit } else { s.states & !bit };
         if states == s.states {
