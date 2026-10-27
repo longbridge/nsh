@@ -9,9 +9,10 @@ use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NativeProps, NodeId,
     PayloadValue, ViewKind, WebSource,
+    element::{ImageAsset, ImageProgress, Root, VideoInfo, VideoProgress, WebNavigation},
     geometry::{DevicePixels, size},
     platform::ColorScheme,
-    ui::{ImageAsset, ImageProgress, Root, VideoInfo, VideoProgress, WebNavigation, prelude::*},
+    prelude::*,
 };
 use nsh_engine::{Engine, EngineConfig, Environment};
 
@@ -46,7 +47,7 @@ fn Media() -> impl IntoElement {
                 .on_progress(move |p: &ImageProgress| {
                     note(format!("image {}/{}", p.loaded, p.total))
                 })
-                .on_load(move |s: &Size<Points>| {
+                .on_load(move |s: &Size<DevicePixels>| {
                     note(format!("image {}x{}", s.width.0, s.height.0))
                 })
                 .on_error(move |m: &str| note(format!("image failed: {m}")))

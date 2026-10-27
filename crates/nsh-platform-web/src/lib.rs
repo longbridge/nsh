@@ -29,6 +29,7 @@ mod filesystem;
 #[cfg(feature = "js")]
 mod local_time;
 mod net;
+mod shader;
 mod storage;
 mod text;
 mod websocket;
@@ -90,16 +91,16 @@ thread_local! {
     /// so that matching never needs the engine.
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
-    static UI_SETS: RefCell<Option<Vec<nsh_core::ui::Registry>>> = const { RefCell::new(None) };
+    static UI_SETS: RefCell<Option<Vec<nsh_core::element::Registry>>> = const { RefCell::new(None) };
     /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
-    static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::ui::Root>>> = const { RefCell::new(None) };
+    static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::element::Root>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// What [`ui_sets!`] gives.
-pub use nsh_core::ui::Registry;
+pub use nsh_core::element::Registry;
 
 /// Sets the UI sets the apps started from now on serve: `nsh/base` and
 /// an app's own Rust components (`nsh.json` `"rust"`). A runtime built for
@@ -133,14 +134,14 @@ macro_rules! ui_sets {
 
 /// Sets the Rust app [`nsh_start_rust`] runs: `root` makes its root
 /// component (with its theme), each time the page starts it.
-pub fn set_root(root: impl Fn() -> nsh_core::ui::Root + 'static) {
+pub fn set_root(root: impl Fn() -> nsh_core::element::Root + 'static) {
     ROOT.with(|r| *r.borrow_mut() = Some(Box::new(root)));
 }
 
 /// Makes this module the web runtime of a Rust app (`nsh.json` `"root"`):
 /// it serves `$sets` (`nsh/base` and the app's own set) and runs the
 /// root component `$root` makes (an expression giving a
-/// [`nsh_core::ui::Root`]) when the page calls [`nsh_start_rust`]. Built
+/// [`nsh_core::element::Root`]) when the page calls [`nsh_start_rust`]. Built
 /// without the feature `js`, the module has no QuickJS: the app is Rust
 /// and the browser's own JS from start to end. Exports `nsh_app_init`, as
 /// [`ui_sets!`].
@@ -175,6 +176,8 @@ struct BundleOptions {
     /// The VM limits the page runs the app with ([`nsh_bundle_limits`]);
     /// `None`: none, as an app on its own.
     limits: Option<String>,
+    /// Static chunks staged before the entry starts.
+    chunks: Vec<nsh_engine::Chunk>,
 }
 
 struct Running {
@@ -501,7 +504,8 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
         // SAFETY: trusted, per `nsh_start_bytecode`'s contract.
         BundleCode::Bytecode(bytes) => unsafe { Bundle::bytecode(bytes) },
     }
-    .with_policy(policy);
+    .with_policy(policy)
+    .with_chunks(options.chunks);
     if let Some(harden) = options.harden {
         // SAFETY: trusted, per `nsh_bundle_harden`'s contract.
         bundle = unsafe { bundle.with_harden_bytecode(harden) };
@@ -649,8 +653,36 @@ pub unsafe extern "C" fn nsh_bundle_options(
             harden: None,
             app_id: (!app_id.is_empty()).then_some(app_id),
             limits: None,
+            chunks: Vec::new(),
         }
     });
+}
+
+/// Stages a static dependency for the next app, after [`nsh_bundle_options`].
+///
+/// # Safety
+///
+/// Both ranges are memory from [`nsh_alloc`]. Bytecode must be trusted output
+/// from the matching CLI, as required by [`nsh_start_bytecode`].
+#[cfg(feature = "js")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_bundle_chunk(
+    name: *const u8,
+    name_len: usize,
+    code: *const u8,
+    code_len: usize,
+    bytecode: u32,
+) {
+    // SAFETY: the caller provides allocated ranges and trusted bytecode.
+    let chunk = unsafe {
+        let name = string(name, name_len);
+        if bytecode != 0 {
+            nsh_engine::Chunk::bytecode(name, std::slice::from_raw_parts(code, code_len).to_vec())
+        } else {
+            nsh_engine::Chunk::source(name, string(code, code_len))
+        }
+    };
+    OPTIONS.with(|o| o.borrow_mut().chunks.push(chunk));
 }
 
 /// Sets the VM limits the next [`nsh_start`] / [`nsh_start_bytecode`]
@@ -783,10 +815,10 @@ pub unsafe extern "C" fn nsh_compile(
 ) -> u32 {
     // SAFETY: guaranteed by the caller.
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
-    let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
+    let sets: Vec<nsh_core::element::description::SetDescription> = ui_sets()
         .iter()
-        .flat_map(nsh_core::ui::Registry::sets)
-        .filter_map(nsh_core::ui::description::SetDescription::of)
+        .flat_map(nsh_core::element::Registry::sets)
+        .filter_map(nsh_core::element::description::SetDescription::of)
         .collect();
     let result = nsh_bundler::compile_module(&name, &source, &sets);
     let ok = result.is_ok();
@@ -1121,8 +1153,17 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
-        EventKind::HoverMove | EventKind::ContextMenu => {
-            // `{ position, pagePosition, modifiers }`, as handlers get it.
+        EventKind::HoverMove
+        | EventKind::ContextMenu
+        | EventKind::Press
+        | EventKind::LongPress
+        | EventKind::PressDown
+        | EventKind::PressUp
+            if matches!(kind, EventKind::HoverMove | EventKind::ContextMenu)
+                || value.get("pagePosition").is_some() =>
+        {
+            // `{ position, pagePosition, modifiers }` (presses: and
+            // `clicks`), as handlers get it.
             let at = |k: &str| {
                 let p = value.get(k);
                 let n = |c: &str| {
@@ -1151,6 +1192,13 @@ pub unsafe extern "C" fn nsh_event(
                     position,
                     page_position,
                     modifiers,
+                })
+            } else if kind != EventKind::ContextMenu {
+                EventPayload::Press(nsh_core::PressEvent {
+                    position,
+                    page_position,
+                    modifiers,
+                    clicks: (num("clicks") as u32).max(1),
                 })
             } else {
                 EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
@@ -1268,6 +1316,7 @@ pub unsafe extern "C" fn nsh_paste(
             .to_owned()
     };
     let mut paste = nsh_core::PasteEvent::new(text(&value, "text"));
+    paste.html = text(&value, "html");
     let mut at = 0usize;
     for file in value
         .get("files")
@@ -1454,9 +1503,13 @@ fn key_of(code: u32) -> Option<Key> {
 /// an auto-repeat. Returns the binding that fires, -1 for none (the key
 /// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
 /// reports a firing binding with [`nsh_key_command`].
+///
+/// `f64` keeps every `u32` binding ID positive in JS, including Rust
+/// shortcuts (`1 << 31` and up) and overlay Escape (`u32::MAX`), while
+/// leaving the negative sentinels distinct.
 #[unsafe(no_mangle)]
-pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -> i32 {
-    let Some(key) = key_of(key) else { return -1 };
+pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -> f64 {
+    let Some(key) = key_of(key) else { return -1.0 };
     let keystroke = Keystroke {
         modifiers: Modifiers {
             ctrl: modifiers & 1 != 0,
@@ -1472,9 +1525,9 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -
         })
     });
     match found {
-        KeyMatch::None => -1,
-        KeyMatch::Held => -2,
-        KeyMatch::Fire(id) => id as i32,
+        KeyMatch::None => -1.0,
+        KeyMatch::Held => -2.0,
+        KeyMatch::Fire(id) => id as f64,
     }
 }
 
@@ -1507,6 +1560,28 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// Vertical scroll view `id` is pulled `distance` past its top: its pull
+/// value (`pullValue`) follows.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_pull(id: u32, distance: f32) -> f64 {
+    send(|app| {
+        if app.animation.pulled(id, distance) {
+            let mut out = Out::new();
+            app.animation.outputs(&mut out);
+            if !out.is_empty() {
+                ffi::submit(&out.finish());
+            }
+        }
+    })
+}
+
+/// Scroll view `id` came to rest (`onScrollEnd`, sent or not): the snapping
+/// animated values that follow it settle.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_scroll_ended(id: u32) -> f64 {
+    send(|app| app.animation.scroll_ended(id))
+}
+
 /// The user zoomed zoomable scroll view `id` to `scale` (reported before
 /// the offset it scrolled to).
 #[unsafe(no_mangle)]
@@ -1530,16 +1605,26 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
             ffi::submit(&out.finish());
         }
         let (value_x, value_y) = app.animation.pan_values(id);
-        let payload = EventPayload::Pan {
-            translation: point(Points(tx), Points(ty)),
-            velocity_x: vx,
-            velocity_y: vy,
-            value_x: value_x.map(Points),
-            value_y: value_y.map(Points),
+        let payload = if phase == 3 {
+            EventPayload::PanCancelled {
+                translation: point(Points(tx), Points(ty)),
+                velocity_x: vx,
+                velocity_y: vy,
+                value_x: value_x.map(Points),
+                value_y: value_y.map(Points),
+            }
+        } else {
+            EventPayload::Pan {
+                translation: point(Points(tx), Points(ty)),
+                velocity_x: vx,
+                velocity_y: vy,
+                value_x: value_x.map(Points),
+                value_y: value_y.map(Points),
+            }
         };
         match phase {
             0 => app.control.dispatch_event(id, EventKind::PanStart, payload),
-            2 => app.control.dispatch_event(id, EventKind::PanEnd, payload),
+            2 | 3 => app.control.dispatch_event(id, EventKind::PanEnd, payload),
             _ => {}
         }
     })

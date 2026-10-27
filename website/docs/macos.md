@@ -11,7 +11,7 @@ NSH apps also run as native Mac apps. The macOS backend renders them with AppKit
 text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the native modules are the
 same as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`platform.os` is `"macos"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
-context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+context menus come from `nsh_core::element::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 The macOS backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, dialogs
@@ -54,9 +54,12 @@ nsh build my-app --release -o build
 dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # in a checkout: target/debug/nsh-macos-host
 ```
 
-`--window-size` is the window's initial size (TSX apps); the window can be resized.
+`--window-size` is the window's initial size (TSX apps); the window can be resized. `--display <n>` (`nsh run` / `nsh test
+--target macos --display <n>`) centers it on display `n`: `1` is the primary display, the one with the menu bar.
 
-`nsh test --target macos` runs a TSX app's tests in macOS windows: each app a test opens gets a window of its own, and
+`nsh test --target macos` runs a TSX app's tests in macOS windows, on a secondary display when there is one (the main
+screen stays yours; `--display <n>` picks another): each app a test opens gets a window of its own, at the size the
+test asks for even on a display shorter than it, and
 the steps click, type and scroll with the system's input at the views their selectors name
 ([Testing](./testing-and-trace.md#on-a-real-platform)).
 
@@ -76,8 +79,10 @@ app that updates twice a second:
 | `CPU` / `GPU` / `MEM` | The process: CPU (100% is one core), its GPU share, its memory footprint (Activity Monitor's figure). |
 
 The bars below are the last 120 frames' main-thread time against one refresh (the line): green within half of it, amber
-within it, red over. With `--trace` too, the host also logs the readings once a second (milliseconds as
-mean/p50/p95/max). Measure release builds; the monitor costs nothing while it is off.
+within it, red over. While the panel shows, the readings are also logged once a second (target `nsh::perf`, in the
+Linux backend's shape with macOS's frame phases `tick`, `drain` and `canvas`; milliseconds as mean/p50/p95/max), which
+`nsh test --fps -v` shows and `examples/gallery/tools/perf.py` reads. Measure release builds; the monitor costs nothing
+while it is off.
 
 ## Packaging
 
@@ -153,7 +158,7 @@ standalone session alive when its window closes. Closing hides the window;
 reopening from the Dock shows that same window and engine. For an explicit Exit
 or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
-`nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
+`nsh_core::element::desktop::close_window()` follows the chosen window-close policy.
 
 
 `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
@@ -181,7 +186,7 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
-`selectable` text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
+Selectable text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
 Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
 only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
 that shows the app's popup and backdrop. Pages show their `header` at the top. A click anywhere in an `Input`, its padding too, puts the caret at the nearest
@@ -200,12 +205,12 @@ their order with the cancel action last and no default; Escape chooses the cance
 | Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Option+Left, Cmd+[, mouse back button | Go back (not while a field has the focus: there Option+Left moves the caret) |
 | Option / Cmd + arrows, with Shift; Option+Delete, Cmd+Delete; Ctrl+A / E / K | Move, select and delete by word and line in a field, as in every Mac app |
-| Cmd+Z, Shift+Cmd+Z, Cmd+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Cmd+A / Cmd+C select and copy `selectable` text |
+| Cmd+Z, Shift+Cmd+Z, Cmd+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Cmd+A / Cmd+C select and copy selectable text |
 | Arrows; Page Up / Down, Space, Shift+Space, Option+Up / Down; Home / End, Cmd+Up / Down | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Cmd+W, Cmd+M, Ctrl+Cmd+F, Cmd+H, Option+Cmd+H, Cmd+Q | Close, minimize, full screen, hide, hide others, quit (`nsh package` and `nsh run` apps' menus) |
 | Cmd+R | Reloads the latest build (`nsh run`) |
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) come before these, except activation keys addressed to a focused pressable view, Quit, Hide,
+The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come before these, except activation keys addressed to a focused pressable view, Quit, Hide,
 Minimize and Full Screen, which cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Cmd+C is the key that types C on a US layout).

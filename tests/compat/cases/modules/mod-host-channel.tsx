@@ -3,7 +3,7 @@
 // launch parameters are empty, a listener is added and removed, a post goes
 // nowhere and a call fails at once with the reason. Its script checks each.
 import { Text, View, signal } from "nsh";
-import { host } from "nsh/host";
+import { host } from "nsh";
 
 function App() {
   const calls = signal("not called");

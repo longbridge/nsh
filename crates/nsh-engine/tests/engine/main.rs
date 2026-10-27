@@ -21,6 +21,7 @@ mod counter;
 mod errors;
 mod external_wake;
 mod fetch;
+mod focus;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;
 mod handle_bench;
@@ -54,6 +55,7 @@ mod rust_renderers;
 mod rust_scrolling;
 mod rust_styles;
 mod rust_touch;
+mod shader;
 mod shutdown;
 mod split;
 mod storage;

@@ -21,9 +21,10 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
+    element::{Callback, Registry, Root},
     geometry::{Points, Size},
     platform::{Idiom, Locale, Os},
-    ui::{Callback, Registry, Root, prelude::timer},
+    prelude::timer,
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
@@ -196,6 +197,24 @@ pub struct TestResult {
     /// Why it failed (`None` unless its status is
     /// [`TestStatus::Failed`]).
     pub failure: Option<Failure>,
+}
+
+impl TestResult {
+    /// The result of a test that ran elsewhere (`cargo test`'s, which
+    /// `nsh test` reports with the app's TypeScript tests).
+    pub fn new(
+        name: impl Into<String>,
+        elapsed: Duration,
+        status: TestStatus,
+        failure: Option<Failure>,
+    ) -> TestResult {
+        TestResult {
+            name: name.into(),
+            elapsed,
+            status,
+            failure,
+        }
+    }
 }
 
 /// Whether a test ran and passed.
@@ -674,7 +693,7 @@ impl Session {
     /// may be an app a `beforeAll` opened).
     async fn close_apps_since(self: &Arc<Self>, mark: usize) -> Option<Vec<String>> {
         let session = self.clone();
-        nsh_core::ui::prelude::blocking(move || session.close_apps(mark))
+        nsh_core::prelude::blocking(move || session.close_apps(mark))
             .await
             .ok()
             .flatten()

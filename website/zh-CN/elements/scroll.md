@@ -11,7 +11,7 @@ demo: el-scroll
 `Scroll` 是原生滚动视图（iOS 和 Mac Catalyst 上是 UIScrollView，Android 上是 ScrollView）。它把所有子元素作为内容进行布局，并在原生侧滚动：滚动、惯性滑动、回弹和吸附都由平台以屏幕刷新率完成。Rust 用 `scroll()` 创建，TSX 用从 `nsh` 导入的 `<Scroll>`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 scroll().flex_1().child(
     view().p_4().gap_2().child(each(
@@ -67,6 +67,8 @@ scroll().flex_1().child(
 |---|---|---|---|
 | `refreshing` | `.refreshing(..)` | `boolean` | 显示刷新指示器。 |
 | `onRefresh` | `.on_refresh(..)` | `() => void` | 用户下拉刷新：开始加载，并在结束前保持 `refreshing` 为真。 |
+| `refreshIndicator` | `.refresh_indicator(Some(height))` | `{ height: number }` | 应用自己绘制指示器，高 `height` 点：平台的转圈隐藏，下拉到 `height` 即刷新，刷新中在内容上方留出 `height`。`height` 不大于 0 时视为未设。 |
+| `pullValue` | `.pull_value(&value)` | `AnimatedValue` | 一个动画值，写入视图被拉过顶部的距离（静止为 0，随下拉增大；刷新中为内容上方留出的空间，设了 `refreshIndicator` 时等于 `height`），用来绘制应用的指示器。 |
 
 ```rust tabs
 let refreshing = signal(false);
@@ -171,7 +173,7 @@ scroller.scrollTo({ y: 0, animated: true });
 
 ## 键盘
 
-滚动视图中的输入框会在原生侧自动避开键盘：滚动视图获得底部内边距，并自行滚动到获得焦点的输入框。对于滚动视图之外的内容，请使用 `nsh/base` 的 [`KeyboardAvoidingView`](./keyboard-avoiding-view.md)。参见[表单与键盘](../docs/forms-and-keyboard.md)。
+滚动视图中的输入框会在原生侧自动避开键盘：滚动视图获得底部内边距，并自行滚动到获得焦点的输入框。对于滚动视图之外的内容，请在底部内边距或外边距中使用 [`env(keyboard-inset-height)`](./keyboard.md)。参见[表单与键盘](../docs/forms-and-keyboard.md)。
 
 ## 从右到左
 

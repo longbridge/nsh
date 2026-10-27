@@ -39,7 +39,7 @@ function Player() {
         paused={paused()}
         muted
         repeat
-        resizeMode="cover"
+        class="object-cover"
         style={{ height: 220, borderRadius: 8, overflow: "hidden", backgroundColor: "#000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
       />
@@ -68,7 +68,7 @@ mount(Player);
 | `rate` | `number` | `1` | 播放速度。 |
 | `repeat` | `boolean` | `false` | 播放到结尾后从头重新播放。 |
 | `controls` | `boolean` | `false` | 显示平台自带的播放控件。 |
-| `resizeMode` | `"cover" \| "contain" \| "stretch" \| "center"` | | 视频如何适应其区域。 |
+| `objectFit`（样式）、`object-*` 类 | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | 视频如何适应其区域，同 CSS 的 `object-fit`（`class="object-cover"`）。 |
 | `progressUpdateInterval` | `number` | `250` | `onProgress` 事件之间的毫秒数。 |
 | `audioSession` | `"default" \| "playback" \| "mixWithOthers"` | `"default"` | 声音与设备上其他音频的关系：见[声音与其他应用](#声音与其他应用)。 |
 
@@ -93,7 +93,7 @@ mount(Player);
 | 事件 | 数据 | 时机 |
 |---|---|---|
 | `onLoadStart` | | 视频开始加载。 |
-| `onLoad` | `{ duration: number; size: Size }` | 可以播放：时长（秒）和尺寸。 |
+| `onLoad` | `{ duration: number; size: PixelSize }` | 可以播放：时长（秒）和像素尺寸。 |
 | `onProgress` | `{ currentTime: number; duration: number }` | 播放期间，每 `progressUpdateInterval` 毫秒一次。单位为秒。 |
 | `onBuffer` | `{ isBuffering: boolean }` | 播放在等待数据，或恢复播放。 |
 | `onEnd` | | 播放到达结尾。 |

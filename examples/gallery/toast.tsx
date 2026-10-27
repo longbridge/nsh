@@ -5,7 +5,8 @@
 // the toasts and their lifecycle, a `ToastStack` lays them out, a `Toast`
 // is each one's root.
 import { Overlay, signal, Text, View } from "nsh";
-import { safeArea, Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
+import { Toast, type ToastEntry, ToastManager, ToastStack } from "nsh/base";
+import { safeArea } from "nsh";
 import { colors, desktop, finish, radius } from "./ui";
 
 /** What a toast shows. */
@@ -138,8 +139,7 @@ function Item(props: { entry: ToastEntry }) {
 export function Toaster() {
   return (
     <Overlay
-      pointerEvents="box-none"
-      style={{ left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: safeArea().bottom + 16, alignItems: desktop() ? "flex-end" : "center" }}
+      style={{ pointerEvents: "box-none", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: safeArea().bottom + 16, alignItems: desktop() ? "flex-end" : "center" }}
     >
       <ToastStack
         placement={desktop() ? "bottomRight" : "bottomCenter"}

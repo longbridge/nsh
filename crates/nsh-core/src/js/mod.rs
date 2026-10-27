@@ -15,25 +15,7 @@
 /// platforms' and host elements' modules. Registries add theirs
 /// (`Registry::specifier`: `nsh/base`, an app's set) or
 /// the functions of nsh's own (`nsh/image`, `nsh/android`).
-pub const NATIVE_MODULES: &[&str] = &[
-    "nsh",
-    "nsh:rt",
-    "nsh/device",
-    "nsh/accessibility",
-    "nsh/android",
-    "nsh/ios",
-    "nsh/desktop",
-    "nsh/webview",
-    "nsh/video",
-    "nsh/native",
-    "nsh/gesture",
-    "nsh/animated",
-    "nsh/canvas",
-    "nsh/list",
-    "nsh/image",
-    "nsh/host",
-    "nsh/keymap",
-];
+pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/mobile"];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.
 /// Privileged entries route through NSH capability adapters.
@@ -107,9 +89,11 @@ mod tests {
         let style = super::style::declarations();
         // Every property the core parses has a type, in its interface.
         for (name, ts) in [
-            ("boxShadow", "string"),
+            ("boxShadow", "string | BoxShadowLayer[]"),
+            ("textShadow", "string | TextShadowLayer[]"),
             ("gridTemplateColumns", "string"),
-            ("transform", "TransformStep[]"),
+            ("transform", "string | TransformStep[]"),
+            ("rotate", "string | number | AnimatedNode"),
             ("tintColor", "ColorValue"),
             (
                 "display",
@@ -119,12 +103,20 @@ mod tests {
             assert!(style.contains(&format!("  {name}?: {ts};")), "{name}");
         }
         assert!(!style.contains("backdropMaterial"));
+        // Style keys, not props.
+        for key in [
+            "numberOfLines",
+            "textOverflow",
+            "userSelect",
+            "pointerEvents",
+        ] {
+            assert!(style.contains(&format!("  {key}?: ")), "{key}");
+        }
         let text = style.find("export interface TextStyle").unwrap();
         assert!(style[text..].contains("  textDecorationStyle?:"));
         // Each host prop and event in the interface of the elements it is for.
         let elements = super::host::declarations();
         for (interface, prop) in [
-            ("HostProps", "  pointerEvents?: PointerEvents;"),
             ("HostProps", "  onPress?: (e?: PressEvent) => void;"),
             ("HostProps", "  onLongPress?: (e?: PressEvent) => void;"),
             ("HostProps", "  onPressDown?: (e?: PressEvent) => void;"),
@@ -145,10 +137,10 @@ mod tests {
                 "IOSInputHostProps",
                 "  keyboardAppearance?: KeyboardAppearance;",
             ),
-            ("ImageHostProps", "  onLoad?: (e: Size) => void;"),
+            ("ImageHostProps", "  onLoad?: (e: PixelSize) => void;"),
             (
                 "VideoHostProps",
-                "  onLoad?: (e: { duration: number; size: Size }) => void;",
+                "  onLoad?: (e: { duration: number; size: PixelSize }) => void;",
             ),
             ("VideoHostProps", "  audioSession?: AudioSession;"),
             (

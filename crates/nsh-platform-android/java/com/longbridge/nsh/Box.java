@@ -2,6 +2,7 @@ package com.longbridge.nsh;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Path;
 import android.graphics.Rect;
@@ -48,6 +49,13 @@ class Box extends ViewGroup implements Node {
     /** Children go here while the box both clips and casts a shadow. */
     private Box content;
     private final Path clipPath = new Path();
+    /** Whether a shader draws its box (`SHADER`; libnsh renders it). */
+    private boolean shader;
+    /** The shader's last frame, reused while its size stays. */
+    private Bitmap shaderBitmap;
+    private final Path shaderPath = new Path();
+    private final Rect shaderBounds = new Rect();
+    private final android.graphics.Paint shaderPaint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
 
     Box(Context context, Mounter mounter, int id) {
         super(context);
@@ -131,12 +139,58 @@ class Box extends ViewGroup implements Node {
         invalidateOutline();
         decor.applyPivot(this);
         if (content != null) content.layout(0, 0, w, h);
+        if (shader) shaderSize();
+    }
+
+    // --- Shaders -----------------------------------------------------------------
+
+    /** A shader draws its box (or no longer does). */
+    void setShader(boolean on) {
+        shader = on;
+        if (on) {
+            shaderSize();
+        } else if (shaderBitmap != null) {
+            shaderBitmap = null;
+            invalidate();
+        }
+    }
+
+    /** Tells libnsh the size its frames are rendered at. */
+    private void shaderSize() {
+        long handle = mounter.handle();
+        if (handle != 0 && Native.shaderSize(handle, id, getWidth(), getHeight())) mounter.host.requestFrames();
+    }
+
+    /** A new frame: premultiplied RGBA rows, copied before returning (the buffer is libnsh's). */
+    void shaderFrame(java.nio.ByteBuffer pixels, int width, int height) {
+        if (!shader) return;
+        if (pixels == null || width <= 0 || height <= 0) {
+            shaderBitmap = null;
+        } else {
+            if (shaderBitmap == null || shaderBitmap.getWidth() != width || shaderBitmap.getHeight() != height) {
+                shaderBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            }
+            shaderBitmap.copyPixelsFromBuffer(pixels);
+        }
+        invalidate();
+    }
+
+    /** The shader's frame, stretched over the box inside its rounded corners, under the children. */
+    @Override
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        if (shaderBitmap == null || getWidth() <= 0 || getHeight() <= 0) return;
+        shaderBounds.set(0, 0, getWidth(), getHeight());
+        canvas.save();
+        if (decor.rounded()) canvas.clipPath(decor.shape(shaderBounds, 0, shaderPath));
+        else canvas.clipRect(shaderBounds);
+        canvas.drawBitmap(shaderBitmap, null, shaderBounds, shaderPaint);
+        canvas.restore();
     }
 
     /** Applies clipping after a style change. */
     void updateClip() {
-        // Not `hasShadow()`: the background may arrive (or animate in) later.
-        boolean split = clip && (decor.shadowColor >>> 24) != 0;
+        boolean split = clip && decor.hasOuterShadows();
         if (split && content == null) {
             // Clipping this view would clip its shadow: children move into a
             // content box that clips instead.
@@ -339,6 +393,8 @@ class Box extends ViewGroup implements Node {
     private float downRawX, downRawY;
     /** Where the press went down (for the ripple). */
     private float pressX, pressY;
+    /** The touch, for the press events' payload. */
+    private final Mounter.PressAt at = new Mounter.PressAt();
     private boolean panning, tracking, pressedIn, longPressed;
     private VelocityTracker velocity;
     private final Runnable longPress = this::onLongPress;
@@ -370,14 +426,14 @@ class Box extends ViewGroup implements Node {
         if (tracking && !panning) {
             if (!pressedIn) onPressIn();
             longPressed = true;
-            mounter.event(id, Native.LONG_PRESS);
+            mounter.press(id, Native.LONG_PRESS, this, at);
         }
     }
 
     private void onPressIn() {
         if (pressedIn || !tracking) return;
         pressedIn = true;
-        if (wants(Native.PRESS_IN)) mounter.event(id, Native.PRESS_IN);
+        if (wants(Native.PRESS_IN)) mounter.press(id, Native.PRESS_IN, this, at);
         mounter.pressFeedback(this, id, true, pressX, pressY);
     }
 
@@ -386,7 +442,7 @@ class Box extends ViewGroup implements Node {
         removeCallbacks(longPress);
         if (!pressedIn) return;
         pressedIn = false;
-        if (wants(Native.PRESS_OUT)) mounter.event(id, Native.PRESS_OUT);
+        if (wants(Native.PRESS_OUT)) mounter.press(id, Native.PRESS_OUT, this, at);
         mounter.pressFeedback(this, id, false, pressX, pressY);
     }
 
@@ -456,6 +512,7 @@ class Box extends ViewGroup implements Node {
         boolean pressable = pressable(), pannable = pannable(), twoFinger = twoFinger();
         if (!pressable && !pannable && !twoFinger) return false;
         float density = mounter.density;
+        if (pressable) at.track(e);
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downRawX = e.getRawX();
@@ -523,7 +580,7 @@ class Box extends ViewGroup implements Node {
                     if (!pressedIn) onPressIn();
                     boolean press = !longPressed && wants(Native.PRESS);
                     pressOut();
-                    if (press) mounter.event(id, Native.PRESS);
+                    if (press) mounter.press(id, Native.PRESS, this, at);
                 }
                 pressOut();
                 panning = false;

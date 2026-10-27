@@ -34,8 +34,9 @@ impl NativeComponent for Square {
 
 /// A component and, after it, a focused field.
 const FIELD_AFTER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { nativeComponent } from "nsh/native";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { nativeComponent } from "nsh";
 
 const Square = nativeComponent<{}, {}>("test.square", { props: [], events: [] });
 
@@ -56,7 +57,8 @@ mount(App);
 /// composition is cancelled), "stale" on "hao" (dropped, as "好" is
 /// committed after it); the log becomes the text when "hao" ends.
 const COMPOSING_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("abcd");
@@ -176,6 +178,7 @@ fn windows(cx: &mut TestAppContext) {
     presses_carry_where_the_pointer_was(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
+    text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx);
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
     js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
     each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
@@ -271,6 +274,94 @@ fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut 
     wait_for(&view, cx, "ab");
 }
 
+/// Two fields. Enter in the first, and Ctrl+N (Command+N on macOS), both
+/// focus the second. Text typed before the engine has handled that key
+/// belongs to the second field.
+const TWO_FIELDS: &str = r#"
+import { keymap, mount, signal, View, type YNode } from "nsh";
+import { Input } from "nsh/base";
+
+function App() {
+  const first = signal("A");
+  const second = signal("");
+  let next!: YNode;
+  const go = () => next.focus();
+  keymap.bind("mod+n", go, { when: "always" });
+  return (
+    <View style={{ flex: 1, padding: 8, gap: 8 }}>
+      <Input
+        autoFocus
+        value={first()}
+        onChange={(t) => first.set(t)}
+        onSubmit={go}
+        submitBehavior="submit"
+        style={{ height: 30 }}
+      />
+      <Input ref={next} value={second()} onChange={(t) => second.set(t)} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn down(vk: u16, modifiers: crate::input::Modifiers) -> crate::input::KeyEvent {
+    crate::input::KeyEvent {
+        vk,
+        down: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+/// `x`, then Backspace, then `y`, before the engine applies `key`. The
+/// focused field must still read "A", and then "y" once the next field
+/// has the keyboard.
+fn typed_ahead(cx: &mut TestAppContext, key: crate::input::KeyEvent) {
+    let code = nsh_bundler::compile_module("App.tsx", TWO_FIELDS, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "A");
+    view.update(cx, |view, _| {
+        let surface = view.surface().clone();
+        assert!(crate::input::key(&surface, key), "the key was not handled");
+        crate::text_input::char_input(&surface, "x");
+        assert!(crate::input::key(
+            &surface,
+            down(crate::keys::VK_BACK, crate::input::Modifiers::default())
+        ));
+        crate::text_input::char_input(&surface, "y");
+        let now = crate::text_input::focused(view.surface())
+            .and_then(|field| crate::text_input::accessible_value(&field))
+            .map(|value| value.text);
+        assert!(
+            matches!(now.as_deref(), None | Some("A")),
+            "typed ahead into the field that still has the keyboard: {now:?}"
+        );
+    });
+    wait_for(&view, cx, "y");
+}
+
+fn text_typed_ahead_of_enter_or_a_binding_lands_in_the_next_field(cx: &mut TestAppContext) {
+    typed_ahead(
+        cx,
+        down(crate::keys::VK_RETURN, crate::input::Modifiers::default()),
+    );
+    let modifiers = if cfg!(target_os = "macos") {
+        crate::input::Modifiers {
+            meta: true,
+            ..crate::input::Modifiers::default()
+        }
+    } else {
+        crate::input::Modifiers {
+            ctrl: true,
+            ..crate::input::Modifiers::default()
+        }
+    };
+    typed_ahead(cx, down(0x4E, modifiers));
+}
+
 struct KeyLog {
     keys: Rc<std::cell::RefCell<Vec<String>>>,
     focus: Rc<std::cell::RefCell<Option<gpui::FocusHandle>>>,
@@ -312,10 +403,11 @@ impl NativeComponent for KeyLog {
 /// that takes the keyboard. `mod+k` fires while text is edited. `j` does
 /// not. The menu's `mod+z` and `mod+shift+n` still choose their items.
 const SHORTCUTS_OVER_COMPONENT: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
-import { keymap } from "nsh/keymap";
-import { nativeComponent } from "nsh/native";
+import { keymap } from "nsh";
+import { nativeComponent } from "nsh";
 
 const KeyLog = nativeComponent<{}, {}>("test.keylog", { props: [], events: [] });
 
@@ -410,10 +502,10 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
 struct Desk(&'static str);
 
 /// Which desk the engine running the call was given.
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 struct Whose;
 
-#[nsh_core::ui::module]
+#[nsh_core::element::module]
 impl Whose {
     /// In the JS call.
     pub(crate) fn now() -> String {
@@ -422,20 +514,21 @@ impl Whose {
 
     /// As a task, after it waited.
     pub(crate) async fn later() -> String {
-        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        nsh_core::prelude::timer(Duration::from_millis(5)).await;
         desk()
     }
 }
 
 fn desk() -> String {
-    nsh_core::ui::engine_context::<Desk>()
+    nsh_core::element::engine_context::<Desk>()
         .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
 }
 
 /// A field showing which desk `Whose` names, in the call and in a task.
 const WHOSE: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { nativeModule } from "nsh/native";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { nativeModule } from "nsh";
 
 interface WhoseApi {
   now(): string;
@@ -473,7 +566,7 @@ impl gpui::Render for Pair {
 }
 
 fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
-    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    let mut context = nsh_core::element::Registry::ui_set("test/context");
     context.module::<Whose>();
     crate::set_ui_sets(vec![nsh_base::registry(), context]);
     let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
@@ -503,7 +596,7 @@ fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut T
 
 /// A Rust view (`test/keys`) that binds a keystroke of its own.
 mod rust_keys {
-    use nsh_core::ui::{Registry, prelude::*};
+    use nsh_core::{element::Registry, prelude::*};
 
     /// The set the app imports `Shortcut` from.
     pub(super) fn registry() -> Registry {
@@ -545,8 +638,9 @@ mod rust_keys {
 fn js_and_rust_view(view_first: bool) -> String {
     format!(
         r#"
-import {{ Input, mount, signal, View }} from "nsh";
-import {{ keymap }} from "nsh/keymap";
+import {{ mount, signal, View }} from "nsh";
+import {{ Input }} from "nsh/base";
+import {{ keymap }} from "nsh";
 import {{ Shortcut }} from "test/keys";
 
 const VIEW_FIRST = {view_first};
@@ -614,7 +708,8 @@ fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppCont
 /// A pad inside 8 points of padding. A press writes where it was in the
 /// pad and in the window.
 mod press_point {
-    use nsh_core::ui::prelude::*;
+    use nsh_base::input;
+    use nsh_core::prelude::*;
 
     #[component]
     pub(super) fn PressPoint() -> impl IntoElement {
@@ -750,7 +845,8 @@ fn height_below_title_bar(cx: &mut VisualTestContext) -> f32 {
 /// and an application menu: File with New, Quit (the `quit` role, with a
 /// shortcut of its own) and Close (the `close` role).
 const OWNED_WINDOW: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -839,7 +935,8 @@ fn quit_and_close_requests_go_to_the_handler_instead_of_acting(cx: &mut TestAppC
 /// The app's height under an auto-hidden menu bar (and ` new` once File
 /// > New was chosen).
 const AUTO_HIDDEN_BAR: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu, Window } from "nsh/desktop";
 
 function App() {
@@ -909,8 +1006,9 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
 /// Two images from two asset directories: each reports its size, or why
 /// it did not load.
 const TWO_ASSET_ROOTS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
-import { Image } from "nsh/image";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+import { Image } from "nsh";
 
 function App() {
   const text = signal("waiting");
@@ -1000,7 +1098,8 @@ fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut Tes
 }
 
 const MENU_OVER_FIELD: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 import { Menu } from "nsh/desktop";
 
 function App() {
@@ -1096,7 +1195,8 @@ fn wait_until_blurred(view: &Entity<AppView>, cx: &mut VisualTestContext) {
 /// carried: the field reads the modifier keys and click count of the last
 /// press.
 const PRESS_MODIFIERS: &str = r#"
-import { Input, mount, signal, View } from "nsh";
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
 
 function App() {
   const text = signal("none");

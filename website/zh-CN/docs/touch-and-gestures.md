@@ -17,7 +17,7 @@ NSH 的触摸处理分三个层次。**按压**（Rust 中的 `.on_press`、TSX 
 所有元素都接受按压事件，不需要单独的 "touchable" 组件。把 `.on_press` / `onPress` 加在视图、文本、图片或任何其他元素上即可。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -96,7 +96,7 @@ mount(App);
 状态样式叠加在视图自身的样式之上。后面的状态优先（hover、focus、active），禁用样式优先于所有状态，视图禁用时其他状态样式不生效。
 
 ```rust tabs
-use nsh_core::{Ripple, ui::prelude::*};
+use nsh_core::{Ripple, prelude::*};
 
 view().on_press(open).active(|s| s.opacity(0.5))
 
@@ -186,12 +186,12 @@ view()
 
 ## pointerEvents
 
-指针事件设置（`.pointer_events(..)`、`pointerEvents`）决定子树中哪些视图可以成为触摸的目标。它在原生命中测试时求值，每次触摸都不产生额外开销。
+样式键 `pointerEvents`（Rust 中为 `.pointer_events(..)`）决定子树中哪些视图可以成为触摸的目标。它在原生命中测试时求值，每次触摸都不产生额外开销。
 
 | Rust | TSX | 视图本身 | 子视图 |
 |---|---|---|---|
 | `PointerEvents::Auto`（默认） | `"auto"` | 接收触摸 | 接收触摸 |
-| `PointerEvents::None` | `"none"` | 永远不是目标 | 永远不是目标：触摸穿透到后面的内容 |
+| `PointerEvents::None` | `"none"` | 永远不是目标 | 永远不是目标，除非设置了 `"auto"`：触摸穿透到后面的内容 |
 | `PointerEvents::BoxNone` | `"box-none"` | 永远不是目标 | 接收触摸 |
 | `PointerEvents::BoxOnly` | `"box-only"` | 接收触摸 | 永远不是目标 |
 
@@ -222,7 +222,7 @@ view().flex_1().child(map()).child(
 <View style={{ flex: 1 }}>
   <Map />
   {/* 浮动工具栏：空白区域把触摸交给地图。 */}
-  <View pointerEvents="box-none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
+  <View style={{ pointerEvents: "box-none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
     <View onPress={locate} style={{ alignSelf: "flex-end", padding: 12, borderRadius: 24, backgroundColor: "#ffffff" }}>
       <Text>Locate</Text>
     </View>
@@ -230,14 +230,14 @@ view().flex_1().child(map()).child(
 </View>
 ```
 
-Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 设置的是同一件事；显式属性优先于类。
+`"none"` 与 CSS 的 `pointer-events` 一样会继承：其中设置了 `"auto"` 的视图会重新接收触摸。`"box-none"` 和 `"box-only"` 只作用于设置它们的视图。Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 分别设置 `"none"` 和 `"auto"`；作为样式键，`pointerEvents` 也能用在状态样式（`activeStyle` 等）和变体中。
 
 ## 原生手势：拖动、捏合与旋转
 
 要让拖动、捏合和旋转移动屏幕上的东西，就把[动画值](./animation.md#动画值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动；你的代码只在手势开始和结束时得到通知。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -263,7 +263,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -277,7 +277,7 @@ function App() {
           x.spring(0, { velocity: e.velocityX });
           y.spring(0, { velocity: e.velocityY });
         }}
-        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", transform: [{ translateX: x }, { translateY: y }] }}
+        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", translate: [x, y] }}
       />
     </View>
   );
@@ -324,7 +324,7 @@ view()
     const projected = (e.valueX ?? 0) + e.velocityX * 0.2;
     x.spring(projected > 0 ? 140 : -140, { velocity: e.velocityX });
   }}
-  style={{ transform: [{ translateX: x }] }}
+  style={{ translate: [x, 0] }}
 />
 ```
 
@@ -360,7 +360,7 @@ view()
 | `stopPropagation()` | 外层视图不再收到这次触摸事件。 |
 
 ```rust tabs
-use nsh_core::{TouchPhase, ui::{TouchEvent, prelude::*}};
+use nsh_core::{TouchPhase, element::{TouchEvent}, prelude::*};
 
 view().on_touch(|e: &TouchEvent| {
     let Some(p) = e.points.iter().find(|p| p.changed) else { return };
@@ -451,7 +451,7 @@ Rust 组件的响应者从成为响应者起一直保持按下状态，直到它
 Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`，以及自成为响应者以来的手势 `gesture`。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn sketch() -> impl IntoElement {
     let strokes = signal(Vec::<Vec<Point<Points>>>::new());
@@ -522,10 +522,10 @@ mount(Sketch);
 
 ## PanResponder
 
-在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh/gesture` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
+在 Rust 中，响应者事件已经带有手势：`ResponderEvent::gesture` 是一个 `PanGesture`，包含自开始以来的距离、速度和手指数量。在 TSX 中，`nsh` 中的 `PanResponder` 封装了手势响应者系统，并附加同样的手势状态；把它的 `panHandlers` 展开到视图上。
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn ball() -> impl IntoElement {
     let pos = signal((0.0_f32, 0.0_f32));
@@ -548,14 +548,14 @@ fn ball() -> impl IntoElement {
             pos.set((x + d.x.0, y + d.y.0));
         })
         .on_responder_release(move |e: &ResponderEvent| {
-            log::info!("released at {} {} pt/ms", e.gesture.vx, e.gesture.vy)
+            log::info!("released at {} {} pt/s", e.gesture.vx, e.gesture.vy)
         })
 }
 ```
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
-import { PanResponder } from "nsh/gesture";
+import { PanResponder } from "nsh";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -566,12 +566,12 @@ function Ball() {
       start = pos();
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/ms"),
+    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/s"),
   });
   return (
     <View
       {...responder.panHandlers}
-      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", transform: [{ translateX: pos().x }, { translateY: pos().y }] }}
+      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", translate: [pos().x, pos().y] }}
     />
   );
 }
@@ -587,7 +587,7 @@ mount(Ball);
 | `position` | `moveX`、`moveY` | 各触点中心的最新位置，surface 坐标（点）。 |
 | `origin` | `x0`、`y0` | 成为响应者时触点中心的位置。 |
 | `delta` | `dx`、`dy` | 自成为响应者以来移动的距离。 |
-| `vx`、`vy` | `vx`、`vy` | 速度，单位为每**毫秒**的点数。 |
+| `vx`、`vy` | `vx`、`vy` | 速度，单位为每秒的点数。 |
 | `active_touches` | `numberActiveTouches` | 按下的手指数。 |
 
 在 Rust 中，`PanGesture::begin` 和 `PanGesture::update` 根据原始触摸（`.on_touch`）跟踪手势。TSX 回调参数为 `(event, gestureState)`：`onStartShouldSetPanResponder(Capture)`、`onMoveShouldSetPanResponder(Capture)`、`onPanResponderGrant`、`onPanResponderReject`、`onPanResponderStart`、`onPanResponderMove`、`onPanResponderEnd`、`onPanResponderRelease`、`onPanResponderTerminate`、`onPanResponderTerminationRequest` 和 `onShouldBlockNativeResponder`。最后一个默认为 `true`：成为响应者的 PanResponder 会阻止原生滚动视图接管它的触摸。
@@ -624,7 +624,7 @@ view()
 `PanActivation::horizontal(active, fail)` 和 `PanActivation::vertical(active, fail)` 设置常用的组合。没有激活偏移时，任一方向移动 10 点后激活。激活之前，外层的滚动视图会等待它（iOS），视图的其他接管声明也不会被询问。激活后，滚动视图不能再拿走这些触摸，视图成为响应者（先 grant，再收到移动）；失败时滚动视图照常滚动。在 TSX 中，`PanResponder` 的 `panHandlers` 也可以一起用：和这个属性放在同一个视图上，`onPanResponderGrant` 在激活时运行。
 
 > [!NOTE]
-> 不同 API 的速度单位不同：响应者手势的 `vx` / `vy` 是每毫秒的点数，而拖动结束时的速度以及弹簧或衰减的速度是每秒的点数。把 `vx` 传给弹簧前要乘以 1000。
+> 所有速度的单位都是每秒的点数：响应者手势的 `vx` / `vy`、拖动的速度以及弹簧或衰减的速度都是，所以 `vx` 可以直接传给弹簧或衰减。
 
 ## 为什么有些答案是属性
 
@@ -635,5 +635,5 @@ view()
 - [`View`](../elements/view.md)：基础元素上的所有触摸属性。
 - [动画](./animation.md)：用于手势驱动运动的动画值、弹簧和衰减。
 - [滚动](./scrolling.md)：键盘点击设置、滚动视图与嵌套手势。
-- [`nsh/gesture`](../modules/nsh-gesture.md)：`PanResponder` 参考。
+- [`PanResponder`](../modules/nsh.md#panresponder)：`PanResponder` 参考。
 - [无障碍](./accessibility.md)：可按压视图是无障碍元素；给它们设置角色和标签。

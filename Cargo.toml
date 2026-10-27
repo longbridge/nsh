@@ -7,7 +7,7 @@ exclude = ["crates/gpui"]
 default-members = ["crates/xtask"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 homepage = "https://nsh.dev"
@@ -25,22 +25,23 @@ unreachable_pub = "deny"
 private_interfaces = "deny"
 
 [workspace.dependencies]
+unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
-nsh-core = { version = "0.2.0", path = "crates/nsh-core" }
-nsh-package = { version = "0.2.0", path = "crates/nsh-package" }
+nsh-core = { version = "0.3.0", path = "crates/nsh-core" }
+nsh-package = { version = "0.3.0", path = "crates/nsh-package" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
-nsh-base = { version = "0.2.0", path = "crates/nsh-base", default-features = false }
-nsh-macros = { version = "0.2.0", path = "crates/nsh-macros" }
-nsh-js = { version = "0.2.0", path = "crates/nsh-js" }
-nsh-engine = { version = "0.2.0", path = "crates/nsh-engine", default-features = false }
-nsh-bundler = { version = "0.2.0", path = "crates/nsh-bundler", default-features = false }
-nsh-platform-ios = { version = "0.2.0", path = "crates/nsh-platform-ios", default-features = false }
-nsh-platform-android = { version = "0.2.0", path = "crates/nsh-platform-android", default-features = false }
-nsh-platform-linux = { version = "0.2.0", path = "crates/nsh-platform-linux", default-features = false }
-nsh-platform-macos = { version = "0.2.0", path = "crates/nsh-platform-macos", default-features = false }
-nsh-platform-windows = { version = "0.2.0", path = "crates/nsh-platform-windows", default-features = false }
-nsh-dev = { version = "0.2.0", path = "crates/nsh-dev" }
-nsh-testing = { version = "0.2.0", path = "crates/nsh-testing", default-features = false }
+nsh-base = { version = "0.3.0", path = "crates/nsh-base", default-features = false }
+nsh-macros = { version = "0.3.0", path = "crates/nsh-macros" }
+nsh-js = { version = "0.3.0", path = "crates/nsh-js" }
+nsh-engine = { version = "0.3.0", path = "crates/nsh-engine", default-features = false }
+nsh-bundler = { version = "0.3.0", path = "crates/nsh-bundler", default-features = false }
+nsh-platform-ios = { version = "0.3.0", path = "crates/nsh-platform-ios", default-features = false }
+nsh-platform-android = { version = "0.3.0", path = "crates/nsh-platform-android", default-features = false }
+nsh-platform-linux = { version = "0.3.0", path = "crates/nsh-platform-linux", default-features = false }
+nsh-platform-macos = { version = "0.3.0", path = "crates/nsh-platform-macos", default-features = false }
+nsh-platform-windows = { version = "0.3.0", path = "crates/nsh-platform-windows", default-features = false }
+nsh-dev = { version = "0.3.0", path = "crates/nsh-dev" }
+nsh-testing = { version = "0.3.0", path = "crates/nsh-testing", default-features = false }
 
 anyhow = "1"
 thiserror = "2"
@@ -48,6 +49,7 @@ clap = { version = "4.6", features = ["derive"] }
 crossbeam-channel = "0.5"
 notify = "8.2"
 log = "0.4"
+ordered-float = { version = "5", default-features = false }
 env_logger = "0.11"
 libc = "0.2"
 imagesize = "0.15"
@@ -64,6 +66,13 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 rustc-hash = "2.1"
+# Shaders (`nsh_core::shader`): the WGSL front end and validator wgpu uses, and
+# its GLSL ES writer for the web's WebGL 2.
+naga = { version = "29", default-features = false, features = ["wgsl-in"] }
+# The native backends' shader renderer (`nsh_engine::shader`), the version GPUI uses:
+# WGSL only, each OS's own GPU API (and GL where Vulkan may be missing).
+wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "gles"] }
+pollster = "0.4"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
@@ -84,6 +93,11 @@ percent-encoding = "2.3"
 url = "2.5"
 ureq = "3.1"
 regex = "1"
+# The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
+ropey = "1.6"
+unicode-segmentation = "1.13"
+# The line and word diffs of `nsh-base`'s `DiffView` (histogram, git's indent heuristic).
+imara-diff = "0.2"
 markdown = "1.0.0"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3.0"
@@ -196,6 +210,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSObject",
   "NSOperation",
   "NSProcessInfo",
+  "NSPropertyList",
   "NSRange",
   "NSRunLoop",
   "NSSet",
@@ -271,6 +286,8 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
   "UISceneSession",
   "UIScreen",
   "UIScrollView",
+  "UITabBar",
+  "UITabBarItem",
   "UITapGestureRecognizer",
   "UITextField",
   "UITextInput",
@@ -320,6 +337,7 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
   "CGEventTypes",
   "CGGradient",
   "CGImage",
+  "CGLayer",
   "CGPath",
   "CGWindowLevel",
 ] }

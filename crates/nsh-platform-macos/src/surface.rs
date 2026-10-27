@@ -244,6 +244,8 @@ pub(crate) struct Surface {
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
     pub(crate) file_drop: crate::file_drop::State,
+    /// The GPU device and the shader views rendering ([`crate::shader`]).
+    pub(crate) shaders: crate::shader::Shaders,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -293,6 +295,7 @@ impl Surface {
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            shaders: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         // CoreText's first use loads fonts and caches (tens of
@@ -380,6 +383,7 @@ impl Surface {
         self.queued.borrow_mut().clear();
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
+        crate::shader::clear(self);
     }
 
     /// Calls `f` with the engine's control, if an app runs.
@@ -436,7 +440,6 @@ impl Surface {
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);
-        crate::system::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);
         self.await_layout(Size::new(Points(width), Points(height)));
@@ -544,7 +547,11 @@ impl Surface {
         });
         if let (Some(monitor), Some(start)) = (monitor, start) {
             // Core Animation's commit (drawing what changed) included.
-            monitor.record_work(start.elapsed(), applied);
+            let cost = start.elapsed();
+            monitor.record_work(cost, applied);
+            if applied {
+                crate::fps::drained(cost);
+            }
         }
         self.ensure_ticking();
     }
@@ -635,11 +642,20 @@ impl Surface {
     /// Writes the animated values to the views and reports finished
     /// animations.
     pub(crate) fn write_animations(&self) {
-        let finished = {
+        let (finished, moved) = {
             let mut anim = self.anim.borrow_mut();
             anim.write(&self.mounter.borrow());
-            std::mem::take(&mut anim.finished)
+            let mut moved = Vec::new();
+            anim.write_components(
+                |id| crate::native::has_component(self, id),
+                |id, name, value| moved.push((id, std::sync::Arc::<str>::from(name), value)),
+            );
+            (std::mem::take(&mut anim.finished), moved)
         };
+        // Shaders whose animated uniforms moved render from the next frame.
+        crate::shader::wake(self);
+        // No surface state borrowed while the app's components run.
+        crate::native::component_animated(self, moved);
         crate::scroll::pin_animated_sticky(self);
         if !finished.is_empty() {
             self.control(|c| c.animations_finished(finished));
@@ -798,7 +814,9 @@ impl Surface {
         let start = Instant::now();
         let dirty = self.wants_frames();
         quiet(|| self.tick(now));
-        monitor.record_work(start.elapsed(), dirty);
+        let cost = start.elapsed();
+        monitor.record_work(cost, dirty);
+        crate::fps::ticked(cost);
         monitor.vsync(
             Instant::now(),
             std::time::Duration::from_secs_f64(period.max(0.0)),

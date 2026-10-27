@@ -202,7 +202,18 @@ pub struct ScrollBehavior {
     pub pinch: bool,
     /// `centerContent`: content smaller than the viewport is centered.
     pub center_content: bool,
+    /// `refreshIndicator`: the height of the app's own pull-to-refresh
+    /// indicator, which replaces the platform's spinner; `None` for the
+    /// platform's.
+    pub refresh_indicator: Option<Points>,
 }
+
+/// How far past the top a released pull refreshes with the platform's
+/// spinner.
+const REFRESH_PULL: Points = Points(64.0);
+/// The room the platform's spinner keeps above the content while
+/// refreshing.
+const REFRESH_SPACE: Points = Points(56.0);
 
 impl Default for ScrollBehavior {
     fn default() -> Self {
@@ -222,6 +233,7 @@ impl Default for ScrollBehavior {
             bounces_zoom: true,
             pinch: true,
             center_content: false,
+            refresh_indicator: None,
         }
     }
 }
@@ -230,6 +242,25 @@ impl ScrollBehavior {
     /// Whether the content zooms (scrolling both ways while zoomed in).
     pub fn zooms(&self) -> bool {
         self.max_zoom > self.min_zoom
+    }
+
+    /// Whether a vertical scroll view dragged to `offset` (negative: pulled
+    /// past its top) refreshes when the finger lifts, if it listens to
+    /// `onRefresh` and is not refreshing yet.
+    pub fn refreshes(&self, offset: Points) -> bool {
+        offset.0 <= -self.refresh_threshold().0
+    }
+
+    /// How far past the top a released pull refreshes: the app's
+    /// indicator's height, or the platform spinner's distance.
+    pub fn refresh_threshold(&self) -> Points {
+        self.refresh_indicator.unwrap_or(REFRESH_PULL)
+    }
+
+    /// The room kept above the content while it refreshes: the app's
+    /// indicator's height, or the platform spinner's.
+    pub fn refresh_inset(&self) -> Points {
+        self.refresh_indicator.unwrap_or(REFRESH_SPACE)
     }
 
     /// Whether flings end at snap points.
@@ -517,8 +548,11 @@ pub struct InputConfig {
     pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
-    /// Caret and selection color.
+    /// Selection highlight color (on iOS also the caret's, unless
+    /// [`InputConfig::caret_color`] is set: UIKit tints both with one).
     pub selection_color: Option<Color>,
+    /// Caret color; the platform's default when `None`.
+    pub caret_color: Option<Color>,
     /// What the input holds, for autofill.
     pub auto_fill: crate::ops::AutoFill,
     /// The text runs right to left.
@@ -568,6 +602,7 @@ impl Default for InputConfig {
             paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
             selection_color: None,
+            caret_color: None,
             auto_fill: crate::ops::AutoFill::Default,
             rtl: false,
             caret_hidden: false,
@@ -704,6 +739,9 @@ pub enum MountItem {
         scrollbar_visible: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,
+        /// Native animation value fed with how far it is pulled past its
+        /// top (vertical views).
+        pull_value: Option<crate::animation::NodeId>,
         /// When dragging dismisses the keyboard.
         keyboard_dismiss: KeyboardDismissMode,
         /// A horizontal list laid out right to left: the platform mirrors
@@ -777,6 +815,16 @@ pub enum MountItem {
         id: NodeId,
         /// The drawing.
         drawing: Arc<crate::canvas::Drawing>,
+    },
+    /// What a shader view draws under its children (`None`: nothing); the
+    /// animated values among its uniforms come as
+    /// [`crate::animation::AnimationProp::CanvasArg`] bindings of its
+    /// [`crate::shader::ShaderLayer::slots`].
+    Shader {
+        /// The view.
+        id: NodeId,
+        /// The program and its uniforms.
+        layer: Option<Arc<crate::shader::ShaderLayer>>,
     },
     /// Bind visual properties to native animation nodes.
     AnimationBindings {
@@ -867,6 +915,16 @@ pub enum MountItem {
         id: NodeId,
         /// The name it was registered by (`com.example.map`).
         name: Arc<str>,
+    },
+    /// The names of a registered native component's animated prop slots:
+    /// `names[n]` is [`AnimationProp::ComponentSlot`]`(n)`. Sent before the
+    /// [`MountItem::AnimationBindings`] that use new slots; slots keep their
+    /// name for the component's life.
+    ComponentPropSlots {
+        /// The container.
+        id: NodeId,
+        /// The name of each slot.
+        names: Vec<Arc<str>>,
     },
     /// Properties of a registered native component that changed (all of
     /// them after [`MountItem::Component`]); `None` removes one.

@@ -4,24 +4,12 @@
 // values the modules that exported them first (`nsh/image`, `nsh/list`,
 // `nsh/canvas`, `nsh/webview`, `nsh/video`) still export. Its script checks
 // each.
-import {
-  Canvas,
-  CanvasGradient,
-  CanvasRenderingContext2D,
-  Image,
-  List,
-  Path2D,
-  Text,
-  Video,
-  View,
-  WebView,
-  signal,
-} from "nsh";
-import * as oldCanvas from "nsh/canvas";
-import * as oldImage from "nsh/image";
-import * as oldList from "nsh/list";
-import * as oldVideo from "nsh/video";
-import * as oldWebView from "nsh/webview";
+import { Canvas, CanvasGradient, CanvasRenderingContext2D, Image, List, Path2D, Text, Video, View, WebView, signal } from "nsh";
+import * as oldCanvas from "nsh";
+import * as oldImage from "nsh";
+import * as oldList from "nsh";
+import * as oldVideo from "nsh";
+import * as oldWebView from "nsh";
 
 function App() {
   let kept: CanvasRenderingContext2D | undefined;

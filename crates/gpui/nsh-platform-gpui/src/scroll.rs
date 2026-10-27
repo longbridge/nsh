@@ -90,6 +90,17 @@ impl ScrollHost for Host<'_> {
         }
     }
 
+    fn pulled(&self, distance: Points) {
+        let pulled = self
+            .surface
+            .anim
+            .borrow_mut()
+            .pulled(self.view.id(), distance);
+        if pulled && self.surface.mounter.try_borrow().is_ok() {
+            self.surface.write_animations();
+        }
+    }
+
     fn relayout(&self) {
         self.view.moved();
     }
@@ -113,6 +124,13 @@ impl ScrollHost for Host<'_> {
             }
             shared::frame(&host, now * 1000.0)
         });
+    }
+
+    fn settled(&self) {
+        let id = self.view.id();
+        if self.surface.anim.borrow_mut().scroll_ended(id) {
+            self.surface.ensure_ticking();
+        }
     }
 }
 

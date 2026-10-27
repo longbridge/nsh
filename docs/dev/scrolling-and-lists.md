@@ -34,8 +34,8 @@
   `footer` / `empty` / `separator` (a component or an element), `contentStyle`
   (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,
   `onLoadMoreAtStart` + `loadMoreAtStartThreshold` (below), `onViewableItemsChange` +
-  `viewabilityConfig` (`itemVisiblePercentThreshold` / `viewAreaCoveragePercentThreshold` / `minimumViewTime`), `keyExtractor`,
-  `refreshing` / `onRefresh`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
+  `viewabilityConfig` (`itemVisibleThreshold` / `viewAreaCoverageThreshold` / `minimumViewTime`), `keyExtractor`,
+  `refreshing` / `onRefresh`, `refreshIndicator`, `pullValue`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
   props, ...) goes to the scroll view as on a `<Scroll>` (`list.rs` `OWN`: the names are read once, when the list is
   made; their values follow their getters). Positions, columns, sticky travel and viewability are all computed in the core; sticky cells
   are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset + value - start, 0, end - start)`, `value` the cell's animated offset or 0);
@@ -60,6 +60,9 @@
   distance from the end (the bottom) only while it is at its start, where item 0 shows (a chat's new message);
   scrolled away from it, a splice or a measurement before the viewport keeps the visible rows in place as on other
   lists (`ListState::loads_at_start`, `keeps_visible_rows`; `measured` returns what cancels `anchor_end`'s scroll).
+- **Spare list cells** (recycled cells without an item) keep their last row. The core hides them (`Core::set_spare`:
+  `visibility: hidden` and `accessibilityElementsHidden`) when they lie in the render window, were never placed or
+  the items changed, and shows them as it places them; the few the window leaves behind while scrolling stay shown.
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in
@@ -83,7 +86,7 @@
   view's own (`ScrollState::issued`; platforms count every `ScrollBy` and `ScrollTo` from the view's creation) and
   replayed over stale reports, as a list does its own; scroll commands for a list not placed in its view yet wait
   for the update that places it. The scroll view's props (`onScroll` and the other scroll events, `scrollValue`,
-  `refreshing`, paging and snapping, `contentInset`, `scrollbar`, `scrollable`, `keyboardDismissMode`) and what
+  `refreshing`, `refreshIndicator`, `pullValue`, paging and snapping, `contentInset`, `scrollbar`, `scrollable`, `keyboardDismissMode`) and what
   needs a scroll view of the list's own (`inverted`, `maintainVisibleContentPosition`) are ignored there, each
   warned of once; a zoomable scroll view around it is not supported. Sticky rows stick to the view's viewport:
   their ranges are in the view's offsets, the last one stopping where its bottom meets the end of the list's

@@ -66,7 +66,7 @@ changes: a text, a style property, a branch of `when` (`<If>`), the rows of `eac
 subtree to find out what changed.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[derive(Clone, PartialEq)]
 struct Quote {
@@ -132,10 +132,10 @@ item. You can see this in `nsh test --trace` output (below).
 
 An animation driven from the engine thread (a signal written on every frame) costs a commit per frame, and a JS call
 in TSX, and stutters when the engine thread is busy. Animated values ([Animation](./animation.md): `animated_value` in
-Rust, [`nsh/animated`](../modules/nsh-animated.md) in TSX) run animations natively instead:
+Rust, [`nsh`'s animation API](../modules/nsh.md#animation) in TSX) run animations natively instead:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 let scroll_y = animated_value(0.0);
 
@@ -150,14 +150,14 @@ virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
 
 ```tsx tabs
 import { List, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 const scrollY = createAnimatedValue(0);
 
 <View
   style={{
     opacity: scrollY.interpolate({ inputRange: [0, 120], outputRange: [1, 0.35] }),
-    transform: [{ translateY: scrollY.interpolate({ inputRange: [0, 120], outputRange: [0, -6] }) }],
+    translate: [0, scrollY.interpolate({ inputRange: [0, 120], outputRange: [0, -6] })],
   }}
 />;
 <List each={photos()} scrollValue={scrollY} estimatedItemSize={64} style={{ flex: 1 }}>
@@ -235,7 +235,9 @@ nsh run App.tsx --target macos --fps --release
 ```
 
 (`AppOptions { fps: true, .. }` in a Rust app's `run_app`) shows the frame rate and what frames and commits cost over the running app, with CPU, GPU and memory
-([macOS: performance monitor](./macos.md#performance-monitor)).
+([macOS: performance monitor](./macos.md#performance-monitor)). On Linux and Windows, `--target linux --fps` and
+`--target windows --fps` log the same readings once a second, with the time of each phase of a frame;
+`nsh test --target linux --fps -v` (or `windows`) takes them while a test drives the app.
 
 > [!TIP]
 > Single measurements are dominated by the CPU's clock state: a thread that just slept runs slower for a while.
@@ -243,17 +245,7 @@ nsh run App.tsx --target macos --fps --release
 
 ## Reference numbers
 
-From NSH's own baselines (Apple silicon unless noted):
-
-| Scenario | Numbers |
-|---|---|
-| Counter app, headless (debug) | First frame ~0.5–0.65 ms (58 ops / 49 mount items); one tap ~0.15 ms |
-| Counter app, Mac Catalyst (release) | First frame ~1.05–1.15 ms (about 0.7 ms of it lays out 10 texts with CoreText for the first time); one tap ~0.12 ms |
-| Gallery photo list, headless (debug) | First frame 653 ops / 224 nodes, ~2.7 ms |
-| Scrolling the photo list, Catalyst (release) | Rebinding one row while scrolling slowly ~0.4 ms; a whole screen of ~32 rows on a fast fling 0.9–1.6 ms |
-| Scrolling the photo list, Android emulator (arm64, release) | Rebinding one row ~0.3–0.4 ms (JS ~60 µs) |
-| Engine startup (release) | ~75–155 µs; the global APIs (`fetch`, `URL`, ...) cost nothing until first used, then ~90 µs |
-| Hot reload | ~120 ms from saving a file to the new version running; applying the update 0.2–0.5 ms |
+Measured numbers, NSH's baselines and the gallery page by page on Linux, are in the [performance report](./performance-report.md).
 
 ## Checklist
 
@@ -267,6 +259,7 @@ From NSH's own baselines (Apple silicon unless noted):
 
 ## See also
 
+- [Performance report](./performance-report.md)
 - [Architecture](./architecture.md)
 - [Testing](./testing-and-trace.md)
 - [Lists](./lists.md), [Animation](./animation.md), [Reactivity](./reactivity.md)

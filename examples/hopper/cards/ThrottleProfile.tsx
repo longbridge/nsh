@@ -1,18 +1,7 @@
 import { Canvas, computed, signal, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 import { Icon } from "../icons";
-import {
-  addPhase,
-  type Bezier,
-  type EasingName,
-  easingLabel,
-  easings,
-  type Phase,
-  phases,
-  selectedPhase,
-  setBezier,
-  setEasing,
-} from "../store";
+import { addPhase, type Bezier, type EasingName, easingLabel, easings, type Phase, phases, selectedPhase, setBezier, setEasing } from "../store";
 import { color, mono, radius } from "../theme";
 import { Action, Panel, track } from "../ui";
 
@@ -176,8 +165,8 @@ function Timeline() {
               style={{ position: "absolute", top: 0, bottom: 0, left: left(), width: label }}
             >
               <View
-                pointerEvents="none"
                 style={{
+                  pointerEvents: "none",
                   position: "absolute",
                   top: on() ? 24 : 27,
                   left: x(phase().at) - left() - (on() ? 8 : 5),
@@ -190,9 +179,9 @@ function Timeline() {
                 }}
               />
               <Text
-                pointerEvents="none"
-                numberOfLines={1}
                 style={{
+                  pointerEvents: "none",
+                  numberOfLines: 1,
                   position: "absolute",
                   left: 0,
                   right: 0,
@@ -227,10 +216,7 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
         borderWidth: 1,
         borderColor: color.lineStrong,
         backgroundColor: color.raised,
-        shadowColor: "#000",
-        shadowOpacity: 0.5,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 6 },
+        boxShadow: "0px 6px 16px rgb(0 0 0 / 0.5)",
       }}
     >
       <Each of={easings}>

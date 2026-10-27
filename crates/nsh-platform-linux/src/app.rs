@@ -20,11 +20,11 @@ use crate::{
     surface::Surface,
 };
 
-static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
+static UI_SETS: RwLock<Option<Vec<nsh_core::element::Registry>>> = RwLock::new(None);
 
 /// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
-pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
+pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn root() -> Option<Root> {
 }
 
 /// The UI sets engines serve.
-pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
+pub(crate) fn ui_sets() -> Vec<nsh_core::element::Registry> {
     UI_SETS
         .read()
         .unwrap_or_else(|e| e.into_inner())
@@ -79,6 +79,9 @@ pub enum AppSource {
 pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
+    /// Logs the performance monitor's readings once a second (`nsh::perf`:
+    /// frame rate, frame and commit costs, CPU, memory).
+    pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
     pub asset_base: Option<AssetBase>,
@@ -126,6 +129,7 @@ impl Default for AppOptions {
     fn default() -> Self {
         AppOptions {
             trace: false,
+            fps: false,
             asset_base: None,
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
@@ -210,6 +214,9 @@ impl AppView {
             dev: RefCell::new(None),
         });
         crate::system::watch_environment(&view.surface);
+        if view.options.borrow().fps {
+            view.surface.enable_fps();
+        }
         view
     }
 
@@ -308,7 +315,7 @@ impl AppView {
 
     /// The embedding app's text size relative to the default (1.0), which
     /// stands in for the user's: every text that allows font scaling (texts,
-    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// inputs, the components' labels and alerts) is laid out again
     /// at it, and `fontScale()` reads it, at once and for every app loaded
     /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
     /// boxes sized by their text grow with it. `None` follows the system's
@@ -365,6 +372,7 @@ fn initial_environment() -> Environment {
 
 /// Runs `source` in a window until it is closed.
 pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
+    prefer_gl_on_nvidia();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
     // app id is the application id).
@@ -399,6 +407,23 @@ pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
     });
     // GTK must not parse the host's own arguments.
     app.run_with_args::<&str>(&[])
+}
+
+/// Draws with GSK's GL renderer instead of its Vulkan one (GTK's default
+/// since 4.16) under NVIDIA's driver, unless `GSK_RENDERER` chooses: there
+/// GSK's Vulkan frames cost the main thread several times as much (the
+/// gallery's Animations demo: ~9.5 ms of paint per frame and 73% CPU at
+/// 75 fps, against ~1 ms and 14% at 120 fps with GL; `docs/dev/linux.md`).
+fn prefer_gl_on_nvidia() {
+    if std::env::var_os("GSK_RENDERER").is_some()
+        || !std::path::Path::new("/proc/driver/nvidia/version").exists()
+    {
+        return;
+    }
+    // SAFETY: called before GTK starts, while this thread is the process'
+    // only one reading the environment (the engine and the dev client start
+    // with the window).
+    unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
 }
 
 /// GNOME's window shortcuts: Ctrl+W closes the window, Ctrl+Q quits, F11

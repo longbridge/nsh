@@ -87,6 +87,8 @@ element takes, which go to the list's scroll view.
 | `loadMoreAtStartThreshold` | `number` | `1` | How close to the start (in viewport lengths) `onLoadMoreAtStart` fires. |
 | `refreshing` | `boolean` | | The pull-to-refresh spinner shows. |
 | `onRefresh` | `() => void` | | Enables pull to refresh; set `refreshing` while you load. |
+| `refreshIndicator` | `{ height: number }` | | The app draws its own pull-to-refresh indicator, `height` tall, in place of the spinner. |
+| `pullValue` | `AnimatedValue` | | Fed with how far the list is pulled past its top, for that indicator. |
 | `onViewableItemsChange` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | Items that became or stopped being viewable. |
 | `viewabilityConfig` | `ViewabilityConfig` | | When an item counts as viewable. |
 
@@ -99,10 +101,10 @@ interface ViewToken<T> {
 }
 
 interface ViewabilityConfig {
-  /** Percent of the viewport an item must cover to count as viewable. */
-  viewAreaCoveragePercentThreshold?: number;
-  /** Percent of an item that must be visible. Without either threshold, any visible pixel counts. */
-  itemVisiblePercentThreshold?: number;
+  /** How much of the viewport an item must cover to count as viewable, from 0 to 1. */
+  viewAreaCoverageThreshold?: number;
+  /** How much of an item must be visible, from 0 to 1. Without either threshold, any visible pixel counts. */
+  itemVisibleThreshold?: number;
   /** Milliseconds items must stay viewable before they are reported. */
   minimumViewTime?: number;
 }
@@ -126,7 +128,7 @@ interface ViewabilityConfig {
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard (`"never"`: the tap only dismisses it). |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `scrollEventThrottle` | `number` | | Minimum milliseconds between `onScroll` events (at most one per frame anyway). |
-| `scrollValue` | `AnimatedValue` | | A [animated value](./nsh-animated.md) fed with the scroll offset (main axis) on the UI thread, for scroll-linked effects. |
+| `scrollValue` | `AnimatedValue` | | A [animated value](./nsh.md#animation) fed with the scroll offset (main axis) on the UI thread, for scroll-linked effects. |
 
 ### Scroll events
 

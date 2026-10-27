@@ -5,13 +5,14 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
-use nsh_base::{dialog, keyboard_avoiding_view, safe_area_view};
+use nsh_base::{dialog, input};
 use nsh_core::{
     Points, Size,
-    ui::{
+    element::{
         AutoCapitalize, AutoFill, KeyboardDismissMode, LayoutAnimation, ReturnKeyType,
-        SubmitBehavior, View, prelude::*,
+        SubmitBehavior, View,
     },
+    prelude::*,
 };
 
 use crate::{
@@ -138,8 +139,9 @@ impl Field {
     fn render(self, input: impl FnOnce(Input) -> Input) -> View {
         let focus = self.fx.focus;
         let on_blur = self.on_blur;
-        let base = nsh_core::ui::input()
+        let base = nsh_core::element::input()
             .placeholder_color(|| color(colors::FAINT))
+            .caret_color(|| color(colors::ACCENT))
             .selection_color(|| color(colors::ACCENT))
             .return_key_type(ReturnKeyType::Done)
             .multiline(self.multiline)
@@ -714,6 +716,7 @@ pub(crate) fn Form() -> impl IntoElement {
                         chained(13, i)
                             .placeholder("A blue placeholder, an amber selection")
                             .placeholder_color(|| color(colors::INFO))
+                            .caret_color(|| color(colors::WARN))
                             .selection_color(|| color(colors::WARN))
                     }),
             )
@@ -850,7 +853,7 @@ pub(crate) fn Form() -> impl IntoElement {
                     .child(link_row(
                         IconName::Text,
                         "A message bar at the bottom",
-                        "KeyboardAvoidingView",
+                        "env(keyboard-inset-height)",
                         false,
                         |_: &()| {
                             nav::push("message-bar", || titled("Message bar").child(message_bar()));
@@ -888,7 +891,7 @@ fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
         .presentation(ModalPresentation::PageSheet)
         .on_cancel(close)
         .child(
-            safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+            view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
                 scroll()
                     .flex_1()
                     .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
@@ -1092,7 +1095,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         ),
         (
             false,
-            "KeyboardAvoidingView lifts it with the keyboard. Say something.".to_owned(),
+            "Its bottom padding, env(keyboard-inset-height), lifts it with the keyboard. Say something.".to_owned(),
         ),
     ]);
     let draft = signal(String::new());
@@ -1143,7 +1146,8 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         },
     );
     view().flex_1().child(
-        keyboard_avoiding_view()
+        view()
+            .pb_keyboard()
             .flex_1()
             .bg(colors::BACKGROUND)
             .child(
@@ -1193,6 +1197,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
                             .submit_behavior(SubmitBehavior::Submit)
                             .placeholder("Message")
                             .placeholder_color(|| color(colors::FAINT))
+                            .caret_color(|| color(colors::ACCENT))
                             .selection_color(|| color(colors::ACCENT))
                             .return_key_type(ReturnKeyType::Send)
                             .flex_1()
