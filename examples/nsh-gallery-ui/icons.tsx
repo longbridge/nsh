@@ -43,6 +43,8 @@ export type IconName =
   | "moon"
   | "code"
   | "sliders"
+  | "stepper"
+  | "otp"
   | "panel-bottom"
   | "replace"
   | "replace-all"
@@ -384,6 +386,25 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [7, 6, 3, 10, 7, 14]);
     line(c, [13, 6, 17, 10, 13, 14]);
     line(c, [11.5, 4.5, 8.5, 15.5]);
+  },
+  stepper: (c) => {
+    // A field with its minus and plus.
+    rect(c, 2.5, 5.5, 15, 9, 2.5);
+    line(c, [10, 5.5, 10, 14.5]);
+    line(c, [4.5, 10, 7.5, 10]);
+    line(c, [12.5, 10, 15.5, 10]);
+    line(c, [14, 8.5, 14, 11.5]);
+  },
+  otp: (c) => {
+    // Four cells, two of them filled.
+    for (const [i, x] of [2, 6.25, 10.5, 14.75].entries()) {
+      rect(c, x, 6, 3.25, 8, 1);
+      if (i < 2) {
+        c.beginPath();
+        c.arc(x + 1.625, 10, 0.9, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
   },
   sliders: (c) => {
     for (const [y, x] of [[6, 12.5], [14, 7.5]]) {
