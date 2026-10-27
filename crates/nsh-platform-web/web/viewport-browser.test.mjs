@@ -9,6 +9,14 @@ const chromium = [process.env.CHROME, 'chromium', 'chromium-browser', 'google-ch
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean).find((name) => {
   try { execFileSync(name, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 });
+// A browser's first launch on a fresh CI runner (font caches, the snap's setup) takes longer than a test's
+// budget: launch it once here so that cost lands on no test.
+if (chromium) {
+  try {
+    execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--dump-dom',
+      'about:blank'], { stdio: 'ignore', timeout: 120000 });
+  } catch {}
+}
 
 for (const crossOrigin of [false, true]) {
   test(`viewport dialogs cover the host of a ${crossOrigin ? 'sandboxed' : 'same-origin'} iframe and restore it`,
@@ -109,11 +117,15 @@ for (const crossOrigin of [false, true]) {
           frame.srcdoc=${JSON.stringify(child).replaceAll('</script', '<\\/script')};
           </script>`;
         await writeFile(join(dir,'index.html'),html);
-        const result=execFileSync(chromium,['--headless','--no-sandbox','--disable-dev-shm-usage','--disable-gpu',
+        const run=()=>execFileSync(chromium,['--headless','--no-sandbox','--disable-dev-shm-usage','--disable-gpu',
           // Keep virtual time shared with the sandboxed frame. Its opaque origin remains enforced.
           '--disable-site-isolation-trials','--allow-file-access-from-files','--window-size=1280,800','--virtual-time-budget=5000',
           '--user-data-dir='+join(dir,'profile'),'--dump-dom',pathToFileURL(join(dir,'index.html')).href],
-          {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:20000,maxBuffer:8*1024*1024});
+          {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:60000,maxBuffer:8*1024*1024});
+        let result;
+        try { result=run(); } catch (error) {
+          throw Error(`${chromium} failed: ${error.message}\n${error.stderr ?? ''}`, { cause: error });
+        }
         assert.equal(result.match(/data-result="([^"]*)"/)?.[1], 'passed');
       } finally { await rm(dir,{recursive:true,force:true}); }
     });
