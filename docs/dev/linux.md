@@ -97,7 +97,8 @@ Views listening to `onFileDrop` install a root `GtkDropTarget` for `GdkFileList`
 while at least one enabled destination is mounted. The controller negotiates
 Copy, uses NSH hit testing to choose the closest destination within its modal,
 and emits entry/leave as that destination changes. Dropped `GFile`s with absolute
-local paths are delivered as file URLs, preserving filename escaping. Removing
+local paths are delivered as file URLs, preserving filename escaping, with the
+drop point in the window's coordinates (`pagePosition`, `EventPayload::FileDropAt`). Removing
 the last destination removes the controller; disabling or deleting the current
 target clears its drag state. The implementation lives in `file_drop.rs`.
 

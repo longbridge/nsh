@@ -1211,12 +1211,15 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             obj.set("pagePosition", point_object(cx, *page_position)?)?;
             obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
         }
-        EventPayload::FileDrop(uris) => {
+        EventPayload::FileDrop(uris) | EventPayload::FileDropAt { uris, .. } => {
             let list = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
                 list.set(index, uri.as_str())?;
             }
             obj.set("uris", list)?;
+            if let EventPayload::FileDropAt { page_position, .. } = payload {
+                obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            }
         }
         // The bytes cross natively: each file is a `File` over them.
         EventPayload::Paste(paste) => {

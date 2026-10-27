@@ -111,7 +111,21 @@ impl Headless {
         else {
             return Err(format!("no view at `{selector}` listens to `onFileDrop`"));
         };
-        self.send(id, EventKind::FileDrop, EventPayload::FileDrop(uris));
+        // Let go at the middle of what the selector names, as Linux
+        // reports where.
+        let at = self
+            .screen
+            .match_inside(&parsed, target)
+            .and_then(|inner| self.screen.bounds_in_root(inner))
+            .or_else(|| self.screen.bounds_in_root(target));
+        let payload = match at {
+            Some(b) => EventPayload::FileDropAt {
+                uris,
+                page_position: b.center(),
+            },
+            None => EventPayload::FileDrop(uris),
+        };
+        self.send(id, EventKind::FileDrop, payload);
         self.done()
     }
 }
