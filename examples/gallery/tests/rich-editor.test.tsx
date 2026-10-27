@@ -35,14 +35,19 @@ test("Tab and Shift-Tab indent list items, and the toolbar edits the shown edito
 
 test("the list buttons change every level of a nested list, and take it out", async () => {
   const app = await openDemo();
+  // Counted against what was on screen before: how much of the document
+  // fits (and with it how many of its other numbered lists show) depends
+  // on the fonts' metrics.
+  const numbered = app.count("text:1.");
+  const lettered = app.count("text:a.");
   await app.press("The list buttons change every level at once");
   await app.press("role:button[Numbered list]");
   await app.waitFor("text:•", { state: "gone" });
   // The outer list and the nested one are numbered, the nested one with
-  // letters, beside the document's other numbered list.
+  // letters.
   expect(app.count("text:◦")).toBe(0);
-  expect(app.count("text:1.")).toBe(2);
-  expect(app.count("text:a.")).toBe(1);
+  expect(app.count("text:1.")).toBe(numbered + 1);
+  expect(app.count("text:a.")).toBe(lettered + 1);
   await app.press("role:button[Bulleted list]");
   await app.waitFor("text:◦");
   expect(app.count("text:•")).toBe(2);
