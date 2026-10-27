@@ -3,7 +3,7 @@ use std::{
     mem::{Discriminant, discriminant},
 };
 
-use nsh_core::{Command, MountBatch, MountItem, NodeId, ROOT_ID, ViewKind};
+use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, ROOT_ID, ViewKind};
 
 use crate::{Appearance, ComponentFactory, view::NshView};
 
@@ -12,6 +12,7 @@ pub(crate) struct Mounter {
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
     pub(crate) exit: bool,
+    pub(crate) page_backgrounds: Vec<Color>,
     unhandled: HashSet<Discriminant<MountItem>>,
     placeholders: HashSet<String>,
 }
@@ -23,6 +24,7 @@ impl Default for Mounter {
             components: HashMap::new(),
             appearance: None,
             exit: false,
+            page_backgrounds: Vec::new(),
             unhandled: HashSet::new(),
             placeholders: HashSet::new(),
         };
@@ -60,6 +62,7 @@ impl Mounter {
         self.exit = false;
         self.unhandled.clear();
         self.placeholders.clear();
+        self.page_backgrounds.clear();
     }
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
@@ -165,5 +168,25 @@ impl Mounter {
                 }
             }
         }
+        self.page_backgrounds.clear();
+        collect_page_backgrounds(&self.views, ROOT_ID, &mut self.page_backgrounds);
+    }
+}
+
+fn collect_page_backgrounds(views: &[Option<NshView>], id: NodeId, colors: &mut Vec<Color>) {
+    let Some(view) = views.get(id as usize).and_then(Option::as_ref) else {
+        return;
+    };
+    if id == ROOT_ID
+        || view.parent == Some(ROOT_ID)
+        || matches!(view.kind, ViewKind::Screen | ViewKind::Modal)
+    {
+        let fill = view.style.background_color;
+        if !fill.is_transparent() && !colors.contains(&fill) {
+            colors.push(fill);
+        }
+    }
+    for &child in &view.children {
+        collect_page_backgrounds(views, child, colors);
     }
 }

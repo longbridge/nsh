@@ -24,6 +24,7 @@ struct Painter<'a> {
     hits: &'a mut Vec<Hit>,
     area: Rect,
     cells: CellSize,
+    page_backgrounds: &'a [nsh_core::Color],
 }
 
 pub(crate) fn draw(
@@ -35,14 +36,17 @@ pub(crate) fn draw(
 ) {
     hits.clear();
     let clip = area.intersection(buffer.area);
+    let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
     Painter {
         tree,
         buffer,
         hits,
         area,
         cells,
+        page_backgrounds: &page_backgrounds,
     }
     .view(ROOT_ID, Point::default(), clip, 1.0, true, None);
+    tree.page_backgrounds = page_backgrounds;
 }
 
 impl Painter<'_> {
@@ -95,9 +99,15 @@ impl Painter<'_> {
         if !visible.is_empty() {
             let fill = view.style.background_color;
             if !fill.is_transparent() {
-                if fill.0 & 255 == 255 && opacity >= 1.0 {
+                let page_background = self.page_backgrounds.contains(&fill);
+                if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
+                    let background = if page_background {
+                        Color::Reset
+                    } else {
+                        blend(fill, opacity, Color::Reset)
+                    };
                     Block::default()
-                        .style(Style::reset().bg(blend(fill, opacity, Color::Reset)))
+                        .style(Style::reset().bg(background))
                         .render(visible, self.buffer);
                     for y in visible.y..visible.bottom() {
                         for x in visible.x..visible.right() {

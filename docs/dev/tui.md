@@ -84,11 +84,23 @@ preserve empty rows. A grapheme wider than the available line remains whole and 
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's
 `TextEngine` contract requires. Custom font registration succeeds with the terminal font remaining in use.
 
+## Page backgrounds
+
+A **Page background** is the fill of the surface root, an app's top-level view, a screen or a modal, and any
+view fill of exactly the same RGBA color. These fills draw `Color::Reset`, so the terminal supplies its own
+background. A matching fill resets the background even when it lies over a colored card; it does not inherit that
+card's color. Other fills keep the app's colors, including colors that differ by a single channel value.
+
+The attached tree's page colors are collected after each complete mount batch, before drawing. This makes
+matching independent of paint order and follows style changes, detachments and app replacement. Transparent fills
+remain transparent. The Emacs Key scheme, Minibuffer and mouse-capture changes are separate interaction work.
+
 ## Degradation in this slice
 
 | Feature | Terminal representation |
 |---|---|
-| View fill | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
+| Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
+| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |

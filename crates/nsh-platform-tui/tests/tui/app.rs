@@ -18,7 +18,7 @@ fn Counter() -> impl IntoElement {
     )
 }
 
-fn surface() -> (AppView, crossbeam_channel::Receiver<()>) {
+pub(super) fn surface() -> (AppView, crossbeam_channel::Receiver<()>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut options = AppOptions::default();
     options.wake = Some(Arc::new(move || {
@@ -28,7 +28,7 @@ fn surface() -> (AppView, crossbeam_channel::Receiver<()>) {
     (AppView::new(options), rx)
 }
 
-fn draw_until(
+pub(super) fn draw_until(
     view: &mut AppView,
     terminal: &mut Terminal<TestBackend>,
     rx: &crossbeam_channel::Receiver<()>,
@@ -59,7 +59,7 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     draw_until(&mut view, &mut terminal, &rx, "Count 0");
     assert_eq!(
         terminal.backend().buffer()[(0, 0)].bg,
-        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+        ratatui_core::style::Color::Reset
     );
     view.stop();
     terminal
@@ -75,7 +75,11 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     );
 }
 
-fn mouse(kind: nsh_platform_tui::MouseKind, column: u16, row: u16) -> nsh_platform_tui::Input {
+pub(super) fn mouse(
+    kind: nsh_platform_tui::MouseKind,
+    column: u16,
+    row: u16,
+) -> nsh_platform_tui::Input {
     let mut mouse = nsh_platform_tui::MouseInput::default();
     mouse.kind = kind;
     mouse.column = column;
@@ -293,13 +297,15 @@ fn app_errors_are_delivered_on_the_rendering_thread() {
 
 #[component]
 fn Bordered() -> impl IntoElement {
-    view()
-        .w(px(48.0))
-        .h(px(48.0))
-        .border_1()
-        .rounded(px(8.0))
-        .bg(nsh_core::color::rgb(0x123456))
-        .border_color(nsh_core::color::rgb(0xffffff))
+    view().child(
+        view()
+            .w(px(48.0))
+            .h(px(48.0))
+            .border_1()
+            .rounded(px(8.0))
+            .bg(nsh_core::color::rgb(0x123456))
+            .border_color(nsh_core::color::rgb(0xffffff)),
+    )
 }
 
 #[test]
