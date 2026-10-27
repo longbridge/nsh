@@ -36,7 +36,7 @@ async function fixture() {
     const dom = createDom(invoke, values, api, () => live, () => {});
     const components = createComponents(invoke, values, api, dom);
     const close = () => { if (live) { wasm.nsh_browser_dispose(); live = false; values.dispose(); } };
-    return { api, values, invoke, dom, components, modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
+    return { api, values, invoke, dom, components, mouseEvents: () => values.result(wasm.nsh_browser_test_mouse_events()), fileDropEvents: () => values.result(wasm.nsh_browser_test_file_drop_events()), modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
       restart() { close(); return start(); } };
   };
   return start();
@@ -607,4 +607,27 @@ test("cleanup returns its callback and permits an unowned registration", { skip:
   assert.equal(calls, 1);
   close();
   assert.equal(calls, 1);
+});
+
+
+test("native mouse payloads preserve positions, modifiers and nullable pressed buttons", { skip: !path }, async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual(f.mouseEvents(), [null, "left", "right", "middle", "back", "forward"].map(pressedButton => ({
+      position: { x: 3, y: 4 }, pagePosition: { x: 30, y: 40 },
+      modifiers: { control: false, alt: false, shift: true, platform: false }, pressedButton,
+    })));
+  } finally { f.close(); }
+});
+
+
+test("native file drops preserve URIs and optional page position", { skip: !path }, async () => {
+  const f = await fixture();
+  try {
+    const uris = ["file:///tmp/hello.txt", "file:///tmp/world.txt"];
+    assert.deepEqual(f.fileDropEvents(), [
+      { uris },
+      { uris, pagePosition: { x: 30, y: 40 } },
+    ]);
+  } finally { f.close(); }
 });

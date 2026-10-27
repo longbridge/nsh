@@ -115,3 +115,6 @@ Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平
 | `onOpen` | `.on_open(\|\| ..)` | 它已进入：完全显示出来。 |
 | `onClose` | `.on_close(\|\| ..)` | 它已离开：完全消失。应用关闭它时也会触发。 |
 | `onCancel` | `.on_cancel(\|\| ..)` | 用户尝试关闭它（Escape 或返回键、按下背景层、已启用的下拉关闭），无论它是否关闭。 |
+
+在 Web 上，嵌入时设置 `dialogs: "viewport"` 可让面板和遮罩覆盖宿主页面，同源 iframe 也会采用这个范围。
+跨域 iframe 由宿主页接入 [`hostPlayerFrame`](../docs/web.md)。

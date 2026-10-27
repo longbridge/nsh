@@ -1,8 +1,10 @@
-import { Canvas, cleanup, type GestureResponderEvent, Image, type MouseButton, signal, Text, View } from "nsh";
+import { Canvas, cleanup, type GestureResponderEvent, Image, type MouseButton, platform, signal, Text, View } from "nsh";
+
+const pointer = platform.idiom === "desktop";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { PanResponder } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, hint, IconTile, isDark, mono, Press, radius, Row, Stat, tints } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, density, finish, hint, IconTile, isDark, mono, Press, radius, Row, Stat, tints } from "../ui";
 
 /** A dot matrix behind a stage, drawn once. */
 function Dots() {
@@ -243,80 +245,105 @@ function PressEvents() {
         onPressUp={() => fire("pressOut")}
         onPress={() => fire("press")}
         onLongPress={() => fire("longPress")}
-        activeStyle={{ opacity: 0.55 }}
+        hoverStyle={{ opacity: 0.94 }}
+        activeStyle={{ opacity: 0.7, transform: [{ scale: 0.99 }] }}
         role="button"
         style={{
-          height: 64,
+          height: pointer ? 44 : 56,
           borderRadius: radius.control,
           borderCurve: "continuous",
+          borderWidth: 1,
           backgroundColor: colors.light,
           ...finish.light,
           alignItems: "center",
           justifyContent: "center",
+          transitionProperty: "opacity, transform",
+          transitionDuration: 120,
         }}
       >
-        <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onLight }}>{hint("Tap, hold, or slide off", "Click, hold, or slide off")}</Text>
+        <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "600", color: colors.onLight }}>{hint("Tap, hold, or slide off", "Click, hold, or slide off")}</Text>
       </View>
-      <View style={{ flexDirection: "row", gap: 6 }}>
+      {/* The events as lights in one sunk track, the latest ones under it. */}
+      <View style={{ ...stage(), padding: 3, gap: 3, flexDirection: "row" }}>
         <Each of={[...names]}>
           {(name, i) => (
             <View
               style={{
                 flex: 1,
-                height: 30,
-                borderRadius: 15,
+                height: pointer ? 22 : 28,
+                borderRadius: 5,
+                borderCurve: "continuous",
                 alignItems: "center",
                 justifyContent: "center",
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: flashes[i()].interpolate({ inputRange: [0, 1], outputRange: [colors.raised, colors.accentFill] }),
-                boxShadow: finish.raised.boxShadow,
+                backgroundColor: flashes[i()].interpolate({ inputRange: [0, 1], outputRange: [alpha(colors.text, 0), colors.accentFill] }),
               }}
             >
-              <Text style={{ fontSize: 11, fontFamily: mono, color: colors.text }}>{name()}</Text>
+              <Text style={{ fontSize: 11, fontFamily: mono, color: colors.muted }}>{name()}</Text>
             </View>
           )}
         </Each>
       </View>
-      <Text style={{ numberOfLines: 1, fontSize: 12, fontFamily: mono, color: colors.faint }}>
+      <Text style={{ numberOfLines: 1, fontSize: 11, fontFamily: mono, color: colors.faint, paddingHorizontal: 2 }}>
         {log().join(" · ") || "No events yet"}
       </Text>
-      <View style={{ flexDirection: "row", gap: 10 }}>
+      <View style={{ flexDirection: "row", gap: 8 }}>
         <View
           onPress={() => fire("ripple")}
           onLongPress={() => fire("fast long press")}
           delayLongPress={250}
-          activeStyle={{ backgroundColor: colors.border }}
+          hoverStyle={finish.hover}
+          activeStyle={finish.pressed}
           android={{ ripple: { color: alpha(colors.accentFill, 0.25) } }}
+          role="button"
           style={{
             flex: 1,
-            height: 56,
+            height: pointer ? 44 : 56,
             borderRadius: radius.control,
             borderCurve: "continuous",
+            borderWidth: 1,
             backgroundColor: colors.raised,
             ...finish.raised,
-            borderWidth: 1,
-            borderColor: colors.border,
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
+            paddingHorizontal: 12,
+            gap: 8,
+            transitionProperty: "background-color, border-color, box-shadow",
+            transitionDuration: 120,
           }}
         >
-          <Text style={{ fontSize: 14, color: colors.text }}>Ripple</Text>
-          <Text style={{ fontSize: 12, color: colors.faint }}>Long press after 250 ms</Text>
+          <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text }}>Ripple</Text>
+          <Text style={{ flex: 1, textAlign: "right", fontSize: 12, color: colors.faint }}>Long press after 250 ms</Text>
         </View>
         <View
           onPress={() => fire("borderless")}
           android={{ ripple: { borderless: true, radius: 40 } }}
-          activeStyle={{ opacity: 0.4 }}
+          hoverStyle={finish.hover}
+          activeStyle={finish.pressed}
           role="button"
           accessibilityLabel="Star"
-          style={{ width: 56, height: 56, alignItems: "center", justifyContent: "center" }}
+          style={{
+            width: pointer ? 44 : 56,
+            height: pointer ? 44 : 56,
+            borderRadius: radius.control,
+            borderCurve: "continuous",
+            borderWidth: 1,
+            backgroundColor: colors.raised,
+            ...finish.raised,
+            alignItems: "center",
+            justifyContent: "center",
+            transitionProperty: "background-color, border-color, box-shadow",
+            transitionDuration: 120,
+          }}
         >
-          <Icon name="star" size={24} tint={colors.warn} />
+          <Icon name="star" size={18} tint={colors.warn} />
         </View>
       </View>
-      <Text onPress={() => fire("text")} activeStyle={{ opacity: 0.3 }} style={{ alignSelf: "flex-start", fontSize: 15, color: colors.accent, paddingVertical: 12 }}>
+      <Text
+        onPress={() => fire("text")}
+        hoverStyle={{ textDecorationLine: "underline" }}
+        activeStyle={{ opacity: 0.4 }}
+        style={{ alignSelf: "flex-start", fontSize: density.body, fontWeight: "500", color: colors.accent, paddingVertical: 2 }}
+      >
         Pressable text, dimmed while pressed
       </Text>
     </Card>
@@ -456,10 +483,10 @@ function Accessibility() {
             onPress={() => last.set(item().label)}
           >
             <Row first={i() === 0}>
-              <IconTile name={item().icon} size={34} tint={last() === item().label ? colors.accent : colors.text} />
+              <IconTile name={item().icon} size={pointer ? 28 : 36} tint={last() === item().label ? colors.accent : colors.text} />
               <View style={{ flex: 1, gap: 1 }}>
-                <Text style={{ fontSize: 15, color: colors.text }}>{item().label}</Text>
-                <Text style={{ fontSize: 12, color: colors.muted }}>{item().hint}</Text>
+                <Text style={{ fontSize: density.body, fontWeight: "500", color: colors.text }}>{item().label}</Text>
+                <Text style={{ fontSize: density.note, color: colors.muted }}>{item().hint}</Text>
               </View>
               <Text style={{ fontSize: 11, fontFamily: mono, color: colors.faint }}>button</Text>
             </Row>

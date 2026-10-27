@@ -13,7 +13,7 @@ let app: App;
 /** The Charts page with a mouse to hover with and a manual clock for the stream's ticks. */
 const start = async (reducedMotion = false) => {
   app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {}, reducedMotion });
-  await app.press("role:button[Charts]");
+  await app.press("role:button[Plot]");
   await app.waitFor("Live price");
 };
 beforeEach(() => start());

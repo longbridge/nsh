@@ -2,7 +2,7 @@ import type { JSX } from "nsh";
 import { cleanup, reduceMotion, signal, Text, View } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
 import { platform } from "nsh";
-import { alpha, Button, Card, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
+import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
 const pointer = platform.idiom === "desktop";
 const size = pointer ? { gap: 10, switch: "small" as const } : { gap: 12, switch: "regular" as const };
@@ -523,10 +523,10 @@ const PERIODS = [
   { value: "week", label: "7d peak" },
 ] as const;
 type Period = (typeof PERIODS)[number]["value"];
-const RESOURCES: { name: string; tone: Tone; unit: string; total: number; used: Record<Period, number> }[] = [
-  { name: "Compute", tone: "accent", unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
-  { name: "Memory", tone: "info", unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
-  { name: "Network", tone: "warn", unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
+const RESOURCES: { name: string; color: string; unit: string; total: number; used: Record<Period, number> }[] = [
+  { name: "Compute", color: chart.s1, unit: "vCPU", total: 64, used: { now: 38, day: 51, week: 59 } },
+  { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
+  { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
 const RINGS = pointer ? 164 : 172;
 /** Each ring's width and the gap between rings, in points. */
@@ -560,7 +560,7 @@ function Capacity() {
           style={{ width: RINGS, height: RINGS }}
         >
           {RESOURCES.map((r, i) => (
-            <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} style={{ fill: alpha(toneColor(r.tone), 0.13) }} />
+            <Arc innerRadius={radii[i].inner} outerRadius={radii[i].outer} style={{ fill: alpha(r.color, 0.13) }} />
           ))}
           {RESOURCES.map((r, i) => (
             <Arc
@@ -568,7 +568,7 @@ function Capacity() {
               outerRadius={radii[i].outer}
               endAngle={share(r) * 2 * Math.PI}
               cornerRadius={RING_WIDTH / 2}
-              style={{ fill: toneColor(r.tone) }}
+              style={{ fill: r.color }}
             />
           ))}
           <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 2, pointerEvents: "none" }}>
@@ -580,7 +580,7 @@ function Capacity() {
           {RESOURCES.map((r) => (
             <View style={{ gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: toneColor(r.tone) }} />
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: r.color }} />
                 <Text style={{ flex: 1, fontSize: 13, color: colors.text }}>{r.name}</Text>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>{`${fixed(share(r) * 100, 0)}%`}</Text>
               </View>
@@ -628,7 +628,9 @@ function Revenue() {
   const shown = () => (hover() == null ? undefined : REGIONS[hover()!]);
   return (
     <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, the hovered slice lifted">
-      <View style={{ flexDirection: pointer ? "row" : "column", alignItems: "center", gap: pointer ? 24 : 16 }}>
+      {/* The legend sits beside the ring where the card has room for its
+          names and below it where it has not, never cutting a name short. */}
+      <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 24 : 16 }}>
         <Plot
           data={REGIONS}
           accessibilityLabel={`Revenue by region, ${money(REVENUE)} in all; largest North America at ${portion(482)}`}
@@ -658,7 +660,7 @@ function Revenue() {
             <Text style={{ fontSize: 20, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{money(shown()?.revenue ?? REVENUE)}</Text>
           </View>
         </Plot>
-        <View style={{ alignSelf: "stretch", flex: pointer ? 1 : undefined, justifyContent: "center", gap: 2 }}>
+        <View style={{ alignSelf: "stretch", flexGrow: 1, flexBasis: pointer ? 260 : undefined, justifyContent: "center", gap: 2 }}>
           {REGIONS.map((r, i) => (
             <View
               class="transition-opacity duration-150 motion-reduce:transition-none"
@@ -737,8 +739,8 @@ function Sales() {
         <Text style={{ fontSize: 12, color: colors.muted }}>{hover() == null ? `${shown().month}, the last month` : shown().month}</Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>
-        <Legend color={toneColor("accent")} label="Online" value={`${shown().online}k`} />
-        <Legend color={toneColor("info")} label="In store" value={`${shown().store}k`} />
+        <Legend color={chart.s1} label="Online" value={`${shown().online}k`} />
+        <Legend color={chart.s2} label="In store" value={`${shown().store}k`} />
       </View>
       <View style={{ flexDirection: "row", gap: 8, marginTop: size.gap }}>
         <Plot
@@ -768,7 +770,7 @@ function Sales() {
             inactiveOpacity={0.45}
             label={stacked() ? undefined : "online"}
             labelStyle={labelStyle}
-            style={{ fill: toneColor("accent") }}
+            style={{ fill: chart.s1 }}
           />
           <Bar
             value="store"
@@ -779,7 +781,7 @@ function Sales() {
             // Stacked, the top bar's label is the month's total.
             label={stacked() ? (d: Sale) => String(total(d)) : "store"}
             labelStyle={labelStyle}
-            style={{ fill: toneColor("info") }}
+            style={{ fill: chart.s2 }}
           />
         </Plot>
         {/* The y axis' labels at the grid's values. */}

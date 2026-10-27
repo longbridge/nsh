@@ -948,6 +948,10 @@ down, so the search field keeps the keyboard focus. The trigger's role, states, 
 (`Overlay::anchor`), at least as wide as its layout reports, and waits for that first layout (open at first, it would
 be made before the slot is filled).
 
+On the web, `Sheet` wraps its two overlays in a modal root with no platform animation. The embedding player
+reports that root’s presentation size independently of the app, so both the backdrop and panel follow
+`dialogs: "viewport"`. SheetMotion retains ownership of entering, leaving and controlled close requests.
+
 `Sheet` opts into downward dragging with `closeOnSwipe` (default false, bottom side). Its pan updates
 `SheetMotion.drag_y` on the platform's animation graph; a clamped fraction of the measured panel height drives both
 translation and backdrop opacity. Release past 30% or 800 points/second requests `onOpenChange(false, "swipe")`

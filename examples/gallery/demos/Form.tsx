@@ -1,11 +1,13 @@
 import { effect, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
 import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
-import { Keyboard, keyboardFrame, safeAreaInsets } from "nsh";
+import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, tints, type Tone, toneColor } from "../ui";
 
+/** A pointer and a keyboard: desktop density. */
+const pointer = platform.idiom === "desktop";
 /**
  * A labelled input (`api` names the prop it shows, `hint` is a plain note):
  * the border glows accent while focused (a ring fading in
@@ -26,7 +28,9 @@ function Field(
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     if (has) Animated.sequence([9, -8, 6, -4, 2, 0].map((x) => Animated.timing(shake, { toValue: x, duration: 45 }))).start();
   });
-  const box = () => (props.multiline ? { minHeight: 46, paddingTop: 13, paddingBottom: 13 } : { height: 46 });
+  // Desktop density with a pointer (28 pt, text 13), touch density otherwise.
+  const box = () =>
+    props.multiline ? (pointer ? { minHeight: 28, paddingTop: 6, paddingBottom: 6 } : { minHeight: 46, paddingTop: 13, paddingBottom: 13 }) : { height: pointer ? 28 : 46 };
   return (
     <View style={{ gap: 6, translate: [shake, 0] }}>
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
@@ -52,7 +56,7 @@ function Field(
         }}
       >
         <If when={own.prefix}>
-          <Text style={{ paddingLeft: 14, fontSize: 15, color: colors.muted }}>{own.prefix}</Text>
+          <Text style={{ paddingLeft: pointer ? 8 : 14, fontSize: pointer ? 13 : 15, color: colors.muted }}>{own.prefix}</Text>
         </If>
         <Input
           returnKeyType={own.next ? "next" : "done"}
@@ -66,7 +70,7 @@ function Field(
             own.onBlur?.();
           }}
           {...input}
-          style={[{ flex: 1, paddingHorizontal: 14, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
+          style={[{ flex: 1, paddingHorizontal: pointer ? 8 : 14, fontSize: pointer ? 13 : 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
         />
         <View
           style={{
