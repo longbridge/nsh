@@ -12,10 +12,10 @@ A shader is a view whose box a GPU program draws: gradients that flow, noise and
 foil, ripples that follow a tap. You write one WGSL function, `shade`, that gives the color of each point of the box;
 the platform runs it on the GPU at the screen's resolution, over the view's background and under its children.
 Animated values move it natively, frame by frame, with no work in the app's code. TSX makes one with `<Shader>` from
-`nsh`, Rust with `shader(program)`.
+`nsh`, Rust with `shader().source(program)`.
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::Shader};
+use nsh_core::{prelude::*, shader::{Shader, UniformName}};
 
 const GLOW: &str = r#"
 struct Uniforms { tint: vec4f }
@@ -28,10 +28,25 @@ fn shade(uv: vec2f) -> vec4f {
 }
 "#;
 
+/// The members of `GLOW`'s `struct Uniforms`.
+#[derive(Clone, Copy)]
+enum Glow {
+    Tint,
+}
+
+impl UniformName for Glow {
+    fn name(&self) -> &str {
+        match self {
+            Glow::Tint => "tint",
+        }
+    }
+}
+
 fn glow() -> impl IntoElement {
     let program = Shader::compile(GLOW).expect("a valid shader");
-    shader(program)
-        .uniform("tint", Hsla::from(rgb(0x38bdf8)))
+    shader()
+        .source(program)
+        .uniform(Glow::Tint, Hsla::from(rgb(0x38bdf8)))
         .h(px(200.0))
         .rounded(px(14.0))
 }
@@ -130,14 +145,31 @@ on the UI thread: the animation runs at full frame rate however busy the app's c
 and `u32` members and the components of a `vec2f`; an interpolation to colors animates a `vec3f` or `vec4f`.
 
 ```rust tabs
-use nsh_core::{prelude::*, shader::Shader};
+use nsh_core::{prelude::*, shader::{Shader, UniformName}};
+
+/// The members of the ripple's `struct Uniforms`.
+#[derive(Clone, Copy)]
+enum Ripple {
+    Wave,
+    Center,
+}
+
+impl UniformName for Ripple {
+    fn name(&self) -> &str {
+        match self {
+            Ripple::Wave => "wave",
+            Ripple::Center => "center",
+        }
+    }
+}
 
 fn ripple(program: Shader) -> impl IntoElement {
     let wave = animated_value(0.0);
     wave.timing(1.0, 2200.0, Easing::Linear);
-    shader(program)
-        .animated_uniform("wave", &wave)
-        .uniform("center", [0.5_f32, 0.5])
+    shader()
+        .source(program)
+        .animated_uniform(Ripple::Wave, &wave)
+        .uniform(Ripple::Center, [0.5_f32, 0.5])
         .h(px(200.0))
 }
 ```
@@ -197,7 +229,7 @@ A shader takes the props of a [view](./view.md) plus:
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `source` | `shader(program)` | `string` | The WGSL source defining `fn shade(uv: vec2f) -> vec4f`. Rust compiles it with `Shader::compile(source)`. |
+| `source` | `.source(program)` | `string` | The WGSL source defining `fn shade(uv: vec2f) -> vec4f`. Rust compiles it with `Shader::compile(source)`. |
 | `uniforms` | `.uniform(name, value)`, `.animated_uniform(name, &value)` | `Record<string, ShaderUniform>` | The values of the members of `struct Uniforms`, by name: numbers, colors, animated values and lists of them. |
 | `paused` | `.paused(bool)` | `boolean` | Stops the clock of `nsh.time`. Default `false`. |
 
@@ -239,13 +271,13 @@ once, one that reads `nsh.time` every frame, and one with animated uniforms whil
 
 ## Rust
 
-`shader(program)` (from `nsh_core::element`) makes a shader view of a compiled `Shader`
+`shader()` (from `nsh_core::element`) makes a shader view; `.source(program)` gives it a compiled `Shader`
 (`nsh_core::shader::Shader::compile(source)`, which returns the same errors as above). Compile a program once and
-share it: it is cheap to clone. The program may be bound, `shader(move || …)`, to switch programs.
+share it: it is cheap to clone. The program may be bound, `.source(move || …)`, to switch programs.
 
 | Method | Description |
 |---|---|
-| `.uniform(name, value)` | Sets a member of `struct Uniforms`: a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes. |
+| `.uniform(name, value)` | Sets a member of `struct Uniforms`, named by a variant of the app's enum that implements `UniformName` (or a `&str`): a number, a `Color` or `Hsla`, `[f32; 2]` / `[f32; 3]` / `[f32; 4]`, or a `Vec<UniformValue>`. A bound value (`move \|\| …`) sets it again when it changes. |
 | `.animated_uniform(name, &value)` | Binds a member (a number, or a `vec3f` / `vec4f` color) to an animated value. |
 | `.paused(bool)` | Stops the clock of `nsh.time`; bindable. |
 

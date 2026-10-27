@@ -25,7 +25,7 @@
 //! reading `nsh.time` is [`Shader::animated`] and draws every frame unless
 //! paused, others draw when their size or uniforms change.
 //!
-//! The native backends render the module with wgpu (`nsh-shader`), the web
+//! The native backends render the module with wgpu (`nsh_engine::shader`), the web
 //! backend with WebGL 2 from the GLSL ES this module translates it into
 //! ([`Shader::glsl_es`], feature `glsl`).
 //!
@@ -702,6 +702,40 @@ impl<const N: usize> From<[f32; N]> for UniformValue {
 impl From<Vec<UniformValue>> for UniformValue {
     fn from(v: Vec<UniformValue>) -> Self {
         UniformValue::List(v)
+    }
+}
+
+/// The name of a member of a shader's `struct Uniforms`, as
+/// [`ShaderView::uniform`](crate::element::ShaderView::uniform) takes it:
+/// usually an enum of the program's members, so a name is a variant the
+/// compiler checks rather than a string.
+///
+/// ```
+/// use nsh_core::shader::UniformName;
+///
+/// #[derive(Clone, Copy)]
+/// enum Wave {
+///     Tint,
+///     Speed,
+/// }
+///
+/// impl UniformName for Wave {
+///     fn name(&self) -> &str {
+///         match self {
+///             Wave::Tint => "tint",
+///             Wave::Speed => "speed",
+///         }
+///     }
+/// }
+/// ```
+pub trait UniformName {
+    /// The member's name in WGSL.
+    fn name(&self) -> &str;
+}
+
+impl UniformName for &str {
+    fn name(&self) -> &str {
+        self
     }
 }
 

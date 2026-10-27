@@ -159,7 +159,7 @@ pub(crate) struct Surface {
     frame_clients: RefCell<Vec<FrameClient>>,
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
-    shader_renderer: std::cell::OnceCell<Option<Rc<nsh_shader::Renderer>>>,
+    shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
     /// The model of a test session's app (`nsh test --target gpui`).
     #[cfg(feature = "dev")]
     test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
@@ -287,9 +287,9 @@ impl Surface {
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
     /// the first time one asks.
-    pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_shader::Renderer>> {
+    pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
-            .get_or_init(|| nsh_shader::Renderer::new(nsh_shader::PixelFormat::Bgra).map(Rc::new))
+            .get_or_init(|| nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra).map(Rc::new))
             .clone()
     }
 

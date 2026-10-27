@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` and painted as a GPUI image
+//! mounts on a view, rendered by `nsh_engine::shader` and painted as a GPUI image
 //! under the view's children, clipped to its rounded box as a background
 //! is.
 //!
@@ -23,7 +23,7 @@ use std::{
 
 use gpui::{Corners, RenderImage};
 use nsh_core::{animation::AnimationValue, shader::ShaderLayer};
-use nsh_shader::{Renderer, ShaderView};
+use nsh_engine::shader::{Renderer, ShaderView};
 
 use crate::{
     image::Texture,
@@ -55,7 +55,7 @@ pub(crate) struct ShaderState {
 
 /// A frame uploaded as a GPUI image.
 struct Shown {
-    /// The frame's [`nsh_shader::Frame::serial`].
+    /// The frame's [`nsh_engine::shader::Frame::serial`].
     serial: u64,
     /// The opacity multiplied in.
     opacity: f32,
@@ -247,7 +247,7 @@ fn paint(cx: &mut DrawCx<'_>, shader: &ShaderState, (w, h): (f32, f32)) {
 
 /// A frame (premultiplied BGRA) as a GPUI image (straight BGRA) at
 /// `opacity`; `None` when it is transparent.
-fn upload(frame: &nsh_shader::Frame, opacity: f32) -> Option<Arc<RenderImage>> {
+fn upload(frame: &nsh_engine::shader::Frame, opacity: f32) -> Option<Arc<RenderImage>> {
     let mut buf = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
     let mut any = false;
     for p in frame.rows().flat_map(|row| row.as_chunks::<4>().0) {

@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` and shown as the contents of
+//! mounts on a view, rendered by `nsh_engine::shader` and shown as the contents of
 //! a sublayer under the view's children, clipped to its rounded box as a
 //! background is ([`crate::decor`] shapes it with the view).
 //!
@@ -21,7 +21,7 @@ use std::{
 };
 
 use nsh_core::{animation::AnimationValue, canvas::Damage, shader::ShaderLayer};
-use nsh_shader::{Frame, PixelFormat, Renderer, ShaderView};
+use nsh_engine::shader::{Frame, PixelFormat, Renderer, ShaderView};
 use objc2::rc::Retained;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGImage;

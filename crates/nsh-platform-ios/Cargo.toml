@@ -25,7 +25,7 @@ embed = ["js"]
 
 [dependencies]
 nsh-core = { workspace = true, features = ["svg"] }
-nsh-engine.workspace = true
+nsh-engine = { workspace = true, features = ["shader"] }
 nsh-base = { workspace = true, features = ["highlight"] }
 serde_json.workspace = true
 log.workspace = true
@@ -44,6 +44,5 @@ block2.workspace = true
 objc2-foundation.workspace = true
 objc2-quartz-core.workspace = true
 objc2-ui-kit.workspace = true
-nsh-shader.workspace = true
 rustc-hash.workspace = true
 libc.workspace = true

@@ -167,7 +167,7 @@ pub(crate) struct Surface {
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
-    shader_renderer: std::cell::OnceCell<Option<Rc<nsh_shader::Renderer>>>,
+    shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
@@ -257,9 +257,12 @@ impl Surface {
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
     /// the first time one asks.
-    pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_shader::Renderer>> {
+    pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
-            .get_or_init(|| nsh_shader::Renderer::new(nsh_shader::PixelFormat::Bgra).map(Rc::new))
+            .get_or_init(|| {
+                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra)
+                    .map(Rc::new)
+            })
             .clone()
     }
 

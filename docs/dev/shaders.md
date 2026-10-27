@@ -1,10 +1,10 @@
 # Shaders
 
-A shader view (`Shader` from `nsh`, the `shader` host element; Rust `nsh_core::element::shader(..)`) is a view whose
+A shader view (`Shader` from `nsh`, the `shader` host element; Rust `nsh_core::element::shader()` with `.source(..)`) is a view whose
 box a GPU program the app writes in WGSL draws, over the view's background and under its children. The program is
-checked and wrapped in Rust (`nsh_core::shader`), rendered by wgpu on the native backends (`nsh-shader`) and by
+checked and wrapped in Rust (`nsh_core::shader`), rendered by wgpu on the native backends (`nsh_engine::shader`, feature `shader`) and by
 WebGL 2 on the web, from GLSL ES the core translates it into. The module docs of `crates/nsh-core/src/shader.rs` and
-`crates/nsh-shader/src/lib.rs` are the reference; this page is the overview.
+`crates/nsh-engine/src/shader.rs` are the reference; this page is the overview.
 
 ## The contract
 
@@ -51,7 +51,7 @@ in what calls `shade`, then with them. Errors (`ShaderError`) carry the 1-based 
 `Shader::animated` is whether any function reads `nsh.time` (an `AccessIndex` of member 1 on the `nsh` global): only
 those draw every frame.
 
-Each frame is at most `nsh_shader::MAX_SIDE` (4096) pixels a side; larger views render at a lower scale. A GPU
+Each frame is at most `nsh_engine::shader::MAX_SIDE` (4096) pixels a side; larger views render at a lower scale. A GPU
 program that never ends is stopped by the operating system's GPU watchdog (the browser's on the web).
 
 ## The core: props, the compile cache and the mount item
@@ -90,7 +90,7 @@ An animated value (`UniformValue::Animated`) becomes a value slot: a `UniformSlo
 the other). The platform's animator hands each slot's value to the shader view, which writes it into its copy of the
 words with `ShaderLayer::write_slot` and renders again: an animated uniform moves with no JS and no engine work per
 frame. A new layer with the same program and slots keeps the values written into the animated slots
-(`nsh_shader::ShaderView::set_layer`, `op_sh` on the web), so a re-render of the app's component does not snap them
+(`nsh_engine::shader::ShaderView::set_layer`, `op_sh` on the web), so a re-render of the app's component does not snap them
 back.
 
 In JS, `uniforms` is decoded natively (`host_values.rs`, `impl HostValue for ShaderUniforms`): numbers, CSS color
@@ -99,16 +99,16 @@ holds alive with the view. In Rust, `ShaderView::uniform(name, value)` takes any
 (numbers, `Color`, `Hsla`, `[f32; 2..4]`, lists; a bound value sets it again when it changes) and
 `ShaderView::animated_uniform(name, &value)` binds an animated value, keeping its node alive with the element.
 
-## The renderer (`nsh-shader`)
+## The renderer (`nsh_engine::shader`)
 
-`nsh_shader::Renderer` holds a wgpu device and queue, two bind group layouts (built-ins alone; built-ins and
+`nsh_engine::shader::Renderer` holds a wgpu device and queue, two bind group layouts (built-ins alone; built-ins and
 uniforms) and the render pipelines by source hash (`None` for one the device refused, reported once with a `js`
 warning). A backend opens it the first time a shader is mounted on a surface (Android: on the `NshView`, kept across
 app loads), so an app without shaders opens no device. `Renderer::new` requests a low-power adapter on the primary
 backends and GL (`WGPU_BACKEND` overrides) with WebGL 2's downlevel limits; where no adapter or device is found it is
 `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
-`nsh_shader::ShaderView` is one view's state on the main thread: the layer, its words with the animated slots
+`nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its words with the animated slots
 written in, size and scale, the clock of `nsh.time` (`Clock`: kept while paused), and its frames.
 
 - **Rendering never waits for the GPU.** `render` draws into a texture and copies it into one of two read-back

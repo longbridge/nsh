@@ -42,7 +42,6 @@ nsh-platform-macos = { version = "0.3.0", path = "crates/nsh-platform-macos", de
 nsh-platform-windows = { version = "0.3.0", path = "crates/nsh-platform-windows", default-features = false }
 nsh-dev = { version = "0.3.0", path = "crates/nsh-dev" }
 nsh-testing = { version = "0.3.0", path = "crates/nsh-testing", default-features = false }
-nsh-shader = { version = "0.3.0", path = "crates/nsh-shader" }
 
 anyhow = "1"
 thiserror = "2"
@@ -70,7 +69,7 @@ rustc-hash = "2.1"
 # Shaders (`nsh_core::shader`): the WGSL front end and validator wgpu uses, and
 # its GLSL ES writer for the web's WebGL 2.
 naga = { version = "29", default-features = false, features = ["wgsl-in"] }
-# The native backends' shader renderer (`nsh-shader`), the version GPUI uses:
+# The native backends' shader renderer (`nsh_engine::shader`), the version GPUI uses:
 # WGSL only, each OS's own GPU API (and GL where Vulkan may be missing).
 wgpu = { version = "29", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "gles"] }
 pollster = "0.4"

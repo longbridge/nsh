@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` and shown as a `CGImage` in a
+//! mounts on a view, rendered by `nsh_engine::shader` and shown as a `CGImage` in a
 //! sublayer under the view's children, clipped to its rounded box as a
 //! background is.
 //!
@@ -19,7 +19,7 @@ use nsh_core::{
     geometry::{Points, px, size},
     shader::ShaderLayer,
 };
-use nsh_shader::{Frame, PixelFormat, Renderer, ShaderView};
+use nsh_engine::shader::{Frame, PixelFormat, Renderer, ShaderView};
 use objc2::{Message, rc::Retained, runtime::AnyObject, sel};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect};
 use objc2_core_graphics::CGImage;

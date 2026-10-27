@@ -1,4 +1,4 @@
-//! The native backends' shader renderer: what a shader view
+//! The native backends' shader renderer (feature `shader`): what a shader view
 //! ([`nsh_core::shader`]) draws, rendered with wgpu into pixels the backend
 //! shows the way it shows a canvas' raster.
 //!

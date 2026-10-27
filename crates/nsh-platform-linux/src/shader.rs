@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` and shown as a texture under
+//! mounts on a view, rendered by `nsh_engine::shader` and shown as a texture under
 //! the view's children, clipped to its rounded box as a background is.
 //!
 //! The surface opens the GPU device the first time a shader is mounted
@@ -19,7 +19,7 @@ use nsh_core::{
     geometry::{Points, size},
     shader::ShaderLayer,
 };
-use nsh_shader::{Renderer, ShaderView};
+use nsh_engine::shader::{Renderer, ShaderView};
 
 use crate::{
     surface::Surface,

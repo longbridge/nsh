@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` on the UI thread next to the
+//! mounts on a view, rendered by `nsh_engine::shader` on the UI thread next to the
 //! animator and shown by `Box.java` as a bitmap under the view's children,
 //! clipped to its rounded box as a background is.
 //!
@@ -24,7 +24,7 @@ use nsh_core::{
     geometry::{Points, size},
     shader::ShaderLayer,
 };
-use nsh_shader::{Frame, PixelFormat, Renderer, ShaderView};
+use nsh_engine::shader::{Frame, PixelFormat, Renderer, ShaderView};
 use rustc_hash::FxHashMap;
 
 use crate::java::{java, with_env};

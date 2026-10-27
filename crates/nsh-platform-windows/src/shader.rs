@@ -1,5 +1,5 @@
 //! Shader views: the layer [`MountItem::Shader`](nsh_core::MountItem)
-//! mounts on a view, rendered by `nsh-shader` and drawn as a bitmap under
+//! mounts on a view, rendered by `nsh_engine::shader` and drawn as a bitmap under
 //! the view's children, clipped to its rounded box as a background is.
 //!
 //! The surface opens the GPU device the first time a shader is mounted
@@ -24,7 +24,7 @@ use std::{
 };
 
 use nsh_core::{NodeId, Points, animation::AnimationValue, geometry::size, shader::ShaderLayer};
-use nsh_shader::{Renderer, ShaderView};
+use nsh_engine::shader::{Renderer, ShaderView};
 use windows::Win32::Graphics::{
     Direct2D::{
         Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT},
@@ -61,7 +61,7 @@ struct Drawn {
     bitmap: ID2D1Bitmap1,
     /// Its size in pixels.
     size: (u32, u32),
-    /// The frame it holds ([`nsh_shader::Frame::serial`]).
+    /// The frame it holds ([`nsh_engine::shader::Frame::serial`]).
     serial: u64,
     /// The device generation it was made in.
     generation: u64,

@@ -76,9 +76,9 @@ crates/
                        the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
                        the globals `WebSocket`, `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
-  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
-  nsh-shader/          The native backends' shader renderer: shader views' WGSL rendered with wgpu offscreen, read back
-                       asynchronously (never blocks the main thread) as pixels the backend shows (docs/dev/shaders.md)
+  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform;
+                       feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
+                       wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
@@ -444,6 +444,19 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - New `pub struct` types use `#[non_exhaustive]` and implement `Default`, deriving it when possible.
 - Set only the fields needed and leave the rest at their defaults. Within the defining crate, use `..Default::default()`; callers in other crates start with `Type::default()` and assign fields, because non-exhaustive structs cannot be constructed with external struct literals.
 - New fields have sensible defaults so extending a struct does not break downstream construction.
+
+## Public Rust element API
+
+What apps call to build UI in Rust stays stable and strongly typed:
+
+- Element constructors take no content: `shader()`, then builder methods (`.source(program)`, `.uniform(..)`), so a
+  new input is a new method, never a changed signature. Existing constructors that take their content
+  (`canvas(painter)`, `video(url)`) are not a model for new ones.
+- Names the app chooses (a shader's uniforms, ...) are typed: a trait the app implements on its own enum
+  (`shader::UniformName`), with `&str` implementing it too, never a bare `&str` parameter.
+- Values are typed (`impl Into<UniformValue>`, `Hsla`, `Points`), not strings to parse.
+- No macros to make elements or set their props (declaring components with `#[component]` and its derives stays):
+  plain functions, methods and traits.
 
 ## Commits and pull requests
 

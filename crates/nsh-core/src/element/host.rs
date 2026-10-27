@@ -358,12 +358,11 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 
 crate::static_reactive!(Painter: Painter, Drawing);
 
-/// A view whose box `shader` draws, under its children (a bound one draws
-/// the new program when it changes): compile it once with
-/// [`Shader::compile`](crate::shader::Shader::compile) and set its
-/// uniforms with [`ShaderView::uniform`].
-pub fn shader(shader: impl IntoReactive<crate::shader::Shader>) -> ShaderView {
-    ShaderView(ElNode::new(Tag::Shader)).bind_prop(shader, |s| Prop::Shader(Some(s)))
+/// A view whose box a shader draws, under its children: give it the
+/// program with [`ShaderView::source`] and its uniforms with
+/// [`ShaderView::uniform`]. Without a program it draws nothing of its own.
+pub fn shader() -> ShaderView {
+    ShaderView(ElNode::new(Tag::Shader))
 }
 
 crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
@@ -380,16 +379,24 @@ crate::static_reactive!(
 );
 
 impl ShaderView {
-    /// Sets the member `name` of the shader's `struct Uniforms`: a number,
-    /// a color or a list (a vector, an array of `vec4f`). A bound value sets
-    /// it again when it changes; [`Self::animated_uniform`] moves one
-    /// natively.
+    /// The program that draws its box, compiled once with
+    /// [`Shader::compile`](crate::shader::Shader::compile) (a bound one
+    /// draws the new program when it changes).
+    pub fn source(self, shader: impl IntoReactive<crate::shader::Shader>) -> Self {
+        self.bind_prop(shader, |s| Prop::Shader(Some(s)))
+    }
+
+    /// Sets the member `name` of the shader's `struct Uniforms`, usually a
+    /// variant of the app's enum of them
+    /// ([`UniformName`](crate::shader::UniformName)): a number, a color or a
+    /// list (a vector, an array of `vec4f`). A bound value sets it again
+    /// when it changes; [`Self::animated_uniform`] moves one natively.
     pub fn uniform(
         mut self,
-        name: &str,
+        name: impl crate::shader::UniformName,
         value: impl IntoReactive<crate::shader::UniformValue>,
     ) -> Self {
-        let name: Arc<str> = name.into();
+        let name: Arc<str> = name.name().into();
         self.0.bind_attr(value, move |attrs, value| {
             let mut uniforms = attrs
                 .props
@@ -412,7 +419,11 @@ impl ShaderView {
     /// the animated value `value`: the platform writes it on every frame it
     /// changes and draws again, without the engine. One whose owner is gone
     /// counts as 0.
-    pub fn animated_uniform(mut self, name: &str, value: &impl super::Animated) -> Self {
+    pub fn animated_uniform(
+        mut self,
+        name: impl crate::shader::UniformName,
+        value: &impl super::Animated,
+    ) -> Self {
         let value = match value.animated_node().live() {
             Some(node) => {
                 let id = node.id();
