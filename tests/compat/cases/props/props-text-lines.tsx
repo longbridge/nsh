@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): what decides
 // a `<Text>`'s lines as the platform receives it: the styles `numberOfLines`
-// (the lines also decide its height), `textOverflow` and `selectable`, and
+// (the lines also decide its height), `textOverflow` and `userSelect`, and
 // the prop `adjustsFontSizeToFit`, which shrinks the font until
 // the text fits, at most to `minimumFontScale` (text that fits keeps its
 // size). Its script
@@ -21,7 +21,7 @@ function App() {
       <Text testID="head" style={{ numberOfLines: 1, textOverflow: "ellipsis-start" }}>
         Head
       </Text>
-      <Text testID="selectable" style={{ selectable: true }}>
+      <Text testID="selectable" style={{ userSelect: "text" }}>
         Selectable
       </Text>
       <Text

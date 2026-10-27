@@ -237,12 +237,12 @@ function ToolBody(props: { tool: Tool }) {
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.line }}>
       <View style={{ padding: 12, backgroundColor: colors.inset }}>
-        <Text style={{ selectable: true, fontFamily: mono, fontSize: 12, lineHeight: 18, color: isDark() ? "#c9cdd3" : colors.code }}>{code().code}</Text>
+        <Text style={{ userSelect: "text", fontFamily: mono, fontSize: 12, lineHeight: 18, color: isDark() ? "#c9cdd3" : colors.code }}>{code().code}</Text>
       </View>
       <If when={code().state === "done"}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, height: 44, borderTopWidth: 1, borderTopColor: colors.line }}>
           <Text style={{ fontSize: 13, color: colors.muted }}>Output</Text>
-          <Text style={{ selectable: true, flex: 1, fontFamily: mono, fontSize: 14, color: colors.up }}>{code().output}</Text>
+          <Text style={{ userSelect: "text", flex: 1, fontFamily: mono, fontSize: 14, color: colors.up }}>{code().output}</Text>
           <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>exit 0 · {code().ms} ms</Text>
         </View>
       </If>

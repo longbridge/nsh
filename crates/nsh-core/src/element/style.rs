@@ -2862,19 +2862,19 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Its texts can be selected and copied (`selectable: true`,
+    /// Its texts can be selected and copied (`userSelect: "text"`,
     /// Tailwind's `select-text`).
     fn select_text(mut self) -> Self {
         self.style()
-            .value(StyleKey::Selectable, PropertyValue::OptBool(Some(true)));
+            .value(StyleKey::UserSelect, PropertyValue::OptBool(Some(true)));
         self
     }
 
-    /// Its texts cannot be selected (`selectable: false`, Tailwind's
+    /// Its texts cannot be selected (`userSelect: "none"`, Tailwind's
     /// `select-none`).
     fn select_none(mut self) -> Self {
         self.style()
-            .value(StyleKey::Selectable, PropertyValue::OptBool(Some(false)));
+            .value(StyleKey::UserSelect, PropertyValue::OptBool(Some(false)));
         self
     }
 
@@ -3784,7 +3784,7 @@ pub trait Styled: Sized {
         self.style().bind_value(lines, |s, lines: u32| {
             s.value(
                 StyleKey::NumberOfLines,
-                PropertyValue::LineClamp(Some(lines)),
+                PropertyValue::NumberOfLines(Some(lines)),
             );
         });
         self

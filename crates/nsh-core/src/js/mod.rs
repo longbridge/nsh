@@ -107,7 +107,7 @@ mod tests {
         for key in [
             "numberOfLines",
             "textOverflow",
-            "selectable",
+            "userSelect",
             "pointerEvents",
         ] {
             assert!(style.contains(&format!("  {key}?: ")), "{key}");

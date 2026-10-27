@@ -457,7 +457,7 @@ impl Rule {
 
 /// Node properties classes and styles set: those that are not layout or
 /// drawing (the core takes them from the style, [`crate::Style`]'s
-/// `numberOfLines`, `textOverflow`, `selectable` and `pointerEvents`, and from
+/// `numberOfLines`, `textOverflow`, `userSelect` and `pointerEvents`, and from
 /// the classes for the rest).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClassProps {
@@ -470,7 +470,7 @@ pub struct ClassProps {
     pub no_wrap: Option<bool>,
     /// `pointerEvents` (`pointer-events-none` / `-auto`).
     pub pointer_events: Option<PointerEvents>,
-    /// `selectable` (`select-none` / `select-text`; `auto`: none). A
+    /// `userSelect` (`select-none` / `select-text`; `auto`: none). A
     /// view's reach the texts in it that say none, as CSS's `user-select:
     /// auto` takes its parent's.
     pub selectable: Option<bool>,

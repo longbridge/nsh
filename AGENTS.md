@@ -362,7 +362,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   headers; `AlertDialog`, drawn in the platform's dialog style where the system has no dialog to show). React Native and
   UIKit are references for which capabilities exist, not APIs to be compatible with.
 - **Styles: native first, in the forms people write.** One set of properties written three ways (Rust `Styled`,
-  `style` keys, Tailwind classes) means the same in each; the names are CSS's. Each key takes the form most used and
+  `style` keys, Tailwind classes) means the same in each; the names are CSS's but for a few common forms. Each key takes the form most used and
   easiest to write, CSS's by default: where common use and CSS differ, the common form wins (a `lineHeight` number is
   points) and `docs/dev/styles.md` lists it. React Native is a reference for what is common, not an API to match: no
   names or aliases for its sake. Tailwind (v4) utilities mean what Tailwind's generated CSS does. What NSH cannot

@@ -5658,7 +5658,7 @@ fn styles_clamp_cut_and_select_texts_and_say_which_views_take_touches() {
             style: style(&[
                 ("numberOfLines", StyleValue::Number(2.0)),
                 ("textOverflow", StyleValue::Str("ellipsis-middle")),
-                ("selectable", StyleValue::Bool(true)),
+                ("userSelect", StyleValue::Str("text")),
             ]),
             patch: Default::default(),
         },

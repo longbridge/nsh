@@ -268,16 +268,16 @@ Prefer limiting the scale over turning it off: large text is an accessibility se
 
 ## Selection
 
-The style key `selectable: true` (`.select_text()`, the class `select-text`) lets the user select and copy the text, as in the system's own text views: a long press selects the word under the finger, the handles move the selection's ends, and the edit menu offers Copy and Select All (iOS adds Look Up, Translate and Share; Android Share). A selection stays inside one text block. The style key `selectionColor` (`.selection_color(..)`, `selection:text-*`) colors the highlight and the handles. `selectable` set on a view reaches the texts inside it that set none.
+The style key `userSelect: "text"` (`.select_text()`, the class `select-text`) lets the user select and copy the text, as in the system's own text views: a long press selects the word under the finger, the handles move the selection's ends, and the edit menu offers Copy and Select All (iOS adds Look Up, Translate and Share; Android Share). A selection stays inside one text block. The style key `selectionColor` (`.selection_color(..)`, `selection:text-*`) colors the highlight and the handles. `userSelect` set on a view reaches the texts inside it that set none.
 
-In desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers, such as buttons and pressable rows); `selectable: false` (`.select_none()`, the class `select-none`) keeps a text unselectable there. Phone and tablet browsers follow the native rule.
+In desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers, such as buttons and pressable rows); `userSelect: "none"` (`.select_none()`, the class `select-none`) keeps a text unselectable there. Phone and tablet browsers follow the native rule.
 
 ```rust tabs
 text(order_number).select_text().selection_color(rgb(0x7c3aed))
 ```
 
 ```tsx tabs
-<Text style={{ selectable: true, selectionColor: "#7c3aed" }}>{orderNumber}</Text>
+<Text style={{ userSelect: "text", selectionColor: "#7c3aed" }}>{orderNumber}</Text>
 ```
 
 To copy from code (a Copy button), use `set_clipboard(..)` in Rust or [`Clipboard`](../modules/nsh.md#clipboard) in TSX.

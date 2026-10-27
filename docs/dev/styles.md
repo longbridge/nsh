@@ -2,7 +2,7 @@
 
 - **Principles** (frozen with the first recorded release):
   1. One set of properties, three ways to write it (Rust `Styled`, `style` keys, classes), one meaning; the names are
-     CSS's properties.
+     CSS's properties, but for the few a common form says more plainly ("Forms past CSS's").
   2. Native first: defaults, units and value forms serve the platforms and performance, not compatibility with the
      web (lengths are points, `"50%"` or `"auto"`, never `"30px"` in a style: classes take CSS's units, which depend on
      the theme and the window).
@@ -38,7 +38,8 @@
   `ellipsis-middle` (where a clamped text is cut), `textAlign`'s `auto` (React Native's: the text's natural side, by its
   direction); variants past Tailwind's: `selected:` (`accessibilityState.selected`, `selectedStyle`), `ios:` /
   `android:` / `web:` (the platform). A new one joins this list.
-- **CSS's meanings**: inline styles mean what classes mean: a style key is the CSS property of its name. Every view, however it is styled, keeps
+- **CSS's meanings**: inline styles mean what classes mean: a style key is the CSS property of its name (or of the form
+  "Forms past CSS's" gives it). Every view, however it is styled, keeps
   React Native's defaults for what nothing sets (a column while no display is set, `flexShrink: 0`,
   `alignContent: flex-start` outside grids, minimum sizes of 0: Yoga's, which spare measuring every item's
   min-content size; `min-width: auto` written out is CSS's automatic minimum). Colors (`crates/nsh-core/src/css.rs`) are hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, names and
@@ -90,7 +91,7 @@
   `Tokens::over`), `Core::class_tokens_changed` drops the cached strings that name tokens and resolves
   their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Settings
-  that are props in React Native are style keys here, as in CSS (`numberOfLines`, `textOverflow`, `selectable`,
+  that are props in React Native are style keys here, as in CSS (`numberOfLines`, `textOverflow`, `userSelect`,
   `pointerEvents`, `objectFit`; `line-clamp-*`, `truncate`, `text-ellipsis`, `select-*`, `pointer-events-*`,
   `object-*`), and the inline style wins over their classes as over any; `whitespace-nowrap` is class-only. `caret-*`,
   `placeholder:text-*` / `selection:bg-*` set the `caretColor`, `placeholderColor` / `selectionColor` style keys (the caret and the selection highlight are apart; UIKit tints both

@@ -78,7 +78,7 @@ text("Run ")
 ```
 
 ```tsx tabs
-<Text style={{ selectable: true, fontSize: 15, lineHeight: 22 }}>
+<Text style={{ userSelect: "text", fontSize: 15, lineHeight: 22 }}>
   {"Run "}
   <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
     {" cargo test "}
@@ -171,11 +171,11 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Text
 | `maxFontSizeMultiplier` | `.max_font_size_multiplier(..)` | `number` | `0` | The upper bound of the system scale; `0` is none. |
 | `adjustsFontSizeToFit` | `.shrink_to_fit(min_scale)` | `boolean` | `false` | Shrink the font until the text fits its lines (`numberOfLines`) and its box. |
 | `minimumFontScale` | `.shrink_to_fit(min_scale)` | `number` | | How far `adjustsFontSizeToFit` shrinks at most (0..1; at least 0.1). |
-| `selectable` (style) | `.select_text()`, `.select_none()` | `boolean` | unset | `true`: the user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. Unset takes the setting of the views around the text; with none set, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `false` keeps it unselectable there too. |
+| `userSelect` (style) | `.select_text()`, `.select_none()` | `"auto" \| "none" \| "text"` | `"auto"` | `"text"`: the user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. `"auto"` takes the setting of the views around the text; with none set, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `"none"` keeps it unselectable there too. |
 | `selectionColor` (style) | `.selection_color(..)` | `ColorValue` | the platform's accent | The selection's highlight and handles. |
 | `onTextLayout` | | `(e: { lines: TextLayoutLine[] }) => void` | | The laid-out lines after each layout. |
 
-The Tailwind classes `select-text`, `select-none` and `select-auto` set `selectable`, `line-clamp-*` sets `numberOfLines`, `text-ellipsis` and `text-clip` set `textOverflow`, and `truncate` is one line cut with an ellipsis. The selection's highlight and handles take the style key
+The Tailwind classes `select-text`, `select-none` and `select-auto` set `userSelect`, `line-clamp-*` sets `numberOfLines`, `text-ellipsis` and `text-clip` set `textOverflow`, and `truncate` is one line cut with an ellipsis. The selection's highlight and handles take the style key
 `selectionColor` (`selection:text-*`), the platform's accent by default.
 
 ## Text styles

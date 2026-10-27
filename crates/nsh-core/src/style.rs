@@ -1026,10 +1026,10 @@ pub(crate) struct Pending {
     pub(crate) object_fit: Option<crate::ResizeMode>,
     /// `numberOfLines`: the most lines of a text (`Some(0)`, `none`: no clamp
     /// over a class's).
-    pub(crate) line_clamp: Option<u32>,
+    pub(crate) number_of_lines: Option<u32>,
     /// `textOverflow`: where a clamped text is cut.
     pub(crate) text_overflow: Option<EllipsizeMode>,
-    /// `selectable`: whether a text can be selected (`None`, `auto`: the
+    /// `userSelect`: whether a text can be selected (`None`, `auto`: the
     /// view's around it, else the platform's).
     pub(crate) user_select: Option<bool>,
     /// `pointerEvents`: which touches the view and the views in it take.
@@ -1607,7 +1607,7 @@ style_keys! {
     StrokeDasharray = "strokeDasharray": View "number | string" "The dashes and gaps of those outlines, lengths separated by spaces or commas, an odd list repeated, or `none` (CSS's and SVG's `stroke-dasharray`, inherited).",
     NumberOfLines = "numberOfLines": Text "number" "The most lines a `<Text>` shows (CSS's `line-clamp`, class `line-clamp-*`); 0 shows them all.",
     TextOverflow = "textOverflow": Text "\"ellipsis\" | \"clip\" | \"ellipsis-start\" | \"ellipsis-middle\"" "CSS's `text-overflow`: how a clamped `<Text>` is cut, with an ellipsis at its end (the default), clipped, or with the ellipsis at its start or in its middle.",
-    Selectable = "selectable": View "boolean" "Whether a `<Text>` can be selected and copied (CSS's `user-select`, classes `select-text` / `select-none`); a view's reaches the texts in it that set none; unset leaves it to the view around it, else to the platform.",
+    UserSelect = "userSelect": View "\"auto\" | \"none\" | \"text\"" "CSS's `user-select`: whether a `<Text>` can be selected (`\"text\"`) or not (`\"none\"`); a view's reaches the texts in it; `\"auto\"` leaves it to the view around it, else to the platform.",
     PointerEvents = "pointerEvents": View "\"auto\" | \"none\" | \"box-none\" | \"box-only\"" "CSS's `pointer-events`: `\"none\"` takes no touches, for the view and the views in it unless one says `\"auto\"`; `\"box-none\"` takes none on the view itself, only on the views in it; `\"box-only\"` takes them on the view itself, never on the views in it.",
     VerticalAlign = "verticalAlign": View "\"baseline\" | \"text-top\" | \"text-bottom\" | \"middle\"" "Where a view or image inside a `<Text>` sits in its line (CSS `vertical-align`, `align-*`): its bottom on the baseline (the default), its top or bottom at the top or bottom of the text's font, or its middle half the font's x height above the baseline. The line grows to hold it.",
 }
@@ -1619,8 +1619,6 @@ pub enum StyleValue<'a> {
     Number(f32),
     /// A string.
     Str(&'a str),
-    /// `true` or `false`.
-    Bool(bool),
     /// `null` / `undefined`: resets the property to its default.
     Null,
 }
@@ -1781,7 +1779,7 @@ pub enum PropertyValue {
     /// `textAlignVertical`: 0% the top, 50% the middle, 100% the bottom.
     AlignVertical(Option<Percentage>),
     /// `numberOfLines` (`Some(0)`: no clamp).
-    LineClamp(Option<u32>),
+    NumberOfLines(Option<u32>),
     /// `textOverflow`.
     TextOverflow(Option<EllipsizeMode>),
     /// `pointerEvents`.
@@ -2161,7 +2159,6 @@ enum Len {
 impl Len {
     fn parse(v: StyleValue<'_>) -> Result<Len, StyleError> {
         match v {
-            StyleValue::Bool(_) => Err(StyleError::InvalidValue),
             StyleValue::Number(n) => Ok(Len::Px(n)),
             StyleValue::Str("auto") => Ok(Len::Auto),
             StyleValue::Str(s) => s
@@ -2290,7 +2287,6 @@ fn lpa_or_zero(v: StyleValue<'_>) -> Result<LengthPercentageAuto, StyleError> {
 
 fn number(v: StyleValue<'_>, default: f32) -> Result<f32, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Number(n) => Ok(n),
         StyleValue::Null => Ok(default),
         StyleValue::Str(_) => Err(StyleError::InvalidValue),
@@ -2299,7 +2295,6 @@ fn number(v: StyleValue<'_>, default: f32) -> Result<f32, StyleError> {
 
 fn opt_number(v: StyleValue<'_>) -> Result<Option<f32>, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Number(n) => Ok(Some(n)),
         StyleValue::Null => Ok(None),
         StyleValue::Str(_) => Err(StyleError::InvalidValue),
@@ -2312,7 +2307,6 @@ fn opt_points(v: StyleValue<'_>) -> Result<Option<Points>, StyleError> {
 
 fn color(v: StyleValue<'_>) -> Result<Option<Color>, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Str(s) => Color::parse(s).map(Some).ok_or(StyleError::InvalidValue),
         StyleValue::Null => Ok(None),
         StyleValue::Number(_) => Err(StyleError::InvalidValue),
@@ -2346,7 +2340,6 @@ fn svg_paint(v: StyleValue<'_>) -> Result<Option<SvgPaint>, StyleError> {
 /// a solid line, as in SVG.
 fn dasharray(v: StyleValue<'_>) -> Result<Option<Arc<[Points]>>, StyleError> {
     let lengths: Vec<Points> = match v {
-        StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
         StyleValue::Null => return Ok(None),
         StyleValue::Number(n) if n >= 0.0 => vec![px(n)],
         StyleValue::Number(_) => return Err(StyleError::InvalidValue),
@@ -2368,7 +2361,6 @@ fn dasharray(v: StyleValue<'_>) -> Result<Option<Arc<[Points]>>, StyleError> {
 
 fn keyword<'a>(v: StyleValue<'a>) -> Result<Option<&'a str>, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Str(s) => Ok(Some(s)),
         StyleValue::Null => Ok(None),
         StyleValue::Number(_) => Err(StyleError::InvalidValue),
@@ -2416,7 +2408,6 @@ fn align_content(v: StyleValue<'_>) -> Result<AlignContent, StyleError> {
 
 fn font_weight(v: StyleValue<'_>) -> Result<Option<u16>, StyleError> {
     Ok(match v {
-        StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
         StyleValue::Null => None,
         StyleValue::Number(n) => Some((n as u16).clamp(100, 900)),
         StyleValue::Str("normal") => Some(400),
@@ -2432,7 +2423,6 @@ fn font_weight(v: StyleValue<'_>) -> Result<Option<u16>, StyleError> {
 /// A length in points from a number or a string (`"2px"`, `"0.5rem"`).
 fn length_value(v: StyleValue<'_>, default: f32) -> Result<f32, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Number(n) => Ok(n),
         StyleValue::Str(s) => css::length(s).ok_or(StyleError::InvalidValue),
         StyleValue::Null => Ok(default),
@@ -2442,7 +2432,6 @@ fn length_value(v: StyleValue<'_>, default: f32) -> Result<f32, StyleError> {
 /// Milliseconds from a number or `"150ms"` / `"0.2s"`.
 fn duration(v: StyleValue<'_>) -> Result<f32, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Number(n) => Ok(n.max(0.0)),
         StyleValue::Null => Ok(0.0),
         StyleValue::Str(s) => {
@@ -2539,7 +2528,6 @@ fn grid_template(v: StyleValue<'_>) -> Result<grid::Template, StyleError> {
 
 fn grid_placement(v: StyleValue<'_>) -> Result<taffy::GridPlacement<String>, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Null => Ok(taffy::GridPlacement::Auto),
         StyleValue::Number(n) => line_index(n),
         StyleValue::Str(s) => grid::placement(s).ok_or(StyleError::InvalidValue),
@@ -2574,7 +2562,6 @@ fn line_index(n: f32) -> Result<taffy::GridPlacement<String>, StyleError> {
 
 fn grid_line(v: StyleValue<'_>) -> Result<taffy::Line<taffy::GridPlacement<String>>, StyleError> {
     match v {
-        StyleValue::Bool(_) => Err(StyleError::InvalidValue),
         StyleValue::Null => Ok(taffy::Line {
             start: taffy::GridPlacement::Auto,
             end: taffy::GridPlacement::Auto,
@@ -2723,7 +2710,6 @@ impl StyleKey {
                 // CSS's shorthand. Unset: the defaults (React Native's
                 // `flexShrink: 0`).
                 let (grow, shrink, basis) = match value {
-                    StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
                     StyleValue::Null => (0.0, 0.0, Dimension::auto()),
                     StyleValue::Number(n) if n >= 0.0 => (n, 1.0, Dimension::length(0.0)),
                     StyleValue::Number(_) => return Err(StyleError::InvalidValue),
@@ -2897,7 +2883,6 @@ impl StyleKey {
             // Text
             K::Fill | K::Stroke => PropertyValue::Paint(svg_paint(value)?),
             K::StrokeWidth => PropertyValue::OptPoints(match value {
-                StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
                 StyleValue::Null => None,
                 StyleValue::Number(n) if n >= 0.0 => Some(px(n)),
                 StyleValue::Str(s) => match css::length(s) {
@@ -2970,7 +2955,7 @@ impl StyleKey {
                         .max_by(|a, b| a.0.radius.0.total_cmp(&b.0.radius.0)),
                 )
             }
-            K::NumberOfLines => PropertyValue::LineClamp(match value {
+            K::NumberOfLines => PropertyValue::NumberOfLines(match value {
                 StyleValue::Null => None,
                 StyleValue::Number(n) if n >= 0.0 => Some(n as u32),
                 _ => return Err(StyleError::InvalidValue),
@@ -2983,10 +2968,11 @@ impl StyleKey {
                 Some("ellipsis-middle") => Some(EllipsizeMode::Middle),
                 Some(_) => return Err(StyleError::InvalidValue),
             }),
-            K::Selectable => PropertyValue::OptBool(match value {
-                StyleValue::Null => None,
-                StyleValue::Bool(b) => Some(b),
-                _ => return Err(StyleError::InvalidValue),
+            K::UserSelect => PropertyValue::OptBool(match keyword(value)? {
+                None | Some("auto") => None,
+                Some("none") => Some(false),
+                Some("text") => Some(true),
+                Some(_) => return Err(StyleError::InvalidValue),
             }),
             K::PointerEvents => {
                 use crate::props::PointerEvents as P;
@@ -3140,7 +3126,6 @@ fn transform_value(
     number: Option<TransformKind>,
 ) -> Result<PropertyValue, StyleError> {
     let ops = match value {
-        StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
         StyleValue::Null => Vec::new(),
         StyleValue::Number(n) => {
             let kind = number.ok_or(StyleError::InvalidValue)?;
@@ -3159,7 +3144,6 @@ fn transform_value(
 /// (`"20px"`) or the font's own (`"normal"`).
 fn line_height(value: StyleValue<'_>) -> Result<LineHeight, StyleError> {
     Ok(match value {
-        StyleValue::Bool(_) => return Err(StyleError::InvalidValue),
         StyleValue::Null | StyleValue::Str("normal") => LineHeight::Normal,
         StyleValue::Number(n) => LineHeight::Points(px(n)),
         StyleValue::Str(s) if s.ends_with("px") || s.ends_with("pt") || s.ends_with("rem") => {
@@ -3230,10 +3214,10 @@ impl Style {
     }
 
     /// What the style says of the node's own props: `numberOfLines`,
-    /// `textOverflow`, `selectable` and `pointerEvents`, into `props`.
+    /// `textOverflow`, `userSelect` and `pointerEvents`, into `props`.
     pub(crate) fn node_props(&self, props: &mut crate::tailwind::ClassProps) {
         let p = &self.pending;
-        props.number_of_lines = p.line_clamp;
+        props.number_of_lines = p.number_of_lines;
         props.ellipsize = p.text_overflow;
         props.selectable = p.user_select;
         props.pointer_events = p.pointer_events;
@@ -3644,9 +3628,9 @@ impl Style {
             (K::CaretColor, V::Color(c)) => self.text.caret_color = *c,
             (K::WritingDirection, V::OptBool(v)) => self.text.writing_direction = *v,
             (K::TextAlignVertical, V::AlignVertical(v)) => self.text.align_vertical = *v,
-            (K::NumberOfLines, V::LineClamp(v)) => self.pending.line_clamp = *v,
+            (K::NumberOfLines, V::NumberOfLines(v)) => self.pending.number_of_lines = *v,
             (K::TextOverflow, V::TextOverflow(v)) => self.pending.text_overflow = *v,
-            (K::Selectable, V::OptBool(v)) => self.pending.user_select = *v,
+            (K::UserSelect, V::OptBool(v)) => self.pending.user_select = *v,
             (K::PointerEvents, V::PointerEvents(v)) => self.pending.pointer_events = *v,
             (K::FontVariant, V::FontVariant(v)) => self.text.font_variant = *v,
             (K::TextShadow, V::TextShadow(v)) => {

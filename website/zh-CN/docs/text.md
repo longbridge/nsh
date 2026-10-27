@@ -260,16 +260,16 @@ text("Tab label").max_font_size_multiplier(1.3).text_size(px(13.0))
 
 ## 选择
 
-样式键 `selectable: true`（`.select_text()`，类 `select-text`）允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`.selection_color(..)`、`selection:text-*`）设置高亮和选择柄的颜色。设在视图上的 `selectable` 作用于其中未自行设置的文本。
+样式键 `userSelect: "text"`（`.select_text()`，类 `select-text`）允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`.selection_color(..)`、`selection:text-*`）设置高亮和选择柄的颜色。设在视图上的 `userSelect` 作用于其中未自行设置的文本。
 
-在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`selectable: false`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
+在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`userSelect: "none"`（`.select_none()`，类 `select-none`）让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
 
 ```rust tabs
 text(order_number).select_text().selection_color(rgb(0x7c3aed))
 ```
 
 ```tsx tabs
-<Text style={{ selectable: true, selectionColor: "#7c3aed" }}>{orderNumber}</Text>
+<Text style={{ userSelect: "text", selectionColor: "#7c3aed" }}>{orderNumber}</Text>
 ```
 
 要在代码中复制（比如“复制”按钮），在 Rust 中使用 `set_clipboard(..)`，在 TSX 中使用 [`Clipboard`](../modules/nsh.md#clipboard)。

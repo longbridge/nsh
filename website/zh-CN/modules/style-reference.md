@@ -6,7 +6,7 @@ order: 16
 
 # 样式参考
 
-本页列出 `style` 属性可用的每一个键，以及在 Rust 中设置它的 `Styled` 方法。Rust 组件用以 Tailwind 工具类命名的类型化方法为元素设置样式（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`，来自 `nsh_core::prelude`），它们会落到同样的键上；TSX 传入 `style` 对象（以及 class）。Rust 列给出对应的方法；大多数方法接受一个值、一个 signal 或一个闭包，`.style_when(…)` / `.style_with(…)` 可以让任意样式按条件生效。键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查它们。样式键表示与它同名的 CSS 属性，与设置该属性的类名相同：`paddingLeft` 就是 CSS 的 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow` 和 `shadow-md`。数字的单位是点，同时支持这些 CSS 能力：网格、渐变、盒阴影、滤镜、混合模式、轮廓线、变换、过渡和关键帧动画。
+本页列出 `style` 属性可用的每一个键，以及在 Rust 中设置它的 `Styled` 方法。Rust 组件用以 Tailwind 工具类命名的类型化方法为元素设置样式（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`，来自 `nsh_core::prelude`），它们会落到同样的键上；TSX 传入 `style` 对象（以及 class）。Rust 列给出对应的方法；大多数方法接受一个值、一个 signal 或一个闭包，`.style_when(…)` / `.style_with(…)` 可以让任意样式按条件生效。键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查它们。样式键表示与它同名的 CSS 属性，与设置该属性的类名相同：`paddingLeft` 就是 CSS 的 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow` 和 `shadow-md`；少数键采用应用里更直白的名字（`paddingHorizontal` 对应 `padding-inline`，`marginStart` 对应 `margin-inline-start`，`numberOfLines` 对应 `line-clamp`）。数字的单位是点，同时支持这些 CSS 能力：网格、渐变、盒阴影、滤镜、混合模式、轮廓线、变换、过渡和关键帧动画。
 
 样式怎么写、怎样与 class 组合、文字样式如何继承，见 [样式](../docs/styling.md)。class 的语法见 [Tailwind 参考](./tailwind-reference.md)。
 
@@ -419,7 +419,7 @@ view()
 |---|---|---|---|
 | `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | `.cursor(Cursor)`、`.cursor_pointer()` | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。 |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `.pointer_events(PointerEvents::BoxNone)` | 视图及其中的视图接收哪些触摸（`pointer-events-none`、`pointer-events-auto`）。`"none"`：都不接收，其中的视图也不接收，除非某个视图设置了 `"auto"`，与 CSS 一样会继承。`"box-none"`：视图本身不接收，其中的视图照常接收；`"box-only"`：视图本身接收，其中的视图都不接收（两者都来自 React Native，只作用于该视图）。默认为 `"auto"`。见 [触摸与手势](../docs/touch-and-gestures.md#pointerevents)。 |
-| `selectable` | `boolean` | `.select_text()`、`.select_none()` | `<Text>` 能否被选择和复制：`true`（`select-text`）可以，`false`（`select-none`）不可以；设在视图上时，作用于其中未自行设置的文本。不设置（`select-auto`）为默认值，交给外层视图决定，没有则由平台决定。见[文本](../elements/text.md)。 |
+| `userSelect` | `"auto" \| "none" \| "text"` | `.select_text()`、`.select_none()` | `<Text>` 能否被选择和复制：`"text"`（`select-text`）可以，`"none"`（`select-none`）不可以；设在视图上时，作用于其中未自行设置的文本。`"auto"`（`select-auto`）为默认值，交给外层视图决定，没有则由平台决定。见 [text](../elements/text.md)。 |
 
 ### SVG 绘制
 

@@ -533,7 +533,7 @@ browsers' touches into what phones report:
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
   which going back passes over (`history.back()` again) as if the app had been left from its first page. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
-- **Text selection**: text is selectable when `selectable` is true (`selectable: true`; `nsh-selectable`), and with the desktop idiom also
+- **Text selection**: text is selectable when `selectable` is true (`userSelect: "text"`; `nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
   page; phones and tablets select only what asks for it. `editable` (a field) / `textAt` tell `pointerDown` (a drag there
@@ -545,7 +545,7 @@ browsers' touches into what phones report:
 - **Selectable views** (`<View selectable>`, `ViewProps::selectable_view`): `op_vp` marks a view whose props have
   `selectableView` `nsh-area`, and the browser's own selection spans its texts (handles and long presses on phones
   included). The area and everything in it is `user-select: text` in every idiom, inside views that take presses too,
-  except texts set off (`selectable: false`: `nsh-noselect`, set by `op_t`), images and videos; an area inside
+  except texts set off (`userSelect: "none"`: `nsh-noselect`, set by `op_t`), images and videos; an area inside
   another is part of the outer one (`areaOf`). `textAt` takes the area's texts and `areaGap` its other places outside
   views that take presses, so `mousedown` is not prevented there and a drag may start between texts, as between a
   web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins

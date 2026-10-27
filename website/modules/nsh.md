@@ -341,7 +341,6 @@ See [Animation](../docs/animation.md) for the guide.
 | `opacity` | `.bind_opacity(&value)` | `style={{ opacity: value }}` |
 | `backgroundColor` | `.bind_background(&value.interpolate_colors(&[0.0, 1.0], &[white(), black()]))` | `style={{ backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ["#fff", "#000"] }) }}` |
 | `borderColor`, `color` | `.bind_border_color(&node)`, `.bind_color(&node)` | The same: a node of colors. `borderColor` colors every side; a `Text`'s `color` colors the whole text |
-| `shadowColor`, `shadowOpacity`, `shadowRadius` | `.bind_shadow_color(&node)`, `.bind_shadow_opacity(&value)`, `.bind_shadow_radius(&value)` | `style={{ shadowOpacity: value }}` (a node of colors for `shadowColor`) |
 | `transform` | `.bind_translate_x(&value)`, `.bind_translate_y`, `.bind_scale`, `.bind_rotate` (degrees) | `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY`, `rotateZ` steps: `transform: [{ translateX: value }]` |
 | Scroll position | `.scroll_value(&value)` on a scroll view or a list | `<Scroll scrollValue={value}>` and `<List scrollValue={value}>` write the scroll offset into it each frame |
 | Gestures | `.pan_values(Some(&x), Some(&y))`, `.pinch_value(&scale)`, `.rotation_value(&angle)` | `pan={{ x, y }}`, `pinch={{ scale }}`, `rotation={{ angle }}` on any element: the gesture writes the values directly (see [Touch and gestures](../docs/touch-and-gestures.md)) |

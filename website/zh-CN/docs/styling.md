@@ -10,7 +10,7 @@ demo: guide-styling
 
 每个元素都使用同一套原生样式，有两种写法。在 Rust 中，样式是链式调用在元素上的类型化方法（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`）；在 TSX 中，是一个由 camelCase 属性组成的 `style` 属性，或 [Tailwind 类名](./tailwind.md)。两者都包括盒阴影、渐变、滤镜、轮廓线、过渡和 grid 等 CSS 能力，只有变化了的属性才会发送给原生视图。
 
-三种写法写的是同一组属性，含义相同。属性名取自 CSS，CSS 值（颜色、渐变、滤镜、阴影、变换、对齐关键字）和 Tailwind 工具类的含义与 Web 上相同，每个 Rust 方法和工具类设置的值与 Tailwind CSS 4 生成的一致，因此你在 Web 上的经验可以沿用：`paddingLeft` 就是 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow`，`display: "flex"` 与 `flex` 类一样是横向。其余部分为原生应用而设计：长度单位是点（`16`、`"50%"`、`"auto"`；类可以用 `rem` 等 CSS 单位），默认值是原生布局的默认值（见下文），会变化的值用数字而不是字符串来写（`translate: [x, 0]`、阴影的各层），平台超出 CSS 的能力有专门的[扩展](#扩展)。
+三种写法写的是同一组属性，含义相同。属性名取自 CSS（少数采用应用里更常见、更直白的名字，如 `paddingHorizontal`、`marginStart` 和 `numberOfLines`），CSS 值（颜色、渐变、滤镜、阴影、变换、对齐关键字）和 Tailwind 工具类的含义与 Web 上相同，每个 Rust 方法和工具类设置的值与 Tailwind CSS 4 生成的一致，因此你在 Web 上的经验可以沿用：`paddingLeft` 就是 `padding-left` 和 `pl-4`，`boxShadow` 就是 `box-shadow`，`display: "flex"` 与 `flex` 类一样是横向。其余部分为原生应用而设计：长度单位是点（`16`、`"50%"`、`"auto"`；类可以用 `rem` 等 CSS 单位），默认值是原生布局的默认值（见下文），会变化的值用数字而不是字符串来写（`translate: [x, 0]`、阴影的各层），平台超出 CSS 的能力有专门的[扩展](#扩展)。
 
 ```rust tabs
 view()
