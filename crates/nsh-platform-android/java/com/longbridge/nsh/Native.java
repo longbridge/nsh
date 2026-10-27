@@ -59,24 +59,24 @@ final class Native {
     static final int NATIVE_EVENT = 47;
     static final int CLIPBOARD = 48;
     static final int KEY_COMMAND = 49;
-    static final int HOVER_IN = 51;
-    static final int HOVER_OUT = 52;
+    static final int MENU = 50;
+    static final int MOUSE_ENTER = 51;
+    static final int MOUSE_LEAVE = 52;
     static final int FILE_DRAG_ENTER = 53;
     static final int FILE_DRAG_LEAVE = 54;
     static final int FILE_DROP = 55;
-    static final int HOVER_MOVE = 56;
+    static final int MOUSE_MOVE = 56;
     static final int CONTEXT_MENU = 57;
     static final int COMPOSITION_CHANGE = 58;
     static final int PRESS_OUTSIDE = 59;
     static final int CANCEL = 60;
     static final int POSITION = 61;
-    static final int MOUSE_MOVE = 62;
-    static final int HOST = 63;
-    static final int PICK = 64;
-    static final int LOAD_MORE_AT_START = 65;
-    static final int OPEN_URL = 66;
-    static final int CARET_MOVE = 67;
-    static final int PASTE = 68;
+    static final int HOST = 62;
+    static final int PICK = 63;
+    static final int LOAD_MORE_AT_START = 64;
+    static final int OPEN_URL = 65;
+    static final int CARET_MOVE = 66;
+    static final int PASTE = 67;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -229,17 +229,19 @@ final class Native {
     static native boolean keyUp(long handle, int keyCode);
 
     /**
-     * {@code onHoverMove} of view {@code id}: the pointer at ({@code x}, {@code y}) in it and at
-     * ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers}: 1 Ctrl, 2 Alt,
+     * Mouse event {@code kind} ({@code onMouseEnter}, {@code onMouseMove}, {@code onMouseLeave}) of
+     * view {@code id}: the pointer at ({@code x}, {@code y}) in it and at ({@code pageX},
+     * {@code pageY}) in its root view (dp), with no button down; {@code modifiers}: 1 Ctrl, 2 Alt,
      * 4 Shift, 8 Meta.
      */
-    static native void hover(long handle, int id, float x, float y, float pageX, float pageY, int modifiers);
+    static native void mouse(long handle, int id, int kind, float x, float y, float pageX, float pageY,
+            int modifiers);
 
     /**
      * Press event {@code kind} ({@code onPress}, {@code onLongPress}, {@code onPressDown},
      * {@code onPressUp}) of node {@code id}: the touch at ({@code x}, {@code y}) in the pressed
      * view and at ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers} as
-     * {@link #hover}'s; {@code clicks}: the click count.
+     * {@link #mouse}'s; {@code clicks}: the click count.
      */
     static native void press(long handle, int id, int kind, float x, float y, float pageX, float pageY,
             int modifiers, int clicks);

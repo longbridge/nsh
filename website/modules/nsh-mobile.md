@@ -112,6 +112,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 |---|---|---|---|---|
 | `items` | `.items(..)` | `TabBarItem[]` | `[]` | The tabs, in order. |
 | `selectedIndex` | `.selected_index(..)` | `number` | `0` | The selected tab, by index; an index past the tabs selects none. |
+| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS: hides the bar without a transition. The app owns this value across pushes and pops. The bar shows when both this prop and the visible stack’s `hidesBottomBarWhenPushed` request are false. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Where the bar is: its position and size. Its look is the system's. |
 | `testID` | `.test_id(..)` | `string` | none | Finds the bar in tests and `nsh test --trace`. |
 

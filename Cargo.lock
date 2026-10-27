@@ -1139,6 +1139,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
  "crypto-common 0.1.7",
+ "subtle",
 ]
 
 [[package]]
@@ -2145,7 +2146,16 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa26c720c68b866f2c96ef5c1264b3e6f473fe5d4ce61cd44bbe913e553018"
 dependencies = [
- "hmac",
+ "hmac 0.13.0",
+]
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -2911,6 +2921,16 @@ checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
 name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
@@ -3169,6 +3189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "syntect",
  "tar",
  "tungstenite 0.30.0",
  "ureq",
@@ -3446,7 +3467,13 @@ dependencies = [
 name = "nsh-platform-web"
 version = "0.3.0"
 dependencies = [
+ "brotli",
+ "crc32c",
+ "crc32fast",
+ "flate2",
+ "hmac 0.12.1",
  "log",
+ "md-5 0.10.6",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
@@ -3457,8 +3484,12 @@ dependencies = [
  "quickjs-jit",
  "rustc-hash 2.1.3",
  "serde_json",
+ "sha1 0.10.7",
+ "sha2 0.10.9",
  "ttf-parser",
  "unicode-bidi",
+ "url",
+ "zstd",
 ]
 
 [[package]]
@@ -4842,11 +4873,11 @@ dependencies = [
  "half",
  "hex-simd",
  "hkdf",
- "hmac",
+ "hmac 0.13.0",
  "itoa",
  "keccak",
  "libc",
- "md-5",
+ "md-5 0.11.0",
  "memchr",
  "once_cell",
  "p256",
@@ -5126,7 +5157,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
 dependencies = [
  "crypto-bigint",
- "hmac",
+ "hmac 0.13.0",
 ]
 
 [[package]]
@@ -7734,6 +7765,7 @@ dependencies = [
  "clap",
  "libc",
  "notify",
+ "serde_json",
  "windows-sys 0.61.2",
  "zip",
 ]

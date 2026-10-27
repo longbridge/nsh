@@ -987,7 +987,7 @@ word (`readonly`, `multiline`).
 | A value's change | `on<Value>Change(next, details?)` | `onChange(text)`, `onOpenChange(open, reason)` |
 | Any other event | `on<Event>`, present tense, one object | `onPress()`, `onSubmit({ text })` |
 | A phase | `<act>Start`, `<act>End` | `onPanStart`, `onLoadStart` |
-| The pointer over a view | `In` / `Out` | `onHoverIn`, `onHoverOut` |
+| The mouse over a view | `Enter` / `Move` / `Leave`, the DOM's | `onMouseEnter`, `onMouseMove`, `onMouseLeave` |
 | Starting to listen | Returns `() => void` | `keymap.bind(..)` |
 | A value of the environment | An accessor, `set<Value>` beside it | `colorScheme()`, `setColorScheme` |
 | A read-only boolean | `is<Adjective>`, `has<Noun>` | `isAvailable` |
@@ -1046,8 +1046,8 @@ domain term exists.
   an event with nothing to report passes nothing.
 - Name the act, not past tense or a request: `onPress`, `onClose`, `onCancel`, `onBackPress`.
 - Name the intent rather than the geometry when the act has a name: `onLoadMore`, not "the end was reached".
-- Lifecycle pairs are `onOpen` / `onClose`; phases are `Start` / `End`, never `Begin`; the pointer over a view is
-  `onHoverIn` / `onHoverOut`, a file dragged over it `Enter` / `Leave`.
+- Lifecycle pairs are `onOpen` / `onClose`; phases are `Start` / `End`, never `Begin`; the mouse over a view is
+  `onMouseEnter` / `onMouseMove` / `onMouseLeave` (the DOM's names), a file dragged over it `Enter` / `Leave`.
 - Document whether a callback runs before or after the component's own state changes, and whether it may re-enter the
   component.
 

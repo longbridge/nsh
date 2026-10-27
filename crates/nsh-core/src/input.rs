@@ -467,12 +467,12 @@ pub fn next_states(tracked: u8, states: u8, bit: u8, on: bool) -> Option<u8> {
 
 /// Whether hovering a view that tracks `tracked` and listens to `events`
 /// matters: for its `hover:` styles (the `HOVERED` state) or its
-/// `onHoverIn` / `onHoverOut` / `onHoverMove`.
+/// `onMouseEnter` / `onMouseLeave` / `onMouseMove`.
 pub fn hoverable(tracked: u8, events: EventMask) -> bool {
     tracked & HOVERED != 0
-        || events.contains(EventKind::HoverIn)
-        || events.contains(EventKind::HoverOut)
-        || events.contains(EventKind::HoverMove)
+        || events.contains(EventKind::MouseEnter)
+        || events.contains(EventKind::MouseLeave)
+        || events.contains(EventKind::MouseMove)
 }
 
 /// The views under the mouse went from `old` to `new` (innermost first):

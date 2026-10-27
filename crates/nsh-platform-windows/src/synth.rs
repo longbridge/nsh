@@ -12,8 +12,16 @@ use crate::{
 };
 
 /// A pointer event of the mouse's `button` (0: primary, 3: back) at `x`,
-/// `y` (points, root coordinates).
-pub(crate) fn pointer(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32, button: u8) {
+/// `y` (points, root coordinates), with the buttons `held` after it (bit
+/// `n` for button `n`, as a mouse message's `wparam` tells them).
+pub(crate) fn pointer(
+    surface: &Rc<Surface>,
+    kind: PointerKind,
+    x: f32,
+    y: f32,
+    button: u8,
+    held: u8,
+) {
     crate::input::pointer(
         surface,
         PointerEvent {
@@ -21,6 +29,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32, 
             x,
             y,
             button,
+            buttons: held,
             pointer: 1,
             touch: false,
             pen: false,

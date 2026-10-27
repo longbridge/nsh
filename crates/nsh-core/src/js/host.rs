@@ -464,14 +464,19 @@ export interface PressEvent {
   clickCount: number;
 }
 
-/** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
-export interface HoverEvent {
+/** Where the mouse is over a view: the payload of `onMouseEnter`, `onMouseMove` and `onMouseLeave` (GPUI's `MouseMoveEvent`). */
+export interface MouseEvent {
   /** Position in the view (its transforms undone). */
   position: Point;
   /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
   pagePosition: Point;
   modifiers: Modifiers;
+  /** The button held down (a drag), or `null`. */
+  pressedButton: MouseButton | null;
 }
+
+/** A mouse button (GPUI's `MouseButton`). */
+export type MouseButton = "left" | "right" | "middle" | "back" | "forward";
 
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
@@ -564,34 +569,28 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "The press ended. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
     ),
     (
-        EventKind::HoverIn,
+        EventKind::MouseEnter,
         on::ALL,
-        "() => void",
-        "The mouse came over the view or a view inside it (never on touches).",
+        "(e: MouseEvent) => void",
+        "The mouse came over the view or a view inside it (never on touches; the DOM's `mouseenter`).",
     ),
     (
-        EventKind::HoverOut,
+        EventKind::MouseLeave,
         on::ALL,
-        "() => void",
-        "The mouse left the view and the views inside it, or the window.",
+        "(e: MouseEvent) => void",
+        "The mouse left the view and the views inside it, or the window, from where `e` says (the DOM's `mouseleave`).",
     ),
     (
-        EventKind::HoverMove,
+        EventKind::MouseMove,
         on::ALL,
-        "(e: HoverEvent) => void",
-        "The mouse moved over the view (or a view inside it) with no button down, at most once per frame.",
+        "(e: MouseEvent) => void",
+        "The mouse moved over the view (or a view inside it), with or without a button down (`e.pressedButton`), or a modifier key changed while it rests there with none down; at most once per frame.",
     ),
     (
         EventKind::ContextMenu,
         on::ALL,
         "(e: ContextMenuEvent) => void",
         "The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup(items, e.pagePosition)`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead.",
-    ),
-    (
-        EventKind::MouseMove,
-        on::ALL,
-        "(e: Point) => void",
-        "The mouse moved inside the view, including with a button down (desktops and web); `x`/`y` are local coordinates in points, delivered at most once per frame.",
     ),
     (
         EventKind::FileDragEnter,

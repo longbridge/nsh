@@ -48,7 +48,7 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Collapsible`, `Progress`, `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`), `Input` (a native text input, made by `nsh-js`), the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Collapsible`, `Progress`, `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `NumberInput` (a number typed or stepped: `number_input.rs`), `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`), `Input` (a native text input, made by `nsh-js`), the status
                        bar, `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), `ResizablePanelGroup` / `ResizablePanel` (`resizable/`), `DockArea` (a dockable workspace: splits, tab groups and edge docks whose layout is
                        data, `dock/`, docs/dev/dock.md), `Editor` (a code editor: highlighting, several carets, folds, search, diagnostics;
                        `editor/`, docs/dev/editor.md), `DiffView` (the changes between two texts or of a patch, split or unified: `diff/`,
@@ -323,7 +323,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
   button, a checkbox, radios, a switch, tabs, popovers, menus, tooltips and sheets, text input and system alerts today, with the status bar a
   prop of pages and dialogs; controls such as toggles, sliders and selects as their behavior is written). Names follow `gpui-base`'s
-  (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
+  (`docs/dev/api-naming.md`), and so do the API and the features: GPUI Kit's components are long proven, so an
+  `nsh-base` component covers every option of its `gpui-base` / `gpui-component` counterpart (as a prop, a part or the
+  app's slot), or `docs/dev/api-naming.md` says why it does not. `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two
   registries exporting one name panic, `Registry::merged`). Mobile-only APIs (iOS, Android or both) go to `nsh/mobile`, desktop-only ones to `nsh/desktop`,
   platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}`. `nsh` has no catch-all re-exports. Beside
@@ -378,6 +380,30 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   type of their own where one is needed, as `LineHeight`), never to strings the core parses again; only a TSX
   `style`'s values are parsed from strings. Frozen with the first recorded release as `docs/dev/styles.md` writes it ("Principles",
   "Extensions").
+- **API shapes: one form per thing, shapes that can grow** (decided by the user before the freeze; details and
+  examples in `docs/dev/api-naming.md` "Conventions", "Shapes that can grow" and "Units"; the API is being brought to
+  them). Names come from `gpui-base` / GPUI and the DOM; React Native is a reference only.
+  - Units: one per quantity. Lengths are points; an image's or a video's own size is pixels, typed `PixelSize`
+    (never `Size`); times are milliseconds; velocities points per second; shares fractions from 0 to 1 (no `Percent`
+    in names). Only media time is seconds (HTML's `currentTime`) and a deceleration the velocity kept per
+    millisecond (UIKit's 0.998 / 0.99).
+  - Events: every handler gets one object, value changes included (`onChange({ value })`, `onOpenChange({ open,
+    reason })`, `onLayout({ bounds })`), its fields named as the props they report; never positional arguments, a
+    bare value or a shared data type passed as the payload itself. An event with nothing to report passes nothing.
+    Only the responder callbacks keep React Native's `(e, gestureState)`.
+  - Mouse events are the DOM's and GPUI's: `onMouseEnter` / `onMouseMove` / `onMouseLeave`, each with a
+    `MouseEvent { position, pagePosition, modifiers, pressedButton }`; `onMouseMove` fires with or without a button
+    down. State styles keep CSS's names (`hover:`, `hoverStyle`).
+  - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
+    animations → `{ finished }`). Failure rejects (or throws) with the error, never resolves `false` (`Image.prefetch`,
+    `getSize`, `fetch`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
+  - Methods take their options as one object (`addPanel(panel, { placement, size })`, `net.connect({ host, port })`),
+    never a second or third positional option.
+  - Identifiers an app matches on are the app's and required, never derived from a label (`AlertDialogAction.id`).
+  - Refs: each element has a ref type of its own (`InputRef`, `ScrollRef`, `VideoRef`, ... over a common `ViewRef`),
+    never one type carrying every element's methods.
+  - Listening: a function that starts listening returns a function that stops it, and what is registered while a
+    component renders goes with the component.
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`

@@ -97,6 +97,7 @@ mount(App);
 |---|---|---|---|---|
 | `items` | `.items(..)` | `TabBarItem[]` | `[]` | 各个标签，按顺序。 |
 | `selectedIndex` | `.selected_index(..)` | `number` | `0` | 选中的标签的索引；超出标签数量的索引不选中任何标签。 |
+| `hidden` | `.hidden(..)` | `boolean` | `false` | iOS：立即隐藏标签栏。应用在页面推入和弹出期间持有这个值；当它和当前可见导航栈的 `hidesBottomBarWhenPushed` 请求都为 false 时，标签栏显示。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 标签栏的位置和尺寸。外观是系统的。 |
 | `testID` | `.test_id(..)` | `string` | 无 | 在测试和 `nsh test --trace` 中找到标签栏。 |
 

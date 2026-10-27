@@ -54,14 +54,14 @@ covers [props] ContextMenu.offset
 covers [props] ContextMenu.margin
 # A tooltip after the pointer rested on its trigger for `delay`, gone when
 # the pointer leaves.
-event text:SlowTrigger onHoverIn
+event text:SlowTrigger onMouseEnter
 wait 1000
 absent SlowTip
 wait 1500
 expect SlowTip
 expect Log: tooltip true hover
 expect Tip: open
-event text:SlowTrigger onHoverOut
+event text:SlowTrigger onMouseLeave
 absent SlowTip
 expect Log: tooltip false hover
 expect Tip: closed
@@ -71,15 +71,25 @@ covers [events] Tooltip.onOpen
 covers [events] Tooltip.onClose
 # An element's `tooltip`: shown after half a second, gone on a press, and
 # gone when the pointer leaves.
-event id:prop-tip onHoverIn
+event id:prop-tip onMouseEnter
 wait 700
 expect PropTip
 touch start id:prop-tip 5 5
 touch end
 absent PropTip
-event text:ElementTrigger onHoverIn
+event text:ElementTrigger onMouseEnter
 wait 700
 expect ElementTip
-event text:ElementTrigger onHoverOut
+event text:ElementTrigger onMouseLeave
 absent ElementTip
 covers [props] tooltip
+
+# The browser-JS backend shares the app's brands and preserves queued jobs.
+tap id:case-runtime-identities
+expect Buffer brand: true
+expect Cleanup identity: true
+expect Callback error: TypeError
+expect Ticks: 0
+tap id:runtime-tick
+wait 20
+expect Ticks: 1
