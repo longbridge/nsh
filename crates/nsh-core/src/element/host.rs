@@ -2112,3 +2112,129 @@ impl From<Drawing> for Painter {
 }
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        element::{
+            AnimatedValue,
+            reactive::{Runtime, create_root, signal},
+        },
+        shader::{ShaderUniforms, UniformName, UniformValue},
+    };
+
+    #[derive(Clone, Copy)]
+    enum Ripple {
+        Center,
+        Wave,
+        Speed,
+    }
+
+    impl UniformName for Ripple {
+        fn name(&self) -> &str {
+            match self {
+                Ripple::Center => "center",
+                Ripple::Wave => "wave",
+                Ripple::Speed => "speed",
+            }
+        }
+    }
+
+    fn uniforms(attrs: &super::super::builder::Attrs) -> ShaderUniforms {
+        attrs
+            .props
+            .iter()
+            .find_map(|p| match p {
+                Prop::Uniforms(u) => Some(u.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// The animation nodes released since the last call.
+    fn released(executor: &super::super::task::Executor) -> usize {
+        executor
+            .take_actions()
+            .into_iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    super::super::task::Action::Animation(
+                        crate::animation::AnimationOp::Release { .. }
+                    )
+                )
+            })
+            .count()
+    }
+
+    fn value(u: &ShaderUniforms, name: &str) -> Option<UniformValue> {
+        u.0.iter()
+            .find(|(n, _)| &**n == name)
+            .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn uniform_takes_static_bound_and_animated_values() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = std::rc::Rc::new(super::super::task::Executor::default());
+        let (value_owner, wave) = create_root(|| AnimatedValue::new(&executor, 0.0));
+        let speed = signal(1.0_f32);
+        let view = shader()
+            .uniform(Ripple::Center, [0.5_f32, 0.5])
+            .uniform(Ripple::Wave, &wave)
+            .uniform(Ripple::Speed, move || speed.get());
+        let node = view.0;
+
+        // The static and animated ones are set at once; the animated one by
+        // its node, which the element holds.
+        let set = uniforms(&node.attrs);
+        assert_eq!(
+            value(&set, "center"),
+            Some(UniformValue::List(vec![
+                UniformValue::Number(0.5),
+                UniformValue::Number(0.5)
+            ]))
+        );
+        let id = wave.node().live().expect("live").id();
+        assert_eq!(value(&set, "wave"), Some(UniformValue::Animated(id)));
+        assert_eq!(
+            node.attrs.bound.len(),
+            1,
+            "the element holds the animated node"
+        );
+        assert_eq!(
+            value(&set, "speed"),
+            None,
+            "a bound one is applied when resolved"
+        );
+
+        // The bound one follows its signal.
+        assert_eq!(
+            value(&uniforms(&node.resolved_attrs()), "speed"),
+            Some(UniformValue::Number(1.0))
+        );
+        speed.set(2.0);
+        assert_eq!(
+            value(&uniforms(&node.resolved_attrs()), "speed"),
+            Some(UniformValue::Number(2.0))
+        );
+
+        // The node outlives the owner of the handle it came from.
+        value_owner.dispose();
+        assert_eq!(released(&executor), 0, "the view keeps the animated node");
+        drop(node);
+        assert_eq!(released(&executor), 1, "and lets it go with the view");
+    }
+
+    #[test]
+    fn a_later_uniform_replaces_one_of_the_same_name() {
+        let view = shader()
+            .uniform("speed", 1.0_f32)
+            .uniform(Ripple::Speed, 3.0_f32);
+        let set = uniforms(&view.0.attrs);
+        assert_eq!(set.0.len(), 1);
+        assert_eq!(value(&set, "speed"), Some(UniformValue::Number(3.0)));
+    }
+}
