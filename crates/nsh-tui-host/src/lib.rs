@@ -32,6 +32,9 @@ struct Args {
     data_dir: Option<PathBuf>,
     #[arg(long)]
     trace: bool,
+    /// Capture the mouse for clicks, hover, dragging and text selection.
+    #[arg(long)]
+    mouse: bool,
     /// Render to an in-memory terminal (used by nsh test).
     #[arg(long, requires = "dev_server")]
     headless: bool,
@@ -92,7 +95,7 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
             })
         })?;
     } else {
-        let session = terminal::Session::enter()?;
+        let session = terminal::Session::enter(args.mouse)?;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         run(&mut terminal, &mut view, &args, |timeout| {
             if let Some(clipboard) = &terminal_clipboard {

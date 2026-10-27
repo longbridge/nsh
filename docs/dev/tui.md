@@ -361,6 +361,36 @@ again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter
 indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control. Kitty negotiation and
 the search Minibuffer are separate work. Editing uses the keys below while a field is focused.
 
+## Mouse and text selection
+
+The standalone host leaves mouse capture off so the terminal emulator owns ordinary selection. Start
+`nsh-tui-host --mouse --bundle <bundle.js>` (or `--mouse --dev-server <url>`) to capture clicks, motion and wheel
+reports. An embedder owns this transport choice and forwards `Input::Mouse`; AppView never changes terminal
+modes. The test agent forwards the same input independently of terminal capture.
+
+`input.rs` picks the last painted, clipped hit regions inside the newest modal. Hover follows the ancestor
+chain, reports `HOVERED`, HoverIn/Out/Move and rechecks the pointer after rendering a changed tree. Leaving the
+surface or losing focus clears hover. Pressed states clear on release, cancellation or a drag. Pointer coordinates
+are absolute Cells at the input seam and Cell centers in points in events, including an embedded area's offset.
+
+A primary-button drag retains its initial target outside the surface. The core's Grab, Gate and Candidate
+helpers choose native pans or content scrolling; Touch start/move/end/cancel events feed the responder system,
+including `panActivation`. A blocking JS responder prevents native gesture takeover. Native pans write the
+surface's Animator and report translation, velocity and values at release; the animation renderer consumes that
+same graph. The terminal deliberately admits mouse drags as scroll candidates, so dragging unclaimed scroll
+content moves it directly within its bounds. Selecting text takes precedence over content scrolling.
+
+`selection.rs` adapts the core SelectionModel to the visible tree's text layouts. `<View selectable>` groups its
+texts (nested groups belong to the outer group); `userSelect: "text"` selects a standalone Text and
+`userSelect: "none"` excludes it. Dragging highlights whole graphemes with reversed Cells, Shift+click extends,
+and Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C copies through the existing clipboard backend (OSC 52 in the
+standalone host). Ctrl+C also copies at the AppView seam; the standalone host reserves it for quitting.
+Ctrl+A / Cmd+A selects the area's texts and Esc / Ctrl+G clears the selection. Clicking elsewhere or losing
+focus clears it. A click on selectable pressable text still presses; a drag past the shared press slop selects.
+The layout retains each painted grapheme's UTF-16 range, including wide characters and ellipsis gaps; copying
+uses original text and joins paragraphs with newlines. Highlights stay within clipped text Cells and below
+covering views. Removed text endpoints clear the selection through the shared model.
+
 ## Text fields
 
 `text_input.rs` keeps one `nsh_core::text_edit::Model` per Input. The core model owns the text, byte selection,
@@ -437,6 +467,10 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
+| Hover and pressed states | App-defined state styles and hover events on the Cell hit regions |
+| Mouse drags | Native pan values, responder moves and bounded content scrolling |
+| Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
+| Pointer precision | One terminal Cell, converted to its center in points |
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
@@ -472,6 +506,9 @@ clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess 
 `NSH_RUNTIME` to check inherited input/output, file diagnostics (including `-v`) and Cell scale precedence and
 validation. These are additional ticket-02 seams. The test-agent acceptance seam is `nsh test --target tui`: the existing
 counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapshots after a press, and startup errors).
+The pointer tests exercise hover, responder capture, pan values, drag scrolling and cross-text copying through
+AppView; the pointer fixture imports the unchanged Physics, Gestures and Resizable demos. Their runtime acceptance
+and pan animation rendering must be checked together with the animation ticket.
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry imports the
 unchanged `examples/tui-gallery` Form and checks invalid fields and successful account creation.
@@ -484,6 +521,7 @@ cargo test -p nsh-tui-host
 cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/pointer --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
 cargo test -p nsh-cli --test cli
 cargo test -p nsh-tui-host --lib terminal::tests::normal_exit_restores_raw_mode -- --ignored --nocapture --test-threads=1

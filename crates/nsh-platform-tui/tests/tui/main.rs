@@ -11,4 +11,5 @@ mod keyboard;
 mod modal_focus;
 mod navigation;
 mod page_background;
+mod pointer;
 mod scroll;

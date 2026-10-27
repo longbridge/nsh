@@ -17,6 +17,7 @@ pub(crate) struct Hit {
     pub(crate) area: Rect,
     pub(crate) target: Option<NodeId>,
     pub(crate) origin: Point<Points>,
+    pub(crate) node_origin: Point<Points>,
 }
 
 #[derive(Clone, Copy)]
@@ -119,6 +120,7 @@ impl Painter<'_> {
                 area: visible,
                 target: press.map(|p| p.0),
                 origin: press.map_or(origin, |p| p.1),
+                node_origin: origin,
             });
         }
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;

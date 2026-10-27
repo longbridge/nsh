@@ -8,6 +8,8 @@ use nsh_core::{Color, Command, MountBatch, MountItem, NodeId, Points, ROOT_ID, V
 use crate::{Appearance, ComponentFactory, canvas::CanvasView, view::NshView};
 
 pub(crate) struct Mounter {
+    pub(crate) animator: nsh_core::animation::Animator,
+    pub(crate) responder: Option<NodeId>,
     pub(crate) views: Vec<Option<NshView>>,
     pub(crate) components: HashMap<String, ComponentFactory>,
     pub(crate) appearance: Option<Appearance>,
@@ -28,6 +30,8 @@ pub(crate) struct Mounter {
 impl Default for Mounter {
     fn default() -> Self {
         let mut this = Self {
+            animator: Default::default(),
+            responder: None,
             views: Vec::new(),
             components: HashMap::new(),
             appearance: None,
@@ -99,6 +103,8 @@ impl Mounter {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.animator = Default::default();
+        self.responder = None;
         self.focus_requests.clear();
         self.views.clear();
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
@@ -118,7 +124,14 @@ impl Mounter {
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
         for item in batch.items {
+            self.animator.apply(&item);
             match item {
+                MountItem::Gestures { id, values } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.gestures = values;
+                    }
+                }
+                MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
                 MountItem::Create { id, kind } => {
                     if !matches!(
                         kind,
@@ -195,6 +208,16 @@ impl Mounter {
                     }
                 }
                 MountItem::Keymap(keymap) => self.keymap = keymap,
+                MountItem::Command {
+                    id,
+                    command: Command::SetJsResponder { block },
+                } => {
+                    self.responder = block.then_some(id);
+                }
+                MountItem::Command {
+                    command: Command::ClearJsResponder,
+                    ..
+                } => self.responder = None,
                 MountItem::Input { id, config } => {
                     if let Some(view) = self.get_mut(id) {
                         let auto_focus = config.auto_focus && view.input.is_none();
@@ -245,9 +268,10 @@ impl Mounter {
                     id,
                     layout,
                     content,
-                    ..
+                    text,
                 } => {
                     if let Some(view) = self.get_mut(id) {
+                        view.text_content = Some(text);
                         view.text = Some((layout, content));
                     }
                 }

@@ -274,6 +274,10 @@ text(order_number).select_text().selection_color(rgb(0x7c3aed))
 
 要在代码中复制（比如“复制”按钮），在 Rust 中使用 `set_clipboard(..)`，在 TSX 中使用 [`Clipboard`](../modules/nsh.md#clipboard)。
 
+终端宿主以 `--mouse` 启动时，拖过可选择的 View 或 Text 即可按完整字素选择文本，选中的 Cell 以反色显示。
+用 Ctrl+Shift+C、Ctrl+Insert、Alt+W 或 Cmd+C 复制，宿主通过 OSC 52 把文本发送到终端剪贴板。
+Shift+单击扩展选区，Ctrl+A / Cmd+A 选择区域内全部文本，Esc 清除选区。终端宿主保留 Ctrl+C 用于退出。
+
 ## onTextLayout
 
 `onTextLayout`（Rust 中的 `TextLayout` 事件）在每次布局后报告排好的各行，坐标位于文字的内容框中：

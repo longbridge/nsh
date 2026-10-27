@@ -17,6 +17,7 @@ mod navigation;
 mod render;
 #[cfg(feature = "run-app")]
 mod run;
+mod selection;
 mod surface;
 mod text;
 mod text_input;
