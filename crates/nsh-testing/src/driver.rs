@@ -26,6 +26,11 @@ pub(crate) trait Driver: Send {
     fn clear(&mut self, selector: &str) -> Result<(), String>;
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String>;
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
+    /// Drops local files (`file:` URLs) on what `selector` names.
+    fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
+        let _ = (selector, uris);
+        Err("`dropFiles` runs headless only for now: run the test without `--target`".into())
+    }
     /// Drags without lifting, until [`Driver::drop_held`].
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
         let _ = (selector, by);
@@ -130,6 +135,9 @@ impl Driver for Headless {
     }
     fn drag_and_hold(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
         Headless::drag_and_hold(self, selector, by)
+    }
+    fn drop_files(&mut self, selector: &str, uris: Vec<String>) -> Result<(), String> {
+        Headless::drop_files(self, selector, uris)
     }
     fn drop_held(&mut self) -> Result<(), String> {
         Headless::drop_held(self)

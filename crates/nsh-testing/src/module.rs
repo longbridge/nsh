@@ -1528,6 +1528,17 @@ impl App {
         step(&this, move |app| app.drag_and_hold(&selector, by)).await
     }
 
+    /// Drops local files (`file:` URLs, as a file manager drags them) on
+    /// the middle of what `selector` names: it, or the nearest view around
+    /// it listening, hears `onFileDrop`. Desktops, headless for now.
+    pub async fn drop_files(
+        this: Instance<Self>,
+        selector: String,
+        uris: Vec<String>,
+    ) -> Result<(), String> {
+        step(&this, move |app| app.drop_files(&selector, uris)).await
+    }
+
     /// Lifts the finger `dragAndHold` left down, where it is.
     pub async fn drop(this: Instance<Self>) -> Result<(), String> {
         step(&this, move |app| app.drop_held()).await
