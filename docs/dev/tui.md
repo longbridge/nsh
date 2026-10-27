@@ -226,6 +226,9 @@ reported until it becomes visible.
 a declined request returns as `Command::Back`, which proceeds directly to navigation. Otherwise the innermost
 stack takes it: its top screen receives BackRequest when listened for, `prevent_back` keeps it in place, and a
 native pop sends Dismiss immediately. The shared Stack remembers native pops until the app removes those screens.
+Each screen remembers its last focused control. When that screen becomes visible again after back or an
+app-driven removal, the control regains focus if it still exists, is focusable and shows. A missing or hidden
+control leaves focus empty. Modal focus restoration takes precedence over this page history.
 
 Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
 sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.

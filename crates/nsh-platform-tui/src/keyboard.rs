@@ -15,6 +15,8 @@ use crate::{Handled, key_scheme::Action, mount::Mounter, render::Geometry};
 pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
     modals: Vec<ModalFocus>,
+    screens: Vec<NodeId>,
+    screen_focus: Vec<(NodeId, NodeId)>,
 }
 
 #[derive(Clone, Copy)]
@@ -77,6 +79,29 @@ impl Keyboard {
     ) {
         let old = self.focused;
         self.focused = id;
+        if let Some(focused) = id {
+            let mut parent = Some(focused);
+            while let Some(id) = parent {
+                let Some(view) = tree.get(id) else {
+                    break;
+                };
+                if view.kind == ViewKind::Modal {
+                    break;
+                }
+                if view.kind == ViewKind::Screen {
+                    if let Some((_, saved)) = self
+                        .screen_focus
+                        .iter_mut()
+                        .find(|(screen, _)| *screen == id)
+                    {
+                        *saved = focused;
+                    } else {
+                        self.screen_focus.push((id, focused));
+                    }
+                }
+                parent = view.parent;
+            }
+        }
         self.sync_states(tree, control);
         if old != id {
             if let Some(old) = old {
@@ -130,12 +155,12 @@ impl Keyboard {
             .copied()
             .filter(|&id| crate::navigation::modal_visible(tree, id))
             .collect();
-        if !self
+        let modal_changed = !self
             .modals
             .iter()
             .map(|modal| modal.id)
-            .eq(active.iter().copied())
-        {
+            .eq(active.iter().copied());
+        if modal_changed {
             let previous = std::mem::take(&mut self.modals);
             let mut scope = previous.last().map_or(ROOT_ID, |modal| modal.id);
             if let Some(last) = previous.last()
@@ -190,6 +215,41 @@ impl Keyboard {
             self.focus(Some(id), tree, control);
             reveal(tree, geometry, id);
         }
+        let scope = crate::navigation::focus_scope(tree);
+        let screens: Vec<_> = geometry
+            .iter()
+            .filter(|g| {
+                input_scope(tree, g.id) == scope
+                    && tree
+                        .get(g.id)
+                        .is_some_and(|view| view.kind == ViewKind::Screen)
+            })
+            .map(|g| g.id)
+            .collect();
+        if !modal_changed && self.focused.is_none() {
+            let candidates = self.candidates(tree, geometry);
+            let restored = screens
+                .iter()
+                .rev()
+                .filter(|screen| !self.screens.contains(screen))
+                .find_map(|screen| {
+                    self.screen_focus
+                        .iter()
+                        .find(|(saved, _)| saved == screen)
+                        .map(|(_, id)| *id)
+                        .filter(|id| {
+                            candidates
+                                .iter()
+                                .any(|g| g.id == *id && !g.visible.is_empty())
+                        })
+                });
+            if let Some(id) = restored {
+                self.focus(Some(id), tree, control);
+            }
+        }
+        self.screens = screens;
+        self.screen_focus
+            .retain(|(screen, _)| tree.get(*screen).is_some());
         self.sync_states(tree, control);
         old_focus != self.focused || !tree.scrolled.is_empty()
     }

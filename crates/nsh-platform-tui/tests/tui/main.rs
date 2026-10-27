@@ -4,6 +4,7 @@ mod text;
 
 mod app;
 
+mod focus_navigation;
 mod keyboard;
 mod modal_focus;
 mod navigation;
