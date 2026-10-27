@@ -62,8 +62,12 @@ impl Painter<'_> {
         if view.style.hidden || opacity <= 0.0 {
             return;
         }
-        let origin = parent + view.frame.origin;
-        let bounds = CellBounds::new(Bounds::new(origin, view.frame.size), self.cells, self.area);
+        let bounds = CellBounds::new(
+            Bounds::new(parent + view.frame.origin, view.frame.size),
+            self.cells,
+            self.area,
+        );
+        let origin = bounds.origin(self.cells, self.area);
         let visible = bounds.clipped(clip);
         let pointer = pointer && view.props.pointer_events != PointerEvents::None;
         let press = if pointer
