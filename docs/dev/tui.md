@@ -170,9 +170,12 @@ storage, network routes, clipboard, environment pins and manual clocks use the s
 The private `TuiNative` posts requests to the view and wakes it. Rendering applies complete batches, draws, then
 services requests; a screenshot serializes that completed buffer. Input requests call `AppView::handle`, exactly
 as the host's terminal input does. Pointer coordinates convert from content-relative points to absolute Cells,
-including the embedding area's origin. Bounds follow rounded parent origins, scrolling, clipping and concealed
-screens. The agent drives press/release, motion, wheel events, individual keys and bracketed paste. Scroll
-requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
+including the embedding area's origin. `Native::bounds` uses the renderer's unclipped Cell geometry, including
+rounded parent origins, transforms and scroll offsets. Mounted controls outside a Scroll keep their bounds,
+including negative coordinates above its viewport, so the shared agent can scroll them into view before pressing.
+Concealed or hidden views have no rendered geometry. Pointer input still uses clipped hit regions, and text-span
+bounds describe visible characters. The agent drives press/release, motion, wheel events, individual keys and
+bracketed paste. Scroll requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
 is the platform's current input implementation: this adapter does not emulate missing input features. Richer pointer/scroll behavior and system dialogs are supplied by their respective platform tickets.
 Fields use the same editor for real keys, synthetic keys and bracketed paste.
 `setViewport` currently returns an error; select the initial viewport with `open(entry, { width, height })`.
@@ -537,10 +540,40 @@ scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. R
 other and disabled thumbs are skipped. Progress paints the app's track and indicator, including indeterminate
 indicators sized by the app. Page backgrounds retain the terminal-background policy above.
 
-Mouse presses use the same hit regions as other views when the host captures the mouse. Slider dragging and
-hover feedback are the ticket-09 follow-up; the controls acceptance deliberately leaves them out until that
-pointer implementation merges. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
+Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
+acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
+acceptance described below. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
 their documented degradation below; the gallery's outline-based control focus styles are rendered.
+
+## Mouse and text selection
+
+The standalone host leaves mouse capture off so the terminal emulator owns ordinary selection. Start
+`nsh-tui-host --mouse --bundle <bundle.js>` (or `--mouse --dev-server <url>`) to capture clicks, motion and wheel
+reports. An embedder owns this transport choice and forwards `Input::Mouse`; AppView never changes terminal
+modes. The test agent forwards the same input independently of terminal capture.
+
+`input.rs` picks the last painted, clipped hit regions inside the newest modal. Hover follows the ancestor
+chain, reports `HOVERED`, HoverIn/Out/Move and rechecks the pointer after rendering a changed tree. Leaving the
+surface or losing focus clears hover. Pressed states clear on release, cancellation or a drag. Pointer coordinates
+are absolute Cells at the input seam and Cell centers in points in events, including an embedded area's offset.
+
+A primary-button drag retains its initial target outside the surface. The core's Grab, Gate and Candidate
+helpers choose native pans or content scrolling; Touch start/move/end/cancel events feed the responder system,
+including `panActivation`. A blocking JS responder prevents native gesture takeover. Native pans write the
+surface's Animator and report translation, velocity and values at release; the animation renderer consumes that
+same graph. The terminal deliberately admits mouse drags as scroll candidates, so dragging unclaimed scroll
+content moves it directly within its bounds. Selecting text takes precedence over content scrolling.
+
+`selection.rs` adapts the core SelectionModel to the visible tree's text layouts. `<View selectable>` groups its
+texts (nested groups belong to the outer group); `userSelect: "text"` selects a standalone Text and
+`userSelect: "none"` excludes it. Dragging highlights whole graphemes with reversed Cells, Shift+click extends,
+and Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C copies through the existing clipboard backend (OSC 52 in the
+standalone host). Ctrl+C also copies at the AppView seam; the standalone host reserves it for quitting.
+Ctrl+A / Cmd+A selects the area's texts and Esc / Ctrl+G clears the selection. Clicking elsewhere or losing
+focus clears it. A click on selectable pressable text still presses; a drag past the shared press slop selects.
+The layout retains each painted grapheme's UTF-16 range, including wide characters and ellipsis gaps; copying
+uses original text and joins paragraphs with newlines. Highlights stay within clipped text Cells and below
+covering views. Removed text endpoints clear the selection through the shared model.
 
 ## Text fields
 
@@ -624,6 +657,10 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
+| Hover and pressed states | App-defined state styles and hover events on the Cell hit regions |
+| Mouse drags | Native pan values, responder moves and bounded content scrolling |
+| Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
+| Pointer precision | One terminal Cell, converted to its center in points |
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
@@ -664,6 +701,9 @@ clicked state, rejected-patch reloads, errors and the log panel. CLI subprocess 
 `NSH_RUNTIME` to check inherited input/output, file diagnostics (including `-v`) and Cell scale precedence and
 validation. These are additional ticket-02 seams. The test-agent acceptance seam is `nsh test --target tui`: the existing
 counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapshots after a press, and startup errors).
+The pointer tests exercise hover, responder capture, pan values, drag scrolling and cross-text copying through
+AppView; the pointer fixture imports the unchanged Physics, Gestures and Resizable demos. Their runtime acceptance
+and pan animation rendering must be checked together with the animation ticket.
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
 its own, checks invalid fields and successful account creation.
@@ -685,6 +725,7 @@ cargo test -p nsh-tui-host
 cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/pointer --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/controls --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null

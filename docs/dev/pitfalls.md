@@ -100,11 +100,9 @@ Things that were found the hard way. Read the section of the area you change bef
   when its artifact was built in another checkout and the current checkout's source mtimes are older. In ticket
   20, `cargo check` used metadata containing the terminal performance API while `cargo test` reused an rlib
   whose dep-info did not even list `perf.rs`; both had the requested `dev` and `run-app` features. Check verbose
-  Cargo output and the selected artifact's dep-info before changing feature gates. The terminal platform and
-  host record `env!("CARGO_MANIFEST_DIR")` in an unused constant so Cargo tracks checkout identity as an input
-  for subsequent builds. This uses Cargo's existing variable and preserves the shared target and artifact names;
-  it does not add runtime state or a build setting. Older revisions without this input still need fresh artifacts
-  when switching checkouts.
+  Cargo output and the selected artifact's dep-info before changing feature gates. Validate independent worktrees
+  with their own default target directories; product code should not add build inputs to compensate for shared
+  artifacts.
 
 - **rquickjs must not enable the `full` feature.** It pulls in `dyn-load` (dlopen2), which does not compile for iOS / Catalyst. iOS targets
   have no prebuilt bindings and need the `bindgen` feature (and libclang).

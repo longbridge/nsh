@@ -738,7 +738,11 @@ fn scroll_ancestor(tree: &Mounter, mut id: NodeId) -> Option<NodeId> {
     }
 }
 
-fn move_scroll(tree: &mut Mounter, id: NodeId, to: nsh_core::Points) -> nsh_core::Points {
+pub(crate) fn move_scroll(
+    tree: &mut Mounter,
+    id: NodeId,
+    to: nsh_core::Points,
+) -> nsh_core::Points {
     let view = tree.get_mut(id).unwrap();
     let scroll = view.scroll.as_mut().unwrap();
     let max = scroll.max(view.frame.size);

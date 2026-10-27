@@ -79,7 +79,7 @@ impl Session {
         self.active.load(Ordering::Acquire)
     }
 
-    pub(crate) fn enter() -> io::Result<Self> {
+    pub(crate) fn enter(mouse: bool) -> io::Result<Self> {
         let session = Self {
             active: Arc::new(AtomicBool::new(true)),
             #[cfg(unix)]
@@ -96,9 +96,11 @@ impl Session {
             Output,
             terminal::EnterAlternateScreen,
             Print(ENABLE_ALTERNATE_SCROLL),
-            event::EnableMouseCapture,
             cursor::Hide
         )?;
+        if mouse {
+            execute!(Output, event::EnableMouseCapture)?;
+        }
         Ok(session)
     }
 }
@@ -287,7 +289,7 @@ mod tests {
     #[ignore = "requires an interactive terminal"]
     fn normal_exit_restores_raw_mode() {
         assert!(!terminal::is_raw_mode_enabled().unwrap());
-        let session = Session::enter().unwrap();
+        let session = Session::enter(false).unwrap();
         assert!(terminal::is_raw_mode_enabled().unwrap());
         drop(session);
         assert!(!terminal::is_raw_mode_enabled().unwrap());
@@ -298,7 +300,7 @@ mod tests {
     fn panic_restores_raw_mode() {
         assert!(!terminal::is_raw_mode_enabled().unwrap());
         let result = std::panic::catch_unwind(|| {
-            let _session = Session::enter().unwrap();
+            let _session = Session::enter(false).unwrap();
             panic!("terminal restoration test");
         });
         assert!(result.is_err());

@@ -120,6 +120,7 @@ pub struct AppView {
     kill: String,
     field_drag: Option<(nsh_core::NodeId, ratatui_core::layout::Position)>,
     pointer: Pointer,
+    selection: crate::selection::Selection,
     hits: Vec<Hit>,
     geometry: Vec<crate::render::Geometry>,
     keyboard: crate::keyboard::Keyboard,
@@ -172,6 +173,7 @@ impl AppView {
             kill: String::new(),
             field_drag: None,
             pointer: Pointer::default(),
+            selection: Default::default(),
             hits: Vec::new(),
             geometry: Vec::new(),
             keyboard: Default::default(),
@@ -371,12 +373,16 @@ impl AppView {
         if !focused {
             self.minibuffer.end();
             self.field_drag = None;
+            self.selection.clear();
             if let Some(engine) = &self.surface.engine {
                 self.keyboard.focus(None, &mut self.tree, &engine.control());
+                self.pointer.leave(&mut self.tree, &engine.control());
             }
             self.surface.wake.notify();
-            self.pointer
-                .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+            self.pointer.cancel(
+                &mut self.tree,
+                self.surface.engine.as_ref().map(Engine::control).as_ref(),
+            );
         }
     }
 
@@ -429,8 +435,10 @@ impl AppView {
                 || (self.editing_field().is_none() && !self.minibuffer.is_open()))
             && self.diagnostics.handle(&input)
         {
-            self.pointer
-                .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+            self.pointer.cancel(
+                &mut self.tree,
+                self.surface.engine.as_ref().map(Engine::control).as_ref(),
+            );
             if std::mem::take(&mut self.diagnostics.toggle_perf) {
                 self.set_fps_monitor(self.perf.is_none());
             }
@@ -464,12 +472,29 @@ impl AppView {
             }
             Input::Mouse(mouse) => {
                 if self.handle_field_mouse(mouse) {
+                    self.selection.clear();
                     self.surface.wake.notify();
                     return Handled::Yes;
                 }
                 let Some(engine) = &self.surface.engine else {
                     return Handled::Ignored;
                 };
+                if self.selection.handle(
+                    mouse,
+                    self.area,
+                    self.options.cells,
+                    &self.hits,
+                    &self.geometry,
+                    &self.tree,
+                ) {
+                    self.pointer.cancel(&mut self.tree, Some(&engine.control()));
+                    self.keyboard.focus(None, &mut self.tree, &engine.control());
+                    self.surface.wake.notify();
+                    return Handled::Yes;
+                }
+                if matches!(mouse.kind, crate::MouseKind::Down(crate::MouseButton::Left)) {
+                    self.surface.wake.notify();
+                }
                 let handled = if matches!(mouse.kind, crate::MouseKind::Wheel { .. }) {
                     let handled = self.keyboard.wheel(
                         mouse,
@@ -480,17 +505,20 @@ impl AppView {
                         &self.geometry,
                     );
                     if handled == Handled::Yes {
-                        self.pointer.cancel(Some(&engine.control()));
+                        self.pointer.cancel(&mut self.tree, Some(&engine.control()));
                     }
                     handled
                 } else {
                     self.pointer.handle(
                         mouse,
-                        self.area,
-                        self.options.cells,
-                        &self.hits,
-                        &mut self.tree,
-                        &engine.control(),
+                        crate::input::PointerContext {
+                            area: self.area,
+                            cells: self.options.cells,
+                            hits: &self.hits,
+                            geometry: &self.geometry,
+                            tree: &mut self.tree,
+                            control: &engine.control(),
+                        },
                     )
                 };
                 if handled == Handled::Yes {
@@ -549,7 +577,13 @@ impl AppView {
         }
         let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control)
             || self.handle_field_key(key, stroke, &control)
-        {
+            || self.selection.key(
+                key,
+                modifiers,
+                &self.tree,
+                &self.geometry,
+                self.clipboard.as_ref(),
+            ) {
             Handled::Yes
         } else if let Some(crate::key_scheme::Action::Search(forward)) =
             crate::key_scheme::terminal(stroke)
@@ -684,7 +718,7 @@ impl AppView {
             })
         });
         if let Some(id) = id {
-            self.pointer.cancel(Some(&control));
+            self.pointer.cancel(&mut self.tree, Some(&control));
             self.keyboard.focus(Some(id), &mut self.tree, &control);
             let view = self.tree.get_mut(id).unwrap();
             let field = view.field.as_mut().unwrap();
@@ -743,8 +777,10 @@ impl AppView {
             self.dev = Some(dev);
         }
         if self.area != area {
-            self.pointer
-                .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+            self.pointer.cancel(
+                &mut self.tree,
+                self.surface.engine.as_ref().map(Engine::control).as_ref(),
+            );
             self.area = area;
             self.environment.window = self.size();
             if let Some(engine) = &self.surface.engine {
@@ -846,6 +882,18 @@ impl AppView {
             &mut self.hits,
             &mut self.geometry,
         );
+        self.selection.draw(
+            &self.tree,
+            &self.geometry,
+            &self.hits,
+            self.options.cells,
+            area,
+            buffer,
+        );
+        if let Some(engine) = &self.surface.engine {
+            self.pointer
+                .rehover(area, &self.hits, &mut self.tree, &engine.control());
+        }
         if let Some(engine) = &self.surface.engine
             && self
                 .keyboard
@@ -911,8 +959,12 @@ impl AppView {
     }
 
     fn stop_engine(&mut self) {
-        self.pointer
-            .cancel(self.surface.engine.as_ref().map(Engine::control).as_ref());
+        self.pointer.cancel(
+            &mut self.tree,
+            self.surface.engine.as_ref().map(Engine::control).as_ref(),
+        );
+        self.selection.clear();
+        self.pointer = Pointer::default();
         self.surface.stop();
         self.tree.clear();
         self.hits.clear();

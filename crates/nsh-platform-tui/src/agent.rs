@@ -103,8 +103,15 @@ impl TuiNative {
 impl Native for TuiNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_view(move |view, _| {
-            let (_, visible) = displayed(view, id)?;
-            Some(points(view, visible))
+            let bounds = view.geometry.iter().find(|geometry| geometry.id == id)?.bounds;
+            let cells = view.options.cells;
+            Some(Bounds::new(
+                bounds.origin(cells, view.area),
+                Size::new(
+                    cells.width() * (bounds.right - bounds.left) as f32,
+                    cells.height() * (bounds.bottom - bounds.top) as f32,
+                ),
+            ))
         })
         .ok()
         .flatten()

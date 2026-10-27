@@ -5,10 +5,6 @@
 //! into the area supplied by the app. [`CellTextEngine`] measures on the
 //! same fixed grid that drawing and input use.
 
-// Cargo otherwise considers older files in another worktree fresh in a shared target directory.
-// Track the checkout as an input as well as source mtimes, without changing artifact names.
-const _: &str = env!("CARGO_MANIFEST_DIR");
-
 mod animation;
 mod app;
 mod canvas;
@@ -24,6 +20,7 @@ mod render;
 #[cfg(feature = "run-app")]
 mod run;
 mod search;
+mod selection;
 mod surface;
 mod text;
 mod text_input;

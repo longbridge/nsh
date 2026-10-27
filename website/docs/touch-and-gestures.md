@@ -637,3 +637,10 @@ The main thread never waits for your code. When the system needs an answer on th
 - [Scrolling](./scrolling.md): the keyboard taps setting, scroll views and nested gestures.
 - [`PanResponder`](../modules/nsh.md#panresponder): the `PanResponder` reference.
 - [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.
+
+## Terminal pointer input
+
+The terminal host preserves the terminal emulator's own text selection by default. Start the host with
+`--mouse` to capture mouse input: hover applies the app's `hoverStyle` and `hover:` classes, primary-button drags
+drive native pans and responders, and dragging scroll content moves its viewport. Positions follow the Cell
+grid. Embedding applications choose when to forward mouse events to their NSH surface.

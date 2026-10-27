@@ -1,8 +1,5 @@
 //! Standalone terminal transport for the Native Shell development host.
 
-// Invalidate shared-target artifacts when changing worktrees, even when source mtimes are older.
-const _: &str = env!("CARGO_MANIFEST_DIR");
-
 use std::{cell::RefCell, io, path::PathBuf, rc::Rc};
 
 use clap::Parser;
@@ -38,6 +35,10 @@ struct Args {
     /// Show frame timings and terminal output (C-h p toggles).
     #[arg(long)]
     fps: bool,
+    /// Capture the mouse for clicks, hover, dragging and text selection.
+    #[arg(long)]
+    mouse: bool,
+
     /// Render to an in-memory terminal (used by nsh test).
     #[arg(long, requires = "dev_server")]
     headless: bool,
@@ -100,7 +101,7 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
             })
         })?;
     } else {
-        let session = terminal::Session::enter()?;
+        let session = terminal::Session::enter(args.mouse)?;
         let mut terminal = Terminal::new(view.measure_backend(CrosstermBackend::new(
             io::BufWriter::new(view.measure_writer(terminal::Output)),
         )))?;

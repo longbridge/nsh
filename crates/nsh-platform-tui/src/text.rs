@@ -49,6 +49,7 @@ pub(crate) struct CellLayout {
     /// The displayed rows, kept for searching the text on screen.
     pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
+    pub(crate) glyphs: Vec<(nsh_core::Bounds<Points>, std::ops::Range<u32>)>,
 }
 
 pub(crate) struct Row {
@@ -204,6 +205,7 @@ impl TextEngine for CellTextEngine {
         let mut lines = Vec::new();
         let mut displayed = Vec::new();
         let mut metrics = Vec::new();
+        let mut selection_glyphs = Vec::new();
         let mut offset = 0;
         for (index, row) in rows.into_iter().enumerate() {
             let width = row.iter().map(|g| g.width).sum::<usize>();
@@ -236,6 +238,20 @@ impl TextEngine for CellTextEngine {
                 cap_height: self.cells.height(),
                 x_height: self.cells.height(),
             });
+            let mut column = indent;
+            for glyph in &row {
+                selection_glyphs.push((
+                    nsh_core::Bounds::new(
+                        nsh_core::Point::new(
+                            self.cells.width() * column as f32,
+                            self.cells.height() * index as f32,
+                        ),
+                        Size::new(self.cells.width() * glyph.width as f32, self.cells.height()),
+                    ),
+                    glyph.start..glyph.end,
+                ));
+                column += glyph.width;
+            }
             let mut spans = Vec::with_capacity(row.len() + 1);
             if indent > 0 {
                 spans.push(Span::raw(" ".repeat(indent)));
@@ -254,6 +270,7 @@ impl TextEngine for CellTextEngine {
             paragraph: Paragraph::new(lines),
             rows: displayed,
             metrics,
+            glyphs: selection_glyphs,
         }))
     }
 
