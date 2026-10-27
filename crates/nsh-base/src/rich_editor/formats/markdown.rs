@@ -241,6 +241,13 @@ impl Reader<'_> {
         self.schema.mark(name, Some(attrs)).ok()
     }
 
+    // Whether the schema's paragraphs have `textAlign`.
+    fn aligns_paragraphs(&self) -> bool {
+        self.schema
+            .node_type(&self.names.paragraph)
+            .is_some_and(|t| t.spec().attrs.iter().any(|(name, _)| name == TEXT_ALIGN))
+    }
+
     fn paragraph(&self, inline: Vec<Node>) -> Result<Node, FormatError> {
         self.node(&self.names.paragraph, Attrs::new(), inline)
     }
@@ -408,7 +415,19 @@ impl Reader<'_> {
                     }
                     None => Vec::new(),
                 };
-                let paragraph = self.paragraph(inline)?;
+                // A column's alignment (`:---:`) is its paragraphs'
+                // `textAlign`, where the schema has it.
+                let mut attrs = Attrs::new();
+                if let Some(align) = table.align.get(j).and_then(|a| match a {
+                    mdast::AlignKind::Left => Some("left"),
+                    mdast::AlignKind::Center => Some("center"),
+                    mdast::AlignKind::Right => Some("right"),
+                    mdast::AlignKind::None => None,
+                }) && self.aligns_paragraphs()
+                {
+                    attrs.insert(TEXT_ALIGN.into(), Value::from(align));
+                }
+                let paragraph = self.node(&self.names.paragraph, attrs, inline)?;
                 cells.push(
                     ty.create(None, Fragment::from(vec![paragraph]), Vec::new())
                         .map_err(make)?,
@@ -515,6 +534,10 @@ impl Reader<'_> {
 }
 
 // An HTML block holding a table.
+// The paragraph attribute a table column's alignment reads and writes.
+const TEXT_ALIGN: &str = "textAlign";
+
+// An HTML block holding a table.
 fn is_html_table(html: &str) -> bool {
     html.trim_start()
         .get(..6)
@@ -614,6 +637,8 @@ impl Writer<'_> {
     fn pipe_table(&self, table: &Node) -> Option<String> {
         let mut lines = Vec::new();
         let mut width = None;
+        // Each column's alignment: its first row's cell's paragraph's.
+        let mut aligns = Vec::new();
         for i in 0..table.child_count() {
             let row = table.child(i);
             let mut cells = Vec::new();
@@ -634,6 +659,16 @@ impl Writer<'_> {
                 if text.contains('\n') {
                     return None;
                 }
+                if i == 0 {
+                    aligns.push(
+                        match paragraph.attrs().get(TEXT_ALIGN).and_then(Value::as_str) {
+                            Some("left") => ":---",
+                            Some("center") => ":---:",
+                            Some("right") => "---:",
+                            _ => "---",
+                        },
+                    );
+                }
                 cells.push(escape_cell_pipes(&text));
             }
             match width {
@@ -643,7 +678,7 @@ impl Writer<'_> {
             }
             lines.push(format!("| {} |", cells.join(" | ")));
             if i == 0 {
-                lines.push(format!("|{}|", vec![" --- "; cells.len()].join("|")));
+                lines.push(format!("| {} |", aligns.join(" | ")));
             }
         }
         (width? > 0).then(|| lines.join("\n"))
@@ -1100,6 +1135,28 @@ mod tests {
         // Rows short of cells are filled.
         let doc = f.parse(&schema, "| a | b |\n| - | - |\n| c |\n").unwrap();
         assert_eq!(doc.child(0).child(1).child_count(), 2);
+    }
+
+    #[test]
+    fn gfm_column_alignment_is_its_paragraphs_text_align() {
+        let schema = crate::rich_editor::tables::test_util::schema();
+        let schema = &schema;
+        let f = MarkdownFormat::default();
+        let md = "| a | b | c |\n| :--- | :---: | --- |\n| 1 | 2 | 3 |\n";
+        let doc = f.parse(schema, md).unwrap();
+        let align = |row: usize, col: usize| {
+            doc.child(0)
+                .child(row)
+                .child(col)
+                .child(0)
+                .attrs()
+                .get("textAlign")
+                .cloned()
+        };
+        assert_eq!(align(1, 0), Some(Value::from("left")));
+        assert_eq!(align(0, 1), Some(Value::from("center")));
+        assert_eq!(align(1, 2), Some(Value::Null));
+        assert_eq!(f.serialize(&doc).unwrap(), md);
     }
 
     #[test]
