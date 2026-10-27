@@ -116,7 +116,11 @@ impl Keyboard {
         }
     }
 
-    pub(crate) fn cursor(&self, geometry: &[Geometry]) -> Option<Position> {
+    pub(crate) fn cursor(&self, tree: &Mounter, geometry: &[Geometry]) -> Option<Position> {
+        let input = tree.get(self.focused?)?.input.as_ref()?;
+        if !input.editable || input.caret_hidden {
+            return None;
+        }
         let g = geometry
             .iter()
             .find(|g| Some(g.id) == self.focused && !g.visible.is_empty())?;

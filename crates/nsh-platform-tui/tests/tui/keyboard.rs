@@ -78,7 +78,7 @@ fn terminal_keys_move_focus_in_reading_order_and_enter_presses_it() {
     ] {
         assert_eq!(view.handle(input), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {focused}"));
-        terminal.backend_mut().assert_cursor_position(cursor);
+        assert!(!terminal.backend().cursor_visible());
         assert_eq!(
             terminal.backend().buffer()[cursor].bg,
             Color::Rgb(0x12, 0x34, 0x56)
@@ -327,6 +327,7 @@ fn ModalKeys() -> impl IntoElement {
         .child(
             view()
                 .h(px(16.0))
+                .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                 .on_press(move |_: &()| root_pressed.update(|n| *n += 1))
                 .child(text("root button")),
         )
@@ -349,6 +350,7 @@ fn ModalKeys() -> impl IntoElement {
                         .top(px(48.0))
                         .h(px(16.0))
                         .w(px(160.0))
+                        .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                         .on_press(move |_: &()| {
                             modal_pressed.update(|n| *n += 1);
                             close.set(true);
@@ -377,7 +379,8 @@ fn modal_focus_is_scoped_and_cancel_honors_close_on_escape() {
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 3));
+    draw_focused_cell(&mut view, &mut terminal, &rx, (0, 3));
+    assert!(!terminal.backend().cursor_visible());
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "modal 1 cancel 1");
     assert_eq!(view.handle(ctrl("g")), Handled::Yes);
@@ -424,6 +427,7 @@ fn EditableFocus() -> impl IntoElement {
             view()
                 .h(px(16.0))
                 .disabled(true)
+                .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                 .on_press(|_: &()| {})
                 .child(text("disabled")),
         )
@@ -436,6 +440,7 @@ fn EditableFocus() -> impl IntoElement {
             view()
                 .h(px(16.0))
                 .focusable(false)
+                .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                 .on_press(|_: &()| {})
                 .child(text("skip")),
         )
@@ -443,6 +448,7 @@ fn EditableFocus() -> impl IntoElement {
             view()
                 .h(px(16.0))
                 .on_focus(move |_: &()| focus.set("button"))
+                .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                 .on_press(|_: &()| {})
                 .child(text("button")),
         )
@@ -465,7 +471,7 @@ fn focus_visits_editable_fields_and_skips_disabled_or_opted_out_views() {
     );
     view.handle(key("Down", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus button");
-    terminal.backend_mut().assert_cursor_position((0, 4));
+    assert!(!terminal.backend().cursor_visible());
 }
 
 #[component]
@@ -545,6 +551,7 @@ fn TwoModals() -> impl IntoElement {
                     .top(px(48.0))
                     .w(px(80.0))
                     .h(px(16.0))
+                    .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                     .on_press(|_: &()| {})
                     .child(text("first")),
             ),
@@ -558,6 +565,7 @@ fn TwoModals() -> impl IntoElement {
                         .top(px(80.0))
                         .w(px(80.0))
                         .h(px(16.0))
+                        .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                         .on_press(|_: &()| {})
                         .child(text("second")),
                 ),
@@ -574,14 +582,16 @@ fn only_the_newest_modal_supplies_focus_candidates() {
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 5));
+    draw_focused_cell(&mut view, &mut terminal, &rx, (0, 5));
+    assert!(!terminal.backend().cursor_visible());
     view.handle(ctrl("g"));
     draw_until(&mut view, &mut terminal, &rx, "closed 1");
     view.handle(ctrl("n"));
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 3));
+    draw_focused_cell(&mut view, &mut terminal, &rx, (0, 3));
+    assert!(!terminal.backend().cursor_visible());
 }
 
 #[cfg(feature = "js")]
@@ -619,6 +629,7 @@ fn LaterModal() -> impl IntoElement {
                     .top(px(80.0))
                     .w(px(80.0))
                     .h(px(16.0))
+                    .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                     .on_press(|_: &()| {})
                     .child(text("new modal")),
             )
@@ -630,6 +641,7 @@ fn LaterModal() -> impl IntoElement {
                     .top(px(48.0))
                     .w(px(80.0))
                     .h(px(16.0))
+                    .focus(|style| style.bg(nsh_core::color::rgb(0x123456)))
                     .on_press(move |_: &()| later.set(true))
                     .child(text("open modal")),
             ),
@@ -650,7 +662,8 @@ fn a_later_modal_takes_focus_even_when_inserted_before_the_existing_one() {
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 5));
+    draw_focused_cell(&mut view, &mut terminal, &rx, (0, 5));
+    assert!(!terminal.backend().cursor_visible());
 }
 
 #[cfg(feature = "dev")]
@@ -694,7 +707,74 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
     );
     view.handle(key("Escape", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus A");
-    terminal.backend_mut().assert_cursor_position((0, 1));
+    assert!(!terminal.backend().cursor_visible());
+    assert_eq!(
+        terminal.backend().buffer()[(0, 1)].bg,
+        Color::Rgb(0x12, 0x34, 0x56)
+    );
     view.stop();
     std::fs::remove_file(path).unwrap();
+}
+
+fn draw_focused_cell(
+    view: &mut nsh_platform_tui::AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    at: (u16, u16),
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if terminal.backend().buffer()[at].bg == Color::Rgb(0x12, 0x34, 0x56) {
+            return;
+        }
+        rx.recv_deadline(deadline).expect("app focus style");
+    }
+}
+
+#[component]
+fn CursorPage() -> impl IntoElement {
+    let focused = signal("none");
+    view()
+        .flex_1()
+        .child(
+            view()
+                .h(px(16.0))
+                .on_focus(move |_: &()| focused.set("button"))
+                .on_press(|_: &()| {})
+                .child(text("button")),
+        )
+        .child(
+            nsh_base::input()
+                .h(px(32.0))
+                .on_focus(move |_: &()| focused.set("field")),
+        )
+        .child(
+            nsh_base::input()
+                .h(px(32.0))
+                .caret(false)
+                .on_focus(move |_: &()| focused.set("hidden caret")),
+        )
+        .child(text(move || format!("focused {}", focused.get())))
+}
+
+#[test]
+fn only_an_editable_field_with_a_visible_caret_shows_the_terminal_cursor() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<CursorPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused none");
+    view.handle(ctrl("n"));
+    draw_until(&mut view, &mut terminal, &rx, "focused button");
+    assert!(!terminal.backend().cursor_visible());
+    view.handle(ctrl("n"));
+    draw_until(&mut view, &mut terminal, &rx, "focused field");
+    assert!(terminal.backend().cursor_visible());
+    terminal.backend_mut().assert_cursor_position((0, 1));
+    view.handle(ctrl("n"));
+    draw_until(&mut view, &mut terminal, &rx, "focused hidden caret");
+    assert!(!terminal.backend().cursor_visible());
 }

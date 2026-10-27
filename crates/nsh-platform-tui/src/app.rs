@@ -397,7 +397,7 @@ impl AppView {
             return;
         }
         if self.focused
-            && let Some(cursor) = self.keyboard.cursor(&self.geometry)
+            && let Some(cursor) = self.keyboard.cursor(&self.tree, &self.geometry)
         {
             frame.set_cursor_position(cursor);
         }

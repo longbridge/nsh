@@ -257,7 +257,7 @@ it. Wheel scrolling, indicators, sticky cells, gestures and scrolling animations
 `navigation.rs` handles back. This keeps a future vim scheme independent of the actions, with one scheme selected
 today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy.
 The standalone host reserves Ctrl+C for exit and C-h e for diagnostics. While the diagnostics panel is open,
-it owns keys and the app's focus cursor is hidden; closing it restores the app's cursor.
+it owns keys and the app's field caret is hidden; closing it restores the caret when an editable field has focus.
 
 | Keys | Action |
 |---|---|
@@ -274,8 +274,10 @@ Focus visits pressable and editable views, honoring `focusable` and disabled sta
 left-to-right Cell order. Traversal wraps at the ends; horizontal movement stays on overlapping row ranges.
 Concealed screens supply no candidates. When a modal is open, candidates come only from the newest modal.
 Focus and focus-within states are reported through TrackStates and `EngineControl::set_states`, so the app's
-focus styles apply. The platform adds no highlight: `AppView::render` puts the terminal cursor on the focused
-view's first visible Cell. A buffer-only Widget cannot position the terminal cursor. Removing a focused view or
+focus styles apply. Pressable views have no platform focus marker: their app-defined focus styles are the
+indicator, and their terminal cursor is hidden. `AppView::render` reserves the terminal cursor for a focused
+editable field's caret and respects `caret={false}`. A buffer-only Widget cannot position the terminal cursor.
+Removing a focused view or
 changing its focus scope clears focus; unfocused surfaces ignore keys.
 
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
