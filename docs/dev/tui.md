@@ -173,6 +173,11 @@ positive coordinates, including negative positions (`-0.5` becomes `0`). The emb
 is added after conversion. `geometry::CellBounds` is the common boundary for view frames and content boxes;
 input content boxes follow the same rule as text content boxes.
 
+A positive width or height occupies at least one Cell; a zero extent stays zero. This rendering rule keeps thin
+progress rails, slider thumbs and partial indicators visible and operable: the official gallery's 6-point rail
+occupies one Cell row at the default 16-point Cell height. It changes only the Cell projection; layout, app styles
+and the control's numeric value remain the core's.
+
 A box first snaps its origin relative to its parent's snapped origin. Its right and bottom edges are then computed
 from that snapped origin plus its point width and height, using the same rounding rule. Children and content use
 this snapped origin, including when the parent is partly off screen; clipping happens afterward. Hit regions reuse
@@ -377,6 +382,13 @@ editable field's caret and respects `caret={false}`. A buffer-only Widget cannot
 Removing an ordinary focused view clears focus. Modal presentation and closing use the focus history described
 above; unfocused surfaces ignore keys.
 
+Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
+state stays on a shared ancestor when moving backward between its controls. App-defined outlines draw as
+single-Cell strokes in the app's color, transformed with the control before Cell rounding and ancestor clipping.
+They take no layout space; text and children draw above the stroke when they share its Cells. This is a
+rendering rule for outlines the app sets, including focus outlines; the backend adds no outline of its own.
+The app and shared example UI own the appearance, while the backend projects their styles onto Cells.
+
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
 without firing again. Navigation activation completes a press in one action; a later release does not press
@@ -419,6 +431,25 @@ with the terminal cursor after it. A query with no match is crossed out. The cur
 The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
 Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
 row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
+
+### Base controls
+
+The official gallery's Controls demo uses the same `nsh/base` components in the terminal. Button, Checkbox,
+Radio/RadioGroup, Switch and Tab/Tabs take Enter after focus traversal; disabled controls are skipped. The app
+owns their values and the content of Collapsible. Checked, mixed, selected and disabled styles, including the
+projected states of Checkbox indicators and Switch tracks/thumbs, are resolved by the core and painted through
+ordinary mount batches. The backend supplies interaction states and never substitutes a terminal control.
+
+A focused Slider thumb installs its component's keys in the existing app keymap: arrows change by a step,
+PageUp/PageDown by a page, and Home/End move to its limits. Those bindings run before terminal navigation and
+scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. Range thumbs stay within each
+other and disabled thumbs are skipped. Progress paints the app's track and indicator, including indeterminate
+indicators sized by the app. Page backgrounds retain the terminal-background policy above.
+
+Mouse presses use the same hit regions as other views when the host captures the mouse. Slider dragging and
+hover feedback are the ticket-09 follow-up; the controls acceptance deliberately leaves them out until that
+pointer implementation merges. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
+their documented degradation below; the gallery's outline-based control focus styles are rendered.
 
 ## Text fields
 
@@ -494,6 +525,11 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
 | Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
+| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout |
+| Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
+| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
+| Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
+| Slider dragging and control hover | Ticket-09 pointer follow-up |
 | Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
@@ -539,6 +575,10 @@ counter test and `crates/nsh-tui-host/tests/fixtures/agent` (styled Cell snapsho
 The text-input fixture checks typing, readline navigation, one large paste, selection, copy/cut through the
 engine's isolated clipboard, masked Cells, multiline paste and report-only paste. Its Form entry, a sign-up form of
 its own, checks invalid fields and successful account creation.
+The `controls` fixture imports `examples/gallery/demos/Controls.tsx` unchanged, traverses and operates its
+controls with terminal keys, exercises ordinary mouse presses, and reads Cell screenshots. AppView controls
+tests cover focus outlines, backward focus-within transitions, projected value/disabled styles, sub-Cell
+progress rails and focused Slider keys. These tests do not exercise hover or Slider drags yet.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
@@ -554,6 +594,7 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test examples/counter --target tui
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/text-input --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/controls --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/animation --target tui < /dev/null
 cargo test -p nsh-cli --test cli
