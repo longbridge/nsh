@@ -31,7 +31,8 @@ function DemoRow(props: { demo: Demo; index: number }) {
       onPress={() => nav.push({ name: "demo", demo: props.demo })}
       role="button"
       accessibilityLabel={props.demo.name}
-      style={{ flexDirection: "row", height: 16, gap: 16 }}
+      style={{ flexDirection: "row", height: 16, gap: 16, borderLeftWidth: 8, borderColor: "transparent" }}
+      focusStyle={{ backgroundColor: colors.focus, borderColor: colors.accent }}
     >
       <Text style={{ width: 16, color: colors.faint }}>{String(props.index).padStart(2, "0")}</Text>
       <Text style={{ width: 128, color: colors.text }}>{props.demo.name}</Text>
