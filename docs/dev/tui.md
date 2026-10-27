@@ -118,7 +118,8 @@ restyles nothing, so the look is the app's own, after Emacs's dired, magit and i
   carry a value's meaning.
 - Separators are drawn with line characters (`─`, `│`, borders); there are no filled blocks. The pages set no
   background, so the terminal's own shows through, and the palette follows the light or dark appearance. The only
-  fill is a dialog's, which has to hide the rows under it.
+  fill is a dialog's (`nsh/base`'s `Dialog`, so the platform's modal focus and Esc apply), which has to hide the
+  rows under it.
 
 ```sh
 ./target/debug/nsh build examples/tui-gallery --out .nsh/tui-gallery
