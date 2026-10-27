@@ -1,22 +1,28 @@
 //! What an app's code uses of the native modules, by name: the exports of
-//! each native module it imports, and whether it may read the global
-//! `crypto`. A runtime that serves only those can leave the rest out of its
-//! binary (`nsh package --target web`, `docs/dev/web.md`).
+//! each native module it imports, and whether it may use the globals of the
+//! standard module `crypto` ([`nsh_core::js::CRYPTO_GLOBALS`]). A runtime
+//! that serves only those can leave the rest out of its binary (`nsh package
+//! --target web`, `docs/dev/web.md`).
 //!
 //! It reads the bundle's output: native modules stay imports there
 //! (`plugin.rs`), so every use is an import declaration, a re-export or an
 //! `import()` of one. What it cannot tell apart counts as everything: a
-//! namespace import uses every export, and a computed member of
-//! `globalThis` may be `crypto`.
+//! namespace import uses every export; a global of `crypto` is used wherever
+//! its name is spelled (a variable, a member, a key being destructured, a
+//! string), and wherever the global object is read by a name it cannot see
+//! (a computed member, or a destructuring with a computed key or a rest
+//! element). The global object under another name, read by a name made at
+//! run time (`const g = globalThis; g[name]`), is beyond it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use oxc::{
     allocator::Allocator,
     ast::ast::{
+        AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
         ComputedMemberExpression, ExportAllDeclaration, ExportFromDeclaration, Expression,
-        IdentifierReference, ImportDeclaration, ImportDeclarationSpecifier, ImportExpression,
-        StaticMemberExpression, StringLiteral,
+        IdentifierName, IdentifierReference, ImportDeclaration, ImportDeclarationSpecifier,
+        ImportExpression, PropertyKey, StringLiteral, TemplateElement, VariableDeclarator,
     },
     ast_visit::{Visit, walk},
     parser::Parser,
@@ -56,9 +62,11 @@ impl Imported {
 pub struct NativeUse {
     /// What it imports of each native module, by specifier.
     pub imports: BTreeMap<String, Imported>,
-    /// It may read the global `crypto`: it names `crypto` (as a variable
-    /// or a member, in code or a string) or reads a computed member of
-    /// `globalThis`, `self`, `window` or `global`.
+    /// It may use the globals of `crypto` ([`nsh_core::js::CRYPTO_GLOBALS`]):
+    /// it spells one of their names (as a variable, a member or a key it
+    /// destructures, in a string or a template), reads a computed member of
+    /// `globalThis`, `self`, `window` or `global`, or destructures one of
+    /// them with a computed key or a rest element.
     pub global_crypto: bool,
     /// It loads a module whose specifier is computed (`import(name)`),
     /// which may be any native module, whole.
@@ -85,12 +93,37 @@ impl NativeUse {
     }
 }
 
-/// Globals whose computed members may be `crypto`.
+/// The global object's names: what is read from it by a name the code does
+/// not spell may be a global of `crypto`.
 const GLOBAL_OBJECTS: &[&str] = &["globalThis", "self", "window", "global"];
 
 struct Finder<'u, F> {
     uses: &'u mut NativeUse,
     is_native: &'u F,
+}
+
+impl<F> Finder<'_, F> {
+    /// A name spelled in the code: one of `crypto`'s globals may be reached
+    /// through it.
+    fn spelled(&mut self, name: &str) {
+        if nsh_core::js::CRYPTO_GLOBALS.contains(&name) {
+            self.uses.global_crypto = true;
+        }
+    }
+}
+
+/// Whether `expression` is the global object, by one of its names.
+fn is_global_object(expression: &Expression<'_>) -> bool {
+    matches!(expression, Expression::Identifier(object) if GLOBAL_OBJECTS.contains(&object.name.as_str()))
+}
+
+/// Whether a computed key is a name the code spells (a string or a number),
+/// which the visitor judges where it is written.
+fn is_literal_key(key: &PropertyKey<'_>) -> bool {
+    matches!(
+        key,
+        PropertyKey::StringLiteral(_) | PropertyKey::NumericLiteral(_)
+    )
 }
 
 impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
@@ -145,32 +178,62 @@ impl<'a, F: Fn(&str) -> bool> Visit<'a> for Finder<'_, F> {
     }
 
     fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
-        if it.name == "crypto" {
-            self.uses.global_crypto = true;
-        }
+        self.spelled(it.name.as_str());
     }
 
-    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if it.property.name == "crypto" {
-            self.uses.global_crypto = true;
+    // Members (`globalThis.crypto`) and keys (`({ crypto: c } = globalThis)`,
+    // `const { CryptoKey } = self`).
+    fn visit_identifier_name(&mut self, it: &IdentifierName<'a>) {
+        self.spelled(it.name.as_str());
+    }
+
+    fn visit_string_literal(&mut self, it: &StringLiteral<'a>) {
+        self.spelled(it.value.as_str());
+    }
+
+    fn visit_template_element(&mut self, it: &TemplateElement<'a>) {
+        if let Some(cooked) = &it.value.cooked {
+            self.spelled(cooked.as_str());
         }
-        walk::walk_static_member_expression(self, it);
     }
 
     fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if let Expression::Identifier(object) = &it.object
-            && GLOBAL_OBJECTS.contains(&object.name.as_str())
-            && !matches!(&it.expression, Expression::StringLiteral(key) if key.value != "crypto")
-        {
+        // A string's name is judged where it is spelled.
+        if is_global_object(&it.object) && !matches!(it.expression, Expression::StringLiteral(_)) {
             self.uses.global_crypto = true;
         }
         walk::walk_computed_member_expression(self, it);
     }
 
-    fn visit_string_literal(&mut self, it: &StringLiteral<'a>) {
-        if it.value == "crypto" {
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        if let (BindingPattern::ObjectPattern(pattern), Some(init)) = (&it.id, &it.init)
+            && is_global_object(init)
+            && (pattern.rest.is_some()
+                || pattern
+                    .properties
+                    .iter()
+                    .any(|property| property.computed && !is_literal_key(&property.key)))
+        {
             self.uses.global_crypto = true;
         }
+        walk::walk_variable_declarator(self, it);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::ObjectAssignmentTarget(target) = &it.left
+            && is_global_object(&it.right)
+            && (target.rest.is_some()
+                || target.properties.iter().any(|property| {
+                    matches!(
+                        property,
+                        AssignmentTargetProperty::AssignmentTargetPropertyProperty(property)
+                            if property.computed && !is_literal_key(&property.name)
+                    )
+                }))
+        {
+            self.uses.global_crypto = true;
+        }
+        walk::walk_assignment_expression(self, it);
     }
 }
 
@@ -249,6 +312,42 @@ mod tests {
             "const c = 1;",
             "globalThis.fetch(u);",
             "globalThis['fetch'];",
+        ] {
+            assert!(!uses(code).global_crypto, "{code}");
+        }
+    }
+
+    /// A runtime without `crypto` lacks all of its globals, not only
+    /// `crypto` (`nsh_core::js::CRYPTO_GLOBALS`).
+    #[test]
+    fn every_global_of_crypto_counts() {
+        for code in [
+            "if (key instanceof CryptoKey) {}",
+            "const proto = SubtleCrypto.prototype;",
+            "globalThis.Crypto;",
+            "'CryptoKey' in self;",
+        ] {
+            assert!(uses(code).global_crypto, "{code}");
+        }
+    }
+
+    #[test]
+    fn destructuring_the_global_object_counts_the_names_it_may_take() {
+        for code in [
+            "const { crypto: c } = globalThis; c.randomUUID();",
+            "let c; ({ crypto: c } = self);",
+            "const { 'crypto': c } = window;",
+            "const { [name]: c } = globalThis;",
+            "let c; ({ [name]: c } = globalThis);",
+            "const { fetch, ...rest } = globalThis;",
+            "Reflect.get(globalThis, `crypto`);",
+        ] {
+            assert!(uses(code).global_crypto, "{code}");
+        }
+        for code in [
+            "const { fetch } = globalThis;",
+            "const { [key]: _, ...rest } = props;",
+            "let v; ({ [key]: v } = props);",
         ] {
             assert!(!uses(code).global_crypto, "{code}");
         }

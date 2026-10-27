@@ -107,8 +107,9 @@ a source map and the app's id (for its storage); `nsh_bundle_harden` the hardeni
 
 `nsh package --target web` ships `nsh-lite.wasm` (as the site's `nsh.<digest>.wasm`) to an app the lite runtime
 serves (`web::serves_lite`): from `nsh/base` it imports only exports of its core part (`nsh_base::parts::core`: the
-controls, popups, toasts, alerts, navigation and `Input`), nothing of `nsh/base/plot`, `zlib` or `crypto`, never reads
-the global `crypto` and imports no computed specifier, as the bundle's `native_use` says (`native-pipeline.md`).
+controls, popups, toasts, alerts, navigation and `Input`), nothing of `nsh/base/plot`, `zlib` or `crypto`, never uses
+the globals of `crypto` (`crypto`, `Crypto`, `SubtleCrypto`, `CryptoKey`, which the lite runtime lacks) and imports
+no computed specifier, as the bundle's `native_use` says (`native-pipeline.md`).
 Every other app ships the full `nsh.wasm`, and so does an app with Rust components of its own, whose runtime is built
 for it (`rust_app.rs`). The lite runtime is `nsh-platform-web` without its default features `base-full` (its
 `ui_sets()` default is `nsh_base::registry_of([parts::core])`), `std-zlib` and `std-crypto`: the code of the other

@@ -67,10 +67,7 @@ type Init = fn(&Ctx<'_>) -> Result<()>;
 #[cfg(feature = "crypto")]
 const LAZY: &[(&[&str], Init)] = &[
     (&["process"], init_process),
-    (
-        &["crypto", "Crypto", "SubtleCrypto", "CryptoKey"],
-        init_crypto,
-    ),
+    (nsh_core::js::CRYPTO_GLOBALS, init_crypto),
 ];
 /// [`LAZY`] of a runtime without `crypto` (feature `crypto`).
 #[cfg(not(feature = "crypto"))]

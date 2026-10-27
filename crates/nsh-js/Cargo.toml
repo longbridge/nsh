@@ -18,8 +18,8 @@ default = ["zlib", "crypto"]
 bytecode-only = []
 # The standard module `zlib`: deflate, gzip, brotli and zstd.
 zlib = ["quickjs-jit-stdlib/zlib", "quickjs-jit-stdlib/zlib-zstd"]
-# The standard module `crypto` and the global `crypto`: hashes, random
-# values, Web Crypto.
+# The standard module `crypto` and its globals (`crypto`, `Crypto`,
+# `SubtleCrypto`, `CryptoKey`): hashes, random values, Web Crypto.
 crypto = ["quickjs-jit-stdlib/crypto"]
 
 [dependencies]
