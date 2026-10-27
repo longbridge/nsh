@@ -3,10 +3,8 @@
 //! behavior, prepending and taps with the keyboard up (as the TSX
 //! gallery's `demos/Scrolling.tsx`).
 
-use nsh_core::{
-    Bounds, Points,
-    ui::{View, prelude::*},
-};
+use nsh_base::input;
+use nsh_core::{Bounds, Points, element::View, prelude::*};
 
 use crate::ui::{
     Badge, Button, ButtonVariant, DemoPage, Figure, Finish, Finished, IconName, Meter, Section,
@@ -850,6 +848,7 @@ pub(crate) fn Scrolling() -> impl IntoElement {
                         "Type here, then click the button",
                     ))
                     .placeholder_color(|| color(colors::FAINT))
+                    .caret_color(|| color(colors::ACCENT))
                     .selection_color(|| color(colors::ACCENT))
                     .h(px(44.0))
                     .text_size(px(15.0))

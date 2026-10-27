@@ -5,7 +5,7 @@
 // the value it starts at. Its script
 // checks each.
 import { Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const x = createAnimatedValue(11);
@@ -15,10 +15,10 @@ function App() {
   const angle = createAnimatedValue(45);
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
-      <View testID="card" pan={{ x, y }} style={{ height: 60, transform: [{ translateX: x }, { translateY: y }] }}>
+      <View testID="card" pan={{ x, y }} style={{ height: 60, translate: [x, y] }}>
         <Text>Card</Text>
       </View>
-      <View testID="sheet" pan={{ y: down }} style={{ height: 60, transform: [{ translateY: down }] }}>
+      <View testID="sheet" pan={{ y: down }} style={{ height: 60, translate: [0, down] }}>
         <Text>Sheet</Text>
       </View>
       <View

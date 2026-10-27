@@ -16,10 +16,13 @@
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
   decodes them. Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
-- **Fit and position**: `resizeMode` (or an `object-*` fit class) sizes the image and the `objectPosition` style
-  (`ObjectPosition`, CSS's `object-position`, parsed by `css::object_position`; `object-top`, ... set it) places it, both
-  computed by one function, `ResizeMode::fit` (`center` keeps the natural size, as CSS's `none`, and `scale-down`
-  shrinks what is larger than the box, as CSS's `scale-down`, on every platform). The
+- **Fit and position**: the `objectFit` style (CSS's `object-fit`: `fill`, `contain`, `cover`, `none`, `scale-down`;
+  the `object-*` fit classes set it, and the style wins over them as in CSS; `Style::pending`, a node's `object_fit`;
+  images cover their box by default, videos are contained; Rust's `.object_fit(..)` sets the same style) sizes
+  the image and the `objectPosition` style (`ObjectPosition`, CSS's `object-position`, parsed by
+  `css::object_position`; `object-top`, ... set it) places it, both computed by one function, `ResizeMode::fit`
+  (`Center` keeps the natural size, CSS's `none`, and `ScaleDown` shrinks what is larger than the box, CSS's
+  `scale-down`, on every platform). The
   position is the image's, not the view's: it travels in `ImageOptions::position` with `MountItem::Image`, and a change
   sends that item again, not a `ViewStyle`. iOS and macOS show the image in a picture layer inside the clipped image
   layer, framed at the fitted rectangle (the tint and its mask inside it); Android translates its draw matrix by the
@@ -71,7 +74,7 @@
   through `Native.imageBytes`, the web runtime gets them once per key (`image_bytes`) as a browser blob URL that
   `asset()` maps the key to, revoked (`release_image`) when no source holds them. `Image.getSize` / `prefetch` of a
   `data:` URI decode it on the platform (`nsh_core::image::decode_data_uri`, the one decoder every backend uses).
-- **Picked images** (`nsh/picker`, `nsh_core::picker`): `Picker.pickImages` sends the root `Command::PickImages` with a
+- **Picked images** (`nsh`'s `Picker`, `nsh_core::picker`): `Picker.pickImages` sends the root `Command::PickImages` with a
   `PickRequest` checked in Rust (`limit`: 1 for a single pick, at most `MAX_PICKED` = 100; `max_dimension`, `quality`
   as a `Percentage`, `PickFormat::Compatible` / `Current`); the `picker` capability gates it (denied: `[]` and a log
   line). What each image becomes is decided by `PickRequest::needs_encoding` from its type and its size with its

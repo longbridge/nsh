@@ -30,7 +30,7 @@ pub enum ColorScheme {
 
 /// The appearance an app asks for (`nsh.json` `"appearance"`, TS
 /// `setColorScheme`): one of its own, or the system's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::ui::PropEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, crate::element::PropEnum)]
 pub enum Appearance {
     /// The system appearance (default).
     #[default]
@@ -144,7 +144,7 @@ pub struct Environment {
     pub title_bar: Edges<Points>,
     /// Height of the software keyboard over the surface; 0 when hidden.
     pub keyboard_height: Points,
-    /// Duration of the keyboard's show / hide animation in seconds.
+    /// Duration of the keyboard's show / hide animation in milliseconds.
     pub keyboard_duration: f32,
     /// Light or dark appearance.
     pub color_scheme: ColorScheme,
@@ -194,7 +194,7 @@ impl Default for Environment {
             safe_area: Edges::default(),
             title_bar: Edges::default(),
             keyboard_height: Points(0.0),
-            keyboard_duration: 0.25,
+            keyboard_duration: 250.0,
             color_scheme: ColorScheme::Light,
             font_scale: 1.0,
             rtl: false,
@@ -329,7 +329,7 @@ impl std::fmt::Display for Locale {
 }
 
 /// An HTTP request for the platform's network stack (made by JS `fetch`
-/// and by Rust components' [`crate::ui::ambient::fetch`]).
+/// and by Rust components' [`crate::element::ambient::fetch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpRequest {
     /// Upper-case method (`GET`, `POST`, ...).

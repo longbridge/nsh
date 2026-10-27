@@ -13,7 +13,7 @@ A list (`virtual_list(..)` in Rust, `List` from `nsh` in TSX) renders long data 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -151,7 +151,7 @@ In both, measurements stay with their rows, and when rows are inserted above the
 
 ## Props
 
-A list takes every scrolling prop of the scroll view that makes sense for a list (`pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `decelerationRate`, `disableIntervalMomentum`, `bounces`, `scrollable`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `keyboardDismissMode`, `scrollEventThrottle`, `onScroll`, `onScrollDragStart`, `onScrollDragEnd`, `onMomentumStart`, `onMomentumEnd`, `onScrollEnd`, `scrollValue`; in Rust the same methods as a scroll view's), described in [Scrolling](./scrolling.md). Lists keep a scale of 1. Its own props:
+A list takes every scrolling prop of the scroll view that makes sense for a list (`pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `decelerationRate`, `disableIntervalMomentum`, `bounces`, `scrollable`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `keyboardDismissMode`, `scrollEventThrottle`, `onScroll`, `onScrollDragStart`, `onScrollDragEnd`, `onMomentumStart`, `onMomentumEnd`, `onScrollEnd`, `scrollValue`, `pullValue`; in Rust the same methods as a scroll view's), described in [Scrolling](./scrolling.md). Lists keep a scale of 1. Its own props:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
@@ -180,6 +180,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable. |
 | `keyExtractor` | `.keys(..)` | `(item, index) => string` | | The key in viewability tokens; in Rust, the rows' identities. |
 | `refreshing` / `onRefresh` | `.refreshing(..)` / `.on_refresh(..)` | `boolean` / `() => void` | | Pull to refresh. |
+| `refreshIndicator` | `.refresh_indicator(..)` | `{ height: number }` | | The app's own pull-to-refresh indicator, in place of the platform's spinner (see [Scrolling](./scrolling.md#an-indicator-of-your-own)). |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `ref` | `.element_ref(&list)` | `YNode` | | `scrollToIndex`, `scrollToOffset`, `scrollToEnd`, `scrollTo`. |
 
@@ -302,7 +303,7 @@ const shown = hidden.mul(-1).add(56);
 
 <View style={{ flex: 1, overflow: "hidden" }}>
   <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, hidden.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -311,8 +312,6 @@ const shown = hidden.mul(-1).add(56);
 `inverted` lays the list out from the end: item 0 is at the bottom, the list starts scrolled to the end, and it keeps its distance from the end as items change. Keep the newest message first; prepend to add one, append to load older ones with `onLoadMore` (the "end" of an inverted list is the top). A chat opened at an old message loads the newer ones with [`onLoadMoreAtStart`](#loading-at-the-start-onloadmoreatstart); with it, the list keeps its distance from the bottom while it is there and keeps the messages on screen in place when scrolled up.
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
-
 #[derive(Clone, PartialEq)]
 struct Message {
     id: u32,
@@ -376,8 +375,9 @@ pub fn chat() -> impl IntoElement {
     .on_load_more(load_older)
     .load_more_threshold(0.5)
     .flex_1();
-    keyboard_avoiding_view()
+    view()
         .flex_1()
+        .pb_keyboard()
         .child(list)
         .child(
             view().flex_row().gap_2().p_2().child(
@@ -402,8 +402,8 @@ pub fn chat() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, List, mount, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { List, mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 
@@ -419,7 +419,7 @@ function Chat() {
   };
   const loadOlder = () => messages.update((m) => [...m, ...Array.from({ length: 20 }, (_, i) => message(`Older ${i}`, false))]);
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
       <List
         each={messages()}
         inverted
@@ -457,7 +457,7 @@ function Chat() {
           style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
         />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -695,8 +695,8 @@ Once the newest message is in, stop loading: new messages then arrive at the sta
 
 | `viewabilityConfig` | Rust | Description |
 |---|---|---|
-| `itemVisiblePercentThreshold` | `Viewability { item_visible_percent, .. }` | Percent of an item that must be visible. |
-| `viewAreaCoveragePercentThreshold` | `Viewability { view_area_percent, .. }` | Percent of the viewport an item must cover. |
+| `itemVisibleThreshold` | `Viewability { item_visible_threshold, .. }` | How much of an item must be visible, from 0 to 1. |
+| `viewAreaCoverageThreshold` | `Viewability { view_area_coverage_threshold, .. }` | How much of the viewport an item must cover, from 0 to 1. |
 | `minimumViewTime` | `.minimum_view_time(Duration)` | Milliseconds an item must stay viewable before it is reported. |
 
 Without a threshold, any visible pixel counts.
@@ -707,7 +707,7 @@ let playing = signal(None::<usize>);
 virtual_list(count, move |at| video_card(videos.clone(), at))
     .estimated_item_size(px(300.0))
     .viewability(Viewability {
-        item_visible_percent: Some(60.0),
+        item_visible_threshold: Some(Percentage(0.6)),
         ..Viewability::default()
     })
     .minimum_view_time(Duration::from_millis(250))
@@ -723,7 +723,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
   estimatedItemSize={300}
   style={{ flex: 1 }}
   keyExtractor={(v) => v.slug}
-  viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 250 }}
+  viewabilityConfig={{ itemVisibleThreshold: 0.6, minimumViewTime: 250 }}
   onViewableItemsChange={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
 >
   {(v) => <VideoCard video={v()} />}
@@ -768,7 +768,7 @@ The look of a list is the app's own: the list places and recycles the rows, and 
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::{palette::NEUTRAL, prelude::*};
+use nsh_core::{element::palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,

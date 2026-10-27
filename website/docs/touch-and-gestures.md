@@ -17,7 +17,7 @@ Pick the highest level that does the job: the higher the level, the less work cr
 Every element accepts the press handlers; there is no separate "touchable" component. Put `.on_press` / `onPress` on a view, a text, an image or anything else.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -96,7 +96,7 @@ Press feedback is the app's: styles the view takes while it is pressed, hovered,
 The state styles go over the view's own styles. Later states win (hover, focus, active), the disabled style wins over all, and the others do not apply while the view is disabled.
 
 ```rust tabs
-use nsh_core::{Ripple, ui::prelude::*};
+use nsh_core::{Ripple, prelude::*};
 
 view().on_press(open).active(|s| s.opacity(0.5))
 
@@ -186,12 +186,12 @@ Mind the drawing order: a dropdown is drawn over the siblings of its field only 
 
 ## pointerEvents
 
-Pointer events (`.pointer_events(..)`, `pointerEvents`) decide which views of a subtree can be the target of a touch. They are evaluated natively during hit testing, so they cost nothing per touch.
+The style key `pointerEvents` (`.pointer_events(..)` in Rust) decides which views of a subtree can be the target of a touch. It is evaluated natively during hit testing, so it costs nothing per touch.
 
 | Rust | TSX | The view | Its children |
 |---|---|---|---|
 | `PointerEvents::Auto` (default) | `"auto"` | Takes touches | Take touches |
-| `PointerEvents::None` | `"none"` | Never the target | Never the target: touches pass through to what is behind |
+| `PointerEvents::None` | `"none"` | Never the target | Never the target unless one sets `"auto"`: touches pass through to what is behind |
 | `PointerEvents::BoxNone` | `"box-none"` | Never the target | Take touches |
 | `PointerEvents::BoxOnly` | `"box-only"` | Takes touches | Never the target |
 
@@ -222,7 +222,7 @@ view().flex_1().child(map()).child(
 <View style={{ flex: 1 }}>
   <Map />
   {/* A floating toolbar: the empty area passes touches to the map. */}
-  <View pointerEvents="box-none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
+  <View style={{ pointerEvents: "box-none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end", padding: 16 }}>
     <View onPress={locate} style={{ alignSelf: "flex-end", padding: 12, borderRadius: 24, backgroundColor: "#ffffff" }}>
       <Text>Locate</Text>
     </View>
@@ -230,14 +230,14 @@ view().flex_1().child(map()).child(
 </View>
 ```
 
-The Tailwind classes `pointer-events-none` and `pointer-events-auto` set the same thing; an explicit prop wins over the class.
+`"none"` is inherited as CSS's `pointer-events`: a view inside it that sets `"auto"` takes touches again. `"box-none"` and `"box-only"` apply to the view that sets them. The Tailwind classes `pointer-events-none` and `pointer-events-auto` set `"none"` and `"auto"`, and as a style key `pointerEvents` also takes state styles (`activeStyle`, ...) and variants.
 
 ## Native gestures: pan, pinch and rotation
 
 For drags, pinches and rotations that move something on screen, bind [animated values](./animation.md#animated-values) to the gesture. The platform's gesture recognizer writes the values on the UI thread and the views bound to them move in the same frame; your code is told when the gesture starts and ends.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 fn App() -> impl IntoElement {
@@ -263,7 +263,7 @@ fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
@@ -277,7 +277,7 @@ function App() {
           x.spring(0, { velocity: e.velocityX });
           y.spring(0, { velocity: e.velocityY });
         }}
-        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", transform: [{ translateX: x }, { translateY: y }] }}
+        style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", translate: [x, y] }}
       />
     </View>
   );
@@ -324,7 +324,7 @@ view()
     const projected = (e.valueX ?? 0) + e.velocityX * 0.2;
     x.spring(projected > 0 ? 140 : -140, { velocity: e.velocityX });
   }}
-  style={{ transform: [{ translateX: x }] }}
+  style={{ translate: [x, 0] }}
 />
 ```
 
@@ -360,7 +360,7 @@ Each TSX handler gets a `GestureResponderEvent`:
 | `stopPropagation()` | Views further out do not see this touch event. |
 
 ```rust tabs
-use nsh_core::{TouchPhase, ui::{TouchEvent, prelude::*}};
+use nsh_core::{TouchPhase, element::{TouchEvent}, prelude::*};
 
 view().on_touch(|e: &TouchEvent| {
     let Some(p) = e.points.iter().find(|p| p.changed) else { return };
@@ -451,7 +451,7 @@ A Rust component's responder stays pressed from its grant until its touches end,
 The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp` and the `gesture` since the grant.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn sketch() -> impl IntoElement {
     let strokes = signal(Vec::<Vec<Point<Points>>>::new());
@@ -522,10 +522,10 @@ How it runs: a view with any touch or responder handler listens to touches nativ
 
 ## PanResponder
 
-In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh/gesture` wraps the responder system and adds the same gesture state; spread its `panHandlers` on a view.
+In Rust, the responder events already carry the gesture: `ResponderEvent::gesture` is a `PanGesture` with the distance from the start, the velocity and the number of fingers. In TSX, `PanResponder` from `nsh` wraps the responder system and adds the same gesture state; spread its `panHandlers` on a view.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn ball() -> impl IntoElement {
     let pos = signal((0.0_f32, 0.0_f32));
@@ -548,14 +548,14 @@ fn ball() -> impl IntoElement {
             pos.set((x + d.x.0, y + d.y.0));
         })
         .on_responder_release(move |e: &ResponderEvent| {
-            log::info!("released at {} {} pt/ms", e.gesture.vx, e.gesture.vy)
+            log::info!("released at {} {} pt/s", e.gesture.vx, e.gesture.vy)
         })
 }
 ```
 
 ```tsx tabs
 import { mount, signal, View } from "nsh";
-import { PanResponder } from "nsh/gesture";
+import { PanResponder } from "nsh";
 
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
@@ -566,12 +566,12 @@ function Ball() {
       start = pos();
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/ms"),
+    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/s"),
   });
   return (
     <View
       {...responder.panHandlers}
-      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", transform: [{ translateX: pos().x }, { translateY: pos().y }] }}
+      style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#0969da", translate: [pos().x, pos().y] }}
     />
   );
 }
@@ -587,7 +587,7 @@ The gesture state:
 | `position` | `moveX`, `moveY` | The latest position of the touches' centroid, in surface points. |
 | `origin` | `x0`, `y0` | Where the centroid was when the responder was granted. |
 | `delta` | `dx`, `dy` | Distance moved since the grant. |
-| `vx`, `vy` | `vx`, `vy` | Velocity, in points per **millisecond**. |
+| `vx`, `vy` | `vx`, `vy` | Velocity, in points per second. |
 | `active_touches` | `numberActiveTouches` | Fingers down. |
 
 `PanGesture::begin` and `PanGesture::update` follow a gesture from raw touches (`.on_touch`) in Rust. The TSX callbacks get `(event, gestureState)`: `onStartShouldSetPanResponder(Capture)`, `onMoveShouldSetPanResponder(Capture)`, `onPanResponderGrant`, `onPanResponderReject`, `onPanResponderStart`, `onPanResponderMove`, `onPanResponderEnd`, `onPanResponderRelease`, `onPanResponderTerminate`, `onPanResponderTerminationRequest` and `onShouldBlockNativeResponder`. The last one defaults to `true`: a granted PanResponder keeps native scroll views from taking its touches.
@@ -624,7 +624,7 @@ view()
 `PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
 
 > [!NOTE]
-> Velocities differ by API: the responder gesture's `vx` / `vy` are points per millisecond, while the pan end's velocity and a spring's or a decay's velocity are points per second. Multiply `vx` by 1000 before passing it to a spring.
+> Every velocity is in points per second: the responder gesture's `vx` / `vy`, a pan's velocity and a spring's or a decay's, so `vx` goes to a spring or a decay as it is.
 
 ## Why some answers are props
 
@@ -635,5 +635,5 @@ The main thread never waits for your code. When the system needs an answer on th
 - [`View`](../elements/view.md): every touch prop on the basic element.
 - [Animation](./animation.md): animated values, springs and decay for gesture-driven motion.
 - [Scrolling](./scrolling.md): the keyboard taps setting, scroll views and nested gestures.
-- [`nsh/gesture`](../modules/nsh-gesture.md): the `PanResponder` reference.
+- [`PanResponder`](../modules/nsh.md#panresponder): the `PanResponder` reference.
 - [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.

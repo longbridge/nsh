@@ -56,7 +56,7 @@ TSX app adds its entry (`nsh package App.tsx --target …`).
 | Key | Type | Default | Used for |
 |---|---|---|---|
 | `name` | string | the entry's directory name | The display name under the icon (`CFBundleDisplayName`, Android `android:label`) and the output file name. |
-| `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh-storage.md), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
+| `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh.md#storage), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
 | `version` | string | `"1.0.0"` | The user-visible version (`CFBundleShortVersionString`, `versionName`). |
 | `build` | number | `1` | The build number (`CFBundleVersion`, `versionCode`). Raise it for every release you upload. |
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
@@ -88,6 +88,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
+| `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
 
 ## iOS simulator
@@ -142,7 +143,13 @@ without Gradle. Requirements:
 - For a Rust app, the Android NDK (`sdkmanager "ndk;<version>"`, or `ANDROID_NDK_HOME`), which builds its
   `libnsh.so`.
 
-The app targets API 35 and needs API 28 (Android 9) or newer; it contains native code for `arm64-v8a`, `armeabi-v7a` and `x86_64`.
+The app targets API 35 and needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
+`arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
+yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
+
+```sh
+nsh package --target android --abi arm64-v8a
+```
 
 ### Signing for release
 

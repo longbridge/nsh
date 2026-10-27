@@ -1,5 +1,5 @@
 import { List, mount, signal, Text, View, type YNode } from "nsh";
-import { desktop, Inspector, Panel, size, tint, ui, wide } from "./palette";
+import { button, buttonText, desktop, Inspector, Panel, size, tint, ui, wide } from "./palette";
 
 type Trade = { id: string; symbol: string; shares: number; change: number };
 
@@ -70,7 +70,7 @@ function App() {
         loadMoreThreshold={0.5}
         refreshing={refreshing()}
         onRefresh={refresh}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+        viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
         onViewableItemsChange={viewable}
         header={
           <View style={{ ...ui().card, borderRadius: 14, padding: 14, gap: 10, marginBottom: 4 }}>
@@ -155,7 +155,7 @@ function App() {
             loadMoreThreshold={0.5}
             refreshing={refreshing()}
             onRefresh={refresh}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
             onViewableItemsChange={viewable}
             footer={<Text style={{ color: ui().faint, fontSize: 13, textAlign: "center", paddingVertical: 12 }}>{status()}</Text>}
           >
@@ -203,16 +203,8 @@ function App() {
 
 function Chip(props: { label: string; onPress: () => void }) {
   return (
-    <View
-      onPress={props.onPress}
-      activeStyle={{ opacity: 0.6 }}
-      style={
-        wide()
-          ? { ...ui().raised, height: size.control, paddingHorizontal: 12, justifyContent: "center", borderRadius: 8 }
-          : { ...ui().raised, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10 }
-      }
-    >
-      <Text style={{ color: ui().text, fontWeight: "600", fontSize: wide() ? 13 : undefined }}>{props.label}</Text>
+    <View onPress={props.onPress} {...button()}>
+      <Text style={buttonText()}>{props.label}</Text>
     </View>
   );
 }

@@ -1,17 +1,27 @@
 //! `StaticLayout` text engine, driven through JNI on the engine thread:
 //! `TextLayouts.prepare` builds the styled text once per content,
 //! `measure` lays it out at any width, `layout` makes the final
-//! `StaticLayout` that the UI thread only draws.
+//! `StaticLayout` that the UI thread only draws. Hit testing (`hitTest`,
+//! `caretRect`, `rangeRects`) asks that `StaticLayout` too, with the code
+//! the UI thread's selection, links and test agent call directly.
 
-use std::sync::Arc;
+use std::{
+    ops::Range,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 
 use jni::{
-    objects::{GlobalRef, JObject, JValue},
+    objects::{GlobalRef, JObject, JStaticMethodID, JValue},
     signature::{Primitive, ReturnType},
     sys::jvalue,
 };
 use nsh_core::{
-    AttributedText, EllipsizeMode, Points, Size, TextAlign, TextEngine, TextLayout, geometry::px,
+    Affinity, AttributedText, Bounds, EllipsizeMode, Point, Points, Size, TextAlign, TextEngine,
+    TextLayout, TextPosition,
+    geometry::{point, px},
 };
 
 use crate::java::{java, with_env};
@@ -43,9 +53,32 @@ pub(crate) struct Prepared(Option<GlobalRef>);
 /// A finished `StaticLayout`, drawn by `NshText.java`.
 pub(crate) struct AndroidLayout(pub(crate) GlobalRef);
 
+/// The display density (pixels per dp), shared by the host and its text
+/// engine: `wm density` and display changes change it while the app runs.
+#[derive(Clone)]
+pub(crate) struct Density(Arc<AtomicU32>);
+
+impl Density {
+    pub(crate) fn new(density: f32) -> Self {
+        Self(Arc::new(AtomicU32::new(density.to_bits())))
+    }
+
+    pub(crate) fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    /// Whether `density` is new (a positive, finite value that differs).
+    pub(crate) fn set(&self, density: f32) -> bool {
+        if !(density.is_finite() && density > 0.0) {
+            return false;
+        }
+        self.0.swap(density.to_bits(), Ordering::Relaxed) != density.to_bits()
+    }
+}
+
 /// [`TextEngine`] backed by Android's `StaticLayout`.
 pub(crate) struct AndroidTextEngine {
-    pub(crate) density: f32,
+    pub(crate) density: Density,
 }
 
 impl TextEngine for AndroidTextEngine {
@@ -139,7 +172,7 @@ impl TextEngine for AndroidTextEngine {
             EllipsizeMode::Middle => 2,
             EllipsizeMode::Clip => 3,
         };
-        let density = self.density;
+        let density = self.density.get();
         let shadow = text.shadow;
         // Offset, width, height and `verticalAlign` (0 baseline, 1 text
         // top, 2 text bottom, 3 middle): `TextLayouts.Attachment` places it
@@ -266,7 +299,7 @@ impl TextEngine for AndroidTextEngine {
             let j = java();
             let args: [jvalue; 2] = [
                 JValue::Object(obj.as_obj()).as_jni(),
-                JValue::Float(self.density).as_jni(),
+                JValue::Float(self.density.get()).as_jni(),
             ];
             // SAFETY: matches the signature checked in `java::init`.
             let array = unsafe {
@@ -312,7 +345,7 @@ impl TextEngine for AndroidTextEngine {
             let j = java();
             let args: [jvalue; 2] = [
                 JValue::Object(obj.as_obj()).as_jni(),
-                JValue::Float(self.density).as_jni(),
+                JValue::Float(self.density.get()).as_jni(),
             ];
             // SAFETY: matches the signature checked in `java::init`.
             let array = unsafe {
@@ -336,6 +369,87 @@ impl TextEngine for AndroidTextEngine {
             .iter()
             .map(|&[x, y]| (!x.is_nan()).then_some(nsh_core::geometry::point(px(x), px(y))))
             .collect()
+    }
+
+    fn hit_test(&self, layout: &TextLayout, at: Point<Points>) -> TextPosition {
+        let Some(AndroidLayout(obj)) = layout.downcast::<AndroidLayout>() else {
+            return TextPosition::default();
+        };
+        let packed = with_env(|env| {
+            let j = java();
+            let args: [jvalue; 4] = [
+                JValue::Object(obj.as_obj()).as_jni(),
+                JValue::Float(at.x.0).as_jni(),
+                JValue::Float(at.y.0).as_jni(),
+                JValue::Float(self.density.get()).as_jni(),
+            ];
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_static_method_unchecked(
+                    <&jni::objects::JClass<'_>>::from(j.text.as_obj()),
+                    j.text_hit_test,
+                    ReturnType::Primitive(Primitive::Long),
+                    &args,
+                )
+            }?
+            .j()
+        });
+        // The offset in the low 32 bits, bit 32 set at the end of a wrapped
+        // line (`TextLayouts.hitTest`).
+        let offset = u32::try_from(packed & 0xffff_ffff).unwrap_or_default();
+        let affinity = if (packed >> 32) & 1 != 0 {
+            Affinity::Upstream
+        } else {
+            Affinity::Downstream
+        };
+        TextPosition::new(offset, affinity)
+    }
+
+    fn caret_rect(&self, layout: &TextLayout, position: TextPosition) -> Option<Bounds<Points>> {
+        let AndroidLayout(obj) = layout.downcast::<AndroidLayout>()?;
+        let j = java();
+        let args: [jvalue; 4] = [
+            JValue::Object(obj.as_obj()).as_jni(),
+            JValue::Int(i32::try_from(position.offset).unwrap_or(i32::MAX)).as_jni(),
+            JValue::Bool((position.affinity == Affinity::Upstream).into()).as_jni(),
+            JValue::Float(self.density.get()).as_jni(),
+        ];
+        // SAFETY: `text_caret_rect` takes these arguments (checked in
+        // `java::init`) and returns `float[]`.
+        let floats = unsafe { call_floats(j.text_caret_rect, &args) };
+        // x, y and the height of the line, in dp; nothing without lines.
+        let &[x, y, height] = floats.as_chunks::<3>().0.first()?;
+        Some(Bounds::new(
+            point(px(x), px(y)),
+            Size::new(px(0.0), px(height)),
+        ))
+    }
+
+    fn range_rects(&self, layout: &TextLayout, range: Range<u32>, out: &mut Vec<Bounds<Points>>) {
+        let Some(AndroidLayout(obj)) = layout.downcast::<AndroidLayout>() else {
+            return;
+        };
+        if range.start >= range.end {
+            return;
+        }
+        let j = java();
+        let offset = |o: u32| i32::try_from(o).unwrap_or(i32::MAX);
+        let args: [jvalue; 4] = [
+            JValue::Object(obj.as_obj()).as_jni(),
+            JValue::Int(offset(range.start)).as_jni(),
+            JValue::Int(offset(range.end)).as_jni(),
+            JValue::Float(self.density.get()).as_jni(),
+        ];
+        // SAFETY: `text_range_rects` takes these arguments (checked in
+        // `java::init`) and returns `float[]`.
+        let floats = unsafe { call_floats(j.text_range_rects, &args) };
+        // x, y, width and height of each box, in dp.
+        for &[x, y, width, height] in floats.as_chunks::<4>().0 {
+            out.push(Bounds::new(
+                point(px(x), px(y)),
+                Size::new(px(width), px(height)),
+            ));
+        }
     }
 
     fn register_font(&self, data: &[u8]) -> Result<(), String> {
@@ -381,4 +495,33 @@ impl TextEngine for AndroidTextEngine {
             None => Ok(()),
         }
     }
+}
+
+/// Calls a `TextLayouts` method that returns `float[]` and copies the array
+/// out; empty when the call fails.
+///
+/// # Safety
+///
+/// `method` is one of the `text_*` ids of [`crate::java::Java`] that returns
+/// `float[]` and `args` are its arguments: their number and types are those
+/// of the signature checked in `java::init`.
+unsafe fn call_floats(method: JStaticMethodID, args: &[jvalue]) -> Vec<f32> {
+    with_env(|env| {
+        let j = java();
+        // SAFETY: the caller's contract.
+        let array = unsafe {
+            env.call_static_method_unchecked(
+                <&jni::objects::JClass<'_>>::from(j.text.as_obj()),
+                method,
+                ReturnType::Array,
+                args,
+            )
+        }?
+        .l()?;
+        let array = jni::objects::JFloatArray::from(array);
+        let len = usize::try_from(env.get_array_length(&array)?).unwrap_or_default();
+        let mut out = vec![0f32; len];
+        env.get_float_array_region(&array, 0, &mut out)?;
+        Ok(out)
+    })
 }

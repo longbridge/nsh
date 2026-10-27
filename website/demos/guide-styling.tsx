@@ -1,5 +1,6 @@
 import { mount, Scroll, signal, Text, View } from "nsh";
-import { desktop, size, tint, ui, wide } from "./palette";
+import { reduceMotion } from "nsh";
+import { desktop, focusRing, size, tint, ui, wide } from "./palette";
 
 // A function, so the styles follow the page's theme.
 const styles = () =>
@@ -40,7 +41,7 @@ function App() {
       <Tile label="radial" ink="#0c0d0f" style={{ backgroundImage: "radial-gradient(circle, #ffd99a, #ff8a7a)" }} />
       <Tile label="corners" style={{ borderTopLeftRadius: 40, borderBottomRightRadius: 40, backgroundColor: tint(ui().up, 0.3) }} />
       <Tile label="continuous" ink={ui().page} style={{ borderRadius: 28, borderCurve: "continuous", backgroundColor: ui().up }} />
-      <Tile label="rotate + scale" style={{ backgroundColor: tint(ui().info, 0.3), transform: [{ rotate: "-8deg" }, { scale: 0.9 }] }} />
+      <Tile label="rotate + scale" style={{ backgroundColor: tint(ui().info, 0.3), rotate: "-8deg", scale: 0.9 }} />
       <Tile label="outline" style={{ outlineWidth: 2, outlineColor: ui().accent, outlineOffset: 3 }} />
       <Tile label="opacity 0.5" ink={ui().page} style={{ backgroundColor: ui().text, opacity: 0.5 }} />
     </View>
@@ -59,6 +60,9 @@ function App() {
                   : { flex: 1, padding: 12, borderRadius: 10, backgroundColor: ui().raised.backgroundColor, alignItems: "center", borderWidth: 3, borderColor: "transparent" },
                 picked() === i() && styles().selected,
               ]}
+              hoverStyle={{ opacity: 0.88 }}
+              focusStyle={focusRing()}
+              activeStyle={{ opacity: 0.7 }}
             >
               <Text style={{ color: ui().text, fontSize: desktop ? 13 : undefined }}>{label()}</Text>
             </View>
@@ -76,14 +80,17 @@ function App() {
           height: 72,
           borderRadius: on() ? 36 : 12,
           backgroundColor: on() ? ui().accent : ui().info,
-          transform: [{ translateX: on() ? 120 : 0 }],
+          translate: on() ? 120 : 0,
           width: 150,
           alignItems: "center",
           justifyContent: "center",
           transitionProperty: "all",
-          transitionDuration: 400,
+          transitionDuration: reduceMotion() ? 0 : 400,
           transitionTimingFunction: "ease-in-out",
         }}
+        hoverStyle={{ opacity: 0.88 }}
+        focusStyle={focusRing()}
+        activeStyle={{ opacity: 0.7 }}
       >
         <Text style={{ color: ui().page, fontWeight: "600" }}>{on() ? "On" : "Off"}</Text>
       </View>

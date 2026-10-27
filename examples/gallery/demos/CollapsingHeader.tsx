@@ -1,5 +1,5 @@
 import { List, Scroll, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh";
 import { colors } from "../ui";
 
 /** How tall the header is open, and the bar it collapses to. */
@@ -42,10 +42,8 @@ export function CollapsingHeader() {
             right: 0,
             height: OPEN,
             transformOrigin: "center bottom",
-            transform: [
-              { translateY: scroll.interpolate({ inputRange: [0, RANGE], outputRange: [0, RANGE / 2] }) },
-              { scale: scroll.interpolate({ inputRange: [-OPEN, 0], outputRange: [2, 1] }) },
-            ],
+            translate: [0, scroll.interpolate({ inputRange: [0, RANGE], outputRange: [0, RANGE / 2] })],
+            scale: scroll.interpolate({ inputRange: [-OPEN, 0], outputRange: [2, 1] }),
           }}
         >
           <View style={{ position: "absolute", top: 24, left: 36, width: 120, height: 120, borderRadius: 60, backgroundColor: colors.onAccent, opacity: 0.14 }} />
@@ -75,7 +73,7 @@ export function CollapsingHeader() {
               fontSize: 30,
               fontWeight: "700",
               transformOrigin: "left center",
-              transform: [{ scale: collapsed.interpolate({ inputRange: [0, 1], outputRange: [1, 0.62] }) }],
+              scale: collapsed.interpolate({ inputRange: [0, 1], outputRange: [1, 0.62] }),
             }}
           >
             Recent

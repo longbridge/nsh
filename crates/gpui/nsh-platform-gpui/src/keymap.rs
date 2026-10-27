@@ -85,6 +85,11 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, editing: bool) -> boo
             EventKind::KeyCommand,
             EventPayload::Value(PayloadValue::Number(id as f64)),
         );
+        // Escape cancels text waiting for a field. Every other binding may
+        // move focus, so text typed straight after it waits for that field.
+        if event.vk != keys::VK_ESCAPE {
+            crate::text_input::arm(surface);
+        }
     }
     found.consumed()
 }
@@ -99,7 +104,7 @@ fn repeats(state: &KeymapState, event: &KeyEvent) -> bool {
 }
 
 /// A modifier key (which does not end another key's auto-repeat).
-fn modifier(vk: u16) -> bool {
+pub(crate) fn modifier(vk: u16) -> bool {
     matches!(
         vk,
         keys::VK_SHIFT | keys::VK_CONTROL | keys::VK_MENU | keys::VK_LWIN

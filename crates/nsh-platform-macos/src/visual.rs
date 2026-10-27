@@ -2,7 +2,8 @@
 //! layered and inset box shadows, gradient backgrounds, outlines, a
 //! brightness veil and backdrop blur (an `NSVisualEffectView` blurring
 //! what the window shows behind the view: Core Animation's
-//! `backgroundFilters` do nothing in AppKit windows).
+//! `backgroundFilters` do nothing in AppKit windows), or, for
+//! `glassEffect` on macOS 26 and later, an `NSGlassEffectView`.
 //!
 //! CSS draws a box shadow only outside the box. Under an opaque background
 //! (a fill layer, or a gradient, which draw above them) outer shadow layers
@@ -16,11 +17,15 @@
 //! In-process renderings (`shot`) do not show unmasked outer shadows.
 
 use nsh_core::{
-    BorderStyle, BoxShadow, Color, CornerRadii, Filter, Gradient, GradientKind, GradientSize,
-    ViewStyle,
+    BorderStyle, BoxShadow, Color, CornerRadii, Filter, GlassEffect, Gradient, GradientKind,
+    GradientSize, ViewStyle,
     geometry::{Points, px},
 };
-use objc2::{MainThreadOnly as _, rc::Retained};
+use objc2::{
+    MainThreadOnly as _, msg_send,
+    rc::{Allocated, Retained},
+    runtime::AnyClass,
+};
 use objc2_app_kit::{
     NSUserInterfaceItemIdentification as _, NSView, NSVisualEffectBlendingMode,
     NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
@@ -63,10 +68,11 @@ pub(crate) struct Visual {
     backdrop: Option<Backdrop>,
 }
 
-/// A backdrop blur: a visual effect view, the view's first subview, that
-/// blurs what is behind it.
+/// A backdrop blur, a visual effect view that blurs what is behind it, or
+/// glass: the view's first subview.
 struct Backdrop {
-    view: Retained<NSVisualEffectView>,
+    view: Retained<NSView>,
+    glass: bool,
 }
 
 impl Drop for Backdrop {
@@ -78,21 +84,52 @@ impl Drop for Backdrop {
 /// Identifies backdrop views among a view's subviews.
 const BACKDROP_ID: &str = "nsh.backdrop";
 
-/// Whether `view` is a backdrop blur (nsh's, not a hosted native view).
+/// Whether `view` is a backdrop blur or glass (nsh's, not a hosted native
+/// view).
 pub(crate) fn is_backdrop(view: &NSView) -> bool {
-    view.downcast_ref::<NSVisualEffectView>().is_some()
-        && view
-            .identifier()
-            .is_some_and(|id| id.to_string() == BACKDROP_ID)
+    view.identifier()
+        .is_some_and(|id| id.to_string() == BACKDROP_ID)
 }
 
-/// Whether `style` blurs what is behind the view.
+/// Whether `style` blurs what is behind the view, or draws glass there.
 pub(crate) fn has_backdrop(style: &ViewStyle) -> bool {
-    style.effects.as_ref().is_some_and(|e| {
-        e.backdrop_filters
-            .iter()
-            .any(|f| matches!(*f, Filter::Blur(r) if r.0 > 0.0))
-    })
+    (style.glass_effect != GlassEffect::None && glass_class().is_some())
+        || style.effects.as_ref().is_some_and(|e| {
+            e.backdrop_filters
+                .iter()
+                .any(|f| matches!(*f, Filter::Blur(r) if r.0 > 0.0))
+        })
+}
+
+/// AppKit's glass view, which macOS 26 brought.
+///
+/// Looked up at runtime, as `nsh-platform-ios` looks up `UIGlassEffect`:
+/// binding it by its link-time symbol would keep the app from launching
+/// on an earlier macOS (Rust cannot link a class weakly yet,
+/// rust-lang/rust#29603).
+fn glass_class() -> Option<&'static AnyClass> {
+    AnyClass::get(c"NSGlassEffectView")
+}
+
+/// A glass view of `style` at `frame`, where AppKit has one.
+fn new_glass(style: GlassEffect, frame: CGRect) -> Option<Retained<NSView>> {
+    // NSGlassEffectViewStyle: regular, clear.
+    let raw: isize = match style {
+        GlassEffect::None => return None,
+        GlassEffect::Regular => 0,
+        GlassEffect::Clear => 1,
+    };
+    let class = glass_class()?;
+    // SAFETY: the class found is NSGlassEffectView, an NSView subclass:
+    // `alloc` and NSView's `initWithFrame:` make one, and `setStyle:`
+    // takes its NSInteger style. Called on the main thread with the view
+    // it decorates.
+    unsafe {
+        let allocated: Allocated<NSView> = msg_send![class, alloc];
+        let view: Retained<NSView> = msg_send![allocated, initWithFrame: frame];
+        let _: () = msg_send![&*view, setStyle: raw];
+        Some(view)
+    }
 }
 
 /// Whether `style` has effects that draw outside the box (they need an
@@ -198,7 +235,7 @@ impl Visual {
                 })
                 .sum::<f32>()
         });
-        self.set_backdrop(view, blur, local, radii);
+        self.set_backdrop(view, blur, style.glass_effect, local, radii);
     }
 
     fn set_shadows(
@@ -458,25 +495,53 @@ impl Visual {
 
     /// `backdrop-filter: blur()`: a visual effect view below everything
     /// the view draws (the view's background moves to a fill layer above
-    /// it: `decor`). AppKit chooses the blur, not `radius`.
-    fn set_backdrop(&mut self, view: &NshView, radius: f32, local: CGRect, radii: CornerRadii) {
-        if radius <= 0.0 {
+    /// it: `decor`). AppKit chooses the blur, not `radius`. `glassEffect`
+    /// puts a glass view there instead where AppKit has one (macOS 26),
+    /// which needs no radius; before, the blur stands in for it.
+    fn set_backdrop(
+        &mut self,
+        view: &NshView,
+        radius: f32,
+        glass_style: GlassEffect,
+        local: CGRect,
+        radii: CornerRadii,
+    ) {
+        let glass = glass_style != GlassEffect::None && glass_class().is_some();
+        if (radius <= 0.0 && !glass) || self.backdrop.as_ref().is_some_and(|b| b.glass != glass) {
             self.backdrop = None;
+        }
+        if radius <= 0.0 && !glass {
             return;
         }
         let b = self.backdrop.get_or_insert_with(|| {
-            let v = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(view.mtm()), local);
+            let (v, glass) = match new_glass(glass_style, local).filter(|_| glass) {
+                Some(v) => (v, true),
+                None => {
+                    let v = NSVisualEffectView::initWithFrame(
+                        NSVisualEffectView::alloc(view.mtm()),
+                        local,
+                    );
+                    v.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
+                    v.setState(NSVisualEffectState::Active);
+                    v.setMaterial(NSVisualEffectMaterial::Popover);
+                    (Retained::into_super(v), false)
+                }
+            };
             // Its own layer now, to order and clip it below.
             v.setWantsLayer(true);
-            v.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
-            v.setState(NSVisualEffectState::Active);
-            v.setMaterial(NSVisualEffectMaterial::Popover);
             v.setIdentifier(Some(ns_string!("nsh.backdrop")));
             view.ns()
                 .addSubview_positioned_relativeTo(&v, NSWindowOrderingMode::Below, None);
-            Backdrop { view: v }
+            Backdrop { view: v, glass }
         });
         b.view.setFrame(local);
+        if b.glass {
+            // The glass draws its own rounded shape.
+            let r = crate::decor::shared(&radii).unwrap_or(0.0) as CGFloat;
+            // SAFETY: NSGlassEffectView's `setCornerRadius:`, a CGFloat, on
+            // the main thread.
+            let _: () = unsafe { msg_send![&*b.view, setCornerRadius: r] };
+        }
         let Some(layer) = b.view.layer() else {
             return;
         };
@@ -606,10 +671,14 @@ fn add_reversed(path: &CFRetained<CGMutablePath>, rect: CGRect, radii: CornerRad
 /// Configures `g` to draw `gradient` over a `size` box.
 fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
     let (w, h) = (size.width.max(1.0), size.height.max(1.0));
-    let stops = gradient.resolved_stops(nsh_core::Size::new(
-        nsh_core::Points(w as f32),
-        nsh_core::Points(h as f32),
-    ));
+    // How far along the gradient line the layer's `0..1` reaches: the
+    // line, but a repeating radial gradient's rings past the ending shape
+    // to the farthest corner (Core Animation repeats nothing).
+    let reach = shape_gradient_geometry(g, gradient, w, h);
+    let stops = gradient.unrolled_stops(
+        nsh_core::Size::new(nsh_core::Points(w as f32), nsh_core::Points(h as f32)),
+        nsh_core::geometry::Percentage(reach as f32),
+    );
     // A transparent stop takes its neighbor's hue (as CSS's premultiplied
     // mixing does), so fades to transparent do not darken.
     let colors: Vec<Retained<objc2::runtime::AnyObject>> = (0..stops.len())
@@ -642,6 +711,16 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
     // SAFETY: an array of CGColors, as `colors` documents.
     unsafe { g.setColors(Some(&NSArray::from_retained_slice(&colors))) };
     g.setLocations(Some(&NSArray::from_retained_slice(&locations)));
+}
+
+/// Sets `g`'s type and its start and end points for `gradient` over a
+/// `w` × `h` box; how far along the gradient line its end point is.
+fn shape_gradient_geometry(
+    g: &CAGradientLayer,
+    gradient: &Gradient,
+    w: CGFloat,
+    h: CGFloat,
+) -> CGFloat {
     match gradient.kind {
         GradientKind::Radial {
             circle,
@@ -677,8 +756,15 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
             } else {
                 (dx, dy)
             };
+            // The farthest corner, in radii of the ending shape.
+            let reach = if gradient.repeating && rx > 0.0 && ry > 0.0 {
+                (cx.max(w - cx) / rx).hypot(cy.max(h - cy) / ry).max(1.0)
+            } else {
+                1.0
+            };
             g.setStartPoint(CGPoint::new(cx / w, cy / h));
-            g.setEndPoint(CGPoint::new((cx + rx) / w, (cy + ry) / h));
+            g.setEndPoint(CGPoint::new((cx + rx * reach) / w, (cy + ry * reach) / h));
+            reach
         }
         GradientKind::Conic { from, x, y } => {
             // SAFETY: an immutable Core Animation constant.
@@ -689,6 +775,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
             // from the right; CSS starts up.
             let a = from.0 as f64 - std::f64::consts::FRAC_PI_2;
             g.setEndPoint(CGPoint::new(x + a.cos() / 2.0, y + a.sin() / 2.0));
+            1.0
         }
         kind => {
             // SAFETY: an immutable Core Animation constant.
@@ -706,6 +793,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
             let (cx, cy) = (w / 2.0, h / 2.0);
             g.setStartPoint(CGPoint::new((cx - dx) / w, (cy - dy) / h));
             g.setEndPoint(CGPoint::new((cx + dx) / w, (cy + dy) / h));
+            1.0
         }
     }
 }

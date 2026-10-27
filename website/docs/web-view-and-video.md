@@ -7,7 +7,7 @@ group: ui
 
 # Web view and video
 
-The web view and the video player embed the platform's own web engine and media player as ordinary views: `web_view` and `video` in Rust (`nsh_core::ui::prelude`), `WebView` and `Video` from `nsh` in TSX. Because NSH renders with native views, they sit in your layout like any other element: they scroll with their parent, take rounded corners and clipping, and other views can overlap them without layering problems.
+The web view and the video player embed the platform's own web engine and media player as ordinary views: `web_view` and `video` in Rust (`nsh_core::prelude`), `WebView` and `Video` from `nsh` in TSX. Because NSH renders with native views, they sit in your layout like any other element: they scroll with their parent, take rounded corners and clipping, and other views can overlap them without layering problems.
 
 | Component | iOS | Android | macOS | Linux | Windows |
 |---|---|---|---|---|---|
@@ -37,7 +37,7 @@ codecs decode; `rate` works, there is no poster, and the control bar always show
 ## WebView
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -101,7 +101,7 @@ Events:
 The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)` and `post_message` / `postMessage(data)`:
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn browser() -> impl IntoElement {
     let web = element_ref();
@@ -160,7 +160,7 @@ function Browser() {
   );
   return (
     <View style={{ flex: 1, paddingTop: 50 }}>
-      <Text numberOfLines={1} style={{ paddingHorizontal: 12, color: "#57606a" }}>
+      <Text style={{ numberOfLines: 1, paddingHorizontal: 12, color: "#57606a" }}>
         {nav()?.loading ? "Loading…" : nav()?.title ?? ""}
       </Text>
       <WebView
@@ -187,7 +187,7 @@ mount(Browser);
 Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const PAGE: &str = r#"<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
@@ -304,7 +304,7 @@ The check covers the web view's `src` and every top-level navigation the page ma
 ## Video
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 pub fn player() -> impl IntoElement {
     let player = element_ref();
@@ -321,7 +321,7 @@ pub fn player() -> impl IntoElement {
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
-                .resize_mode(ResizeMode::Contain)
+                .object_fit(ResizeMode::Contain)
                 .h(px(220.0))
                 .rounded(px(12.0))
                 .overflow_hidden()
@@ -362,7 +362,6 @@ function Player() {
         src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
         paused={paused()}
         repeat
-        resizeMode="contain"
         style={{ height: 220, borderRadius: 12, overflow: "hidden", backgroundColor: "#000000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
         onEnd={() => paused.set(true)}
@@ -385,7 +384,7 @@ mount(Player);
 
 Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
 
-In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `resize_mode(ResizeMode::Contain)`, `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
+In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `object_fit(ResizeMode::Contain)` (the `objectFit` style), `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -395,7 +394,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 | `volume` | `number` | `1` | 0..1. |
 | `rate` | `number` | `1` | The playback speed. |
 | `repeat` | `boolean` | `false` | Plays again from the start at the end. |
-| `resizeMode` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the picture fits the view. |
+| `objectFit` (style), `object-*` classes | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | How the picture fits the view, as CSS's `object-fit` (`class="object-cover"`). |
 | `controls` | `boolean` | `false` | The platform's playback controls. |
 | `progressUpdateInterval` | `number` | `250` | Milliseconds between `onProgress` events. |
 

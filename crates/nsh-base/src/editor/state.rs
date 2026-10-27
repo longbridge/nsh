@@ -30,7 +30,7 @@ pub(crate) const MATCH_LIMIT: usize = 10_000;
 /// The font the text is drawn and measured in.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Font {
-    pub(crate) family: nsh_core::ui::SharedString,
+    pub(crate) family: nsh_core::element::SharedString,
     pub(crate) size: Points,
     pub(crate) line_height: Points,
 }
@@ -183,7 +183,7 @@ pub(crate) struct State {
     /// The text last reported to the app (`onChange`) or set by it, and
     /// the buffer's version then: an unchanged version is an unchanged
     /// text, with no need to make or compare the whole text.
-    pub(crate) reported: Option<(u64, nsh_core::ui::SharedString)>,
+    pub(crate) reported: Option<(u64, nsh_core::element::SharedString)>,
     /// The selections last reported (`onSelectionChange`).
     pub(crate) reported_selections: Vec<EditorSelection>,
     /// What a search in the selection searches, carried through edits
@@ -296,13 +296,12 @@ impl State {
             }
             None => self.relayout(),
         }
-        diagnostics::adjust(&mut self.diagnostics, changes);
-        diagnostics::adjust(&mut self.decorations, changes);
+        self.tag_reach = diagnostics::adjust(&mut self.diagnostics, self.tag_reach, changes);
+        self.decoration_reach =
+            diagnostics::adjust(&mut self.decorations, self.decoration_reach, changes);
         if let Some(scope) = &mut self.search_scope {
-            diagnostics::adjust(scope, changes);
+            diagnostics::adjust(scope, usize::MAX, changes);
         }
-        self.decoration_reach = app_highlight::reach(&self.decorations);
-        self.tag_reach = app_highlight::reach(&self.diagnostics);
         self.fold_candidates = None;
         self.find();
         let len = self.buffer.len();
@@ -832,6 +831,16 @@ impl State {
         }
     }
 
+    /// The diagnostics that can overlap bytes `low..=high`, by start: those
+    /// starting from the longest one's bytes before `low` up to `high`.
+    pub(crate) fn diagnostics_near(
+        &self,
+        low: usize,
+        high: usize,
+    ) -> impl Iterator<Item = &Mark<EditorDiagnostic>> {
+        app_highlight::near(&self.diagnostics, self.tag_reach, low, high).map(|(_, mark)| mark)
+    }
+
     /// Sets the diagnostics, resolved.
     pub(crate) fn set_diagnostics(&mut self, marks: Vec<Mark<EditorDiagnostic>>) {
         self.tag_reach = app_highlight::reach(&marks);
@@ -1028,8 +1037,8 @@ impl State {
     ) -> Vec<(Rect, EditorDiagnosticSeverity)> {
         let (start, end) = self.rows_offsets(rows.clone());
         let mut out = Vec::new();
-        for mark in &self.diagnostics {
-            if mark.range.end < start || mark.range.start > end {
+        for mark in self.diagnostics_near(start, end) {
+            if mark.range.end < start {
                 continue;
             }
             if SpanTags::of(&mark.item).severity.is_none() {

@@ -258,12 +258,21 @@ final class Native {
 
     static native float[] tick(long handle, long frameNanos);
 
+    /** Shader view {@code id} is {@code width} × {@code height} px; whether frames should come. */
+    static native boolean shaderSize(long handle, int id, int width, int height);
+
     /**
      * A scroll view's offset, after applying {@code applied} of the scrolls
      * the core asked for. Returns bound values when a scroll value changed,
      * else null.
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
+
+    /**
+     * How far (points) a vertical scroll view is pulled past its top.
+     * Returns bound values when a pull value changed, else null.
+     */
+    static native float[] pull(long handle, int id, float distance);
 
     /**
      * A scroll view came to rest: the snapping animated values that follow it settle. Returns

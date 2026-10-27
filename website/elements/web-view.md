@@ -14,7 +14,7 @@ view, in order with the views around it. Rust makes one with `web_view(url)` or 
 with `<WebView>` from `nsh`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn browser() -> impl IntoElement {
     let title = signal(SharedString::from("Loading…"));
@@ -36,7 +36,7 @@ function Browser() {
   const nav = signal<WebViewNavigation | null>(null);
   return (
     <View style={{ flex: 1 }}>
-      <Text numberOfLines={1}>{nav()?.title ?? "Loading…"}</Text>
+      <Text style={{ numberOfLines: 1 }}>{nav()?.title ?? "Loading…"}</Text>
       <WebView
         src="https://example.com"
         style={{ flex: 1 }}
@@ -102,7 +102,7 @@ The app and the page exchange strings. The page posts with `window.nsh.postMessa
 with the ref's `postMessage(data)` (`post_message(..)` in Rust). Send JSON for structured data.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const PAGE: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width">

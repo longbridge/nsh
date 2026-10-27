@@ -109,6 +109,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Development hosts never restore windows**: `nsh run` launches the Catalyst host with `-ApplePersistenceIgnoreState YES`;
   after a crash, macOS would otherwise show a modal "reopen windows?" alert over it.
 - **IPAs are zipped with `ditto -c -k --norsrc --keepParent`**: `--sequesterRsrc` adds `__MACOSX/` resource forks.
+- **Float fields of the dev protocol decode through `nsh_dev::protocol`'s `float`** (`deserialize_with`): rolldown turns
+  on serde_json's `arbitrary_precision`, which feature unification can carry into a host's build, and then a number
+  with a fraction inside an internally tagged enum (every message, `TestStep`, `SceneQuery`) is buffered as a map
+  `{"$serde_json::private::Number": "390.5"}` that a plain `f32` / `f64` field rejects ("invalid type: map, expected
+  f64"); integers decode either way. A new float field in a message takes the same attribute.
 
 ## iOS, UIKit and Mac Catalyst
 
@@ -125,9 +130,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
 - **Catalyst's Mac idiom does not support `UIRefreshControl`** (attaching one throws `_UICatalystUnsupportedMacIdiomBehavior`): in the Mac
-  idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control.
+  idiom the pull is detected in the scroll delegate and shown with a spinner + contentInset; iOS uses the native control unless the
+  app draws its own indicator (`refreshIndicator`), which `UIRefreshControl` cannot give way to: then it takes the Mac idiom's way,
+  without the spinner (`Mounter::sync_refresh`, on the events and on each behavior).
 - **Mac idiom custom pull to refresh**: on release, the system's bounce already targets the old inset (back to 0), so changing only
-  `contentInset` hides the spinner; once refreshing starts, the offset is animated to `-REFRESH_INSET` on the next main-queue turn. Synthetic
+  `contentInset` hides the spinner; once refreshing starts, the offset is animated to the top inset plus the refresh room on the next main-queue turn. Synthetic
   tests need continuous scroll events with phases (began / changed / ended); plain wheel events never overscroll.
 - **Set backgrounds on `layer.backgroundColor`, not `UIView.backgroundColor`**: views with `drawRect:` (`TextView`) paint the latter into their
   contents bitmap, where corners cannot round it.
@@ -157,8 +164,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **`TextView` uses `UIViewContentMode::Redraw`**: list cells can get their text before their frame; without redrawing on
   resize the text stays drawn at zero size.
 - **UINavigationController breaks transitions started during another one**: stack changes that arrive while
-  `transitionCoordinator()` is set wait for `didShow` and are applied on the next main-queue turn (the coordinator outlives
-  the callback); only pages the controller actually had count as popped by the user.
+  `transitionCoordinator()` is set wait for the transition's end (`didShow`, or the coordinator's completion: a modal
+  presented or dismissed over the stack sets the coordinator too and never reaches `didShow`) and are applied on the next
+  main-queue turn (the coordinator outlives those callbacks); only pages the controller actually had count as popped by
+  the user.
 - **UIKit installs its own interactive-pop delegate while loading a navigation controller's view**: assigning NSH's
   delegate when the stack is created can be overwritten. Bind the current recognizer in `didShow`, after UIKit has
   configured the screen, so hidden headers use NSH's mounted `popOnSwipe` / `popOnBack` policy too. Verify the gesture
@@ -221,6 +230,12 @@ Things that were found the hard way. Read the section of the area you change bef
   recognizer requiring the secondary button recognized every tap, and as a tap recognizer it cancelled the presses inside
   (a `ContextMenu`'s trigger opened its menu instead of pressing). The `onContextMenu` recognizer allows only
   `UITouchTypeIndirectPointer` touches (`mount.rs`).
+- **iOS, VoiceOver's increment / decrement**: VoiceOver calls `accessibilityIncrement` / `accessibilityDecrement`
+  (swipe up / down) only on elements with `UIAccessibilityTraitAdjustable`, so an element with those actions gets the
+  trait on top of its role's (`native_view.rs` `traits`; an image with them is announced as an adjustable image). It
+  reads the element's value as soon as the call returns, while the new value comes from the engine thread in a later
+  batch: a step whose value arrives after VoiceOver read the old one announces the new one (`NshView::late_step_value`),
+  one that arrives before it asked is read by VoiceOver itself.
 
 ## Android
 
@@ -231,6 +246,10 @@ Things that were found the hard way. Read the section of the area you change bef
   measures again. A layout of precomputed text does not draw `UnderlineSpan` / `StrikethroughSpan` (even ones set after
   `create`): runs carry a `TextLayouts.Decoration` marker and `TextBox` draws the lines. `Layout.Alignment` is relative to each
   paragraph's direction: absolute left / right alignment sets an `AlignmentSpan` per paragraph from its resolved direction.
+- **Android, text hit testing**: `Layout.getOffsetForHorizontal` stops before the last cluster of a wrapped (non-last)
+  line, so a hit past its end is snapped to the line's end (`TextLayouts.hitTest`, upstream); `getSelectionPath` adds
+  margin rectangles when a range ends at a wrapped line's end, so range boxes come from the run's carets
+  (`TextLayouts.rangeRects`), not from the path.
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
 - **Android, inputs**: `EditText` reconfiguration (input type, filters, single line) sets the same text again and fires

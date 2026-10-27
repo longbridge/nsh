@@ -86,7 +86,7 @@ fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
     std::fs::create_dir_all(&root).unwrap();
     let expected = root.join("com.example.trace-exit");
     let source = format!(
-        "import process from 'process'; import {{platform}} from 'nsh/device';\n\
+        "import process from 'process'; import {{platform}} from 'nsh';\n\
          if (platform.os !== 'macos') throw new Error('trace OS was lost');\n\
          if (process.dataDir !== {}) throw new Error('trace data directory was lost: ' + process.dataDir);\n\
          process.exit(0);",
@@ -125,7 +125,7 @@ fn headless_runs_play_the_platform_s_part() {
     let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
     let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
     assert!(failed.is_empty(), "{failed:#?}");
-    assert_eq!(results.len(), 8);
+    assert_eq!(results.len(), 10);
 }
 
 #[test]

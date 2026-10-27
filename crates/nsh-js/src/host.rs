@@ -59,13 +59,13 @@ pub(crate) struct Shared {
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
     /// sockets), handed to their calls' `System`.
-    pub(crate) system_quotas: nsh_core::ui::Quotas,
+    pub(crate) system_quotas: nsh_core::element::Quotas,
     /// The VM's scheduler, for native transports that start its I/O runtime.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
     /// children), closed when the VM goes.
-    pub(crate) system_locals: nsh_core::ui::Locals,
+    pub(crate) system_locals: nsh_core::element::Locals,
     /// The lazy standard globals installed so far (bits of `standard::LAZY`).
     pub(crate) lazy_globals: Cell<u8>,
     /// Worker completion wakes the owning engine without polling.
@@ -178,12 +178,12 @@ pub struct HostOptions {
     pub harden_bytecode: Option<std::sync::Arc<Vec<u8>>>,
     /// The UI sets apps import as native modules
     /// (`nsh_base::registry()`, served as `nsh/base`, and an app's own).
-    pub ui_sets: Vec<nsh_core::ui::Registry>,
+    pub ui_sets: Vec<nsh_core::element::Registry>,
     /// The queue of the JS calls Rust posts (`Callback::post`,
     /// `call_async`): the engine hands the core the same one
     /// ([`nsh_core::Core::set_posts`]), which releases the calls posted
     /// during a synchronous call in order with the ops.
-    pub posts: nsh_core::ui::Posts,
+    pub posts: nsh_core::element::Posts,
     /// The URL relative request URLs (`fetch("/api")`, `new Request("x")`)
     /// resolve against: the page's on the web. `None` (native hosts):
     /// they are invalid, as there is no document they belong to.
@@ -580,8 +580,8 @@ impl Host {
     /// ([`nsh_core::Core::take_events`]): a node's event to its handler, a
     /// Rust component's event to its `on<Event>` prop, a call's result to
     /// its promise (converted now).
-    pub fn deliver(&self, event: nsh_core::ui::JsEvent) {
-        if let nsh_core::ui::JsEvent::Event(id, kind, payload) = &event {
+    pub fn deliver(&self, event: nsh_core::element::JsEvent) {
+        if let nsh_core::element::JsEvent::Event(id, kind, payload) = &event {
             self.dispatch_event(*id, *kind, payload);
             return;
         }
@@ -993,8 +993,8 @@ impl Host {
         ops.retain(|op| {
             !matches!(
                 op,
-                Op::Rust(nsh_core::ui::RustOp {
-                    run: nsh_core::ui::RustCall::Post(_),
+                Op::Rust(nsh_core::element::RustOp {
+                    run: nsh_core::element::RustCall::Post(_),
                     ..
                 })
             )
@@ -1043,12 +1043,23 @@ impl Host {
 
     /// Publishes the design tokens the app is drawn with to JS (`token()`
     /// of `nsh`). Call before evaluating the bundle, then on every change.
-    pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::ui::Tokens>) {
+    pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::element::Tokens>) {
         self.guarded(Phase::Call, || {
             self.cx.with(|cx| {
                 crate::env::set_tokens(cx.as_raw().as_ptr(), tokens);
             });
             self.run_jobs();
+        });
+    }
+
+    /// Sets how the app's theme file makes the tokens it is drawn with
+    /// ([`nsh_core::Core::theme_tokens`]): `token()` reads them from the
+    /// entry's first statement on, before the theme reaches the core. Call
+    /// before evaluating the bundle, then when the embedding app's tokens
+    /// change.
+    pub fn set_theme_tokens(&self, theme: nsh_core::element::ThemeTokens) {
+        self.cx.with(|cx| {
+            crate::env::set_theme_tokens(cx.as_raw().as_ptr(), theme);
         });
     }
 
@@ -1210,6 +1221,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         // The bytes cross natively: each file is a `File` over them.
         EventPayload::Paste(paste) => {
             obj.set("text", paste.text.as_str())?;
+            obj.set("html", paste.html.as_str())?;
             let files = rquickjs::Array::new(cx.clone())?;
             for (index, file) in paste.files.iter().enumerate() {
                 let blob = crate::web::blob::Blob::new(file.data.clone(), file.mime.clone());
@@ -2192,31 +2204,30 @@ const report = (v) => text(String(v));
             r##"import { element, prop } from "nsh:rt";
             prop(element("view"), "style", {
                 flexDirection: "row", backgroundColor: "#ff0000", bogus: 1,
-                shadowColor: "#000", shadowOffset: { width: 2, height: 6 },
-                shadowOpacity: 0.25, shadowRadius: 10,
+                boxShadow: "2px 6px 10px rgb(0 0 0 / 0.25)", textShadow: "0 1px 4px #000",
                 borderRadius: 12, borderBottomLeftRadius: 0,
-            });
-            prop(element("view"), "style", { shadowOffset: null });"##,
+            });"##,
         )
         .unwrap();
-        let styles: Vec<_> = ops(&host)
+        let style = ops(&host)
             .into_iter()
-            .filter_map(|op| match op {
+            .find_map(|op| match op {
                 Op::SetStyle { style, .. } => Some(style),
                 _ => None,
             })
-            .collect();
-        let style = &styles[0];
+            .unwrap();
         assert_eq!(format!("{:?}", style.layout.flex_direction), "Row");
         assert_eq!(style.view.background_color, nsh_core::Color(0xff00_00ff));
-        let shadow = style.view.shadow;
-        assert_eq!((shadow.offset_x.0, shadow.offset_y.0), (2.0, 6.0));
-        assert_eq!((shadow.opacity, shadow.radius.0), (0.25, 10.0));
+        let shadow = style.view.effects.as_ref().unwrap().box_shadows[0];
+        assert_eq!(
+            (shadow.offset_x.0, shadow.offset_y.0, shadow.blur.0),
+            (2.0, 6.0, 10.0)
+        );
+        assert_eq!(style.text.shadow_radius.map(|r| r.0), Some(4.0));
         assert_eq!(
             style.view.radii().to_array().map(|r| r.0),
             [12.0, 12.0, 12.0, 0.0]
         );
-        assert_eq!(styles[1].view.shadow, nsh_core::Shadow::DEFAULT);
     }
 
     /// `style={[base, props.style]}` where `props.style` is itself a list:

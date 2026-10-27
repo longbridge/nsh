@@ -51,7 +51,7 @@ nsh package App.tsx --target ios-simulator --run
 | 键 | 类型 | 默认值 | 用途 |
 |---|---|---|---|
 | `name` | string | 入口文件所在目录的名称 | 图标下方显示的名称（`CFBundleDisplayName`、Android 的 `android:label`），也用作输出文件名。 |
-| `id` | string | 必填 | Bundle identifier / Android 包名，使用你拥有的域名的反向 DNS 形式。它也决定应用[存储](../modules/nsh-storage.md)的位置，因此每个应用各有一份。`nsh package` 和 `nsh publish` 遇到 `com.example.` 占位 id 时会给出警告。 |
+| `id` | string | 必填 | Bundle identifier / Android 包名，使用你拥有的域名的反向 DNS 形式。它也决定应用[存储](../modules/nsh.md#storage)的位置，因此每个应用各有一份。`nsh package` 和 `nsh publish` 遇到 `com.example.` 占位 id 时会给出警告。 |
 | `version` | string | `"1.0.0"` | 用户可见的版本号（`CFBundleShortVersionString`、`versionName`）。 |
 | `build` | number | `1` | 构建号（`CFBundleVersion`、`versionCode`）。每次上传新版本都要递增。 |
 | `icon` | string | 无 | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
@@ -80,6 +80,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore <file>` | Android：release keystore（默认使用 debug 密钥）。 |
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <password>` | Android：keystore 密码；也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
+| `--abi <abi>` | Android：APK 包含的 ABI，可重复或用逗号分隔（默认：`arm64-v8a` 和 `armeabi-v7a`）。 |
 | `--run` | 构建完成后安装并启动：在 iOS 模拟器中，或在 `adb` 能看到的 Android 设备或模拟器上；macOS、Linux 和 Windows 应用在本机启动；Web 站点在本机提供服务并在浏览器中打开。不适用于 `--target ios`。 |
 
 ## iOS 模拟器
@@ -128,7 +129,12 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35，要求 API 28（Android 9）或更高版本；包含适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的原生代码。
+应用的目标 API 为 35，要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
+加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
+
+```sh
+nsh package --target android --abi arm64-v8a
+```
 
 ### 发布签名
 

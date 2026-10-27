@@ -27,7 +27,7 @@ mod hooks;
 mod keymap;
 pub(crate) mod language;
 pub(crate) mod languages;
-mod layout;
+pub(crate) mod layout;
 mod movement;
 mod parts;
 mod search;
@@ -54,7 +54,7 @@ pub use highlighter::{
 pub use hooks::{EditorBounds, EditorHoverEvent, EditorTextPressEvent};
 pub use languages::{EditorLanguage, register_highlighter, register_language};
 pub use layout::EditorScrollBeyond;
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 pub use parts::{EditorClasses, EditorPart, EditorStyles};
 pub use touch::EditorRect;
 

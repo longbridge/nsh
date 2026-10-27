@@ -3,7 +3,7 @@
 //! with messages both ways, a web site with its navigation state, back and
 //! forward, and a video with controls of the demo's own or the system's.
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, RoundButton,
@@ -132,7 +132,7 @@ fn Site() -> impl IntoElement {
                 .child(
                     text(move || state.with(|s| host(s.as_ref())))
                         .number_of_lines(1)
-                        .ellipsize_mode(nsh_core::EllipsizeMode::Middle)
+                        .text_overflow(nsh_core::EllipsizeMode::Middle)
                         .flex_1()
                         .text_size(px(15.0))
                         .text_color(colors::MUTED),

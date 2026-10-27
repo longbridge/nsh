@@ -1,7 +1,7 @@
 //! `Sheet`: a panel at an edge of the screen, over a backdrop, in
 //! overlays.
 
-use nsh_core::ui::{Style, prelude::*};
+use nsh_core::{element::Style, prelude::*};
 
 use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};
 
@@ -76,9 +76,7 @@ pub enum SheetEvent {
 pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
     let change = move |next: bool, reason: OpenChangeReason| {
-        if open.request(next) {
-            cx.emit(SheetEvent::OpenChange(next, reason));
-        }
+        open.request(next, || cx.emit(SheetEvent::OpenChange(next, reason)));
     };
     let motion = SheetMotion::new(move || open.get(), move || props.side.get());
     let height = animated_value(1.0);

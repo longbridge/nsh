@@ -331,7 +331,7 @@ pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
 }
 
 fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
-    if view.kind() == ViewKind::Input || is_key_control(view) {
+    if view.kind() == ViewKind::Input || is_key_stop(view) {
         return;
     }
     let Some(window) = view.ns().window() else {
@@ -439,7 +439,7 @@ fn cursor_at(hit: &Hit) -> Cursor {
             cursor_of(s.style.cursor)
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
                 .or_else(|| {
-                    (v == &hit.view && crate::selection_area::is_area_text(v, &s))
+                    (v == &hit.view && crate::selectable_view::is_area_text(v, &s))
                         .then_some(Cursor::Text)
                 })
         })
@@ -471,6 +471,12 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     if always || NSCursor::currentCursor() != cursor {
         cursor.set();
     }
+}
+
+/// Where the mouse last was (root coordinates), while it is over the root:
+/// where the pointer events the root got put it, the test agent's too.
+pub(crate) fn pointer_location(surface: &Surface) -> Option<(f32, f32)> {
+    surface.input.last.get()
 }
 
 /// Sets the cursor again where the mouse is (what is under it changed).
@@ -557,6 +563,19 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let (x, y) = (p.x as f32, p.y as f32);
     let time = event.timestamp() * 1000.0;
     let input = &surface.input;
+    // Every button's press and release puts the mouse there, the secondary
+    // ones' too: a menu the app opens on a right click without a place
+    // (`Menu.popup()`) opens where that click was, not where an earlier
+    // press left it (`chrome::popup`).
+    if matches!(
+        ty,
+        NSEventType::RightMouseDown
+            | NSEventType::RightMouseUp
+            | NSEventType::OtherMouseDown
+            | NSEventType::OtherMouseUp
+    ) {
+        input.last.set(Some((x, y)));
+    }
     match ty {
         // Control-click is the secondary click on macOS.
         NSEventType::LeftMouseDown
@@ -564,6 +583,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
                 .modifierFlags()
                 .contains(NSEventModifierFlags::Control) =>
         {
+            input.last.set(Some((x, y)));
             context_menu(surface, x, y, event.modifierFlags());
         }
         NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
@@ -738,15 +758,67 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     crate::scroll::key_scroll(surface, &hit.view, horizontal, m)
 }
 
-/// A mounted ordinary view that can be reached and activated by keyboard.
+/// A mounted ordinary view the keyboard focus stops at (Tab): one that
+/// takes presses, or any `focusable` one ([`nsh_core::ViewProps::focus_stop`]),
+/// shown and reachable by the pointer.
+pub(crate) fn is_key_stop(view: &NshView) -> bool {
+    {
+        let state = view.state();
+        if state.kind == ViewKind::Input
+            || !state
+                .props
+                .focus_stop(state.events.contains(EventKind::Press))
+        {
+            return false;
+        }
+    }
+    view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor()
+}
+
+/// A stop that Return and Space press ([`is_key_stop`] taking presses): a
+/// stop that takes none hears its keys through the app's keymap.
 pub(crate) fn is_key_control(view: &NshView) -> bool {
-    let state = view.state();
-    state.kind != ViewKind::Input
-        && state.events.contains(EventKind::Press)
-        && state.props.focusable != Some(false)
-        && !state.props.accessibility.state.disabled
-        && view.can_target()
-        && !view.ns().isHiddenOrHasHiddenAncestor()
+    is_key_stop(view) && view.state().events.contains(EventKind::Press)
+}
+
+/// `focus()` on a view that is not an input: the keyboard focus moves to
+/// it as Tab moves it there (its `becomeFirstResponder` sets `focus:` and
+/// reports `onFocus`), if it is a stop of Tab ([`is_key_stop`]).
+pub(crate) fn focus_control(surface: &Surface, view: &NshView) {
+    if !is_key_stop(view) || has_key_focus(view) {
+        return;
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    // A field that edits keeps the focus while a click is handled (the
+    // view refuses it then): the window takes it first, as `blur()` does.
+    if crate::text_input::editing(surface) {
+        window.makeFirstResponder(None);
+    }
+    window.makeFirstResponder(Some(view.ns()));
+}
+
+/// `blur()` on a view that is not an input and has the keyboard focus:
+/// the surface's root takes it, as when an input is blurred.
+pub(crate) fn blur_control(surface: &Surface, view: &NshView) {
+    if let Some(window) = view.ns().window()
+        && has_key_focus(view)
+    {
+        window.makeFirstResponder(Some(surface.root.ns()));
+    }
+}
+
+/// Whether `view` itself is its window's first responder.
+fn has_key_focus(view: &NshView) -> bool {
+    view.ns()
+        .window()
+        .and_then(|window| window.firstResponder())
+        .is_some_and(|responder| {
+            responder
+                .downcast_ref::<objc2_app_kit::NSView>()
+                .is_some_and(|v| v == view.ns())
+        })
 }
 
 /// Enter or Space addressed to a focused control inside the current modal.
@@ -771,8 +843,8 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 }
 
 /// Tab / Shift+Tab (or with Control) with the root focused: moves into
-/// AppKit's key view loop (fields and pressable views), from the first or last, so
-/// focus never gets stuck on the root.
+/// AppKit's key view loop (fields and the views [`is_key_stop`] takes), from
+/// the first or last, so focus never gets stuck on the root.
 fn tab(surface: &Surface, event: &NSEvent) -> bool {
     const TAB: u16 = 48;
     let flags = event.modifierFlags();
@@ -790,7 +862,7 @@ fn tab(surface: &Surface, event: &NSEvent) -> bool {
     let from = responder
         .as_ref()
         .and_then(|responder| responder.downcast_ref::<objc2_app_kit::NSView>())
-        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_control(&view)))
+        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_stop(&view)))
         .unwrap_or(surface.root.ns());
     crate::text_input::tab(surface, from, flags.contains(NSEventModifierFlags::Shift));
     true
@@ -1069,10 +1141,10 @@ fn down(
         finish(surface, stale, true);
     }
     let hit = pick(&surface.root, x, y);
-    // A selection area around the view selects across its texts; else a
+    // A selectable view around the view selects across its texts; else a
     // selectable text selects alone.
     let selecting = hit.as_ref().filter(|h| !h.native).and_then(|h| {
-        crate::selection_area::target(&h.view)
+        crate::selectable_view::target(&h.view)
             .or_else(|| crate::text::selectable(&h.view.state()).then(|| h.view.clone()))
     });
     let Some(hit) = hit else {
@@ -1164,8 +1236,8 @@ fn down(
             .map(|p| p.clicked(modifiers(flags), clicks as u32))
     };
     match &selecting {
-        Some(area) if crate::selection_area::is_area(area) => {
-            crate::selection_area::down(surface, area, x, y, clicks, shift, press.is_some());
+        Some(area) if crate::selectable_view::is_area(area) => {
+            crate::selectable_view::down(surface, area, x, y, clicks, shift, press.is_some());
         }
         Some(view) => {
             let (lx, ly) = local(surface, view, x, y);
@@ -1243,8 +1315,8 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     if let Mode::Select(view) = &p.mode {
         let view = view.clone();
-        let selects = if crate::selection_area::is_area(&view) {
-            crate::selection_area::drag(surface, &view, tx, ty, x, y)
+        let selects = if crate::selectable_view::is_area(&view) {
+            crate::selectable_view::drag(surface, &view, tx, ty, x, y)
         } else {
             let (lx, ly) = local(surface, &view, x, y);
             crate::text::selection_drag(&view, tx, ty, lx, ly)
@@ -1367,8 +1439,8 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
 /// The button pressed on selecting `view` (an area's or a text's) went
 /// up. True if it ended a selecting drag.
 fn selection_up(surface: &Surface, view: &NshView) -> bool {
-    if crate::selection_area::is_area(view) {
-        crate::selection_area::up(surface)
+    if crate::selectable_view::is_area(view) {
+        crate::selectable_view::up(surface)
     } else {
         crate::text::selection_up(view)
     }

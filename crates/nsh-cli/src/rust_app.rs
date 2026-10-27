@@ -51,7 +51,7 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
-use nsh_core::ui::description::{Description, SetDescription};
+use nsh_core::element::description::{Description, SetDescription};
 
 use crate::{runtime::Platform, ui};
 
@@ -840,7 +840,17 @@ impl RustApp {
                 }
             })?;
         self.watch_with(&mut watcher)?;
-        for event in &rx {
+        loop {
+            if ui::stop_requested() {
+                return Ok(());
+            }
+            let event = match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(event) => event,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    bail!("stopped watching the app's Rust code");
+                }
+            };
             // Reads (inotify reports them) change nothing.
             if !matches!(event.kind, notify::EventKind::Access(_))
                 && event.paths.iter().any(|p| self.is_rust(p))
@@ -851,7 +861,6 @@ impl RustApp {
                 return Ok(());
             }
         }
-        bail!("stopped watching the app's Rust code")
     }
 
     /// What the steps say they build: `the Rust crate charts`, `the Rust
@@ -933,6 +942,7 @@ impl RustApp {
         };
         let sets = self.sets();
         let ws = &self.workspace;
+        let web_dev = self.web_dev_profile();
         // A Rust app's runners too (`nsh.json` "root"), only then: they
         // name its root component.
         let rust = if self.root.is_some() {
@@ -961,7 +971,7 @@ strip = true
 panic = \"abort\"
 [profile.web.package.quickjs-jit-sys]
 opt-level = 3
-"),
+{web_dev}"),
             false,
         )?;
         // What earlier versions of nsh wrote: the app's own command line,
@@ -1049,7 +1059,7 @@ opt-level = 3
                 "//! Describes the app's UI sets for `nsh`: one JSON document on standard\n\
                  //! output (nsh-core `ui::description`).\n\n\
                  fn main() {{\n    let sets = vec![{}];\n    \
-                 println!(\"{{}}\", nsh_core::ui::description::Description::of(&sets).to_json());\n}}\n{}",
+                 println!(\"{{}}\", nsh_core::element::description::Description::of(&sets).to_json());\n}}\n{}",
                 calls.join(", "),
                 self.app_sets("")
             ),
@@ -1270,6 +1280,7 @@ opt-level = 3
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [features]\n# The runtime of published apps: bytecode only (nsh-platform-web).\n\
                  bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\
+                 browser = [\"nsh-platform-web/browser\"]\n\
                  # The development host's: what `nsh test --target web` asks about.\n\
                  dev = [\"nsh-platform-web/dev\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
@@ -1278,7 +1289,8 @@ opt-level = 3
                 self.web_lib(),
                 src("nsh-core"),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                src("nsh-platform-web"),
+                self.nsh
+                    .dep("nsh-platform-web", ", default-features = false"),
             ),
         )?;
         // nsh's `.cargo/config.toml` gives its own web runtime this stack
@@ -1310,6 +1322,43 @@ opt-level = 3
         )
     }
 
+    /// The profile of the development web runtime (`web-dev`, for
+    /// [`WebKind::Dev`](crate::runtime::WebKind::Dev)), which is built again
+    /// on every change to the app's Rust code: incremental and without LTO,
+    /// so an edit to an app crate rebuilds in well under a second where
+    /// `web`'s fat LTO over one codegen unit re-optimizes the whole module.
+    /// The app's crates are at `-O1` (what changes), the other crates for
+    /// size and QuickJS at `-O3` (it dominates the runtime's cost). It panics
+    /// as `web` does (`abort`) and has no debug assertions, so the page
+    /// behaves as the published one.
+    fn web_dev_profile(&self) -> String {
+        let mut profile = String::from(
+            "
+# The development web runtime (`nsh run --target web`): built again on
+# every change to the app's Rust code, so incremental and without LTO; the
+# app's crates at -O1, the others for size, QuickJS at -O3.
+[profile.web-dev]
+inherits = \"dev\"
+opt-level = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+panic = \"abort\"
+[profile.web-dev.package.\"*\"]
+opt-level = \"s\"
+[profile.web-dev.package.quickjs-jit-sys]
+opt-level = 3
+",
+        );
+        for c in &self.crates {
+            profile.push_str(&format!(
+                "[profile.web-dev.package.{:?}]\nopt-level = 1\n",
+                c.package
+            ));
+        }
+        profile
+    }
+
     /// The web runtime's library name (its module is `<name>.wasm`),
     /// after the app as its binaries are ([`Self::bin`]).
     fn web_lib(&self) -> String {
@@ -1317,9 +1366,10 @@ opt-level = 3
     }
 
     /// The app's web runtime of `kind` (its `nsh.wasm` / `nsh-dev.wasm`, and
-    /// nsh's `nsh.js`), built for `wasm32-unknown-unknown` with the `web`
-    /// profile as nsh builds its own (`runtime::web`). Without `build`, the
-    /// one built before, if any.
+    /// nsh's `nsh.js`), built for `wasm32-unknown-unknown`: a release one
+    /// with the `web` profile as nsh builds its own (`runtime::web`), a
+    /// development one with `web-dev` ([`Self::web_dev_profile`]). Without
+    /// `build`, the one built before, if any.
     pub(crate) fn web(
         &self,
         kind: crate::runtime::WebKind,
@@ -1384,7 +1434,7 @@ opt-level = 3
         // nor hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Release => &["--features", "bytecode-only"],
+            crate::runtime::WebKind::Browser => &["--features", "browser"],
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -1400,7 +1450,7 @@ opt-level = 3
             package: &package,
             triple: Some(WASM),
             release: false,
-            profile: Some("web"),
+            profile: Some(web_profile(kind)),
             extra: features,
             artifact: &artifact,
             what: &format!("the web runtime of {}", self.packages()),
@@ -1412,6 +1462,10 @@ opt-level = 3
         runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
         if self.nsh == Nsh::Registry {
             let js = self.registry_crate("nsh-platform-web")?.join("web/nsh.js");
+            crate::runtime::copy_browser_host(
+                js.parent().context("web runtime has no parent")?,
+                &out,
+            )?;
             fs::copy(&js, &runtime.js)
                 .with_context(|| format!("copy {} to {}", js.display(), runtime.js.display()))?;
         }
@@ -1776,21 +1830,33 @@ opt-level = 3
     }
 
     /// The Android runtime of the app: the prebuilt runtime's `classes.dex`
-    /// with the app's `libnsh.so` for each of its ABIs.
-    pub(crate) fn android(&self, prebuilt: &Path, dev: bool) -> anyhow::Result<PathBuf> {
-        self.android_runtime(prebuilt, dev, self.root.is_some())
+    /// with the app's `libnsh.so` for each of `abis` (empty: each ABI of the
+    /// prebuilt runtime).
+    pub(crate) fn android(
+        &self,
+        prebuilt: &Path,
+        dev: bool,
+        abis: &[String],
+    ) -> anyhow::Result<PathBuf> {
+        self.android_runtime(prebuilt, dev, self.root.is_some(), abis)
     }
 
     /// The Android runtime `nsh test --target android` runs the app in: the
     /// development library, a Rust app's too (with its root, which it runs
     /// when the test session says so).
     pub(crate) fn test_android(&self, prebuilt: &Path) -> anyhow::Result<PathBuf> {
-        self.android_runtime(prebuilt, true, false)
+        self.android_runtime(prebuilt, true, false, &[])
     }
 
     /// [`Self::android`]; `rust`: a Rust app's runner library, with no
     /// development support.
-    fn android_runtime(&self, prebuilt: &Path, dev: bool, rust: bool) -> anyhow::Result<PathBuf> {
+    fn android_runtime(
+        &self,
+        prebuilt: &Path,
+        dev: bool,
+        rust: bool,
+        abis: &[String],
+    ) -> anyhow::Result<PathBuf> {
         let sdk = crate::android::Sdk::find()?;
         let out = self.workspace.join(match (rust, dev) {
             (true, true) => "android-rust-dev",
@@ -1802,6 +1868,10 @@ opt-level = 3
         install(&prebuilt.join("classes.dex"), &out.join("classes.dex"))?;
         for entry in fs::read_dir(prebuilt.join("lib"))? {
             let abi = entry?.file_name().to_string_lossy().into_owned();
+            // Only what the APK takes: each ABI is a build of its own.
+            if !abis.is_empty() && !abis.contains(&abi) {
+                continue;
+            }
             let triple = match abi.as_str() {
                 "arm64-v8a" => "aarch64-linux-android",
                 "armeabi-v7a" => "armv7-linux-androideabi",
@@ -1903,7 +1973,7 @@ impl RustApp {
         for krate in &self.crates {
             code.push_str(&format!(
                 "\n/// The UI set of the crate {}: the entry `#[native_module(\"…\")]` makes in it.\n\
-                 {cfg}fn {}() -> nsh_core::ui::Registry {{\n    \
+                 {cfg}fn {}() -> nsh_core::element::Registry {{\n    \
                  #[allow(unused_imports)]\n    use {}::*;\n    \
                  {ENTRY}() // the crate {} (nsh.json \"rust\")\n}}\n",
                 krate.package,
@@ -1914,7 +1984,7 @@ impl RustApp {
         }
         code.push_str(&format!(
             "\n// Without the entry: nsh's stand-in, which fails the build saying what to add.\n\
-             {cfg}#[allow(unused_imports)]\nuse nsh_core::ui::__private::no_native_module as {ENTRY};\n"
+             {cfg}#[allow(unused_imports)]\nuse nsh_core::element::__private::no_native_module as {ENTRY};\n"
         ));
         code
     }
@@ -1938,7 +2008,10 @@ fn set_fn(krate: &AppCrate) -> String {
 /// `"appearance"`, `"statusBar"`, `"id"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
-    let mut make = format!("nsh_core::ui::Root::of::<{krate}::{}>()", root.component);
+    let mut make = format!(
+        "nsh_core::element::Root::of::<{krate}::{}>()",
+        root.component
+    );
     if let Some(theme) = &root.theme {
         make.push_str(&format!(
             "\n        .tokens(\n            nsh_base::Theme::from_json(include_str!({:?}))\n                \
@@ -1956,7 +2029,7 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
             "Light"
         };
         make.push_str(&format!(
-            "\n        .appearance(nsh_core::ui::Appearance::{variant})"
+            "\n        .appearance(nsh_core::element::Appearance::{variant})"
         ));
     }
     if let Some(setting) = root
@@ -1982,7 +2055,7 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     format!(
         "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and\n\
          /// status bar.\n\
-         {cfg}fn app_root() -> nsh_core::ui::Root {{\n    {make}\n}}\n"
+         {cfg}fn app_root() -> nsh_core::element::Root {{\n    {make}\n}}\n"
     )
 }
 
@@ -2104,6 +2177,15 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
     match name {
         "nsh-platform-gpui" | "nsh-gpui-host" => source.join("crates/gpui").join(name),
         _ => source.join("crates").join(name),
+    }
+}
+
+/// The profile the app's web runtime of `kind` builds with: `web` for
+/// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
+fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
+    match kind {
+        crate::runtime::WebKind::Browser => "web",
+        crate::runtime::WebKind::Dev => "web-dev",
     }
 }
 
@@ -2230,7 +2312,7 @@ mod tests {
         write_crate(
             &dir.join("native/storage"),
             "storage",
-            "use nsh_core::ui::prelude::*;\n\n#[nsh_core::ui::native_module( \"app/storage\" )]\nfn native(r: &mut Registry) {}\n",
+            "use nsh_core::prelude::*;\n\n#[nsh_core::element::native_module( \"app/storage\" )]\nfn native(r: &mut Registry) {}\n",
             "",
         );
         let json = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
@@ -2468,10 +2550,10 @@ mod tests {
             },
         );
         for line in [
-            "#[cfg(x)]\nfn app_root() -> nsh_core::ui::Root {",
-            "nsh_core::ui::Root::of::<app_native::App>()",
+            "#[cfg(x)]\nfn app_root() -> nsh_core::element::Root {",
+            "nsh_core::element::Root::of::<app_native::App>()",
             "include_str!(\"/app/theme.json\")",
-            ".appearance(nsh_core::ui::Appearance::Dark)",
+            ".appearance(nsh_core::element::Appearance::Dark)",
             ".app_id(\"com.example.app\")",
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
         ] {
@@ -2522,7 +2604,7 @@ mod tests {
                 "{main}"
             );
             assert!(
-                main.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
+                main.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
                 "{main}"
             );
         }
@@ -2539,7 +2621,7 @@ mod tests {
         let test = read("test/main.rs");
         assert!(test.contains("nsh_testing::runner(vec![nsh_base::registry(), set_app_app_native()], Some(app_root))"), "{test}");
         assert!(
-            test.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
+            test.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
             "{test}"
         );
         assert!(manifest.contains("\"rust-web\"]"), "{manifest}");
@@ -2561,7 +2643,7 @@ mod tests {
                 "{main}"
             );
             assert!(
-                main.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
+                main.contains("nsh_core::element::Root::of::<app_app_native::App>()"),
                 "{main}"
             );
         }
@@ -2819,6 +2901,100 @@ mod tests {
     }
 
     #[test]
+    fn web_dev_profile_builds_the_development_runtime_incrementally() {
+        use crate::runtime::WebKind;
+        let dir = std::env::temp_dir().join(format!("nsh-rust-web-dev-{}", std::process::id()));
+        let app = app(
+            &dir,
+            &[
+                ("app-charts", dir.join("charts")),
+                ("app-storage", dir.join("storage")),
+            ],
+            None,
+        );
+        app.write_workspace().unwrap();
+        let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
+        assert_eq!(super::web_profile(WebKind::Dev), "web-dev");
+        let profile = |name: &str| -> Vec<String> {
+            let header = format!("[{name}]");
+            let mut lines = manifest.lines().skip_while(|l| *l != header).skip(1);
+            let mut keys = Vec::new();
+            for line in lines.by_ref() {
+                if line.starts_with('[') || line.is_empty() {
+                    break;
+                }
+                keys.push(line.to_owned());
+            }
+            keys
+        };
+        let web_dev = profile("profile.web-dev");
+        for key in [
+            "inherits = \"dev\"",
+            "opt-level = 1",
+            "panic = \"abort\"",
+            "debug-assertions = false",
+        ] {
+            assert!(web_dev.iter().any(|l| l == key), "{key}: {manifest}");
+        }
+        // Incremental: no LTO, and dev's codegen units.
+        assert!(
+            !web_dev
+                .iter()
+                .any(|l| l.starts_with("lto") || l.starts_with("codegen-units"))
+        );
+        assert_eq!(
+            profile("profile.web-dev.package.\"*\""),
+            ["opt-level = \"s\""]
+        );
+        assert_eq!(
+            profile("profile.web-dev.package.quickjs-jit-sys"),
+            ["opt-level = 3"]
+        );
+        for package in ["app-charts", "app-storage"] {
+            let name = format!("profile.web-dev.package.\"{package}\"");
+            assert_eq!(profile(&name), ["opt-level = 1"], "{manifest}");
+        }
+        // As nsh's own manifest, for the debug builds of the hosts: each
+        // table once, or Cargo rejects the manifest as a duplicate key.
+        assert_eq!(
+            profile("profile.dev.package.quickjs-jit-sys"),
+            ["opt-level = 3"]
+        );
+        assert_eq!(profile("profile.dev.package.taffy"), ["opt-level = 3"]);
+        for table in [
+            "[profile.dev.package.quickjs-jit-sys]",
+            "[profile.dev.package.taffy]",
+            "[profile.web-dev]",
+        ] {
+            assert_eq!(manifest.matches(table).count(), 1, "{table}: {manifest}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn web_dev_profile_leaves_the_release_runtime_s_profile_as_it_was() {
+        use crate::runtime::WebKind;
+        let dir = std::env::temp_dir().join(format!("nsh-rust-web-rel-{}", std::process::id()));
+        let app = app(&dir, &[("app-native", dir.join("native"))], None);
+        app.write_workspace().unwrap();
+        let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
+        assert_eq!(super::web_profile(WebKind::Browser), "web");
+        let web = "[profile.web]
+inherits = \"release\"
+opt-level = \"z\"
+lto = \"fat\"
+codegen-units = 1
+strip = true
+panic = \"abort\"
+[profile.web.package.quickjs-jit-sys]
+opt-level = 3
+";
+        assert!(manifest.contains(web), "{manifest}");
+        assert_eq!(manifest.matches("[profile.web.").count(), 1, "{manifest}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_generated_code_calls_the_entry_of_the_crate() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-app-ws-{}", std::process::id()));
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
@@ -2870,10 +3046,10 @@ mod tests {
             for line in [
                 "vec![nsh_base::registry(), set_app_app_native()]".to_owned(),
                 format!(
-                    "{cfg}fn set_app_app_native() -> nsh_core::ui::Registry {{\n    #[allow(unused_imports)]\n    use app_app_native::*;\n    __nsh_native_module() // the crate app-native (nsh.json \"rust\")\n}}"
+                    "{cfg}fn set_app_app_native() -> nsh_core::element::Registry {{\n    #[allow(unused_imports)]\n    use app_app_native::*;\n    __nsh_native_module() // the crate app-native (nsh.json \"rust\")\n}}"
                 ),
                 format!(
-                    "{cfg}#[allow(unused_imports)]\nuse nsh_core::ui::__private::no_native_module as __nsh_native_module;"
+                    "{cfg}#[allow(unused_imports)]\nuse nsh_core::element::__private::no_native_module as __nsh_native_module;"
                 ),
             ] {
                 assert!(code.contains(&line), "{file}: no {line:?} in\n{code}");
@@ -2964,7 +3140,7 @@ mod tests {
             // Each crate's entry in its own function; one stand-in.
             for (name, package) in [("app_charts", "charts"), ("app_app_storage", "app-storage")] {
                 let set = format!(
-                    "fn set_{name}() -> nsh_core::ui::Registry {{\n    #[allow(unused_imports)]\n    use {name}::*;\n    __nsh_native_module() // the crate {package} (nsh.json \"rust\")\n}}"
+                    "fn set_{name}() -> nsh_core::element::Registry {{\n    #[allow(unused_imports)]\n    use {name}::*;\n    __nsh_native_module() // the crate {package} (nsh.json \"rust\")\n}}"
                 );
                 assert!(code.contains(&set), "{dir}: no {set:?} in\n{code}");
             }
@@ -2977,7 +3153,7 @@ mod tests {
             // The root is a component of the first crate listed.
             if dir.contains("rust-") {
                 assert!(
-                    code.contains("nsh_core::ui::Root::of::<app_charts::shell::Home>()"),
+                    code.contains("nsh_core::element::Root::of::<app_charts::shell::Home>()"),
                     "{dir}: {code}"
                 );
             }
@@ -3007,7 +3183,7 @@ mod tests {
 
     #[test]
     fn the_cli_reads_the_description_of_the_app_s_crates() {
-        use nsh_core::ui::description::{Description, SetDescription};
+        use nsh_core::element::description::{Description, SetDescription};
         let crates = |packages: &[&str]| -> Vec<AppCrate> {
             packages
                 .iter()
@@ -3018,7 +3194,7 @@ mod tests {
                 .collect()
         };
         let set = |specifier: &'static str| -> SetDescription {
-            nsh_core::ui::Registry::ui_set(specifier).into()
+            nsh_core::element::Registry::ui_set(specifier).into()
         };
         let text = |sets: Vec<SetDescription>| {
             Description {
@@ -3053,7 +3229,7 @@ mod tests {
                 .starts_with("the description of the Rust crates: the description is in format 0")
         );
         // A specifier of nsh's own or of another crate.
-        for nsh in ["nsh/base", "nsh", "nsh/image"] {
+        for nsh in ["nsh/base", "nsh", "nsh/mobile"] {
             let error = read(&text(vec![set(nsh)]), &["charts"]).unwrap_err();
             assert!(
                 error.contains(&format!(

@@ -136,6 +136,9 @@ final class ScrollBox extends FrameLayout implements Node {
         // The view or its content changed size: scroll what was clamped.
         scroller.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> payOwed());
         scroller.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+            // Layout may clamp against a mixture of old and new pixel
+            // sizes. Report only after restoring the logical offset.
+            if (rescaling) return;
             if (stickyCells.length > 0) pinSticky();
             if (touching && !dragging && !swallowing) {
                 dragging = true;
@@ -167,6 +170,10 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     void setContentSize(int width, int height) {
+        if (rescaling) {
+            rescaledContent = true;
+            requestLayout();
+        }
         content.contentWidth = width;
         content.contentHeight = height;
         if (scroller instanceof ZScroll) {
@@ -364,6 +371,12 @@ final class ScrollBox extends FrameLayout implements Node {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
         }
 
+        void stop() {
+            // Bypass snapping: a zero-velocity native fling replaces the
+            // previous scroller animation at its current position.
+            super.fling(0);
+        }
+
         @Override
         public void draw(Canvas canvas) {
             super.draw(canvas);
@@ -394,6 +407,12 @@ final class ScrollBox extends FrameLayout implements Node {
         @Override
         public void fling(int velocity) {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
+        }
+
+        void stop() {
+            // Bypass snapping: a zero-velocity native fling replaces the
+            // previous scroller animation at its current position.
+            super.fling(0);
         }
 
         @Override
@@ -457,6 +476,47 @@ final class ScrollBox extends FrameLayout implements Node {
         return true;
     }
 
+    /** Saved pixel target in the new density, until content and viewport are laid out. */
+    private boolean rescaling, rescaledContent;
+    private int rescaledX, rescaledY;
+
+    void rescale(float scale) {
+        rescaledX = Math.round((rescaling ? rescaledX : scroller.getScrollX() + owedX) * scale);
+        rescaledY = Math.round((rescaling ? rescaledY : scroller.getScrollY() + owedY) * scale);
+        rescaling = true;
+        rescaledContent = false;
+        owedX = owedY = 0;
+        removeCallbacks(settled);
+        // Native motion also uses pixels: end it before restoring the
+        // position, so an old fling cannot move it back on the next frame.
+        stopMotion();
+    }
+
+    private void stopMotion() {
+        if (scroller instanceof ZScroll) ((ZScroll) scroller).stop();
+        else if (scroller instanceof VScroll) ((VScroll) scroller).stop();
+        else if (scroller instanceof HScroll) ((HScroll) scroller).stop();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        if (!rescaling || !rescaledContent) return;
+        // Unlike a core scroll command, changing coordinate systems does
+        // not increment `applied`. A smaller content area may clamp this
+        // final offset; tell the core so virtual lists follow the result.
+        if (scroller instanceof ZScroll) ((ZScroll) scroller).scrollToPx(rescaledX, rescaledY, false);
+        else scroller.scrollTo(rescaledX, rescaledY);
+        // The zero-velocity native scroller must also start at this new
+        // position, rather than writing its pre-rescale position next frame.
+        stopMotion();
+        rescaling = false;
+        pinSticky();
+        float d = mounter.density;
+        mounter.scroll(id, scroller.getScrollX() / d, scroller.getScrollY() / d, applied);
+        postDelayed(settled, 120);
+    }
+
     /** Scrolls the core asked for that were applied (reported with offsets). */
     private int applied;
 
@@ -469,6 +529,11 @@ final class ScrollBox extends FrameLayout implements Node {
 
     void scrollByPx(int dx, int dy) {
         applied++;
+        if (rescaling) {
+            rescaledX += dx;
+            rescaledY += dy;
+            return;
+        }
         int x = scroller.getScrollX() + dx + owedX, y = scroller.getScrollY() + dy + owedY;
         scroller.scrollTo(x, y);
         owedX = x - scroller.getScrollX();
@@ -477,7 +542,7 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /** Pays what clamping kept back, as far as the current size allows. */
     private void payOwed() {
-        if (owedX == 0 && owedY == 0) return;
+        if (rescaling || (owedX == 0 && owedY == 0)) return;
         int x = scroller.getScrollX() + owedX, y = scroller.getScrollY() + owedY;
         scroller.scrollTo(x, y);
         owedX = x - scroller.getScrollX();
@@ -486,6 +551,11 @@ final class ScrollBox extends FrameLayout implements Node {
 
     void scrollToPx(int x, int y, boolean animated) {
         applied++;
+        if (rescaling) {
+            rescaledX = x;
+            rescaledY = y;
+            return;
+        }
         if (scroller instanceof ZScroll) {
             ((ZScroll) scroller).scrollToPx(x, y, animated);
         } else if (scroller instanceof ScrollView) {
@@ -517,6 +587,28 @@ final class ScrollBox extends FrameLayout implements Node {
     /** `ScrollBehavior` zoom settings. */
     private boolean zooms, bouncesZoom = true, pinch = true, centerContent;
     private float minZoom = 1, maxZoom = 1;
+
+    /** Pull to refresh: whether the spinner shows, where (dp) a pull refreshes and the room kept while refreshing. */
+    private boolean refreshIndicator = true;
+    private float refreshThreshold = 64, refreshInset = 56;
+
+    /** `refreshIndicator`: the app draws its own, {@code height} dp tall, in place of the spinner. */
+    void setRefresh(boolean own, float height) {
+        float inset = own ? height : 56;
+        boolean changed = refreshIndicator == own || inset != refreshInset;
+        refreshIndicator = !own;
+        refreshThreshold = own ? height : 64;
+        refreshInset = inset;
+        if (!changed) return;
+        if (own) {
+            spinner.setVisibility(GONE);
+        } else if (refreshing) {
+            spinner.setVisibility(VISIBLE);
+            spinner.setAlpha(1);
+        }
+        // A refresh in progress keeps the room of the indicator now showing.
+        if (refreshing && !pulling) animatePull(inset * mounter.density, null);
+    }
 
     void setZoom(boolean zooms, float min, float max, boolean bouncesZoom, boolean pinch, boolean center) {
         minZoom = min;
@@ -1016,13 +1108,15 @@ final class ScrollBox extends FrameLayout implements Node {
             case MotionEvent.ACTION_MOVE:
                 // Resistance like a rubber band.
                 setPull(Math.max(0, (e.getY() - startY) * 0.5f));
-                spinner.setVisibility(VISIBLE);
-                spinner.setAlpha(Math.min(1, pull / (64 * d)));
+                if (refreshIndicator) {
+                    spinner.setVisibility(VISIBLE);
+                    spinner.setAlpha(Math.min(1, pull / (refreshThreshold * d)));
+                }
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 pulling = false;
-                if (pull >= 64 * d) {
+                if (pull >= refreshThreshold * d) {
                     setRefreshing(true);
                     mounter.event(id, Native.REFRESH);
                 } else {
@@ -1038,18 +1132,23 @@ final class ScrollBox extends FrameLayout implements Node {
         refreshing = on;
         float d = mounter.density;
         if (on) {
-            spinner.setVisibility(VISIBLE);
-            spinner.setAlpha(1);
-            animatePull(56 * d, null);
+            if (refreshIndicator) {
+                spinner.setVisibility(VISIBLE);
+                spinner.setAlpha(1);
+            }
+            animatePull(refreshInset * d, null);
         } else {
             animatePull(0, () -> spinner.setVisibility(GONE));
         }
     }
 
     private void setPull(float px) {
+        if (px == pull) return;
         pull = px;
         scroller.setTranslationY(px);
         spinner.setTranslationY(Math.max(0, px / 2 - spinner.getHeight() / 2f));
+        // The pull is a translation, not a scroll: the offset stays 0.
+        mounter.pull(id, px / mounter.density);
     }
 
     private void animatePull(float to, Runnable end) {

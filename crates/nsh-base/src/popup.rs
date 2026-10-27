@@ -1,7 +1,7 @@
 //! What the popups of `nsh/base` share (`Popover`, `Menu`, `ContextMenu`,
 //! `Tooltip`, `Sheet`): their open state, controlled or not, and why it
 //! changed. They show their content in the core's overlays
-//! (`nsh_core::ui::overlay`), which place it and report presses outside,
+//! (`nsh_core::element::overlay`), which place it and report presses outside,
 //! Escape and the back button; deciding to close is theirs.
 //!
 //! How a popup presents itself follows the device (`auto`, the only
@@ -13,7 +13,7 @@
 //! (a transparent backdrop takes it). A popover stays anchored to its
 //! trigger everywhere: what it shows belongs next to it.
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 /// Why a popup opened or closed (`onOpenChange`'s `reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -67,16 +67,20 @@ impl OpenState {
             .unwrap_or_else(|| self.own.get_untracked())
     }
 
-    /// The user asks for it to be `open`: its own state follows when the
-    /// app does not control it; whether it is a change to report.
-    pub(crate) fn request(self, open: bool) -> bool {
+    /// The user asks for it to be `open`: when that is a change, `report`
+    /// runs (the popup emits `OpenChange`), then its own state follows when
+    /// the app does not control it. Reported first: the lifecycle
+    /// ([`lifecycle`]) emits `Open` / `Close` as the state changes, at once
+    /// where the popup has no motion (the desktops, reduced motion), and
+    /// the app hears `onOpenChange` before them.
+    pub(crate) fn request(self, open: bool, report: impl FnOnce()) {
         if self.get_untracked() == open {
-            return false;
+            return;
         }
+        report();
         if self.controlled.get_untracked().is_none() {
             self.own.set(open);
         }
-        true
     }
 }
 

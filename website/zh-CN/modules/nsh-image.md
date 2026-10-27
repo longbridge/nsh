@@ -9,14 +9,14 @@ order: 2.2
 `nsh` 导出 `Image`，即显示图片的 [`<Image>`](../elements/image.md) 元素。同一个 `Image` 还可以在不显示图片的情况下向原生图片加载器查询图片信息：尺寸，以及在显示之前预先加载。
 
 ```ts
-import { Image, type ImageSize } from "nsh";
+import { Image, type PixelSize } from "nsh";
 ```
 
 `Image` 是一个带有两个函数的组件：`<Image src=…>` 渲染原生图片视图（编译器像处理 `<View>` 一样就地创建它），`Image.getSize` / `Image.prefetch` 则直接在它上面调用。
 
 ```ts
 const Image: ((props: ImageProps) => YNode) & {
-  getSize(src: string | ImageAsset): Promise<ImageSize>;
+  getSize(src: string | ImageAsset): Promise<PixelSize>;
   prefetch(src: string | ImageAsset): Promise<boolean>;
 };
 ```
@@ -26,9 +26,9 @@ const Image: ((props: ImageProps) => YNode) & {
 ## Image.getSize
 
 ```ts
-getSize(src: string | ImageAsset): Promise<ImageSize>;
+getSize(src: string | ImageAsset): Promise<PixelSize>;
 
-interface ImageSize {
+interface PixelSize {
   width: number;   // 像素（SVG 为点）
   height: number;
 }
@@ -62,7 +62,7 @@ next.forEach((p) => Image.prefetch(p.url));
 
 ## 相关内容
 
-- [`<Image>`](../elements/image.md)：`src`、`resizeMode`、`placeholder`、`onLoad`、`onProgress`、`onError` 等属性。
+- [`<Image>`](../elements/image.md)：`src`、`placeholder`、`objectFit` 样式、`onLoad`、`onProgress`、`onError` 等属性。
 - 导入图片文件（`import logo from "./logo.png"`）会得到一个 `ImageAsset`（`{ url, size, scales? }`，尺寸单位为点），`<Image src>` 和画布的 `drawImage` 都接受它。
 
 > [!NOTE]

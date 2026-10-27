@@ -16,17 +16,12 @@ pub enum AnimationProp {
     BorderColor,
     /// `color` of a text: the whole text takes it.
     Color,
-    /// `shadowColor`.
-    ShadowColor,
-    /// `shadowOpacity`, 0..1.
-    ShadowOpacity,
-    /// `shadowRadius`, in points.
-    ShadowRadius,
     /// The value of entry `n` of the view's `transform` list (translations
     /// in points, rotations and skews in degrees).
     Transform(u8),
-    /// Animated value slot `n` of a canvas drawing: the canvas draws again
-    /// with it (a number or a color).
+    /// Animated value slot `n` of a canvas drawing, or of a shader's layer
+    /// ([`crate::shader::ShaderLayer::slots`]): the canvas or the shader
+    /// draws again with it (a number or a color).
     CanvasArg(u16),
     /// `top` of a `position: sticky` view: how far from the viewport's
     /// start of a vertical scroll view it sticks. The core hands it to the
@@ -35,6 +30,48 @@ pub enum AnimationProp {
     StickyTop,
     /// `left`: the same in a horizontal scroll view.
     StickyLeft,
+    /// Animated prop slot `n` of a registered native component: the platform
+    /// hands the value to the component under the slot's name
+    /// ([`crate::mount::MountItem::ComponentPropSlots`]), a number or a color.
+    ComponentSlot(u16),
+}
+
+/// The value of a native component's animated prop
+/// ([`AnimationProp::ComponentSlot`]), as the platform hands it over.
+///
+/// Values are equal when their bits are: a NaN that stays NaN is not a change
+/// to hand over again.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub enum AnimatedPropValue {
+    /// A number.
+    Number(f64),
+    /// A color, `0xAARRGGBB` (Android's `Color` layout).
+    Color(u32),
+}
+
+impl PartialEq for AnimatedPropValue {
+    fn eq(&self, other: &AnimatedPropValue) -> bool {
+        match (self, other) {
+            (AnimatedPropValue::Number(a), AnimatedPropValue::Number(b)) => {
+                a.to_bits() == b.to_bits()
+            }
+            (AnimatedPropValue::Color(a), AnimatedPropValue::Color(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AnimatedPropValue {}
+
+impl From<super::AnimationValue> for AnimatedPropValue {
+    fn from(value: super::AnimationValue) -> AnimatedPropValue {
+        match value {
+            // The graph's colors are `0xRRGGBBAA`.
+            super::AnimationValue::Color(rgba) => AnimatedPropValue::Color(rgba.rotate_right(8)),
+            other => AnimatedPropValue::Number(f64::from(other.number())),
+        }
+    }
 }
 
 impl AnimationProp {
@@ -45,9 +82,6 @@ impl AnimationProp {
             "backgroundColor" => AnimationProp::BackgroundColor,
             "borderColor" => AnimationProp::BorderColor,
             "color" => AnimationProp::Color,
-            "shadowColor" => AnimationProp::ShadowColor,
-            "shadowOpacity" => AnimationProp::ShadowOpacity,
-            "shadowRadius" => AnimationProp::ShadowRadius,
             "top" => AnimationProp::StickyTop,
             "left" => AnimationProp::StickyLeft,
             _ => return None,

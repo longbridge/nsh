@@ -78,13 +78,15 @@ pub(crate) struct HostFlags {
 }
 
 /// The host window's own options: the desktop hosts take the size
-/// ([`HostWindow::check`]), the macOS host the name too.
+/// ([`HostWindow::check`]), the macOS host the name and the display too.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct HostWindow<'a> {
     /// The app's name in the host (the menu bar, the window title).
     pub(crate) name: Option<&'a str>,
     /// The window's initial size, `WxH` in points.
     pub(crate) size: Option<&'a str>,
+    /// The display the window opens on, from 1 (the primary display).
+    pub(crate) display: Option<usize>,
 }
 
 impl HostWindow<'_> {
@@ -108,6 +110,11 @@ impl HostWindow<'_> {
                 "--name needs --target macos and a TSX entry (the other hosts do not take it yet)"
             );
         }
+        if self.display.is_some() && (target != Target::Macos || rust_root) {
+            bail!(
+                "--display needs --target macos and a TSX entry (the other hosts do not take it yet)"
+            );
+        }
         if self.size.is_some() && (!desktop || rust_root) {
             bail!(
                 "--window-size needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
@@ -116,12 +123,16 @@ impl HostWindow<'_> {
         Ok(())
     }
 
-    /// The arguments of the size, for a desktop host.
-    fn args(&self) -> Vec<&str> {
+    /// The arguments of the size and the display, for a desktop host.
+    fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(size) = self.size {
             // `WxH` in points; the host opens the window at this size.
-            args.extend(["--window-size", size]);
+            args.extend(["--window-size".to_owned(), size.to_owned()]);
+        }
+        if let Some(display) = self.display {
+            // One-based, as the host counts them.
+            args.extend(["--display".to_owned(), display.to_string()]);
         }
         args
     }
@@ -375,6 +386,7 @@ fn run_rust_app(
                 crate::package::PackageTarget::IosSimulator,
                 &out,
                 config,
+                &[],
             )?;
             let bundle = out.join(format!("{name}.app"));
             let step = ui::Step::start(format!("installing {id} in the simulator"));
@@ -400,7 +412,18 @@ fn run_rust_app(
             let sdk = android::Sdk::find()?;
             let serial = android::device(&sdk)?;
             let out = run.join("android");
-            package_for_run(&entry, crate::package::PackageTarget::Android, &out, config)?;
+            // The device's ABI alone: each one is a build of the app's crate.
+            let abi = android::device_abis(&sdk, &serial)?
+                .into_iter()
+                .find(|abi| android::ABIS.contains(&abi.as_str()))
+                .with_context(|| format!("{serial} runs none of {}", android::ABIS.join(", ")))?;
+            package_for_run(
+                &entry,
+                crate::package::PackageTarget::Android,
+                &out,
+                config,
+                std::slice::from_ref(&abi),
+            )?;
             let apk = out.join(format!("{name}.apk"));
             let step = ui::Step::start(format!("installing {id} on {serial}"));
             android::adb(&sdk, &serial, &["install", "-r", &apk.to_string_lossy()])?;
@@ -433,12 +456,13 @@ fn run_rust_app(
 }
 
 /// Packages the Rust app at `entry` for `target` into `out` (as `nsh
-/// package` does), for `nsh run` to install.
+/// package` does), for `nsh run` to install; Android: for `abis`.
 fn package_for_run(
     entry: &Path,
     target: crate::package::PackageTarget,
     out: &Path,
     config: crate::package::AppConfig,
+    abis: &[String],
 ) -> anyhow::Result<()> {
     crate::package::package(crate::package::PackageOptions {
         entry,
@@ -448,6 +472,7 @@ fn package_for_run(
         sign: None,
         profile: None,
         keystore: None,
+        abis,
         run: false,
     })
 }
@@ -581,7 +606,7 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, port, release, limits)?;
-    install_android_host(&sdk, &serial, work, &crate::runtime::android(true)?)?;
+    install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -643,6 +668,7 @@ pub(crate) fn install_android_host(
                 rust: false,
                 dark: false,
                 runtime,
+                abis: &[],
                 icon: None,
                 assets: Vec::new(),
                 signing: Signing::Debug,
@@ -938,6 +964,21 @@ mod tests {
         };
         assert!(named.check(Target::Macos, false).is_ok());
         assert!(named.check(Target::Linux, false).is_err());
+    }
+
+    /// `--display` reaches the macOS host only, for a TSX entry.
+    #[test]
+    fn the_macos_host_takes_a_display() {
+        let placed = HostWindow {
+            display: Some(2),
+            ..HostWindow::default()
+        };
+        assert!(placed.check(Target::Macos, false).is_ok());
+        assert!(placed.check(Target::Macos, true).is_err());
+        for target in [Target::Linux, Target::Windows, Target::Gpui, Target::Ios] {
+            assert!(placed.check(target, false).is_err(), "{target:?}");
+        }
+        assert_eq!(placed.args(), ["--display", "2"]);
     }
 
     /// The desktop hosts get each app's own id, so each keeps its own data.

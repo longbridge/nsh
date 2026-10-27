@@ -10,7 +10,7 @@ use nsh_core::{
         CanvasFont, CanvasOp, Composite, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num,
         Paint, PathOp,
     },
-    ui::PropEnum,
+    element::PropEnum,
 };
 
 use crate::encode::css_color;
@@ -175,7 +175,7 @@ fn rule(r: FillRule) -> &'static str {
     }
 }
 
-fn font(f: &CanvasFont) -> String {
+pub(crate) fn font(f: &CanvasFont) -> String {
     let family = f.family.as_deref().map_or_else(
         || "system-ui, sans-serif".to_owned(),
         |f| format!("\"{f}\""),

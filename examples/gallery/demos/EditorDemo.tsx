@@ -1,26 +1,10 @@
-import { type Bounds, cleanup, computed, Input, Overlay, type Point, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
-import {
-  Button,
-  DockArea,
-  type DockAreaRef,
-  Editor,
-  type EditorDecoration,
-  type EditorDiagnostic,
-  type EditorPosition,
-  type EditorRange,
-  type EditorRef,
-  type EditorSearchResult,
-  type EditorSelection,
-  Menu,
-  MenuItem,
-  MenuSeparator,
-  TextView,
-} from "nsh/base";
+import { type Bounds, cleanup, computed, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
+import { Button, DockArea, type DockAreaRef, Editor, type EditorDecoration, type EditorDiagnostic, type EditorPosition, type EditorRange, type EditorRef, type EditorSearchResult, type EditorSelection, Menu, MenuItem, MenuSeparator, TextView, Input } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
-import { openUrl, platform, windowSize } from "nsh/device";
-import { keymap } from "nsh/keymap";
+import { openUrl, platform, windowSize } from "nsh";
+import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { colors, handleThumb } from "../ui";
+import { colors, handleThumb, Tip } from "../ui";
 import { SAMPLE } from "./lsp/sample";
 import { type CodeAction, type DocumentColor, LanguageServer, type Problem } from "./lsp/server";
 
@@ -174,7 +158,7 @@ function Tool(props: { label: string; name: string; onPress: () => void; on?: bo
       onPress={props.onPress}
       selected={props.on}
       accessibilityLabel={props.label}
-      tooltip={props.label}
+      tooltip={<Tip label={props.label} />}
       class="h-7 min-w-7 items-center justify-center rounded-md px-1.5 hover:bg-foreground/10 active:opacity-70 selected:bg-primary"
     >
       <Text class={`font-mono text-[11px] font-semibold ${props.on ? "text-primary-foreground" : "text-foreground"}`}>{props.name}</Text>
@@ -190,7 +174,7 @@ function IconTool(props: { label: string; icon: IconName; onPress: () => void; o
       onPress={props.onPress}
       selected={props.on}
       accessibilityLabel={props.label}
-      tooltip={props.label}
+      tooltip={<Tip label={props.label} />}
       class={`${props.size === "small" ? "size-5" : "size-7"} items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70 selected:bg-foreground/15`}
     >
       <Icon name={props.icon} size={props.size === "small" ? 13 : 16} tint={props.on ? colors.text : colors.muted} />
@@ -467,7 +451,7 @@ export function EditorDemo() {
               autoCorrect={false}
               class={field}
             />
-            <Text numberOfLines={1} class="px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
+            <Text style={{ numberOfLines: 1 }} class="px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
               {matches()}
             </Text>
             <Tool label="Match case" name="Aa" on={caseSensitive()} onPress={() => caseSensitive.set(!caseSensitive())} />
@@ -586,32 +570,30 @@ export function EditorDemo() {
   /** The problems of the sample shown: pressing one puts the caret on it. */
   function Problems() {
     return (
-      <Scroll class="flex-1">
-        <View class="py-1">
-          <If when={problems().length > 0} else={<Text class="px-3 py-1 text-xs text-muted-foreground">No problems</Text>}>
-            <Each of={problems()}>
-              {(p) => (
-                <Button
-                  onPress={() => {
-                    const at = p().diagnostic.range.start;
-                    editor?.setSelections([{ anchor: at, head: at }]);
-                    editor?.revealPosition(at, true);
-                    editor?.focus();
-                  }}
-                  accessibilityLabel={p().diagnostic.message}
-                  class="flex-row gap-2 px-3 py-1 hover:bg-foreground/10 active:bg-foreground/15"
-                >
-                  <Dot severity={p().diagnostic.severity} />
-                  <Text numberOfLines={1} class="flex-1 text-xs text-foreground">
-                    {p().diagnostic.message}
-                  </Text>
-                  <Text class="font-mono text-[11px] tabular-nums text-muted-foreground">{`${p().diagnostic.range.start.line + 1}:${p().diagnostic.range.start.column + 1}`}</Text>
-                </Button>
-              )}
-            </Each>
-          </If>
-        </View>
-      </Scroll>
+      // A list, not a column of every row: a long file has thousands of
+      // problems, and only those in view are made.
+      <If when={problems().length > 0} else={<Text class="px-3 py-2 text-xs text-muted-foreground">No problems</Text>}>
+        <List each={problems()} estimatedItemSize={24} class="flex-1" contentClass="py-1">
+          {(p) => (
+            <Button
+              onPress={() => {
+                const at = p().diagnostic.range.start;
+                editor?.setSelections([{ anchor: at, head: at }]);
+                editor?.revealPosition(at, true);
+                editor?.focus();
+              }}
+              accessibilityLabel={p().diagnostic.message}
+              class="flex-row gap-2 px-3 py-1 hover:bg-foreground/10 active:bg-foreground/15"
+            >
+              <Dot severity={p().diagnostic.severity} />
+              <Text style={{ numberOfLines: 1 }} class="flex-1 text-xs text-foreground">
+                {p().diagnostic.message}
+              </Text>
+              <Text class="font-mono text-[11px] tabular-nums text-muted-foreground">{`${p().diagnostic.range.start.line + 1}:${p().diagnostic.range.start.column + 1}`}</Text>
+            </Button>
+          )}
+        </List>
+      </If>
     );
   }
 
@@ -626,7 +608,7 @@ export function EditorDemo() {
           trigger={
             <View
               accessibilityLabel="Language"
-              tooltip="Language"
+              tooltip={<Tip label="Language" />}
               class="h-7 flex-row items-center gap-1.5 rounded-md px-1.5 hover:bg-foreground/10 active:opacity-70"
             >
               <Icon name="code" size={16} tint={colors.muted} />
@@ -656,7 +638,7 @@ export function EditorDemo() {
           popupClass={popup}
           backdropClass="bg-black/40"
           trigger={
-            <View accessibilityLabel="Editor options" tooltip="Editor options" class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
+            <View accessibilityLabel="Editor options" tooltip={<Tip label="Editor options" />} class="size-7 items-center justify-center rounded-md hover:bg-foreground/10 active:opacity-70">
               <Icon name="sliders" size={16} tint={colors.muted} />
             </View>
           }
@@ -699,11 +681,11 @@ export function EditorDemo() {
           backdropClass="bg-black/40"
           renderTab={(tab) => (
             <View class="h-7 flex-row items-center gap-2 px-3">
-              <Text numberOfLines={1} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>
+              <Text style={{ numberOfLines: 1 }} class={`text-xs font-medium ${tab.active ? "text-foreground" : "text-muted-foreground"}`}>
                 {tab.panel === "editor" ? fileOf(language()) : `Problems ${problems().length}`}
               </Text>
               <If when={tab.active}>
-                <View pointerEvents="none" class="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-brand" />
+                <View style={{ pointerEvents: "none" }} class="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-brand" />
               </If>
             </View>
           )}
@@ -805,22 +787,22 @@ export function EditorDemo() {
       </If>
 
       <View class="h-6 flex-row items-center gap-3 overflow-hidden border-t border-border pl-2.5 pr-1">
-        <Text numberOfLines={1} class="font-mono text-[11px] tabular-nums text-foreground">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] tabular-nums text-foreground">
           {caret()}
         </Text>
-        <Text numberOfLines={1} class="font-mono text-[11px] text-destructive">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-destructive">
           {plural(count("error"), "error")}
         </Text>
-        <Text numberOfLines={1} class="font-mono text-[11px] text-warn">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-warn">
           {plural(count("warning"), "warning")}
         </Text>
-        <Text numberOfLines={1} class="font-mono text-[11px] text-info">
+        <Text style={{ numberOfLines: 1 }} class="font-mono text-[11px] text-info">
           {plural(count("info"), "info")}
         </Text>
-        <Text numberOfLines={1} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
+        <Text style={{ numberOfLines: 1 }} class="min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {last()}
         </Text>
-        <Text numberOfLines={1} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
+        <Text style={{ numberOfLines: 1 }} class="ml-auto min-w-0 shrink font-mono text-[11px] text-muted-foreground">
           {typescript() && analyzing() ? "Analyzing…" : LANGUAGES.find((l) => l.value === language())!.label}
         </Text>
         <IconTool label="Toggle problems" icon="diagnostics" size="small" on={problemsShown()} onPress={() => area?.toggleDock("bottom")} />

@@ -20,6 +20,7 @@ mod css;
 mod css_named;
 pub mod desktop;
 mod effects;
+pub mod element;
 mod fenwick;
 pub mod filesystem;
 pub mod geometry;
@@ -37,12 +38,14 @@ mod ops;
 pub mod overlay;
 pub mod picker;
 pub mod platform;
+pub mod prelude;
 mod props;
 pub mod reactive;
 pub mod resource;
 pub mod runtime;
 pub mod scroll;
 pub mod selection;
+pub mod shader;
 pub mod shape;
 pub mod storage;
 mod style;
@@ -54,7 +57,6 @@ pub mod text_edit;
 pub mod time;
 mod transform;
 pub mod transition;
-pub mod ui;
 pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
@@ -97,16 +99,18 @@ pub use crate::{
         PointerEvents, Ripple, ViewProps,
     },
     style::{
-        BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, FontFamily,
-        FontVariant, ObjectPosition, PaintStyle, PatchValue, PositionAxis, Shadow, Style,
-        StyleDecl, StyleError, StyleKey, StylePatch, StyleValue, SvgPaint, TextAlign,
-        TextDecoration, TextShadow, TextStyle, TextTransform, TransformOrigin, VerticalAlign,
-        ViewStyle,
+        BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,
+        FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition, PaintStyle,
+        PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey, StylePatch,
+        StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
+        TransformOrigin, TransformProperty, VerticalAlign, ViewStyle,
     },
     text::{
-        ATTACHMENT_CHAR, ApproxTextEngine, AttachmentAlignments, AttributedText, BackgroundBox,
-        FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment, TextBackground,
-        TextEngine, TextLayout, TextLine, TextLink, TextSpan,
+        ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
+        BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
+        TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
     },
-    transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
+    transform::{
+        Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,
+    },
 };

@@ -282,6 +282,9 @@ pub(super) struct ListState {
     /// What `contentClass` sets.
     content_class: ListContentStyle,
     pub(super) horizontal: bool,
+    /// Shown mirrored (a horizontal list right to left): laid out left to
+    /// right, so the content's left padding is its main axis' end.
+    mirrored: bool,
     pub(super) inverted: bool,
     /// `maintainVisibleContentPosition`'s `autoscrollToBottomThreshold`:
     /// a list that is not inverted follows the end of its content while
@@ -383,6 +386,7 @@ impl ListState {
             by_index: FxHashMap::default(),
             free: Vec::new(),
             extras: [Extra::NONE; 3],
+            mirrored: false,
             content: ListContentStyle::default(),
             content_style: ListContentStyle::default(),
             content_class: ListContentStyle::default(),
@@ -803,7 +807,9 @@ impl ListState {
     /// Padding at the start / end of the main axis and of the cross axis.
     fn main_padding(&self) -> (f32, f32) {
         let p = &self.content.padding;
-        if self.horizontal {
+        if self.horizontal && self.mirrored {
+            (p.right.0, p.left.0)
+        } else if self.horizontal {
             (p.left.0, p.right.0)
         } else {
             (p.top.0, p.bottom.0)
@@ -1011,6 +1017,18 @@ impl ListState {
             self.horizontal = horizontal;
             self.sizes.fill(f32::NAN);
             self.rebuild_offsets();
+        }
+    }
+
+    /// Whether it shows mirrored (horizontal, right to left): its left and
+    /// right content padding keep their sides on screen.
+    pub(super) fn set_mirrored(&mut self, mirrored: bool) {
+        if mirrored != self.mirrored {
+            self.mirrored = mirrored;
+            let p = &self.content.padding;
+            if self.horizontal && p.left != p.right {
+                self.rebuild_offsets();
+            }
         }
     }
 
@@ -1230,6 +1248,14 @@ impl ListState {
     fn set_extra(&mut self, kind: ExtraKind, cell: u32) {
         self.extras[kind as usize] = Extra { cell, size: 0.0 };
         self.dirty = true;
+    }
+
+    /// Whether cell `cell` is a slot's the list freed: bound to no item, it
+    /// still holds what it showed last until the list binds it again.
+    pub(super) fn frees(&self, cell: u32) -> bool {
+        self.slots
+            .iter()
+            .any(|s| s.cell == cell && s.index.is_none())
     }
 
     pub(super) fn remove_cell(&mut self, cell: u32) {
@@ -1546,16 +1572,16 @@ impl ListState {
                 return true;
             }
             let pixels = (end.min(bottom) - start.max(top)).max(0.0);
-            let (percent, threshold) = match (
-                self.viewability.view_area_percent,
-                self.viewability.item_visible_percent,
+            let (share, threshold) = match (
+                self.viewability.view_area_coverage_threshold,
+                self.viewability.item_visible_threshold,
             ) {
-                (Some(t), _) => (100.0 * pixels / self.viewport, t),
-                (None, Some(t)) => (100.0 * pixels / size.max(f32::EPSILON), t),
+                (Some(t), _) => (pixels / self.viewport, t.0),
+                (None, Some(t)) => (pixels / size.max(f32::EPSILON), t.0),
                 (None, None) => return pixels > 0.0,
             };
             if threshold > 0.0 {
-                percent >= threshold
+                share >= threshold
             } else {
                 pixels > 0.0
             }
@@ -1582,7 +1608,10 @@ impl ListState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{geometry::px, props::EdgeInsets};
+    use crate::{
+        geometry::{Percentage, px},
+        props::EdgeInsets,
+    };
 
     fn list(count: u32, estimated: f32, viewport: f32) -> ListState {
         let mut l = ListState::new();
@@ -1765,6 +1794,25 @@ mod tests {
     }
 
     #[test]
+    fn a_mirrored_horizontal_list_keeps_its_left_padding_on_the_left() {
+        // Laid out left to right and shown mirrored: the left padding is the
+        // end of its main axis, so it shows on the left.
+        let mut l = list(3, 50.0, 1000.0);
+        l.set_horizontal(true);
+        l.set_content(ListContentStyle {
+            padding: EdgeInsets {
+                left: px(16.0),
+                ..EdgeInsets::default()
+            },
+            ..ListContentStyle::default()
+        });
+        assert_eq!(l.blocks().body, 16.0);
+        l.set_mirrored(true);
+        assert_eq!(l.blocks().body, 0.0);
+        assert_eq!(l.blocks().total, 3.0 * 50.0 + 16.0);
+    }
+
+    #[test]
     fn padding_gaps_and_extras() {
         let mut l = list(3, 50.0, 1000.0);
         l.set_content(ListContentStyle {
@@ -1924,9 +1972,9 @@ mod tests {
         l.offset = 50.0;
         // Any visible pixel: items 0..=4.
         assert_eq!(l.viewable_items(), Some((0, 4)));
-        l.viewability.item_visible_percent = Some(60.0);
+        l.viewability.item_visible_threshold = Some(Percentage(0.6));
         assert_eq!(l.viewable_items(), Some((1, 3)));
-        l.viewability.item_visible_percent = Some(50.0);
+        l.viewability.item_visible_threshold = Some(Percentage(0.5));
         assert_eq!(l.viewable_items(), Some((0, 4)));
     }
 

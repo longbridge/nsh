@@ -9,6 +9,7 @@ mod build;
 mod cdp;
 mod check;
 mod dev;
+mod dev_port;
 mod entry;
 mod init;
 mod logger;
@@ -34,7 +35,7 @@ use std::{
 
 use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
-use nsh_core::ui::{Registry, description::SetDescription};
+use nsh_core::element::{Registry, description::SetDescription};
 
 /// The UI sets this command line links: `nsh/base`.
 pub(crate) fn own_sets() -> &'static [Registry] {
@@ -54,7 +55,7 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
     }
     let sets: Arc<[SetDescription]> = own_sets()
         .iter()
-        .flat_map(nsh_core::ui::Registry::sets)
+        .flat_map(nsh_core::element::Registry::sets)
         .map(SetDescription::from)
         .collect();
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets.clone());
@@ -66,7 +67,7 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
 pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
     let sets: Arc<[SetDescription]> = own_sets()
         .iter()
-        .flat_map(nsh_core::ui::Registry::sets)
+        .flat_map(nsh_core::element::Registry::sets)
         .map(SetDescription::from)
         .chain(app)
         .collect();
@@ -177,6 +178,14 @@ enum Command {
         /// `nsh/host` calls of each app the tests open and sends its events.
         #[arg(long, value_name = "JS")]
         web_host: Option<PathBuf>,
+        /// With `--target macos`: the display the apps' windows open on,
+        /// centered: 1 is the primary display (the one with the menu bar),
+        /// 2 the next, and so on; the main one when there is no such
+        /// display. Default: the first display besides the primary one
+        /// (not a mirror of it), so that a run keeps off the screen in use;
+        /// the primary one when there is no other.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        display: Option<u32>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -200,7 +209,7 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
         /// Minify and strip debug info.
@@ -236,7 +245,7 @@ enum Command {
         /// whose `App.tsx` is the entry.
         #[arg(default_value = ".")]
         entry: PathBuf,
-        /// Dev server port (the next free one is used if it is taken).
+        /// Dev server port (replaces the previous NSH development session).
         #[arg(long, default_value_t = nsh_dev::protocol::DEFAULT_PORT)]
         port: u16,
         /// Minify and strip debug info.
@@ -275,6 +284,11 @@ enum Command {
         /// `windows`, `gpui`).
         #[arg(long = "window-size", value_name = "WIDTHxHEIGHT")]
         size: Option<String>,
+        /// The display the window opens on, centered: 1 is the primary
+        /// display (the one with the menu bar), 2 the next, and so on; the
+        /// main one when there is no such display (`--target macos` only).
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        display: Option<u32>,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -430,6 +444,10 @@ struct PackageArgs {
     /// Keystore password (also `NSH_KEYSTORE_PASSWORD`).
     #[arg(long, env = "NSH_KEYSTORE_PASSWORD", hide_env_values = true)]
     keystore_password: Option<String>,
+    /// Android ABIs of the APK, repeated or separated by commas (default:
+    /// arm64-v8a and armeabi-v7a; with --run also the device's).
+    #[arg(long, value_delimiter = ',', value_parser = crate::android::ABIS)]
+    abi: Vec<String>,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
     /// machine at the address it prints).
@@ -509,6 +527,12 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         // keeps TypeScript tests (a `tsconfig.json` for them).
         types &= check::has_typescript(entry);
     }
+    // Own the port across builds and restarts, until every host and forwarding
+    // rule from this command has been cleaned up.
+    let _port = match &command {
+        Command::Run { port, .. } | Command::Dev { port, .. } => dev_port::Session::acquire(*port)?,
+        _ => None,
+    };
     // A Rust app (`nsh.json` "root") has no bundle: it is built, checked,
     // tested, run and packaged.
     let rust_command = matches!(
@@ -564,6 +588,9 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     }
     let mut restarted = false;
     loop {
+        if ui::stop_requested() {
+            return Ok(());
+        }
         match app.describe() {
             Ok(sets) => set_app_sets(sets),
             // Its build failed and waited for the next change already.
@@ -620,6 +647,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser,
             web_host,
+            display,
         } => test::test(
             &path,
             &entry,
@@ -630,6 +658,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             browser.as_deref(),
             web_host,
+            display.map(|n| n as usize),
         ),
         Command::Dev {
             entry,
@@ -676,6 +705,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 keystore,
                 key_alias,
                 keystore_password,
+                abi,
                 run,
             } = *args;
             let mut config = package::read_config(&entry)?;
@@ -698,6 +728,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                         keystore_password.as_deref().unwrap_or_default(),
                     )
                 }),
+                abis: &abi,
                 run,
             })
         }
@@ -712,6 +743,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             name,
             size,
+            display,
         } => {
             no_limits_for_rust(&entry, limits)?;
             run::run(
@@ -724,6 +756,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run::HostWindow {
                     name: name.as_deref(),
                     size: size.as_deref(),
+                    display: display.map(|n| n as usize),
                 },
             )
         }

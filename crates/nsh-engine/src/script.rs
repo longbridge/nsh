@@ -4,7 +4,7 @@
 //! uninhabited, so the loop needs no `cfg`).
 
 /// Host-owned permissions, data root and event wakeup for native system modules.
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 pub(crate) struct SystemConfig {
     pub(crate) access: nsh_core::access::Access,
     pub(crate) websocket: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
@@ -16,13 +16,19 @@ pub(crate) struct SystemConfig {
     pub(crate) host: std::rc::Rc<dyn nsh_core::host_channel::HostBridge>,
 }
 
-#[cfg(not(feature = "js"))]
+#[cfg(not(any(feature = "js", all(feature = "browser", target_arch = "wasm32"))))]
 pub(crate) struct SystemConfig;
 
 #[cfg(feature = "js")]
 pub(crate) use imp::Script;
-#[cfg(not(feature = "js"))]
+#[cfg(all(
+    not(feature = "js"),
+    not(all(feature = "browser", target_arch = "wasm32"))
+))]
 pub(crate) use stub::Script;
+
+#[cfg(all(feature = "browser", target_arch = "wasm32", not(feature = "js")))]
+pub(crate) use crate::browser::Script;
 
 #[cfg(feature = "js")]
 mod imp {
@@ -67,10 +73,11 @@ mod imp {
         pub(crate) fn start<M: TextEngine + 'static>(
             bundle: &Bundle,
             limits: Limits,
-            ui_sets: &[nsh_core::ui::Registry],
-            posts: nsh_core::ui::Posts,
+            ui_sets: &[nsh_core::element::Registry],
+            posts: nsh_core::element::Posts,
             environment: &Environment,
-            tokens: Arc<nsh_core::ui::Tokens>,
+            tokens: Arc<nsh_core::element::Tokens>,
+            theme: nsh_core::element::ThemeTokens,
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -134,6 +141,7 @@ mod imp {
             }));
             host.set_environment(environment);
             host.set_tokens(tokens);
+            host.set_theme_tokens(theme);
             let script = Script {
                 host,
                 exit_requested,
@@ -222,7 +230,7 @@ mod imp {
             self.host.dispatch_event(id, event, payload);
         }
 
-        pub(crate) fn deliver(&self, event: nsh_core::ui::JsEvent) {
+        pub(crate) fn deliver(&self, event: nsh_core::element::JsEvent) {
             self.host.deliver(event);
         }
 
@@ -284,8 +292,12 @@ mod imp {
             self.host.set_environment(environment);
         }
 
-        pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::ui::Tokens>) {
+        pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::element::Tokens>) {
             self.host.set_tokens(tokens);
+        }
+
+        pub(crate) fn set_theme_tokens(&self, theme: nsh_core::element::ThemeTokens) {
+            self.host.set_theme_tokens(theme);
         }
 
         pub(crate) fn take_fonts(&self, out: &mut Vec<String>) {
@@ -316,16 +328,20 @@ mod imp {
 
 #[cfg(not(feature = "js"))]
 mod stub {
+    #[cfg(not(all(feature = "browser", target_arch = "wasm32")))]
     use std::{
         rc::Rc,
         sync::{Arc, atomic::AtomicBool},
     };
 
+    #[cfg(not(all(feature = "browser", target_arch = "wasm32")))]
     use nsh_core::{EventKind, EventPayload, NodeId, Op, TextEngine, time::Instant};
 
+    #[cfg(not(all(feature = "browser", target_arch = "wasm32")))]
     use crate::{AppError, AppErrorKind, Bundle, Chunk, Environment, HotUpdate, Limits, MountSink};
 
     /// No JS in this build: never made.
+    #[cfg(not(all(feature = "browser", target_arch = "wasm32")))]
     pub(crate) enum Script {}
 
     /// What JS asked of its requests (nothing without JS).
@@ -334,15 +350,17 @@ mod stub {
         pub(crate) ops: Vec<(u32, crate::FetchOp)>,
     }
 
+    #[cfg(not(all(feature = "browser", target_arch = "wasm32")))]
     impl Script {
         #[allow(clippy::too_many_arguments, reason = "as the real one's")]
         pub(crate) fn start<M: TextEngine + 'static>(
             _: &Bundle,
             _: Limits,
-            _: &[nsh_core::ui::Registry],
-            _: nsh_core::ui::Posts,
+            _: &[nsh_core::element::Registry],
+            _: nsh_core::element::Posts,
             _: &Environment,
-            _: Arc<nsh_core::ui::Tokens>,
+            _: Arc<nsh_core::element::Tokens>,
+            _: nsh_core::element::ThemeTokens,
             _: Rc<M>,
             _: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -374,7 +392,7 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn deliver(&self, _: nsh_core::ui::JsEvent) {
+        pub(crate) fn deliver(&self, _: nsh_core::element::JsEvent) {
             match *self {}
         }
 
@@ -430,7 +448,11 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn set_tokens(&self, _: Arc<nsh_core::ui::Tokens>) {
+        pub(crate) fn set_tokens(&self, _: Arc<nsh_core::element::Tokens>) {
+            match *self {}
+        }
+
+        pub(crate) fn set_theme_tokens(&self, _: nsh_core::element::ThemeTokens) {
             match *self {}
         }
 

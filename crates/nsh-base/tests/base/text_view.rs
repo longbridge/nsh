@@ -2,8 +2,9 @@
 
 use nsh_base::{TextViewClasses, TextViewPart, TextViewParts, TextViewStyles, text_view};
 use nsh_core::{
-    PatchValue, StyleKey,
-    ui::{Root, Style, prelude::*},
+    StyleKey,
+    element::{Root, Style},
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -24,7 +25,10 @@ fn RootOverrides() -> impl IntoElement {
     let styles = TextViewStyles {
         root: Some(
             Style::default()
-                .with(StyleKey::FontSize, PatchValue::Number(23.0))
+                .with(
+                    StyleKey::FontSize,
+                    StyleKey::FontSize.number_value(23.0).unwrap(),
+                )
                 .into(),
         ),
         ..Default::default()

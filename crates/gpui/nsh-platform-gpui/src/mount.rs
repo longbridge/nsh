@@ -149,6 +149,7 @@ impl Mounter {
             }
             MountItem::Remove { id } => {
                 if let Some(view) = &self.get(*id) {
+                    crate::text_input::removing(surface, view);
                     crate::navigation::removing(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
@@ -158,6 +159,7 @@ impl Mounter {
             }
             MountItem::Delete { id } => {
                 if let Some(view) = self.views.remove(*id) {
+                    crate::text_input::removing(surface, &view);
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
@@ -202,7 +204,7 @@ impl Mounter {
                     ViewKind::WebView | ViewKind::Video | ViewKind::Native => {
                         crate::native::resized(view)
                     }
-                    _ => {}
+                    _ => crate::shader::resized(surface, view),
                 }
             }
             MountItem::ViewStyle { id, style } => {
@@ -302,6 +304,11 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            MountItem::Shader { id, layer } => {
+                if let Some(view) = &self.get(*id) {
+                    crate::shader::set(surface, view, layer.clone());
+                }
+            }
             MountItem::Gestures { id, values } => {
                 if let Some(view) = &self.get(*id) {
                     crate::input::gestures(surface, view, *values);
@@ -356,7 +363,9 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(surface, *id, command),
             // The animator's (`Surface::apply`).
-            MountItem::Animation(_) | MountItem::AnimationBindings { .. } => {}
+            MountItem::Animation(_)
+            | MountItem::AnimationBindings { .. }
+            | MountItem::ComponentPropSlots { .. } => {}
         }
     }
 

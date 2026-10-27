@@ -2,8 +2,11 @@
 // needs another on), checkboxes under a "select all" that shows a partial
 // selection, a plan picker of radios with a disabled plan, tabs that switch
 // a section, collapsible sections whose content is kept while collapsed,
-// progress bars of a transfer the app drives and of one of unknown size.
-// Every row is the control, its label included. Also the
+// progress bars of a transfer the app drives and of one of unknown size,
+// sliders of a level and of a price range.
+// Every row is the control, its label included; on a desktop the plans
+// and the tabs are one stop of Tab each, moved through with the arrow
+// keys. Also the
 // gallery's own `Toggle` (a `Switch`) and `Segmented` (`Tabs`).
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
@@ -133,6 +136,29 @@ test("a progress bar shows the transfer's value the app drives, and one of unkno
   expect(app.texts()).toContain("0%");
 });
 
+test("a slider reports the value the app owns, a range's thumbs never cross, and a disabled one takes no drag", async () => {
+  expect(app.count("role:adjustable")).toBe(3);
+  expect(app.texts()).toContain("60%");
+  expect(app.texts()).toContain("$100 – $400");
+  // Far past the end: held at the maximum, the end reported once.
+  await app.drag("label:Volume", { x: 600, y: 0 });
+  await app.waitFor("Volume: 100");
+  expect(app.texts()).toContain("100%");
+  // The range's start stops at its end.
+  await app.drag("label:Minimum price", { x: 600, y: 0 });
+  await app.waitFor("Price: 400 to 400");
+  expect(app.texts()).toContain("$400 – $400");
+  // Muted: the volume's slider is disabled.
+  await app.press("Mute");
+  await app.waitFor("Volume: muted");
+  expect(app.enabled("label:Volume")).toBe(false);
+  await app.drag("label:Volume", { x: -600, y: 0 });
+  expect(app.texts()).toContain("Volume: muted");
+  await app.press("Unmute");
+  await app.waitFor("Volume: unmuted");
+  expect(app.texts()).toContain("100%");
+});
+
 test("the gallery's segmented control is a tab list", async () => {
   await app.back();
   await app.press("role:button[System]");
@@ -153,4 +179,56 @@ test("the gallery's toggle is a switch", async () => {
   await app.waitFor("overflow: visible");
   await app.press("label:Clip");
   await app.waitFor("overflow: hidden");
+});
+
+test("the keyboard moves through the plans and the tabs, each one stop of Tab", async () => {
+  // A desktop: Tab stops at the views that take presses. A manual clock:
+  // the gallery's live demos never settle, and in a real window each key
+  // would wait for them.
+  const desk = await open("../App.tsx", { platform: "macos", clock: {} });
+  await desk.press("role:button[Controls]");
+  await desk.waitFor("Select all");
+  // Tab from stop to stop until the plans, entered at the checked one
+  // (Plus): Down there checks the plan after it.
+  let tabs = 0;
+  while (!desk.shows("Plan: Team")) {
+    expect(++tabs).toBeLessThan(40);
+    await desk.keyboard.press("tab");
+    await desk.keyboard.press("down");
+    await desk.wait(50);
+  }
+  // Enterprise is disabled: Down goes around to Free, Up back to Team.
+  await desk.keyboard.press("down");
+  await desk.waitFor("Plan: Free");
+  await desk.keyboard.press("up");
+  await desk.waitFor("Plan: Team");
+  await desk.keyboard.press("right");
+  await desk.waitFor("Plan: Free");
+  await desk.keyboard.press("left");
+  await desk.waitFor("Plan: Team");
+  // One Tab leaves the group: Return presses the button after it.
+  await desk.keyboard.press("tab");
+  await desk.keyboard.press("enter");
+  await desk.waitFor("Continue: Team, $12 / mo");
+  // On to the tabs, entered at the selected one (Overview): the arrows
+  // select as they move.
+  tabs = 0;
+  while (!desk.shows("Tab: Activity")) {
+    expect(++tabs).toBeLessThan(10);
+    await desk.keyboard.press("tab");
+    await desk.keyboard.press("right");
+    await desk.wait(50);
+  }
+  expect(desk.texts()).toContain("Deployed to production");
+  // Billing is disabled: End stops at Members, Right goes around.
+  await desk.keyboard.press("end");
+  await desk.waitFor("Tab: Members");
+  await desk.waitFor("Grace Hopper");
+  await desk.keyboard.press("right");
+  await desk.waitFor("Tab: Overview");
+  expect(desk.texts()).toContain("Visitors");
+  await desk.keyboard.press("left");
+  await desk.waitFor("Tab: Members");
+  await desk.keyboard.press("home");
+  await desk.waitFor("Tab: Overview");
 });

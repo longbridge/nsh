@@ -7,7 +7,7 @@ starting after an NSH update is a bug in NSH, never in the app.
 
 This page is the contract and how it is enforced. It holds from the first release recorded in
 `nsh-compat` ("Releasing") on, and for good, whatever the version number says; earlier versions made no promises.
-The first release recorded is 0.3.0: earlier ones are not recorded.
+No release is recorded yet, 0.3.0 included: the first one recorded starts the contract.
 
 ## What apps depend on
 
@@ -134,7 +134,7 @@ existing record, an app whose script fails, a `covers` claim that does not hold 
 checks (`[<module>] <name>`, `[globals] <name>`, `[props] <name>`, `[events] <name>`, `[styles] <name>`; a
 component's own props and events as `[props] <Component>.<name>`, `[events] <Component>.<name>`; platform props as
 `ios.<name>`, ...). Commit the record in `nsh-compat` and open a pull request there; once it is merged, the release
-is frozen. The first release recorded, 0.3.0, starts the contract.
+is frozen. The first release recorded starts the contract.
 
 Before the first record, two things land in NSH:
 
@@ -163,7 +163,10 @@ below it, a popup's backdrop), `wait <ms>` runs timers, and `viewport <w> <h>` a
 screen and pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}` props apply, and
 `fontscale <scale>` sets the user's text size. What a view looks like is checked as the platform receives it:
 `frame <selector> <x> <y> <width> <height>` (its layout, in points relative to its parent), `prop` / `noprop` (a host
-prop), `style` / `nostyle` (a paint or text style key), `listens` (an event the platform reports),
+prop), `style` / `nostyle` (a paint or text style key), `drawing` / `nodrawing` (an operation of a canvas's latest
+drawing, written as the canvas method or property apps use: `drawing id:chart strokeStyle #ff0000ff`; the SVG paint
+properties `fill`, `stroke`, `strokeWidth` and `strokeDasharray` show only there, in what a component draws),
+`listens` (an event the platform reports),
 `statusbar <key>=<value>...` (the status bar the platform was last told to show: `foreground`, `hidden`, `animated`);
 `log <text>` checks a `console` line, and `covers <item>` is a claim, not a step. Other steps stand in for the
 platform's input: `event <selector> <onEvent> [<key>=<value>...]` reports an event with its payload keys as the

@@ -25,7 +25,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 use nsh_core::host_channel::HostBridge;
 use nsh_core::{
     JsonValue,
@@ -172,7 +172,7 @@ impl HostChannel {
         self.lock().handlers.remove(name);
     }
 
-    #[cfg(feature = "js")]
+    #[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
     fn handler(&self, name: &str) -> Option<Handler> {
         self.lock().handlers.get(name).cloned()
     }
@@ -244,7 +244,7 @@ impl HostChannel {
 
     /// The bridge an app's `nsh/host` reaches this channel through, from
     /// the engine whose queue is `tx`: its parameters as they are now.
-    #[cfg(feature = "js")]
+    #[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
     pub(crate) fn bridge(&self, tx: Sender<Message>) -> EngineBridge {
         EngineBridge {
             params: JsonValue::Object(self.params()),
@@ -294,14 +294,14 @@ impl Drop for HostAttachment {
 
 /// What an engine's `nsh/host` reaches of the channel
 /// ([`nsh_core::host_channel::HostBridge`]).
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 pub(crate) struct EngineBridge {
     params: JsonValue,
     channel: HostChannel,
     tx: Sender<Message>,
 }
 
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 impl EngineBridge {
     /// Runs `handler` with `call`; a handler that panics drops the call,
     /// which fails it in the app.
@@ -314,7 +314,7 @@ impl EngineBridge {
     }
 }
 
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 impl HostBridge for EngineBridge {
     fn available(&self) -> bool {
         self.channel.lock().configured
@@ -573,7 +573,7 @@ mod tests {
             release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         });
         let mut config = EngineConfig::new(Bundle::source(
-            "import { host } from 'nsh/host'; host.post('hold');".to_owned(),
+            "import { host } from 'nsh'; host.post('hold');".to_owned(),
         ));
         if let crate::App::Js(bundle) = &mut config.app {
             bundle.policy.declared =
@@ -605,7 +605,7 @@ mod tests {
             seen_tx.send(call.take_data()).unwrap();
         });
         let mut config = EngineConfig::new(Bundle::source(
-            "import { host } from 'nsh/host'; host.on('open', data => host.post('seen', data));"
+            "import { host } from 'nsh'; host.on('open', data => host.post('seen', data));"
                 .to_owned(),
         ));
         if let crate::App::Js(bundle) = &mut config.app {

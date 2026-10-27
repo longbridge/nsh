@@ -3,10 +3,11 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
-use nsh_base::{alert_dialog, dialog, nav_page, safe_area_view};
+use nsh_base::{alert_dialog, dialog, input, nav_page};
 use nsh_core::{
     ModalPresentation,
-    ui::{AnyElement, Os, Screen, prelude::*},
+    element::{AnyElement, Os, Screen},
+    prelude::*,
 };
 
 use crate::{
@@ -314,6 +315,7 @@ fn DraftCard() -> impl IntoElement {
                 .value(move || draft.with(|d| d.0.clone()))
                 .placeholder("A draft")
                 .placeholder_color(|| color(colors::FAINT))
+                .caret_color(|| color(colors::ACCENT))
                 .selection_color(|| color(colors::ACCENT))
                 .h(px(48.0))
                 .px(px(14.0))
@@ -398,7 +400,7 @@ fn instant() -> Screen {
 
 fn headerless() -> Screen {
     nav_page().header_visible(false).child(
-        safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+        view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
             view()
                 .flex_1()
                 .p_4()
@@ -409,7 +411,7 @@ fn headerless() -> Screen {
                             .px_1()
                             .pt_3()
                             .child(body(
-                                "The screen owns the whole surface; a SafeAreaView keeps it \
+                                "The screen owns the whole surface; its env(safe-area-inset-*) padding keeps it \
                                      clear of the status bar and the home indicator.",
                             )),
                     ),
@@ -417,7 +419,7 @@ fn headerless() -> Screen {
                 .child(
                     appear().index(1).child(
                         Section::new("Safe area")
-                            .note("SafeAreaView")
+                            .note("env(safe-area-inset-*)")
                             .child(insets()),
                     ),
                 )
@@ -596,7 +598,7 @@ fn modal_body(
     text_body: &str,
     close: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+    view().p_safe_area().flex_1().bg(colors::BACKGROUND).child(
         view()
             .flex_1()
             .p_4()

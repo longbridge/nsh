@@ -1,7 +1,7 @@
 import { mount, signal, Text, View } from "nsh";
-import { createAnimatedValue } from "nsh/animated";
-import { PanResponder } from "nsh/gesture";
-import { desktop, Inspector, Log, Panel, size, tint, ui, wide } from "./palette";
+import { createAnimatedValue } from "nsh";
+import { PanResponder } from "nsh";
+import { button, buttonText, desktop, focusRing, Inspector, Log, tint, ui, wide } from "./palette";
 
 /** A card dragged on the UI thread: `pan` drives two animated values. */
 function DragCard() {
@@ -25,7 +25,7 @@ function DragCard() {
           ...ui().accentFill,
           alignItems: "center",
           justifyContent: "center",
-          transform: [{ translateX: x }, { translateY: y }],
+          translate: [x, y],
         }}
       >
         <Text style={{ color: ui().onAccent, fontWeight: "700" }}>Drag me</Text>
@@ -47,7 +47,7 @@ function ResponderDot() {
       state.set("dragging");
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(0)} pt/s`),
     onPanResponderTerminate: () => state.set("taken over"),
   });
   return (
@@ -63,7 +63,7 @@ function ResponderDot() {
             height: 50,
             borderRadius: 25,
             backgroundColor: ui().info,
-            transform: [{ translateX: pos().x }, { translateY: pos().y }],
+            translate: [pos().x, pos().y],
           }}
         />
       </View>
@@ -78,8 +78,7 @@ function App() {
   const dot = signal(0);
   const under = signal(0);
   // With a pointer the buttons are as wide as their labels; on a phone they share the row.
-  const pressable = desktop ? { height: size.control, justifyContent: "center" as const, paddingHorizontal: 12, borderRadius: 8 } : { flex: 1, padding: 14, borderRadius: 12 };
-  const label = desktop ? { fontSize: 13 } : {};
+  const share = desktop ? {} : { flex: 1 };
   const buttons = () => (
     <View style={{ flexDirection: "row", gap: desktop ? 8 : 10 }}>
       <View
@@ -87,29 +86,26 @@ function App() {
         onPressUp={() => add("pressOut")}
         onPress={() => add("press")}
         onLongPress={() => add("longPress")}
+        {...button("primary", { style: share })}
         activeStyle={{ opacity: 0.5 }}
-        style={{
-          ...pressable,
-          ...ui().primary,
-          alignItems: "center",
-        }}
       >
-        <Text style={{ color: ui().onPrimary, fontWeight: "600", ...label }}>activeStyle opacity</Text>
+        <Text style={buttonText("primary")}>activeStyle opacity</Text>
       </View>
       <View
         onPress={() => add("underlay")}
+        {...button("secondary", { style: share })}
         activeStyle={{ backgroundColor: ui().border, backgroundImage: "none" }}
-        style={{ ...ui().raised, ...pressable, alignItems: "center" }}
       >
-        <Text style={{ color: ui().text, fontWeight: "600", ...label }}>activeStyle background</Text>
+        <Text style={buttonText()}>activeStyle background</Text>
       </View>
       <View
         onPress={() => add("active:")}
         class={
           desktop
-            ? "h-8 items-center justify-center rounded-lg bg-[#0f8a55] px-3 transition active:scale-95 active:bg-[#0b6b42] dark:bg-[#45d49a] dark:active:bg-[#2fae7b]"
-            : "flex-1 items-center rounded-xl bg-[#0f8a55] p-3.5 transition active:scale-95 active:bg-[#0b6b42] dark:bg-[#45d49a] dark:active:bg-[#2fae7b]"
+            ? "h-8 items-center justify-center rounded-lg bg-[#0f8a55] px-3 transition motion-reduce:transition-none hover:bg-[#12a368] active:scale-95 active:bg-[#0b6b42] dark:bg-[#45d49a] dark:hover:bg-[#5be0a9] dark:active:bg-[#2fae7b]"
+            : "flex-1 items-center rounded-xl bg-[#0f8a55] p-3.5 transition motion-reduce:transition-none hover:bg-[#12a368] active:scale-95 active:bg-[#0b6b42] dark:bg-[#45d49a] dark:hover:bg-[#5be0a9] dark:active:bg-[#2fae7b]"
         }
+        focusStyle={focusRing()}
       >
         <Text class={desktop ? "text-[13px] font-semibold text-white dark:text-[#0c0d0f]" : "font-semibold text-white dark:text-[#0c0d0f]"}>active:</Text>
       </View>
@@ -121,6 +117,9 @@ function App() {
         hitSlop={24}
         onPress={() => dot.update((n) => n + 1)}
         style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: ui().down, margin: 12 }}
+        hoverStyle={{ opacity: 0.88 }}
+        focusStyle={focusRing()}
+        activeStyle={{ opacity: 0.7 }}
       />
       <Text style={{ flex: 1, color: ui().text }}>
         hitSlop 24: the dot takes {desktop ? "clicks" : "taps"} around it ({dot()})
@@ -132,12 +131,14 @@ function App() {
       <View
         onPress={() => under.update((n) => n + 1)}
         style={{ flex: 1, borderRadius: 12, backgroundColor: tint(ui().up, 0.14), alignItems: "center", justifyContent: "center" }}
+        hoverStyle={{ opacity: 0.88 }}
+        focusStyle={focusRing()}
+        activeStyle={{ opacity: 0.7 }}
       >
         <Text style={{ color: ui().up }}>Under an overlay: {under()}</Text>
       </View>
       <View
-        pointerEvents="none"
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 3, borderColor: ui().warn, borderStyle: "dashed" }}
+        style={{ pointerEvents: "none", position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, borderWidth: 3, borderColor: ui().warn, borderStyle: "dashed" }}
       />
     </View>
   );

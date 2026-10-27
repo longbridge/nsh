@@ -13,7 +13,7 @@ Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so 
 other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
 
 ```rust tabs
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 fn player() -> impl IntoElement {
     let paused = signal(true);
@@ -26,7 +26,7 @@ fn player() -> impl IntoElement {
                 .element_ref(&player)
                 .paused(paused)
                 .repeat(true)
-                .resize_mode(ResizeMode::Contain)
+                .object_fit(ResizeMode::Contain)
                 .h(px(220.0))
                 .bg(black())
                 .on_progress(move |p: &VideoProgress| {
@@ -61,7 +61,6 @@ function Player() {
         src="https://example.com/clip.mp4"
         paused={paused()}
         repeat
-        resizeMode="contain"
         style={{ height: 220, backgroundColor: "#000000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
       />
@@ -91,7 +90,7 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 | `rate` | `.rate(..)` | `number` | `1` | The playback speed. |
 | `repeat` | `.repeat(..)` | `boolean` | `false` | Plays again from the start at the end. |
 | `controls` | `.controls(..)` | `boolean` | `false` | Shows the platform's playback controls. |
-| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center" \| "scale-down"` | | How the video fits its box. iOS, macOS and Android play `"center"` and `"scale-down"` as `"contain"`, Linux both as `"scale-down"`. |
+| `objectFit` (style), `object-*` classes | `.object_fit(ResizeMode::Contain)` | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | How the video fits its box, as CSS's `object-fit` (`class="object-cover"`). iOS, macOS and Android play `"none"` and `"scale-down"` as `"contain"`, Linux both as `"scale-down"`. |
 | `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | Milliseconds between `onProgress` events. |
 
 Give the video a size through its styles; its size is the one its styles give it. Use the size `onLoad` reports to set
@@ -102,7 +101,7 @@ an aspect ratio when you want the video's own proportions.
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | none | Loading began. |
-| `onLoad` | `.on_load` | `{ duration, size }` (`VideoInfo`: `duration`, `size`) | The video is ready: its duration in seconds and its size. |
+| `onLoad` | `.on_load` | `{ duration, size }` (`VideoInfo`: `duration`, `size`) | The video is ready: its duration in seconds and its size in pixels. |
 | `onProgress` | `.on_progress` | `{ currentTime, duration }` (`VideoProgress`: `current_time`, `duration`) | Every `progressUpdateInterval` while playing (seconds). |
 | `onBuffer` | `.on_buffer` | `{ isBuffering }` (`bool`) | Playback stalled for data / resumed. |
 | `onEnd` | `.on_end` | none | Playback reached the end (with `repeat`, at the end of each loop). |

@@ -27,14 +27,14 @@ NSH 应用用元素和组件描述界面，可以用 Rust，也可以用 TSX。R
 | `when(..)`、`each(..)` | `<If>`、`<Each>` | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
 ```rust tabs
-use nsh_core::ui::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
+use nsh_core::prelude::*;   // view, text, image, scroll, input, virtual_list, ..., when, each
 ```
 
 ```tsx tabs
 import { Image, mount, Text, View } from "nsh";
 ```
 
-在 Rust 中，样式是与 Tailwind 工具类同名的带类型方法（`.px_4()`、`.rounded_lg()`、`.bg(..)`），监听器也是方法（`.on_press(..)`）；仅限某个平台的设置有各自的方法。在 TSX 中，props 保留 camelCase 命名（`onPress`、`numberOfLines`、`backgroundColor`）；每个元素都接受 `style`、`class` / `classList`（[Tailwind](./tailwind.md)）、`ref`、触摸处理函数、无障碍属性和 `testID`，仅限某个平台的 props 放在 `ios={{…}}` 和 `android={{…}}` 中，只有当前平台的对象会被发送：
+在 Rust 中，样式是与 Tailwind 工具类同名的带类型方法（`.px_4()`、`.rounded_lg()`、`.bg(..)`），监听器也是方法（`.on_press(..)`）；仅限某个平台的设置有各自的方法。在 TSX 中，props 保留 camelCase 命名（`onPress`、`allowFontScaling`、`backgroundColor`）；每个元素都接受 `style`、`class` / `classList`（[Tailwind](./tailwind.md)）、`ref`、触摸处理函数、无障碍属性和 `testID`，仅限某个平台的 props 放在 `ios={{…}}` 和 `android={{…}}` 中，只有当前平台的对象会被发送：
 
 ```rust tabs
 view()
@@ -328,7 +328,8 @@ fn search() -> impl IntoElement {
 
 ```tsx tabs
 import type { YNode } from "nsh";
-import { Input, Text, View } from "nsh";
+import { Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 function Search() {
   let input: YNode | undefined;
@@ -352,7 +353,7 @@ Rust 的 ref 是一个 `Copy` 句柄；它的调用发往携带它的元素，�
 
 `const` 或导入的绑定应持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他内容时，会在元素创建时报告，并说明应该怎么写。
 
-ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`SafeAreaView`、`KeyboardAvoidingView` 以及你自己 crate 中的 Rust 组件同样接受 `ref`（Rust 中是 `component_ref()`，用 `.component_ref(&r)` 放到元素上：`safe_area_view().component_ref(&r)`）。
+ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。基础组件以及你自己 crate 中的 Rust 组件同样接受 `ref`（Rust 中是 `component_ref()`，用 `.component_ref(&r)` 放到元素上：`dialog().component_ref(&r)`）。
 
 ## 展开 props
 
@@ -361,7 +362,8 @@ ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./r
 在 TSX 中，用 `{...props}` 把一个 props 对象展开到元素或组件上。getter 仍然是 getter，所以展开的 props 会继续跟随它们读取的内容。要取出一部分 props 自己用、把其余的传下去，使用 `split`：
 
 ```tsx
-import { Input, type InputProps, split, Text, View } from "nsh";
+import { split, Text, View } from "nsh";
+import { Input, type InputProps } from "nsh/base";
 
 function Field(props: InputProps & { label: string }) {
   const [own, rest] = split(props, ["label"]);

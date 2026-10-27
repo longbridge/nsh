@@ -23,7 +23,7 @@ There are six tools, from the readiest to the most flexible:
 
 ## Motion
 
-A motion moves a view's opacity and transform through keyframes, natively. Create one in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh/animated` in TSX), bind it to the view, and play a ready-made motion or one of your own on it. `enter` starts the view where a motion begins and plays it at once, so the view comes in from its first frame.
+A motion moves a view's opacity and transform through keyframes, natively. Create one in the component that owns the view (`motion()` in Rust, `createMotion()` from `nsh` in TSX), bind it to the view, and play a ready-made motion or one of your own on it. `enter` starts the view where a motion begins and plays it at once, so the view comes in from its first frame.
 
 ```rust tabs
 #[component]
@@ -44,7 +44,7 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, View } from "nsh";
-import { createMotion } from "nsh/animated";
+import { createMotion } from "nsh";
 
 function App() {
   const card = createMotion({ enter: "fadeInUp" });
@@ -63,14 +63,14 @@ mount(App);
 
 A motion has an animated value per channel: `opacity` (0..1), `translateX` and `translateY` (points), `rotate`, `rotateX` and `rotateY` (degrees), `scale`, `scaleX` and `scaleY`. They start at rest (opacity and scales 1, the rest 0) and apply in that order: translations, then rotations, then scales, about the view's transform origin. A motion has no look of its own: it moves what you styled.
 
-A motion moves opacity and transform only. Spreading `m.style` sets the view's `opacity`; to keep an opacity of your own, bind only the transform (`transform: m.transform`). Colors move with an animated value and [`interpolate`](#interpolation).
+A motion moves opacity and transform only. Spreading `m.style` sets the view's `opacity` and `transform`; to keep an opacity of your own, bind only the steps (`transform: m.transform`). Colors move with an animated value and [`interpolate`](#interpolation).
 
 | TSX | Rust | Description |
 |---|---|---|
 | `createMotion(options?)` | `motion()` | A motion with every channel at rest. |
 | `createMotion({ initial: { opacity: 0 } })` | `m.value(MotionChannel::Opacity).set(0.0)` | Where channels start; the others start at rest. |
 | `createMotion({ enter, delay, duration, ... })` | `motion().entering(spec)` | Starts where `enter` starts and plays it at once; the other options change its timing. `enter` sets the channels it moves, over `initial`. |
-| `style={m.style}`, `m.transform` | `.bind_motion(&m)` | Binds the channels: `m.style` is `{ opacity, transform }`; spread `m.transform` into a transform with a step of your own. A motion takes 7 of a view's 8 transform steps (`scale` is folded into `scaleX` and `scaleY`), which leaves one for yours, such as `[{ perspective: 600 }, ...m.transform]` for 3D flips. In Rust the motion's transform applies after the view's own. |
+| `style={m.style}`, `m.transform` | `.bind_motion(&m)` | Binds the channels: `m.style` is `{ opacity, transform }`, its `transform` a list of seven steps (`scale` is folded into `scaleX` and `scaleY`). They apply after the view's `translate`, `rotate` and `scale`; a perspective before them gives a 3D flip its depth: `transform: [{ perspective: 800 }, ...m.transform]`. In Rust the motion's transform applies after the view's own. |
 | `m.opacity`, `m.translateX`, ... | `m.value(MotionChannel::Opacity)`, ... | One channel's animated value, to interpolate or drive by hand. |
 | `m.play(motion, options?)` | `m.play(spec)` | Plays a preset or a motion of your own; a new one interrupts the one playing. Resolves with `true` when it finished (`AnimationEnd` in Rust). |
 | `m.animation(motion, options?)` | `m.animation(spec)` | The same motion as a [composite animation](#composite-animations), not started, to sequence, stagger or loop with others. |
@@ -80,7 +80,7 @@ A motion moves opacity and transform only. Spreading `m.style` sets the view's `
 
 ### Presets
 
-The ready-made motions are data: `motions` from `nsh/animated` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards; for larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin: give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
+The ready-made motions are data: `motions` from `nsh` (`motions.fadeInUp` is what `play("fadeInUp")` plays) and `MotionPreset` in Rust (`MotionPreset::FadeInUp.spec()`). Distances are in points, sized for controls and cards; for larger views, scale a motion's values or write your own keyframes. `swing` and the other rotations turn about the view's transform origin: give a swinging sign `transformOrigin: "top"` (`.origin_top()`).
 
 **Enter**: they start hidden or away and end at rest.
 
@@ -290,7 +290,8 @@ function App() {
           height: 100,
           borderRadius: on() ? 50 : 16,
           backgroundColor: on() ? "#8250df" : "#0969da",
-          transform: [{ rotate: on() ? "45deg" : "0deg" }, { scale: on() ? 1.2 : 1 }],
+          rotate: on() ? "45deg" : "0deg",
+          scale: on() ? 1.2 : 1,
           transitionProperty: "all",
           transitionDuration: 400,
           transitionTimingFunction: "ease-in-out",
@@ -367,7 +368,7 @@ Tailwind: `animate-spin`, `animate-ping`, `animate-pulse`, `animate-bounce`, `an
 
 ## Animated values
 
-An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh/animated` in TSX), bind it to styles, and animate it; the bound views follow it every frame without an update.
+An animated value is a number that lives on the UI thread. Create one (`animated_value(..)` in Rust, `createAnimatedValue` from `nsh` in TSX), bind it to styles, and animate it; the bound views follow it every frame without an update.
 
 ```rust tabs
 #[component]
@@ -401,14 +402,14 @@ pub fn App() -> impl IntoElement {
 
 ```tsx tabs
 import { mount, Text, View } from "nsh";
-import { createAnimatedValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh";
 
 function App() {
   const x = createAnimatedValue(0);
   const opacity = createAnimatedValue(1);
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 24 }}>
-      <View style={{ width: 60, height: 60, borderRadius: 12, backgroundColor: "#0969da", opacity, transform: [{ translateX: x }] }} />
+      <View style={{ width: 60, height: 60, borderRadius: 12, backgroundColor: "#0969da", opacity, translate: [x, 0] }} />
       <View
         onPress={async () => {
           await x.timing(240, { duration: 600, easing: Easing.out(Easing.cubic) });
@@ -426,7 +427,7 @@ function App() {
 mount(App);
 ```
 
-**What can be bound:** opacity (`.bind_opacity(..)`); the background color, border color (every side) and a text's color (the whole text), through an interpolation to colors (`.bind_background(..)`, `.bind_border_color(..)`, `.bind_color(..)`); the shadow's color, opacity and radius (`.bind_shadow_color(..)`, ...); and the transform steps `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY` and `rotateZ` (`.bind_translate_x(..)`, `.bind_translate_y(..)`, `.bind_scale(..)`, `.bind_rotate(..)` in degrees, `.bind_transform(kind, ..)`). A focus ring or a price that flashes green is a color interpolation bound to the border or text color:
+**What can be bound:** `opacity` (`.bind_opacity(..)`); `backgroundColor`, `borderColor` (every side) and a text's `color` (the whole text), through an interpolation to colors (`.bind_background(..)`, `.bind_border_color(..)`, `.bind_color(..)`); `translate` (`[x, y]`, a value per axis), `rotate` (degrees) and `scale` (`[x, y]` per axis, or one value for both); and the steps of a `transform` list: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY` and `rotateZ` (`.bind_translate_x(..)`, `.bind_translate_y(..)`, `.bind_scale(..)`, `.bind_rotate(..)` in degrees, `.bind_transform(kind, ..)` in Rust). Shadows change with [transitions](#transitions). A focus ring or a price that flashes green is a color interpolation bound to the border or text color:
 
 ```rust tabs
 let flash = animated_value(0.0);
@@ -569,10 +570,8 @@ const t = createAnimatedValue(0);
   style={{
     backgroundColor: t.interpolate({ inputRange: [0, 1, 2], outputRange: ["#54aeff", "#8250df", "#cf222e"] }),
     opacity: t.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
-    transform: [
-      { rotate: t.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) },
-      { scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2], easing: Easing.out(Easing.back()) }) },
-    ],
+    rotate: t.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }),
+    scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2], easing: Easing.out(Easing.back()) }),
   }}
 />
 ```
@@ -607,7 +606,7 @@ const scroll = createAnimatedValue(0);
 const header = scroll.diffClamp(0, 56);
 
 <Scroll style={{ flex: 1 }} scrollValue={scroll}>…</Scroll>
-<View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: header.mul(-1) }] }}>…</View>
+<View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, header.mul(-1)] }}>…</View>
 ```
 
 With `{ snap: true }` (`diff_clamp_with(min, max, DiffClamp::snapping())`), a header left partly shown when the scrolling stops finishes the move: it settles fully shown or fully hidden, whichever is nearer, in 200 ms on the UI thread. It hides only once the page has scrolled at least its height, so a page scrolled less than that shows the whole header. Scrolling again during the move takes over from where the header is.
@@ -622,7 +621,7 @@ const header = scroll.diffClamp(0, 56, { snap: true });
 
 ## Composite animations
 
-Animations are built out of steps (`Animation` in Rust, `Animated` from `nsh/animated` in TSX) and the whole tree runs natively: each step starts on the UI thread the moment the previous one ends, with no gap and none of your code in between.
+Animations are built out of steps (`Animation` in Rust, `Animated` from `nsh` in TSX) and the whole tree runs natively: each step starts on the UI thread the moment the previous one ends, with no gap and none of your code in between.
 
 ```rust tabs
 let ys: Vec<AnimatedValue> = (0..5).map(|_| animated_value(0.0)).collect();
@@ -651,7 +650,7 @@ spawn(async move {
 ```
 
 ```tsx tabs
-import { Animated, createAnimatedValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh";
 
 const ys = [0, 1, 2, 3, 4].map(() => createAnimatedValue(0));
 const fade = createAnimatedValue(1);
@@ -694,7 +693,7 @@ A running animation does not keep its values alive: when the component that owns
 
 ## Easing
 
-Easing curves are data, evaluated natively: `Easing` from `nsh/animated` in TSX, the `Easing` enum in Rust.
+Easing curves are data, evaluated natively: `Easing` from `nsh` in TSX, the `Easing` enum in Rust.
 
 | TSX | Rust | Description |
 |---|---|---|
@@ -725,7 +724,7 @@ x.timing(1, { easing: [0.2, 0.8, 0.2, 1] });
 `Easing.sample(easing, count)` (`sample_easing` in Rust) returns the curve at `count` evenly spaced points from 0 to 1, and `Animated.sampleSpring(config, fps?)` / `Animated.sampleDecay(config, fps?)` (`sample_spring`, `sample_decay`) the values a spring or decay moves through, one per frame (60 per second by default) from `config.from` (0) until it ends. They are computed by the same native code the animations run, so a chart of a curve shows exactly what the animation does:
 
 ```rust tabs
-use nsh_core::ui::{sample_easing, sample_spring};
+use nsh_core::element::{sample_easing, sample_spring};
 
 let curve = sample_easing(Easing::Curve(Curve::Back(1.70158), EaseMode::Out), 50); // 50 progress values
 let spring = sample_spring(0.0, 1.0, Spring { stiffness: 180.0, damping: 8.0, ..Spring::default() }, 60.0);
@@ -741,7 +740,7 @@ const spring = Animated.sampleSpring({ toValue: 1, stiffness: 180, damping: 8 })
 A layout animation animates the frame changes of the **next** update natively: views that move or resize glide to their new frames, new views fade (or scale) in, removed views fade out. Call it right before the state change: `animate_layout(..)` in Rust, `LayoutAnimation.configureNext(config)` in TSX.
 
 ```rust tabs
-use nsh_core::ui::LayoutAnimation;
+use nsh_core::element::LayoutAnimation;
 
 let items = signal(vec![1, 2, 3]);
 let next = stored(4);
@@ -764,7 +763,7 @@ let remove = move || {
 
 ```tsx tabs
 import { signal } from "nsh";
-import { LayoutAnimation } from "nsh/animated";
+import { LayoutAnimation } from "nsh";
 
 const items = signal([1, 2, 3]);
 let next = 4;
@@ -790,7 +789,7 @@ const remove = () => {
 A config is `{ duration, create?, update?, delete? }` (`LayoutAnimation { create, update, delete }` in Rust): `create` for inserted views, `update` for moved or resized ones, `delete` for removed ones. Each phase is `{ type?, property?, duration?, delay?, springDamping? }` (`LayoutTransition { curve, property, duration_ms, delay_ms }`), where `type` is `"easeInEaseOut"`, `"spring"`, `"linear"`, `"easeIn"`, `"easeOut"` or `"keyboard"` (the software keyboard's own curve, timed from when the keyboard started to move, so that what makes room for it moves with it; `LayoutCurve::Keyboard`), `property` is what appearing and disappearing views animate (`"opacity"`, `"scaleXY"`, `"scale"`), and `springDamping` (0..1, 0.7 by default; `LayoutCurve::Spring { damping }`) sets the spring's overshoot.
 
 ```rust tabs
-use nsh_core::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
+use nsh_core::element::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
 
 animate_layout(LayoutAnimation {
     create: Some(LayoutTransition::new(LayoutCurve::EaseOut, 300.0)),
@@ -826,7 +825,7 @@ Reach for `requestAnimationFrame` (a global in TSX, following the display) only 
 
 ## Reduced motion
 
-When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh/accessibility` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
+When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
 
 [Motions](#motion) follow the setting on their own: `play` and `enter` land where the motion ends at once, without moving, and the answer is `true` as for a motion that played. An exit still ends hidden, an entrance still ends at rest. Pass `ignoreReduceMotion: true` (`play_ignoring_reduce_motion` in Rust) for a motion that carries meaning the user needs, such as a progress spinner.
 
@@ -846,7 +845,7 @@ view().style_when(|| !reduce_motion(), |s| s.animate_bounce())
 
 ```tsx tabs
 import { View } from "nsh";
-import { reduceMotion } from "nsh/accessibility";
+import { reduceMotion } from "nsh";
 
 const open = () => (reduceMotion() ? panel.set(0) : panel.spring(0));
 
@@ -857,7 +856,7 @@ See [Accessibility](./accessibility.md#reduced-motion).
 
 ## Related
 
-- [`nsh/animated`](../modules/nsh-animated.md): the TSX reference.
+- [`nsh`'s animation API](../modules/nsh.md#animation): the TSX reference.
 - [Touch and gestures](./touch-and-gestures.md): driving animated values with the finger.
 - [Scrolling](./scrolling.md#scroll-linked-effects-scrollvalue): `scrollValue`.
 - [Canvas](./canvas.md#driving-drawings-with-animated-values): animated values in drawings.

@@ -210,6 +210,10 @@ enum Pumped {
     Exited,
 }
 
+/// How soon a press follows the last on the same view to count as its next
+/// click: the platforms' default double-click time.
+const CLICK_INTERVAL: Duration = Duration::from_millis(500);
+
 /// An app on a headless engine ([`start`]) and what it shows ([`Screen`]),
 /// driven by steps: press views, type into inputs, scroll, go back, wait
 /// for what it shows.
@@ -264,6 +268,9 @@ pub struct Headless {
     /// The embedding app's channel with the app (`EngineConfig::host`),
     /// which the test plays.
     host: nsh_engine::HostChannel,
+    /// The last press: its view and when, for counting a double press as
+    /// the platforms do ([`CLICK_INTERVAL`]).
+    last_press: Option<(NodeId, nsh_core::time::Instant, u32)>,
     /// Where the app's `nsh/host` calls go (the web page's host).
     #[cfg(feature = "js")]
     host_calls: Option<HostCalls>,
@@ -302,6 +309,7 @@ impl Headless {
             clock,
             wanted,
             host,
+            last_press: None,
             #[cfg(feature = "js")]
             host_calls: None,
         })
@@ -576,17 +584,7 @@ impl Headless {
     fn apply(&mut self, batch: &MountBatch) {
         let focused = self.screen.focused();
         self.screen.apply(batch);
-        // The app moved the focus (`focus()`, `blur()`): platforms tell the
-        // views as when the user moves it.
-        let now = self.screen.focused();
-        if now != focused {
-            if let Some(old) = focused {
-                self.send(old, EventKind::Blur, EventPayload::None);
-            }
-            if let Some(new) = now {
-                self.send(new, EventKind::Focus, EventPayload::None);
-            }
-        }
+        self.focus_calls(batch, focused);
         self.exited |= batch.items.iter().any(|item| {
             matches!(
                 item,
@@ -788,8 +786,8 @@ impl Headless {
 
     /// The step `idle`: applies batches until none comes for `quiet`, or
     /// for 10 s at most (false then). Long enough, it lets the engine's
-    /// idle collection run (every second at most), so what the app keeps
-    /// alive shows.
+    /// idle collection run (every second at most, after 0.3 s without
+    /// work), so what the app keeps alive shows.
     pub fn idle(&mut self, quiet: Duration) -> Result<bool, String> {
         self.step("idle");
         let quiet = self.quiet(quiet, MAX_IDLE);
@@ -1113,12 +1111,22 @@ impl Headless {
         self.step(format!("pressAt({selector}, {}, {})", at.x.0, at.y.0));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
-        // `at` is in the view. The touch reports it in the root, as `press`
-        // reports a canvas node's center.
+        // `at` is in the view the selector names, which may be inside the
+        // pressable the press goes to (a paragraph's text in an editor):
+        // it is moved into that view's coordinates. The touch reports it
+        // in the root, as `press` reports a canvas node's center.
+        let named = match self.screen.resolve(&parsed)[..] {
+            [named] => named,
+            _ => id,
+        };
         let page = self
             .screen
-            .bounds_in_root(id)
+            .bounds_in_root(named)
             .map(|bounds| bounds.origin + at);
+        let at = match (page, self.screen.bounds_in_root(id)) {
+            (Some(page), Some(target)) => page - target.origin,
+            _ => at,
+        };
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
@@ -1134,12 +1142,27 @@ impl Headless {
     }
 
     /// A press at `at` in `view` (else the view's center), in that view
-    /// and in the root, as one click with no modifier keys. `None` when the
-    /// view has no bounds.
-    fn press_payload(&self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+    /// and in the root, with no modifier keys. Presses on one view within
+    /// [`CLICK_INTERVAL`] of each other count up (`clicks` 2 is a double
+    /// press), as the platforms count them. `None` when the view has no
+    /// bounds.
+    fn press_payload(&mut self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+        // A pointer's press takes the keyboard focus off the view Tab
+        // gave it to.
+        if self.screen.key_focus().is_some_and(|id| id != view) {
+            self.move_focus(None);
+        }
         let Some(bounds) = self.screen.bounds_in_root(view) else {
             return EventPayload::None;
         };
+        let now = self.clock.now();
+        let clicks = match self.last_press {
+            Some((last, at, clicks)) if last == view && now.duration_since(at) < CLICK_INTERVAL => {
+                clicks + 1
+            }
+            _ => 1,
+        };
+        self.last_press = Some((view, now, clicks));
         let position = at.unwrap_or_else(|| {
             point(
                 Points(bounds.size.width.0 / 2.0),
@@ -1153,7 +1176,7 @@ impl Headless {
                 Points(bounds.origin.y.0 + position.y.0),
             ),
             modifiers: nsh_core::keymap::Modifiers::default(),
-            clicks: 1,
+            clicks,
         })
     }
 
@@ -1553,7 +1576,10 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ui::{Root, prelude::*};
+    use nsh_core::{
+        element::{Root, input},
+        prelude::*,
+    };
 
     use super::*;
 
@@ -1657,7 +1683,7 @@ mod tests {
     #[component]
     fn RetainedLayout() -> impl IntoElement {
         let count = signal(0_u32);
-        let listener: nsh_core::ui::Listener<Bounds<Points>> =
+        let listener: nsh_core::element::Listener<Bounds<Points>> =
             (move |_: &Bounds<Points>| count.update(|n| *n += 1)).into();
         view().child(dynamic(move || {
             let current = count.get();
@@ -1979,7 +2005,7 @@ mod tests {
                 view()
                     .test_id("button")
                     .h(px(40.0))
-                    .on_press(move |_: &()| presses.update(|p| *p += 1))
+                    .on_press(move || presses.update(|p| *p += 1))
                     .on_press_up(move |_: &()| ups.update(|u| *u += 1))
                     .child(text("Button")),
             )
@@ -2034,6 +2060,34 @@ mod tests {
         assert!(app.shows("Refreshes 1"));
         let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
+    }
+
+    /// A list with a refresh indicator of its own, 100 tall.
+    #[component]
+    fn FarPull() -> impl IntoElement {
+        let refreshes = signal(0_u32);
+        view()
+            .flex_1()
+            .child(text(move || format!("Refreshes {}", refreshes.get())))
+            .child(
+                scroll()
+                    .test_id("list")
+                    .flex_1()
+                    .refresh_indicator(Some(px(100.0)))
+                    .on_refresh(move |_: &()| refreshes.update(|r| *r += 1))
+                    .children((0..30).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_pull_refreshes_at_its_threshold() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<FarPull>())).unwrap();
+        app.first_render().unwrap();
+        // 150 points of finger rubber-band to less than 100 (past 64).
+        app.drag("Row 2", point(px(0.0), px(150.0))).unwrap();
+        assert!(app.shows("Refreshes 0"));
+        app.drag("Row 2", point(px(0.0), px(1000.0))).unwrap();
+        app.wait_for("Refreshes 1").unwrap();
     }
 
     /// A shortcut counting its presses, and a field.
@@ -2092,6 +2146,100 @@ mod tests {
         let mut android = open_shortcuts(nsh_core::platform::Os::Android);
         android.press_key("ctrl+k").unwrap();
         android.wait_for("Palette 1").unwrap();
+    }
+
+    /// A card that opens something when pressed, a chart in it that is a
+    /// stop of Tab without taking presses (its arrow key steps while it
+    /// has the focus), and a button.
+    #[component]
+    fn FocusStops() -> impl IntoElement {
+        let opens = signal(0_u32);
+        let presses = signal(0_u32);
+        let steps = signal(0_u32);
+        let focused = signal(false);
+        effect(move || {
+            if focused.get() {
+                on_key("right", move |_| steps.update(|s| *s += 1));
+            }
+        });
+        view()
+            .flex_1()
+            .child(
+                view()
+                    .test_id("card")
+                    .on_press(move || opens.update(|o| *o += 1))
+                    .child(
+                        view()
+                            .test_id("chart")
+                            .h(px(40.0))
+                            .focusable(true)
+                            .on_focus(move || focused.set(true))
+                            .on_blur(move || focused.set(false)),
+                    ),
+            )
+            .child(
+                view()
+                    .test_id("button")
+                    .on_press(move || presses.update(|p| *p += 1))
+                    .child(text("Button")),
+            )
+            .child(text(move || {
+                format!(
+                    "Opens {} presses {} steps {} focused {}",
+                    opens.get(),
+                    presses.get(),
+                    steps.get(),
+                    focused.get()
+                )
+            }))
+    }
+
+    #[test]
+    fn tab_stops_at_a_focusable_view_that_takes_no_presses() {
+        let mut config = EngineConfig::new(Root::of::<FocusStops>());
+        config.environment.os = nsh_core::platform::Os::MacOs;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        let id = |app: &Headless, s: &str| match app.screen().view(&Selector::parse(s).unwrap()) {
+            crate::screen::Pick::One(id) => id,
+            _ => panic!("{s} is shown"),
+        };
+        let (card, chart, button) = (
+            id(&app, "id:card"),
+            id(&app, "id:chart"),
+            id(&app, "id:button"),
+        );
+        assert_eq!(app.screen().tab_stops(), [card, chart, button]);
+        // In tree order: the card, then the chart inside it.
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(card));
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(chart));
+        app.wait_for("Opens 0 presses 0 steps 0 focused true")
+            .unwrap();
+        // Return presses nothing there; its keys reach it through the
+        // keymap while it has the focus.
+        app.press_key("enter").unwrap();
+        app.press_key("right").unwrap();
+        app.wait_for("Opens 0 presses 0 steps 1 focused true")
+            .unwrap();
+        app.press_key("tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(button));
+        app.wait_for("Opens 0 presses 0 steps 1 focused false")
+            .unwrap();
+        app.press_key("right").unwrap();
+        app.press_key("enter").unwrap();
+        app.wait_for("Opens 0 presses 1 steps 1 focused false")
+            .unwrap();
+        app.press_key("shift+tab").unwrap();
+        assert_eq!(app.screen().key_focus(), Some(chart));
+        app.wait_for("Opens 0 presses 1 steps 1 focused true")
+            .unwrap();
+        // A press on the chart is the card's: being focusable takes none.
+        app.press("id:chart").unwrap();
+        app.wait_for("Opens 1 presses 1 steps 1 focused false")
+            .unwrap();
     }
 
     #[cfg(feature = "js")]

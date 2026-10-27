@@ -350,6 +350,34 @@ impl<M: TextEngine> Core<M> {
         })
     }
 
+    /// The native scroll view's own and nested lists' ranges, plus CSS
+    /// sticky views. Remount replays the same data without restacking.
+    pub(super) fn sticky_ranges(&self, view: Key) -> Vec<StickyRange> {
+        let node = &self.nodes[view as usize];
+        // A parent-viewport list mounts as a plain view. Its scroll view
+        // receives these ranges through `dependents` below.
+        if node.list.as_ref().is_some_and(|list| list.parent) {
+            return Vec::new();
+        }
+        let Some(scroll) = node.scroll.as_ref() else {
+            return Vec::new();
+        };
+        let mut all: Vec<StickyRange> = node
+            .list
+            .as_ref()
+            .map(|l| l.sent_sticky.clone())
+            .unwrap_or_default();
+        for &d in &scroll.dependents {
+            if let Some(list) = self.nodes[d as usize].list.as_ref() {
+                all.extend_from_slice(&list.sent_sticky);
+            }
+        }
+        // And its `position: sticky` views'.
+        all.extend_from_slice(&scroll.view_sticky);
+        all.sort_by_key(|r| r.cell);
+        all
+    }
+
     /// Sends each view in `sticky_views` its sticky cells: its lists' in
     /// its viewport, its own when it is a list, and its sticky views'
     /// ([`super::sticky`]).
@@ -364,19 +392,7 @@ impl<M: TextEngine> Core<M> {
             let Some(scroll) = node.scroll.as_ref() else {
                 continue;
             };
-            let mut all: Vec<StickyRange> = node
-                .list
-                .as_ref()
-                .map(|l| l.sent_sticky.clone())
-                .unwrap_or_default();
-            for &d in &scroll.dependents {
-                if let Some(list) = self.nodes[d as usize].list.as_ref() {
-                    all.extend_from_slice(&list.sent_sticky);
-                }
-            }
-            // And its `position: sticky` views'.
-            all.extend_from_slice(&scroll.view_sticky);
-            all.sort_by_key(|r| r.cell);
+            let all = self.sticky_ranges(view);
             if all == scroll.page_sticky {
                 continue;
             }
@@ -650,10 +666,18 @@ impl<M: TextEngine> Core<M> {
             if scroll.scroll_value.is_some() {
                 bits |= ignored::SCROLL_VALUE;
             }
-            if scroll.refreshing {
+            if scroll.refreshing
+                || scroll.pull_value.is_some()
+                || scroll.behavior.refresh_indicator.is_some()
+            {
                 bits |= ignored::REFRESH;
             }
-            if scroll.behavior != ScrollBehavior::default()
+            // The app's refresh indicator counts as refresh above.
+            let behavior = ScrollBehavior {
+                refresh_indicator: None,
+                ..scroll.behavior.clone()
+            };
+            if behavior != ScrollBehavior::default()
                 || scroll.keyboard_dismiss != crate::ops::KeyboardDismissMode::None
             {
                 bits |= ignored::BEHAVIOR;
@@ -698,7 +722,11 @@ const IGNORED: [(u16, &str, &str); 7] = [
         AROUND,
     ),
     (ignored::SCROLL_VALUE, "`scrollValue`", AROUND),
-    (ignored::REFRESH, "`refreshing` and `onRefresh`", AROUND),
+    (
+        ignored::REFRESH,
+        "`refreshing`, `onRefresh`, `pullValue` and `refreshIndicator`",
+        AROUND,
+    ),
     (
         ignored::BEHAVIOR,
         "paging, snapping, `contentInset`, `contentOffset`, `bounces`, `scrollable` and `keyboardDismissMode`",

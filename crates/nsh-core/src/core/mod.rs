@@ -7,6 +7,7 @@ mod overlay;
 mod parent_viewport;
 mod renders;
 mod services;
+mod slots;
 mod sticky;
 #[cfg(test)]
 mod tests;
@@ -36,7 +37,7 @@ use crate::{
         ROOT_ID, ResizeMode, ScreenAnimation, ScreenProp, ScrollProp, Tag,
     },
     props::{AccessibilityProp, EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
-    style::{Color, EllipsizeMode, PaintStyle, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
+    style::{Color, PaintStyle, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
     tailwind::{ClassEnvironment, ClassList, ClassProps, Tailwind},
     text::{AttributedText, MeasureCache, ResolvedTextStyle, TextEngine, TextLayout},
 };
@@ -90,6 +91,8 @@ mod dirty {
     /// Emit [`crate::MountItem::AccessibilityLabel`] (unless
     /// [`VIEW_PROPS`] sends everything).
     pub(super) const LABEL: u32 = 1 << 18;
+    /// Emit [`crate::MountItem::Shader`].
+    pub(super) const SHADER: u32 = 1 << 19;
 }
 
 /// A layout root other than the surface's: screens, modals and header
@@ -118,7 +121,7 @@ struct RootState {
     status_bar: Option<crate::StatusBarSetting>,
     /// Its entry in the surface's status bars, while the node is in the
     /// tree ([`Core::sync_status_bars`]).
-    status_bar_entry: Option<crate::ui::status_bar::StatusBarEntry>,
+    status_bar_entry: Option<crate::element::status_bar::StatusBarEntry>,
     /// Placement and root view (overlays).
     overlay: Option<Box<overlay::OverlayState>>,
 }
@@ -126,18 +129,10 @@ struct RootState {
 /// Paragraph settings of a text block (or input).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Paragraph {
-    /// `numberOfLines`; 0 means no limit.
-    lines: u32,
-    /// `ellipsizeMode`.
-    ellipsize: EllipsizeMode,
     /// `allowFontScaling`.
     allow_font_scaling: bool,
     /// `maxFontSizeMultiplier`; 0 means no limit.
     max_font_multiplier: f32,
-    /// `ellipsizeMode` was set (it then wins over classes).
-    ellipsize_set: bool,
-    /// `selectable` as set (it wins over `select-*` classes).
-    selectable: Option<bool>,
     /// `selectionColor` of selectable text.
     selection_color: Option<crate::Color>,
     /// `adjustsFontSizeToFit`.
@@ -149,12 +144,8 @@ struct Paragraph {
 impl Default for Paragraph {
     fn default() -> Self {
         Self {
-            lines: 0,
-            ellipsize: EllipsizeMode::Tail,
             allow_font_scaling: true,
             max_font_multiplier: 0.0,
-            ellipsize_set: false,
-            selectable: None,
             selection_color: None,
             fit: false,
             min_font_scale: 0.0,
@@ -196,6 +187,7 @@ enum Kind {
     Video,
     Native,
     Overlay,
+    Shader,
 }
 
 impl Kind {
@@ -213,6 +205,7 @@ impl Kind {
                 | Kind::HeaderItem
                 | Kind::InputAccessory
                 | Kind::Overlay
+                | Kind::Shader
         )
     }
 
@@ -239,7 +232,11 @@ impl Kind {
             Kind::WebView => ViewKind::WebView,
             Kind::Video => ViewKind::Video,
             Kind::Native => ViewKind::Native,
-            Kind::View | Kind::Cell | Kind::RawText | Kind::Overlay => ViewKind::View,
+            // A shader's view is a view the platform draws its layer in
+            // (`MountItem::Shader`), under its children.
+            Kind::View | Kind::Cell | Kind::RawText | Kind::Overlay | Kind::Shader => {
+                ViewKind::View
+            }
         }
     }
 
@@ -264,6 +261,7 @@ impl Kind {
             Tag::Video => Kind::Video,
             Tag::Native => Kind::Native,
             Tag::Overlay => Kind::Overlay,
+            Tag::Shader => Kind::Shader,
         }
     }
 
@@ -288,6 +286,23 @@ struct ComponentState {
     props: Vec<(Arc<str>, crate::JsonValue)>,
     /// Properties changed since the last commit.
     changed: Vec<Arc<str>>,
+    /// The names of its animated prop slots (`AnimationProp::ComponentSlot`):
+    /// a name keeps its slot once given one.
+    slots: Vec<Arc<str>>,
+    /// The bound slots and their animation nodes. A bound prop's value in
+    /// `props` is kept but not sent until it is unbound.
+    bound: Vec<(u16, crate::animation::NodeId)>,
+    /// `slots` changed since the platform was last told (a `Cell`: the
+    /// commit clears it while it reads the node).
+    slots_changed: std::cell::Cell<bool>,
+}
+
+impl ComponentState {
+    fn is_bound(&self, name: &str) -> bool {
+        self.bound
+            .iter()
+            .any(|(s, _)| &*self.slots[*s as usize] == name)
+    }
 }
 
 #[derive(Debug)]
@@ -296,6 +311,7 @@ struct ScrollState {
     scrollbar_visible: bool,
     refreshing: bool,
     scroll_value: Option<crate::animation::NodeId>,
+    pull_value: Option<crate::animation::NodeId>,
     keyboard_dismiss: KeyboardDismissMode,
     /// Last content size sent to the platform.
     content: Option<Size<Points>>,
@@ -339,6 +355,7 @@ impl Default for ScrollState {
             scrollbar_visible: true,
             refreshing: false,
             scroll_value: None,
+            pull_value: None,
             keyboard_dismiss: KeyboardDismissMode::None,
             content: None,
             content_item: None,
@@ -377,10 +394,22 @@ struct InputState {
     empty_line: Option<(u64, Size<Points>)>,
 }
 
+/// A shader node's props and the layer they make.
+#[derive(Debug, Default)]
+struct ShaderNode {
+    /// `source`, as JS set it.
+    source: Option<Arc<str>>,
+    /// The program: `source` compiled, or what Rust set.
+    shader: Option<crate::shader::Shader>,
+    uniforms: crate::shader::ShaderUniforms,
+    paused: bool,
+    /// What the platform shows (`None`: nothing, as a view).
+    layer: Option<Arc<crate::shader::ShaderLayer>>,
+}
+
 #[derive(Debug, Default)]
 struct ImageState {
     source: Option<ImageSource>,
-    resize_mode: ResizeMode,
     options: crate::mount::ImageOptions,
 }
 
@@ -404,12 +433,14 @@ struct Node {
     animated: Vec<(AnimationProp, crate::animation::NodeId)>,
     /// What a canvas draws.
     drawing: Option<Arc<crate::canvas::Drawing>>,
+    /// A shader's program, uniforms and layer.
+    shader: Option<Box<ShaderNode>>,
     /// The `style` prop as written, applied over the class styles.
     inline_style: StylePatch,
     /// `class` / `classList` as set.
     class_names: Option<Box<classes::ClassNames>>,
     /// Their parsed form.
-    classes: Option<Arc<ClassList>>,
+    classes: Option<std::rc::Rc<ClassList>>,
     /// Node props the classes set.
     class_props: Option<Box<ClassProps>>,
     /// Interaction states (`tailwind::state` bits).
@@ -452,8 +483,14 @@ struct Node {
     /// `position: sticky`: its insets, where it sticks in the viewport of
     /// the scroll view around it ([`Core::update_sticky_views`]).
     sticky: Option<Box<taffy::Rect<taffy::LengthPercentageAuto>>>,
+    /// `objectFit` (and the `object-*` classes): how its image or video
+    /// fits its box.
+    object_fit: Option<ResizeMode>,
     /// The inset padding and margin components set: added to the style's.
     insets: Option<Box<[EdgeInsets; 2]>>,
+    /// Its padding's and margin's `env()` terms and the insets they came
+    /// to when its style was last applied ([`Core::sync_env`]).
+    env: Option<Box<(crate::style::EnvEdges, [EdgeInsets; 2])>>,
     events: EventMask,
     /// `zIndex`: native views are ordered by it (stable) among siblings.
     z_index: i32,
@@ -572,6 +609,13 @@ impl Node {
         if self.spare {
             style.hidden = true;
         }
+        // A canvas whose drawing fills with its background shows it there
+        // only (`Painter::fill_background_from_view`).
+        if self.kind == Kind::Canvas && self.drawing.as_ref().is_some_and(|d| d.paints_background())
+        {
+            style.background_color = crate::style::Color::TRANSPARENT;
+            style.clear_background_images();
+        }
         if style.transform.has_fractions() {
             let size = if self.frame.size.width.is_nan() {
                 Size::default()
@@ -616,6 +660,7 @@ impl Node {
             paint: None,
             animated: Vec::new(),
             drawing: None,
+            shader: matches!(kind, Kind::Shader).then(Box::default),
             inline_style: StylePatch::default(),
             class_names: None,
             classes: None,
@@ -637,7 +682,9 @@ impl Node {
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
             sticky: None,
+            object_fit: None,
             insets: None,
+            env: None,
             events: EventMask::default(),
             z_index: 0,
             vertical_align: crate::style::VerticalAlign::Baseline,
@@ -831,6 +878,9 @@ pub struct Core<M: TextEngine> {
     /// The warning about animated insets of views that are not sticky, or
     /// on the axis their scroll view does not scroll, was logged.
     inset_warned: bool,
+    /// Compiled shaders by the hash of their source, with their errors
+    /// (an app setting the same source again compiles it once).
+    shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
     /// Live screens, modals and header items.
     roots: Vec<Key>,
     /// Attached input accessories by `nativeID`.
@@ -849,9 +899,12 @@ pub struct Core<M: TextEngine> {
     paced_scratch: Vec<(u32, u32)>,
     /// The events for JS, in order (the platform's and the core's events,
     /// Rust components' events, calls' results).
-    events: Vec<crate::ui::JsEvent>,
+    events: Vec<crate::element::JsEvent>,
     /// Reused buffer of `(item index, cell)` for list updates.
     cells_scratch: Vec<(u32, Key)>,
+    /// The list cells whose content waits for the app's render functions
+    /// this round (sorted; [`Core::cells_awaiting_renders`]): not measured.
+    awaiting_renders: Vec<Key>,
     root: Key,
     viewport: Size<Points>,
     mount: Vec<MountItem>,
@@ -862,6 +915,10 @@ pub struct Core<M: TextEngine> {
     commands: Vec<(NodeId, Command)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
+    /// The nodes whose padding or margin uses `env()` (`Node::env`).
+    env_styled: rustc_hash::FxHashSet<NodeId>,
+    /// Scratch of [`Core::sync_env`].
+    env_scratch: Vec<NodeId>,
     /// The screens and modals with a `statusBar`, in the order they got
     /// it: few, so attaching and detaching only flag them for the commit.
     status_bar_nodes: Vec<Key>,
@@ -977,6 +1034,7 @@ impl<M: TextEngine> Core<M> {
             sticky_changed: false,
             sticky_warned: false,
             inset_warned: false,
+            shaders: Default::default(),
             roots: Vec::new(),
             accessories: Default::default(),
             header_heights: (Points(44.0), Points(96.0)),
@@ -986,12 +1044,15 @@ impl<M: TextEngine> Core<M> {
             paced_scratch: Vec::new(),
             events: Vec::new(),
             cells_scratch: Vec::new(),
+            awaiting_renders: Vec::new(),
             root,
             viewport,
             mount: Vec::new(),
             batches: 0,
             commands: Vec::new(),
             layout_animation: None,
+            env_styled: Default::default(),
+            env_scratch: Vec::new(),
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
@@ -1300,7 +1361,7 @@ impl<M: TextEngine> Core<M> {
     /// Moves what the core hands JS (events it raised, such as
     /// `onLoadMore` and `onLayout`, Rust components' events, calls'
     /// results) into `out`, in order.
-    pub fn take_events(&mut self, out: &mut Vec<crate::ui::JsEvent>) {
+    pub fn take_events(&mut self, out: &mut Vec<crate::element::JsEvent>) {
         out.append(&mut self.events);
     }
 
@@ -1343,6 +1404,62 @@ impl<M: TextEngine> Core<M> {
                 self.mark(key, dirty::INPUT);
             }
         }
+    }
+
+    /// The platform's views must get everything again, as new views do, and
+    /// text is measured again: the unit the platform converted the values
+    /// with changed (Android's density). The views stay, scrolled where they
+    /// are.
+    pub fn remount(&mut self) {
+        self.fonts_changed();
+        let keys: Vec<Key> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.created)
+            .map(|(k, _)| k as Key)
+            .collect();
+        for key in keys {
+            let flags = self.mount_state(key);
+            self.mark(key, flags);
+            let node = &mut self.nodes[key as usize];
+            if let Some(root) = node.root.as_mut() {
+                root.laid_out = None;
+            }
+            // A scroll view keeps where it is scrolled to: its content size
+            // goes again as it is, not as a first one (which would put a
+            // right to left one at its right end). A new size from the
+            // layout below replaces it ([`Self::set_scroll_content`]).
+            let id = node.id;
+            if let Some(scroll) = node.scroll.as_mut()
+                && let Some(size) = scroll.content
+            {
+                scroll.content_item = Some((self.batches, self.mount.len()));
+                self.mount.push(MountItem::ScrollContent { id, size });
+            }
+            if let Some(layout) = node.layout {
+                // Every frame is sent again.
+                self.layout.mark_dirty(layout);
+            }
+            // Replay pixel-based sticky state without clearing the lists'
+            // bookkeeping (which would restack their existing cells).
+            // If layout changes the logical ranges, its later item wins.
+            let ranges = self.sticky_ranges(key);
+            if !ranges.is_empty() {
+                self.mount.push(MountItem::StickyCells {
+                    id,
+                    cells: ranges
+                        .into_iter()
+                        .map(|r| StickyCell {
+                            cell: r.cell,
+                            start: Points(r.start),
+                            end: Points(r.end),
+                            offset: r.offset,
+                        })
+                        .collect(),
+                });
+            }
+        }
+        self.needs_layout = true;
     }
 
     /// The user edited input `id` (before JS sees the edit): keeps the text
@@ -1504,8 +1621,19 @@ impl<M: TextEngine> Core<M> {
                 if node.drawing.as_deref() == Some(&*drawing) {
                     return Ok(());
                 }
+                // An empty drawing on a canvas that has drawn nothing shows
+                // nothing new (a component's canvas before its first layout).
+                if node.drawing.is_none() && drawing.ops.is_empty() && drawing.nodes.is_empty() {
+                    return Ok(());
+                }
+                // Whether the view draws its background (it does not where
+                // the drawing fills with it).
+                let background_moved = node.drawing.as_ref().is_some_and(|d| d.paints_background())
+                    != drawing.paints_background();
                 node.drawing = Some(Arc::from(drawing));
-                let flags = dirty::CANVAS | if slots_changed { dirty::ANIMATION } else { 0 };
+                let flags = dirty::CANVAS
+                    | if slots_changed { dirty::ANIMATION } else { 0 }
+                    | if background_moved { dirty::VIEW } else { 0 };
                 self.mark(key, flags);
                 Ok(())
             }
@@ -1597,6 +1725,7 @@ impl<M: TextEngine> Core<M> {
         self.sync_keys();
         // Platforms animate the frames, insertions and removals that follow
         // in the batch; ops may already have queued some.
+        self.sync_env();
         if let Some(animation) = self.layout_animation.take() {
             self.mount.insert(0, MountItem::LayoutAnimation(animation));
         }
@@ -2087,10 +2216,13 @@ impl<M: TextEngine> Core<M> {
         let key = self.key(id)?;
         let node = &mut self.nodes[key as usize];
         node.inline_style = patch;
-        if node.classes.is_some() || node.spaced {
+        if node.classes.is_some() || node.spaced || node.inline_style.reads_current_color() {
             self.restyle(key);
             return Ok(());
         }
+        let mut props = node.class_props.as_deref().cloned().unwrap_or_default();
+        style.node_props(&mut props);
+        self.set_class_props(key, props);
         self.set_style(id, *style)
     }
 
@@ -2151,6 +2283,18 @@ impl<M: TextEngine> Core<M> {
             }
         }
         let node = &mut self.nodes[key as usize];
+        if node.object_fit != pending.object_fit {
+            node.object_fit = pending.object_fit;
+            if node.image.is_some() {
+                self.mark(key, dirty::IMAGE);
+            } else if let Some(control) = node.control.as_mut() {
+                // A video is contained by default.
+                let fit = pending.object_fit.unwrap_or(ResizeMode::Contain);
+                apply_native(control, NativeProp::VideoResizeMode(fit));
+                self.mark(key, dirty::NATIVE);
+            }
+        }
+        let node = &mut self.nodes[key as usize];
         if node.wants_fixed != pending.fixed_position {
             // Made an overlay, or a view again: at once while it is in no
             // parent (classes are set before the node is inserted), else as
@@ -2163,8 +2307,36 @@ impl<M: TextEngine> Core<M> {
                 self.fixed_changed.push((key, id));
             }
         }
+        // `env()`'s terms, on the edges their declarations name (left and
+        // right are physical, right to left too).
+        let env = pending.env;
+        let env = (!env.is_empty()).then(|| (env, self.env_insets(key, &env)));
         let node = &mut self.nodes[key as usize];
-        if let Some([padding, margin]) = node.insets.as_deref() {
+        let id = node.id;
+        match env {
+            Some(env) => {
+                node.env = Some(Box::new(env));
+                self.env_styled.insert(id);
+            }
+            None => {
+                if node.env.take().is_some() {
+                    self.env_styled.remove(&id);
+                }
+            }
+        }
+        let node = &mut self.nodes[key as usize];
+        let mut extra = node.insets.as_deref().copied();
+        if let Some((_, applied)) = node.env.as_deref() {
+            let sum = |a: EdgeInsets, b: EdgeInsets| EdgeInsets {
+                top: a.top + b.top,
+                right: a.right + b.right,
+                bottom: a.bottom + b.bottom,
+                left: a.left + b.left,
+            };
+            let [p, m] = extra.unwrap_or_default();
+            extra = Some([sum(p, applied[0]), sum(m, applied[1])]);
+        }
+        if let Some([padding, margin]) = extra.as_ref() {
             // On top of points; percentages cannot take an addition.
             let add = |p: &mut taffy::LengthPercentage, d: f32| {
                 if let taffy::style::ExpandedLengthPercentage::Length(v) = p.expand() {
@@ -2253,6 +2425,15 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         if view_changed {
             flags |= dirty::VIEW;
+            // A drawing filling with the view's background paints the new
+            // one.
+            if self.nodes[key as usize]
+                .drawing
+                .as_ref()
+                .is_some_and(|d| d.paints_background())
+            {
+                flags |= dirty::CANVAS;
+            }
         }
         if position_changed && self.nodes[key as usize].image.is_some() {
             flags |= dirty::IMAGE;
@@ -2377,8 +2558,9 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Lays `key` out in the other direction: its left and right properties
-    /// trade places (their start / end ones with them).
+    /// Lays `key` out in the other direction. Its left and right properties
+    /// keep their sides, as in CSS; its start / end ones move with the
+    /// direction, so it is styled again when it has some.
     fn flip_direction(&mut self, key: Key, rtl: bool) {
         let direction = if rtl {
             taffy::Direction::Rtl
@@ -2387,23 +2569,24 @@ impl<M: TextEngine> Core<M> {
         };
         let node = &mut self.nodes[key as usize];
         node.rtl = rtl;
-        let mut view = node.view_style.clone();
+        if let Some(list) = node.list.as_mut() {
+            let mirrored = rtl && list.horizontal;
+            list.set_mirrored(mirrored);
+        }
+        // A spaced child's margin is on its end side.
+        let logical = node.logical.is_some() || node.spaced;
         let kind = node.kind;
         if let Some(base) = node.base_layout.as_deref_mut() {
-            crate::style::swap_sides(base, &mut view);
             base.direction = direction;
-            node.view_style = view;
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
             let mut layout = self.layout.style(l).clone();
-            crate::style::swap_sides(&mut layout, &mut view);
             layout.direction = direction;
-            self.nodes[key as usize].view_style = view;
             self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         self.mark(key, dirty::VIEW);
-        if self.reads_direction(key) {
+        if logical || self.reads_direction(key) {
             self.restyle(key);
         }
         let node = &mut self.nodes[key as usize];
@@ -2449,7 +2632,7 @@ impl<M: TextEngine> Core<M> {
         // source (JS finds the handler when the event is delivered).
         let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
             let message = not_granted(what, uri, capability);
-            core.events.push(crate::ui::JsEvent::Event(
+            core.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::Error,
                 EventPayload::Error {
@@ -2513,6 +2696,87 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// A shader's `source`, program, `uniforms` or `paused`: the layer is
+    /// made again, and sent when it changed.
+    fn set_shader_prop(&mut self, key: Key, prop: Prop) {
+        let id = self.nodes[key as usize].id;
+        let Some(state) = self.nodes[key as usize].shader.as_mut() else {
+            log::warn!(target: "js", "shader props are a `<Shader>`'s; node {id} is not one");
+            return;
+        };
+        match prop {
+            Prop::ShaderSource(source) => {
+                if state.source == source {
+                    return;
+                }
+                state.source = source;
+                state.shader = None;
+                if let Some(source) = &state.source {
+                    let hash = crate::shader::source_hash(source);
+                    let compiled = self
+                        .shaders
+                        .get(&hash)
+                        .filter(|c| match c {
+                            Ok(shader) => shader.source() == &**source,
+                            Err(_) => true,
+                        })
+                        .cloned();
+                    let compiled = compiled.unwrap_or_else(|| {
+                        let compiled = crate::shader::Shader::compile(source);
+                        // Bounded: an app making sources on the fly does not
+                        // keep them all.
+                        if self.shaders.len() >= 64 {
+                            self.shaders.clear();
+                        }
+                        self.shaders.insert(hash, compiled.clone());
+                        compiled
+                    });
+                    let state = self.nodes[key as usize]
+                        .shader
+                        .as_mut()
+                        .expect("shader node");
+                    match compiled {
+                        Ok(shader) => state.shader = Some(shader),
+                        Err(error) => log::warn!(target: "js", "the shader of node {id}: {error}"),
+                    }
+                }
+            }
+            Prop::Shader(shader) => {
+                state.source = None;
+                state.shader = shader;
+            }
+            Prop::Uniforms(uniforms) => state.uniforms = uniforms,
+            Prop::ShaderPaused(paused) => state.paused = paused,
+            _ => return,
+        }
+        let state = self.nodes[key as usize]
+            .shader
+            .as_mut()
+            .expect("shader node");
+        let layer = state.shader.clone().map(|shader| {
+            let mut warnings = Vec::new();
+            let mut layer =
+                crate::shader::ShaderLayer::new(shader, &state.uniforms.0, &mut warnings);
+            layer.paused = state.paused;
+            for warning in warnings {
+                log::warn!(target: "js", "the shader of node {id}: {warning}");
+            }
+            Arc::new(layer)
+        });
+        if layer == state.layer {
+            return;
+        }
+        let nodes_of = |l: &Option<Arc<crate::shader::ShaderLayer>>| {
+            l.as_ref().map_or(&[][..], |l| &l.nodes[..]).to_vec()
+        };
+        let slots_changed = nodes_of(&layer) != nodes_of(&state.layer);
+        state.layer = layer;
+        self.mark(
+            key,
+            dirty::SHADER | if slots_changed { dirty::ANIMATION } else { 0 },
+        );
+    }
+
     fn set_prop(&mut self, id: NodeId, prop: Prop) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         // Rust components: `component` makes a view a host, its props
@@ -2539,6 +2803,12 @@ impl<M: TextEngine> Core<M> {
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
+        if let Prop::ShaderSource(_) | Prop::Shader(_) | Prop::Uniforms(_) | Prop::ShaderPaused(_) =
+            prop
+        {
+            self.set_shader_prop(key, prop);
+            return Ok(());
+        }
         if let Prop::Screen(ScreenProp::StatusBar(setting)) = prop {
             self.set_status_bar(key, setting);
             return Ok(());
@@ -2556,10 +2826,15 @@ impl<M: TextEngine> Core<M> {
                 | Prop::Scrollbar(_)
                 | Prop::Refreshing(_)
                 | Prop::ScrollValue(_)
+                | Prop::PullValue(_)
                 | Prop::Native(NativeProp::Scrollable(_))
         ) && let Some(list) = self.nodes[key as usize].list.as_mut().filter(|l| l.parent)
         {
             list.ignored |= match prop {
+                Prop::Scroll(ScrollProp::RefreshIndicator(None)) => 0,
+                Prop::Scroll(ScrollProp::RefreshIndicator(Some(_))) | Prop::PullValue(Some(_)) => {
+                    list::ignored::REFRESH
+                }
                 Prop::Scroll(_)
                 | Prop::KeyboardDismissMode(
                     KeyboardDismissMode::OnDrag | KeyboardDismissMode::Interactive,
@@ -2607,22 +2882,15 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::IMAGE;
                 }
             }
-            Prop::ResizeMode(mode) => {
-                if let Some(image) = node.image.as_mut() {
-                    image.resize_mode = mode;
-                    flags |= dirty::IMAGE;
-                } else if let Some(control) = node.control.as_mut() {
-                    apply_native(control, NativeProp::VideoResizeMode(mode));
-                    flags |= dirty::NATIVE;
-                }
-            }
             Prop::Horizontal(horizontal) => {
                 if let Some(scroll) = node.scroll.as_mut()
                     && scroll.horizontal != horizontal
                 {
                     scroll.horizontal = horizontal;
                     flags |= dirty::SCROLL;
+                    let rtl = node.rtl;
                     if let Some(list) = node.list.as_mut() {
+                        list.set_mirrored(horizontal && rtl);
                         list.set_horizontal(horizontal);
                     }
                     let children = node.children.clone();
@@ -2664,6 +2932,10 @@ impl<M: TextEngine> Core<M> {
                         ScrollProp::BouncesZoom(on) => b.bounces_zoom = on,
                         ScrollProp::Pinch(on) => b.pinch = on,
                         ScrollProp::CenterContent(on) => b.center_content = on,
+                        ScrollProp::RefreshIndicator(h) => {
+                            // No height, no indicator: every release would refresh.
+                            b.refresh_indicator = h.filter(|h| h.0 > 0.0);
+                        }
                         ScrollProp::Zoom(scale) => {
                             // After the limits (sent with this commit's
                             // behavior) are applied.
@@ -2703,6 +2975,12 @@ impl<M: TextEngine> Core<M> {
             Prop::ScrollValue(value) => {
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.scroll_value = value;
+                    flags |= dirty::SCROLL;
+                }
+            }
+            Prop::PullValue(value) => {
+                if let Some(scroll) = node.scroll.as_mut() {
+                    scroll.pull_value = value;
                     flags |= dirty::SCROLL;
                 }
             }
@@ -2836,29 +3114,10 @@ impl<M: TextEngine> Core<M> {
                 node.gestures.rotation = value;
                 flags |= dirty::PAN;
             }
-            Prop::NumberOfLines(lines) => {
-                if node.paragraph.lines != lines {
-                    node.paragraph.lines = lines;
-                    self.mark_text_block(key);
-                }
-            }
-            Prop::EllipsizeMode(mode) => {
-                node.paragraph.ellipsize_set = true;
-                if node.paragraph.ellipsize != mode {
-                    node.paragraph.ellipsize = mode;
-                    self.mark_text_block(key);
-                }
-            }
             Prop::AllowFontScaling(allow) => {
                 if node.paragraph.allow_font_scaling != allow {
                     node.paragraph.allow_font_scaling = allow;
                     self.font_settings_changed(key);
-                }
-            }
-            Prop::Selectable(on) => {
-                if node.paragraph.selectable != on {
-                    node.paragraph.selectable = on;
-                    self.mark_text_block(key);
                 }
             }
             Prop::SelectionColor(color) if node.input.is_none() => {
@@ -3063,10 +3322,10 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
-            Prop::SelectionArea(value) => {
+            Prop::SelectableView(value) => {
                 let props = node.props.get_or_insert_default();
-                if props.selection_area != value {
-                    props.selection_area = value;
+                if props.selectable_view != value {
+                    props.selectable_view = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }
@@ -3245,6 +3504,10 @@ impl<M: TextEngine> Core<M> {
                                 component.props.iter().map(|(k, _)| k.clone()).collect();
                             self.mount.push(MountItem::Component { id, name });
                             flags |= dirty::COMPONENT;
+                            if !component.slots.is_empty() {
+                                component.slots_changed.set(true);
+                                flags |= dirty::ANIMATION;
+                            }
                         }
                         None => component.name = Some(name),
                         Some(old) if *old != name => log::warn!(
@@ -3252,6 +3515,36 @@ impl<M: TextEngine> Core<M> {
                             "a native component cannot change from `{old}` to `{name}`; render a new element"
                         ),
                         Some(_) => {}
+                    }
+                }
+            }
+            Prop::ComponentPropBinding(name, value) => {
+                if let Some(component) = node.component.as_mut() {
+                    let slot = match component.slots.iter().position(|k| *k == name) {
+                        Some(s) => Some(s as u16),
+                        None if value.is_none() => None,
+                        None => {
+                            component.slots.push(name.clone());
+                            component.slots_changed.set(true);
+                            Some((component.slots.len() - 1) as u16)
+                        }
+                    };
+                    if let Some(slot) = slot {
+                        let at = component.bound.iter().position(|(s, _)| *s == slot);
+                        match (at, value) {
+                            (Some(i), Some(n)) => component.bound[i].1 = n,
+                            (None, Some(n)) => component.bound.push((slot, n)),
+                            (Some(i), None) => {
+                                component.bound.remove(i);
+                                // Its static value (or its removal) is sent again.
+                                if !component.changed.contains(&name) {
+                                    component.changed.push(name);
+                                }
+                                flags |= dirty::COMPONENT;
+                            }
+                            (None, None) => {}
+                        }
+                        flags |= dirty::ANIMATION;
                     }
                 }
             }
@@ -3375,6 +3668,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::SelectionColor(color) => {
                         c.selection_color = color;
+                        false
+                    }
+                    Prop::CaretColor(color) => {
+                        c.caret_color = color;
                         false
                     }
                     Prop::AutoFill(fill) => {
@@ -3866,7 +4163,6 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
-        node.frame = Bounds::UNSET;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;
             // The new native view counts the core's scrolls from zero.
@@ -3878,67 +4174,12 @@ impl<M: TextEngine> Core<M> {
         let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
         let id = node.id;
         let kind = node.kind;
-        // A new native view already has the default style and no listeners.
-        let mut flags = 0;
-        if node.view_style != ViewStyle::default()
-            || node.elevation != Points::ZERO
-            || node.backdrop_material != crate::BackdropMaterial::default()
-            || parent_list
-            || node.spare
-        {
-            flags |= dirty::VIEW;
-        }
-        if !node.events.is_empty() {
-            flags |= dirty::EVENTS;
-        }
-        if kind == Kind::Text {
-            flags |= dirty::TEXT_MOUNT;
-            if has_attachments {
-                // Its attachments' views go inside the new view.
-                node.attached.clear();
-                flags |= dirty::TEXT_BUILD;
-            }
-        }
-        if node.image.as_ref().is_some_and(|i| i.source.is_some()) {
-            flags |= dirty::IMAGE;
-        }
-        if let Some(scroll) = &node.scroll
-            && !parent_list
-        {
-            flags |= dirty::SCROLL;
-            if scroll.refreshing {
-                flags |= dirty::REFRESHING;
-            }
-        }
-        if !node.animated.is_empty() || node.drawing.as_ref().is_some_and(|d| !d.slots.is_empty()) {
-            flags |= dirty::ANIMATION;
-        }
-        if node.drawing.is_some() {
-            flags |= dirty::CANVAS;
-        }
-        if !node.gestures.is_empty() {
-            flags |= dirty::PAN;
-        }
-        if node.props.is_some() || node.spare {
-            flags |= dirty::VIEW_PROPS;
-        }
-        match kind {
-            Kind::Screen => flags |= dirty::SCREEN,
-            Kind::Modal => flags |= dirty::MODAL,
-            _ => {}
-        }
-        if node.control.is_some() {
-            flags |= dirty::NATIVE;
-        }
-        if let Some(list) = node.list.as_mut() {
-            list.dirty = true;
-        }
-        if let Some(input) = node.input.as_mut() {
-            input.content = None;
-            flags |= dirty::INPUT;
-            if !input.value.is_empty() {
-                flags |= dirty::INPUT_VALUE;
-            }
+        let mut flags = self.mount_state(key);
+        let node = &mut self.nodes[key as usize];
+        if kind == Kind::Text && has_attachments {
+            // Its attachments' views go inside the new view.
+            node.attached.clear();
+            flags |= dirty::TEXT_BUILD;
         }
         self.mount.push(MountItem::Create {
             id,
@@ -3957,9 +4198,6 @@ impl<M: TextEngine> Core<M> {
                     name: name.clone(),
                 });
             }
-            // The new component gets every property.
-            component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
-            flags |= dirty::COMPONENT;
         }
         if let Some(item) = self.creation_tracking(key) {
             self.mount.push(item);
@@ -3990,6 +4228,91 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.nodes[key as usize].children = original;
+    }
+
+    /// Resets what `key`'s native view was last sent and returns what a new
+    /// view needs: a new view has the default style and no listeners.
+    fn mount_state(&mut self, key: Key) -> u32 {
+        let node = &mut self.nodes[key as usize];
+        let kind = node.kind;
+        node.frame = Bounds::UNSET;
+        // A list in its parent's viewport is a plain view clipping its
+        // cells (`Node::mounted_view_style`), with no scroll view's config.
+        let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
+        let mut flags = 0;
+        if node.view_style != ViewStyle::default()
+            || node.elevation != Points::ZERO
+            || node.backdrop_material != crate::BackdropMaterial::default()
+            || parent_list
+            || node.spare
+        {
+            flags |= dirty::VIEW;
+        }
+        if !node.events.is_empty() {
+            flags |= dirty::EVENTS;
+        }
+        if kind == Kind::Text {
+            flags |= dirty::TEXT_MOUNT;
+        }
+        if node.image.as_ref().is_some_and(|i| i.source.is_some()) {
+            flags |= dirty::IMAGE;
+        }
+        if let Some(scroll) = &node.scroll
+            && !parent_list
+        {
+            flags |= dirty::SCROLL;
+            if scroll.refreshing {
+                flags |= dirty::REFRESHING;
+            }
+        }
+        if !node.animated.is_empty()
+            || node.drawing.as_ref().is_some_and(|d| !d.slots.is_empty())
+            || node.component.as_ref().is_some_and(|c| !c.slots.is_empty())
+            || node
+                .shader
+                .as_ref()
+                .and_then(|s| s.layer.as_ref())
+                .is_some_and(|l| !l.nodes.is_empty())
+        {
+            flags |= dirty::ANIMATION;
+        }
+        if node.drawing.is_some() {
+            flags |= dirty::CANVAS;
+        }
+        if node.shader.as_ref().is_some_and(|s| s.layer.is_some()) {
+            flags |= dirty::SHADER;
+        }
+        if !node.gestures.is_empty() {
+            flags |= dirty::PAN;
+        }
+        if node.props.is_some() || node.spare {
+            flags |= dirty::VIEW_PROPS;
+        }
+        match kind {
+            Kind::Screen => flags |= dirty::SCREEN,
+            Kind::Modal => flags |= dirty::MODAL,
+            _ => {}
+        }
+        if node.control.is_some() {
+            flags |= dirty::NATIVE;
+        }
+        if let Some(list) = node.list.as_mut() {
+            list.dirty = true;
+        }
+        if let Some(input) = node.input.as_mut() {
+            input.content = None;
+            flags |= dirty::INPUT;
+            if !input.value.is_empty() {
+                flags |= dirty::INPUT_VALUE;
+            }
+        }
+        if let Some(component) = node.component.as_mut() {
+            // The new component gets every property, and its slots' names.
+            component.changed = component.props.iter().map(|(k, _)| k.clone()).collect();
+            component.slots_changed.set(!component.slots.is_empty());
+            flags |= dirty::COMPONENT;
+        }
+        flags
     }
 
     #[inline]
@@ -4062,11 +4385,9 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::IMAGE != 0
                 && let Some(image) = &node.image
             {
-                // An explicit `resizeMode` wins over `object-*` classes.
-                let resize_mode = match node.class_props.as_ref().and_then(|c| c.resize_mode) {
-                    Some(m) if image.resize_mode == ResizeMode::default() => m,
-                    _ => image.resize_mode,
-                };
+                // The style's `objectFit`; an image covers its box by
+                // default.
+                let resize_mode = node.object_fit.unwrap_or_default();
                 // Bundled assets with variants: the one for the screen.
                 let ratio = self.components.environment.pixel_ratio;
                 self.mount.push(MountItem::Image {
@@ -4094,6 +4415,7 @@ impl<M: TextEngine> Core<M> {
                         horizontal: scroll.horizontal,
                         scrollbar_visible: scroll.scrollbar_visible,
                         scroll_value: scroll.scroll_value,
+                        pull_value: scroll.pull_value,
                         keyboard_dismiss: scroll.keyboard_dismiss,
                         mirrored: node.kind == Kind::List && scroll.horizontal && node.rtl,
                     });
@@ -4147,6 +4469,31 @@ impl<M: TextEngine> Core<M> {
                             .map(|(i, &n)| (AnimationProp::CanvasArg(i as u16), n)),
                     );
                 }
+                if let Some(layer) = node.shader.as_ref().and_then(|s| s.layer.as_ref()) {
+                    bindings.extend(
+                        layer
+                            .nodes
+                            .iter()
+                            .enumerate()
+                            .map(|(i, &n)| (AnimationProp::CanvasArg(i as u16), n)),
+                    );
+                }
+                if let Some(component) = &node.component {
+                    bindings.extend(
+                        component
+                            .bound
+                            .iter()
+                            .map(|&(s, n)| (AnimationProp::ComponentSlot(s), n)),
+                    );
+                }
+                if let Some(component) = &node.component
+                    && component.slots_changed.replace(false)
+                {
+                    self.mount.push(MountItem::ComponentPropSlots {
+                        id,
+                        names: component.slots.clone(),
+                    });
+                }
                 self.mount
                     .push(MountItem::AnimationBindings { id, bindings });
             }
@@ -4157,9 +4504,22 @@ impl<M: TextEngine> Core<M> {
                     drawing.clone()
                 } else {
                     let (paint, current) = self.resolved_paint(key);
-                    Arc::new(drawing.painted(&paint, current))
+                    let style = &node.view_style;
+                    let images = style
+                        .effects
+                        .as_deref()
+                        .map_or(&[][..], |e| &e.background_images[..]);
+                    Arc::new(drawing.painted(&paint, current, style.background_color, images))
                 };
                 self.mount.push(MountItem::Canvas { id, drawing });
+            }
+            if flags & dirty::SHADER != 0
+                && let Some(shader) = &node.shader
+            {
+                self.mount.push(MountItem::Shader {
+                    id,
+                    layer: shader.layer.clone(),
+                });
             }
             if flags & dirty::PAN != 0 {
                 let mut values = node.gestures;
@@ -4197,8 +4557,11 @@ impl<M: TextEngine> Core<M> {
                 && let Some(component) = self.nodes[key as usize].component.as_mut()
                 && !component.changed.is_empty()
             {
-                let props = std::mem::take(&mut component.changed)
+                let changed = std::mem::take(&mut component.changed);
+                let props: Vec<_> = changed
                     .into_iter()
+                    // A bound prop's value waits until it is unbound.
+                    .filter(|name| !component.is_bound(name))
                     .map(|name| {
                         let value = component
                             .props
@@ -4208,7 +4571,9 @@ impl<M: TextEngine> Core<M> {
                         (name, value)
                     })
                     .collect();
-                self.mount.push(MountItem::ComponentProps { id, props });
+                if !props.is_empty() {
+                    self.mount.push(MountItem::ComponentProps { id, props });
+                }
             }
             let node = &self.nodes[key as usize];
             if flags & dirty::NATIVE != 0
@@ -4244,9 +4609,11 @@ impl<M: TextEngine> Core<M> {
                     if let Some(c) = class {
                         config.placeholder_color = config.placeholder_color.or(c.placeholder_color);
                     }
-                    config.selection_color = config
-                        .selection_color
-                        .or(self.inherited_text_props(key).2)
+                    config.selection_color =
+                        config.selection_color.or(self.inherited_text_props(key).2);
+                    config.caret_color = config
+                        .caret_color
+                        .or(node.text_style.caret_color)
                         .or(class.and_then(|c| c.caret_color));
                     config.style = scaled(
                         self.inherited_text_style(key).inherit(&node.text_style),
@@ -4320,7 +4687,7 @@ impl<M: TextEngine> Core<M> {
         }
         input.content_size = Some(size);
         let id = node.id;
-        self.events.push(crate::ui::JsEvent::Event(
+        self.events.push(crate::element::JsEvent::Event(
             id,
             EventKind::ContentSizeChange,
             EventPayload::Map(vec![
@@ -4423,17 +4790,10 @@ impl<M: TextEngine> Core<M> {
     /// color change keeps both and just needs a new final layout.
     fn rebuild_text(&mut self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
+        // Its own style's and classes' (`numberOfLines`, `textOverflow`).
         let class = node.class_props.as_deref();
-        // Explicit props win over classes (`numberOfLines` over
-        // `line-clamp-*`).
-        let max_lines = match (node.paragraph.lines, class.and_then(|c| c.number_of_lines)) {
-            (0, Some(n)) => n,
-            (n, _) => n,
-        };
-        let ellipsize = match class.and_then(|c| c.ellipsize) {
-            Some(m) if !node.paragraph.ellipsize_set => m,
-            _ => node.paragraph.ellipsize,
-        };
+        let max_lines = class.and_then(|c| c.number_of_lines).unwrap_or(0);
+        let ellipsize = class.and_then(|c| c.ellipsize).unwrap_or_default();
         let inherited = self.inherited_text_style(key);
         let (no_wrap, selectable, highlight) = self.inherited_text_props(key);
         let (align, physical) = node
@@ -4452,7 +4812,7 @@ impl<M: TextEngine> Core<M> {
             // must ellipsize at the box (`truncate`).
             no_wrap: max_lines == 0 && no_wrap.unwrap_or(false),
             shadow: node.text_style.shadow(),
-            selectable: node.paragraph.selectable.or(selectable),
+            selectable,
             selection_color: node
                 .paragraph
                 .selection_color
@@ -5292,7 +5652,7 @@ impl<M: TextEngine> Core<M> {
                 });
                 cx.metadata_changed = false;
                 if report_lines {
-                    self.events.push(crate::ui::JsEvent::Event(
+                    self.events.push(crate::element::JsEvent::Event(
                         id,
                         EventKind::TextLayout,
                         text_lines(engine, &text, &text_layout),
@@ -5319,7 +5679,7 @@ impl<M: TextEngine> Core<M> {
                         .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
                     let layout = engine.layout(prepared, size);
                     if report_lines {
-                        self.events.push(crate::ui::JsEvent::Event(
+                        self.events.push(crate::element::JsEvent::Event(
                             id,
                             EventKind::TextLayout,
                             text_lines(engine, &cx.text, &layout),
@@ -5506,7 +5866,7 @@ impl<M: TextEngine> Core<M> {
     fn report_frame(&mut self, key: Key) {
         let node = &self.nodes[key as usize];
         if !node.frame.origin.x.0.is_nan() {
-            self.events.push(crate::ui::JsEvent::Event(
+            self.events.push(crate::element::JsEvent::Event(
                 node.id,
                 EventKind::Layout,
                 EventPayload::Layout(node.frame),
@@ -5520,7 +5880,7 @@ impl<M: TextEngine> Core<M> {
             node.frame = frame;
             let (id, is_text) = (node.id, node.kind == Kind::Text);
             if node.events.contains(EventKind::Layout) {
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::Layout,
                     EventPayload::Layout(frame),
@@ -5610,6 +5970,11 @@ impl<M: TextEngine> Core<M> {
     /// Measures rendered cells, keeps the visible content anchored, picks
     /// the items to render and positions the cells of every list.
     fn update_lists(&mut self, relayout: bool) {
+        // A cell measured before JS's render of its content arrives would
+        // record the size of its empty placeholders.
+        let mut awaiting = std::mem::take(&mut self.awaiting_renders);
+        self.cells_awaiting_renders(&mut awaiting);
+        self.awaiting_renders = awaiting;
         for i in 0..self.lists.len() {
             let key = self.lists[i];
             // Lists in their parent's viewport come after, outer ones first.
@@ -5719,6 +6084,13 @@ impl<M: TextEngine> Core<M> {
             .loads_at_start = events.contains(EventKind::LoadMoreAtStart);
         let mut anchor = 0.0;
         for &(index, cell) in &ready {
+            // Waiting for JS's render: it keeps its estimate (or the size
+            // measured last) until the holder arrives and lays it out
+            // again. A list in a view sized by its content would otherwise
+            // shrink to nothing and leave no row in its window to render.
+            if self.awaiting_renders.binary_search(&cell).is_ok() {
+                continue;
+            }
             if let Some(cell_layout) = self.nodes.get(cell as usize).and_then(|c| c.layout) {
                 let size = main_of(self.rounded_layout(cell_layout).size);
                 let list = self.nodes[key as usize].list.as_mut().expect("list");
@@ -5729,6 +6101,9 @@ impl<M: TextEngine> Core<M> {
             .into_iter()
             .zip(extras)
         {
+            if self.awaiting_renders.binary_search(&extra.cell).is_ok() {
+                continue;
+            }
             if let Some(cell_layout) = self.nodes.get(extra.cell as usize).and_then(|c| c.layout) {
                 let size = main_of(self.rounded_layout(cell_layout).size);
                 let list = self.nodes[key as usize].list.as_mut().expect("list");
@@ -5854,14 +6229,14 @@ impl<M: TextEngine> Core<M> {
         let mut binds = Vec::new();
         let edges = list.update_window(&mut binds);
         if edges.end {
-            self.events.push(crate::ui::JsEvent::Event(
+            self.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::LoadMore,
                 EventPayload::None,
             ));
         }
         if edges.start && events.contains(EventKind::LoadMoreAtStart) {
-            self.events.push(crate::ui::JsEvent::Event(
+            self.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::LoadMoreAtStart,
                 EventPayload::None,
@@ -5878,7 +6253,7 @@ impl<M: TextEngine> Core<M> {
             if viewable != list.viewable {
                 list.viewable = viewable;
                 let (first, last) = viewable.map_or((-1.0, -1.0), |(f, l)| (f as f64, l as f64));
-                self.events.push(crate::ui::JsEvent::Event(
+                self.events.push(crate::element::JsEvent::Event(
                     id,
                     EventKind::ViewableItemsChange,
                     EventPayload::Map(vec![

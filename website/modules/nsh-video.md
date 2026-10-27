@@ -39,7 +39,7 @@ function Player() {
         paused={paused()}
         muted
         repeat
-        resizeMode="cover"
+        class="object-cover"
         style={{ height: 220, borderRadius: 8, overflow: "hidden", backgroundColor: "#000" }}
         onProgress={(e) => time.set(`${e.currentTime.toFixed(1)} / ${e.duration.toFixed(1)} s`)}
       />
@@ -68,7 +68,7 @@ mount(Player);
 | `rate` | `number` | `1` | The playback speed. |
 | `repeat` | `boolean` | `false` | Plays again from the start at the end. |
 | `controls` | `boolean` | `false` | Shows the platform's playback controls. |
-| `resizeMode` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the video fits its box. |
+| `objectFit` (style), `object-*` classes | `"cover" \| "contain" \| "fill" \| "none" \| "scale-down"` | `"contain"` | How the video fits its box, as CSS's `object-fit` (`class="object-cover"`). |
 | `progressUpdateInterval` | `number` | `250` | Milliseconds between `onProgress` events. |
 | `audioSession` | `"default" \| "playback" \| "mixWithOthers"` | `"default"` | What the sound does to the rest of the device's audio: see [Sound and other apps](#sound-and-other-apps). |
 
@@ -93,7 +93,7 @@ The setting takes effect while the video plays. On iOS, the first such video to 
 | Event | Payload | When |
 |---|---|---|
 | `onLoadStart` | | The video starts loading. |
-| `onLoad` | `{ duration: number; size: Size }` | It is ready to play: its length in seconds and its size. |
+| `onLoad` | `{ duration: number; size: PixelSize }` | It is ready to play: its length in seconds and its size in pixels. |
 | `onProgress` | `{ currentTime: number; duration: number }` | While playing, every `progressUpdateInterval` ms. Seconds. |
 | `onBuffer` | `{ isBuffering: boolean }` | Playback waits for data, or resumes. |
 | `onEnd` | | Playback reached the end. |

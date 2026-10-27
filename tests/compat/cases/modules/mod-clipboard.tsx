@@ -3,7 +3,7 @@
 // answers: writing goes through, and every read is a promise (pending
 // there). Its script checks each.
 import { Text, View, signal } from "nsh";
-import { Clipboard } from "nsh/clipboard";
+import { Clipboard } from "nsh";
 
 function App() {
   const calls = signal("not called");

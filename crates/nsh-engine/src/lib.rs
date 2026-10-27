@@ -8,6 +8,9 @@
 //! platform through a [`MountSink`]. The platform thread never blocks on
 //! the engine.
 
+#[cfg(all(feature = "browser", target_arch = "wasm32", not(feature = "js")))]
+pub mod browser;
+
 mod access;
 mod app_directory;
 mod cache;
@@ -18,6 +21,8 @@ mod local_storage;
 pub mod net;
 pub mod perf;
 mod script;
+#[cfg(feature = "shader")]
+pub mod shader;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(feature = "js")]
@@ -42,11 +47,12 @@ use crossbeam_channel::{Receiver, Sender};
 pub use local_storage::local_storage_prefix;
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
-    PayloadValue, TextEngine, time::Instant, ui::JsEvent,
+    PayloadValue, TextEngine, element::JsEvent, time::Instant,
 };
 pub use nsh_core::{
     JsonValue,
     access::{Access, Capabilities},
+    element::{EngineContext, Root, Tokens},
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
     platform::{
@@ -55,7 +61,6 @@ pub use nsh_core::{
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
-    ui::{EngineContext, Root, Tokens},
 };
 #[cfg(feature = "js")]
 pub use nsh_js::BYTECODE_VERSION;
@@ -83,6 +88,17 @@ const ENGINE_STACK_SIZE: usize = 8 * 1024 * 1024;
 /// garbage immediately; only cycles (such as detached node subtrees, whose
 /// parent/child links reference each other) wait for the collector.
 const IDLE_GC_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How long the engine has had nothing to do (no message, no timer due)
+/// before an idle collection: a collection walks every object of the VM,
+/// tens of milliseconds for an app holding a lot of data, so it waits for
+/// a pause rather than land between the turns of a paste held down or of
+/// work done in slices on timers. An engine never quiet that long (a
+/// timer every few frames) still collects every [`IDLE_GC_LONGEST`].
+const IDLE_GC_QUIET: Duration = Duration::from_millis(300);
+
+/// The longest time between idle collections, quiet or not.
+const IDLE_GC_LONGEST: Duration = Duration::from_secs(5);
 
 /// The shortest time between two deliveries of mouse motion: a frame at
 /// 120 Hz. Mice report moves far more often (up to 1000 Hz), and a handler
@@ -587,6 +603,13 @@ pub trait MountSink: Send + 'static {
     /// show it in the frame the window takes the size, stops waiting here.
     fn resized(&self, _size: Size<Points>) {}
 
+    /// The engine has handled the first `events` events sent with
+    /// [`EngineControl::dispatch_event`]. Called after the commit of the
+    /// turn that handled them (what they changed came before), once per
+    /// turn. A platform holding typed text for the field an event may focus
+    /// gives it to the focused field from here.
+    fn handled(&self, _events: u64) {}
+
     /// The app imports chunk `id` of a split bundle (`import()`), which its
     /// [`Bundle`] does not hold: load it and hand it over with
     /// [`EngineControl::chunk_loaded`] (or [`EngineControl::chunk_failed`]),
@@ -658,7 +681,7 @@ pub struct EngineConfig {
     /// The UI sets JS imports (`nsh_base::registry()` by default, the app's
     /// own): their Rust components and modules. A Rust app's
     /// components need no registration.
-    pub ui_sets: Vec<nsh_core::ui::Registry>,
+    pub ui_sets: Vec<nsh_core::element::Registry>,
     /// The tokio runtime the components' async tasks use (timers, IO,
     /// background work); `None`: one shared by the engines of the process.
     pub runtime: Option<tokio::runtime::Handle>,
@@ -682,7 +705,7 @@ pub struct EngineConfig {
     pub clock: Clock,
     /// What the host gives this engine's Rust code, which its UI sets'
     /// functions and components read while it runs them
-    /// (`nsh_core::ui::engine_context`): a host serving several engines
+    /// (`nsh_core::element::engine_context`): a host serving several engines
     /// tells them apart by it.
     pub context: EngineContext,
     /// Values of the environment kept whatever the platform reports (a
@@ -740,7 +763,7 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
 }
 
 /// Native hosts choose these anchors before any application JavaScript runs.
-#[cfg(feature = "js")]
+#[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
@@ -872,6 +895,7 @@ enum Message {
     Frame,
     States(NodeId, u8),
     FontsChanged,
+    Remount,
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
     Fetch(Requester, u64, FetchEvent),
@@ -1037,6 +1061,13 @@ impl EngineControl {
     /// is measured again.
     pub fn fonts_changed(&self) {
         let _ = self.tx.send(Message::FontsChanged);
+    }
+
+    /// The platform's views get everything again and text is measured
+    /// again: the unit the platform converts values with changed (Android's
+    /// density). Send the new environment and size too.
+    pub fn remount(&self) {
+        let _ = self.tx.send(Message::Remount);
     }
 
     /// Records the engine's commits into `monitor` from now on (`None`:
@@ -1321,9 +1352,12 @@ struct Driver<M: TextEngine + 'static> {
     /// once; its views stay as they were and no JS runs any more.
     stopped: bool,
     last_gc: Instant,
+    /// When a message or a due timer last gave the engine work
+    /// ([`IDLE_GC_QUIET`]).
+    last_active: Instant,
     /// The queue of the JS calls Rust posts: its notify wakes the engine,
     /// as the core's task notify does ([`LocalEngine::set_wake`]).
-    posts: nsh_core::ui::Posts,
+    posts: nsh_core::element::Posts,
     /// The engine's clock, its thread's ([`Clock::enter`]).
     clock: Clock,
     /// The host's context, its thread's ([`EngineContext::enter`]).
@@ -1347,9 +1381,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         config.pinned.apply(&mut config.environment);
-        #[cfg(feature = "js")]
+        #[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
         let system_tx = tx.clone();
-        #[cfg(feature = "js")]
+        #[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
         let host_bridge = config.host.bridge(tx.clone());
         let host_tx = tx.clone();
         let text_engine = Rc::new(text_engine);
@@ -1366,11 +1400,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             .chain(&config.ui_sets)
             .cloned()
             .collect();
-        core.set_components(nsh_core::ui::Registry::merged(&sets));
+        core.set_components(nsh_core::element::Registry::merged(&sets));
         // The JS calls Rust posts queue in one place, which the core
         // releases in order with the ops (a post during a synchronous call)
         // and the script runs.
-        let posts = nsh_core::ui::Posts::new();
+        let posts = nsh_core::element::Posts::new();
         core.set_posts(posts.clone());
         if let App::Js(_) = &config.app {
             // Only JS is limited (Rust code is as trusted as the platform).
@@ -1412,8 +1446,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         let fonts = config
             .ui_sets
             .iter()
-            .flat_map(nsh_core::ui::Registry::asset_files)
-            .filter(|file| file.kind == nsh_core::ui::AssetKind::Font);
+            .flat_map(nsh_core::element::Registry::asset_files)
+            .filter(|file| file.kind == nsh_core::element::AssetKind::Font);
         for font in fonts {
             let result = match config.assets.as_deref() {
                 Some(assets) => assets.read(font.uri),
@@ -1440,6 +1474,16 @@ impl<M: TextEngine + 'static> Driver<M> {
         posts.set_notify(Arc::new(move || {
             let _ = wake.send(Message::Wake);
         }));
+        // The embedding app's tokens sent before the start
+        // (`Engine::start_with`) are there as the bundle evaluates, so its
+        // first render reads them; the rest comes after it, in order.
+        let mut early = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            match message {
+                Message::Tokens(tokens) => core.set_host_tokens(tokens.map(|t| *t)),
+                message => early.push(message),
+            }
+        }
         let js_tokens = core.tokens().clone();
         let state = State {
             core,
@@ -1459,6 +1503,8 @@ impl<M: TextEngine + 'static> Driver<M> {
             hover_moved: None,
             sets_seen: FxHashMap::default(),
             resized: None,
+            events_handled: 0,
+            events_reported: 0,
             pinned: config.pinned,
             host: config.host.clone(),
             url_opens: Vec::new(),
@@ -1484,6 +1530,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             assets: config.assets.clone(),
             stopped: false,
             last_gc: Instant::now(),
+            last_active: Instant::now(),
             posts: posts.clone(),
             clock: config.clock.clone(),
             context: config.context.clone(),
@@ -1492,7 +1539,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
-                #[cfg(feature = "js")]
+                #[cfg(any(feature = "js", all(feature = "browser", target_arch = "wasm32")))]
                 let system = {
                     script::SystemConfig {
                         access: (*access).clone(),
@@ -1509,7 +1556,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         host: Rc::new(host_bridge),
                     }
                 };
-                #[cfg(not(feature = "js"))]
+                #[cfg(not(any(feature = "js", all(feature = "browser", target_arch = "wasm32"))))]
                 let system = script::SystemConfig;
                 let (script, eval_us) = Script::start(
                     bundle,
@@ -1518,6 +1565,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     posts,
                     &environment,
                     driver.state.js_tokens.clone(),
+                    driver.state.core.theme_tokens(),
                     text_engine,
                     stop,
                     sink,
@@ -1542,7 +1590,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         // What was sent before the start (`Engine::start_with`) is in the
         // first frame; a move of the clock comes after it.
         let mut moves = Vec::new();
-        while let Ok(message) = rx.try_recv() {
+        let pending = early
+            .into_iter()
+            .chain(std::iter::from_fn(|| rx.try_recv().ok()));
+        for message in pending {
             if let Message::Advance(..) = message {
                 moves.push(message);
             } else if !handle(script, state, message) {
@@ -1565,6 +1616,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
+        state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
@@ -1581,8 +1633,8 @@ impl<M: TextEngine + 'static> Driver<M> {
     /// (on the system's clock; a manual one moves only when told), or the
     /// idle collection (the system's time, whatever the clock).
     fn deadline(&self) -> Option<Instant> {
-        let gc_deadline = (self.script.is_some() && self.state.committed_since_gc)
-            .then(|| self.last_gc + IDLE_GC_INTERVAL);
+        let gc_deadline =
+            (self.script.is_some() && self.state.committed_since_gc).then(|| self.next_gc());
         let due = if self.clock.is_manual() {
             None
         } else {
@@ -1607,6 +1659,7 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// Handles one message; false on shutdown.
     fn handle(&mut self, message: Message, rx: &Receiver<Message>) -> bool {
+        self.last_active = Instant::now();
         match message {
             Message::Advance(by, done) => {
                 let running = self.advance(by, rx, self.clock.moves_with_frames());
@@ -1708,6 +1761,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             ..
         } = self;
         let script = script.as_ref();
+        if script
+            .and_then(Script::next_timer)
+            .is_some_and(|due| due <= nsh_core::time::now())
+        {
+            self.last_active = Instant::now();
+        }
         let turn_start = state.trace.then(Instant::now);
         state.dispatch_touch_move(script);
         if state
@@ -1744,10 +1803,19 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
+        state.report_handled(&**sink);
         state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         self.check_stopped();
+    }
+
+    /// When the next idle collection may run: a second after the last, once
+    /// the engine has been quiet for [`IDLE_GC_QUIET`] (or at the latest
+    /// [`IDLE_GC_LONGEST`] after the last).
+    fn next_gc(&self) -> Instant {
+        let quiet = (self.last_active + IDLE_GC_QUIET).min(self.last_gc + IDLE_GC_LONGEST);
+        (self.last_gc + IDLE_GC_INTERVAL).max(quiet)
     }
 
     /// Collects cycles when the engine has been idle long enough, so
@@ -1755,9 +1823,13 @@ impl<M: TextEngine + 'static> Driver<M> {
     fn collect_if_idle(&mut self) {
         if let Some(script) = &self.script
             && self.state.committed_since_gc
-            && self.last_gc.elapsed() >= IDLE_GC_INTERVAL
+            && Instant::now() >= self.next_gc()
         {
+            let start = self.state.trace.then(Instant::now);
             script.collect_garbage();
+            if let Some(start) = start {
+                log::info!(target: "nsh::perf", "gc: {}µs", start.elapsed().as_micros());
+            }
             self.last_gc = Instant::now();
             self.state.committed_since_gc = false;
             if let Some(batch) = self.state.commit(Some(script)) {
@@ -1794,7 +1866,7 @@ struct State<M: TextEngine> {
     core: Core<M>,
     /// The design tokens JS has (`token()`): the core's when they were
     /// last sent.
-    js_tokens: Arc<nsh_core::ui::Tokens>,
+    js_tokens: Arc<nsh_core::element::Tokens>,
     /// What the environment keeps whatever the platform reports
     /// ([`EngineConfig::pinned`]).
     pinned: EnvironmentPins,
@@ -1835,10 +1907,14 @@ struct State<M: TextEngine> {
     sets_seen: FxHashMap<(u8, NodeId), usize>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
     resized: Option<Size<Points>>,
+    /// Events received ([`EngineControl::dispatch_event`]), and the count
+    /// last reported ([`MountSink::handled`]).
+    events_handled: u64,
+    events_reported: u64,
 }
 
 /// Who made a request: JS (`fetch`), or a Rust component's task
-/// (`nsh_core::ui::fetch`, [`Core::take_fetches`]).
+/// (`nsh_core::element::fetch`, [`Core::take_fetches`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Requester {
     Js(RequestId),
@@ -2114,6 +2190,15 @@ impl<M: TextEngine> State<M> {
         }
     }
 
+    /// Tells the platform how many events were handled, once the commit
+    /// of what they changed is submitted.
+    fn report_handled(&mut self, sink: &dyn MountSink) {
+        if self.events_handled != self.events_reported {
+            self.events_reported = self.events_handled;
+            sink.handled(self.events_handled);
+        }
+    }
+
     /// Asks the platform for a frame when JS or a component's task waits
     /// for one.
     fn request_frame(&mut self, script: Option<&Script>, sink: &dyn MountSink) {
@@ -2333,8 +2418,8 @@ fn insets(env: &Environment) -> EdgeInsets {
 }
 
 /// What Rust components read from the environment.
-fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::ui::Environment {
-    nsh_core::ui::Environment {
+fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element::Environment {
+    nsh_core::element::Environment {
         window,
         safe_area: insets(env),
         title_bar: env.title_bar,
@@ -2374,6 +2459,7 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
 fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message: Message) -> bool {
     match message {
         Message::Event(id, event, mut payload) => {
+            state.events_handled += 1;
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
@@ -2491,6 +2577,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         Message::States(id, states) => state.core.set_states(id, states),
         Message::FontsChanged => state.core.fonts_changed(),
+        Message::Remount => state.core.remount(),
         Message::Fetch(who, hop, event) => {
             if let Some(event) = state.net.event(who, hop, event) {
                 match who {
@@ -2517,7 +2604,12 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();
         }
-        Message::Tokens(tokens) => state.core.set_host_tokens(tokens.map(|t| *t)),
+        Message::Tokens(tokens) => {
+            state.core.set_host_tokens(tokens.map(|t| *t));
+            if let Some(script) = script {
+                script.set_theme_tokens(state.core.theme_tokens());
+            }
+        }
         // A Rust app has no `nsh/host`: what the host sends it goes.
         Message::HostEvent(name, data) => {
             if let Some(script) = script {

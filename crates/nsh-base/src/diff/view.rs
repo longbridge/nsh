@@ -7,7 +7,10 @@
 //! wrapped lines and the annotations under them. Only the rows in view
 //! (and a few around them) are made.
 
-use nsh_core::ui::{EventKind, EventPayload, Style, prelude::*};
+use nsh_core::{
+    element::{EventKind, EventPayload, Style},
+    prelude::*,
+};
 
 use super::{
     DiffAnnotation, DiffExpand, DiffIndicators, DiffLayout, DiffSeparator, DiffSide, DiffViewPart,
@@ -101,7 +104,7 @@ pub(crate) fn render(dv: Dv) -> impl IntoElement {
         .text_color(move || theme().foreground)
         .font_family(move || font_a().family)
         .text_size(move || Length::from(font_b().size))
-        .line_height(move || Length::from(font_c().line_height))
+        .line_height(move || nsh_core::LineHeight::from(font_c().line_height))
         .child(
             scroll()
                 .element_ref(&dv.vscroll)
@@ -625,7 +628,7 @@ fn line_row(
 /// The highlight of the code's selected text: the lines' selection color.
 fn selection_color() -> Hsla {
     let color = theme().selection();
-    if nsh_core::ui::ambient::dark() {
+    if nsh_core::element::ambient::dark() {
         color.dark
     } else {
         color.light

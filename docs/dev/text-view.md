@@ -33,9 +33,9 @@ colored with the theme's tokens; the app restyles each part over it.
 - **Each block is made with primitives** (`Cx::block`): a paragraph or heading is one `text` whose children are spans
   (`Inline` → nested texts, inline images, slots), lists are rows of a marker text and a column, code blocks a column
   with floating actions and a horizontal `scroll`, tables one grid in a horizontal `scroll` (below), disclosures a
-  pressable summary and an `If`. With `selectable`, every text carries `selectable` and the root is a selection area
-  (`Element::selection_area`), so one selection runs across the blocks, and inside a `SelectionArea` on into the
-  texts around the view ("Selection areas" in `text.md`).
+  pressable summary and an `If`. With `selectable`, every text carries `userSelect: "text"` (`.select_text()`) and the root is a selectable view
+  (`Element::selectable`), so one selection runs across the blocks, and inside a selectable view on into the
+  texts around the view ("Selectable views" in `text.md`).
 - **Tables** (`Cx::table`) lay out as gpui-kit's: columns fit their content when there is room, shrink (their cells
   wrapping) down to a floor per column when the view is narrower, and below the floors the table scrolls horizontally
   (`tableScroll`; `tableScrollbar` hides its indicator, as `codeBlockScrollbar` a code block's). The cells are one CSS grid, so columns line up across rows: each column is a `minmax(<floor>,
@@ -64,7 +64,7 @@ colored with the theme's tokens; the app restyles each part over it.
   code blocks again only while they are being written.
 - **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
-  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::ui::open_url`,
+  (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::element::open_url`,
   under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
 
 ## Parts and their default styles
@@ -225,14 +225,14 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 |---|---|
 | `TextView::markdown` / `::html` | `markdown` / `html` props; `document` for blocks the app builds |
 | `TextViewStyle` (colors, code block style, heading sizes) | A default typography in the theme's colors; `classes` / `styles` by part; `TextViewParts` (typed, Rust) |
-| Selection across the view | `selectable`: the view is a selection area, one selection across its blocks (drag, double / triple click, Shift+click; long press and handles); `SelectionArea` joins several views and texts |
+| Selection across the view | `selectable`: the view is a selectable view, one selection across its blocks (drag, double / triple click, Shift+click; long press and handles); a `selectable` `View` joins several views and texts |
 | Code block actions (copy) | `codeBlockActions` (`copy` built in, the app's with `renderCodeBlockAction` / `onCodeBlockAction`) |
 | Highlighter (tree-sitter) | Built in (syntect, Allsum's palette, feature `highlight`); the app's `CodeHighlighter` (Rust, styled ranges) or `renderCodeBlock` replaces it |
 | Table actions | `renderTableActions` |
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |
 | Link clicks | `onLinkPress({ url })` |
-| Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh/animated`, layout animation) |
+| Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh`'s `Animated`, layout animation) |
 
 ## Limits
 

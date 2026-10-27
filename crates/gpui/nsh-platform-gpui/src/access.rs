@@ -138,6 +138,7 @@ fn groups_role(role: Role) -> bool {
             | Role::Switch
             | Role::Tab
             | Role::MenuItem
+            | Role::ListBoxOption
     )
 }
 
@@ -166,6 +167,7 @@ fn focusable(role: Role) -> bool {
             | Role::SpinButton
             | Role::Switch
             | Role::Tab
+            | Role::ListBoxOption
     )
 }
 
@@ -227,6 +229,13 @@ pub(crate) fn role_for(a: &Accessibility, kind: ViewKind, pressable: bool) -> Op
         AxRole::Toolbar => Role::Toolbar,
         AxRole::List => Role::List,
         AxRole::Grid => Role::Grid,
+        AxRole::Table => Role::Table,
+        AxRole::Row => Role::Row,
+        AxRole::Cell => Role::Cell,
+        AxRole::ColumnHeader => Role::ColumnHeader,
+        AxRole::RowGroup => Role::RowGroup,
+        AxRole::Listbox => Role::ListBox,
+        AxRole::Option => Role::ListBoxOption,
     })
 }
 
@@ -460,7 +469,9 @@ fn describe(
     if state.disabled {
         node.set_disabled();
     }
-    if state.selected || role == Role::Tab {
+    // Tabs and options are selectable whether selected or not: a `false`
+    // tells assistive technologies they can be.
+    if state.selected || matches!(role, Role::Tab | Role::ListBoxOption) {
         node.set_selected(state.selected);
     }
     if let Some(checked) = state.checked {
@@ -1267,6 +1278,8 @@ mod tests {
             (AxRole::List, Role::List),
             (AxRole::Radio, Role::RadioButton),
             (AxRole::Menuitem, Role::MenuItem),
+            (AxRole::Listbox, Role::ListBox),
+            (AxRole::Option, Role::ListBoxOption),
             (AxRole::Summary, Role::Status),
             (AxRole::Alert, Role::Alert),
         ] {

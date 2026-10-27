@@ -5,14 +5,17 @@
 //! carets, the composition and the sink. Only the rows in view (and a few
 //! around them) are made, each a text whose spans are highlighted tokens.
 
-use nsh_core::ui::{ContextMenuEvent, Cursor, EventKind, EventPayload, Style, prelude::*};
+use nsh_core::{
+    element::{ContextMenuEvent, Cursor, EventKind, EventPayload, Style},
+    prelude::*,
+};
 
 use super::{
     EditorDiagnosticSeverity, EditorPart, EditorProps,
     controller::Ed,
     state::{RowContent, SpanTags},
 };
-use crate::theme;
+use crate::{input, theme};
 
 /// The width of a caret.
 pub(crate) const CARET_WIDTH: f32 = 2.0;
@@ -86,16 +89,6 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
         hover: signal(None),
         pressed: signal(None),
     };
-    // Lines scrolled into view with no colors yet get them in the same
-    // commit (a jump, or a scroll faster than the parse and the guesses
-    // ahead of it).
-    let shown_ed = ed.clone();
-    effect(move || {
-        shown_ed.scroll_y.get();
-        shown_ed.viewport.get();
-        shown_ed.text_rev.get();
-        untracked(|| shown_ed.highlight_shown_now());
-    });
     view()
         .element_ref(&ed.hooks.outer)
         .on_layout(move |_: &Bounds<Points>| place_ed.measure_place())
@@ -108,7 +101,7 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
         .text_color(move || theme().foreground)
         .font_family(move || font_a().family)
         .text_size(move || Length::from(font_b().size))
-        .line_height(move || Length::from(font_c().line_height))
+        .line_height(move || nsh_core::LineHeight::from(font_c().line_height))
         .child(
             scroll()
                 .element_ref(&ed.vscroll)
@@ -162,8 +155,8 @@ pub(crate) fn render(ed: Ed) -> impl IntoElement {
 /// Which of the editor's two trees a part is made for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Layer {
-    /// In the scroll views, empty: what the pointer, the wheel, the scroll
-    /// bars and touches reach (the platforms scroll it).
+    /// In the scroll views: the active-line backgrounds and what the
+    /// pointer, wheel, scroll bars and touches reach (the platforms scroll it).
     Hit,
     /// Over the scroll views, receiving no pointer: what shows, placed
     /// where the editor scrolled to. Its views keep their handlers for the
@@ -183,9 +176,11 @@ struct GutterPointer {
 fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
     let props = ed.props;
     let shown = move || props.line_numbers.get() || props.folding.get();
+    // Memos: every row reads them, and an edit would measure the digit
+    // again for each.
     let number_width = {
         let ed = ed.clone();
-        move || {
+        let width = computed(move || {
             ed.text_rev.get();
             if !props.line_numbers.get() {
                 return px(0.0);
@@ -197,17 +192,19 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
             // a measured width up, so a number laid out in the exact width
             // of its digits is a fraction too wide and shows as "…".
             (zero * digits.max(2) as f32).ceil()
-        }
+        });
+        move || width.get()
     };
     let fold_width = {
         let ed = ed.clone();
-        move || {
+        let width = computed(move || {
             if !props.folding.get() {
                 return px(0.0);
             }
             ed.text_rev.get();
             ed.st.borrow().line_height()
-        }
+        });
+        move || width.get()
     };
     let height = {
         let ed = ed.clone();
@@ -216,16 +213,13 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
     let rows = visible_rows(ed.clone());
     let top = ed.rows_top;
     when(shown, move || {
-        let (nw, fw) = (number_width.clone(), fold_width.clone());
-        let (number_width, fold_width) = (number_width.clone(), fold_width.clone());
         let height = height.clone();
         let row_ed = ed.clone();
         let press_ed = ed.clone();
-        let hit_nw = nw.clone();
         let inner = view()
             .relative()
             .mt(move || Length::from(top.get()))
-            .w(move || Length::from(nw() + fw()))
+            .w(move || Length::from(number_width() + fold_width()))
             .h(move || Length::from(height()));
         let inner = match layer {
             Layer::Paint => inner.child(each(
@@ -235,8 +229,8 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                     gutter_row(
                         row_ed.clone(),
                         row.get_untracked(),
-                        number_width.clone(),
-                        fold_width.clone(),
+                        number_width,
+                        fold_width,
                         pointer,
                     )
                 },
@@ -246,7 +240,7 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
             Layer::Hit => inner
                 .on(EventKind::Press, move |p: &EventPayload| {
                     let EventPayload::Press(e) = p else { return };
-                    if !props.line_numbers.get_untracked() || e.position.x >= hit_nw() {
+                    if !props.line_numbers.get_untracked() || e.position.x >= number_width() {
                         return;
                     }
                     let row = {
@@ -265,8 +259,8 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                         fold_hit(
                             row_ed.clone(),
                             row.get_untracked(),
-                            number_width.clone(),
-                            fold_width.clone(),
+                            number_width,
+                            fold_width,
                             pointer,
                         )
                     },
@@ -388,13 +382,17 @@ fn gutter_row(
                 let number = move || info.get().number.map(|n| n.to_string()).unwrap_or_default();
                 let ed = press_ed.clone();
                 let number_width = number_width.clone();
+                // The row's number changes with each edit above it: the
+                // text follows it, the element is made again only for
+                // another part.
+                let active = computed(move || info.get().active);
                 dynamic(move || {
-                    let active = info.get().active;
+                    let active = active.get();
                     let el = text(number)
                         .w(Length::from(number_width()))
                         .text_right()
                         .text_color(move || {
-                            if info.get().active {
+                            if active {
                                 theme().foreground
                             } else {
                                 theme().muted_foreground
@@ -421,8 +419,9 @@ fn gutter_row(
             move || {
                 let ed = fold_ed.clone();
                 let width = fold_width.clone();
+                let fold = computed(move || info.get().fold);
                 dynamic(move || {
-                    let fold = info.get().fold;
+                    let fold = fold.get();
                     let ed = ed.clone();
                     let size = width();
                     let el = view()
@@ -708,11 +707,15 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> 
     });
     let el = el.min_w(relative(1.0));
     if layer == Layer::Hit {
+        // Backgrounds belong to the scroll content, below its native
+        // indicators. The paint overlay above it holds the foreground.
         // The selection's handles take touches of their own.
-        return el.child(super::touch::handles(ed)).into_element();
+        return el
+            .child(active_lines(ed.clone(), lh))
+            .child(super::touch::handles(ed))
+            .into_element();
     }
-    el.child(active_lines(ed.clone(), lh.clone()))
-        .child(rulers(ed.clone()))
+    el.child(rulers(ed.clone()))
         .child(indent_guides(ed.clone(), lh.clone()))
         .child(match_rects(ed.clone()))
         .child(selection_rects(ed.clone()))
@@ -1321,44 +1324,4 @@ fn whitespace_marks(ed: Ed) -> impl IntoElement {
             })
             .collect::<Vec<_>>()
     })
-}
-
-impl Ed {
-    /// Guesses the colors of the lines in view that have none yet, here:
-    /// what the parse and the guesses off the engine thread bring a few
-    /// frames later.
-    fn highlight_shown_now(&self) {
-        let changed = {
-            let mut st = self.st.borrow_mut();
-            let st = &mut *st;
-            let count = st.display.row_count();
-            let lh = st.line_height().0.max(1.0);
-            let height = self.viewport.get_untracked().height.0;
-            if count == 0 || height <= 0.0 {
-                return;
-            }
-            let y = (self.scroll_y.get_untracked() - self.rows_top.get_untracked())
-                .0
-                .max(0.0);
-            let first_row = ((y / lh).floor() as usize).min(count - 1);
-            let last_row = (((y + height) / lh).ceil() as usize).clamp(first_row + 1, count) - 1;
-            let first = st.display.row(first_row).line;
-            let last = st.display.row(last_row).line;
-            let Some(h) = &mut st.highlighter else {
-                return;
-            };
-            if (first..=last).all(|line| h.tokens(line).is_some()) {
-                return;
-            }
-            let start = first.saturating_sub(super::highlight::GUESS_CONTEXT);
-            let offset = st.buffer.line_start(start);
-            match h.guess(st.buffer.rope(), start, offset, last) {
-                Some(guess) => !h.guessed(guess.run()).is_empty(),
-                None => false,
-            }
-        };
-        if changed {
-            self.hl_rev.update(|r| *r += 1);
-        }
-    }
 }

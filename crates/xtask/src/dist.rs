@@ -135,6 +135,10 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // source and hot updates). Both build to the same file, copied in turn.
     for (features, file) in [
         (&["--features", "bytecode-only"][..], "nsh.wasm"),
+        (
+            &["--no-default-features", "--features", "browser"][..],
+            "nsh-browser.wasm",
+        ),
         (&["--features", "dev"][..], "nsh-dev.wasm"),
     ] {
         let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
@@ -155,6 +159,20 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         &root.join("crates/nsh-platform-web/web/nsh.js"),
         &out.join("runtime/web/nsh.js"),
     )?;
+
+    for entry in fs::read_dir(root.join("crates/nsh-platform-web/web/browser"))? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            copy(
+                &entry.path(),
+                &out.join("runtime/web/browser").join(entry.file_name()),
+            )?;
+        }
+    }
 
     // Android runtimes. Windows machines often have no Android SDK: the
     // distribution is then made without them.

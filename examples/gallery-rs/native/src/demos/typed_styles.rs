@@ -13,11 +13,14 @@
 //! `even:` / `last:` are plain Rust from the row's index, `sm:` reads the
 //! window.
 
-use nsh_core::ui::{
-    AnyElement, BlendMode, BoxShadow, Image,
-    palette::{
-        AMBER, BLACK, BLUE, EMERALD, FUCHSIA, GREEN, Hue, INDIGO, ORANGE, PINK, RED, ROSE, SKY,
-        VIOLET, WHITE, YELLOW, ZINC,
+use nsh_base::input;
+use nsh_core::{
+    element::{
+        AnyElement, BlendMode, BoxShadow, Image,
+        palette::{
+            AMBER, BLACK, BLUE, EMERALD, FUCHSIA, GREEN, Hue, INDIGO, ORANGE, PINK, RED, ROSE, SKY,
+            VIOLET, WHITE, YELLOW, ZINC,
+        },
     },
     prelude::*,
 };
@@ -1077,6 +1080,7 @@ fn inputs() -> AnyElement {
             input()
                 .placeholder("Focus me")
                 .placeholder_color(|| color(zinc(400, 600)))
+                .caret_color(|| color(colors::ACCENT))
                 .selection_color(|| color(colors::ACCENT))
                 .h_11()
                 .rounded(px(10.0))

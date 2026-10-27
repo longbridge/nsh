@@ -1,10 +1,10 @@
 import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
-import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { platform, windowSize } from "nsh/device";
+import { Animated, createAnimatedValue, Easing } from "nsh";
+import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { NavPage, NavStack } from "nsh/base";
-import { keymap } from "nsh/keymap";
-import { Storage } from "nsh/storage";
+import { keymap } from "nsh";
+import { Storage } from "nsh";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
@@ -45,11 +45,15 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     title: "Drawing and type",
     demos: [
       { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
+      { name: "Shaders", detail: "WGSL shaders on the GPU: noise, gradients, animated uniforms", icon: "spark", screen: lazy(() => import("./demos/Shaders").then((m) => m.Shaders)) },
+      { name: "Charts", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut and bars, built from plot parts", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
       { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
       { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
       { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
       { name: "Text View", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "text", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
       { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "text", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
+      { name: "Rich Editor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo", icon: "text", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
+      { name: "DataTable", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "lists", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
       { name: "Diff", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "text", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
       { name: "Images", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: lazy(() => import("./demos/Images").then((m) => m.Images)) },
     ],
@@ -60,7 +64,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
       { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
       { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
-      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
+      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars, sliders", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
@@ -86,7 +90,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
         <IconTile name={props.demo.icon} size={38} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 16, fontWeight: "500", color: colors.text }}>{props.demo.name}</Text>
-          <Text numberOfLines={2} style={{ fontSize: 13, lineHeight: 18, color: colors.muted }}>
+          <Text style={{ numberOfLines: 2, fontSize: 13, lineHeight: 18, color: colors.muted }}>
             {props.demo.detail}
           </Text>
         </View>
@@ -189,7 +193,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
       <Icon name={props.demo.icon} size={17} tint={active() ? colors.accent : colors.muted} />
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
         {props.demo.name}
       </Text>
     </View>
@@ -241,7 +245,7 @@ function Sidebar() {
           bottom: 0,
           left: 0,
           width: SIDEBAR,
-          transform: [{ translateX: slide }],
+          translate: [slide, 0],
           backgroundColor: colors.inset,
           borderRightWidth: 1,
           borderRightColor: colors.line,
@@ -288,10 +292,10 @@ function DemoPane() {
       <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
         <IconTile name={selected().icon} size={36} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text numberOfLines={1} style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>
+          <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
             {selected().name}
           </Text>
-          <Text numberOfLines={1} style={{ fontSize: 13, color: colors.muted }}>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
             {selected().detail}
           </Text>
         </View>

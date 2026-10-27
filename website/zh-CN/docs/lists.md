@@ -13,7 +13,7 @@ demo: guide-lists
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 #[component]
 pub fn App() -> impl IntoElement {
@@ -151,7 +151,7 @@ const toggle = (id: number) =>
 
 ## 属性
 
-列表接受滚动视图中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollable`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollDragStart`、`onScrollDragEnd`、`onMomentumStart`、`onMomentumEnd`、`onScrollEnd`、`scrollValue`；在 Rust 中是与滚动视图相同的方法），说明见[滚动](./scrolling.md)。列表保持 1 倍缩放。它自己的属性：
+列表接受滚动视图中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollable`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollDragStart`、`onScrollDragEnd`、`onMomentumStart`、`onMomentumEnd`、`onScrollEnd`、`scrollValue`、`pullValue`；在 Rust 中是与滚动视图相同的方法），说明见[滚动](./scrolling.md)。列表保持 1 倍缩放。它自己的属性：
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
@@ -180,6 +180,7 @@ const toggle = (id: number) =>
 | `viewabilityConfig` | `.viewability(..)`、`.minimum_view_time(..)` | `ViewabilityConfig` | | 什么情况下条目算作可见。 |
 | `keyExtractor` | `.keys(..)` | `(item, index) => string` | | 可见性回调中的键；在 Rust 中是各行的标识。 |
 | `refreshing` / `onRefresh` | `.refreshing(..)` / `.on_refresh(..)` | `boolean` / `() => void` | | 下拉刷新。 |
+| `refreshIndicator` | `.refresh_indicator(..)` | `{ height: number }` | | 应用自己的下拉刷新指示器，取代平台的转圈（见[滚动](./scrolling.md#自己的指示器)）。 |
 | `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `ref` | `.element_ref(&list)` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
@@ -302,7 +303,7 @@ const shown = hidden.mul(-1).add(56);
 
 <View style={{ flex: 1, overflow: "hidden" }}>
   <List each={rows} scrollValue={scroll} stickyHeaderIndices={headers} stickyHeaderOffset={shown}>…</List>
-  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, transform: [{ translateY: hidden.mul(-1) }] }}>…</View>
+  <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, translate: [0, hidden.mul(-1)] }}>…</View>
 </View>
 ```
 
@@ -311,8 +312,6 @@ const shown = hidden.mul(-1).add(56);
 `inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面；添加消息时插到前面，用 `onLoadMore` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。从一条旧消息打开的聊天用 [`onLoadMoreAtStart`](#在开头加载onloadmoreatstart) 加载更新的消息；设置它后，列表在底部时保持与底部的距离，向上滚动后条目变化时屏幕上的消息保持原位。
 
 ```rust tabs
-use nsh_base::keyboard_avoiding_view;
-
 #[derive(Clone, PartialEq)]
 struct Message {
     id: u32,
@@ -376,8 +375,9 @@ pub fn chat() -> impl IntoElement {
     .on_load_more(load_older)
     .load_more_threshold(0.5)
     .flex_1();
-    keyboard_avoiding_view()
+    view()
         .flex_1()
+        .pb_keyboard()
         .child(list)
         .child(
             view().flex_row().gap_2().p_2().child(
@@ -402,8 +402,8 @@ pub fn chat() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Input, List, mount, signal, Text, View } from "nsh";
-import { KeyboardAvoidingView } from "nsh/base";
+import { List, mount, signal, Text, View } from "nsh";
+import { Input } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 
@@ -419,7 +419,7 @@ function Chat() {
   };
   const loadOlder = () => messages.update((m) => [...m, ...Array.from({ length: 20 }, (_, i) => message(`Older ${i}`, false))]);
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingBottom: "env(keyboard-inset-height)" }}>
       <List
         each={messages()}
         inverted
@@ -457,7 +457,7 @@ function Chat() {
           style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: "#d0d7de", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 }}
         />
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -695,8 +695,8 @@ const loadNewer = async () => {
 
 | `viewabilityConfig` | Rust | 说明 |
 |---|---|---|
-| `itemVisiblePercentThreshold` | `Viewability { item_visible_percent, .. }` | 条目必须可见的百分比。 |
-| `viewAreaCoveragePercentThreshold` | `Viewability { view_area_percent, .. }` | 条目必须覆盖视口的百分比。 |
+| `itemVisibleThreshold` | `Viewability { item_visible_threshold, .. }` | 条目必须可见的比例，0 到 1。 |
+| `viewAreaCoverageThreshold` | `Viewability { view_area_coverage_threshold, .. }` | 条目必须覆盖视口的比例，0 到 1。 |
 | `minimumViewTime` | `.minimum_view_time(Duration)` | 条目保持可见多少毫秒后才被报告。 |
 
 不设阈值时，只要有一个像素可见就算可见。
@@ -707,7 +707,7 @@ let playing = signal(None::<usize>);
 virtual_list(count, move |at| video_card(videos.clone(), at))
     .estimated_item_size(px(300.0))
     .viewability(Viewability {
-        item_visible_percent: Some(60.0),
+        item_visible_threshold: Some(Percentage(0.6)),
         ..Viewability::default()
     })
     .minimum_view_time(Duration::from_millis(250))
@@ -723,7 +723,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
   estimatedItemSize={300}
   style={{ flex: 1 }}
   keyExtractor={(v) => v.slug}
-  viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 250 }}
+  viewabilityConfig={{ itemVisibleThreshold: 0.6, minimumViewTime: 250 }}
   onViewableItemsChange={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
 >
   {(v) => <VideoCard video={v()} />}
@@ -770,7 +770,7 @@ list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 ```rust tabs
 use std::rc::Rc;
 
-use nsh_core::ui::{palette::NEUTRAL, prelude::*};
+use nsh_core::{element::palette::NEUTRAL, prelude::*};
 
 pub struct Setting {
     pub id: &'static str,
