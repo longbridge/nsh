@@ -8,7 +8,10 @@ use std::{
 };
 
 use nsh_platform_tui::{Input, Modifiers, MouseButton, MouseInput, MouseKind, RunEvent};
-use ratatui_crossterm::crossterm::{cursor, event, execute, terminal};
+use ratatui_crossterm::crossterm::{cursor, event, execute, style::Print, terminal};
+
+const ENABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007h";
+const DISABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007l";
 
 pub(crate) struct Session {
     active: Arc<AtomicBool>,
@@ -20,6 +23,7 @@ fn restore(active: &AtomicBool) {
     }
     // Try every restoration even when a disconnected terminal rejects one.
     let _ = execute!(stdout(), event::DisableMouseCapture);
+    let _ = execute!(stdout(), Print(DISABLE_ALTERNATE_SCROLL));
     let _ = execute!(stdout(), terminal::LeaveAlternateScreen);
     let _ = execute!(stdout(), cursor::Show);
     let _ = terminal::disable_raw_mode();
@@ -44,6 +48,7 @@ impl Session {
         execute!(
             stdout(),
             terminal::EnterAlternateScreen,
+            Print(ENABLE_ALTERNATE_SCROLL),
             event::EnableMouseCapture,
             cursor::Hide
         )?;

@@ -16,7 +16,7 @@ pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
     modals: Vec<ModalFocus>,
     screens: Vec<NodeId>,
-    screen_focus: Vec<(NodeId, NodeId)>,
+    screen_focus: Vec<(NodeId, Option<NodeId>)>,
     pending_scroll_focus: Option<ScrollFocus>,
 }
 
@@ -32,8 +32,6 @@ struct ModalFocus {
 enum FocusPosition {
     Nearest,
     RetainVisible,
-    First,
-    Last,
 }
 
 #[derive(Clone, Copy)]
@@ -110,9 +108,9 @@ impl Keyboard {
                         .iter_mut()
                         .find(|(screen, _)| *screen == id)
                     {
-                        *saved = focused;
+                        *saved = Some(focused);
                     } else {
-                        self.screen_focus.push((id, focused));
+                        self.screen_focus.push((id, Some(focused)));
                     }
                 }
                 parent = view.parent;
@@ -249,18 +247,30 @@ impl Keyboard {
                 .rev()
                 .filter(|screen| !self.screens.contains(screen))
                 .find_map(|screen| {
-                    self.screen_focus
-                        .iter()
-                        .find(|(saved, _)| saved == screen)
-                        .map(|(_, id)| *id)
-                        .filter(|id| {
-                            candidates
-                                .iter()
-                                .any(|g| g.id == *id && !g.visible.is_empty())
-                        })
+                    let (_, saved) = self.screen_focus.iter().find(|(seen, _)| seen == screen)?;
+                    if let Some(id) = saved.filter(|id| {
+                        candidates
+                            .iter()
+                            .any(|g| g.id == *id && !g.visible.is_empty())
+                    }) {
+                        Some((id, false))
+                    } else {
+                        candidates
+                            .iter()
+                            .find(|g| contains(tree, *screen, g.id))
+                            .map(|g| (g.id, true))
+                    }
                 });
-            if let Some(id) = restored {
+            if let Some((id, fallback)) = restored {
                 self.focus(Some(id), tree, control);
+                if fallback {
+                    reveal(tree, geometry, id);
+                }
+            }
+        }
+        for &screen in &screens {
+            if !self.screen_focus.iter().any(|(seen, _)| *seen == screen) {
+                self.screen_focus.push((screen, None));
             }
         }
         self.apply_scroll_focus(tree, geometry, control);
@@ -331,28 +341,25 @@ impl Keyboard {
                         || contains(tree, request.scroll, g.id))
             })
             .collect();
-        let next = match request.position {
-            FocusPosition::First => candidates.first().copied(),
-            FocusPosition::Last => candidates.last().copied(),
-            FocusPosition::Nearest | FocusPosition::RetainVisible => {
-                let anchor = Point::new(
-                    viewport.bounds.left + request.anchor.x,
-                    viewport.bounds.top + request.anchor.y,
-                );
-                candidates.iter().copied().min_by_key(|g| {
-                    let dx = (i32::from(g.visible.x) - anchor.x).unsigned_abs();
-                    let dy = (i32::from(g.visible.y) - anchor.y).unsigned_abs();
-                    if matches!(request.position, FocusPosition::RetainVisible) {
-                        (dx.saturating_add(dy), dy)
-                    } else if scroll.horizontal {
-                        (dx, dy)
-                    } else {
-                        (dy, dx)
-                    }
-                })
-            }
-        }
-        .map(|g| g.id);
+        let anchor = Point::new(
+            viewport.bounds.left + request.anchor.x,
+            viewport.bounds.top + request.anchor.y,
+        );
+        let next = candidates
+            .iter()
+            .copied()
+            .min_by_key(|g| {
+                let dx = (i32::from(g.visible.x) - anchor.x).unsigned_abs();
+                let dy = (i32::from(g.visible.y) - anchor.y).unsigned_abs();
+                if matches!(request.position, FocusPosition::RetainVisible) {
+                    (dx.saturating_add(dy), dy)
+                } else if scroll.horizontal {
+                    (dx, dy)
+                } else {
+                    (dy, dx)
+                }
+            })
+            .map(|g| g.id);
         self.focus(next, tree, control);
         if next.is_none() {
             self.pending_scroll_focus = Some(request);
@@ -393,7 +400,10 @@ impl Keyboard {
             x += y;
             y = 0.0;
         }
-        let delta = Point::new(cells.width() * x, cells.height() * y);
+        let delta = Point::new(
+            cells.width() * x * crate::input::WHEEL_COLUMNS,
+            cells.height() * y * crate::input::WHEEL_ROWS,
+        );
         let mut views = Vec::new();
         let mut id = hit.node;
         while let Some(view) = tree.get(id) {
@@ -435,7 +445,10 @@ impl Keyboard {
             } else {
                 1.0
             };
-            scroll.x + cells.width() * if x != 0.0 { x * direction } else { y }
+            scroll.x
+                + cells.width()
+                    * crate::input::WHEEL_COLUMNS
+                    * if x != 0.0 { x * direction } else { y }
         } else {
             scroll.y + delta.y
         };
@@ -598,6 +611,25 @@ impl Keyboard {
                 let Some(id) = target else {
                     return Handled::Ignored;
                 };
+                self.pending_scroll_focus = None;
+                let candidates: Vec<_> = self
+                    .candidates(tree, geometry)
+                    .into_iter()
+                    .filter(|g| contains(tree, id, g.id))
+                    .map(|g| g.id)
+                    .collect();
+                if matches!(action, Action::Start | Action::End) {
+                    let target = if matches!(action, Action::Start) {
+                        candidates.first()
+                    } else {
+                        candidates.last()
+                    };
+                    if let Some(&target) = target {
+                        self.focus(Some(target), tree, control);
+                        reveal(tree, geometry, target);
+                        return Handled::Yes;
+                    }
+                }
                 let view = tree.get_mut(id).unwrap();
                 let scroll = view.scroll.as_mut().unwrap();
                 let (offset, max, page) = if scroll.horizontal {
@@ -620,12 +652,9 @@ impl Keyboard {
                     Action::End => max,
                     _ => unreachable!(),
                 };
-                let position = match action {
-                    Action::Start => FocusPosition::First,
-                    Action::End => FocusPosition::Last,
-                    _ => FocusPosition::Nearest,
-                };
-                self.queue_scroll_focus(geometry, id, position);
+                if !candidates.is_empty() {
+                    self.queue_scroll_focus(geometry, id, FocusPosition::Nearest);
+                }
                 move_scroll(tree, id, to);
                 Handled::Yes
             }

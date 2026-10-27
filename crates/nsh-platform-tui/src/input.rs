@@ -6,6 +6,9 @@ use crate::{CellSize, mount::Mounter, render::Hit};
 
 pub use nsh_core::keymap::Modifiers;
 
+pub(crate) const WHEEL_ROWS: f32 = 3.0;
+pub(crate) const WHEEL_COLUMNS: f32 = 6.0;
+
 /// Whether the surface used an event. Ignored events remain the embedder's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handled {
@@ -37,7 +40,7 @@ pub enum MouseKind {
     /// Motion, including motion with a button held.
     #[default]
     Move,
-    /// Wheel steps, positive right and down; one step moves one Cell on the selected axis.
+    /// Wheel steps, positive right and down: three rows vertically, six columns horizontally.
     Wheel {
         /// Horizontal steps.
         x: i16,

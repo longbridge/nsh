@@ -110,19 +110,26 @@ fn returning_to_a_screen_restores_the_control_that_opened_the_next_page() {
 }
 
 #[test]
-fn returning_to_a_screen_does_not_restore_an_invisible_control() {
+fn returning_to_a_screen_selects_its_first_control_when_the_saved_one_is_hidden() {
     let (mut view, mut terminal, rx) = detail_page();
     key(&mut view, "d", true);
     draw_until(&mut view, &mut terminal, &rx, "visible false");
     key(&mut view, "Escape", false);
-    draw_until(&mut view, &mut terminal, &rx, "home A");
-    assert_eq!(key(&mut view, "Enter", false), Handled::Ignored);
-    key(&mut view, "Tab", false);
     draw_until(&mut view, &mut terminal, &rx, "focus A");
+    assert_eq!(key(&mut view, "Enter", false), Handled::Yes);
 }
 
 #[component]
 fn PagingFocus() -> impl IntoElement {
+    focus_rows(px(48.0), 12)
+}
+
+#[component]
+fn WheelFocus() -> impl IntoElement {
+    focus_rows(px(96.0), 100)
+}
+
+fn focus_rows(height: nsh_core::Points, count: i32) -> impl IntoElement {
     let focused = signal(-1);
     let offset = signal(0);
     let pressed = signal(-1);
@@ -142,9 +149,9 @@ fn PagingFocus() -> impl IntoElement {
         .child(
             scroll()
                 .w(px(160.0))
-                .h(px(48.0))
+                .h(height)
                 .on_scroll(move |event: &ScrollEvent| offset.set(event.offset.y.0 as i32))
-                .children((0..12).map(|index| {
+                .children((0..count).map(|index| {
                     view()
                         .h(px(16.0))
                         .flex_shrink_0()
@@ -196,21 +203,28 @@ fn wheel(view: &mut AppView, column: u16, row: u16, x: i16, y: i16, shift: bool)
 fn the_wheel_keeps_visible_focus_and_replaces_focus_that_scrolls_out_of_sight() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
-    view.load(App::Rust(Root::new::<PagingFocus>(|| ())))
+    view.load(App::Rust(Root::new::<WheelFocus>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focus -1 offset 0");
-    key(&mut view, "Tab", false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 0 offset 0");
+    for index in 0..4 {
+        key(&mut view, "Tab", false);
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("focus {index} offset 0"),
+        );
+    }
     assert_eq!(wheel(&mut view, 0, 2, 0, 1, false), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 16");
+    draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 48");
     key(&mut view, "Enter", false);
-    draw_until(&mut view, &mut terminal, &rx, "pressed 1");
-    key(&mut view, "Down", false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 2 offset 16");
+    draw_until(&mut view, &mut terminal, &rx, "pressed 3");
     wheel(&mut view, 0, 2, 0, 1, false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 2 offset 32");
+    draw_until(&mut view, &mut terminal, &rx, "focus 6 offset 96");
     wheel(&mut view, 0, 2, 0, -1, false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 2 offset 16");
+    draw_until(&mut view, &mut terminal, &rx, "focus 6 offset 48");
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "pressed 6");
 }
 
 #[component]
@@ -243,7 +257,7 @@ fn the_wheel_uses_the_innermost_scroll_then_its_parent_at_the_end() {
     view.load(App::Rust(Root::new::<NestedWheels>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "inner 0 outer 0");
-    for expected in ["inner 16 outer 0", "inner 32 outer 0", "inner 32 outer 16"] {
+    for expected in ["inner 32 outer 0", "inner 32 outer 32"] {
         assert_eq!(wheel(&mut view, 0, 1, 0, 1, false), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, expected);
     }
@@ -260,7 +274,7 @@ fn HorizontalWheel() -> impl IntoElement {
                 .w(px(24.0))
                 .h(px(16.0))
                 .on_scroll(move |event: &ScrollEvent| offset.set(event.offset.x.0 as i32))
-                .child(text("ABCDE").w(px(40.0)).flex_shrink_0()),
+                .child(text("ABCDEFGHIJKLMNOPQRST").w(px(160.0)).flex_shrink_0()),
         )
         .child(text(move || format!("horizontal {}", offset.get())))
 }
@@ -273,14 +287,273 @@ fn shift_wheel_and_horizontal_events_scroll_by_columns() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "horizontal 0");
     assert_eq!(wheel(&mut view, 0, 0, 0, 1, true), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "horizontal 8");
-    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "B");
+    draw_until(&mut view, &mut terminal, &rx, "horizontal 48");
+    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "G");
     wheel(&mut view, 0, 0, 1, 0, false);
-    draw_until(&mut view, &mut terminal, &rx, "horizontal 16");
-    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "C");
+    draw_until(&mut view, &mut terminal, &rx, "horizontal 96");
+    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "M");
     assert_eq!(
         key(&mut view, "Enter", false),
         Handled::Ignored,
         "wheel creates no focus when none existed"
     );
+}
+
+#[component]
+fn DemoListNavigation() -> impl IntoElement {
+    let detail = signal(false);
+    let focused = signal(String::from("none"));
+    let selected = signal(0);
+    let opens = signal(0);
+    let hide_sixth = signal(false);
+    on_key("ctrl+d", move |_| hide_sixth.set(true));
+    view()
+        .flex_1()
+        .child(
+            text(move || {
+                format!(
+                    "focus {} opened {} times {} hidden {}",
+                    focused.get(),
+                    selected.get(),
+                    opens.get(),
+                    hide_sixth.get()
+                )
+            })
+            .h(px(16.0)),
+        )
+        .child(
+            nsh_base::nav_stack()
+                .w(px(320.0))
+                .h(px(128.0))
+                .child(
+                    nsh_base::nav_page().key("demos").child(
+                        scroll()
+                            .w(px(240.0))
+                            .h(px(48.0))
+                            .children((1..=20).map(move |index| {
+                                view()
+                                    .h(px(16.0))
+                                    .flex_shrink_0()
+                                    .opacity(move || {
+                                        if index == 6 && hide_sixth.get() {
+                                            0.0_f32
+                                        } else {
+                                            1.0_f32
+                                        }
+                                    })
+                                    .on_focus(move |_: &()| focused.set(format!("row {index}")))
+                                    .on_press(move |_: &()| {
+                                        selected.set(index);
+                                        opens.update(|n| *n += 1);
+                                        detail.set(true);
+                                    })
+                                    .child(text(format!("demo {index}")))
+                            })),
+                    ),
+                )
+                .child(when(detail, move || {
+                    nsh_base::nav_page()
+                        .key("detail")
+                        .on_dismiss(move |_: &()| detail.set(false))
+                        .child(
+                            view()
+                                .h(px(16.0))
+                                .on_focus(move |_: &()| focused.set("detail".into()))
+                                .on_press(move |_: &()| detail.set(false))
+                                .child(text("close detail")),
+                        )
+                })),
+        )
+}
+
+fn demo_viewport(terminal: &Terminal<TestBackend>) -> Vec<String> {
+    (1..4)
+        .map(|row| {
+            (0..30)
+                .map(|column| terminal.backend().buffer()[(column, row)].symbol())
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn the_sixth_demo_regains_focus_and_its_scroll_position_after_returning() {
+    for (back, ctrl) in [("Escape", false), ("g", true), ("Enter", false)] {
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        view.load(App::Rust(Root::new::<DemoListNavigation>(|| ())))
+            .unwrap();
+        draw_until(&mut view, &mut terminal, &rx, "focus none");
+        for row in 1..=6 {
+            key(&mut view, "Tab", false);
+            draw_until(&mut view, &mut terminal, &rx, &format!("focus row {row}"));
+        }
+        let before = demo_viewport(&terminal);
+        assert!(before.iter().any(|line| line.trim() == "demo 6"));
+        assert!(!before.iter().any(|line| line.trim() == "demo 1"));
+        key(&mut view, "Enter", false);
+        draw_until(&mut view, &mut terminal, &rx, "close detail");
+        key(&mut view, "Tab", false);
+        draw_until(&mut view, &mut terminal, &rx, "focus detail");
+        key(&mut view, back, ctrl);
+        draw_until(&mut view, &mut terminal, &rx, "focus row 6");
+        assert_eq!(
+            demo_viewport(&terminal),
+            before,
+            "the covered screen kept its Scroll"
+        );
+        key(&mut view, "Enter", false);
+        draw_until(&mut view, &mut terminal, &rx, "opened 6 times 2");
+    }
+}
+
+#[test]
+fn returning_to_a_list_reveals_its_first_control_if_the_saved_row_is_hidden() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+    view.load(App::Rust(Root::new::<DemoListNavigation>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    for row in 1..=6 {
+        key(&mut view, "Tab", false);
+        draw_until(&mut view, &mut terminal, &rx, &format!("focus row {row}"));
+    }
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "close detail");
+    key(&mut view, "d", true);
+    draw_until(&mut view, &mut terminal, &rx, "hidden true");
+    key(&mut view, "Escape", false);
+    draw_until(&mut view, &mut terminal, &rx, "focus row 1");
+    assert!(
+        demo_viewport(&terminal)
+            .iter()
+            .any(|line| line.trim() == "demo 1")
+    );
+}
+
+#[test]
+fn paging_from_the_first_row_advances_a_page_and_meta_end_focuses_the_last_row() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<PagingFocus>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus -1 offset 0");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "focus 0 offset 0");
+    key(&mut view, "v", true);
+    draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 48");
+    assert_eq!(
+        (0..5)
+            .map(|x| terminal.backend().buffer()[(x, 1)].symbol())
+            .collect::<String>(),
+        "row 3"
+    );
+    view.handle(Input::Key {
+        key: ">".into(),
+        modifiers: Modifiers {
+            alt: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "focus 11 offset 144");
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "pressed 11");
+}
+
+#[component]
+fn EndpointControls() -> impl IntoElement {
+    let focused = signal("none");
+    view()
+        .flex_1()
+        .child(text(move || format!("focused {}", focused.get())).h(px(16.0)))
+        .child(
+            scroll()
+                .w(px(240.0))
+                .h(px(48.0))
+                .child(
+                    view()
+                        .h(px(160.0))
+                        .flex_shrink_0()
+                        .child(text("before controls")),
+                )
+                .child(
+                    view()
+                        .h(px(16.0))
+                        .flex_shrink_0()
+                        .on_focus(move |_: &()| focused.set("first"))
+                        .on_press(|_: &()| {})
+                        .child(text("first control")),
+                )
+                .child(
+                    view()
+                        .h(px(16.0))
+                        .flex_shrink_0()
+                        .on_focus(move |_: &()| focused.set("last"))
+                        .on_press(|_: &()| {})
+                        .child(text("last control")),
+                )
+                .child(
+                    view()
+                        .h(px(160.0))
+                        .flex_shrink_0()
+                        .child(text("after controls")),
+                ),
+        )
+}
+
+#[test]
+fn endpoints_reveal_the_first_and_last_controls_even_with_nonfocusable_content_around_them() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<EndpointControls>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused none");
+    key(&mut view, "End", false);
+    draw_until(&mut view, &mut terminal, &rx, "focused last");
+    assert!(
+        demo_viewport(&terminal)
+            .iter()
+            .any(|line| line.trim() == "last control")
+    );
+    key(&mut view, "Home", false);
+    draw_until(&mut view, &mut terminal, &rx, "focused first");
+    assert!(
+        demo_viewport(&terminal)
+            .iter()
+            .any(|line| line.trim() == "first control")
+    );
+}
+
+#[component]
+fn TextOnlyPage() -> impl IntoElement {
+    let offset = signal(0);
+    view()
+        .flex_1()
+        .child(text(move || format!("offset {}", offset.get())).h(px(16.0)))
+        .child(
+            scroll()
+                .w(px(240.0))
+                .h(px(48.0))
+                .on_scroll(move |event: &ScrollEvent| offset.set(event.offset.y.0 as i32))
+                .child(text("plain text").h(px(192.0)).flex_shrink_0()),
+        )
+}
+
+#[test]
+fn paging_a_text_only_page_scrolls_without_creating_a_focus_request() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<TextOnlyPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "offset 0");
+    for (name, offset) in [
+        ("PageDown", "offset 48"),
+        ("End", "offset 144"),
+        ("Home", "offset 0"),
+    ] {
+        key(&mut view, name, false);
+        draw_until(&mut view, &mut terminal, &rx, offset);
+        assert_eq!(key(&mut view, "Enter", false), Handled::Ignored);
+    }
 }

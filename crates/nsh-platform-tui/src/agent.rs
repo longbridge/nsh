@@ -159,8 +159,8 @@ impl Native for TuiNative {
                     .clamp(-32767.0, 32767.0) as i16
             };
             (
-                steps(delta.x / view.options.cells.width()),
-                steps(delta.y / view.options.cells.height()),
+                steps(delta.x / (view.options.cells.width() * crate::input::WHEEL_COLUMNS)),
+                steps(delta.y / (view.options.cells.height() * crate::input::WHEEL_ROWS)),
             )
         }) else {
             return;

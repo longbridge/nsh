@@ -17,6 +17,12 @@ to the app's `.nsh/tui.log`, including verbose tool output. The host alone write
 Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the
 screen and raw mode before the CLI reaps it.
 
+The host enables [alternate scroll mode (DECSET 1007)](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
+with `ESC[?1007h` on entering the alternate screen and disables it with `ESC[?1007l` during normal, error and panic
+restoration. When mouse capture is off, terminals supporting this mode can send Up/Down keys for the wheel;
+those keys follow the terminal Key scheme. This prepares the uncaptured-wheel path for the mouse-capture
+setting in ticket 09; captured wheel events keep the three-row/six-column behavior below.
+
 `C-h e` toggles the logs and errors panel. Escape, `C-g` or `q` closes it; arrows and PageUp/PageDown scroll,
 Home/End select the start/end, and `r` reloads the latest build. Errors open the panel automatically and the next
 update closes it. Ordinary builds and connection messages stay in the log. With the panel closed, the app owns
@@ -74,7 +80,8 @@ The private `TuiNative` posts requests to the view and wakes it. Rendering appli
 services requests; a screenshot serializes that completed buffer. Input requests call `AppView::handle`, exactly
 as the host's terminal input does. Pointer coordinates convert from content-relative points to absolute Cells,
 including the embedding area's origin. Bounds follow rounded parent origins, scrolling, clipping and concealed
-screens. The agent drives press/release, motion, wheel events, individual keys and bracketed paste. Their behavior
+screens. The agent drives press/release, motion, wheel events, individual keys and bracketed paste. Scroll
+requests are quantized to the same three-row/six-column wheel steps as real input. Their behavior
 is the platform's current input implementation: this adapter does not emulate missing input features. Field
 editing, richer pointer/scroll behavior and system dialogs are supplied by their respective platform tickets.
 `setViewport` currently returns an error; select the initial viewport with `open(entry, { width, height })`.
@@ -226,9 +233,11 @@ reported until it becomes visible.
 a declined request returns as `Command::Back`, which proceeds directly to navigation. Otherwise the innermost
 stack takes it: its top screen receives BackRequest when listened for, `prevent_back` keeps it in place, and a
 native pop sends Dismiss immediately. The shared Stack remembers native pops until the app removes those screens.
-Each screen remembers its last focused control. When that screen becomes visible again after back or an
-app-driven removal, the control regains focus if it still exists, is focusable and shows. A missing or hidden
-control leaves focus empty. Modal focus restoration takes precedence over this page history.
+Each screen remembers its last focused control when another screen covers it. On back or an app-driven pop,
+that control regains focus if it still exists, is focusable and shows; otherwise the screen's first focusable
+control is selected and revealed. Covered screens stay mounted, including their Scroll states, so returning to
+a valid saved control keeps both focus and scroll offsets. Only a fallback that needs revealing moves a Scroll.
+Modal focus restoration takes precedence over page history and retains its separate invalid-opener policy.
 
 Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
 sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.
@@ -263,11 +272,14 @@ changed scroll view's final offset and applied-command count to the engine, whic
 updates its view of the content. Keyboard movement reveals the focused control in its surrounding Scroll,
 innermost first. Paging and endpoint keys act on the nearest Scroll around focus, or the page's Scroll when there
 is none. Paging moves focus to the visible control nearest its old relative row in the viewport (relative column
-for horizontal scrolling); Home/End choose the first/last visible control after moving to the endpoint. Selection
-uses the next completed frame's geometry, and Enter never presses an off-screen control. These user-driven
-offsets keep the applied count unchanged; only core ScrollBy and ScrollTo increment it.
+for horizontal scrolling). Home/End and Alt+< / Alt+> choose the Scroll's first/last focusable control and reveal
+it, even when nonfocusable content precedes or follows the controls. With no focusable controls, these keys only
+scroll, to the content endpoints for Home/End. Page selection uses the next completed frame's geometry, and Enter
+never presses an off-screen control. These user-driven offsets keep the applied count unchanged; only core
+ScrollBy and ScrollTo increment it.
 
-Each wheel step moves one Cell along the chosen axis. Shift sends vertical wheel steps horizontally. The core's
+Each wheel step moves three rows vertically, or six columns horizontally (three columns times two). Shift sends
+vertical wheel steps horizontally. The core's
 `input::scroll_target` selects the innermost Scroll under the pointer that can move; at an edge the same-axis
 parent can take the event. This search stays inside the newest modal. A vertical wheel uses a horizontal view
 only when no surrounding Scroll takes the vertical axis. Disabled scroll views do not take the wheel.
@@ -294,7 +306,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
-| Alt+<, Home / Alt+>, End | Scroll to the start / end |
+| Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
 | Ctrl+C | Quit |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
