@@ -13,7 +13,6 @@ use std::{
 };
 
 use nsh_core::{
-    element::Os,
     keymap::{Modifiers, When},
     prelude::*,
 };
@@ -206,7 +205,7 @@ impl Rv {
             .get_untracked()
             .unwrap_or_else(|| own_session(&props));
         let state = session.state();
-        let mac = matches!(os(), Os::MacOs | Os::Ios);
+        let mac = apple_keys();
         let base_keymap = Keymap::new(base_keymap_for(mac), &KeymapOptions { mac: Some(mac) })
             .unwrap_or_default();
         let rv = Rv {
@@ -771,7 +770,7 @@ impl Rv {
         if !at.parent().inline_content() {
             return false;
         }
-        let apple = matches!(os(), Os::MacOs | Os::Ios);
+        let apple = apple_keys();
         let (start, end) = (at.start(at.depth), at.end(at.depth));
         let target = if apple && event.meta {
             let geo = self.geo.borrow();
@@ -1311,7 +1310,7 @@ impl Rv {
         let Some(hit) = self.hit(at) else { return };
         let state = self.session.state();
         let doc = state.doc().clone();
-        let mod_key = if matches!(os(), Os::MacOs | Os::Ios) {
+        let mod_key = if apple_keys() {
             modifiers.cmd
         } else {
             modifiers.ctrl
@@ -1358,7 +1357,7 @@ impl Rv {
             if !selection.eq(state.selection()) {
                 self.set_selection(selection.clone(), false);
             }
-            let copy = if matches!(os(), Os::MacOs | Os::Ios) {
+            let copy = if apple_keys() {
                 modifiers.alt
             } else {
                 modifiers.ctrl

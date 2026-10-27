@@ -765,12 +765,20 @@ pub struct KeyOptions {
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
-/// the OS, or for a browser the platform it runs on.
-fn apple_keys() -> bool {
+/// the OS, or for a browser the platform it runs on
+/// ([`crate::keymap::apple_keys`]).
+pub fn apple_keys() -> bool {
     let (os, apple) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| (e.os, e.apple_keyboard));
     crate::keymap::apple_keys(os, apple)
+}
+
+/// [`apple_keys`] where an engine runs, else `None` (as [`try_os`]).
+pub fn try_apple_keys() -> Option<bool> {
+    super::reactive::try_with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .flatten()
+        .map(|env| env.with_untracked(|e| crate::keymap::apple_keys(e.os, e.apple_keyboard)))
 }
 
 /// Runs `handler` when `keystroke` is pressed while the current owner
