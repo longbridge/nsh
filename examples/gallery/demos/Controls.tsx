@@ -451,10 +451,11 @@ export function Controls() {
           disabledStyle={dimmed}
         >
           <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-          {/* A lane as wide as the chevron's stroke (half its icon box); it points down, and up while open. */}
+          {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
+              about its own center; it points down, and up while open. */}
           <View
             class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ display: props.clearable ? "none" : "flex", width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
+            style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
           >
             <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>
