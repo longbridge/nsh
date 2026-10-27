@@ -3426,8 +3426,10 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-testing",
  "ratatui-core",
  "ratatui-widgets",
+ "serde_json",
  "unicode-segmentation",
  "unicode-width",
 ]

@@ -359,7 +359,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.openedUrls()` | 应用打开的 URL（`openUrl`），按顺序排列：只记录，不打开。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
-| `await app.screenshot(path?)` | 应用窗口的 PNG 截图（`Uint8Array`）；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
+| `await app.screenshot(path?)` | 应用截图（`Uint8Array`）：图形平台返回 PNG，`tui` 返回 UTF-8 Cell JSON；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 
 步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。选择器没有匹配到任何视图
@@ -458,6 +458,13 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
 `host.handlers` 只在 headless 运行：开发 host 不回答任何调用，在那里 `open` 会拒绝 handlers。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
+
+`nsh test --target tui` 在内存终端中使用终端渲染器运行测试，适合 CI。每次 `open` 使用独立的 surface 和数据目录。
+用 `open(entry, { width, height })` 指定 point 尺寸；尺寸按应用 `nsh.json` 的 `tui.pointsPerCell` 向上取整为完整 Cell，
+默认每个 Cell 为 8 × 16 points。`app.screenshot("cells.json")` 返回并保存 UTF-8 JSON：`format: "nsh-tui-cells"`、
+`version: 1`、`width`、`height`，以及 `rows[y][x]` 中每个 Cell 的 `symbol`、`fg`、`bg`、`underline` 和 `modifiers`。
+颜色使用 `reset`、小写 ratatui 颜色名、`#rrggbb` 或 `indexed:N`；修饰符是已启用样式名的数组，例如 `bold`、`italic`、
+`underlined`。用 `new TextDecoder().decode(bytes)` 解码返回的字节，再解析 JSON，即可断言 Cell 快照。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或
 `--browser <PATH>` 指定的可执行文件（需要有浏览器：找不到时 `nsh test` 会列出它找过的位置）。整个运行共用一个浏览器，

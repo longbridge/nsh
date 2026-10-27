@@ -4,7 +4,10 @@ use std::{cell::RefCell, io, path::PathBuf, rc::Rc};
 
 use clap::Parser;
 use nsh_platform_tui::{AppOptions, AppView, Bundle, CellSize, Limits, RunEvent, run_app};
-use ratatui_core::terminal::Terminal;
+use ratatui_core::{
+    backend::{Backend, TestBackend},
+    terminal::Terminal,
+};
 use ratatui_crossterm::CrosstermBackend;
 
 mod logging;
@@ -28,6 +31,12 @@ struct Args {
     data_dir: Option<PathBuf>,
     #[arg(long)]
     trace: bool,
+    /// Render to an in-memory terminal (used by nsh test).
+    #[arg(long, requires = "dev_server")]
+    headless: bool,
+    /// Initial in-memory viewport in points, rounded up to whole Cells.
+    #[arg(long, requires = "headless")]
+    window_size: Option<CellSize>,
 }
 
 /// Parses host arguments and runs the selected bundle. The binary owns logging and diagnostics.
@@ -38,12 +47,12 @@ pub fn main() -> io::Result<()> {
 /// Runs the host with an app's registered UI sets and optional Rust root.
 pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
     let args = Args::parse();
-    let log_file = args.log_file.unwrap_or_else(|| {
+    let log_file = args.log_file.clone().unwrap_or_else(|| {
         std::env::temp_dir().join(format!("nsh-tui-host-{}.log", std::process::id()))
     });
     logging::init(&log_file, args.trace)?;
     options.limits = Limits::standalone();
-    options.data_dir = args.data_dir.or_else(nsh_engine::data_dir);
+    options.data_dir = args.data_dir.clone().or_else(nsh_engine::data_dir);
     options.trace = args.trace;
     options.cells = args.points_per_cell;
     let mut view = AppView::new(options);
@@ -55,27 +64,40 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         *reported.borrow_mut() = Some(error.to_string());
     });
     let _shutdown = shutdown::Guard::install()?;
-    let session = terminal::Session::enter()?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    // Prime the area before loading so the first engine layout has the terminal's size.
-    terminal.draw(|frame| view.render(frame, frame.area()))?;
-    if let Some(path) = args.bundle {
-        view.load(Bundle::read(&path)?)?;
+    if args.headless {
+        let (columns, rows) = match args.window_size {
+            Some(size) => {
+                let columns = (size.width() / args.points_per_cell.width()).ceil();
+                let rows = (size.height() / args.points_per_cell.height()).ceil();
+                if columns > f32::from(u16::MAX) || rows > f32::from(u16::MAX) {
+                    return Err(io::Error::other("window size exceeds the terminal grid"));
+                }
+                (columns as u16, rows as u16)
+            }
+            None => (100, 40),
+        };
+        let mut terminal = Terminal::new(TestBackend::new(columns, rows)).unwrap();
+        run(&mut terminal, &mut view, &args, |timeout| {
+            std::thread::sleep(timeout);
+            Ok(if shutdown::requested() {
+                RunEvent::Exit
+            } else {
+                RunEvent::Idle
+            })
+        })?;
     } else {
-        view.connect_dev_server(
-            args.dev_server
-                .unwrap_or_else(|| "ws://127.0.0.1:8790/ws".into()),
-        )?;
+        let session = terminal::Session::enter()?;
+        let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+        run(&mut terminal, &mut view, &args, |timeout| {
+            if !session.is_active() {
+                Err(io::Error::other("terminal session ended after a panic"))
+            } else if shutdown::requested() || (!is_dev && failure.borrow().is_some()) {
+                Ok(RunEvent::Exit)
+            } else {
+                terminal::poll(timeout)
+            }
+        })?;
     }
-    run_app(&mut terminal, &mut view, |timeout| {
-        if !session.is_active() {
-            Err(io::Error::other("terminal session ended after a panic"))
-        } else if shutdown::requested() || (!is_dev && failure.borrow().is_some()) {
-            Ok(RunEvent::Exit)
-        } else {
-            terminal::poll(timeout)
-        }
-    })?;
     let error = if is_dev {
         None
     } else {
@@ -85,4 +107,26 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         Some(error) => Err(io::Error::other(error)),
         None => Ok(()),
     }
+}
+
+fn run<B: Backend>(
+    terminal: &mut Terminal<B>,
+    view: &mut AppView,
+    args: &Args,
+    poll: impl FnMut(std::time::Duration) -> Result<RunEvent, B::Error>,
+) -> io::Result<()> {
+    // Prime the area before loading so the first engine layout has the terminal's size.
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    if let Some(path) = &args.bundle {
+        view.load(Bundle::read(path)?)?;
+    } else {
+        view.connect_dev_server(
+            args.dev_server
+                .as_deref()
+                .unwrap_or("ws://127.0.0.1:8790/ws"),
+        )?;
+    }
+    run_app(terminal, view, poll).map_err(|error| io::Error::other(error.to_string()))
 }

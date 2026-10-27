@@ -456,7 +456,7 @@ test's side prints them under the step `Remote` took last (named as `Headless` n
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
-`windows`, `gpui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
+`windows`, `gpui`, `tui`, `web`, `ios`, `android`); `--fps` (macOS, Linux, Windows and iOS) has the host log its performance
 monitor's readings once a second, shown with `-v` (`docs/dev/linux.md` "Performance", `docs/dev/windows.md`
 "Performance"). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
@@ -501,8 +501,8 @@ real keyboard's, Android's `KeyEvent`s handed to the window's root view as its i
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
 without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
-on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
-test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
+on the platform's main thread and return when the input is posted. Screenshots come back as base64 bytes: PNG
+on graphical targets, versioned UTF-8 Cell JSON on `tui`. The test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
@@ -534,6 +534,21 @@ test's side answers it from its routes (`protocol::TestNetwork`, `run.rs`'s `Hos
 `Head`, `Data` (base64) and `End`, or `Failed`, or `Pass` for `network: "live"`, when the host's own network makes
 the request. `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
 (`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
+
+Terminal (`nsh-platform-tui`, feature `dev`): the CLI accepts `--target tui` and starts `nsh-tui-host --headless`
+with null stdin. The host selects ratatui's in-memory `TestBackend` before terminal setup and runs the ordinary
+surface loop. `--window-size` carries `open`'s point viewport, rounded up to whole Cells; `nsh.json`'s
+`tui.pointsPerCell` sets the scale. The dev session attaches the test Model before loading the bundle, and the
+private `TuiNative` sends requests to the view's inbox. Render applies batches and draws before servicing requests;
+synthetic pointer, key, wheel and paste events go through `AppView::handle`. `app.screenshot("cells.json")` returns
+and saves UTF-8 JSON with `format: "nsh-tui-cells"`, `version: 1`, Cell `width`/`height` and `rows[y][x]` holding
+`symbol`, `fg`, `bg`, `underline`, and ordered `modifiers`. See [the terminal backend](tui.md#platform-tests-and-cell-screenshots)
+for the encoding and the current interaction boundaries. The same tests run with redirected standard streams:
+
+```sh
+./target/debug/nsh test examples/counter --target tui
+./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
+```
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
 and key events, `NSView` frames converted to the content's top-left points, `NSAlert`

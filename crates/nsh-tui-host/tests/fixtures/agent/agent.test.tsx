@@ -1,0 +1,26 @@
+import { expect, open, test } from "nsh/test";
+
+test("terminal screenshots capture styled Cells after real pointer input", async () => {
+  const app = await open("./App.tsx", { width: 160, height: 64 });
+  await app.press("id:increment");
+  await app.waitFor("Count 1");
+  const bytes = await app.screenshot();
+  const picture = JSON.parse(new TextDecoder().decode(new Uint8Array(bytes)));
+  expect(picture.format).toBe("nsh-tui-cells");
+  expect(picture.version).toBe(1);
+  expect(picture.width).toBe(20);
+  expect(picture.height).toBe(4);
+  expect(picture.rows.length).toBe(4);
+  expect(picture.rows.every((row: unknown[]) => row.length === 20)).toBe(true);
+  expect(picture.rows[0][0]).toEqual({
+    symbol: "界", fg: "#123456", bg: "reset", underline: "reset", modifiers: ["bold", "italic", "underlined"],
+  });
+  expect(picture.rows[0][2].symbol).toBe("A");
+  const shown = picture.rows.map((row: { symbol: string }[]) => row.map(cell => cell.symbol).join(""));
+  expect(shown.some((row: string) => row.includes("Count 1"))).toBe(true);
+  expect(Array.from(await app.screenshot())).toEqual(Array.from(bytes));
+});
+
+test("terminal startup reports app errors through the test agent", async () => {
+  await expect(() => open("./error.tsx")).rejects.toThrow("terminal startup failure");
+});

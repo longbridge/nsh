@@ -978,7 +978,7 @@ pub trait Native: Send + Sync {
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
     /// Whether a native animation runs now.
     fn animating(&self) -> bool;
-    /// A picture of the window, as a PNG.
+    /// A picture of the window: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
     /// Makes the window `size` points.
     fn resize(&self, width: Points, height: Points) -> Result<(), String>;

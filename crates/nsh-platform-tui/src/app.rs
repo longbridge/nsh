@@ -1,4 +1,7 @@
 #[cfg(feature = "dev")]
+#[path = "agent.rs"]
+mod agent;
+#[cfg(feature = "dev")]
 #[path = "dev.rs"]
 mod dev;
 
@@ -102,6 +105,8 @@ pub struct AppView {
     dev: Option<dev::DevSession>,
     #[cfg(feature = "dev")]
     diagnostics: dev::Diagnostics,
+    #[cfg(feature = "dev")]
+    test: Option<agent::TestSession>,
     surface: Surface,
     tree: Mounter,
     area: Rect,
@@ -140,6 +145,8 @@ impl AppView {
             dev: None,
             #[cfg(feature = "dev")]
             diagnostics: dev::Diagnostics::default(),
+            #[cfg(feature = "dev")]
+            test: None,
             surface,
             tree: Mounter::default(),
             area: Rect::default(),
@@ -181,6 +188,10 @@ impl AppView {
         config.clipboard = self.options.clipboard.clone();
         config.host = self.options.host.clone();
         config.trace = self.options.trace;
+        #[cfg(feature = "dev")]
+        if let Some(test) = &self.test {
+            test.model.set_up_engine(&mut config);
+        }
         let cells = self.options.cells;
         let engine = Engine::start(
             config,
@@ -190,6 +201,10 @@ impl AppView {
                 wake: self.surface.wake.clone(),
             },
         )?;
+        #[cfg(feature = "dev")]
+        if let Some(test) = &self.test {
+            test.model.engine_started(engine.control());
+        }
         self.surface.engine = Some(engine);
         self.surface.inbox = inbox;
         Ok(())
@@ -400,7 +415,10 @@ impl AppView {
         #[cfg(feature = "dev")]
         if let Some(mut dev) = self.dev.take() {
             while let Ok(event) = dev.inbox.try_recv() {
-                dev.event(self, event);
+                match event {
+                    dev::Message::Event(event) => dev.event(self, *event),
+                    dev::Message::Test(test) => self.test = Some(test),
+                }
             }
             self.dev = Some(dev);
         }
@@ -417,7 +435,22 @@ impl AppView {
         let mut errors = Vec::new();
         while let Ok(message) = self.surface.inbox.try_recv() {
             match message {
-                Message::Batch(batch) => self.tree.apply(batch),
+                Message::Batch(batch) => {
+                    #[cfg(feature = "dev")]
+                    let observed = self.test.as_ref().map(|test| {
+                        (
+                            test.model.clone(),
+                            nsh_core::MountBatch {
+                                items: batch.items.clone(),
+                            },
+                        )
+                    });
+                    self.tree.apply(batch);
+                    #[cfg(feature = "dev")]
+                    if let Some((model, batch)) = observed {
+                        model.apply(&batch);
+                    }
+                }
                 Message::Error(error) => errors.push(error),
                 Message::Frame => self.surface.request_frame(),
                 #[cfg(feature = "dev")]
@@ -456,6 +489,10 @@ impl AppView {
         }
         for error in errors {
             #[cfg(feature = "dev")]
+            if let Some(test) = &self.test {
+                test.model.error(error.to_string());
+            }
+            #[cfg(feature = "dev")]
             if self.dev.is_some() || self.diagnostics.log_path.is_some() {
                 self.diagnostics.error("App error", &error.to_string());
             }
@@ -487,6 +524,17 @@ impl AppView {
         }
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);
+        #[cfg(feature = "dev")]
+        {
+            let requests: Vec<_> = self
+                .test
+                .as_ref()
+                .map(|test| test.inbox.try_iter().collect())
+                .unwrap_or_default();
+            for request in requests {
+                request(self, buffer);
+            }
+        }
     }
 
     /// Stops the engine, drops queued commits, and clears the surface's app-owned state.
@@ -494,6 +542,7 @@ impl AppView {
         #[cfg(feature = "dev")]
         {
             self.dev = None;
+            self.test = None;
             let log_path = self.diagnostics.log_path.take();
             self.diagnostics = dev::Diagnostics::default();
             self.diagnostics.log_path = log_path;
