@@ -92,11 +92,12 @@ pub struct PlotMotion {
     pub appear: Option<Timing>,
     /// How marks move to a new shape when the app changes it, as d3's
     /// update transitions do between `enter` and `exit`: a pie's or an
-    /// arc's radii (a donut's hole opening or closing), and a linear
-    /// scale's domain (the app's `domain`, or the extent of the marks'
-    /// values as rows come), interpolated as d3 transitions a scale's
-    /// domain, so the marks keep their shapes, the grid lines and the
-    /// hover's parts move with them, and new rows come in with the rest.
+    /// arc's radii (a donut's hole opening or closing) and angles (a
+    /// slice or a gauge sweeping round to its new value, d3's `arcTween`),
+    /// and a linear scale's domain (the app's `domain`, or the extent of
+    /// the marks' values as rows come), interpolated as d3 transitions a
+    /// scale's domain, so the marks keep their shapes, the grid lines and
+    /// the hover's parts move with them, and new rows come in with the rest.
     /// None by default: the new shape shows at once. `gpui-base` has no
     /// such motion.
     pub update: Option<Timing>,

@@ -599,7 +599,9 @@ impl Rv {
         let (deleted, inserted, composed) = {
             let mut sink = self.sink.borrow_mut();
             let base = match sink.emptied.take() {
-                Some(old) if text.starts_with(old.as_str()) => old,
+                // Platforms report only changes: the old text again was typed
+                // into the emptied sink.
+                Some(old) if text != old && text.starts_with(old.as_str()) => old,
                 Some(_) => String::new(),
                 None => std::mem::take(&mut sink.text),
             };
