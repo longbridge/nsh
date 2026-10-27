@@ -23,7 +23,7 @@ export function ButtonDemo() {
           <Button label="Save" onPress={() => last.set("pressed Save")} />
           <Button label="Duplicate" variant="secondary" onPress={() => last.set("pressed Duplicate")} />
           <Button label="Cancel" variant="ghost" onPress={() => last.set("pressed Cancel")} />
-          <Button label="Delete" color={colors.danger} onPress={() => last.set("pressed Delete")} />
+          <Button label="Delete" variant="danger" onPress={() => last.set("pressed Delete")} />
         </View>
         <Caption label={pointer ? "Hover, press and Tab to each: one focus ring for every control" : "Press each: it sinks under the finger"} />
       </Card>

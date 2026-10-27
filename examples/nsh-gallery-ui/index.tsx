@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, tints, toneColor, toneTint, type Tone } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -314,12 +314,14 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
   );
 }
 
-export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
+export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost" | "danger";
 
 /**
  * A button: 28 pt tall on a desktop, 40 on a touch screen (`small`: 36).
  * `primary` and `accent` are the citrus fill (the main action), `secondary`
- * a raised neutral, `ghost` bare until the pointer is over it. A `color`
+ * a raised neutral, `ghost` bare until the pointer is over it, `danger` a
+ * destructive action: the danger tone's tint, edge and text on the raised
+ * finish's drop, as quiet as `secondary`. A `color`
  * fills it with that color instead. Under the pointer a raised button
  * lightens, pressed it sinks (an inner shade, and 3% smaller).
  */
@@ -345,10 +347,18 @@ export function Button(props: {
   const variant = () => props.variant ?? "primary";
   const filled = () => !props.color && (variant() === "primary" || variant() === "accent");
   const height = () => (pointer ? 28 : small() ? 36 : 40);
-  const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : colors.text);
+  const danger = () => !props.color && variant() === "danger";
+  const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : danger() ? colors.danger : colors.text);
   const look = (): ViewStyle =>
     props.color
       ? { backgroundColor: props.color, borderColor: "transparent", opacity: props.selected ? 0.88 : 1 }
+      : danger()
+        ? {
+            backgroundColor: props.selected ? alpha(colors.danger, 0.2) : tints.danger,
+            backgroundImage: "none",
+            borderColor: alpha(colors.danger, 0.32),
+            boxShadow: finish.raised.boxShadow,
+          }
       : variant() === "ghost"
         ? { backgroundColor: props.selected ? token("accent") : "transparent", borderColor: "transparent" }
         : filled()
@@ -364,8 +374,8 @@ export function Button(props: {
       disabled={props.disabled}
       accessibilityLabel={props.label}
       selected={props.selected}
-      hoverStyle={props.disabled || props.selected ? undefined : props.color || filled() ? { opacity: 0.94 } : variant() === "ghost" ? hovered() : finish.hover}
-      activeStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.88 } : finish.pressed}
+      hoverStyle={props.disabled || props.selected ? undefined : props.color || filled() ? { opacity: 0.94 } : danger() ? { backgroundColor: alpha(colors.danger, 0.16) } : variant() === "ghost" ? hovered() : finish.hover}
+      activeStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.88 } : danger() ? { backgroundColor: alpha(colors.danger, 0.22), boxShadow: "none" } : finish.pressed}
       focusStyle={focusRing()}
       style={{
         flex: props.flex,

@@ -122,6 +122,17 @@ export function alpha(color: string, a: number) {
   return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
 }
 
+/** The charts' series colors, in order (`theme.json`'s `chart-1` to
+ * `chart-5`): the brand's citrus first, then graphite from dark to light,
+ * so one series leads and the rest stay as quiet as the interface. */
+export const chart = tokens({
+  s1: "chart-1",
+  s2: "chart-2",
+  s3: "chart-3",
+  s4: "chart-4",
+  s5: "chart-5",
+});
+
 /** Translucent tints of the tones, for fills behind text. */
 export const tints = tokens({
   accent: "brand-tint",
