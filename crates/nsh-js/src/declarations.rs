@@ -79,10 +79,10 @@ export interface StateStyleProps<S = ViewStyle> {
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */
-export interface IOSProps {}
+export interface IOSProps extends IOSHostProps {}
 
 /** Desktop-only props of every element (`desktop={{…}}`); elements add their own. */
-export interface DesktopProps {}
+export interface DesktopProps extends DesktopHostProps {}
 
 /** Web-only props of every element (`web={{…}}`). */
 export interface WebProps {}
@@ -941,6 +941,41 @@ declare const text: "export default ignored";
         assert!(!used.contains(&"Baz".to_owned()));
         assert!(!used.contains(&"Foo".to_owned()));
         assert!(local.contains(&"Bar".to_owned()));
+    }
+
+    /// Every host element's props reach an element or a component: a
+    /// group of them declared but in no element's props (`IOSProps` once
+    /// was `{}`, so `ios={{ anything }}` type-checked) is a typo nobody is
+    /// told of.
+    #[test]
+    fn every_host_props_interface_is_used() {
+        let files = bodies(&[nsh_base::registry().into()]);
+        let all: String = files.iter().map(|(_, body)| body.as_str()).collect();
+        let mut unused = Vec::new();
+        for line in all.lines() {
+            let Some(rest) = line.strip_prefix("export interface ") else {
+                continue;
+            };
+            let name: String = rest.chars().take_while(|c| is_ident(*c)).collect();
+            if !name.ends_with("HostProps") {
+                continue;
+            }
+            let uses = all
+                .match_indices(name.as_str())
+                .filter(|(at, _)| {
+                    let before = all[..*at].chars().next_back();
+                    let after = all[at + name.len()..].chars().next();
+                    !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+                })
+                .count();
+            // Its declaration, and at least one use.
+            if uses < 2 {
+                unused.push(name);
+            }
+        }
+        assert!(unused.is_empty(), "declared but used nowhere: {unused:?}");
+        assert!(all.contains("export interface IOSProps extends IOSHostProps {}"));
+        assert!(all.contains("export interface DesktopProps extends DesktopHostProps {}"));
     }
 
     /// A name a file imports is declared in one file only.

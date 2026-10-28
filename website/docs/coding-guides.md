@@ -937,8 +937,9 @@ clipboard, haptics, scroll physics, fonts and timing can differ. One bundle runs
 ([Platform-specific code](./platform-specific.md)); put platform-specific code where NSH gives it a place and define
 the fallback behavior:
 
-- a prop two platforms have is a top-level prop; a prop of one platform goes in `ios={{…}}`, `android={{…}}`,
-  `desktop={{…}}` or `web={{…}}` (a builder method in Rust), and only the current platform's object is applied;
+- what an element means on every platform is a top-level prop; a platform's own system feature goes in
+  `ios={{…}}`, `android={{…}}`, `desktop={{…}}` or `web={{…}}` (a builder method in Rust), in each of the platforms
+  that have it, and only the current platform's object is applied;
 - APIs of mobile platforms come from `nsh/mobile`, those of the desktops from `nsh/desktop`;
 - styles per platform are `ios:`, `android:` and `web:` classes.
 

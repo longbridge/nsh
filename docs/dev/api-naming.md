@@ -154,8 +154,13 @@ go elsewhere under these rules rather than into them.
   (`Button::accessibility_label`).
 - **Colors are styles**: a color of a part or a pseudo-element is a style key with its class (`placeholderColor`,
   `selectionColor`), not a prop.
-- **Platform props only for platform-only things**: something two platforms do is a top-level prop, ignored (and
-  documented as such) where it does not apply. One name per concept, never the same prop under `ios` and `desktop`.
+- **Platform props only for platform-only things**: what an element means on every platform is a top-level prop,
+  ignored (and documented as such) where it does not apply (`presentation`, `headerLargeTitle`). A platform's own
+  system feature (a system gesture, a system material) goes in that platform's object; when several platforms have
+  it, each object carries it under one name (WebView's `allowsBackForwardNavigationGestures` in `ios={{…}}` and
+  `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
+  2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
+  so a key no platform has fails the type check.
 - **Accessors** are named after what they read (`safeArea()`, `windowSize()`, `titleBar()`); they never differ from
   a module's name by case only.
 - **Navigation verbs** are `gpui-base`'s: `push`, `pop`, `popToRoot`, `replace` (`NavStackState`); replacing all is

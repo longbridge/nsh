@@ -53,15 +53,17 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   where an API does not apply its calls do nothing and its components render nothing. Their `isAvailable` and
   `nsh`'s `platform.os` tell which.
 - **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, and browsers in the desktop idiom) on
-  elements and components (`IOSProps` / `AndroidProps` / `DesktopProps` in `types.d.ts`, extended per element; the host
-  props in them are the generated `IOS…HostProps` / `Android…HostProps`). The renderer
+  elements and components (`IOSProps` / `AndroidProps` / `DesktopProps` in `types.d.ts`, each extending its
+  generated `IOSHostProps` / `AndroidHostProps` / `DesktopHostProps`, and extended per element with its own
+  `IOS…HostProps` / `Desktop…HostProps`; a test holds every `…HostProps` to an element's props). The renderer
   (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
   `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
   backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
   `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
-  `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' trackpad swipes, Windows' touchscreen swipes; a
-  prop of several platforms names each: `#[prop(ios = "x", desktop = "x")]`). What two platforms do is a top-level prop, ignored where it does not apply (`presentation`,
+  `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' and Linux's trackpad swipes, Windows'
+  touchscreen swipes; a system feature of several platforms names each: `#[prop(ios = "x", desktop = "x")]`). What
+  an element means on every platform is a top-level prop, ignored where it does not apply (`presentation`,
   `headerLargeTitle`, `headerBackTitle`, AlertDialog's `closeOnEscape` / `closeOnBackdropPress`; `api-naming.md`).
 - A module's exports are made when a bundle first imports it; what must always happen (the root's direction, the
   themes) is the renderer's (`dom.rs`, `setup`), not a module's.

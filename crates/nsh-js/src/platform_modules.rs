@@ -507,9 +507,15 @@ pub(crate) const WEBVIEW_TYPES: &str = r#"export type { WebViewNavigation };
 
 export interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desktop" | "ref">, WebViewHostProps {
   ref?: WebViewRef | ((node: WebViewRef) => void);
-  ios?: IOSWebViewHostProps;
-  desktop?: DesktopWebViewHostProps;
+  ios?: IOSWebViewProps;
+  desktop?: DesktopWebViewProps;
 }
+
+/** A web view's iOS-only props: every element's and its own. */
+export interface IOSWebViewProps extends IOSProps, IOSWebViewHostProps {}
+
+/** A web view's desktop-only props: every element's and its own. */
+export interface DesktopWebViewProps extends DesktopProps, DesktopWebViewHostProps {}
 "#;
 
 /// `nsh/video`.
