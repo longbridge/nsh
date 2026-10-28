@@ -24,6 +24,49 @@ use ratatui_widgets::{clear::Clear, paragraph::Paragraph};
 use super::{AppOptions, AppView, agent};
 use crate::{Input, surface::Wake};
 
+/// Reads `asset:/…` files (fonts) from the development server's `/assets/`, as the desktop hosts do.
+pub(super) struct ServerAssets {
+    base: String,
+}
+
+impl ServerAssets {
+    /// The server's assets for its WebSocket URL (`ws://host:port/ws`).
+    pub(super) fn for_server(url: &str) -> Option<Self> {
+        let (scheme, rest) = if let Some(rest) = url.strip_prefix("ws://") {
+            ("http", rest)
+        } else {
+            ("https", url.strip_prefix("wss://")?)
+        };
+        let host = rest.split('/').next().filter(|host| !host.is_empty())?;
+        Some(Self {
+            base: format!("{scheme}://{host}/assets/"),
+        })
+    }
+
+    fn url(&self, uri: &str) -> Result<String, String> {
+        let path = uri
+            .strip_prefix("asset:/")
+            .ok_or_else(|| format!("not an asset URI: {uri}"))?
+            .trim_start_matches('/');
+        Ok(format!("{}{path}", self.base))
+    }
+}
+
+impl nsh_engine::Assets for ServerAssets {
+    fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
+        let url = self.url(uri)?;
+        let mut response = ureq::get(&url)
+            .call()
+            .map_err(|error| format!("{url}: {error}"))?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(u64::MAX)
+            .read_to_vec()
+            .map_err(|error| format!("{url}: {error}"))
+    }
+}
+
 pub(super) enum Message {
     Event(Box<DevEvent>),
     Test(agent::TestSession),

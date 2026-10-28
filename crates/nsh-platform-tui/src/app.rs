@@ -118,6 +118,9 @@ pub struct AppView {
     output: crate::perf::SharedOutput,
     #[cfg(feature = "dev")]
     dev: Option<dev::DevSession>,
+    /// The development server's `asset:/` files, unless the embedder supplies a reader.
+    #[cfg(feature = "dev")]
+    dev_assets: Option<Arc<dyn nsh_engine::Assets>>,
     #[cfg(feature = "dev")]
     diagnostics: dev::Diagnostics,
     #[cfg(feature = "dev")]
@@ -173,6 +176,8 @@ impl AppView {
             #[cfg(feature = "dev")]
             dev: None,
             #[cfg(feature = "dev")]
+            dev_assets: None,
+            #[cfg(feature = "dev")]
             diagnostics: dev::Diagnostics::default(),
             #[cfg(feature = "dev")]
             test: None,
@@ -218,6 +223,10 @@ impl AppView {
         config.cache = self.options.cache.clone();
         config.data_dir = self.options.data_dir.clone();
         config.assets = self.options.assets.clone();
+        #[cfg(feature = "dev")]
+        if config.assets.is_none() {
+            config.assets = self.dev_assets.clone();
+        }
         config.storage = self.options.storage.clone();
         config.clipboard = Some(self.clipboard.clone());
         config.host = self.options.host.clone();
@@ -255,8 +264,11 @@ impl AppView {
     #[cfg(feature = "dev")]
     pub fn connect_dev_server(&mut self, url: impl Into<String>) -> io::Result<()> {
         self.stop();
+        let url = url.into();
+        self.dev_assets = dev::ServerAssets::for_server(&url)
+            .map(|assets| Arc::new(assets) as Arc<dyn nsh_engine::Assets>);
         self.dev = Some(dev::DevSession::start(
-            url.into(),
+            url,
             &self.options,
             self.surface.wake.clone(),
         )?);

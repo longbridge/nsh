@@ -38,8 +38,9 @@ A source bundle can also be loaded directly:
 ```
 
 `--bundle` reads the adjacent source map and capability metadata. Its `asset:/` resources resolve inside the
-adjacent `assets/` directory; bundled fonts load successfully while text uses the terminal font. An embedding
-app can supply its own `AppOptions::assets` reader. Bytecode files require the trusted-resource
+adjacent `assets/` directory; connected to a development server (`nsh run`), they are read from the server's
+`/assets/`, as on the desktop hosts. Bundled fonts load successfully while text uses the terminal font. An embedding
+app can supply its own `AppOptions::assets` reader, which takes precedence over both. Bytecode files require the trusted-resource
 or verified-package path, owned by the packaging work. Direct hosts without `--log-file` keep diagnostics in
 `nsh-tui-host-<pid>.log` in the system temporary directory, visible through the same panel. `--trace` includes
 the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
@@ -703,7 +704,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Syntax highlighting | The built-in Editor, DiffView and TextView token colors |
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
-| Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
+| Font size, family, line height and letter spacing | Terminal font, display width and one row per line; imported fonts load from adjacent `assets/` or the development server |
 | Shadows, blur, materials, 3D transforms and blend modes | Decorative features left out silently in this slice |
 | View gradients (`backgroundImage`: linear, radial and conic) | Each layer's middle stop as a flat fill over the view's background color, bottom layer first, as canvas gradients |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
