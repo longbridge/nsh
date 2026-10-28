@@ -115,6 +115,25 @@ impl From<&ImageAsset> for ImageSrc {
     }
 }
 
+impl ImageSrc {
+    /// The SVG document `markup` itself as a source ([`super::svg`],
+    /// [`super::image`]): its markup is the image, as an `<svg>` written
+    /// inline in a web page is.
+    pub fn svg_markup(markup: &str) -> Self {
+        use std::fmt::Write;
+        let mut uri = String::with_capacity(markup.len() + 32);
+        uri.push_str("data:image/svg+xml,");
+        for b in markup.bytes() {
+            if b.is_ascii_alphanumeric() || b" -._~!$'()*+,;=:@/?".contains(&b) {
+                uri.push(b as char);
+            } else {
+                let _ = write!(uri, "%{b:02X}");
+            }
+        }
+        uri.into()
+    }
+}
+
 crate::static_reactive!(
     ImageSrc: ImageSrc,
     ImageAsset,

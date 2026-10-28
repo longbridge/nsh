@@ -181,6 +181,10 @@ impl Mounter {
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
                     ViewKind::Canvas => view.changed(),
+                    ViewKind::Image => {
+                        crate::shader::resized(view);
+                        crate::image::resized(surface, view);
+                    }
                     _ => crate::shader::resized(view),
                 }
             }

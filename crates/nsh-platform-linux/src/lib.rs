@@ -31,6 +31,7 @@ mod fps;
 mod image;
 mod input;
 mod keymap;
+mod menu_style;
 mod mount;
 mod native;
 mod navigation;

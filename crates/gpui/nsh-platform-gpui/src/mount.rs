@@ -204,6 +204,10 @@ impl Mounter {
                     ViewKind::WebView | ViewKind::Video | ViewKind::Native => {
                         crate::native::resized(view)
                     }
+                    ViewKind::Image => {
+                        crate::shader::resized(surface, view);
+                        crate::image::resized(surface, view);
+                    }
                     _ => crate::shader::resized(surface, view),
                 }
             }

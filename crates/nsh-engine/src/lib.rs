@@ -635,6 +635,17 @@ pub trait Network: Send + Sync + 'static {
 pub trait Assets: Send + Sync + 'static {
     /// The bytes of `uri`. Blocking; called on the engine thread.
     fn read(&self, uri: &str) -> Result<Vec<u8>, String>;
+
+    /// Where `asset:/` URIs resolve, when it is a directory or a URL the
+    /// image loader can read itself: the core's image loads ([`svg`]s)
+    /// then share the platform's cache entries. `None`: through
+    /// [`Assets::read`].
+    ///
+    /// [`svg`]: nsh_core::element::svg
+    #[cfg(not(target_arch = "wasm32"))]
+    fn base(&self) -> Option<nsh_core::image::loader::AssetBase> {
+        None
+    }
 }
 
 /// Engine settings.
@@ -1411,6 +1422,18 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        core.set_image_context(nsh_core::image::loader::Context {
+            asset_base: config.assets.as_ref().and_then(|a| a.base()),
+            read_asset: config.assets.clone().map(|assets| {
+                Arc::new(move |uri: &str| assets.read(uri)) as nsh_core::image::loader::ReadAsset
+            }),
+            access: access.clone(),
+            // The same cache as the platform's ([`Engine::image_cache`]).
+            disk: config.cache.open_images(config.app.app_id()),
+            // The platform's, if it set one ([`nsh_core::image::loader::set_transport`]).
+            transport: None,
+        });
         core.set_storage(app_storage(&config));
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());

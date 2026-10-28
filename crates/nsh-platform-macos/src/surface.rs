@@ -354,6 +354,8 @@ impl Surface {
                 control.set_tokens(tokens);
             }
         };
+        // Remote images download with NSURLSession.
+        crate::image::install_transport();
         match Engine::start_with(config, CoreTextEngine::default, sink, setup) {
             Ok(engine) => {
                 // The app's downloaded images go through its disk cache.

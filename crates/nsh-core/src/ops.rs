@@ -1620,6 +1620,11 @@ pub enum Command {
     },
     /// Set the status bar (on the root): what the platform shows.
     StatusBar(StatusBarConfig),
+    /// The design tokens the app is drawn with (on the root), sent when
+    /// they change ([`crate::Core::tokens`]): what the platform's own
+    /// controls (menus) take their colors from, by the tokens' names
+    /// (`popover`, `accent`, `border`, ...).
+    Tokens(std::sync::Arc<crate::element::Tokens>),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.

@@ -141,8 +141,8 @@ pub use self::{
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, IntoUniform, Modal,
-        NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Uniform,
-        Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader,
+        NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Svg, Uniform,
+        Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader, svg,
         video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},

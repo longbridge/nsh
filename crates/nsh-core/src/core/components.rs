@@ -807,6 +807,11 @@ impl<M: TextEngine> Core<M> {
                 .runtime
                 .set_tokens(self.components.tokens.clone());
         }
+        // The platform's own controls (menus) take their colors from them.
+        self.commands.push((
+            crate::ROOT_ID,
+            Command::Tokens(self.components.tokens.clone()),
+        ));
         let font = self
             .components
             .tokens
@@ -4670,6 +4675,7 @@ impl<M: TextEngine> Core<M> {
             Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Appearance(appearance) => self.set_appearance(appearance),
+            Action::Tokens(tokens) => self.set_tokens(tokens),
             Action::BuiltInScrollbars(source, theme) => {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }

@@ -495,6 +495,18 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.usvg]
 opt-level = 3
+# Photos are decoded and shrunk to their views' sizes as they load: unoptimized,
+# a 12-megapixel JPEG takes seconds.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
 
 # The web runtime (`nsh.wasm`): what pages download, so it is optimized for
 # size.

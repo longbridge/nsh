@@ -299,6 +299,16 @@ pub fn tokens() -> Arc<Tokens> {
         .get()
 }
 
+/// Draws the app with the design tokens `tokens` (the app's own, which an
+/// embedding app's still win over), in place of the UI set's defaults or
+/// the theme file's: Tailwind's token classes, [`tokens`] and the
+/// platform's own controls (Linux's menus) follow. An app that picks its
+/// theme while it runs sets it here (`set_tokens(theme.into())` of an
+/// `nsh_base::Theme`).
+pub fn set_tokens(tokens: impl Into<Tokens>) {
+    act(Action::Tokens(tokens.into()));
+}
+
 /// The width of `text` on one line in `font` (the CSS `font` shorthand; an
 /// invalid one measures in `10px sans-serif`), by the platform's text engine
 /// (TS: a canvas's `measureText(text).width`).
