@@ -148,25 +148,26 @@ motion only, 620ms `cubic-bezier(.16, 1, .3, 1)`. The copied chat imports
 `./clipboard`, a no-op, because this runtime has no `Clipboard` yet;
 the playground lists every demo but this one (it compiles single files).
 
-Behind the hero, `HeroField.astro` draws the sky from close up, inside a
-galaxy, with a fragment shader (WebGL, two passes: the clouds' field into a
-texture of a texel every 11 px, then the sky per pixel, sampling it). The
-galaxy's light is milky, as its unresolved stars give it: white leaning a
-little cool or warm by region, so it sits with the site's greys, lying in
-belts as Jupiter's clouds do, folded and eddying, gathered within the
-content column and fading beyond it. The stars are crisp points, most faint
-and a few bright (the brightest wear diffraction spikes), of different
-temperatures, crowding where the clouds are, few between them, and gathered
-in clusters; they drift slowly, nearer ones faster, and now and then a
-meteor crosses. Presses act on gravity: a held press is a small mass that
-bends the starlight toward it; released, it sends a gentle wave that
-carries the stars outward as it passes before they settle back, and turns
-their drift to a new heading. The sky shows across the hero, about half as
-strong behind the copy, every mask a smooth gradient. The colors are the
-`--hero-*` tokens. It moves all the time, pauses off screen and in hidden
-tabs, draws one still frame and takes no presses with reduced motion,
-never takes pointer events itself, and draws nothing without WebGL
-(`?fieldperf` logs its frame time).
+Behind the hero, `HeroField.astro` draws the night sky from inside a galaxy
+with a fragment shader (WebGL, two passes: the clouds' field into a texture
+of a texel every 11 px, then the sky per pixel, sampling it). The hero's sky
+darkens toward the night, fading out along its bottom into the page. The
+nebula takes the accent's family, lime through green to teal by region, with
+gold and bright citrus in a few small clouds; its wisps are ridged and
+brightest, lying in belts as Jupiter's clouds do, gathered within the content
+column. A river of stars and star dust runs diagonally through the middle.
+The stars are crisp discs, most faint and a few bright (the brightest wear
+long diffraction spikes), of different temperatures, crowding in the river
+and the clouds, few between them, and gathered in clusters; they drift
+slowly, nearer ones faster, and now and then a meteor crosses. Presses act
+on gravity: a held press is a small mass that bends the starlight toward
+it; released, it sends a gentle wave that carries the stars outward as it
+passes before they settle back, and turns their drift to a new heading. The
+sky shows across the hero, about half as strong behind the copy, every mask
+a smooth gradient. The colors are the `--hero-*` tokens. It moves all the
+time, pauses off screen and in hidden tabs, draws one still frame and takes
+no presses with reduced motion, never takes pointer events itself, and
+draws nothing without WebGL (`?fieldperf` logs its frame time).
 
 ## Demo frames
 

@@ -26,11 +26,12 @@
     --hero-star-rose: #ffb49a;
     --hero-star-gold: #f2e69a;
     --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-milk-cool: rgba(196, 206, 230, 0.22);
-    --hero-milk-pale: rgba(214, 220, 232, 0.2);
-    --hero-milk-silver: rgba(222, 224, 228, 0.2);
-    --hero-milk-warm: rgba(232, 224, 208, 0.2);
-    --hero-milk-mist: rgba(204, 212, 228, 0.22);
+    --hero-nebula-lime: rgba(190, 240, 100, 0.42);
+    --hero-nebula-green: rgba(110, 210, 120, 0.4);
+    --hero-nebula-teal: rgba(60, 190, 170, 0.38);
+    --hero-nebula-gold: rgba(232, 220, 110, 0.38);
+    --hero-nebula-citrus: rgba(214, 250, 130, 0.44);
+    --hero-deep: rgba(3, 5, 14, 0.55);
   }
   html.light,
   html:not(.dark) {
@@ -40,11 +41,12 @@
     --hero-star-rose: #b0503a;
     --hero-star-gold: #9a8410;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-milk-cool: rgba(70, 82, 110, 0.07);
-    --hero-milk-pale: rgba(80, 88, 104, 0.06);
-    --hero-milk-silver: rgba(86, 88, 94, 0.06);
-    --hero-milk-warm: rgba(104, 94, 76, 0.06);
-    --hero-milk-mist: rgba(76, 84, 104, 0.07);
+    --hero-nebula-lime: rgba(110, 160, 30, 0.14);
+    --hero-nebula-green: rgba(50, 150, 70, 0.12);
+    --hero-nebula-teal: rgba(20, 140, 125, 0.12);
+    --hero-nebula-gold: rgba(170, 150, 20, 0.12);
+    --hero-nebula-citrus: rgba(130, 180, 30, 0.14);
+    --hero-deep: rgba(0, 0, 0, 0);
   }
   .hero-field {
     position: absolute;
@@ -140,7 +142,8 @@
     uniform vec3 starRose;
     uniform vec3 starGold;
     uniform vec4 glowColor;
-    uniform vec4 nebula[5];       // the galaxy's milky light, white leaning a little cool or warm (straight alpha)
+    uniform vec4 nebula[5];       // the clouds' hues, the accent's family: lime, green, teal (most clouds), gold, bright citrus (a few) (straight alpha)
+    uniform vec4 deepColor;       // darkens the hero's sky toward the night
     ${NOISE}
     vec4 sampleField(vec2 p) { return texture2D(field, vec2(p.x / size.x, 1.0 - p.y / size.y)); }
 
@@ -157,7 +160,8 @@
 
     // The galaxy, crossing the hero through the open space beside the device
     // (where the demo hides none of it): a band whose edges waver with the
-    // clouds, around a long core. x: the band, z: the core.
+    // clouds, around a long core. x: the band, as wide as the hero; y: the
+    // river of stars down its middle; z: the core.
     vec4 galaxy(vec2 p, float cloud, float detail) {
       float sway = 0.05 * sin(time * 0.06);
       vec2 dir = normalize(stacked > 0.5 ? vec2(1.0, -0.3 + sway) : vec2(1.0, -0.62 + sway));
@@ -171,7 +175,8 @@
       vec2 e = vec2(along / 1.7, across + wobble * 0.3);
       float breath = 0.9 + 0.1 * sin(time * 0.5);
       float core = exp(-dot(e, e) / pow(width * 0.32, 2.0)) * breath;
-      return vec4(band, 0.0, core, 0.0);
+      float river = exp(-pow((across + wobble * 0.35) / (size.y * 0.3), 2.0)) * (0.3 + 0.7 * exp(-pow(along / (size.x * 0.55), 2.0)));
+      return vec4(band, river, core, 0.0);
     }
 
     // Belts, as Jupiter's clouds lie: stripes along the galaxy's heading,
@@ -211,11 +216,11 @@
       float aa = 0.6 / dpr;
       float light = (smoothstep(r + aa, r - aa, d) + 0.18 * exp(-d / (r * 1.2))) * (0.45 + 0.9 * pow(hash(id + seed + 7.1), 3.0));
       if (hash(id + seed + 5.9) > 1.0 - spiky) {
-        float reach = cell * 0.28;
+        float reach = cell * 0.3;
         float fade = 1.0 - smoothstep(0.0, reach, max(abs(v.x), abs(v.y)));
         float thin = 0.45 / dpr + 0.15;
-        light = light * 1.6 + 0.7 * fade * (exp(-abs(v.y) / thin) * exp(-abs(v.x) / (reach * 0.3))
-          + exp(-abs(v.x) / thin) * exp(-abs(v.y) / (reach * 0.3)));
+        light = light * 1.6 + 0.7 * fade * (exp(-abs(v.y) / thin) * exp(-abs(v.x) / (reach * 0.5))
+          + exp(-abs(v.x) / thin) * exp(-abs(v.y) / (reach * 0.5)));
         twinkle = 0.7 + 0.3 * twinkle;
       }
       return show * twinkle * light;
@@ -240,13 +245,13 @@
       // between them, and gather in clusters.
       vec3 c0, c1, c2, c3;
       vec2 qc = mix(p, q, 0.7);
-      float s0 = stars(qc, 12.0, 47.0, 2.0, 1.3, 0.9 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
-      float s1 = stars(mix(p, q, 0.6), 40.0, 1.0, 1.5, 2.2, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
-      float s2 = stars(mix(p, q, 0.8), 90.0, 9.0, 3.0, 2.9, 0.12 + 0.4 * thick, 0.0, c2);
-      float s3 = stars(q, 200.0, 23.0, 6.0, 3.8, 0.18 + 0.3 * thick, 0.15, c3);
+      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.9 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
+      float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
+      float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, 0.12 + 0.4 * thick, 0.0, c2);
+      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, 0.18 + 0.3 * thick, 0.15, c3);
       // The galaxy's unresolved stars: a faint grain where it is thick.
       vec3 cg;
-      float grain = stars(mix(p, q, 0.5), 7.0, 61.0, 1.0, 0.6, 0.85 * thick, 0.0, cg) * 0.22;
+      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.85 * thick, 0.0, cg) * 0.32;
       float sum = s0 + s1 + s2 + s3 + grain;
       rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3 + cg * grain) / max(sum, 1e-4);
       return sum;
@@ -305,7 +310,7 @@
       // The stars, the same ones all along: a press's wave pushes them out
       // as it passes and they settle back, and the press turns their drift.
       // A faint few stay over the copy.
-      float thick = smoothstep(0.35, 0.8, f.r) * band;
+      float thick = max(smoothstep(0.35, 0.8, f.r) * band * 0.6, gx.y);
       float seen = sky;
       vec3 starRgb;
       float sum = starfield(p, q, thick, band, detail, starRgb);
@@ -333,31 +338,34 @@
       // The nebula under the stars: the clouds inside the band and the core,
       // their hues weaving, lying in belts as Jupiter's do, brighter where a
       // wave passes.
-      float cloud = smoothstep(0.32, 0.75, f.r);
-      float fine = smoothstep(0.55, 0.92, detail);
+      float cloud = smoothstep(0.25, 0.7, f.r);
+      float fine = smoothstep(0.5, 0.95, detail);
       // The light gathers within the content column, fading out over a
       // couple of hundred px beyond it.
       vec2 fd = max(frame.xy - p, p - frame.zw);
       float clear = sky * (1.0 - smoothstep(0.0, 220.0, length(max(fd, 0.0))));
-      // Milky light, as a galaxy's unresolved stars give: white leaning a
-      // little cool or warm by region, so it sits with the site's greys:
-      // the place on the arc follows where the clouds lie, shifts belt to
-      // belt and slowly sways.
+      // The accent's family: lime through green to teal by region, gold and
+      // bright citrus in a few small clouds, their wisps paler and brightest.
       float belt = belts(p, f.r, detail);
-      float h = f.g * 1.3 + f.b * 0.5 + belt * 0.22 + time * 0.012;
-      float x = (1.0 - abs(fract(h * 0.5) * 2.0 - 1.0)) * 4.0;
-      vec4 hue = mix(nebula[0], nebula[1], clamp(x, 0.0, 1.0));
-      hue = mix(hue, nebula[2], clamp(x - 1.0, 0.0, 1.0));
-      hue = mix(hue, nebula[3], clamp(x - 2.0, 0.0, 1.0));
-      hue = mix(hue, nebula[4], clamp(x - 3.0, 0.0, 1.0));
-      float gn = hue.a * (band * (0.12 + cloud * (0.45 + 0.9 * fine)) * 1.2 + gx.z * (0.35 + 0.65 * cloud) * 0.7) * (0.45 + 0.75 * belt) * clear;
+      float h = f.g * 1.3 + belt * 0.22 + time * 0.012;
+      float x = (1.0 - abs(fract(h * 0.5) * 2.0 - 1.0)) * 2.0;
+      vec4 cool = mix(nebula[0], nebula[1], clamp(x, 0.0, 1.0));
+      cool = mix(cool, nebula[2], clamp(x - 1.0, 0.0, 1.0));
+      vec4 warm = mix(nebula[3], nebula[4], smoothstep(0.3, 0.8, f.b));
+      float warmth = clamp(smoothstep(0.78, 0.95, f.b) * 0.7 * cloud, 0.0, 1.0);
+      vec4 hue = mix(cool, warm, warmth);
+      hue.rgb = mix(hue.rgb, vec3(1.0), 0.2 * fine * cloud);
+      float gn = hue.a * (band * (0.06 + 0.35 * cloud + 1.3 * fine * (0.35 + 0.65 * cloud)) + gx.z * cloud * 0.25 + gx.y * 0.25 * cloud) * (0.55 + 0.6 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
       float g = clamp(gn + gw, 0.0, 1.0);
       vec3 glowRgb = (hue.rgb * gn + glowColor.rgb * gw) / max(gn + gw, 1e-4);
+      // The night behind it all, across the hero, fading out along its
+      // bottom into the page.
+      float va = deepColor.a * (1.0 - smoothstep(0.7, 1.0, p.y / size.y));
 
-      // Premultiplied: the stars over the nebula.
-      vec3 rgb = glowRgb * g;
-      float a = g;
+      // Premultiplied: the stars over the nebula over the night.
+      vec3 rgb = glowRgb * g + deepColor.rgb * va * (1.0 - g);
+      float a = g + va * (1.0 - g);
       rgb = starRgb * sa + rgb * (1.0 - sa);
       a = sa + a * (1.0 - sa);
       gl_FragColor = vec4(rgb, a);
@@ -467,12 +475,13 @@
       gl!.uniform3fv(u('starGold'), color('--hero-star-gold', [0.95, 0.9, 0.6, 1]).slice(0, 3));
       gl!.uniform4fv(u('glowColor'), color('--hero-glow', [0.78, 0.95, 0.43, 0.16]));
       gl!.uniform4fv(u('nebula'), [
-        ...color('--hero-milk-cool', [0.77, 0.81, 0.9, 0.13]),
-        ...color('--hero-milk-pale', [0.84, 0.86, 0.91, 0.12]),
-        ...color('--hero-milk-silver', [0.87, 0.88, 0.89, 0.12]),
-        ...color('--hero-milk-warm', [0.91, 0.88, 0.82, 0.12]),
-        ...color('--hero-milk-mist', [0.8, 0.83, 0.89, 0.13]),
+        ...color('--hero-nebula-lime', [0.75, 0.94, 0.39, 0.42]),
+        ...color('--hero-nebula-green', [0.43, 0.82, 0.47, 0.4]),
+        ...color('--hero-nebula-teal', [0.24, 0.75, 0.67, 0.38]),
+        ...color('--hero-nebula-gold', [0.91, 0.86, 0.43, 0.38]),
+        ...color('--hero-nebula-citrus', [0.84, 0.98, 0.51, 0.44]),
       ]);
+      gl!.uniform4fv(u('deepColor'), color('--hero-deep', [0, 0, 0, 0]));
     }
 
     function layout() {
