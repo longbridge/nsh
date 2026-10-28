@@ -823,20 +823,26 @@ impl<P: Pose> Update<P> {
     /// Follows `pose`, moving to each new one with the plot's
     /// `motion.update` (at once without one or with reduced motion).
     fn new(plot: PlotContext, pose: impl Fn() -> P + 'static) -> Self {
-        let first = untracked(&pose);
-        let shown = signal((first.clone(), None::<P>));
+        let shown = signal((untracked(&pose), None::<P>));
         let progress = animated_value(1.0);
-        // The app's last pose, and how many changes came: a stopped move's
-        // successor starts only if no change came while the animator was
-        // asked how far it had gone.
-        let last = stored(first);
+        // The app's last pose (none before the first run, which only
+        // shows its pose: what a mark's other effects settle before it is
+        // no move), and how many changes came: a stopped move's successor
+        // starts only if no change came while the animator was asked how
+        // far it had gone.
+        let last = stored(None::<P>);
         let changes = stored(0_u32);
         effect(move || {
             let to = pose();
-            if last.with(|last| *last == to) {
+            let Some(before) = last.replace(Some(to.clone())) else {
+                if shown.with_untracked(|(at, from)| *at != to || from.is_some()) {
+                    shown.set((to, None));
+                }
+                return;
+            };
+            if before == to {
                 return;
             }
-            last.replace(to.clone());
             let change = changes.with(|c| {
                 *c = c.wrapping_add(1);
                 *c
@@ -858,11 +864,11 @@ impl<P: Pose> Update<P> {
                     // A newer change asks again.
                     return;
                 }
-                let at = shown.with_untracked(|(to, from)| match from {
-                    Some(from) => from.lerp(to, t),
-                    None => to.clone(),
+                let at = shown.with_untracked(|(at, from)| match from {
+                    Some(from) => from.lerp(at, t),
+                    None => at.clone(),
                 });
-                Self::run(shown, progress, at, last.get(), timing);
+                Self::run(shown, progress, at, to, timing);
             });
         });
         Update { shown, progress }
