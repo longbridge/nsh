@@ -1,4 +1,4 @@
-import { computed, effect, mount, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
+import { computed, effect, mount, signal, Text, untracked, View, type YNode } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
@@ -10,7 +10,7 @@ import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, colors, desktop, header, hovered, IconTile, lazy, Logo, PageHeader, Press, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
+import { Appear, colors, desktop, header, hovered, IconTile, lazy, Logo, PageHeader, Press, ScrollArea, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
 
 /** The demos: the apps built on NSH, then one demo per element in the
  * website's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
@@ -112,7 +112,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 function Home() {
   return (
     <NavPage title="Gallery" {...header} headerLargeTitle headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
-      <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollArea style={{ backgroundColor: colors.background }} label="Demos">
         <View style={{ paddingTop: 12, paddingBottom: 40, gap: 28 }}>
           <Each of={groups}>
             {(group, g) => (
@@ -140,7 +140,7 @@ function Home() {
             )}
           </Each>
         </View>
-      </Scroll>
+      </ScrollArea>
     </NavPage>
   );
 }
@@ -304,7 +304,7 @@ function Sidebar() {
           <SidebarToggle />
         </View>
         <Search />
-        <Scroll style={{ flex: 1 }}>
+        <ScrollArea label="Demos">
           <View style={{ paddingBottom: 12 }}>
             <Each of={found()}>
               {(group) => (
@@ -320,7 +320,7 @@ function Sidebar() {
               <Text style={{ fontSize: 12, color: colors.muted, paddingHorizontal: 20, paddingTop: 14 }}>No demo matches “{query().trim()}”</Text>
             </If>
           </View>
-        </Scroll>
+        </ScrollArea>
         <View style={{ height: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 16, paddingRight: 10, borderTopWidth: 1, borderTopColor: colors.sidebarBorder }}>
           <Logo size={22} />
           <View style={{ flex: 1, gap: 0 }}>

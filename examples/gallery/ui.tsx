@@ -1,9 +1,9 @@
 // Gallery shell and navigation. Reusable components and visual rules live
 // in the repository's internal nsh-gallery-ui layer.
 import type { JSX, ScrollProps } from "nsh";
-import { computed, Image, Scroll, signal, Text, View } from "nsh";
+import { computed, Image, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
-import { alpha, Appear, colors, hovered, Icon, type IconName, isDark, Press, radius, Tip } from "../nsh-gallery-ui";
+import { alpha, Appear, colors, hovered, Icon, type IconName, isDark, Press, radius, ScrollArea, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -195,8 +195,9 @@ export function DemoPage(props: {
   // Read in the layout below: it is rebuilt only when the count changes.
   const columns = computed(() => columnsFor(360, props.columns ?? 2));
   return (
-    <Scroll
-      style={{ flex: 1, backgroundColor: colors.background }}
+    <ScrollArea
+      style={{ backgroundColor: colors.background }}
+      label={shownDemo()?.name}
       keyboardDismissMode={props.keyboardDismissMode}
       keyboardShouldPersistTaps={props.keyboardShouldPersistTaps}
     >
@@ -228,7 +229,7 @@ export function DemoPage(props: {
         })()}
       </If>
       {props.children}
-    </Scroll>
+    </ScrollArea>
   );
 }
 
