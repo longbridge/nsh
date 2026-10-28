@@ -31,6 +31,11 @@ class and module faces; the same core reactive graph and virtualized list machin
 JS values cross through generation-checked arena handles. Weak tracing connects Rust-owned callbacks and
 payloads to their JS peers; externally held Rust values remain strong. DOM child edges are traced separately,
 so detached trees with callback cycles can be collected. Explicit owner disposal remains deterministic.
+The tracing runs off the calls: an outermost entry promotes weakened values back only when some were demoted, and
+the trace and the demotion run at most every 100ms once the outermost call returned (`Values.schedule`), so a call
+costs the same however many values the app holds. A string crosses in one call, encoded straight into Rust's
+buffer; a row of a table crosses in one (`JsHost::primitives` / `primitive_entries`, op 49, packed by `values.js`
+and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their

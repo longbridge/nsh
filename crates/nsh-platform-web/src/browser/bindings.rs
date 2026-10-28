@@ -8,8 +8,8 @@ use std::{
 use nsh_core::{
     Op,
     element::{
-        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsHost, JsIn, JsKind, JsRaw,
-        Posts, PropError, RustCall, RustOp, System, TaskStart,
+        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsHost, JsIn, JsKind,
+        JsPrimitive, JsRaw, Posts, PropError, RustCall, RustOp, System, TaskStart,
     },
     js::host::HostInput,
 };
@@ -353,6 +353,15 @@ impl JsHost for Bindings {
     }
     fn keys(&self, value: JsRaw) -> Result<Vec<String>, PropError> {
         Value::borrowed(id(value)).keys()
+    }
+    fn primitives(&self, value: JsRaw) -> Result<Option<Vec<JsPrimitive>>, PropError> {
+        let items = Value::borrowed(id(value)).primitives(false)?;
+        Ok(items.map(|items| items.into_iter().map(|(_, v)| v).collect()))
+    }
+    fn primitive_entries(&self, value: JsRaw) -> Result<Vec<(String, JsPrimitive)>, PropError> {
+        Ok(Value::borrowed(id(value))
+            .primitives(true)?
+            .unwrap_or_default())
     }
     fn date(&self, value: JsRaw) -> Option<f64> {
         let n = invoke(11, id(value), 0, 0, 0.0);
