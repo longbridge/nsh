@@ -161,32 +161,23 @@ impl Painter<'_> {
                 .animated
                 .background
                 .unwrap_or(view.style.background_color);
-            if !fill.is_transparent() {
-                let page_background = self.page_backgrounds.contains(&fill);
-                if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
-                    let background = if page_background {
-                        Color::Reset
-                    } else {
-                        blend(fill, opacity, Color::Reset)
-                    };
-                    Block::default()
-                        .style(Style::reset().bg(background))
-                        .render(visible, self.buffer);
-                    for y in visible.y..visible.bottom() {
-                        for x in visible.x..visible.right() {
-                            self.buffer[(x, y)].set_symbol(" ");
-                        }
-                    }
-                } else {
-                    for y in visible.y..visible.bottom() {
-                        for x in visible.x..visible.right() {
-                            let background = blend(fill, opacity, self.buffer[(x, y)].bg);
-                            self.buffer[(x, y)].set_symbol(" ");
-                            Block::default()
-                                .style(Style::reset().bg(background))
-                                .render(Rect::new(x, y, 1, 1), self.buffer);
-                        }
-                    }
+            fill_cells(self.buffer, self.page_backgrounds, visible, fill, opacity);
+            // A Cell holds one background color: each gradient layer draws its
+            // middle stop, as canvas gradients do, bottom layer first.
+            let gradients = view
+                .style
+                .effects
+                .as_ref()
+                .map_or(&[][..], |effects| &effects.background_images[..]);
+            for gradient in gradients.iter().rev() {
+                if let Some(stop) = gradient.stops.get(gradient.stops.len() / 2) {
+                    fill_cells(
+                        self.buffer,
+                        self.page_backgrounds,
+                        visible,
+                        stop.color,
+                        opacity,
+                    );
                 }
             }
             let widths = &view.style.borders.widths;
@@ -429,6 +420,46 @@ impl Painter<'_> {
                     cell.set_symbol(symbol);
                     cell.set_fg(blend(color, opacity, cell.bg));
                 }
+            }
+        }
+    }
+}
+
+/// Fills the `visible` Cells with `fill`: page backgrounds with the terminal's
+/// own, opaque fills replace what is there, translucent ones blend over it.
+fn fill_cells(
+    buffer: &mut Buffer,
+    page_backgrounds: &[nsh_core::Color],
+    visible: Rect,
+    fill: nsh_core::Color,
+    opacity: f32,
+) {
+    if fill.is_transparent() {
+        return;
+    }
+    let page_background = page_backgrounds.contains(&fill);
+    if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
+        let background = if page_background {
+            Color::Reset
+        } else {
+            blend(fill, opacity, Color::Reset)
+        };
+        Block::default()
+            .style(Style::reset().bg(background))
+            .render(visible, buffer);
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                buffer[(x, y)].set_symbol(" ");
+            }
+        }
+    } else {
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                let background = blend(fill, opacity, buffer[(x, y)].bg);
+                buffer[(x, y)].set_symbol(" ");
+                Block::default()
+                    .style(Style::reset().bg(background))
+                    .render(Rect::new(x, y, 1, 1), buffer);
             }
         }
     }

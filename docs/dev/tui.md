@@ -556,7 +556,7 @@ indicators sized by the app. Page backgrounds retain the terminal-background pol
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
-acceptance described below. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
+acceptance described below. Decorative shadows (including Tailwind rings) and 3D transforms retain
 their documented degradation below; the gallery's outline-based control focus styles are rendered.
 
 ## Mouse and text selection
@@ -681,7 +681,8 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Input accessories (`InputAccessoryView`) | Left unmounted, as on the desktops: no software keyboard to show them over |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
-| Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| Shadows, blur, materials, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| View gradients (`backgroundImage`: linear, radial and conic) | Each layer's middle stop as a flat fill over the view's background color, bottom layer first, as canvas gradients |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
 | Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |
