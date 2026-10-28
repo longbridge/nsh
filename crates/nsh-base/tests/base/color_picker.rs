@@ -152,6 +152,11 @@ fn a_channel_typed_is_kept_in_its_space() {
 #[test]
 fn a_disabled_picker_takes_no_changes() {
     let mut app = start(ColorFormat::Hex, true);
+    // Its parts say so to screen readers, as the picker's own state.
+    for part in ["label:Area", "label:Hue", "label:Alpha", "label:Color"] {
+        let state = app.screen().accessibility_state(part).unwrap();
+        assert!(state.disabled, "{part}");
+    }
     app.press("label:Red").unwrap();
     app.drag("label:Alpha", point(px(-300.0), px(0.0))).unwrap();
     app.settle();
