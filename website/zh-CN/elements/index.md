@@ -89,6 +89,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | 组件 | Rust | 作用 | 页面 |
 |---|---|---|---|
 | `AlertDialog` | `nsh_base::alert_dialog()` | 系统的提示框和操作表 | [AlertDialog](./alert-dialog.md) |
+| `<Accordion>` 及其部件 | `nsh_base::accordion()`、`accordion_item()` 等 | 在各自标题下展开和收起的一组分区，一次一个或同时多个 | [Accordion](./accordion.md) |
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |

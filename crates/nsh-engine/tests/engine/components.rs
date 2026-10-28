@@ -2833,6 +2833,156 @@ fn a_base_collapsible_places_its_content_while_open() {
     );
 }
 
+const BASE_ACCORDION: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger } from "nsh/base";
+
+function App() {
+  const open = signal<string[]>(["a"]);
+  const heard = signal<string[]>([]);
+  const item = (value: string, title: string, disabled = false) => (
+    <AccordionItem testID={`item-${value}`} value={value} disabled={disabled}>
+      <AccordionHeader testID={`header-${value}`} level={2}>
+        <AccordionTrigger
+          testID={`trigger-${value}`}
+          class="group bg-white aria-expanded:bg-black"
+          expandedStyle={{ opacity: 0.5 }}
+        >
+          <Text>{title}</Text>
+          <View class="w-[10px] group-aria-expanded:bg-[#00ff00]" />
+        </AccordionTrigger>
+      </AccordionHeader>
+      <AccordionPanel testID={`panel-${value}`} accessibilityLabel={title}>
+        <Text>{`${title} details`}</Text>
+      </AccordionPanel>
+    </AccordionItem>
+  );
+  return (
+    <View>
+      <Accordion
+        testID="faq"
+        value={open()}
+        onChange={({ value }) => {
+          heard.set([...heard(), value.join("+") || "none"]);
+          open.set(value);
+        }}
+      >
+        {item("a", "Shipping")}
+        {item("b", "Returns")}
+        {item("c", "Billing", true)}
+      </Accordion>
+      <Text>{`Heard: ${heard().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Accordion` from TSX: a group of level-2 headings around
+/// buttons that say whether their item is expanded (styled
+/// `aria-expanded:`, `expandedStyle` and `group-aria-expanded:` while it
+/// is), regions named by the app; a press reports the next `value` as one
+/// object (`onChange({ value })`), one item open at a time; a disabled
+/// item's trigger takes no presses.
+#[test]
+fn a_base_accordion_reports_its_value_and_says_what_is_expanded() {
+    use nsh_core::{AccessibilityRole, ViewProps};
+    let (engine, rx) = start(BASE_ACCORDION);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Shipping details"));
+    assert!(!shows(&first, "Returns details"));
+    let id = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let props_in = |batches: &[MountBatch], view| -> Option<ViewProps> {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == view => Some((**props).clone()),
+                _ => None,
+            })
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let initial = std::slice::from_ref(&first);
+    let props = |view| props_in(initial, view).expect("props");
+
+    // The roles: a group, headings of level 2, buttons, regions.
+    assert_eq!(
+        props(id("faq")).accessibility.role,
+        AccessibilityRole::Group
+    );
+    let header = props(id("header-a"));
+    assert_eq!(header.accessibility.role, AccessibilityRole::Header);
+    assert_eq!(header.accessibility.level, Some(2));
+    let (a, b, c) = (id("trigger-a"), id("trigger-b"), id("trigger-c"));
+    let trigger = props(a);
+    assert_eq!(trigger.accessibility.role, AccessibilityRole::Button);
+    assert_eq!(trigger.accessibility.state.expanded, Some(true));
+    assert_eq!(props(b).accessibility.state.expanded, Some(false));
+    let panel = props(id("panel-a"));
+    assert_eq!(panel.accessibility.role, AccessibilityRole::Region);
+    assert_eq!(panel.accessibility.label.as_deref(), Some("Shipping"));
+    // The open trigger's look: `aria-expanded:` and `expandedStyle`.
+    assert_eq!(style(initial, a).background_color.0, 0x0000_00ff);
+    assert_eq!(style(initial, a).opacity, 0.5);
+    assert_eq!(style(initial, b).background_color.0, 0xffff_ffff);
+    // Disabled: no presses, dimmed for screen readers.
+    assert!(props(c).accessibility.state.disabled);
+    assert!(!first.items.iter().any(|i| matches!(
+        i,
+        MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+    )));
+
+    // Another item: it replaces the open one.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Heard: b"));
+    assert!(after.iter().any(|batch| shows(batch, "Returns details")));
+    let now = |view| props_in(&after, view).expect("props");
+    assert_eq!(now(b).accessibility.state.expanded, Some(true));
+    assert_eq!(now(a).accessibility.state.expanded, Some(false));
+    assert_eq!(style(&after, b).background_color.0, 0x0000_00ff);
+    assert_eq!(style(&after, a).background_color.0, 0xffff_ffff);
+
+    // The open item's trigger closes it: an empty value.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Heard: b,none"));
+    assert_eq!(
+        props_in(&after, b)
+            .expect("props")
+            .accessibility
+            .state
+            .expanded,
+        Some(false)
+    );
+}
+
 const SLOT_TRIGGERS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Menu, MenuItem } from "nsh/base";
 import { Disclosure } from "test/ui";

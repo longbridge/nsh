@@ -1567,6 +1567,15 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Laid out but not shown, nor what is inside it (CSS's `visibility:
+    /// hidden`, Tailwind's `invisible`, GPUI's `Styled::invisible`): it
+    /// keeps its place and frame, and takes no presses or keyboard focus.
+    fn invisible(mut self) -> Self {
+        self.style()
+            .value(StyleKey::Visibility, PropertyValue::Bool(true));
+        self
+    }
+
     /// Children in a row.
     fn flex_row(mut self) -> Self {
         self.style().value(

@@ -4,6 +4,7 @@
 // the steps after it are that case's.
 import { type JSX, View, mount, signal } from "nsh";
 import BaseStatusBar from "./base-status-bar";
+import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
 import BaseButton from "./base-button";
 import BaseCheckbox from "./base-checkbox";
@@ -46,6 +47,7 @@ import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
+  "base-accordion": BaseAccordion,
   "base-alert-dialog": BaseAlertDialog,
   "base-button": BaseButton,
   "base-dialog": BaseDialog,

@@ -1017,6 +1017,96 @@ wait 400
 absent Details
 covers [props] Collapsible.reveal
 
+# base-accordion
+tap id:case-base-accordion
+# A group of level-2 headings over buttons, each saying whether its item
+# is expanded. Closed, each item is its trigger's 20 points: the kept and
+# the plain panels are out of the layout, the revealed one zero high.
+expect Open: none
+prop id:faq role group
+prop id:header-a role header
+prop id:trigger-a role button
+prop id:trigger-a accessibilityState expanded=false
+nostyle id:trigger-a backgroundColor
+style id:trigger-a opacity 1
+frame id:faq 0 20 390 60
+frame id:item-b 0 20 390 20
+frame id:item-c 0 40 390 20
+absent Shipping details
+absent Returns details
+listens id:trigger-a onPress
+# A press reports the next value; the app sets it: the panel under its
+# header, a region named by the app, the trigger expanded and styled
+# (`aria-expanded:`, `expandedStyle`).
+tap text:Shipping
+expect Open: a
+expect Changes: 1
+expect Shipping details
+prop id:trigger-a accessibilityState expanded=true
+style id:trigger-a backgroundColor #00ff00ff
+style id:trigger-a opacity 0.5
+prop id:panel-a role region
+prop id:panel-a accessibilityLabel Shipping
+frame id:item-a 0 0 390 50
+frame id:panel-a 0 20 390 30
+frame id:item-b 0 50 390 20
+frame id:faq 0 20 390 90
+# One open at a time: another item replaces it. The revealed panel's
+# frames are where its spring ends.
+tap text:Returns
+expect Open: b
+expect Changes: 2
+expect Returns details
+prop id:trigger-a accessibilityState expanded=false
+prop id:trigger-b accessibilityState expanded=true
+nostyle id:trigger-a backgroundColor
+absent Shipping details
+frame id:item-a 0 0 390 20
+frame id:item-b 0 20 390 50
+frame id:faq 0 20 390 90
+# The open item's trigger closes it; the revealed panel springs shut and
+# its content leaves once it has.
+tap text:Returns
+expect Open: none
+frame id:item-b 0 20 390 20
+frame id:faq 0 20 390 60
+wait 400
+absent Returns details
+# With `multiple`, opening one leaves the others open.
+tap id:multiple
+tap text:Returns
+tap text:Shipping
+expect Open: b,a
+expect Shipping details
+expect Returns details
+frame id:faq 0 20 390 120
+tap text:Returns
+expect Open: a
+absent Returns details
+# A disabled item takes no presses, dimmed for screen readers; it shows
+# what the app's value says.
+prop id:trigger-c accessibilityState disabled=true expanded=false
+tap text:Billing
+expect Changes: 6
+tap id:open-billing
+expect Billing details
+prop id:trigger-c accessibilityState disabled=true expanded=true
+covers [nsh/base] Accordion
+covers [nsh/base] AccordionItem
+covers [nsh/base] AccordionHeader
+covers [nsh/base] AccordionTrigger
+covers [nsh/base] AccordionPanel
+covers [props] Accordion.value
+covers [props] Accordion.multiple
+covers [props] AccordionItem.value
+covers [props] AccordionItem.disabled
+covers [props] AccordionHeader.level
+covers [props] AccordionTrigger.expandedStyle
+covers [props] AccordionPanel.reveal
+covers [props] AccordionPanel.keepMounted
+covers [props] accessibilityLabel
+covers [events] Accordion.onChange
+
 # base-otp-input
 tap id:case-base-otp-input
 # One field over the cells for the keyboard and screen readers: the
