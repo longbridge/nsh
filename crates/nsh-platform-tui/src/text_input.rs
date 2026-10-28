@@ -425,13 +425,17 @@ impl Field {
     pub(crate) fn draw(
         &mut self,
         config: &InputConfig,
-        bounds: CellBounds,
+        mut bounds: CellBounds,
         clip: Rect,
         buffer: &mut Buffer,
         opacity: f32,
         color: Option<nsh_core::Color>,
         page: Color,
     ) {
+        if !config.multiline {
+            bounds.top += (bounds.bottom - bounds.top - 1).max(0) / 2;
+            bounds.bottom = bounds.bottom.min(bounds.top + 1);
+        }
         self.bounds = Some(bounds);
         self.visible = bounds.clipped(clip);
         self.columns = (bounds.right - bounds.left).max(1) as usize;

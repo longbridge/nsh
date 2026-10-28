@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use nsh_core::{
-    AttributedText, EllipsizeMode, Points, Size, TextAlign, TextEngine, TextLayout, TextLine,
+    AttachmentAlignments, AttributedText, EllipsizeMode, FontExtent, Point, Points, Size,
+    TextAlign, TextEngine, TextLayout, TextLine,
 };
 use ratatui_core::{
     style::{Color, Modifier, Style},
@@ -34,6 +35,14 @@ pub(crate) struct Glyph {
     end: u32,
     pub(crate) width: usize,
     style: Style,
+    attachment: Option<Attachment>,
+}
+
+#[derive(Clone, Copy)]
+struct Attachment {
+    index: usize,
+    ascent: usize,
+    descent: usize,
 }
 
 /// Opaque text prepared once for the core's repeated layout measurements.
@@ -49,6 +58,7 @@ pub(crate) struct CellLayout {
     /// The displayed rows, kept for searching the text on screen.
     pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
+    attachments: Vec<Option<Point<Points>>>,
     pub(crate) glyphs: Vec<(nsh_core::Bounds<Points>, std::ops::Range<u32>)>,
 }
 
@@ -57,7 +67,7 @@ pub(crate) struct Row {
     pub(crate) glyphs: Vec<Glyph>,
 }
 
-fn glyphs(text: &AttributedText) -> Vec<Glyph> {
+fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignments) -> Vec<Glyph> {
     let mut offset = 0;
     text.text
         .graphemes(true)
@@ -85,12 +95,35 @@ fn glyphs(text: &AttributedText) -> Vec<Glyph> {
                     style = style.add_modifier(Modifier::CROSSED_OUT);
                 }
             }
+            let attachment = text
+                .attachments
+                .iter()
+                .enumerate()
+                .find(|(_, a)| a.index == start);
+            let width = attachment.map_or_else(
+                || grapheme.width(),
+                |(_, a)| (a.width / cells.width()).ceil() as usize,
+            );
+            let attachment = attachment.map(|(index, a)| {
+                let font = FontExtent::new(cells.height(), Points::ZERO, cells.height() / 2.0);
+                let (ascent, descent) = a.extent(font, alignments.get(start));
+                Attachment {
+                    index,
+                    ascent: (ascent / cells.height()).ceil() as usize,
+                    descent: (descent / cells.height()).ceil() as usize,
+                }
+            });
             Glyph {
-                text: Arc::from(grapheme),
+                text: if attachment.is_some() {
+                    Arc::from(" ".repeat(width))
+                } else {
+                    Arc::from(grapheme)
+                },
                 start,
                 end: offset,
-                width: grapheme.width(),
+                width,
                 style,
+                attachment,
             }
         })
         .collect()
@@ -103,21 +136,32 @@ fn wrap(glyphs: &[Glyph], columns: usize) -> Vec<Vec<Glyph>> {
         let mut end = start;
         let mut width = 0;
         let mut space = None;
+        let mut has_content = false;
         while end < glyphs.len() && !glyphs[end].text.contains('\n') {
             if width + glyphs[end].width > columns && end > start {
                 break;
             }
             width += glyphs[end].width;
-            if glyphs[end].text.as_ref() == " " {
-                space = Some(end);
+            if glyphs[end].attachment.is_none() && glyphs[end].text.as_ref() == " " {
+                if has_content {
+                    space = Some(end);
+                }
+            } else {
+                has_content = true;
             }
             end += 1;
         }
         let mut next = end;
         if end < glyphs.len() && glyphs[end].text.contains('\n') {
             next += 1;
-        } else if end < glyphs.len() && glyphs[end].text.as_ref() == " " {
-            while next < glyphs.len() && glyphs[next].text.as_ref() == " " {
+        } else if end < glyphs.len()
+            && glyphs[end].attachment.is_none()
+            && glyphs[end].text.as_ref() == " "
+        {
+            while next < glyphs.len()
+                && glyphs[next].attachment.is_none()
+                && glyphs[next].text.as_ref() == " "
+            {
                 next += 1;
             }
         } else if end < glyphs.len()
@@ -175,13 +219,29 @@ impl CellTextEngine {
     }
 }
 
+fn row_extent(row: &[Glyph]) -> (usize, usize) {
+    row.iter()
+        .filter_map(|g| g.attachment)
+        .fold((1, 0), |(ascent, descent), a| {
+            (ascent.max(a.ascent), descent.max(a.descent))
+        })
+}
+
 impl TextEngine for CellTextEngine {
     type Prepared = PreparedText;
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
+        self.prepare_aligned(text, &AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &AttachmentAlignments,
+    ) -> Self::Prepared {
         PreparedText {
             text: text.clone(),
-            glyphs: glyphs(text),
+            glyphs: glyphs(text, self.cells, alignments),
         }
     }
 
@@ -194,7 +254,14 @@ impl TextEngine for CellTextEngine {
             .unwrap_or(0);
         Size::new(
             self.cells.width() * columns as f32,
-            self.cells.height() * rows.len() as f32,
+            self.cells.height()
+                * rows
+                    .iter()
+                    .map(|row| {
+                        let (ascent, descent) = row_extent(row);
+                        ascent + descent
+                    })
+                    .sum::<usize>() as f32,
         )
     }
 
@@ -207,7 +274,12 @@ impl TextEngine for CellTextEngine {
         let mut metrics = Vec::new();
         let mut selection_glyphs = Vec::new();
         let mut offset = 0;
-        for (index, row) in rows.into_iter().enumerate() {
+        let mut top = 0;
+        let mut attachments = vec![None; text.attachments.len()];
+        for row in rows {
+            let (ascent, descent) = row_extent(&row);
+            let baseline = top + ascent;
+            let glyph_row = baseline - 1;
             let width = row.iter().map(|g| g.width).sum::<usize>();
             let start = row.first().map_or(offset, |g| g.start);
             let end = row.last().map_or(start, |g| g.end);
@@ -230,21 +302,27 @@ impl TextEngine for CellTextEngine {
                 start,
                 end,
                 x: self.cells.width() * indent as f32,
-                y: self.cells.height() * index as f32,
+                y: self.cells.height() * top as f32,
                 width: self.cells.width() * width as f32,
-                height: self.cells.height(),
-                ascender: self.cells.height(),
-                descender: Points::ZERO,
+                height: self.cells.height() * (ascent + descent) as f32,
+                ascender: self.cells.height() * ascent as f32,
+                descender: self.cells.height() * descent as f32,
                 cap_height: self.cells.height(),
                 x_height: self.cells.height(),
             });
             let mut column = indent;
             for glyph in &row {
+                if let Some(attachment) = glyph.attachment {
+                    attachments[attachment.index] = Some(Point::new(
+                        self.cells.width() * column as f32,
+                        self.cells.height() * (baseline - attachment.ascent) as f32,
+                    ));
+                }
                 selection_glyphs.push((
                     nsh_core::Bounds::new(
                         nsh_core::Point::new(
                             self.cells.width() * column as f32,
-                            self.cells.height() * index as f32,
+                            self.cells.height() * glyph_row as f32,
                         ),
                         Size::new(self.cells.width() * glyph.width as f32, self.cells.height()),
                     ),
@@ -260,16 +338,32 @@ impl TextEngine for CellTextEngine {
                 row.iter()
                     .map(|g| Span::styled(g.text.to_string(), g.style)),
             );
+            while lines.len() < glyph_row {
+                lines.push(Line::default());
+                displayed.push(Row {
+                    indent: 0,
+                    glyphs: Vec::new(),
+                });
+            }
             lines.push(Line::from(spans));
             displayed.push(Row {
                 indent,
                 glyphs: row,
             });
+            top = baseline + descent;
+            while lines.len() < top {
+                lines.push(Line::default());
+                displayed.push(Row {
+                    indent: 0,
+                    glyphs: Vec::new(),
+                });
+            }
         }
         TextLayout(Arc::new(CellLayout {
             paragraph: Paragraph::new(lines),
             rows: displayed,
             metrics,
+            attachments,
             glyphs: selection_glyphs,
         }))
     }
@@ -278,6 +372,12 @@ impl TextEngine for CellTextEngine {
         layout
             .downcast::<CellLayout>()
             .map_or_else(Vec::new, |l| l.metrics.clone())
+    }
+
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
+        layout
+            .downcast::<CellLayout>()
+            .map_or_else(Vec::new, |l| l.attachments.clone())
     }
 
     fn register_font(&self, _: &[u8]) -> Result<(), String> {
@@ -319,6 +419,7 @@ fn ellipsize(row: &mut Vec<Glyph>, columns: usize, mode: EllipsizeMode) {
             end: offset,
             width: 1,
             style: at.map_or_else(Style::default, |g| g.style),
+            attachment: None,
         });
     }
     row.extend_from_slice(&original[right..]);
