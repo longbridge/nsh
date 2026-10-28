@@ -5872,10 +5872,14 @@ fn base_plot_pie_labels_sit_outside_the_ring_with_leader_lines() {
             })
             .unwrap()
     };
-    let frame = |id: u32| {
-        let f = frame_of(&all, id).expect("a frame");
+    // Each view's last frame in `batches`.
+    let frame_in = |batches: &[MountBatch], id: u32| {
+        let f = frame_of(batches, id).expect("a frame");
         (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
     };
+    // Before the values change: after it, the labels rest at the new
+    // places.
+    let frame = |id: u32| frame_in(before, id);
     let label = |text: &str| all.iter().find_map(|b| text_ids(b, text)).expect(text);
     // Layout rounds frames to whole points.
     let close = |(x, y, w, h): (f32, f32, f32, f32), want: (f32, f32, f32, f32)| {
@@ -5885,10 +5889,22 @@ fn base_plot_pie_labels_sit_outside_the_ring_with_leader_lines() {
             && (h - want.3).abs() <= 0.5
     };
     let (a, b) = (label("a"), label("b"));
-    assert!(close(frame(parent_of(a)), (100.0, 50.0 - e, 0.0, 0.0)));
+    assert!(
+        close(frame(parent_of(a)), (100.0, 50.0 - e, 0.0, 0.0)),
+        "{:?}",
+        frame(parent_of(a))
+    );
     assert!(close(frame(a), (0.0, -5.0, 20.0, 10.0)), "{:?}", frame(a));
-    assert!(close(frame(parent_of(b)), (0.0, 50.0 + e, 0.0, 0.0)));
+    assert!(
+        close(frame(parent_of(b)), (0.0, 50.0 + e, 0.0, 0.0)),
+        "{:?}",
+        frame(parent_of(b))
+    );
     assert!(close(frame(b), (-20.0, -5.0, 20.0, 10.0)), "{:?}", frame(b));
+    // Once `a` is half the pie, its label rests at 3 o'clock (the animator
+    // moving it there from where it was).
+    let rest = frame_in(&all, parent_of(a));
+    assert!(close(rest, (100.0, 50.0, 0.0, 0.0)), "{rest:?}");
     assert!(!all.iter().any(|b| shows(b, "c")));
 
     // With `hoverLift`, the line moves out with its slice: the animator
