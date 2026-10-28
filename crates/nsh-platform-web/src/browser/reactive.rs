@@ -327,6 +327,17 @@ impl Runtime {
                 }
                 Ok(Value(0))
             }
+            // Whether the owner a handle of `getOwner` names was disposed
+            // since (no owner, `null`, never is): a node outlives the owner
+            // it was made under until it is collected.
+            115 => {
+                let handle = args.index(0)?;
+                let disposed = !handle.is_nullish()
+                    && !self
+                        .node(&handle)
+                        .is_ok_and(|id| unsafe { h.graph() }.is_live_owner(id));
+                Ok(Value(if disposed { 3 } else { 2 }))
+            }
             _ => Err(PropError("unknown reactive operation".into())),
         };
         let error = unsafe { h.graph() }.data.error.take();

@@ -81,7 +81,7 @@ impl Runtime {
             450..=451 => keymap::call(&self.bindings, op, args),
             310..=312 => self.rows.call(op, args),
             300..=309 => self.dom.call(op, args),
-            100..=114 => self.reactive.call(op, args),
+            100..=115 => self.reactive.call(op, args),
             430 => {
                 let host = self.host.borrow().clone();
                 let available = host.as_ref().is_some_and(|host| host.available());

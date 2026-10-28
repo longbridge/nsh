@@ -500,6 +500,65 @@ test("error boundaries catch component, binding and listener failures and reset"
   assert.equal(read(output), "caught event"); dispose(); close();
 });
 
+test("events queued for a node whose owner was disposed are dropped", { skip: !path }, async () => {
+  const { api, dom, values, close } = await fixture();
+  const key = api.signal("a"), heard = [];
+  const layout = { bounds: { origin: { x: 0, y: 0 }, size: { width: 10, height: 10 } } };
+  let rows, dispose;
+  api.root(stop => {
+    dispose = stop;
+    // A row made again when its key changes, as `<Each of={[key]}>` does.
+    rows = dom.rt.each(() => [key()], item => {
+      const node = dom.rt.element("view");
+      dom.rt.prop(node, "onLayout", () => heard.push(item()));
+      return node;
+    });
+  });
+  const [old] = rows();
+  key.set("b");
+  const [row] = rows();
+  assert.notEqual(row, old);
+  // The engine had queued the old row's layout before the row went.
+  dom.event(values.nodeIds.get(old), "onLayout", layout);
+  dom.event(values.nodeIds.get(row), "onLayout", layout);
+  assert.deepEqual(heard, ["b"]);
+  // A node made with no owner hears its events.
+  const loose = dom.rt.element("view");
+  dom.rt.prop(loose, "onLayout", () => heard.push("loose"));
+  dom.event(values.nodeIds.get(loose), "onLayout", layout);
+  assert.deepEqual(heard, ["b", "loose"]);
+  // A removed modal hears its dismissal, with no owner.
+  let modal, stop, owner;
+  api.root(dispose => {
+    stop = dispose;
+    modal = dom.rt.element("modal");
+    dom.listen(modal, "onDismiss", () => { owner = api.getOwner(); heard.push("dismissed"); });
+  });
+  stop();
+  dom.event(values.nodeIds.get(modal), "onDismiss");
+  assert.deepEqual(heard, ["b", "loose", "dismissed"]);
+  assert.equal(owner, null);
+  dispose(); close();
+});
+
+test("Rust components drop what was queued for them after their owner was disposed", { skip: !path }, async () => {
+  const { api, values, components, close } = await fixture();
+  const Component = components.make({ name: "Fixture", id: 0, props: [], events: ["change"], methods: [] }, () => {});
+  const heard = [];
+  let node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    node = Component({ onChange: value => heard.push(value), cell: value => { heard.push(`cell ${value}`); return null; } });
+  });
+  const id = values.nodeIds.get(node);
+  components.component(id, "change", 1);
+  dispose();
+  components.component(id, "change", 2);
+  components.render(id, "cell", "row", 3);
+  assert.deepEqual(heard, [1]);
+  close();
+});
+
 test("detached DOM parent-child callback cycles collect without stopping the app", { skip: !path || !global.gc }, async () => {
   const { api, dom, values, close } = await fixture();
   let parentRef, childRef;

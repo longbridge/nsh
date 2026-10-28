@@ -31,7 +31,10 @@ class and module faces; the same core reactive graph and virtualized list machin
 JS values cross through generation-checked arena handles. Weak tracing connects Rust-owned callbacks and
 payloads to their JS peers; externally held Rust values remain strong. DOM child edges are traced separately,
 so detached trees with callback cycles can be collected. Explicit owner disposal remains deterministic.
-Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
+A node outlives its owner until it is collected: what the engine queued for it, or for a Rust component,
+before the owner was disposed is dropped (a remade row's layout), as nsh-js drops a freed node's; a removed
+modal still hears its `onDismiss`, with no owner. Callbacks escaping a stopped run become inert; pending
+module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
 CORS, secure-context and permission rules. Synchronous hash/compression APIs retain Rust implementations;

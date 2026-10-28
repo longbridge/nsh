@@ -59,7 +59,9 @@ export function createComponents(invoke, values, reactive, dom) {
     }
     return node;
   };
-  const state = id => { const node = values.nodes.get(id)?.deref(); return node && states.get(node); };
+  // What the engine queued for a component before its owner was disposed
+  // goes with the owner, as a node's events do.
+  const state = id => { const node = values.nodes.get(id)?.deref(), current = node && states.get(node); return current && !reactive.disposed(current.owner) ? current : undefined; };
   return {
     make,
     component(id, name, value) {

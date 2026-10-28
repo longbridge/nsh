@@ -134,7 +134,14 @@ export function createDom(invoke, values, reactive, live, wake) {
       if (name === "onTouch" && touches) return touches.dispatch(payload);
       const target = values.nodes.get(id)?.deref();
       const handler = target && handlers.get(target)?.get(name);
-      if (handler) reactive.batch(() => reactive.runWithOwner(owners.get(target), () => reactive.untracked(() => reactive.protect(() => handler(payload)))));
+      if (!handler) return;
+      let owner = owners.get(target);
+      // A node outlives its owner until it is collected: what the engine
+      // queued for it before the owner was disposed (a remade row's layout)
+      // goes with the owner. A removed modal still hears its dismissal, as
+      // in nsh-js, with no owner.
+      if (reactive.disposed(owner)) { if (name !== "onDismiss") return; owner = null; }
+      reactive.batch(() => reactive.runWithOwner(owner, () => reactive.untracked(() => reactive.protect(() => handler(payload)))));
     },
     dispose() { const stop = dispose; dispose = null; stop?.(); },
   };

@@ -65,6 +65,7 @@ export function createReactive(invoke, live, values) {
   const root = fn => call(105, handle => fn(() => { if (handle && live()) call(106, handle); }));
   const getOwner = () => call(110);
   const runWithOwner = (owner, fn) => call(111, owner, fn);
+  const disposed = owner => call(115, owner);
   const context = defaultValue => {
     const key = {};
     const read = () => call(112, key, defaultValue);
@@ -107,5 +108,5 @@ export function createReactive(invoke, live, values) {
     return [...picks, rest];
   };
   return { signal, computed, effect, cleanup, batch, untracked, root, context, split,
-    getOwner, runWithOwner, renderEffect, ErrorBoundary, protect };
+    getOwner, runWithOwner, disposed, renderEffect, ErrorBoundary, protect };
 }
