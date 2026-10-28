@@ -866,7 +866,7 @@ class Player {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
         // Today where the app runs (`nsh-base`'s calendars).
-        local_offset: localOffset,
+        local_offset: (ms) => localOffset(ms),
         // Intl's default zone.
         time_zone: (p, cap) => {
           const zone = encoder.encode(timeZoneName());
