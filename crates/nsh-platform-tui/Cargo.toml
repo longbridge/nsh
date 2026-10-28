@@ -22,7 +22,7 @@ nsh-dev = { workspace = true, optional = true, features = ["client"] }
 nsh-testing = { workspace = true, optional = true, features = ["agent"] }
 serde_json = { workspace = true, optional = true }
 nsh-core.workspace = true
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
 nsh-engine = { workspace = true, features = ["net"] }
 ratatui-core.workspace = true
 ratatui-widgets.workspace = true

@@ -591,6 +591,11 @@ The layout retains each painted grapheme's UTF-16 range, including wide characte
 uses original text and joins paragraphs with newlines. Highlights stay within clipped text Cells and below
 covering views. Removed text endpoints clear the selection through the shared model.
 
+## Syntax highlighting
+
+The terminal runtime enables `nsh-base`'s built-in highlighting, as the desktop backends do.
+Editor, DiffView and TextView code blocks retain their language token colors in both appearances.
+
 ## Text fields
 
 `text_input.rs` keeps one `nsh_core::text_edit::Model` per Input. The core model owns the text, byte selection,
@@ -681,6 +686,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
+| Syntax highlighting | The built-in Editor, DiffView and TextView token colors |
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
 | Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |

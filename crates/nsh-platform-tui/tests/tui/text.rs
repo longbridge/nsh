@@ -186,6 +186,48 @@ fn inline_mentions_and_math_draw_their_content_and_mentions_can_be_pressed() {
     draw_until(&mut view, &mut terminal, &rx, "pressed");
 }
 
+#[cfg(feature = "js")]
+#[test]
+fn text_view_code_fences_draw_distinct_syntax_token_colors() {
+    use nsh_platform_tui::Bundle;
+    use ratatui_core::{backend::TestBackend, terminal::Terminal};
+
+    use super::app::{draw_until, surface};
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount } from 'nsh';
+        import { TextView } from 'nsh/base';
+        mount(() => <TextView markdown={'```tsx\nconst answer = "hello";\n```'} />);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "const answer");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let at = buffer
+            .content
+            .iter()
+            .position(|cell| cell.symbol() == "c")
+            .unwrap();
+        if buffer.content[at].fg != buffer.content[at + 16].fg {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "keyword and string need distinct syntax colors"
+        );
+    }
+}
+
 #[test]
 fn aligned_attachments_grow_the_line_above_and_below_its_cell_baseline() {
     use nsh_core::{AttachmentAlignments, Point, Size, VerticalAlign};
