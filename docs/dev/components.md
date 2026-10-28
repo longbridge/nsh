@@ -844,6 +844,14 @@ what changed.
   opening and released after. Until they are made, `Children::is_empty()` is true. The content a Rust view passes
   such a component (`drawer().child(..)`) is lazy the same way: the core keeps it in a region of a signal it
   sets when the nested component starts or stops placing its children (slots and rows stay), instead of telling JS.
+- Content that comes and goes with a reveal (`Collapsible`'s `reveal`, `gpui-base`'s `MotionReveal`): the view puts
+  it in a clip view (`overflow_hidden`) whose height is zero while closed and the content's own while open, and calls
+  `animate_layout` with a critically damped spring in the effect that follows `open`, so the commit that changes the
+  height animates every frame it moves on the platform's animator (the clip's, the views after it), with no JS per
+  frame. The content's region follows a signal that turns on with `open` and off after the motion's duration
+  (`set_timeout`, voided by a newer change: layout animations report no end), so it stays in the tree, clipped, while
+  the clip closes. Reduced motion skips both. Heights are not animated values, so this is how a component sizes
+  something with motion.
 
 ## Events
 
