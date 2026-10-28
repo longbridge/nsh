@@ -281,13 +281,16 @@ final class Mounter {
                     // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
                     int selectable = b.getInt();
                     Integer selectionColor = optColor(b);
-                    // The one color all of it is drawn in, if there is one.
-                    Integer uniformColor = optColor(b);
+                    // The one color all of it is drawn in, if there is one
+                    // (`opt_color`: a flag, then the color), unboxed: a text
+                    // updating live allocates nothing for it.
+                    boolean uniform = b.getInt() != 0;
+                    int uniformColor = b.getInt();
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
                         t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
-                        t.recolor(uniformColor, effects.get(t.id));
+                        t.recolor(uniform, uniformColor, effects.get(t.id));
                         t.setLinks(linkData, linkEvents);
                         if (links > 0 && t.press == null) t.press = new Pressable(t, this, t.id);
                         t.setClickable(links > 0 || (t.press != null && t.press.ownWanted()));
