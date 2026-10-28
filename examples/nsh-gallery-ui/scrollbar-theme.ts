@@ -12,17 +12,19 @@ const touch = platform.idiom !== "desktop";
  * The track is 16 points thick over the view's edge (the widest thumb and
  * an inset of 4 on each side, 2 on a touch screen); the thumb is 6 points
  * at rest (3, the system's indicator, on a touch screen), 8 and darker
- * under the pointer or while dragged, its width easing over 300 ms.
+ * under the pointer or while dragged, its width easing over 300 ms. Its
+ * colors are opaque, the muted foreground mixed into the background (as
+ * gpui-component's themes do), so rows never show through it.
  */
 export const scrollbarTheme: ScrollbarTheme = {
   mode: "hover",
   motion: { idle: 2000, enter: 300, exit: 500, entrance: "fade", thumbHoverEntrance: "slideAndFade" },
   vertical: {
     class: `absolute inset-y-0 right-0 w-4 items-end ${touch ? "p-0.5" : "p-1"}`,
-    thumbClass: `${touch ? "w-[3px]" : "w-1.5"} rounded-full bg-muted-foreground opacity-50 transition-all duration-300 hover:w-2 hover:opacity-80 active:w-2 active:opacity-80 motion-reduce:transition-none`,
+    thumbClass: `${touch ? "w-[3px]" : "w-1.5"} rounded-full bg-scrollbar-thumb transition-all duration-300 hover:w-2 hover:bg-scrollbar-thumb-hover active:w-2 active:bg-scrollbar-thumb-hover motion-reduce:transition-none`,
   },
   horizontal: {
     class: `absolute inset-x-0 bottom-0 h-4 items-end ${touch ? "p-0.5" : "p-1"}`,
-    thumbClass: `${touch ? "h-[3px]" : "h-1.5"} rounded-full bg-muted-foreground opacity-50 transition-all duration-300 hover:h-2 hover:opacity-80 active:h-2 active:opacity-80 motion-reduce:transition-none`,
+    thumbClass: `${touch ? "h-[3px]" : "h-1.5"} rounded-full bg-scrollbar-thumb transition-all duration-300 hover:h-2 hover:bg-scrollbar-thumb-hover active:h-2 active:bg-scrollbar-thumb-hover motion-reduce:transition-none`,
   },
 };
