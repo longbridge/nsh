@@ -117,7 +117,7 @@ pub fn AccordionItem(props: AccordionItemProps, _cx: Scope<NoEvent>) -> impl Int
         computed(move || {
             accordion.as_ref().is_some_and(|a| {
                 let value = props.value.get();
-                a.value.get().contains(&value)
+                a.value.with(|open| open.contains(&value))
             })
         })
     };
