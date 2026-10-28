@@ -114,7 +114,9 @@ import type {
   SelectItemState,
   SelectProps,
   NumberInputProps,
+  ScrollbarEntrance,
   ScrollbarMode,
+  ScrollbarMotion,
   ScrollbarProps,
   SliderProps,
   SliderScale,
@@ -238,7 +240,7 @@ import type {
 
 为滚动视图或列表提供应用自己外观的滚动条，放在应用想放的位置，没有外观：轨道（滚动条的 `class`）和其中的滑块（`thumbClass`）。它指明自己的
 滚动视图（`scroll`，即它的 `ref`），跟随其偏移、内容和视口；拖动滑块会滚动内容，按压轨道会让滑块中点移到那里。`mode` 让它在内容滚动时（直到
-之后的 `hideDelay`）、指针在滚动视图上时或始终显示；`axis` 让它变成横向。见 [Scrollbar](../elements/scrollbar.md)。
+之后的 `motion.idle`）、指针在滚动条上时或始终显示；`axis` 让它变成横向。见 [Scrollbar](../elements/scrollbar.md)。
 
 ### OtpInput
 

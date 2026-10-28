@@ -844,21 +844,7 @@ pub fn watch_scroll(
 ) {
     let owner = Owner::current();
     let handler = Rc::new(move |e: &crate::element::ScrollEvent| owner.run(|| handler(e)));
-    add_watch(Rc::new(target), super::watch::WatchHandler::Scroll(handler));
-}
-
-/// Watches the mouse entering (`true`) and leaving (`false`) the element
-/// `target` names while the current owner lives, whether or not it listens
-/// to `on_mouse_enter` itself (the desktops and the web; a hover mode of a
-/// scroll bar over a scroll view it did not make). `target` is resolved as
-/// [`watch_scroll`]'s is.
-pub fn watch_hover(
-    target: impl Fn() -> Option<NodeId> + 'static,
-    handler: impl Fn(bool) + 'static,
-) {
-    let owner = Owner::current();
-    let handler = Rc::new(move |inside: bool| owner.run(|| handler(inside)));
-    add_watch(Rc::new(target), super::watch::WatchHandler::Hover(handler));
+    add_watch(Rc::new(target), handler);
 }
 
 impl super::NodeRef {
@@ -877,7 +863,7 @@ impl super::NodeRef {
     }
 }
 
-fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::WatchHandler) {
+fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::ScrollHandler) {
     let watches = executor().watches.clone();
     let id = watches.borrow_mut().add(target, handler);
     let weak = Rc::downgrade(&watches);

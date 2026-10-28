@@ -1171,24 +1171,24 @@ tap id:case-base-scrollbar
 # puts the thumb's middle there (the thumb 40 long: 200 of 1000 shown on
 # 200), half its travel: 400 of 800; a drag 40 down goes on from there,
 # 40 of the thumb's 160 of travel: 200 more.
-style label:Pages opacity 1
+style label:Pages pointerEvents auto
 frame label:Pages 290 0 10 200
 touch start label:Pages 5 100
 prop id:pages contentOffset y=400
 touch move 5 140
 prop id:pages contentOffset y=600
 touch end
-# While scrolling: hidden until the target scrolls, then until
-# `hideDelay` after. Its thumb no shorter than 30 (10 of 100): a press at
-# 50 puts its start at 35 of 70, half of 900.
-style label:Feed opacity 0
+# While scrolling: hidden (taking no presses) until the target scrolls,
+# then until `motion.idle` after. Its thumb no shorter than 30 (10 of
+# 100): a press at 50 puts its start at 35 of 70, half of 900.
+style label:Feed pointerEvents none
 scroll id:feed 0 100
-style label:Feed opacity 1
+style label:Feed pointerEvents auto
 touch start label:Feed 5 50
 touch end
 prop id:feed contentOffset y=450
 wait 400
-style label:Feed opacity 0
+style label:Feed pointerEvents none
 # Along a horizontal scroll view: the thumb 50 long (200 of 800 shown on
 # 200); a press at 100 puts its start at 75 of 150, half of 600.
 touch start label:Strip 100 3
@@ -1198,7 +1198,7 @@ covers [nsh/base] Scrollbar
 covers [props] Scrollbar.scroll
 covers [props] Scrollbar.axis
 covers [props] Scrollbar.mode
-covers [props] Scrollbar.hideDelay
+covers [props] Scrollbar.motion
 covers [props] Scrollbar.minThumbLength
 covers [props] Scrollbar.thumbClass
 covers [props] Scrollbar.thumbStyle

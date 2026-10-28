@@ -80,18 +80,73 @@ impl JsValue for ScrollbarTarget {
 }
 
 /// When a [`Scrollbar`] shows (`gpui-base`'s `ScrollbarMode`). A drag of
-/// its thumb, and the pointer on its track, keep it shown in every mode;
-/// it never shows while the content fits the viewport.
+/// its thumb keeps it shown in every mode; it never shows while the content
+/// fits the viewport.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
 pub enum ScrollbarMode {
-    /// While the target scrolls, until `hideDelay` after it stops.
+    /// While the target scrolls, until `motion.idle` after it stops; the
+    /// pointer on the bar while it shows keeps it.
     #[default]
     Scrolling,
-    /// While the pointer is over the target (or the bar), and until
-    /// `hideDelay` after it scrolls.
+    /// While the pointer is over the bar (where it shows), and as
+    /// `scrolling`.
     Hover,
     /// Always.
     Always,
+}
+
+/// How a [`Scrollbar`] comes in (`gpui-base`'s `ScrollbarEntrance`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub enum ScrollbarEntrance {
+    /// Fades in without moving.
+    #[default]
+    Fade,
+    /// Slides in from the edge it is on (a vertical bar from the right, a
+    /// horizontal one from the bottom) while it fades.
+    SlideAndFade,
+}
+
+/// How a [`Scrollbar`] shows and hides (`gpui-base`'s `ScrollbarMotion`):
+/// its fades run natively. The durations are milliseconds; `enter` and
+/// `exit` default to zero, so the bar snaps in and out: the timing is the
+/// app's. An `always` bar, or one while the user asks for less motion,
+/// never animates. A reversed fade keeps its speed: it runs for the share
+/// of its duration still to cover. The thumb's width on hover is the
+/// thumb's own style, and so is its motion (`transition-all`).
+#[derive(Debug, Clone, Copy, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ScrollbarMotion {
+    /// How long the bar stays after the last scroll, drag or hover
+    /// (default `2000`).
+    #[prop(default = 2000.0)]
+    pub idle: f64,
+    /// How long it takes to appear (default `0`): its opacity rises
+    /// linearly, a slide eases out (cubic).
+    #[prop(default)]
+    pub enter: f64,
+    /// How long it takes to fade away once `idle` is over (default `0`),
+    /// easing in (cubic).
+    #[prop(default)]
+    pub exit: f64,
+    /// How it comes in (default `"fade"`).
+    #[prop(default)]
+    pub entrance: ScrollbarEntrance,
+    /// How it comes in when the pointer on its hidden thumb shows it (the
+    /// `hover` mode; default `"fade"`).
+    #[prop(default)]
+    pub thumb_hover_entrance: ScrollbarEntrance,
+}
+
+impl Default for ScrollbarMotion {
+    fn default() -> Self {
+        Self {
+            idle: 2000.0,
+            enter: 0.0,
+            exit: 0.0,
+            entrance: ScrollbarEntrance::Fade,
+            thumb_hover_entrance: ScrollbarEntrance::Fade,
+        }
+    }
 }
 
 /// The props of [`Scrollbar`].
@@ -109,13 +164,12 @@ pub struct ScrollbarProps {
     /// When it shows (default `"scrolling"`).
     #[prop(default)]
     pub mode: Prop<ScrollbarMode>,
-    /// How long it stays after the target stops scrolling, the pointer
-    /// leaves or a drag ends, in milliseconds (default `1000`).
-    #[prop(default = 1000.0)]
-    pub hide_delay: Prop<f64>,
-    /// The shortest the thumb gets on a long content (default `24`), so it
+    /// How it shows and hides: how long it stays, its fades.
+    #[prop(default)]
+    pub motion: Prop<ScrollbarMotion>,
+    /// The shortest the thumb gets on a long content (default `48`), so it
     /// stays easy to grab.
-    #[prop(default = px(24.0))]
+    #[prop(default = px(48.0))]
     pub min_thumb_length: Prop<Points>,
     /// The Tailwind classes of the thumb, inside the track's padding and
     /// sized along the axis by the bar (`w-full rounded-full
@@ -136,30 +190,85 @@ struct Drag {
     from: f32,
 }
 
+/// The bar's fade toward shown (`1`) or hidden (`0`), as `gpui-base`'s
+/// `VisibilityAnimation`: the bar samples it to start a reversed fade
+/// where the native one is.
+#[derive(Debug, Clone, Copy)]
+struct Fade {
+    opacity: f32,
+    position: f32,
+    target: f32,
+    entrance: ScrollbarEntrance,
+    start: Instant,
+    /// Milliseconds.
+    duration: f32,
+}
+
+impl Fade {
+    fn settled(target: f32) -> Self {
+        Self {
+            opacity: target,
+            position: target,
+            target,
+            entrance: ScrollbarEntrance::Fade,
+            start: now(),
+            duration: 0.0,
+        }
+    }
+
+    /// The opacity and the slide's progress now.
+    fn sample(&self) -> (f32, f32) {
+        let elapsed = now().saturating_duration_since(self.start).as_secs_f32() * 1000.0;
+        let t = if self.duration > 0.0 {
+            (elapsed / self.duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let entering = self.target > self.opacity || self.target > self.position;
+        let ease_in = t * t * t;
+        let (fade, slide) = if entering {
+            (t, 1.0 - (1.0 - t).powi(3))
+        } else {
+            (ease_in, ease_in)
+        };
+        (
+            self.opacity + (self.target - self.opacity) * fade,
+            self.position + (self.target - self.position) * slide,
+        )
+    }
+}
+
 /// What the bar's parts and listeners share.
 #[derive(Clone, Copy)]
 struct Ctl {
     scroll: Prop<ScrollbarTarget>,
     axis: Axis,
+    mode: Prop<ScrollbarMode>,
+    motion: Prop<ScrollbarMotion>,
     min_thumb: Prop<Points>,
-    hide_delay: Prop<f64>,
     /// What the target reported last.
     metrics: Signal<Option<ScrollEvent>>,
     /// The rail's length along the axis: the track's content box.
     rail: Signal<f32>,
     /// Where the rail starts in the track.
     rail_origin: Stored<Point<Points>>,
-    /// The target scrolled a moment ago (until `hide_delay` after).
+    /// The target scrolled, or the pointer came or went, a moment ago
+    /// (until `motion.idle` after).
     active: Signal<bool>,
-    /// The pointer is over the target.
-    over_target: Signal<bool>,
     /// The pointer is over the track.
     over_track: Signal<bool>,
+    /// The pointer is over the thumb.
+    over_thumb: Signal<bool>,
     drag: Signal<Option<Drag>>,
     /// When the bar hides, unless activity comes first: one timer runs at a
     /// time and waits again while activity has moved this on (scrolling
     /// reports every frame).
     deadline: Stored<Option<Instant>>,
+    /// The bar's opacity, bound natively.
+    opacity: AnimatedValue,
+    /// The slide's progress (`1`: in place), bound natively.
+    position: AnimatedValue,
+    fade: Stored<Fade>,
 }
 
 impl Ctl {
@@ -240,12 +349,13 @@ impl Ctl {
         self.metrics.set(Some(ScrollEvent { offset: to, ..now }));
     }
 
-    /// Something kept the bar shown: it hides `hide_delay` after the last.
+    /// Something kept the bar shown: it hides `motion.idle` after the last.
     fn touch(self) {
         if !self.active.get_untracked() {
             self.active.set(true);
         }
-        let delay = Duration::from_secs_f64(self.hide_delay.get_untracked().max(0.0) / 1000.0);
+        let idle = self.motion.get_untracked().idle.max(0.0);
+        let delay = Duration::from_secs_f64(idle / 1000.0);
         if self.deadline.replace(Some(now() + delay)).is_none() {
             self.hide_after(delay);
         }
@@ -267,17 +377,82 @@ impl Ctl {
         });
     }
 
-    /// The bar shows (tracked).
-    fn shown(self, mode: ScrollbarMode) -> bool {
+    /// The bar shows (tracked), as `gpui-base` decides: always, while
+    /// dragged, while the pointer is on it in the `hover` mode (or in the
+    /// `scrolling` mode once it shows), or until `idle` after the last
+    /// activity.
+    fn shown(self) -> bool {
         if !self.scrolls() {
             return false;
         }
-        let held = self.drag.get().is_some() || self.over_track.get();
-        held || match mode {
-            ScrollbarMode::Always => true,
-            ScrollbarMode::Scrolling => self.active.get(),
-            ScrollbarMode::Hover => self.over_target.get() || self.active.get(),
+        // The pointer reaches a hidden bar only where hover shows it
+        // (`pointer_events` below).
+        self.mode.get() == ScrollbarMode::Always
+            || self.drag.get().is_some()
+            || self.over_track.get()
+            || self.active.get()
+    }
+
+    /// Fades the bar toward `visible`, from where its fade is.
+    fn fade_to(self, visible: bool, first: bool) {
+        let target = if visible { 1.0 } else { 0.0 };
+        let motion = self.motion.get_untracked();
+        let mode = self.mode.get_untracked();
+        let entrance = if mode == ScrollbarMode::Hover && self.over_thumb.get_untracked() {
+            motion.thumb_hover_entrance
+        } else {
+            motion.entrance
+        };
+        let full = if first || mode == ScrollbarMode::Always || reduce_motion() {
+            0.0
+        } else if visible {
+            motion.enter
+        } else {
+            motion.exit
+        } as f32;
+        let fade = self.fade.get();
+        if full <= 0.0 {
+            self.opacity.set(target);
+            self.position.set(target);
+            self.fade.replace(Fade::settled(target));
+            return;
         }
+        if fade.target == target && fade.entrance == entrance {
+            return;
+        }
+        let (opacity, position) = fade.sample();
+        let from = if visible && entrance == ScrollbarEntrance::Fade {
+            1.0
+        } else {
+            position
+        };
+        if from != position {
+            self.position.set(from);
+        }
+        let distance = (target - opacity).abs().max((target - from).abs());
+        let duration = full * distance;
+        let (fade_easing, slide_easing) = if visible {
+            (Easing::Linear, Easing::Curve(Curve::Cubic, EaseMode::Out))
+        } else {
+            let ease_in = Easing::Curve(Curve::Cubic, EaseMode::In);
+            (ease_in, ease_in)
+        };
+        drop(self.opacity.timing(target, duration, fade_easing));
+        drop(self.position.timing(target, duration, slide_easing));
+        self.fade.replace(Fade {
+            opacity,
+            position: from,
+            target,
+            entrance,
+            start: now(),
+            duration,
+        });
+    }
+
+    /// The pointer came onto the track or left it.
+    fn hover_track(self, over: bool) {
+        self.over_track.set(over);
+        self.touch();
     }
 
     /// A press on the track at `at` (in the track): the thumb's middle
@@ -323,15 +498,15 @@ impl Ctl {
 /// A scroll bar of the app's own look for a scroll view or a list it
 /// names (`scroll`), placed by the app like any other view: over the
 /// target's edge, beside a fixed header, along two panes. It owns its
-/// behavior (the thumb's length and place follow the target's content,
-/// viewport and offset; dragging the thumb or pressing the track scrolls
-/// the target; when it shows, by `mode`) and leaves its look to the app:
-/// no colors, sizes, radii or motion of its own. The app's `class` and
-/// `style` style the bar, its track: placed by the app (`absolute inset-y-0
-/// right-0 w-2.5 p-0.5`), the area that takes presses (a press scrolls the
-/// target to that point and a drag goes on from there), a `group` for the
-/// thumb's `group-hover:`, and hidden while not shown (`opacity: 0`, taking
-/// no presses: `transition-opacity` fades it). `thumbClass` / `thumbStyle`
+/// behavior, as `gpui-base`'s does (the thumb's length and place follow the
+/// target's content, viewport and offset; dragging the thumb or pressing
+/// the track scrolls the target; when it shows, by `mode`, and how it fades,
+/// by `motion`) and leaves its look to the app: no colors, sizes or radii
+/// of its own. The app's `class` and `style` style the bar, its track:
+/// placed by the app (`absolute inset-y-0 right-0 w-4 p-1`), the area that
+/// takes presses (a press scrolls the target to that point and a drag goes
+/// on from there), a `group` for the thumb's `group-hover:`; its opacity is
+/// the bar's (hidden, it takes no presses). `thumbClass` / `thumbStyle`
 /// style the thumb, inside the track's padding and sized along the axis by
 /// the bar. Turn the target's own indicator off with `scrollbar={false}`.
 #[component]
@@ -339,16 +514,20 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
     let ctl = Ctl {
         scroll: props.scroll,
         axis: props.axis.get_untracked(),
+        mode: props.mode,
+        motion: props.motion,
         min_thumb: props.min_thumb_length,
-        hide_delay: props.hide_delay,
         metrics: signal(None),
         rail: signal(0.0),
         rail_origin: stored(Point::default()),
         active: signal(false),
-        over_target: signal(false),
         over_track: signal(false),
+        over_thumb: signal(false),
         drag: signal(None),
         deadline: stored(None),
+        opacity: animated_value(0.0),
+        position: animated_value(0.0),
+        fade: stored(Fade::settled(0.0)),
     };
     let target = move || ctl.node();
     watch_scroll(target, move |e: &ScrollEvent| {
@@ -368,17 +547,24 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
             ctl.touch();
         }
     });
-    watch_hover(target, move |inside| {
-        ctl.over_target.set(inside);
-        if !inside {
-            ctl.touch();
-        }
+    let shown = computed(move || ctl.shown());
+    let first = std::cell::Cell::new(true);
+    effect(move || {
+        let visible = shown.get();
+        ctl.fade_to(visible, first.replace(false));
     });
-    let mode = props.mode;
-    let shown = computed(move || ctl.shown(mode.get()));
+    // A hidden bar follows the pointer where it can show on hover (a
+    // mouse in the `hover` mode), as `gpui-base`'s does; elsewhere it lets
+    // the pointer through to what is under it.
+    let hover_reveals = move || ctl.mode.get() == ScrollbarMode::Hover && is_desktop();
     let axis = ctl.axis;
+    // The track's thickness across the axis: how far a sliding entrance
+    // starts off its edge.
+    let thickness = animated_value(0.0);
     let thumb = view()
         .flex_1()
+        .on_mouse_enter(move |_: &MouseEvent| ctl.over_thumb.set(true))
+        .on_mouse_leave(move |_: &MouseEvent| ctl.over_thumb.set(false))
         .claim_touches(TouchClaim::on_start().ask(|request: &ClaimRequest| request.claim()))
         // A scroll view around it does not take the drag over.
         .keep_touches(true)
@@ -405,12 +591,18 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
         })
         .pointer_events(PointerEvents::BoxNone)
         .child(thumb);
+    // Off its edge by the track's thickness until the slide brings it in
+    // (an exit slides it out): the track clips it.
+    let slide = ctl
+        .position
+        .interpolate(&[0.0, 1.0], &[1.0, 0.0])
+        .mul(&thickness);
     // The thumb's room: the track's content box, measured.
     let rail = view()
         .flex_1()
         .map(|v| match axis {
-            Axis::Vertical => v.flex_col(),
-            Axis::Horizontal => v.flex_row(),
+            Axis::Vertical => v.flex_col().bind_translate_x(&slide),
+            Axis::Horizontal => v.flex_row().bind_translate_y(&slide),
         })
         .pointer_events(PointerEvents::BoxNone)
         .on_layout(move |frame: &Bounds<Points>| {
@@ -420,25 +612,32 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
         .child(holder);
     view()
         .group()
+        // The slide in and out stays inside the track, as `gpui-base`'s
+        // bar does inside its scroll area.
+        .overflow_hidden()
         .map(|v| match axis {
             Axis::Vertical => v.flex_col(),
             Axis::Horizontal => v.flex_row(),
         })
         .optional_label(move || props.accessibility_label.get())
-        .on_mouse_enter(move |_: &MouseEvent| ctl.over_track.set(true))
-        .on_mouse_leave(move |_: &MouseEvent| {
-            ctl.over_track.set(false);
-            ctl.touch();
+        .on_layout(move |frame: &Bounds<Points>| {
+            let across = match axis {
+                Axis::Vertical => frame.size.width,
+                Axis::Horizontal => frame.size.height,
+            };
+            thickness.set(across.0);
         })
+        .on_mouse_enter(move |_: &MouseEvent| ctl.hover_track(true))
+        .on_mouse_leave(move |_: &MouseEvent| ctl.hover_track(false))
         .claim_touches(TouchClaim::on_start().ask(|request: &ClaimRequest| request.claim()))
         .keep_touches(true)
         .on_responder_grant(move |e: &ResponderEvent| ctl.press_track(e.location))
         .on_responder_move(move |e: &ResponderEvent| ctl.drag_by(e.gesture.delta.along(axis).0))
         .on_responder_release(move |_: &ResponderEvent| ctl.release())
         .on_responder_terminate(move |_: &ResponderEvent| ctl.release())
-        .style_with(move |s| if shown.get() { s } else { s.opacity(0.0) })
+        .bind_opacity(&ctl.opacity)
         .pointer_events(move || {
-            if shown.get() {
+            if shown.get() || hover_reveals() {
                 PointerEvents::Auto
             } else {
                 PointerEvents::None

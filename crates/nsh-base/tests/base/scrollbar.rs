@@ -1,8 +1,9 @@
 //! `Scrollbar`: a bar of the app's own over a scroll view it names. Its
 //! thumb follows the target's offset and content; a drag of it, or a
 //! press on its track, scrolls the target; it shows by its mode (while
-//! the target scrolls, while the pointer is over it, always), takes no
-//! presses while hidden, and never shows while the content fits.
+//! the target scrolls, while the pointer is over it, always) and fades by
+//! its motion, as `gpui-base`'s does, and never shows while the content
+//! fits.
 
 use std::{
     collections::HashMap,
@@ -10,9 +11,14 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{ScrollbarMode, scrollbar};
+use nsh_base::{ScrollbarEntrance, ScrollbarMode, ScrollbarMotion, scrollbar};
 use nsh_core::{
-    MountItem, NodeId, Size, Transform, element::Root, geometry::point, platform::Os, prelude::*,
+    MountItem, NodeId, Size, Transform,
+    animation::{AnimationOp, AnimationProp, Driver},
+    element::Root,
+    geometry::point,
+    platform::Os,
+    prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -20,6 +26,7 @@ use nsh_testing::Headless;
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
     mode: ScrollbarMode,
+    motion: ScrollbarMotion,
     /// How tall the content is (the viewport is 200).
     content: f32,
 }
@@ -52,7 +59,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     scrollbar()
                         .scroll(content)
                         .mode(props.mode)
-                        .hide_delay(500.0)
+                        .motion(props.motion)
+                        // Under the thumb's 40 points over 1000 (the default is 48).
+                        .min_thumb_length(px(24.0))
                         .accessibility_label("Bar")
                         .absolute()
                         .top_0()
@@ -70,8 +79,12 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 struct Shown {
     /// The bar's node.
     bar: Option<NodeId>,
-    /// Each view's opacity.
-    opacity: HashMap<NodeId, f32>,
+    /// Each view's bound opacity: its animation node.
+    opacity: HashMap<NodeId, nsh_core::animation::NodeId>,
+    /// Where each animation node was set or last sent.
+    values: HashMap<nsh_core::animation::NodeId, f32>,
+    /// The fades of the bar's opacity: their target and duration.
+    fades: Vec<(f32, f32)>,
     /// Each batch that scrolled the target: whether it also moved a view
     /// (the thumb).
     scrolls: Vec<bool>,
@@ -83,22 +96,39 @@ struct Shown {
 struct Seen(Arc<Mutex<Shown>>);
 
 impl Seen {
-    /// The bar is shown: not at opacity 0.
+    /// The bar is shown (or on its way): its opacity's target is not 0.
     fn shown(&self) -> bool {
         let seen = self.0.lock().unwrap();
         let bar = seen.bar.expect("the bar is mounted");
-        seen.opacity.get(&bar).copied().unwrap_or(1.0) > 0.0
+        let node = seen.opacity.get(&bar).expect("the bar's opacity is bound");
+        seen.values.get(node).copied().unwrap_or(0.0) > 0.0
+    }
+
+    /// The fades of the bar's opacity so far, taken.
+    fn fades(&self) -> Vec<(f32, f32)> {
+        std::mem::take(&mut self.0.lock().unwrap().fades)
     }
 }
 
 /// The harness on a headless macOS surface (a mouse to hover with), on a
 /// manual clock; what its batches show of the bar.
 fn start(mode: ScrollbarMode, content: f32) -> (Headless, Seen) {
+    let mut motion = ScrollbarMotion::default();
+    motion.idle = 500.0;
+    start_with(mode, motion, content)
+}
+
+/// [`start`] with `motion`.
+fn start_with(mode: ScrollbarMode, motion: ScrollbarMotion, content: f32) -> (Headless, Seen) {
     // A manual clock: the bar hides only when the test moves it.
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps { mode, content }))
+        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
+            mode,
+            motion,
+            content,
+        }))
     };
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -126,8 +156,26 @@ fn start(mode: ScrollbarMode, content: f32) -> (Headless, Seen) {
                 {
                     seen.bar = Some(*id);
                 }
-                MountItem::ViewStyle { id, style } => {
-                    seen.opacity.insert(*id, style.opacity);
+                MountItem::AnimationBindings { id, bindings } => {
+                    for (prop, node) in bindings {
+                        if *prop == AnimationProp::Opacity {
+                            seen.opacity.insert(*id, *node);
+                        }
+                    }
+                }
+                MountItem::Animation(AnimationOp::Set { node, value }) => {
+                    seen.values.insert(*node, *value);
+                }
+                MountItem::Animation(AnimationOp::Start {
+                    node,
+                    driver: Driver::Timing { to, duration_ms, .. },
+                    ..
+                }) => {
+                    seen.values.insert(*node, *to);
+                    let bar = seen.bar.and_then(|bar| seen.opacity.get(&bar).copied());
+                    if bar == Some(*node) {
+                        seen.fades.push((*to, *duration_ms));
+                    }
                 }
                 _ => {}
             }
@@ -204,13 +252,58 @@ fn while_scrolling_it_shows_and_hides_after_the_delay() {
 }
 
 #[test]
-fn on_hover_it_shows_while_the_pointer_is_over_the_target() {
+fn on_hover_it_shows_while_the_pointer_is_over_the_bar() {
     let (mut app, seen) = start(ScrollbarMode::Hover, 1000.0);
     assert!(!seen.shown());
+    // Over the content: nothing.
     app.hover("id:content").unwrap();
+    assert!(!seen.shown());
+    // Over where the bar shows: it does, and stays the idle time after
+    // the pointer leaves.
+    app.hover("label:Bar").unwrap();
     assert!(seen.shown());
-    press_middle(&mut app);
-    app.wait_for("text:Offset 400").unwrap();
+    app.hover("id:content").unwrap();
+    app.fast_forward(Duration::from_millis(400)).unwrap();
+    assert!(seen.shown());
+    app.fast_forward(Duration::from_millis(200)).unwrap();
+    assert!(!seen.shown());
+}
+
+#[test]
+fn it_fades_in_and_out_by_its_motion() {
+    let mut motion = ScrollbarMotion::default();
+    motion.idle = 500.0;
+    motion.enter = 300.0;
+    motion.exit = 500.0;
+    let (mut app, seen) = start_with(ScrollbarMode::Scrolling, motion, 1000.0);
+    assert!(seen.fades().is_empty(), "the first state snaps");
+    app.scroll("id:content", px(100.0)).unwrap();
+    app.wait_for("text:Offset 100").unwrap();
+    assert_eq!(seen.fades(), vec![(1.0, 300.0)]);
+    app.fast_forward(Duration::from_millis(600)).unwrap();
+    assert_eq!(seen.fades(), vec![(0.0, 500.0)]);
+    // Brought back halfway through its exit (eased in: an eighth of the
+    // way), it comes in over the share still to cover.
+    app.fast_forward(Duration::from_millis(1000)).unwrap();
+    app.scroll("id:content", px(100.0)).unwrap();
+    app.wait_for("text:Offset 200").unwrap();
+    let fades = seen.fades();
+    assert_eq!(fades.len(), 1);
+    assert_eq!(fades[0].0, 1.0);
+    assert!(fades[0].1 > 0.0 && fades[0].1 <= 300.0, "{fades:?}");
+}
+
+#[test]
+fn an_always_bar_never_fades() {
+    let mut motion = ScrollbarMotion::default();
+    motion.enter = 300.0;
+    motion.exit = 500.0;
+    motion.entrance = ScrollbarEntrance::SlideAndFade;
+    let (mut app, seen) = start_with(ScrollbarMode::Always, motion, 1000.0);
+    assert!(seen.shown());
+    app.scroll("id:content", px(100.0)).unwrap();
+    app.wait_for("text:Offset 100").unwrap();
+    assert!(seen.fades().is_empty());
 }
 
 #[test]

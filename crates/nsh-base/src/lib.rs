@@ -121,7 +121,8 @@ pub use crate::{
         resize_handle, v_resizable,
     },
     scrollbar::{
-        Scrollbar, ScrollbarElement, ScrollbarMode, ScrollbarProps, ScrollbarTarget, scrollbar,
+        Scrollbar, ScrollbarElement, ScrollbarEntrance, ScrollbarMode, ScrollbarMotion,
+        ScrollbarProps, ScrollbarTarget, scrollbar,
     },
     select::{
         Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,

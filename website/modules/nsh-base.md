@@ -126,7 +126,9 @@ import type {
   SelectItem,
   SelectItemState,
   SelectProps,
+  ScrollbarEntrance,
   ScrollbarMode,
+  ScrollbarMotion,
   ScrollbarProps,
   SliderProps,
   SliderScale,
@@ -272,7 +274,7 @@ own value, a stop of the keyboard focus, and moves with WAI-ARIA's slider keys. 
 A scroll bar of the app's own look for a scroll view or a list, placed where the app wants it, with no look: a track
 (the bar's `class`) and a thumb in it (`thumbClass`). It names its scroll view (`scroll`, its `ref`) and follows its
 offset, content and viewport; a drag of the thumb scrolls the content, a press on the track brings the thumb's middle
-there. `mode` shows it while the content scrolls (until `hideDelay` after), while the pointer is over the scroll view,
+there. `mode` shows it while the content scrolls (until `motion.idle` after), while the pointer is over the bar,
 or always; `axis` makes it horizontal. See [Scrollbar](../elements/scrollbar.md).
 
 ### OtpInput

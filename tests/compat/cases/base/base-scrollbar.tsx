@@ -4,7 +4,8 @@
 // its own: a press on its track scrolls the target so the thumb's middle
 // is there and a drag goes on from there, the thumb no shorter than
 // `minThumbLength`; it shows by its `mode` (`always`; `scrolling`: while
-// the target scrolls, until `hideDelay` after), hidden at opacity 0, and
+// the target scrolls, until `motion.idle` after), hidden taking no presses,
+// and
 // is labelled for screen readers (`accessibilityLabel`). The app's look of
 // its track (`class`) and thumb (`thumbClass`, `thumbStyle`). Where the
 // target is told to scroll is how its script sees the presses.
@@ -36,7 +37,7 @@ function App() {
         </Scroll>
         <Scrollbar
           scroll={feed}
-          hideDelay={300}
+          motion={{ idle: 300, enter: 0, exit: 0, entrance: "fade", thumbHoverEntrance: "slideAndFade" }}
           minThumbLength={30}
           accessibilityLabel="Feed"
           class="absolute inset-y-0 right-0 w-[10px]"

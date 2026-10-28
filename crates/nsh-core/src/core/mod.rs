@@ -552,9 +552,6 @@ struct Node {
     /// What the overlays have it listen to ([`overlay::watch`]): touches
     /// for an overlay's `onPressOutside`, the pointer for a hint's.
     overlay_watched: u8,
-    /// A view's hover watch has it listen to the mouse entering and leaving
-    /// ([`crate::element::watch_hover`]).
-    hover_watched: bool,
 }
 
 impl Node {
@@ -585,7 +582,7 @@ impl Node {
             }
         }
         // A disabled view still shows its hint, as the desktops' do.
-        if self.overlay_watched & overlay::watch::HINT != 0 || self.hover_watched {
+        if self.overlay_watched & overlay::watch::HINT != 0 {
             events.set(EventKind::MouseEnter, true);
             events.set(EventKind::MouseLeave, true);
         }
@@ -718,7 +715,6 @@ impl Node {
             overflow: None,
             attached: Vec::new(),
             overlay_watched: 0,
-            hover_watched: false,
             elevation: Points::ZERO,
             backdrop_material: crate::BackdropMaterial::default(),
             dirty: 0,
@@ -869,8 +865,6 @@ pub struct Core<M: TextEngine> {
     extent_changed: bool,
     /// The scroll views such lists asked to scroll in this commit.
     outer_asked: Vec<Key>,
-    /// The nodes the views' hover watches have listen to the pointer.
-    hover_watched: Vec<(Key, NodeId)>,
     /// The views whose lists' sticky cells changed in this commit.
     sticky_views: Vec<Key>,
     /// Views with `position: sticky` ([`Core::update_sticky_views`]).
@@ -1035,7 +1029,6 @@ impl<M: TextEngine> Core<M> {
             outer_moved: false,
             extent_changed: false,
             outer_asked: Vec::new(),
-            hover_watched: Vec::new(),
             sticky_views: Vec::new(),
             sticky_nodes: Vec::new(),
             sticky_scrollers: Vec::new(),

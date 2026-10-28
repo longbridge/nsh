@@ -1,6 +1,6 @@
 ---
 title: Scrollbar
-description: "The Scrollbar component: a scroll bar of the app's own look for a scroll view or a list, placed where the app wants it, whose thumb follows the content and whose drags and presses scroll it, shown while scrolling, on hover or always."
+description: "The Scrollbar component: a scroll bar of the app's own look for a scroll view or a list, placed where the app wants it, whose thumb follows the content and whose drags and presses scroll it, shown while scrolling, on hover or always, fading in and out by the app's timing."
 order: 20.86
 group: base
 demo: el-scrollbar
@@ -12,15 +12,22 @@ A scrollbar gives a scroll view or a list a bar in the app's own look: a thin pi
 track in the brand's tone, a bar beside a fixed header or along two panes. It names the scroll view it moves and sits
 wherever the app places it. It owns its behavior: the thumb's length and place follow the content, the viewport and
 the offset (also while a list grows or the window resizes); dragging the thumb scrolls the content, and a press on the
-track brings the thumb's middle there; it shows while the content scrolls, while the pointer is over it, or always.
-The look is the app's: a `Scrollbar` has no colors, sizes, radii or motion of its own.
+track brings the thumb's middle there; it shows while the content scrolls, while the pointer is over it, or always,
+and fades in and out natively. The look and the timing are the app's: a `Scrollbar` has no colors, sizes or radii of
+its own, and its fades take no time until the app gives them some.
 
 ```rust tabs
-use nsh_base::{ScrollbarMode, scrollbar, theme};
+use nsh_base::{ScrollbarEntrance, ScrollbarMode, ScrollbarMotion, scrollbar, theme};
 use nsh_core::prelude::*;
 
 fn inbox(rows: impl IntoElement) -> impl IntoElement {
     let list = element_ref();
+    // In over 300 ms and out over 500 ms, 2 s after the last scroll; pointing
+    // at the hidden thumb slides it in from the edge.
+    let mut motion = ScrollbarMotion::default();
+    motion.enter = 300.0;
+    motion.exit = 500.0;
+    motion.thumb_hover_entrance = ScrollbarEntrance::SlideAndFade;
     view()
         .relative()
         .flex_1()
@@ -30,16 +37,16 @@ fn inbox(rows: impl IntoElement) -> impl IntoElement {
             scrollbar()
                 .scroll(list)
                 .mode(ScrollbarMode::Hover)
+                .motion(motion)
                 .accessibility_label("Messages")
                 // The track over the right edge; the thumb right-aligned in it.
                 .absolute()
                 .top_0()
                 .bottom_0()
                 .right_0()
-                .w(px(12.0))
+                .w(px(16.0))
                 .items_end()
-                .px(px(2.0))
-                .py(px(4.0))
+                .p(px(4.0))
                 .thumb_style(|s| {
                     s.w(px(6.0))
                         .rounded_full()
@@ -67,9 +74,10 @@ function App() {
       <Scrollbar
         scroll={list}
         mode="hover"
+        motion={{ enter: 300, exit: 500, thumbHoverEntrance: "slideAndFade" }}
         accessibilityLabel="Messages"
-        class="absolute inset-y-0 right-0 w-3 items-end px-0.5 py-1 transition-opacity duration-200"
-        thumbClass="w-1.5 rounded-full bg-muted-foreground opacity-60 group-hover:w-2 group-hover:opacity-90 active:w-2 active:opacity-100"
+        class="absolute inset-y-0 right-0 w-4 items-end p-1"
+        thumbClass="w-1.5 rounded-full bg-muted-foreground opacity-60 transition-all duration-300 hover:w-2 hover:opacity-90 active:w-2 active:opacity-100"
       />
     </View>
   );
@@ -102,13 +110,30 @@ scroll view's edge in a `relative` box around both, or anywhere else on the scre
 
 | `mode` | Shows |
 |---|---|
-| `"scrolling"` (default) | While the content scrolls, and until `hideDelay` after it stops. |
-| `"hover"` | While the pointer is over the scroll view, and as `"scrolling"` does. |
+| `"scrolling"` (default) | While the content scrolls, and until `motion.idle` after it stops; the pointer on the bar while it shows keeps it. |
+| `"hover"` | While the pointer is over the bar (where it shows, even while hidden), and as `"scrolling"` does. |
 | `"always"` | Always. |
 
-In every mode it shows while the pointer is over the bar and while its thumb is dragged, then for `hideDelay` more.
-While the content fits the viewport, it stays hidden. Hidden, the bar is at `opacity: 0` and passes presses through to
-what is under it: `transition-opacity` on its `class` fades it in and out.
+In every mode it shows while its thumb is dragged, and stays `motion.idle` after the last scroll, drag or hover. While
+the content fits the viewport, it stays hidden. Hidden, the bar is at `opacity: 0` and passes presses through to what
+is under it.
+
+## Motion
+
+`motion` times the bar's fades, which run natively, as `gpui-base`'s `ScrollbarMotion` does:
+
+| Field | Default | Description |
+|---|---|---|
+| `idle` | `2000` | How long the bar stays after the last scroll, drag or hover, in milliseconds. |
+| `enter` | `0` | How long it takes to appear: its opacity rises linearly, a slide eases out. |
+| `exit` | `0` | How long it takes to fade away once `idle` is over, easing in; it slides out of its track as it fades. |
+| `entrance` | `"fade"` | How it comes in: `"fade"` in place, or `"slideAndFade"` from the edge it is on (the right, the bottom). |
+| `thumbHoverEntrance` | `"fade"` | How it comes in when the pointer on its hidden thumb shows it (`"hover"`). |
+
+With no durations the bar snaps in and out. A fade reversed halfway keeps its speed: it runs for the share of its
+duration still to cover. An `"always"` bar never animates, nor does any while the user asks for less motion. The
+track clips what slides. The thumb's own motion, such as a width that grows on `hover:`, is its style's
+(`transition-all` on `thumbClass`).
 
 ## Props
 
@@ -117,8 +142,8 @@ what is under it: `transition-opacity` on its `class` fades it in and out.
 | `scroll` | `.scroll(..)` | `YNode` | none | The scroll view or list the bar follows and moves (its `ref`). |
 | `axis` | `.axis(..)` | `"horizontal" \| "vertical"` | `"vertical"` | The axis of the scroll view: the track runs along it. Read when the bar is made. |
 | `mode` | `.mode(..)` | `"scrolling" \| "hover" \| "always"` | `"scrolling"` | When the bar shows. |
-| `hideDelay` | `.hide_delay(..)` | `number` | `1000` | How long the bar stays after the content stops scrolling, the pointer leaves or a drag ends, in milliseconds. |
-| `minThumbLength` | `.min_thumb_length(..)` | `number` | `24` | The shortest the thumb gets on a long content, so it stays easy to grab. |
+| `motion` | `.motion(..)` | `ScrollbarMotion` | snaps, `idle` `2000` | How it shows and hides: [Motion](#motion). |
+| `minThumbLength` | `.min_thumb_length(..)` | `number` | `48` | The shortest the thumb gets on a long content, so it stays easy to grab. |
 | `thumbClass`, `thumbStyle` | `.thumb_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The thumb. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the bar. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The bar: its track, where the app places it. |
@@ -140,9 +165,9 @@ States the parts show:
   widens as the pointer comes near).
 - The thumb: `hover:` under the pointer, `active:` while it is dragged.
 
-The bar's visibility is its opacity: give the colors' transparency to the track's background or the thumb. Motion is
-the app's choice (`transition-opacity` for the fade, `transition-all` for a thumb that widens), and `motion-reduce:`
-keeps it still for people who ask for less motion.
+The bar's visibility is its opacity: give the colors' transparency to the track's background or the thumb. A thumb
+that widens takes `transition-all` (it never delays the thumb's place, which the bar sets apart from the thumb's
+styles), and `motion-reduce:` keeps it still for people who ask for less motion.
 
 ## Accessibility
 
@@ -156,4 +181,4 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and actions in g
 - Every platform draws what the app styles, and the thumb follows the offset each platform reports for the scroll
   view. Drags of the thumb and presses on the track work with a mouse, a pen or a finger.
 - `"hover"` follows a mouse or a touchpad pointer (the desktops and the web); on a touch screen, the bar shows while
-  the content scrolls.
+  the content scrolls, and its hidden track lets touches through.
