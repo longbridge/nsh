@@ -488,7 +488,9 @@ above; unfocused surfaces ignore keys.
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
 state stays on a shared ancestor when moving backward between its controls. App-defined outlines draw as
 single-Cell strokes in the app's color, transformed with the control before Cell rounding and ancestor clipping.
-They take no layout space; text and children draw above the stroke when they share its Cells. This is a
+They take no layout space and draw after the view's content. A Cell cannot hold a stroke between two text rows,
+so an edge that would cross glyphs inside the view's box (an inset focus outline on a one-line row) moves outward
+to the nearest free row or column; the stroke never replaces a glyph already drawn, so a neighbour's text stays. This is a
 rendering rule for outlines the app sets, including focus outlines; the backend adds no outline of its own.
 The app and shared example UI own the appearance, while the backend projects their styles onto Cells.
 
@@ -659,7 +661,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
 | Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
-| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout |
+| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout; edges crossing the view's glyphs move outward to free Cells |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |

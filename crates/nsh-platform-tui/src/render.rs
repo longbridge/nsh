@@ -130,6 +130,22 @@ impl Painter<'_> {
                 node_origin: origin,
             });
         }
+        let outline = view.style.outline;
+        let outline = outline.is_visible().then(|| {
+            let outset = outline.offset + outline.width;
+            let stroke = CellBounds::new(
+                projection.bounds(Bounds::new(
+                    Point::new(-outset, -outset),
+                    nsh_core::Size::new(
+                        view.frame.size.width + outset * 2.0,
+                        view.frame.size.height + outset * 2.0,
+                    ),
+                )),
+                self.cells,
+                self.area,
+            );
+            (stroke, outline.color)
+        });
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
         let children_clip = if view.style.overflow_hidden
             || matches!(
@@ -235,50 +251,6 @@ impl Painter<'_> {
                     }
                 }
             }
-            let outline = view.style.outline;
-            if outline.is_visible() {
-                let outset = outline.offset + outline.width;
-                let outline_bounds = CellBounds::new(
-                    projection.bounds(Bounds::new(
-                        Point::new(-outset, -outset),
-                        nsh_core::Size::new(
-                            view.frame.size.width + outset * 2.0,
-                            view.frame.size.height + outset * 2.0,
-                        ),
-                    )),
-                    self.cells,
-                    self.area,
-                );
-                let outline_area = outline_bounds.clipped(clip);
-                let mut sides = Borders::NONE;
-                if outline_bounds.top == i32::from(outline_area.y) {
-                    sides |= Borders::TOP;
-                }
-                if outline_bounds.bottom == i32::from(outline_area.bottom()) {
-                    sides |= Borders::BOTTOM;
-                }
-                if outline_bounds.left == i32::from(outline_area.x) {
-                    sides |= Borders::LEFT;
-                }
-                if outline_bounds.right == i32::from(outline_area.right()) {
-                    sides |= Borders::RIGHT;
-                }
-                Block::default()
-                    .borders(sides)
-                    .render(outline_area, self.buffer);
-                for y in outline_area.y..outline_area.bottom() {
-                    for x in outline_area.x..outline_area.right() {
-                        if (y == outline_area.y && sides.contains(Borders::TOP))
-                            || (y + 1 == outline_area.bottom() && sides.contains(Borders::BOTTOM))
-                            || (x == outline_area.x && sides.contains(Borders::LEFT))
-                            || (x + 1 == outline_area.right() && sides.contains(Borders::RIGHT))
-                        {
-                            let cell = &mut self.buffer[(x, y)];
-                            cell.set_fg(blend(outline.color, opacity, cell.bg));
-                        }
-                    }
-                }
-            }
             if let Some((layout, content)) = &view.text
                 && let Some(layout) = layout.downcast::<CellLayout>()
             {
@@ -381,6 +353,83 @@ impl Painter<'_> {
                 children_pointer,
                 press,
             );
+        }
+        if let Some((stroke, color)) = outline {
+            self.outline(stroke, bounds, clip, color, opacity);
+        }
+    }
+}
+
+impl Painter<'_> {
+    /// Draws an outline after the view's content. A Cell cannot hold a stroke
+    /// between two text rows, so an edge that would cross glyphs inside the
+    /// view's box moves outward to the nearest free row or column, and the
+    /// stroke never replaces a glyph that is already drawn.
+    fn outline(
+        &mut self,
+        mut stroke: CellBounds,
+        content: CellBounds,
+        clip: Rect,
+        color: nsh_core::Color,
+        opacity: f32,
+    ) {
+        let buffer = &*self.buffer;
+        let glyph_at = |x: i32, y: i32| {
+            let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
+                return false;
+            };
+            clip.contains(ratatui_core::layout::Position::new(x, y))
+                && buffer[(x, y)].symbol() != " "
+        };
+        let inside_rows = content.top..content.bottom;
+        let inside_columns = content.left..content.right;
+        let columns = stroke.left.max(content.left)..stroke.right.min(content.right);
+        let row_has_glyphs = |y: i32| columns.clone().any(|x| glyph_at(x, y));
+        while inside_rows.contains(&stroke.top) && row_has_glyphs(stroke.top) {
+            stroke.top -= 1;
+        }
+        while inside_rows.contains(&(stroke.bottom - 1)) && row_has_glyphs(stroke.bottom - 1) {
+            stroke.bottom += 1;
+        }
+        let rows = stroke.top.max(content.top)..stroke.bottom.min(content.bottom);
+        let column_has_glyphs = |x: i32| rows.clone().any(|y| glyph_at(x, y));
+        while inside_columns.contains(&stroke.left) && column_has_glyphs(stroke.left) {
+            stroke.left -= 1;
+        }
+        while inside_columns.contains(&(stroke.right - 1)) && column_has_glyphs(stroke.right - 1)
+        {
+            stroke.right += 1;
+        }
+
+        let area = stroke.clipped(clip);
+        let top = stroke.top == i32::from(area.y);
+        let bottom = stroke.bottom == i32::from(area.bottom());
+        let left = stroke.left == i32::from(area.x);
+        let right = stroke.right == i32::from(area.right());
+        let set = ratatui_core::symbols::border::PLAIN;
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                let on_top = top && y == area.y;
+                let on_bottom = bottom && y + 1 == area.bottom();
+                let on_left = left && x == area.x;
+                let on_right = right && x + 1 == area.right();
+                let symbol = match (on_top, on_bottom, on_left, on_right) {
+                    (true, _, true, _) => set.top_left,
+                    (true, _, _, true) => set.top_right,
+                    (_, true, true, _) => set.bottom_left,
+                    (_, true, _, true) => set.bottom_right,
+                    (true, ..) => set.horizontal_top,
+                    (_, true, ..) => set.horizontal_bottom,
+                    (_, _, true, _) => set.vertical_left,
+                    (_, _, _, true) => set.vertical_right,
+                    _ => continue,
+                };
+                let cell = &mut self.buffer[(x, y)];
+                if cell.symbol() == " " {
+                    cell.set_symbol(symbol);
+                    cell.set_fg(blend(color, opacity, cell.bg));
+                }
+            }
         }
     }
 }

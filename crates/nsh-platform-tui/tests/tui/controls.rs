@@ -83,6 +83,61 @@ fn an_app_outline_follows_the_controls_transformed_bounds() {
 }
 
 #[component]
+fn OutlinedRow() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            nsh_base::button()
+                .absolute()
+                .left(px(16.0))
+                .top(px(32.0))
+                .w(px(80.0))
+                .h(px(32.0))
+                .pt(px(16.0))
+                .focus(|s| {
+                    s.outline(px(2.0))
+                        .outline_offset(px(-2.0))
+                        .outline_color(nsh_core::color::rgb(0x123456))
+                })
+                .child(text("Stocks")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(64.0))
+                .child(text("below")),
+        )
+}
+
+#[test]
+fn an_inset_outline_moves_off_its_content_and_keeps_neighbouring_glyphs() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OutlinedRow>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "below");
+    assert_eq!(view.handle(key("Tab")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "┘");
+    let buffer = terminal.backend().buffer();
+    let outline = Color::Rgb(0x12, 0x34, 0x56);
+    // The row's box is Cells (2, 2)..(12, 4) with its text on row 3: the top
+    // edge keeps the free padding row, the bottom and left edges step outward.
+    assert_eq!(buffer[(5, 2)].symbol(), "─");
+    assert_eq!(buffer[(5, 2)].fg, outline);
+    assert_eq!(buffer[(9, 3)].symbol(), " ");
+    assert_eq!(buffer[(2, 3)].symbol(), "S");
+    assert_eq!(buffer[(1, 3)].symbol(), "│");
+    assert_eq!(buffer[(1, 4)].symbol(), "└");
+    assert_eq!(buffer[(11, 4)].symbol(), "┘");
+    assert_eq!(buffer[(9, 4)].symbol(), "─");
+    assert_eq!(buffer[(9, 4)].fg, outline);
+    // The stroke passes behind the neighbour's text instead of erasing it.
+    assert_eq!(buffer[(2, 4)].symbol(), "b");
+    assert_ne!(buffer[(2, 4)].fg, outline);
+}
+
+#[component]
 fn ThinProgress() -> impl IntoElement {
     let value = signal(0.0f32);
     view()
