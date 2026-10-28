@@ -142,7 +142,7 @@
     the URL check and the `openUrl` capability, where no `host.call` name of the app can reach it or be mistaken for
     it. The core keeps each request (`Action::OpenUrl` → `Core::take_url_opens`); the engine (`State::open_urls`,
     after each commit round) runs the handler on the engine thread with an `OpenUrlRequest`, answered once from any
-    thread: `handled()` resolves the app's promise `true` (`Core::answer_open_url`), `decline()` or dropping it
+    thread: `handled()` resolves the app's promise with `{ opened: true }` (`Core::answer_open_url`), `decline()` or dropping it
     hands the URL to the platform (`Message::UrlHandled` → `Core::open_url_on_platform`: `Command::OpenUrl` on the
     root, answered by `EventKind::OpenUrl` `{ id, opened }`). Without a handler the platform opens it at once. The
     SDKs' handlers are synchronous on the main thread (Swift `(URL) -> Bool`, Java `boolean openUrl(String)`), reached

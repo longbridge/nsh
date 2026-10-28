@@ -13,6 +13,7 @@ use super::{
     PlotContext, STROKE_ROOM, layer,
     line::{Curve, trace, trace_back},
     mark_canvas, mark_canvas_with, reach,
+    scale::AxisMap,
     series::{self, HoverDot, Series},
 };
 
@@ -104,8 +105,9 @@ pub struct AreaProps {
     /// the y scale, a constant baseline; or a field name or a function of
     /// the row and its index, a bottom value per row (a band: a day's low
     /// to its high, a forecast's fan), traced with the top edge's `curve`,
-    /// a row without one skipped. Without one, the bottom edge of the
-    /// plot.
+    /// a row without one skipped. Without one, the edge of the plot where
+    /// the y scale's smallest values are: the bottom edge, the top one
+    /// when the scale is reversed (an area hanging from the top).
     pub y0: Prop<Option<AreaY0>>,
     /// How its edges connect their points: `"natural"` (the default, a
     /// smooth curve, as `gpui-base`'s), `"linear"` or `"stepAfter"`.
@@ -188,10 +190,15 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             color,
         )
     });
-    // Its constant baseline: `y0`'s value, or the plot's bottom edge.
+    // Its constant baseline: `y0`'s value, or the edge of the plot where
+    // the y scale's smallest values are (the bottom one; the top one when
+    // reversed).
     let base = move |plot: PlotContext| match y0.with(|y0| y0.as_ref().map(AreaY0::value)) {
         Some(Some(v)) => plot.y_map.get().tick(v).unwrap_or(0.0),
-        _ => plot.size.get().height.0,
+        _ => match plot.y_map.get() {
+            AxisMap::Linear(map) => map.range()[0],
+            _ => plot.size.get().height.0,
+        },
     };
     // How far past the plot it draws: its edges' swing, or its baseline.
     let bleed = move || {
@@ -209,9 +216,9 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         });
         STROKE_ROOM + swing.max(past).ceil()
     };
-    // Its shape: the top edge, down to the baseline or the bottom edge, and
+    // Its shape: the top edge, to the baseline or the plot's edge, and
     // back. Both edges of a band and a baseline at a value move with the y
-    // scale's domain; the plot's bottom edge stays.
+    // scale's domain; the plot's edge stays.
     let shape =
         move |p: Painter, plot: PlotContext, points: &[Point<Points>], lows: &[Point<Points>]| {
             let (first, last) = (points[0], points[points.len() - 1]);

@@ -17,7 +17,7 @@ demo: el-select
 
 ```rust tabs
 use nsh_base::{SelectItem, SelectItemState, select, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
     ("apple", "苹果"),

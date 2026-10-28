@@ -24,6 +24,9 @@
 // the pointer finding the new ring at once. A gauge `Arc` draws round
 // corners (`cornerRadius`) and sweeps back to its new end with
 // `motion.update`.
+// A `Pie`'s labels (`label`, `labelClass`, `labelStyle`, `labelGap`) sit
+// outside its ring toward each slice's middle, with leader lines
+// (`labelLineClass`, `labelLineStyle`).
 // `PlotAxis`es (`placement`, `labelPlacement`, `ticks`, `tickValues`,
 // `format`, the `label`, `tick` and `line` parts) lay their labels out
 // along a plot's edges.
@@ -31,6 +34,9 @@
 // `motion.update` as rows come.
 // Bars take their colors from their rows' regions through the plot's
 // `colorScale` (`color` on the mark, an ordinal scale on the plot).
+// Reversed scales (`reverse`): bars hanging from the top of a reversed
+// linear y scale in bands from the right edge, and bars across from the
+// right edge of a reversed x; the axis's labels and the hover follow.
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 
@@ -139,8 +145,10 @@ function App() {
         <Bar value="w" label={(d: Sale) => `x${d.w}`} labelClass="h-[14px] w-[30px]" cornerRadii={2} />
       </Plot>
       <PieCase />
+      <PieLabelCase />
       <AxisCase />
       <ColorCase />
+      <ReverseCase />
     </View>
   );
 }
@@ -181,6 +189,34 @@ function PieCase() {
       <Text>{`slice ${slice()}`}</Text>
       <View testID="hole" onPress={() => hole.set(false)} style={{ height: 20 }} />
     </View>
+  );
+}
+
+/** Two equal slices of a ring 30 out in a 100 by 100 plot, from 12
+ * o'clock: the first's middle at 3 o'clock, the second's at 9, each label
+ * 10 past the rim; a row worth nothing has none. */
+function PieLabelCase() {
+  type Region = { share: number; name: string };
+  return (
+    <Plot
+      data={[
+        { share: 1, name: "east" },
+        { share: 1, name: "west" },
+        { share: 0, name: "south" },
+      ]}
+      style={{ width: 100, height: 100 }}
+    >
+      <Pie
+        value="share"
+        outerRadius={30}
+        label={(d: Region) => d.name}
+        labelClass="h-[10px]"
+        labelStyle={{ width: 20 }}
+        labelGap={10}
+        labelLineClass={(_: Region, i: number) => (i === 0 ? "stroke-[#ff0000]" : "stroke-[#0000ff]")}
+        labelLineStyle={{ strokeWidth: 2 }}
+      />
+    </Plot>
   );
 }
 
@@ -225,6 +261,33 @@ function ColorCase() {
     >
       <Bar color="region" label={(d: Region) => `r${d.v}`} labelStyle={{ width: 20, height: 10 }} />
     </Plot>
+  );
+}
+
+/** Bars of 20, 10 and 5 hanging from the top of a reversed y scale of 0
+ * to 40, in three bands from the right edge; under it, the bands' texts.
+ * Bars across from the right edge of a reversed x scale of 0 to 20, the
+ * bands from the bottom edge up. */
+function ReverseCase() {
+  const row = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="hanging"
+        data={SALES}
+        xScale={{ type: "band", reverse: true }}
+        yScale={{ type: "linear", domain: [0, 40], reverse: true }}
+        onHoverChange={({ index }) => row.set(index)}
+        style={{ width: 300, height: 80, marginBottom: 20 }}
+      >
+        <Bar value="w" label={(d: Sale) => `h${d.w}`} labelClass="h-[14px] w-[30px]" />
+        <PlotAxis format={(v) => `rev${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Text>{`reversed ${row()}`}</Text>
+      <Plot data={SALES} xScale={{ type: "linear", domain: [0, 20], reverse: true }} yScale={{ type: "band", reverse: true }} style={{ width: 100, height: 60 }}>
+        <Bar value="w" label={(d: Sale) => `l${d.w}`} labelClass="h-[14px] w-[30px]" />
+      </Plot>
+    </View>
   );
 }
 

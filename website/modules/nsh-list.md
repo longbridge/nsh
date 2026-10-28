@@ -17,7 +17,7 @@ See [Lists](../docs/lists.md) for the guide and [`<List>`](../elements/list.md) 
 ## List
 
 ```ts
-function List<T>(props: ListProps<T>): YNode;
+function List<T>(props: ListProps<T>): JSX.Element;
 ```
 
 ```tsx
@@ -73,7 +73,7 @@ element takes, which go to the list's scroll view.
 | `contentClass` | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (give it a size: `flex: 1` or a height). |
 | `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
-| `ref` | `YNode \| ((node: YNode) => void)` | | See [ref methods](#ref-methods). |
+| `ref` | `ListRef \| ((node: ListRef) => void)` | | See [ref methods](#ref-methods). |
 
 `ListSlot` is a component (`Header`) or an element (`<Header />`).
 
@@ -145,7 +145,7 @@ Lists also take the props every element takes ([common props](../elements/index.
 
 ## Ref methods
 
-A list's `ref` receives a `YNode` with these methods:
+A list's `ref` receives a `ListRef`, with these methods besides `ViewRef`'s:
 
 | Method | Description |
 |---|---|
@@ -155,9 +155,9 @@ A list's `ref` receives a `YNode` with these methods:
 | `scrollTo({ x?, y?, animated? })` | Scrolls to an offset. |
 
 ```tsx
-import { List, Text, View, type YNode } from "nsh";
+import { List, type ListRef, Text, View } from "nsh";
 
-let list!: YNode;
+let list!: ListRef;
 
 <View style={{ flex: 1 }}>
   <Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>

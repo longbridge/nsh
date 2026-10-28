@@ -195,7 +195,7 @@ view()
 ```
 
 ```tsx tabs
-let password!: YNode;
+let password!: InputRef;
 <>
   <Input returnKeyType="next" onSubmit={() => password.focus()} />
   <Input ref={password} masked autoComplete="current-password" />

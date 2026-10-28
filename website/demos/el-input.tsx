@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, mount, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { button, buttonText, field, Inspector, Panel, Stage, ui, wide } from "./palette";
 
@@ -7,7 +7,7 @@ function App() {
   const password = signal("");
   const notes = signal("");
   const submitted = signal("");
-  let passwordInput!: YNode;
+  let passwordInput!: InputRef;
   const signIn = () => submitted.set(`Signed in as ${name() || "nobody"}`);
   const nameField = () => (
     <Input

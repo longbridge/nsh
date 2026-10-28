@@ -10,7 +10,7 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Select` (one value from a list: "Popups" below), `Collapsible`, `Progress`, `Slider`, `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Collapsible`, `Progress`, `Slider`, `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
@@ -90,10 +90,10 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
 - **The surface is free functions** whose reads subscribe: `window()`, `safe_area()`, `keyboard_height()`, `dark()`,
   `font_scale()`, `locale()`, `cx.insets()`, `global::<G>()`, `provide_context(v)` / `use_context::<T>()`.
 - **Modules are functions without a component**: `#[module] impl AlertDialog { pub async fn show(options:
-  AlertDialogOptions) -> Result<Option<SharedString>, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
+  AlertDialogOptions) -> Result<AlertDialogResult, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
 - **System UI**: `nsh_base::alert_dialog().title(..).cancel(..).destructive(..).show()` (TSX's `AlertDialog.show({ … })`:
-  await the label of the action chosen, `None` when closed without one), `dismiss_keyboard()`, a screen's
+  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one), `dismiss_keyboard()`, a screen's
   or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`; a `StatusBarStyle` alone, a
   `StatusBarSetting` or a closure of one), `ModuleCx::set_status_bar(patch)`
   for the default under them; `.inset_padding(..)` / `.inset_margin(..)` on an element; the safe area and the keyboard as styles: `.pt_safe_area()`, `.pb_keyboard()` (`styles.md` "Environment variables").
@@ -318,7 +318,7 @@ reasons: `reactive-components.md`.
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
-  | `Window.setTitleBar(style, height)`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
+  | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` (`"desktop"`) | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
   | `requestAnimationFrame(cb)`, `cancelAnimationFrame` | `request_animation_frame(\|at\| ..)` returns a `Spawned`; in a task `next_frame().await` (an `Instant`), once per frame in a loop |
@@ -331,7 +331,7 @@ reasons: `reactive-components.md`.
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
-  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
+  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, the `{ value }` of `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
   | `BackHandler.onBackPress(f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
@@ -508,7 +508,7 @@ module's object in JS (the type's name otherwise); a module named like a functio
 is merged into it as into a component: its functions and constants are the function's properties (`test.skip(..)`,
 `describe.only(..)`: `Registry::function_members`; TS declares a namespace of the function's name, and the module is
 no export of its own). A function returning `Result` rejects
-the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `YNode` in TS (the node's
+the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `ViewRef` in TS (the node's
 id, and its object again as a result).
 
 ## Classes
@@ -932,9 +932,9 @@ is for, never by replacing one popup with another everywhere:
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
 | `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
-| `Select` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
+| `Select`, `Combobox` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 
-`Select`'s list (`listbox.rs`, shared with the coming `Combobox`) is a state machine of its own, since `gpui-base`'s
+`Select`'s and `Combobox`'s list (`listbox.rs`) is a state machine of its own, since `gpui-base`'s
 `Select` root leaves it to `gpui-component`'s styled `SearchableList` (`api-naming.md`): the rows for the query
 (search: a case-insensitive substring of the titles; adjacent items of one `group` under a header, a section with no
 match dropped), the highlight (Up / Down around the ends over the enabled items, Home / End, Page Up / Down by the
@@ -952,6 +952,14 @@ down, so the search field keeps the keyboard focus. The trigger's role, states, 
 `trigger` slot, so in a TSX app they are the app's element's ("Named slots"): the popup is placed against it
 (`Overlay::anchor`), at least as wide as its layout reports, and waits for that first layout (open at first, it would
 be made before the slot is filled).
+
+`Combobox` (`combobox.rs`) is the same list with an array value. `Hooks::selected` says which rows are selected (the
+select's one value, the combobox's set); with `multiple` its `choose` toggles the item and leaves the list open,
+without it replaces the value and closes. It keeps the value as the user last left it (`latest`): the app's value
+reaches the props a turn after its `onChange` handler set it, so toggles in a row start from what the user did and
+`onConfirm`, sent on every close, reports it. The query is a `listbox::Query`: the search field's own, each opening
+starting from `defaultQuery`, or the app's `query`, whose changes highlight the first match as typing does. The
+footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return closes it with `"select"`.
 
 On the web, `Sheet` wraps its two overlays in a modal root with no platform animation. The embedding player
 reports that root’s presentation size independently of the app, so both the backdrop and panel follow
