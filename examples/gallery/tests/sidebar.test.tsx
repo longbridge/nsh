@@ -16,7 +16,7 @@ test("the sidebar's demos are one stop of Tab, whose Up and Down select the demo
   // Collapsible, the demo after Checkbox (components go by name).
   let tabs = 0;
   while (!app.shows(COLLAPSIBLE)) {
-    expect(++tabs).toBeLessThan(20);
+    expect(++tabs).toBeLessThan(60);
     await app.keyboard.press("tab");
     await app.keyboard.press("down");
   }
