@@ -1,4 +1,4 @@
-import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
+import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, Easing, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
 import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
@@ -360,10 +360,16 @@ const fillOf = (height = 6, tone?: Tone) => (tone ? { height, borderRadius: heig
  * spring to the selected one's, from the row's outer edge. They are placed
  * at once on the first layout, as the row is resized and with reduced
  * motion.
+ *
+ * The places are kept as reported, and only a new place of the selected
+ * item notifies: a row laid out again reports each of its items, which costs
+ * one step each and moves the indicator once. (A native indicator part of
+ * `Tabs` would place it with no JS at all.)
  */
 function indicator(index: () => number) {
-  const spans = signal<{ x: number; width: number }[]>([]);
-  const span = () => spans()[index()];
+  const spans: ({ x: number; width: number } | undefined)[] = [];
+  const moved = signal(0);
+  const span = () => (moved(), spans[index()]);
   const left = createAnimatedValue(0);
   const width = createAnimatedValue(0);
   let at = -1;
@@ -386,9 +392,10 @@ function indicator(index: () => number) {
     left,
     width,
     measure(i: number, x: number, w: number) {
-      const next = spans().slice();
-      next[i] = { x, width: w };
-      spans.set(next);
+      const s = spans[i];
+      if (s && s.x === x && s.width === w) return;
+      spans[i] = { x, width: w };
+      if (i === index()) moved.set(moved() + 1);
     },
   };
 }
@@ -437,19 +444,23 @@ function TabTitle(props: { name: string; selected: boolean; count?: number; icon
  * The widths of a row of tab titles without their icons (`TabTitle`'s
  * `onWidth`, `report(i)`), and the row's width (`room`, from its
  * `onLayout`): what a row decides on its icons by. `widths()` is empty until
- * every title has reported.
+ * every title has reported. The widths are kept as reported and notify once
+ * all are in, then on each change: not once per report.
  */
 function titles(count: number) {
-  const bare = signal<number[]>([]);
+  const bare: number[] = [];
+  let reported = 0;
+  const changed = signal(0);
   const room = signal(0);
   return {
     room,
-    widths: () => (bare().filter((w) => w !== undefined).length === count ? bare() : []),
+    widths: () => (changed(), reported === count ? bare : []),
     report: (i: number) => (w: number) => {
-      if (Math.abs((bare()[i] ?? -1) - w) < 0.5) return;
-      const next = bare().slice();
-      next[i] = w;
-      bare.set(next);
+      const was = bare[i];
+      if (was !== undefined && Math.abs(was - w) < 0.5) return;
+      if (was === undefined) reported++;
+      bare[i] = w;
+      if (reported === count) changed.set(changed() + 1);
     },
   };
 }
@@ -2919,13 +2930,17 @@ export function Controls(props: { show: Control }) {
       running.set(false);
     };
     cleanup(stop);
-    // The indeterminate bar's sweep: the app flips its translation, a
-    // transition moves it; it rests in the middle with reduced motion.
-    const end = signal(false);
-    const sweep = setInterval(() => {
-      if (!reduceMotion()) end.set(!end());
-    }, 800);
-    cleanup(() => clearInterval(sweep));
+    // The indeterminate bar's sweep: a third of the track crossing it and
+    // back (`sweep` from 0 to 1, times `travel`: the two thirds it crosses,
+    // from the bar's layout), looped natively, so no JS runs per crossing;
+    // it rests in the middle with reduced motion.
+    const sweep = createAnimatedValue(0);
+    const travel = createAnimatedValue(0);
+    effect(() => {
+      if (reduceMotion()) sweep.set(0.5);
+      else sweep.keyframes([0, 1], { duration: 800, easing: Easing.bezier(0.42, 0, 0.58, 1), iterations: "infinite", direction: "alternate" });
+    });
+    cleanup(() => void sweep.stop());
     const start = () => {
       if (sent() >= 100) sent.set(0);
       running.set(true);
@@ -2944,19 +2959,18 @@ export function Controls(props: { show: Control }) {
         <Progress
           value={props.value}
           indeterminate={props.indeterminate}
+          // The track spans the bar: the sweep crosses two thirds of it.
+          onLayout={props.indeterminate ? ({ bounds }) => travel.set((bounds.size.width * 2) / 3) : undefined}
           // The label row first: the children follow the track.
           style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
           // The slider's rail and fill, so a level and a transfer read alike.
           trackStyle={rail()}
           // Determinate, the fill glides to each new value (`glide`).
-          indicatorClass={
-            !props.indeterminate
-              ? glide
-              : reduceMotion()
-                ? "w-1/3 translate-x-full"
-                : `w-1/3 transition-transform duration-700 ease-in-out ${end() ? "translate-x-[200%]" : "translate-x-0"}`
-          }
-          indicatorStyle={{ ...fillOf(), translate: props.indeterminate ? undefined : remaining(props.value) }}
+          indicatorClass={props.indeterminate ? "w-1/3" : glide}
+          indicatorStyle={{
+            ...fillOf(),
+            ...(props.indeterminate ? { transform: [{ translateX: sweep.mul(travel) }] } : { translate: remaining(props.value) }),
+          }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Label label={props.label} detail={props.detail} />
