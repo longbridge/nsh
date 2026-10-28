@@ -290,7 +290,10 @@ it can change a sub-Cell gap, while layout remains the core's. Text measurement 
 fit within a point width; that capacity calculation is separate from positioning edges.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
-Every line is one row at any font size. Wrapping prefers spaces, then breaks inside a word. Explicit newlines
+Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
+and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics.
+Their child views draw and receive input in the reserved space, and attachments removed by truncation stay hidden.
+Wrapping prefers spaces, then breaks inside a word. Explicit newlines
 preserve empty rows. A grapheme wider than the available line remains whole and is clipped by drawing.
 `numberOfLines` limits the rows; tail, head and middle ellipses reserve one Cell, while clip adds no marker.
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's
@@ -678,6 +681,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
+| Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
 | Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
