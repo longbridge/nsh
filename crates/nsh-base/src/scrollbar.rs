@@ -234,6 +234,10 @@ impl Ctl {
             Axis::Vertical => to.y = px(offset),
         }
         NodeRef(node).scroll_to(to, false);
+        // The thumb moves in the same batch as the command, not when the
+        // platform reports the scroll (a frame or two later, which lags
+        // behind the pointer).
+        self.metrics.set(Some(ScrollEvent { offset: to, ..now }));
     }
 
     /// Something kept the bar shown: it hides `hide_delay` after the last.
@@ -349,7 +353,16 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
     let target = move || ctl.node();
     watch_scroll(target, move |e: &ScrollEvent| {
         let before = ctl.metrics.get_untracked();
-        ctl.metrics.set(Some(*e));
+        let mut e = *e;
+        // While a drag scrolls the target, the thumb stays where the drag
+        // put it: the platform's reports of the commands before trail it.
+        if let Some(b) = before.filter(|_| ctl.drag.get_untracked().is_some()) {
+            match ctl.axis {
+                Axis::Horizontal => e.offset.x = b.offset.x,
+                Axis::Vertical => e.offset.y = b.offset.y,
+            }
+        }
+        ctl.metrics.set(Some(e));
         // A move (not the first report, nor a resize) shows the bar.
         if before.is_some_and(|b| b.offset != e.offset) {
             ctl.touch();

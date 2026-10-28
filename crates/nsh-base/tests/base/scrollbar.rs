@@ -11,7 +11,9 @@ use std::{
 };
 
 use nsh_base::{ScrollbarMode, scrollbar};
-use nsh_core::{MountItem, NodeId, Size, element::Root, geometry::point, platform::Os, prelude::*};
+use nsh_core::{
+    MountItem, NodeId, Size, Transform, element::Root, geometry::point, platform::Os, prelude::*,
+};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
@@ -69,6 +71,9 @@ struct Shown {
     bar: Option<NodeId>,
     /// Each view's opacity.
     opacity: HashMap<NodeId, f32>,
+    /// Each batch that scrolled the target: whether it also moved a view
+    /// (the thumb).
+    scrolls: Vec<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -98,6 +103,13 @@ fn start(mode: ScrollbarMode, content: f32) -> (Headless, Seen) {
     let record = seen.clone();
     app.observe(move |_, batch| {
         let mut seen = record.0.lock().unwrap();
+        let scrolled = batch.items.iter().any(|item| matches!(item, MountItem::Command { .. }));
+        let moved = batch.items.iter().any(|item| {
+            matches!(item, MountItem::ViewStyle { style, .. } if style.transform != Transform::default())
+        });
+        if scrolled {
+            seen.scrolls.push(moved);
+        }
         for item in &batch.items {
             match item {
                 MountItem::ViewProps { id, props }
@@ -134,6 +146,18 @@ fn a_press_on_the_track_centers_the_thumb_there_and_a_drag_goes_on() {
     // Past the end: held at it.
     app.drag("label:Bar", point(px(0.0), px(400.0))).unwrap();
     app.wait_for("text:Offset 800").unwrap();
+}
+
+#[test]
+fn a_drag_moves_the_thumb_in_the_batch_that_scrolls() {
+    let (mut app, seen) = start(ScrollbarMode::Always, 1000.0);
+    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.wait_for("text:Offset 600").unwrap();
+    // Not a frame later, when the platform reports the scroll: the thumb
+    // would trail the pointer.
+    let scrolls = seen.0.lock().unwrap().scrolls.clone();
+    assert!(!scrolls.is_empty());
+    assert!(scrolls.iter().all(|&moved| moved), "{scrolls:?}");
 }
 
 #[test]
