@@ -3065,7 +3065,6 @@ panic = \"abort\"
         assert!(web.contains("crate-type = [\"cdylib\"]"), "{web}");
         assert!(web.contains("name = \"nsh_app_app_native_web\""), "{web}");
         assert!(web.contains("dev = [\"nsh-platform-web/dev\"]"), "{web}");
-        assert!(!web.contains("bytecode-only"), "{web}");
         let build = read("web/build.rs");
         assert!(build.contains("-zstack-size=8388608"), "{build}");
         assert!(read("web/lib.rs").contains("nsh_platform_web::ui_sets!("));

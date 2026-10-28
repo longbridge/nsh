@@ -158,11 +158,6 @@ pub struct Bundle {
     /// them without asking the platform); those missing are asked of
     /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
     pub chunks: Arc<Vec<Chunk>>,
-    /// The sandbox's hardening as bytecode (`nsh_js::compile_harden`),
-    /// for a runtime without QuickJS' parser; `None`: compiled when the
-    /// policy hardens. Set it with
-    /// [`Bundle::with_harden_bytecode`].
-    pub harden_bytecode: Option<Arc<Vec<u8>>>,
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
@@ -294,7 +289,6 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
-            harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
@@ -309,7 +303,6 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
-            harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
@@ -343,17 +336,6 @@ impl Bundle {
     /// Sets the URL relative request URLs resolve against.
     pub fn with_base_url(mut self, url: impl Into<Arc<str>>) -> Self {
         self.base_url = Some(url.into());
-        self
-    }
-
-    /// Hardens with `bytes` ([`Bundle::harden_bytecode`]).
-    ///
-    /// # Safety
-    ///
-    /// As [`Bundle::bytecode`]: `bytes` comes from `nsh_js::compile_harden`
-    /// of this runtime's `BYTECODE_VERSION`, from a trusted source.
-    pub unsafe fn with_harden_bytecode(mut self, bytes: Vec<u8>) -> Self {
-        self.harden_bytecode = Some(Arc::new(bytes));
         self
     }
 

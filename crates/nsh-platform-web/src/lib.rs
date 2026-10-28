@@ -84,7 +84,7 @@ thread_local! {
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the page reported last ([`nsh_environment`]), kept for the
-    /// next [`nsh_start`].
+    /// next start ([`nsh_start_rust`], `nsh_browser_start`).
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
     /// The app's keyboard shortcuts (`MountItem::Keymap`), matched in
     /// [`nsh_key`] while a key event is being handled. Apart from [`APP`]
@@ -155,9 +155,8 @@ pub fn set_root(root: impl Fn() -> nsh_core::element::Root + 'static) {
 /// it serves `$sets` (`nsh/base` and the app's own set) and runs the
 /// root component `$root` makes (an expression giving a
 /// [`nsh_core::element::Root`]) when the page calls [`nsh_start_rust`]. Built
-/// without the feature `js`, the module has no QuickJS: the app is Rust
-/// and the browser's own JS from start to end. Exports `nsh_app_init`, as
-/// [`ui_sets!`].
+/// without the feature `browser-core`, the module runs no TSX: the app is
+/// Rust from start to end. Exports `nsh_app_init`, as [`ui_sets!`].
 #[macro_export]
 macro_rules! rust_app {
     ($sets:expr, $root:expr) => {
@@ -319,8 +318,8 @@ fn page() -> Environment {
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
 /// shortcuts are Apple's) and `host` (the page answers `nsh/host` calls:
-/// `createPlayer`'s `host`); missing keys keep their value. Called before [`nsh_start`]
-/// and on every change; the idiom and `host` are the ones at start, as on every
+/// `createPlayer`'s `host`); missing keys keep their value. Called before the app
+/// starts and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
 /// # Safety
@@ -532,7 +531,7 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the
-/// ES module [`nsh_start`] runs, for the playground. Returns 1 when it
+/// ES module the browser host runs (`runSource`), for the playground. Returns 1 when it
 /// compiled, 0 for an error; [`nsh_compiled_ptr`] / [`nsh_compiled_len`]
 /// give the module or the error text.
 ///
