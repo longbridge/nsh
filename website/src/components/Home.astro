@@ -701,8 +701,8 @@ const icon = (name: string, size = 16) =>
   /* The accent's glow behind the device, as behind the app icon's mark. */
   .hero__inner { z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4rem; padding-top: 4.5rem; padding-bottom: 4.5rem; }
   .hero__copy { min-width: 0; max-width: 36rem; }
-  .eyebrow { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.7rem; border: 1px solid color-mix(in srgb, var(--citrus) 28%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--citrus) 9%, transparent); color: var(--citrus); font-size: 0.78rem; font-weight: 600; }
-  .eyebrow__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--citrus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--citrus) 20%, transparent); }
+  .eyebrow { display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.32rem 0.8rem 0.32rem 0.65rem; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--foreground) 3%, transparent); color: var(--muted-foreground); font-size: 0.78rem; font-weight: 500; line-height: 1.2; letter-spacing: 0.01em; }
+  .eyebrow__dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--citrus); box-shadow: 0 0 8px color-mix(in srgb, var(--citrus) 70%, transparent); }
   h1 { margin: 1.25rem 0 0; font-size: clamp(2.6rem, 5.2vw, 4.1rem); line-height: 1.02; letter-spacing: -0.045em; font-weight: 750; }
   html[lang^="zh"] h1 { letter-spacing: -0.01em; line-height: 1.16; font-size: clamp(1.9rem, 4.2vw, 2.9rem); }
   .hero__lead { margin: 1.25rem 0 0; color: var(--muted-foreground); font-size: 1.1rem; line-height: 1.6; }

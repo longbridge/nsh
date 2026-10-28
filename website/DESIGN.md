@@ -148,22 +148,26 @@ motion only, 620ms `cubic-bezier(.16, 1, .3, 1)`. The copied chat imports
 `./clipboard`, a no-op, because this runtime has no `Clipboard` yet;
 the playground lists every demo but this one (it compiles single files).
 
-Behind the hero, `HeroField.astro` draws the dot grid with a fragment
-shader (WebGL, two passes: the flow field into a texture of a texel every
-11 px, then the dots and the aurora per pixel, sampling it). A slowly
-flowing, domain-warped noise field runs through the grid as bands of light:
-the dots swell in a band, and on its crest take the accent, mint or pale
-gold (its neighbors, so the field stays one green family) as a second,
-slower field weaves the three hues; a faint aurora of the same hues glows
-under them. The field gathers beside the device, so that stage never goes
-dark, and clears around the copy (the distance to its box) and under the
-caption. A press gathers
-light where it is held; released, it sends a wave whose size, reach and
-life grow with the hold, varied a little by chance (up to four at once).
-The colors are the `--hero-*` tokens. It pauses off screen and in hidden
-tabs, draws one still frame and takes no presses with reduced motion,
-never takes pointer events itself, and draws nothing without WebGL
-(`?fieldperf` logs its frame time).
+Behind the hero, `HeroField.astro` draws a galaxy with a fragment shader
+(WebGL, two passes: the nebula's field into a texture of a texel every
+11 px, then the sky per pixel, sampling it). Its heart sits where the copy
+gives way to the device, placed from their boxes, so the demo hides none of
+it; the band crosses the hero from there, its edges wavering with the
+clouds, split by a dark rift, around a long core warming to gold. Four
+layers of stars, nearer ones larger, faster and fewer, drift and twinkle,
+thickest in the band; the brightest wear diffraction spikes, and now and
+then a meteor crosses. The nebula takes the accent and its neighbors mint
+and pale gold, so the sky stays one green family, and in the dark theme the
+sky around it deepens. A faint mesh of space sinks into the core's well.
+Presses act on gravity: a held press is a mass that grows with the hold
+and bends the mesh and the starlight toward it; released, it leaves as a
+gravitational wave whose size, reach and life grow with the hold, varied a
+little by chance (up to four at once), shaking the mesh and lighting the
+stars it passes. Every mask is a smooth gradient: the sky fades toward the
+copy and the caption. The colors are the `--hero-*` tokens. It moves all the
+time, pauses off screen and in hidden tabs, draws one still frame and takes
+no presses with reduced motion, never takes pointer events itself, and
+draws nothing without WebGL (`?fieldperf` logs its frame time).
 
 ## Demo frames
 
