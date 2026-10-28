@@ -431,13 +431,10 @@ fn on_a_phone_one_tap_on_a_day_picks_it_and_closes_the_sheet() {
         assert_eq!(app.heard().as_deref(), Some("2026/10/14"), "{os:?}");
     }
     // A range closes on the tap on its second end.
-    let mut app = start_on(
-        Os::Ios,
-        HarnessProps {
-            range: true,
-            ..props()
-        },
-    );
+    let mut app = start_on(Os::Ios, HarnessProps {
+        range: true,
+        ..props()
+    });
     app.open();
     app.press("label:2026-10-20").unwrap();
     app.see("10-20*");
@@ -452,14 +449,11 @@ fn on_a_phone_one_tap_on_a_day_picks_it_and_closes_the_sheet() {
 #[test]
 fn on_a_phone_with_a_time_one_tap_on_a_day_picks_it_at_its_time_and_closes_the_sheet() {
     for controlled in [false, true] {
-        let mut app = start_on(
-            Os::Ios,
-            HarnessProps {
-                controlled,
-                time: true,
-                ..props()
-            },
-        );
+        let mut app = start_on(Os::Ios, HarnessProps {
+            controlled,
+            time: true,
+            ..props()
+        });
         app.open();
         app.see("Time");
         app.press("label:2026-10-14").unwrap();
@@ -474,7 +468,11 @@ fn on_a_phone_with_a_time_one_tap_on_a_day_picks_it_at_its_time_and_closes_the_s
         // The keyboard's digits: the hour, then the minute.
         app.type_text("label:Due time", "0900").unwrap();
         app.see("seg09");
-        assert!(app.log().ends_with(" 2026-10-14T09:00"), "{}", app.log());
+        assert!(
+            app.log().ends_with(" 2026-10-14T09:00"),
+            "{}",
+            app.log()
+        );
         // Another day keeps the time.
         app.press("label:2026-10-15").unwrap();
         app.closed();
@@ -526,5 +524,8 @@ fn on_a_phone_the_calendar_spans_the_sheet() {
     let week = seen.parents[&day];
     assert_eq!(seen.frames[&week].size.width, px(800.0));
     let width = seen.frames[&day].size.width;
-    assert!((width.0 - 800.0 / 7.0).abs() <= 1.0, "a day {width:?} wide");
+    assert!(
+        (width.0 - 800.0 / 7.0).abs() <= 1.0,
+        "a day {width:?} wide"
+    );
 }

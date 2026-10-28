@@ -796,7 +796,10 @@ impl Dt {
                 return Points(to as f32);
             }
         }
-        let a = axis.anchor_at(content, f64::from(nsh_core::element::pixel_ratio()));
+        let a = axis.anchor_at(
+            content,
+            f64::from(nsh_core::element::pixel_ratio()),
+        );
         anchor.set(a);
         scroll.set(Points(a.scroll as f32));
         Points(a.scroll as f32)
