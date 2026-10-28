@@ -309,10 +309,28 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有扇区的样式，优先于它们的类（`fill`、`stroke`、`strokeWidth`）。 |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | 指针下的扇区比其他扇区大出的距离，单位为点：按 plot 的 `pointer` 弹簧变化，随悬停淡入淡出。 |
 | `Pie` | `hoverDim` | `.hover_dim(..)` | `number`（0 到 1） | `0` | 有扇区位于指针下时，其他扇区变淡的程度，即不透明度降低的比例，随悬停淡入淡出。 |
+| `Pie` | `label` | `.label(..)` | `string \| (d: T, index: number) => string` | 无 | 每个扇区旁边的文字：一个字段（取其数值），或返回应用格式化文字的函数。文字为空的行、窄于半度的扇区没有标签。 |
+| `Pie` | `labelClass`、`labelStyle` | `.label_class(..)`、`.label_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | `label` 部件：圆环外、引导线末端处的文字，在末端处垂直居中；在饼图右半边时位于末端之后，左半边时位于末端之前。它的内边距就是与引导线末端的距离。 |
+| `Pie` | `labelGap` | `.label_gap(..)` | `number` | `15` | 标签在外缘之外的距离，单位为点。 |
+| `Pie` | `labelLineClass`、`labelLineStyle` | `.label_line_class(..)`、`.label_line_style(..)` | `string \| (d: T, index: number) => string`、`StyleProp<ViewStyle>` | 无 | `labelLine` 部件：每个标签的引导线，从扇区中线处的外缘向外到标签所在的半径，再横向连到文字。它的 `stroke`（没有设置时为 `currentColor`）、`strokeWidth` 和 `strokeDasharray`，所有引导线相同，或扇区所在行的函数；设置样式后才显示。 |
 
 扇区和 arc 用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于饼图和 plot 上的值：使用界面背景色的描边（`stroke-card stroke-2`）同样可以在扇区之间切出间隙。它们的数值不计入 plot 的比例尺。饼图的扇区只在数据行、数值、角度、半径或 plot 的尺寸变化时重绘；指针只通过动画器推动抬起和变淡。
 
 饼图的数据行在坐标轴上没有位置，所以带饼图的 plot 通常把提示框放在指针旁边（`tooltipPlacement="pointer"`）：十字线和提示框跟随指针，没有悬停圆点。环形图中间的内容是应用自己叠放在 plot 上的元素（悬停扇区的数值或总数），图例也是，每个色块使用对应扇区的颜色。
+
+饼图的标签在圆环外标出各个扇区：每段文字位于扇区中线方向、外缘之外 `labelGap` 处（即该半径上的扇区质心），再横向移到扇区所在一侧的同一半径处；设置样式的引导线把它和外缘连起来。标签随扇区在 plot 出现时扫入、在出现的末段淡入，随 `motion.update` 跟着扇区移动，并随悬停的扇区一起抬起；这些都在平台的动画器上运行。请为标签留出空间：`outerRadius` 小于 `"100%"`，或在 plot 周围留白。应用自己要放在扇区处的内容，是叠放在 plot 上的元素，就像环形图中间的内容一样。
+
+```tsx
+<Pie
+  value="seats"
+  outerRadius="64%"
+  sliceClass={(_, i) => FILLS[i % FILLS.length]}
+  label={(d) => share(d.seats)}
+  labelGap={12}
+  labelClass="px-1 text-xs tabular-nums text-muted-foreground"
+  labelLineClass="stroke-border"
+/>
+```
 
 ## PlotAxis
 
@@ -366,7 +384,7 @@ const rows = [
 | 键 | 类型 | 作用 |
 |---|---|---|
 | `appear` | timing | 有 `appearGeneration` 时图形逐渐绘出：折线和区域从起始边缘绘出，柱子从 `base` 长出（柱子设置 `stagger` 时依次长出）；饼图和 arc 的圆环从起点顺时针扫出。 |
-| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线和 `PlotAxis` 一起移动。 |
+| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开；过渡途中再次改变时，从当前绘制的位置继续）；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线和 `PlotAxis` 一起移动。 |
 | `enter` | timing | 指针移到 plot 上时，悬停部件淡入。 |
 | `exit` | timing | 指针离开后，悬停部件淡出。 |
 | `pointer` | spring | 指针在 plot 上移动时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起。 |

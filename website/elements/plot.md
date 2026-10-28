@@ -355,6 +355,10 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | none | The style of every slice, over its classes (`fill`, `stroke`, `strokeWidth`). |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | How far the slice under the pointer grows past the others, in points: on the plot's `pointer` spring, faded in and out with the hover. |
 | `Pie` | `hoverDim` | `.hover_dim(..)` | `number` (0 to 1) | `0` | How much the other slices fade while one is under the pointer, as a share of their opacity, with the hover's fade. |
+| `Pie` | `label` | `.label(..)` | `string \| (d: T, index: number) => string` | none | The text beside each slice: a field (its number) or a function returning the text the app formats. A row whose text is empty, or a slice narrower than half a degree, has none. |
+| `Pie` | `labelClass`, `labelStyle` | `.label_class(..)`, `.label_style(..)` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text outside the ring at the end of its leader line, centered on it, after it on the right half of the pie and before it on the left. Its padding is its distance from the line's end. |
+| `Pie` | `labelGap` | `.label_gap(..)` | `number` | `15` | How far past the rim the labels sit, in points. |
+| `Pie` | `labelLineClass`, `labelLineStyle` | `.label_line_class(..)`, `.label_line_style(..)` | `string \| (d: T, index: number) => string`, `StyleProp<ViewStyle>` | none | The `labelLine` part: each label's leader line, from the rim at the slice's middle out to the label's radius, then across to the text. Its `stroke` (`currentColor` where none is set), `strokeWidth` and `strokeDasharray`, the same on every line or a function of the slice's row; shown once styled. |
 
 A slice and an arc fill with `fill` (`currentColor` where none is set) and stroke their edges with `stroke` (none where
 none is set), their own over the pie's and the plot's as CSS inherits them: a stroke in the surface's color
@@ -366,6 +370,25 @@ Plots with a pie usually place the tooltip by the pointer (`tooltipPlacement="po
 place along an axis: the cross line and the tooltip follow the pointer over it, and it shows no hover dots. A donut's
 center is the app's own element laid over the plot (the hovered slice's value, or the total), and so is its legend,
 with each key in its slice's color.
+
+A pie's labels name its slices outside the ring: each text sits `labelGap` past the rim toward its slice's middle (the
+slice's centroid at that radius), then across to that radius on the slice's side of the pie, and a styled leader line
+joins it to the rim. The labels sweep in with their slices on the plot's appear and fade in over its end, move with
+them on `motion.update`, and lift with the hovered slice; all of it runs on the platform's animator. Give the plot
+room for them: an `outerRadius` below `"100%"`, or space around the plot. Content of the app's own at a slice is an
+element laid over the plot, as a donut's center is.
+
+```tsx
+<Pie
+  value="seats"
+  outerRadius="64%"
+  sliceClass={(_, i) => FILLS[i % FILLS.length]}
+  label={(d) => share(d.seats)}
+  labelGap={12}
+  labelClass="px-1 text-xs tabular-nums text-muted-foreground"
+  labelLineClass="stroke-border"
+/>
+```
 
 ## PlotAxis
 
@@ -431,7 +454,7 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 | Key | Type | What moves |
 |---|---|---|
 | `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |

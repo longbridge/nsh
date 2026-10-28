@@ -48,7 +48,9 @@ pub use self::{
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
-    pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
+    pie::{
+        Arc, ArcElement, ArcProps, Pie, PieElement, PieLabelStyle, PieProps, SliceClass, arc, pie,
+    },
     scale::{BandScale, Scale},
 };
 use self::{

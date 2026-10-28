@@ -16,6 +16,21 @@ pub(crate) fn wrap(key: &'static str, value: Value) -> Result<Value, PropError> 
     object([(key, value)])
 }
 
+/// A video's `onLoad` payload: `{ duration, size: { width, height } }` of the
+/// platforms' `duration`, `width` and `height`, as nsh-js nests them.
+pub(crate) fn video_load(fields: &[(&'static str, PayloadValue)]) -> Result<Value, PropError> {
+    let out = Value::object()?;
+    let size = Value::object()?;
+    for (key, value) in fields {
+        match *key {
+            "width" | "height" => size.set(key, &scalar(value)?)?,
+            _ => out.set(key, &scalar(value)?)?,
+        }
+    }
+    out.set("size", &size)?;
+    Ok(out)
+}
+
 fn object(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Result<Value, PropError> {
     let out = Value::object()?;
     for (key, value) in fields {

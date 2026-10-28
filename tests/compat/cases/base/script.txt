@@ -1165,6 +1165,54 @@ covers [events] onChange
 covers [events] onFocus
 covers [events] onBlur
 covers [events] onSubmit
+# base-combobox
+tap id:case-base-combobox
+# The trigger is a combobox whose value is the selected titles.
+prop label:Tags role combobox
+prop label:Tags accessibilityValue text=Red
+prop label:One accessibilityValue text=Blue
+# With `multiple`, a press toggles the item and the list stays open; the
+# footer shows below the rows, in the app's look.
+tap id:tags
+expect TagFooter
+style parent:text:TagFooter backgroundColor #ff0000ff
+frame parent:text:TagFooter 0 0 390 20
+tap label:Green
+expect Tags: red,green
+expect TagFooter
+prop label:Green accessibilityState selected=true
+tap label:Red
+expect Tags: green
+# The app's query: typing is reported, and the app's query filters.
+type text:FindTag bl
+expect Query: bl
+absent label:Green
+# Closing confirms the value as it is.
+event label:FindTag onCancel
+expect Confirmed: green
+absent TagFooter
+# Without `multiple`, a choice replaces the value and closes the list.
+tap id:one
+tap label:Red
+expect One: red
+absent label:Green
+covers [nsh/base] Combobox
+covers [props] Combobox.items
+covers [props] Combobox.multiple
+covers [props] value
+covers [props] defaultValue
+covers [props] Combobox.searchable
+covers [props] Combobox.searchPlaceholder
+covers [props] Combobox.query
+covers [props] Combobox.footer
+covers [props] Combobox.footerClass
+covers [props] Combobox.footerStyle
+covers [props] Combobox.trigger
+covers [props] accessibilityLabel
+covers [events] onChange
+covers [events] Combobox.onConfirm
+covers [events] Combobox.onQueryChange
+
 # base-select
 tap id:case-base-select
 # Open at first (`defaultOpen`); Escape or back closes it.
@@ -1570,6 +1618,29 @@ covers [props] Pie.innerRadius
 covers [props] Pie.outerRadius
 covers [props] Pie.cornerRadius
 covers [props] Arc.cornerRadius
+# A pie's labels: each slice's text at the end of its leader line, 10
+# past the rim (30) toward the slice's middle, then across to that
+# radius; after the end on the right half, before it on the left,
+# centered on it (the app's 20 by 10). A row worth nothing has none.
+expect east
+frame parent:text:east 90 50 0 0
+frame text:east 0 -5 20 10
+frame parent:text:west 10 50 0 0
+frame text:west -20 -5 20 10
+absent south
+# The leader lines (the `labelLine` part), each in its own classes, the
+# style's width over them, from the rim out to the label.
+drawing below:parent:text:east strokeStyle #ff0000ff
+drawing below:parent:text:west strokeStyle #0000ffff
+drawing below:parent:text:east lineWidth 2
+drawing below:parent:text:east stroke path(moveTo 80 50, lineTo 90 50...
+drawing below:parent:text:west stroke path(moveTo 20 50, lineTo 10 50...
+covers [props] Pie.label
+covers [props] Pie.labelClass
+covers [props] Pie.labelStyle
+covers [props] Pie.labelGap
+covers [props] Pie.labelLineClass
+covers [props] Pie.labelLineStyle
 covers [props] Plot.motion
 covers [nsh/base/plot] Plot
 covers [nsh/base/plot] Line

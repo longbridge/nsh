@@ -42,6 +42,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Switch", detail: "Settings that take effect at once, one that needs another on", icon: "switch", screen: lazy(() => import("./demos/Controls").then((m) => m.SwitchDemo)) },
       { name: "Tabs", detail: "A section switcher, a disabled tab", icon: "tabs", screen: lazy(() => import("./demos/Controls").then((m) => m.TabsDemo)) },
       { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
+      { name: "Combobox", detail: "Topics picked several at once with search, a reviewer picked alone", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.ComboboxDemo)) },
       { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
       { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
       { name: "NumberInput", detail: "Quantities typed or stepped, within a range, in steps", icon: "stepper", screen: lazy(() => import("./demos/Controls").then((m) => m.NumberInputDemo)) },

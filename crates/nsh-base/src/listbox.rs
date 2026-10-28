@@ -1,5 +1,5 @@
-//! The list `nsh/base`'s choices open: `Select`'s (and `Combobox`'s, which
-//! shares it), its state machine and how it presents itself, with no look.
+//! The list `nsh/base`'s choices open: `Select`'s and `Combobox`'s, its
+//! state machine and how it presents itself, with no look.
 //!
 //! `gpui-base`'s `Select` and `Combobox` are thin roots (the combobox
 //! role, a controlled `open`, the keys that open them and move the focus
@@ -23,6 +23,9 @@
 //!   title is announced instead, so the field keeps the focus) and the
 //!   pointer's highlight, which moves only when the pointer did (a row
 //!   scrolled under a still pointer does not take it from the keyboard).
+//!   The query is the search field's, or the app's when it sets one
+//!   ([`Query`], `Combobox`'s `query`); each opening starts from its
+//!   default, and a new query highlights its first enabled match.
 //! - **[`present`]**: on the desktops a popup anchored to the trigger
 //!   (`placement`, `align`, `offset`, `margin`), at least as wide as the
 //!   trigger and never taller than the room on its side; on touch screens
@@ -31,8 +34,13 @@
 //!   parent`), so the popup is as tall as its rows up to that room and a
 //!   list of thousands makes only the rows in view; the highlighted row is
 //!   `focus:` (projected: the keyboard's focus stays on the trigger or the
-//!   search field), the chosen one `selected:` (and selected for screen
-//!   readers), a disabled one `disabled:`.
+//!   search field), the selected ones `selected:` (and selected for screen
+//!   readers; [`Hooks::selected`] says which: the select's one value, the
+//!   combobox's set), a disabled one `disabled:`; a footer part below the
+//!   rows (the combobox's, [`Footer`]).
+//!
+//! Choosing is the component's ([`Hooks::choose`]): the select closes, a
+//! combobox of several values toggles the item and stays open.
 
 use std::{rc::Rc, time::Duration};
 
@@ -257,19 +265,43 @@ pub(crate) enum Via {
     Pointer,
 }
 
+/// Where the query comes from: the app's `query` when it sets one, else
+/// the search field's, which each opening starts at `default`.
+#[derive(Clone, Copy)]
+pub(crate) struct Query {
+    /// The app's query (controlled), if it sets one.
+    pub(crate) controlled: Prop<Option<SharedString>>,
+    /// What each opening starts with while the app sets none.
+    pub(crate) default: Prop<Option<SharedString>>,
+}
+
+impl Query {
+    /// The search field's alone, starting empty (`Select`'s).
+    pub(crate) fn own() -> Self {
+        Self {
+            controlled: Prop::new(None),
+            default: Prop::new(None),
+        }
+    }
+}
+
 /// The list's state: its rows for the query, the highlighted item, and
 /// what reveals it.
 #[derive(Clone, Copy)]
 pub(crate) struct Listbox {
     pub(crate) items: Prop<Vec<SelectItem>>,
     pub(crate) searchable: Prop<bool>,
-    /// What the search field holds.
-    pub(crate) query: Signal<String>,
+    query_props: Query,
+    /// What the search field holds, while the app sets no query.
+    own_query: Signal<String>,
     pub(crate) rows: Memo<Rc<[Row]>>,
     /// The highlighted item, by its index among the items.
     pub(crate) highlight: Signal<Option<usize>>,
     /// Its value, which the highlight follows when the items change.
     highlighted: Stored<Option<SharedString>>,
+    /// The list is open (between [`Listbox::opened`] and
+    /// [`Listbox::closed`]).
+    open: Stored<bool>,
     /// The rows wholly in view, as the list last said.
     visible: Stored<Option<(usize, usize)>>,
     /// A row to reveal once the list says what is in view.
@@ -283,20 +315,30 @@ pub(crate) struct Listbox {
     pub(crate) a11y: Signal<Option<usize>>,
 }
 
+/// The query now: the app's, else the field's (tracked).
+fn query_of(props: Query, own: Signal<String>) -> String {
+    match props.controlled.get() {
+        Some(q) => q.to_string(),
+        None => own.get(),
+    }
+}
+
 impl Listbox {
-    pub(crate) fn new(items: Prop<Vec<SelectItem>>, searchable: Prop<bool>) -> Self {
-        let query = signal(String::new());
+    pub(crate) fn new(items: Prop<Vec<SelectItem>>, searchable: Prop<bool>, query: Query) -> Self {
+        let own_query = signal(String::new());
         let rows = computed(move || {
-            let rows = query.with(|q| items.with(|items| rows(items, q)));
-            Rc::<[Row]>::from(rows)
+            let q = query_of(query, own_query);
+            Rc::<[Row]>::from(items.with(|items| rows(items, &q)))
         });
         let lb = Self {
             items,
             searchable,
-            query,
+            query_props: query,
+            own_query,
             rows,
             highlight: signal(None),
             highlighted: stored(None),
+            open: stored(false),
             visible: stored(None),
             reveal: stored(None),
             list: element_ref(),
@@ -329,7 +371,32 @@ impl Listbox {
                 }
             });
         });
+        // The app's query changed while the list is open (it followed the
+        // field, or set its own): as a typed one, the first match.
+        let last = stored(None::<SharedString>);
+        effect(move || {
+            let now = query.controlled.get();
+            if last.replace(now.clone()) == now || now.is_none() || !lb.open.get() {
+                return;
+            }
+            untracked(|| lb.highlight_first());
+        });
         lb
+    }
+
+    /// The query now (tracked): what the search field shows and the rows
+    /// match.
+    pub(crate) fn query(self) -> String {
+        query_of(self.query_props, self.own_query)
+    }
+
+    /// The field's query at each opening: the default, else none.
+    fn default_query(self) -> String {
+        self.query_props
+            .default
+            .get_untracked()
+            .map(|q| q.to_string())
+            .unwrap_or_default()
     }
 
     /// The item's value, if there is such an item.
@@ -383,11 +450,12 @@ impl Listbox {
             .max(1)
     }
 
-    /// The list opens: the query, the pointer and typeahead start again,
-    /// and the item `initial` picks from the rows and the items is
-    /// highlighted (revealed, and told to screen readers).
+    /// The list opens: the query (its default), the pointer and typeahead
+    /// start again, and the item `initial` picks from the rows and the
+    /// items is highlighted (revealed, and told to screen readers).
     pub(crate) fn opened(self, initial: impl FnOnce(&[Row], &[SelectItem]) -> Option<usize>) {
-        self.query.set(String::new());
+        self.own_query.set(self.default_query());
+        self.open.replace(true);
         self.pointer.replace(None);
         self.visible.replace(None);
         self.reveal.replace(None);
@@ -399,17 +467,28 @@ impl Listbox {
         self.set_highlight(item, Via::Keyboard);
     }
 
-    /// The list closed: the query clears.
+    /// The list closed: the query goes back to its default.
     pub(crate) fn closed(self) {
-        self.query.set(String::new());
+        self.open.replace(false);
+        self.own_query.set(self.default_query());
         self.a11y.set(None);
         self.typeahead.with(Typeahead::clear);
     }
 
-    /// The search field holds `query`: the highlight goes to the first
-    /// enabled item it shows.
-    pub(crate) fn set_query(self, query: &str) {
-        self.query.set(query.to_owned());
+    /// The user typed `query` in the search field: while the app sets no
+    /// query it is the field's, and the highlight goes to the first
+    /// enabled item it shows (an app's query does the same once it
+    /// follows).
+    pub(crate) fn edited(self, query: &str) {
+        if self.query_props.controlled.get_untracked().is_some() {
+            return;
+        }
+        self.own_query.set(query.to_owned());
+        self.highlight_first();
+    }
+
+    /// Highlights the first enabled item the rows show, as a key would.
+    fn highlight_first(self) {
         let first = self.items.with_untracked(|items| {
             self.rows
                 .with_untracked(|rows| step(rows, items, None, Move::First))
@@ -593,6 +672,17 @@ pub(crate) struct Parts {
     pub(crate) render_item: Prop<Option<Renderer<SelectItemState>>>,
     pub(crate) render_group: Prop<Option<Renderer<SelectGroup>>>,
     pub(crate) empty: Prop<Option<Slot>>,
+    /// The content below the rows, in a part of its own (`Combobox`'s
+    /// `footer`); none for `Select`.
+    pub(crate) footer: Option<Footer>,
+}
+
+/// The part below the rows and what it holds.
+#[derive(Clone, Copy)]
+pub(crate) struct Footer {
+    pub(crate) content: Prop<Option<Slot>>,
+    pub(crate) class: Prop<Option<SharedString>>,
+    pub(crate) style: Prop<Style>,
 }
 
 /// What the list asks of its component.
@@ -600,10 +690,13 @@ pub(crate) struct Parts {
 pub(crate) struct Hooks {
     /// Whether it is open (tracked).
     pub(crate) open: Rc<dyn Fn() -> bool>,
-    /// The value chosen now (tracked).
-    pub(crate) value: Memo<Option<SharedString>>,
+    /// Whether the item of this value is selected now (tracked): the
+    /// select's value, or one of the combobox's.
+    pub(crate) selected: Rc<dyn Fn(&SharedString) -> bool>,
     /// Choose item `0` (an enabled one: the list checks).
     pub(crate) choose: Rc<dyn Fn(usize)>,
+    /// The user typed this in the search field (`onQueryChange`).
+    pub(crate) query_changed: Rc<dyn Fn(&str)>,
     /// The user tried to close it, for this reason.
     pub(crate) dismiss: Rc<dyn Fn(OpenChangeReason)>,
     /// It is all there (`true`) or all gone (`false`).
@@ -709,14 +802,16 @@ pub(crate) fn present(
     .into_element()
 }
 
-/// What the popup or sheet holds: the search field, the rows, and the
-/// `empty` slot while no item shows.
+/// What the popup or sheet holds: the search field, the rows, the `empty`
+/// slot while no item shows, and the footer.
 fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyElement> {
+    let query_changed = hooks.query_changed.clone();
     let search = when(
         move || lb.searchable.get(),
         move || {
+            let query_changed = query_changed.clone();
             input()
-                .value(move || lb.query.get())
+                .value(move || lb.query())
                 .placeholder(move || {
                     parts
                         .search_placeholder
@@ -729,7 +824,10 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                 .auto_focus(!sheet)
                 .app_class(parts.search_class)
                 .inline_style(move || parts.search_style.get())
-                .on_change(move |text: &str| lb.set_query(text))
+                .on_change(move |text: &str| {
+                    lb.edited(text);
+                    query_changed(text);
+                })
         },
     );
     let rows = {
@@ -763,11 +861,24 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
         move || lb.rows.with(|r| r.is_empty()),
         move || parts.empty.place(|e| e),
     );
-    vec![
+    let mut content = vec![
         search.into_element(),
         list.into_element(),
         empty.into_element(),
-    ]
+    ];
+    if let Some(footer) = parts.footer {
+        let part = when(
+            move || footer.content.with(Option::is_some),
+            move || {
+                view()
+                    .app_class(footer.class)
+                    .inline_style(footer.style)
+                    .child(footer.content.place(|c| c))
+            },
+        );
+        content.push(part.into_element());
+    }
+    content
 }
 
 /// A row's identity, so rows keep their sizes as the query changes.
@@ -830,10 +941,9 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
     });
     let disabled = computed(move || item.with(|i| i.as_ref().is_some_and(|i| i.disabled)));
     let highlighted = computed(move || index.get().is_some() && lb.highlight.get() == index.get());
-    let value = hooks.value;
-    let selected = computed(move || {
-        item.with(|i| value.with(|v| i.as_ref().is_some_and(|i| v.as_ref() == Some(&i.value))))
-    });
+    let is_selected = hooks.selected.clone();
+    let selected =
+        computed(move || item.with(|i| i.as_ref().is_some_and(|i| is_selected(&i.value))));
     let me = element_ref();
     // A key moved the highlight here: the screen reader's focus follows.
     effect(move || {
@@ -918,15 +1028,23 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         .into_element()
 }
 
-/// The accessibility value of a trigger: the title of the chosen item.
-pub(crate) fn chosen_title(
+/// The accessibility value of a trigger: the titles of the selected items
+/// (`values`, in their order; the select's one), joined by `, `; none
+/// while no item is.
+pub(crate) fn selected_titles(
     items: &[SelectItem],
-    value: Option<&str>,
+    values: &[SharedString],
 ) -> Option<AccessibilityValue> {
-    let value = value?;
-    let item = items.iter().find(|i| i.value == value)?;
+    let titles = values
+        .iter()
+        .filter_map(|v| items.iter().find(|i| i.value == *v))
+        .map(|i| i.title.as_str())
+        .collect::<Vec<_>>();
+    if titles.is_empty() {
+        return None;
+    }
     Some(AccessibilityValue {
-        text: Some(item.title.as_str().into()),
+        text: Some(titles.join(", ").into()),
         ..AccessibilityValue::default()
     })
 }
@@ -937,7 +1055,7 @@ mod tests {
 
     use nsh_core::time::Instant;
 
-    use super::{Move, Row, Typeahead, find_typed, follow, rows, step};
+    use super::{Move, Row, Typeahead, find_typed, follow, rows, selected_titles, step};
     use crate::select::SelectItem;
 
     fn item(value: &'static str, title: &'static str) -> SelectItem {
@@ -1098,5 +1216,20 @@ mod tests {
         // Filtered out: the first enabled match.
         let shown = super::rows(&items, "b");
         assert_eq!(follow(&shown, &items, "apple"), Some(2));
+    }
+
+    #[test]
+    fn a_triggers_value_is_the_selected_titles_in_their_order() {
+        let items = items();
+        let text = |values: &[&'static str]| {
+            let values = values.iter().map(|&v| v.into()).collect::<Vec<_>>();
+            selected_titles(&items, &values).and_then(|v| v.text.map(|t| t.to_string()))
+        };
+        assert_eq!(text(&["carrot"]).as_deref(), Some("Carrot"));
+        assert_eq!(text(&["rice", "apple"]).as_deref(), Some("Rice, Apple"));
+        // Values no item has are left out; none at all is no value.
+        assert_eq!(text(&["kiwi", "celery"]).as_deref(), Some("Celery"));
+        assert_eq!(text(&[]), None);
+        assert_eq!(text(&["kiwi"]), None);
     }
 }

@@ -621,26 +621,33 @@ const REVENUE = REGIONS.reduce((sum, r) => sum + r.revenue, 0);
 /** The theme's series colors: a slice's fill, its legend key's background. */
 const FILLS = ["fill-chart-1", "fill-chart-2", "fill-chart-3", "fill-chart-4", "fill-chart-5"];
 const KEYS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
+/** The leader lines of the pie's labels, each in its slice's color. */
+const STROKES = ["stroke-chart-1", "stroke-chart-2", "stroke-chart-3", "stroke-chart-4", "stroke-chart-5"];
 const money = (k: number) => (k >= 1000 ? `$${(k / 1000).toFixed(2)}M` : `$${k}k`);
 const portion = (k: number) => `${((k / REVENUE) * 100).toFixed(1)}%`;
+/** A slice's label: its share, whole. */
+const percent = (k: number) => `${Math.round((k / REVENUE) * 100)}%`;
 /** The ring's size, its rim 8 points in (room for the lift), the gaps
  * between slices 2 points wide there. */
 const RING = pointer ? 168 : 176;
 const RIM = RING / 2 - 8;
+/** As a pie the ring draws in to leave room for its labels outside. */
+const PIE_RIM = Math.round(RIM * 0.66);
 
 /**
  * Revenue by region as a donut: 2-point gaps of even width, softly rounded
  * corners, the hovered slice lifted and the others dimmed, its value in
  * the hole, a legend with tabular figures at the trailing edge whose
  * hovered row stands out; it closes into a pie, the hole's radius moving
- * on `motion.update`.
+ * on `motion.update` as the ring draws in, its shares written outside
+ * at the ends of leader lines in the slices' colors.
  */
 function Revenue() {
   const hover = signal<number | null>(null);
   const donut = signal(true);
   const shown = () => (hover() == null ? undefined : REGIONS[hover()!]);
   return (
-    <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, the hovered slice lifted">
+    <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, or a pie labeled around its rim">
       {/* The legend sits beside the ring where the card has room for its
           names and below it where it has not, never cutting a name short. */}
       <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 24 : 16 }}>
@@ -657,12 +664,17 @@ function Revenue() {
           <Pie
             value="revenue"
             innerRadius={donut() ? RIM * 0.62 : 0}
-            outerRadius={RIM}
+            outerRadius={donut() ? RIM : PIE_RIM}
             padAngle={2 / RIM}
             cornerRadius={3}
             sliceClass={(_, i) => FILLS[i % FILLS.length]}
             hoverLift={6}
             hoverDim={0.64}
+            label={donut() ? undefined : (d: (typeof REGIONS)[number]) => percent(d.revenue)}
+            labelGap={10}
+            labelStyle={{ paddingHorizontal: 4, fontSize: 11, fontFamily: mono, color: colors.muted, fontVariant: ["tabular-nums"] }}
+            labelLineClass={(_, i) => STROKES[i % STROKES.length]}
+            labelLineStyle={{ strokeWidth: 1 }}
           />
           {/* The total in the hole fades as it opens and closes. */}
           <View

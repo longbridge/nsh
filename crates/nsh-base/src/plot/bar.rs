@@ -659,8 +659,9 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         ))
 }
 
-/// The texts `label` reads of `rows`, once known (as [`series::values`]).
-fn texts(
+/// The texts `label` reads of `rows`, once known (as [`series::values`]):
+/// a bar's labels and a pie's.
+pub(super) fn texts(
     rows: impl Fn() -> Rows + 'static,
     label: impl Fn() -> Option<RowText> + 'static,
 ) -> Signal<Option<Arc<[SharedString]>>> {
