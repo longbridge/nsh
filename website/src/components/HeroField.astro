@@ -22,14 +22,14 @@
   :root {
     --hero-star: rgba(236, 244, 255, 0.9);
     --hero-star-hot: var(--citrus, #c8f26d);
-    --hero-star-blue: #e4e8ec;
-    --hero-star-rose: #ece8de;
-    --hero-star-gold: #e2f0c4;
+    --hero-star-blue: #8fb2ff;
+    --hero-star-rose: #6fd6a8;
+    --hero-star-gold: #e2f6a4;
     --hero-glow: rgba(200, 242, 109, 0.14);
     --hero-nebula-lime: rgba(200, 242, 109, 0.5);
-    --hero-nebula-green: rgba(214, 218, 208, 0.32);
-    --hero-nebula-teal: rgba(150, 156, 150, 0.28);
-    --hero-nebula-gold: rgba(232, 236, 224, 0.34);
+    --hero-nebula-slate: rgba(126, 168, 255, 0.26);
+    --hero-nebula-grey: rgba(150, 156, 150, 0.28);
+    --hero-nebula-teal: rgba(70, 190, 140, 0.32);
     --hero-nebula-citrus: rgba(200, 242, 109, 0.56);
     --hero-deep: rgba(10, 11, 13, 0.5);
   }
@@ -37,15 +37,15 @@
   html:not(.dark) {
     --hero-star: rgba(22, 23, 26, 0.6);
     --hero-star-hot: #5a7a12;
-    --hero-star-blue: #3a3d42;
-    --hero-star-rose: #44423c;
+    --hero-star-blue: #2f55b0;
+    --hero-star-rose: #1d8a62;
     --hero-star-gold: #4f6e0c;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-nebula-lime: rgba(110, 160, 20, 0.3);
-    --hero-nebula-green: rgba(40, 42, 38, 0.12);
-    --hero-nebula-teal: rgba(70, 74, 68, 0.1);
-    --hero-nebula-gold: rgba(30, 32, 28, 0.1);
-    --hero-nebula-citrus: rgba(110, 160, 20, 0.34);
+    --hero-nebula-lime: rgba(96, 146, 12, 0.6);
+    --hero-nebula-slate: rgba(60, 90, 170, 0.2);
+    --hero-nebula-grey: rgba(70, 74, 68, 0.18);
+    --hero-nebula-teal: rgba(30, 140, 100, 0.22);
+    --hero-nebula-citrus: rgba(96, 146, 12, 0.66);
     --hero-deep: rgba(0, 0, 0, 0);
   }
   .hero-field {
@@ -136,7 +136,7 @@
     uniform vec4 copy;      // the hero's copy: left, top, right, bottom, CSS px
     uniform vec4 frame;     // the hero's content column: left, top, right, bottom, CSS px
     uniform vec4 device;    // the demo device: left, top, right, bottom, CSS px
-    uniform vec2 centre;    // the galaxy's heart: around the copy
+    uniform vec2 centre;    // the galaxy's heart: between the copy and the device
     uniform vec4 waves[${WAVES}]; // released presses: x, y, the time (negative: none), the size
     uniform vec4 charge;          // a press being held: x, y, the time it began, 1 while held
     uniform vec2 drift;           // how far the stars have drifted, px at a pace of 1 (presses turn it)
@@ -200,7 +200,7 @@
     // the galaxy holds more), drifting at the layer's speed; the brightest
     // few (spiky: their share) wear a cross of diffraction spikes. out: its
     // color.
-    float stars(vec2 p, float cell, float seed, float speed, float big, float density, float spiky, out vec3 rgb) {
+    float stars(vec2 p, float cell, float seed, float speed, float big, float density, float spiky, float systems, out vec3 rgb) {
       vec2 q = p + drift * speed;
       vec2 id = floor(q / cell);
       vec2 spot = (id + 0.3 + 0.4 * vec2(hash(id + seed), hash(id + seed + 17.3))) * cell;
@@ -218,10 +218,10 @@
       float d = length(v);
       float twinkle = 0.82 + 0.18 * sin(time * (0.5 + 1.2 * pick) + pick * 60.0);
       float hue = hash(id + seed + 3.3);
-      // Their temperatures: blue-white, white, yellow, orange-red, and a
-      // rare few in the accent.
+      // Their colors, the site's own: blue, citrus, teal, a rare few in the
+      // accent, the rest white.
       rgb = hue < 0.22 ? starBlue : hue < 0.34 ? starGold : hue < 0.42 ? starRose : hue < 0.45 ? hotColor : starColor.rgb;
-      rgb = mix(rgb, starColor.rgb, 0.45);
+      rgb = mix(rgb, starColor.rgb, 0.15);
       // A crisp disc with a narrow glow; most stars faint, a few bright, the
       // brightest a little larger.
       float aa = 0.6 / dpr;
@@ -233,6 +233,30 @@
         light = light * 1.6 + 0.7 * fade * (exp(-abs(v.y) / thin) * exp(-abs(v.x) / (reach * 0.5))
           + exp(-abs(v.x) / thin) * exp(-abs(v.y) / (reach * 0.5)));
         twinkle = 0.7 + 0.3 * twinkle;
+      }
+      // Some (systems: their share) are systems: half wear a ring seen
+      // tilted, the rest have one to three companions orbiting them.
+      float kind = hash(id + seed + 13.7);
+      if (kind < systems) {
+        float ang = hash(id + seed + 2.9) * 6.2832;
+        vec2 u = mat2(cos(ang), sin(ang), -sin(ang), cos(ang)) * v;
+        if (kind < systems * 0.5) {
+          float tilt = 2.4 + 1.6 * hash(id + seed + 4.4);
+          float ring = exp(-pow((length(vec2(u.x, u.y * tilt)) - r * 3.0) / (0.6 + 0.12 * r), 2.0));
+          // The ring's far side passes behind the star.
+          ring *= u.y < 0.0 ? smoothstep(r - aa, r + aa, d) : 1.0;
+          light += 0.55 * ring;
+        } else {
+          for (int k = 0; k < 3; k++) {
+            float fk = float(k);
+            if (k > 0 && hash(id + seed + fk * 5.1) < 0.4) continue;
+            float orbit = r * (4.0 + fk * 3.2);
+            float phase = hash(id + seed + fk * 3.1) * 6.2832 + time * 0.5 / (1.0 + fk);
+            vec2 at = vec2(cos(phase), sin(phase) * 0.45) * orbit;
+            float size = 1.0 + 0.6 * hash(id + seed + fk * 7.7);
+            light += 0.75 * smoothstep(size + aa, size - aa, length(u - at));
+          }
+        }
       }
       return show * twinkle * light;
     }
@@ -256,13 +280,15 @@
       // between them, and gather in clusters.
       vec3 c0, c1, c2, c3;
       vec2 qc = mix(p, q, 0.7);
-      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.45 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
-      float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
-      float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, 0.12 + 0.4 * thick, 0.0, c2);
-      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, 0.18 + 0.3 * thick, 0.15, c3);
+      // And some reaches are nearly empty: voids, drifting with the stars.
+      float filled = smoothstep(0.3, 0.46, fbm((qc + drift * 2.0) / 900.0 + 7.3));
+      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.45 * clusters(qc + drift * 2.0) * filled, 0.0, 0.0, c0) * 0.75;
+      float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, (0.12 + 0.5 * thick) * filled, 0.0, 0.0, c1) * 0.8;
+      float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, (0.12 + 0.4 * thick) * filled, 0.0, 0.0, c2);
+      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, (0.18 + 0.3 * thick) * mix(0.3, 1.0, filled), 0.15, 0.35, c3);
       // The galaxy's unresolved stars: a faint grain where it is thick.
       vec3 cg;
-      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.3 * thick, 0.0, cg) * 0.32;
+      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.3 * thick * filled, 0.0, 0.0, cg) * 0.32;
       float sum = s0 + s1 + s2 + s3 + grain;
       rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3 + cg * grain) / max(sum, 1e-4);
       return sum;
@@ -358,21 +384,28 @@
       // It lights the copy, not the demo: dim behind the device.
       vec2 dv = max(device.xy - p, p - device.zw);
       clear *= mix(0.25, 1.0, smoothstep(-60.0, 160.0, length(max(dv, 0.0)) + min(max(dv.x, dv.y), 0.0)));
-      // Graphite clouds, as the site's own greys, the primary's green lighting
-      // only their highlights: the brightest wisps.
+      // Clouds in the site's own colors: slate blue and grey by region, teal
+      // in a few, the primary's green tinting them and lighting their wisps.
       float belt = belts(p, f.r, detail);
       float h = f.g * 1.3 + belt * 0.22 + time * 0.012;
       vec4 hue = mix(nebula[1], nebula[2], 1.0 - abs(fract(h * 0.5) * 2.0 - 1.0));
       hue = mix(hue, nebula[3], clamp(smoothstep(0.78, 0.95, f.b) * 0.7 * cloud, 0.0, 1.0));
       float lit = smoothstep(0.0, 0.4, fine * cloud) * 0.85 + 0.15 * cloud;
       hue = mix(hue, mix(nebula[0], nebula[4], smoothstep(0.3, 0.8, f.b)), lit);
+      // Most of the light opens between the copy and the device.
+      vec2 e = (p - centre) / vec2(max(380.0, size.x * 0.24), max(300.0, size.y * 0.4));
+      clear *= 0.2 + 0.8 * exp(-dot(e, e));
       float gn = hue.a * (band * (0.06 + 0.35 * cloud + 1.3 * fine * (0.35 + 0.65 * cloud)) + gx.z * cloud * 0.25 + gx.y * 0.25 * cloud) * (0.55 + 0.6 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
-      float g = clamp(gn + gw, 0.0, 1.0);
+      // Softly capped, so no moment of the clouds floods the hero.
+      float g = 0.6 * (1.0 - exp(-(gn + gw) / 0.6));
       vec3 glowRgb = (hue.rgb * gn + glowColor.rgb * gw) / max(gn + gw, 1e-4);
       // The night behind it all, across the hero, fading out along its
       // bottom into the page.
-      float va = deepColor.a * (1.0 - smoothstep(0.7, 1.0, p.y / size.y));
+      // Darker reaches of it here and there, the clouds thin over them.
+      float dark = smoothstep(0.52, 0.72, fbm(p / 700.0 + vec2(time * 0.01, -time * 0.008) + 3.1));
+      g *= 1.0 - 0.6 * dark;
+      float va = deepColor.a * (1.0 + 0.7 * dark) * (1.0 - smoothstep(0.7, 1.0, p.y / size.y));
 
       // Premultiplied: the stars over the nebula over the night.
       vec3 rgb = glowRgb * g + deepColor.rgb * va * (1.0 - g);
@@ -469,8 +502,9 @@
     let heading = 0.29, pace = 1, toHeading = heading, toPace = pace;
     let pressId = -1;
     let visible = true, running = false, frame = 0, last = 0;
-    // A fixed moment for the still frame: the clouds already well formed.
-    let t = 40;
+    // The first frame (and the still one): a moment whose light opens between
+    // the copy and the device.
+    let t = 480;
     // The drift as far along as that moment.
     drift[0] = Math.cos(heading) * t;
     drift[1] = Math.sin(heading) * t;
@@ -489,9 +523,9 @@
       gl!.uniform4fv(u('glowColor'), color('--hero-glow', [0.78, 0.95, 0.43, 0.16]));
       gl!.uniform4fv(u('nebula'), [
         ...color('--hero-nebula-lime', [0.75, 0.94, 0.39, 0.42]),
-        ...color('--hero-nebula-green', [0.43, 0.82, 0.47, 0.4]),
-        ...color('--hero-nebula-teal', [0.24, 0.75, 0.67, 0.38]),
-        ...color('--hero-nebula-gold', [0.91, 0.86, 0.43, 0.38]),
+        ...color('--hero-nebula-slate', [0.43, 0.82, 0.47, 0.4]),
+        ...color('--hero-nebula-grey', [0.24, 0.75, 0.67, 0.38]),
+        ...color('--hero-nebula-teal', [0.91, 0.86, 0.43, 0.38]),
         ...color('--hero-nebula-citrus', [0.84, 0.98, 0.51, 0.44]),
       ]);
       gl!.uniform4fv(u('deepColor'), color('--hero-deep', [0, 0, 0, 0]));
@@ -524,13 +558,13 @@
       const frame = hero.querySelector('.hero__inner')?.getBoundingClientRect();
       if (frame) gl!.uniform4f(u('frame'), frame.left - rect.left, frame.top - rect.top, frame.right - rect.left, frame.bottom - rect.top);
       else gl!.uniform4f(u('frame'), 0, 0, w, h);
-      // The galaxy's heart around the copy, a little toward its trailing
-      // side; between the copy and the device once stacked.
+      // The galaxy's heart past the copy's trailing edge, toward the device,
+      // level with the copy; between them once stacked.
       const device = hero.querySelector('.device')?.getBoundingClientRect();
       if (device) gl!.uniform4f(u('device'), device.left - rect.left, device.top - rect.top, device.right - rect.left, device.bottom - rect.top);
       else gl!.uniform4f(u('device'), -1e4, -1e4, -1e4, -1e4);
       if (copy && device) {
-        const x = stacked ? w / 2 : copy.left + copy.width * 0.6 - rect.left;
+        const x = stacked ? w / 2 : copy.right + (device.left - copy.right) * 0.2 - rect.left;
         const y = stacked ? ((copy.bottom + device.top) / 2) - rect.top : ((copy.top + copy.bottom) / 2) - rect.top;
         gl!.uniform2f(u('centre'), x, y);
       } else {
