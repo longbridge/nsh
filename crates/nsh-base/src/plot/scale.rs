@@ -634,11 +634,7 @@ mod tests {
         assert!(gapped.start(1).unwrap() - gapped.width() > 0.0);
     }
 
-    fn colors(
-        scale: &OrdinalScale,
-        met: &mut Vec<SharedString>,
-        of: &[&str],
-    ) -> Vec<Option<Hsla>> {
+    fn colors(scale: &OrdinalScale, met: &mut Vec<SharedString>, of: &[&str]) -> Vec<Option<Hsla>> {
         of.iter().map(|c| scale.color(met, c)).collect()
     }
 
@@ -649,8 +645,7 @@ mod tests {
     /// category.
     #[test]
     fn an_ordinal_scale_maps_its_domain_in_order_and_repeats_its_range() {
-        let [red, green, blue] =
-            [0xff0000ff, 0x00ff00ff, 0x0000ffff].map(|c| Hsla::from(Color(c)));
+        let [red, green, blue] = [0xff0000ff, 0x00ff00ff, 0x0000ffff].map(|c| Hsla::from(Color(c)));
         let scale = OrdinalScale::new(["a", "b", "c", "d", "e"], [red, green, blue]);
         let mut met = Vec::new();
         assert_eq!(

@@ -6055,13 +6055,7 @@ fn base_plot_colors_marks_through_an_ordinal_scale() {
         .collect();
     assert_eq!(
         slices,
-        [
-            vec![green],
-            vec![red],
-            vec![blue],
-            vec![green],
-            vec![gray]
-        ]
+        [vec![green], vec![red], vec![blue], vec![green], vec![gray]]
     );
 
     // Each bar its row's color; the style's fill over every one.

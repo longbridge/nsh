@@ -167,7 +167,11 @@ pub fn Line(props: LineProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let (dot, dot_class, dot_style) = (props.dot, props.dot_class, props.dot_style);
     let (data, color) = (props.data, props.color);
     let colors = plot.map(|plot| {
-        series::colors(plot, move || data.get().unwrap_or_else(|| plot.rows.get()), color)
+        series::colors(
+            plot,
+            move || data.get().unwrap_or_else(|| plot.rows.get()),
+            color,
+        )
     });
     layer()
         .child(mark_canvas(

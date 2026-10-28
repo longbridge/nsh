@@ -805,11 +805,7 @@ impl Edges {
 /// `currentColor`, or a slice's category's color) and strokes it with its
 /// `stroke` (none where none is set): a slice's edge in the surface's
 /// color draws the gaps between slices.
-fn paint(
-    p: Painter,
-    fill: SvgPaint,
-    sector: impl FnOnce(Painter) -> Option<Painter>,
-) -> Painter {
+fn paint(p: Painter, fill: SvgPaint, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter {
     let p = p.fill_style_from_view(fill);
     let p = p
         .stroke_style_from_view(SvgPaint::None)

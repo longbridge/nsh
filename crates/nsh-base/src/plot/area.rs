@@ -182,7 +182,11 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     });
     let (data, color) = (props.data, props.color);
     let colors = plot.map(|plot| {
-        series::colors(plot, move || data.get().unwrap_or_else(|| plot.rows.get()), color)
+        series::colors(
+            plot,
+            move || data.get().unwrap_or_else(|| plot.rows.get()),
+            color,
+        )
     });
     // Its constant baseline: `y0`'s value, or the plot's bottom edge.
     let base = move |plot: PlotContext| match y0.with(|y0| y0.as_ref().map(AreaY0::value)) {
