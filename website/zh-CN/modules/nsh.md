@@ -1050,8 +1050,8 @@ button()
 </Button>
 ```
 
-- URL 必须是绝对地址（带 scheme）。会执行代码或访问应用自身数据的 URL，即 `javascript:`、`data:`、`blob:`、`file:`、`about:` 和 `asset:`，以及相对地址，会抛出 `TypeError`。
-- 声明了能力的应用需要 `openUrl`：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme；其他 URL 抛出 `TypeError`（见[沙箱与能力](../docs/sandbox-and-capabilities.md)）。
+- URL 必须是绝对地址（带 scheme）。会执行代码或访问应用自身数据的 URL，即 `javascript:`、`data:`、`blob:`、`file:`、`about:` 和 `asset:`，以及相对地址，会让 Promise 以 `TypeError` reject。`openUrl` 从不抛出：所有失败都以 reject 报告。
+- 声明了能力的应用需要 `openUrl`：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme；其他 URL 以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"openUrl"`，`resource` 为该 URL（见[沙箱与能力](../docs/sandbox-and-capabilities.md)）。在 Rust 中，`open_url` 对这些 URL 回答 `false`，并在日志中说明原因。
 - 嵌入它的应用先看到这个 URL，可以改由自己的路由处理（Swift `NshAppView.onOpenURL`、Java `NshView.setOpenUrlHandler`、Rust `AppView::host().handle_open_url`；见 [iOS](../docs/ios.md#应用打开的链接) 和 [Android](../docs/android.md#应用打开的链接)），此时 `opened` 为 `true`。
 - 各平台用自己的方式打开：iOS 用 `UIApplication.open`（嵌入时是宿主应用的 application），Android 用 `ACTION_VIEW` Intent，macOS 用 `NSWorkspace`，Windows 用 `ShellExecuteW`，Linux 用 `GtkUriLauncher`，GPUI 用它的 `open_url`，Web 在新标签页中打开。`nsh test` 记录这些 URL，而不真正打开。
 - [`TextView`](../elements/text-view.md) 设置 `links="open"` 后，以同样的方式打开其中的链接。
@@ -1510,7 +1510,16 @@ const names = files.map((url) => decodeURIComponent(new URL(url).pathname.split(
 ```
 
 > [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `writeText` 和 `writeImage` 不做任何事，`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `Clipboard` 的每个函数都以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"clipboard"`，`resource` 为 `""`，系统剪贴板不会被访问。在 Rust 中，写入保持剪贴板不变，读取得到空剪贴板的回答（`""`、`None`、空列表、`false`），拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+>
+> ```tsx
+> try {
+>   await Clipboard.writeText(code());
+> } catch (error) {
+>   if (error.code === "ERR_ACCESS_DENIED") showHint("此应用已关闭复制");
+>   else throw error;
+> }
+> ```
 
 ## Picker
 
@@ -1565,8 +1574,9 @@ pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
 ```
 
 显示选择器，按选中的顺序 resolve 为用户选中的图片；用户取消时 resolve 为 `[]`。Rust：`pick_images(request)`，在任务里
-（`spawn`，或 `async` 模块函数）await 它的结果。超出范围的选项（`limit: 0`、不在 0 到 1 之间的 `quality`）会在调用时抛出
-`RangeError`。
+（`spawn`，或 `async` 模块函数）await 它的结果。`pickImages` 从不抛出：超出范围的选项（`limit: 0`、不在 0 到 1 之间的
+`quality`）让 Promise 以 `RangeError` reject，应用的能力不允许的选取以 `ERR_ACCESS_DENIED` reject（见下文）。取消是用户的
+回答而不是失败：resolve 为 `[]`。
 
 图片拿到手就可以发送：
 
@@ -1671,8 +1681,9 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` resolve 为
-> `[]`，什么也不显示，Rust 和 TSX 都一样。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
+> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
 
 ## Storage
 
@@ -1743,7 +1754,7 @@ const theme = (await Storage.getItem("theme")) ?? "system";
 setItem(key: string, value: string): Promise<void>;
 ```
 
-把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，则 Promise 被拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
+把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，则 Promise 以一个 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 的 `Error` 拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
 
 ```rust tabs
 let draft = serde_json::json!({ "title": title.get(), "body": body.get() });
@@ -1862,13 +1873,26 @@ import { host } from "nsh";
 call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
 ```
 
-以 `args`（任意 JSON 值；不传时为 `null`）调用宿主的函数 `name`，resolve 为它的返回值。函数失败时以宿主给出的错误消息拒绝；`host.available()` 为 `false` 时以 `nsh/host: this platform has no host` 拒绝；`name` 不在应用的 [`host` 能力](#能力)中，或不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）时也会拒绝。
+以 `args`（任意 JSON 值；不传时为 `null`）调用宿主的函数 `name`，resolve 为它的返回值。`host.call` 从不抛出：每种失败都让 Promise 以一个 `Error` 拒绝，它的 `code` 说明发生了什么（消息是写给人看的，可能变化）：
 
-调用最多等待宿主应答 30 秒，之后以 `nsh/host: <name> timed out after 30000 ms` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `nsh/host: invalid timeout <value>` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
+| `code` | 何时 |
+|---|---|
+| `ERR_NSH_HOST_ERROR` | 宿主的函数失败，或宿主没有名为 `name` 的函数；消息是宿主给出的 |
+| `ERR_ACCESS_DENIED` | `name` 不在应用的 [`host` 能力](#能力)中；`permission` 为 `"host"`，`resource` 为该名字 |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 平台没有宿主：`host.available()` 为 `false` |
+| `ETIMEDOUT` | 宿主没有及时应答 |
+| `ERR_NSH_QUOTA_EXCEEDED` | 已有 1024 个调用在等待嵌入应用的应答 |
+
+不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）的 `name` 以 `TypeError` 拒绝。
+
+调用最多等待宿主应答 30 秒，之后以 `ETIMEDOUT` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `RangeError` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
 
 ```ts
 const user = (await host.call("getUserInfo")) as { name: string };
-const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 5000 });
+const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 5000 }).catch((error) => {
+  if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
+  throw error;
+});
 ```
 
 ### host.on
@@ -1887,7 +1911,7 @@ stop();
 
 ### 能力
 
-应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会被拒绝并记录日志；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
+应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会以 `ERR_ACCESS_DENIED` 拒绝并记录日志，向嵌入应用 `host.post` 这样的名字会抛出同样的错误；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
 
 ```json
 { "capabilities": { "host": ["getUserInfo", "bridge.*"] } }

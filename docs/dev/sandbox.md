@@ -38,7 +38,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh`'s `Clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `picker`
-  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick resolves `[]`), `host`
+  (`nsh`'s `Picker`: showing the system's picker, whose picked files reach the app; denied, a pick rejects), `host`
   (`nsh`'s `host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
   names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
   the call of any other name before it reads the grants, since hosts may put names in paths or URLs;
@@ -59,9 +59,22 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
-  sources, the status bar, the clipboard and host calls in the core (`Core::check_prop`, the commit's commands; a refused image fails with `onError`, clipboard reads resolve empty, host calls reject, the rest show nothing;
+  sources, the status bar, the clipboard, the picker and host calls in the core (`Core::check_prop`, the commit's commands and actions;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
+- What a refusal does: every call JS makes fails with `JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the
+  capability's key, `resource` what was asked for, `""` when the capability has none), which its promise rejects with.
+  The modules check in the call, on the `System` the call gets, so the error is typed and nothing is queued:
+  `Clipboard`'s functions (`runtime/clipboard.rs`), `Picker.pickImages`, `openUrl` (`runtime/device.rs`,
+  `open_url::not_granted`) and `Image.getSize` / `prefetch` (`runtime/image.rs`, `resource` the URL). `host.call` is
+  refused by the core (the commit's `Command::HostCall`) and by the SDK channel (`nsh-js` `host_channel.rs`) with
+  `nsh_core::host_channel::not_granted`. A refused `fetch` rejects as every failed fetch, with a `TypeError`, which
+  carries `code`, `permission` `"network"` and `resource` the request's or the redirect's URL (`access::Refused`,
+  `Host::fetch_refused`). A refused source (image, placeholder, video, web view `src` or `html`) shows nothing and
+  reports `onError` with `code` `ERR_ACCESS_DENIED`, as the platforms report a refused navigation. What has no caller
+  to answer (the status bar, a canvas image) only logs. Rust components' calls keep their Rust types: the core's
+  checks answer them as the system would with nothing there (an empty clipboard, no picked files, `open_url` `false`)
+  and an `Err` with the message for `fetch`.
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
 - **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
   declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
@@ -116,7 +129,11 @@ smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), a
 `allocUnsafe`, `allocUnsafeSlow` and `crypto.randomBytes` refuse a size past the heap limit (1 GiB without one) with a
 `RangeError` (`standard/bounds.rs`; Rust's allocator would abort the process); `allocUnsafe` memory is zeroed. LLRT's
 buffers are native memory the heap limit does not count, so these bound one call, not a VM's total. `fs/promises`, `process` and `net` check the call's `System` (the VM's `Access`, data directory,
-`TrustedPaths`) in Rust before any work starts, and count their limits in its quotas. The standard catalog is
+`TrustedPaths`) in Rust before any work starts, and count their limits in its quotas. A call they refuse fails with
+`JsError::access_denied` (`ERR_ACCESS_DENIED`, `permission` the capability's key, `resource` the path, command or
+`"host:port"`), as `websocket`'s does (`resource` the URL): promise functions reject with it, `spawn` and `exit` throw it;
+a used-up quota is `ERR_NSH_QUOTA_EXCEEDED`. The global `WebSocket` reports a URL not granted as a browser reports a
+refused connection: `error`, then `close` (1006), after the constructor returns. The standard catalog is
 eleven bare specifiers and nothing else: `node:` prefixes and other Node modules (`fs`, `child_process`,
 `events`, ...) do not import, so no module reaches files, processes or sockets around these checks. See
 `website/modules/standard-modules.md` for the public surface.
@@ -126,7 +143,8 @@ twice before anything leaves the app: the URL (`check_url`: absolute, at most 16
 characters, never `javascript:`, `vbscript:`, `data:`, `blob:`, `file:`, `about:` or `asset:`, which run code or
 reach the app's own data rather than another app; a web address needs a host) and the `openUrl` capability
 (`Capabilities::open_url`: `true`, every scheme, or `{ "schemes": [...] }`; `Access::allows_open_url`), in the
-module's call (a `TypeError`) and again in the core for Rust callers (`false`, logged once). The embedding app's URL
+module's call (its promise rejects: a `TypeError` for the URL, `ERR_ACCESS_DENIED` for the capability) and again in
+the core for Rust callers (`false`, logged once). The embedding app's URL
 handler sees only URLs that passed both (`embedding.md` "The host channel").
 
 The system's file dialogs and file manager for local paths (`nsh_core::file_dialog`: `pick_paths`, `pick_save_path`,
@@ -137,6 +155,6 @@ its module call, as `openUrl` does.
 
 `nsh`'s native SDK transport (`embedding.md` "The host channel") checks `capabilities.host` for calls and
 posts before invoking embedding code, using the same name rules and grants as the platform transport. Its bounds are checked in Rust (`nsh_core::host_channel`, `nsh-js` `host_channel.rs`): event names of 1 to 256 bytes,
-data as `protocol::to_json` bounds it (64 levels, 2^20 entries), 1024 calls waiting for answers per VM (`RangeError`
-past it) and 256 events kept for listeners not there yet (the oldest dropped), in the VM and in the channel while no
+data as `protocol::to_json` bounds it (64 levels, 2^20 entries), 1024 calls waiting for answers per VM (one more
+rejects with `ERR_NSH_QUOTA_EXCEEDED`) and 256 events kept for listeners not there yet (the oldest dropped), in the VM and in the channel while no
 app runs.

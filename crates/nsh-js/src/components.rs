@@ -419,7 +419,7 @@ unsafe extern "C" fn call_task(
 }
 
 /// A function starting its task in the JS call (`Later`): what the start
-/// throws throws.
+/// refuses rejects, as every call returning a promise.
 unsafe extern "C" fn call_start(
     cx: *mut JsContext,
     this: JsValue,
@@ -436,7 +436,7 @@ unsafe extern "C" fn call_start(
             crate::web::js::Args::new(argc, argv),
         )
     };
-    crate::classes::start(cx, this, args, |host| start(host).map(RustCall::Task))
+    crate::classes::send(cx, this, args, true, |host| start(host).map(RustCall::Task))
 }
 
 /// A module's object: its functions.

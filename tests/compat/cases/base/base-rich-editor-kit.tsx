@@ -73,8 +73,8 @@ function App() {
       let bold = "ran";
       try {
         editor.can(command("toggleBold"));
-      } catch {
-        bold = "unknown";
+      } catch (e) {
+        bold = e instanceof TypeError ? "unknown" : "other";
       }
       return `${editor.can(command("toggleHeading", { level: 3 }))} ${editor.can(command("toggleHeading", { level: 2 }))} ${bold}`;
     });

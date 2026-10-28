@@ -219,12 +219,15 @@ impl Bindings {
                 return;
             }
         };
-        let result = callback.call(&Value(0), &args);
+        let result = if call.settles() && self.kind(raw(callback.0)) != JsKind::Function {
+            // A value in place of a function (`Callback::settling`) answers
+            // itself, a promise what it settles to.
+            Ok(callback)
+        } else {
+            callback.call(&Value(0), &args)
+        };
         match result {
-            Err(error) => call.reply(Err(Exception {
-                message: error.0,
-                stack: None,
-            })),
+            Err(error) => call.reply(Err(Exception::from(error.0))),
             Ok(result) if call.settles() => {
                 let id = self.call_id();
                 self.pending.borrow_mut().insert(id, call);
@@ -252,17 +255,40 @@ impl Bindings {
             if ok {
                 call.reply(Ok(JsIn::new(self, raw(value.0))));
             } else {
-                call.reply(Err(Exception {
-                    message: value
+                let mut exception = Exception::from(
+                    value
                         .get("message")
                         .ok()
                         .and_then(|v| v.as_string())
                         .unwrap_or_else(|| self.describe(raw(value.0))),
-                    stack: value.get("stack").ok().and_then(|v| v.as_string()),
-                }));
+                );
+                exception.stack = value.get("stack").ok().and_then(|v| v.as_string());
+                // Only a traced call's reply checks it (`nsh/test`).
+                if call.traced() {
+                    exception.thrown = thrown_json(&value);
+                }
+                call.reply(Err(exception));
             }
         }
     }
+}
+/// A rejection's reason as JSON, as `nsh-js` makes it
+/// ([`Exception::thrown`]): an object's own enumerable properties with its
+/// `name` and `message` when they are strings, any other value as itself;
+/// `None` when converting it fails.
+fn thrown_json(value: &Value) -> Option<nsh_core::JsonValue> {
+    let mut json = protocol::to_json(&compat::Value::new(Value::borrowed(value.0))).ok()?;
+    if let nsh_core::JsonValue::Object(fields) = &mut json {
+        for key in ["name", "message"] {
+            if fields.contains_key(key) {
+                continue;
+            }
+            if let Some(text) = value.get(key).ok().and_then(|v| v.as_string()) {
+                fields.insert(key.to_owned(), nsh_core::JsonValue::String(text));
+            }
+        }
+    }
+    Some(json)
 }
 fn id(raw: JsRaw) -> u32 {
     raw.0[0] as u32

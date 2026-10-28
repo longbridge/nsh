@@ -76,6 +76,18 @@ impl Default for Runtime {
     }
 }
 impl Runtime {
+    /// Makes `error` the JS exception the call throws (its class, message
+    /// and `code` / ... fields); the `PropError` returned carries its
+    /// message.
+    fn throw(&self, error: nsh_core::element::JsError) -> nsh_core::element::PropError {
+        use nsh_core::element::IntoThrown;
+        let thrown = error.into_thrown();
+        if let Ok(value) = self.modules.error(&thrown) {
+            values::invoke(37, value.0, 0, 0, 0.0);
+        }
+        nsh_core::element::PropError(thrown.message().into())
+    }
+
     fn call(&self, op: u32, args: &Value) -> Result<Value, nsh_core::element::PropError> {
         match op {
             1000..=1006 => self.timers.call(op, args),
@@ -102,27 +114,31 @@ impl Runtime {
                     Value(params.0[0] as u32),
                 ])
             }
+            // The SDK channel's calls and posts (`host.js`): what fails is
+            // thrown as `nsh-js`'s channel throws it, with its class and
+            // `code` (`nsh_core::host_channel`'s errors).
             431 | 432 => {
                 let name = args
                     .index(0)?
                     .as_string()
                     .ok_or_else(|| nsh_core::element::PropError("host: a message name".into()))?;
                 nsh_core::host_channel::check_name(&name).map_err(nsh_core::element::PropError)?;
-                if !nsh_core::access::valid_host_name(&name)
-                    || !self.bindings.system.borrow().access.allows_host(&name)
-                {
-                    return Err(nsh_core::element::PropError(format!(
-                        "nsh/host: `{name}` is not granted"
-                    )));
-                }
+                let checked = nsh_core::host_channel::check_call(
+                    &self.bindings.system.borrow().access,
+                    &name,
+                );
+                checked.map_err(|e| self.throw(e))?;
                 let data = protocol::to_json(&compat::Value::new(args.index(1)?))?;
                 let id = args.index(2)?.as_number().unwrap_or(0.0) as u64;
-                let host = self.host.borrow().clone().ok_or_else(|| {
-                    nsh_core::element::PropError("this platform has no host".into())
-                })?;
+                let host = self
+                    .host
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| self.throw(nsh_core::host_channel::no_host()))?;
                 if op == 431 {
-                    host.call(id, &name, data)
-                        .map_err(nsh_core::element::PropError)?;
+                    host.call(id, &name, data).map_err(|message| {
+                        self.throw(nsh_core::host_channel::host_error(&message))
+                    })?;
                 } else {
                     host.post(&name, data);
                 }

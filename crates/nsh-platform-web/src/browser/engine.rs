@@ -262,6 +262,11 @@ impl Host for Runtime {
             self.fetches.event(id, event);
         }
     }
+    fn fetch_refused(&self, id: u32, message: &str, url: &str) {
+        if !self.bindings.stopped.get() {
+            self.fetches.refused(id, message, url);
+        }
+    }
     fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
         self.event(
             "animationsFinished",

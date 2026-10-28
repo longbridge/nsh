@@ -281,6 +281,9 @@ JS describes.
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
   outside the editor (a block handle): the view keeps the content's page offset, measured after each layout of the
   content and as a handle drag starts, and moved by the scroll since.
+  A query's position outside `0..=doc.content.size` throws a `RangeError` (ProseMirror's `resolve`;
+  `RichEditorSession::check_pos`), never a `null`: `null` is an answer (no node after the position, no view, no
+  such parent). `run` / `can` throw a `TypeError` for a command, node or mark type the editor does not know.
 - **Handle drags** (Tiptap's drag handle, ProseMirror's `view.dragging`): `dragBlock(pos, page)` selects the block
   at `pos` (a table too, though a press does not select one) and carries it closed, or, pressed inside a selection over
   several of its siblings, all of them, `dragTo(page)` moves the drop

@@ -6447,10 +6447,59 @@ fn refused_urls_fail_and_send_nothing() {
             .any(|i| matches!(i, MountItem::Command { .. }))
     );
     let events = js_events(&mut c);
-    assert!(matches!(
-        &events[..],
-        [(3, EventKind::Error, EventPayload::Error { message })] if message.contains("`tracker.io`")
-    ));
+    let [(3, EventKind::Error, EventPayload::Map(fields))] = &events[..] else {
+        panic!("expected the refused image's error: {events:?}");
+    };
+    let field = |key| fields.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
+    assert!(
+        matches!(field("message"), Some(crate::PayloadValue::Str(m)) if m.contains("`tracker.io`"))
+    );
+    assert_eq!(
+        field("code"),
+        Some(&crate::PayloadValue::Str("ERR_ACCESS_DENIED".into()))
+    );
+}
+
+#[test]
+fn refused_web_view_html_fails() {
+    let mut c = core();
+    c.set_access(Arc::new(crate::access::Access {
+        declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+        granted: None,
+    }));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::WebView,
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::Error,
+                enabled: true,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::Html(Some("<b>hi</b>".into()))),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    let events = js_events(&mut c);
+    let [(2, EventKind::Error, EventPayload::Map(fields))] = &events[..] else {
+        panic!("expected the refused web view's error: {events:?}");
+    };
+    assert!(
+        fields.iter().any(
+            |(k, v)| *k == "code" && *v == crate::PayloadValue::Str("ERR_ACCESS_DENIED".into())
+        )
+    );
 }
 
 mod components {

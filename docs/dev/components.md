@@ -470,7 +470,10 @@ a method returning `()` gives `void`, with no reply (JS calls it and moves on, a
 one returning `Result<(), E>` gives `Promise<void>` (rejected with the `Err`'s message: the method runs at the
 commit, after the JS call returned, so it cannot throw); one returning a value gives `Promise<T>` (a wrong argument
 rejects it). Promises settle from the core's events (`JsEvent::Reply`, the boxed value converted then) in the same
-frame's commit rounds. Rust calls the methods directly: `ComponentRef::api::<CounterApi>()`.
+frame's commit rounds. A command (a method returning `()`) given an id, a key or an index the component does not have
+(`DockArea.selectTab`, `DiffView.goToHunk`, `Editor.fold`, `DataTable.scrollToRow`, ...) does nothing and logs a
+`log::warn!` with the method and the value: it runs at the commit, so it cannot throw, and a silent no-op would hide
+the app's bug. Rust calls the methods directly: `ComponentRef::api::<CounterApi>()`.
 
 ## Modules
 

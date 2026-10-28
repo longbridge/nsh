@@ -192,8 +192,31 @@ release (item 3 of the API review); where code differs from one, the rule wins a
 - What a function returns is an object, never a tuple (beside `split`'s, Solid's) or a bare value that may need a second field
   (`AlertDialog.show` resolves `{ action }`, an animation `{ finished }`). A yes / no question returns a boolean
   (`hasText()`, `canUndo()`).
-- A failure rejects (or throws) with the error, never resolves `false` or another sentinel (`Image.prefetch` and
-  `RichEditor.setDocJson` as `Image.getSize` and `fetch`; decided by the user, 2026-10-27).
+- **Failures** of what JS calls (decided by the user, 2026-10-27 and 2026-10-28, items 3 and 5 of the API review):
+  - A failure rejects (or throws) with the error, never resolves `false` or another sentinel (`Image.prefetch` and
+    `RichEditor.setDocJson` as `Image.getSize` and `fetch`).
+  - A function or method returning a promise never throws: every failure rejects, a wrong argument, a grant, a quota
+    and I/O alike (Node's `fs/promises` and the web's `async` functions do so). A synchronous one throws a
+    `TypeError` or `RangeError` for a wrong use (a bug, which needs no code), and other failures with a code.
+  - A failure the app can handle carries a stable `code`; the message is for people and may change. The codes
+    (`nsh_core::element::codes`): `ERR_ACCESS_DENIED` (the capabilities do not grant it: Node's permission model's,
+    an `Error` with `permission`, the capability's key in nsh.json, and `resource`, the path, URL or name asked for;
+    `JsError::access_denied`; `fetch`'s is the web's `TypeError` with the same fields),
+    `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (Node's), `ERR_NSH_QUOTA_EXCEEDED` (a runtime quota: calls waiting at
+    once, sockets, storage), `ETIMEDOUT`, `ERR_NSH_HOST_ERROR` (the embedding app answered `host.call` with an
+    error), and Node's codes for I/O (`ENOENT`, `EACCES`:
+    the OS refused, never NSH's capabilities) and its own (`ERR_FS_FILE_TOO_LARGE`, `ERR_OUT_OF_RANGE`). Never
+    `EACCES` or a code-less message for a capability denial. `nsh/test`'s steps fail with codes of their own
+    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`).
+  - Never a sentinel (`false`, `-1`, `""`, `[]`) or silence for a failure: the clipboard and the picker reject when
+    not granted. `null` stays an answer to a query with nothing there (`groupOf`, `posAtCoords` over nothing,
+    `Storage.getItem` of an absent key, `ViewRef.measure()` of a view not in the tree), and a cancel resolves empty.
+    `host.post` is fire-and-forget, as an event is: with no embedding app it is dropped.
+  - It is the rule of what JS calls: Rust's own API (`clipboard_string`, `pick_images`, `open_url`) answers a
+    refusal as it answers a cancel, as GPUI's do.
+  - A command that runs at the commit (a component's or ref's method with no result: `DockArea.selectTab`,
+    `Diff.goToHunk`) cannot throw: given an unknown id or an index out of range it does nothing and logs a warning;
+    its type stays.
 - An identifier the app matches on is the app's and required, never derived from what is shown
   (`AlertDialogAction.id`: a label changes with the app's language; decided by the user, 2026-10-27).
 - Each element has a ref type of its own (`InputRef`, `ScrollRef`, `ListRef`, `WebViewRef`, `VideoRef`,

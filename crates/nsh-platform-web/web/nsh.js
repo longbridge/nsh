@@ -4684,7 +4684,7 @@ class Player {
       return value;
     };
     const execute = async () => {
-      if (!navigator.storage?.getDirectory) throw error("ENOTSUP", "This browser does not provide Origin Private File System storage");
+      if (!navigator.storage?.getDirectory) throw error("ERR_FEATURE_UNAVAILABLE_ON_PLATFORM", "This browser does not provide Origin Private File System storage");
       const origin = await navigator.storage.getDirectory();
       // Hashing makes arbitrary app IDs safe as a single OPFS directory name.
       const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(request.namespace));

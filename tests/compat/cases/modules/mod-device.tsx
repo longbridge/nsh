@@ -1,8 +1,9 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/device`
 // as the headless runtime reports it (iOS, a phone, 1 pixel per point, the
 // script's viewport), the color scheme an app sets and `openUrl`: a promise
-// for a URL it opens (the headless runtime answers none), a `TypeError` for
-// one it never opens. Its script checks each.
+// for a URL it opens (the headless runtime answers none), one rejected with
+// a `TypeError` for a URL it never opens (it never throws). Its script
+// checks each.
 import { Text, View, signal } from "nsh";
 import { colorScheme, fontScale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 
@@ -31,13 +32,12 @@ function App() {
         testID="open"
         onPress={() => {
           const pending = openUrl("https://example.com/docs?page=1");
-          let refused = "none";
+          opened.set(`${typeof pending.then}, refused pending`);
           try {
-            openUrl("javascript:alert(1)");
+            openUrl("javascript:alert(1)").catch((e: Error) => opened.set(`${typeof pending.then}, refused ${e.name}`));
           } catch (e) {
-            refused = (e as Error).name;
+            opened.set(`${typeof pending.then}, threw ${(e as Error).name}`);
           }
-          opened.set(`${typeof pending.then}, refused ${refused}`);
         }}
       >
         <Text>Open a link</Text>

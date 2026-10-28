@@ -397,8 +397,16 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
     `MouseEvent { position, pagePosition, modifiers, pressedButton }`; `onMouseMove` fires with or without a button
     down. State styles keep CSS's names (`hover:`, `hoverStyle`).
   - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
-    animations → `{ finished }`). Failure rejects (or throws) with the error, never resolves `false` (`Image.prefetch`,
-    `getSize`, `fetch`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
+    animations → `{ finished }`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
+  - Failures (of what JS calls): a function returning a promise never throws, every failure rejects (arguments,
+    grants, quotas, I/O, as Node's `fs/promises`); a synchronous one throws a `TypeError` / `RangeError` for a wrong
+    use. A failure the app can handle carries a stable `code` (`nsh_core::element::codes`: `ERR_ACCESS_DENIED` with
+    `permission` and `resource` for what the capabilities do not grant, an `Error` (`fetch`'s keeps the web's
+    `TypeError`), `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, `ERR_NSH_QUOTA_EXCEEDED`, `ETIMEDOUT`, `ERR_NSH_HOST_ERROR`,
+    Node's errno codes for I/O; `nsh/test`'s own `ERR_NSH_TEST_*`); messages are not API. Never a sentinel
+    (`false`, `-1`, `""`, `[]`) or silence for a failure; `null` stays an answer ("nothing there"), a cancel resolves
+    empty. A command that runs at the commit (a component's or ref's method) cannot throw: given an unknown id or
+    index it does nothing and logs a warning.
   - Methods whose parameters may grow take their options as one object (`net.connect({ host, port })`,
     `Window.setTitleBar({ style, height })`); parameters the user judged will not grow stay positional
     (`setSelection(start, end?)`, `seek(seconds)`, `DockArea.addPanel(panel, placement?, size?)`,

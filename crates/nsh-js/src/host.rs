@@ -1081,6 +1081,22 @@ impl Host {
         });
     }
 
+    /// Fails request `id`, which the app's capabilities do not grant:
+    /// `message` says why, `url` is the URL refused (the request's, or a
+    /// redirect's). `fetch` rejects with a `TypeError` whose `code` is
+    /// `ERR_ACCESS_DENIED`, `permission` `"network"` and `resource` `url`.
+    pub fn fetch_refused(&self, id: RequestId, message: &str, url: &str) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
+                let result = crate::web::fetch_refused(raw, id, message, url)
+                    .map_err(|_| rquickjs::Error::Exception);
+                self.report(&cx, result);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// The number of live JS objects (diagnostics: leak checks).
     pub fn object_count(&self) -> i64 {
         self.rt

@@ -40,7 +40,7 @@ expect Alert: pending
 tap text:Sheet
 expect Sheet: pending
 tap text:Empty
-expect Empty: rejected for actions
+expect Empty: rejected TypeError
 wait 300
 expect Alert: pending
 expect Sheet: pending
@@ -2775,6 +2775,7 @@ expect Items: true true
 expect Takeover: true 1 ba
 expect Empty: true
 expect Page: null null ab
+expect Positions: paragraph true RangeError RangeError RangeError RangeError TypeError TypeError
 expect Error: thrown
 expect Keys: none
 # The `revision` listener hears the changes in JS's next turn.

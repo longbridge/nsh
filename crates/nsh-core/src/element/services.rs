@@ -148,7 +148,7 @@ pub(crate) fn pick_images(
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> (Answer<Result<crate::JsonValue, String>>, Action) {
+) -> (Answer<Result<crate::JsonValue, super::JsError>>, Action) {
     let (answer, slot) = Answer::new();
     (
         answer,

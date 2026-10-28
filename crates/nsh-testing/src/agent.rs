@@ -1454,10 +1454,7 @@ impl Agent {
         let rendered = self.scene.activity()?.batches > 0;
         self.check()?;
         if !rendered {
-            return Err(format!(
-                "the app rendered nothing in {} s",
-                timeout.as_secs()
-            ));
+            return Err(crate::failure::rendered_nothing(timeout));
         }
         self.settled()
     }
@@ -1467,7 +1464,8 @@ impl Agent {
         match pick {
             Pick::One(id) => Ok(id),
             Pick::None => Err(format!(
-                "no {what} matches `{selector}`; {}",
+                "{}; {}",
+                crate::failure::not_found(what, selector),
                 self.on_screen()
             )),
             Pick::Many(n) => Err(format!(
@@ -1475,8 +1473,8 @@ impl Agent {
                  a view around it (`id:list >> {selector}`)"
             )),
             Pick::Disabled => Err(format!(
-                "`{selector}` {}; {}",
-                crate::screen::disabled(what),
+                "{}; {}",
+                crate::failure::disabled(selector, what),
                 self.on_screen()
             )),
         }
@@ -1841,8 +1839,8 @@ impl Agent {
             if left.is_zero() {
                 let what = if gone { "gone" } else { "showing" };
                 return Err(format!(
-                    "`{selector}` {what} never happened in {} ms; {}",
-                    timeout.as_millis(),
+                    "{}; {}",
+                    crate::failure::never_happened(&format!("`{selector}` {what}"), timeout),
                     self.on_screen()
                 ));
             }

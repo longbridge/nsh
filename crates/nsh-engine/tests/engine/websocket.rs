@@ -1,7 +1,8 @@
 //! The `websocket` module through an engine: its `WebSocket.connect` is the
 //! runtime's Rust registry (its JS face and declarations come from its
-//! spec); its checks throw in the call, the handshake is a core task and a
-//! task of each connection drives its socket.
+//! spec); its checks run in the call, which rejects at once, the
+//! handshake is a core task and a task of each connection drives its
+//! socket.
 
 use std::{
     net::TcpListener,
@@ -114,20 +115,15 @@ fn a_connection_round_trips_text_and_bytes_with_its_headers() {
   if (Object.keys(websocket).join(",") !== "WebSocket,WebSocketConnection" || typeof Client.connect !== "function") throw Error("module exports " + Object.keys(websocket));
   const socket = await Client.connect("ws://{address}/", {{ headers: {{ "X-Shell-Test": "yes" }} }});
   const pending = socket.read();
-  let duplicate = false;
-  try {{ socket.read(); }} catch (e) {{ duplicate = e instanceof TypeError && e.message === "WebSocket.read() already has an outstanding read"; }}
-  if (!duplicate) throw Error("a second read throws in the call");
+  const refused = (p) => p.then(() => "done", (e) => `${{e.constructor.name}}:${{e.code}}`);
+  if (await refused(socket.read()) !== "TypeError:undefined") throw Error("a second read rejects");
   await socket.write("shell");
   if (await pending !== "shell") throw Error("text round trip");
   await socket.write(new Uint8Array([3, 7]));
   const bytes = await socket.read();
   if (!(bytes instanceof Uint8Array) || bytes.join(",") !== "3,7") throw Error("binary round trip");
-  let invalid = false;
-  try {{ socket.write(42); }} catch (e) {{ invalid = e instanceof TypeError; }}
-  if (!invalid) throw Error("a number throws in the call");
-  let range = false;
-  try {{ socket.write("x".repeat(8 * 1024 * 1024 + 1)); }} catch (e) {{ range = e instanceof RangeError; }}
-  if (!range) throw Error("the size limit throws in the call");
+  if (await refused(socket.write(42)) !== "TypeError:undefined") throw Error("a number rejects");
+  if (await refused(socket.write("x".repeat(8 * 1024 * 1024 + 1))) !== "RangeError:ERR_OUT_OF_RANGE") throw Error("the size limit rejects");
   await socket.close();
   report("ok");
 }})().catch((e) => report(String(e)));"#
@@ -139,38 +135,45 @@ fn a_connection_round_trips_text_and_bytes_with_its_headers() {
 }
 
 #[test]
-fn bad_urls_options_and_grants_throw_in_the_call() {
+fn bad_urls_options_and_grants_reject() {
     let (_engine, rx) = start(
-        r#"const threw = [];
-for (const options of [42, { protocols: ["chat"] }, { headers: 42 }, { headers: { Authorization: "secret" } },
-    { headers: { Cookie: "secret" } }, { headers: { "Sec-WebSocket-Key": "evil" } }, { headers: { "x-test": 1 } }]) {
-  try { Client.connect("ws://127.0.0.1:9/", options); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
-}
-try { Client.connect("https://127.0.0.1/"); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
-for (const url of ["ws://user:secret@127.0.0.1:9/", "ws://127.0.0.1:9/#part"]) {
-  try { Client.connect(url); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError && /credentials/.test(e.message)); }
-}
-try { Client.connect("ws://example.com/"); threw.push("connected"); } catch (e) {
-  threw.push(e instanceof TypeError && /capabilities.network.http/.test(e.message));
-}
-report(threw.join(" "));"#,
+        r#"(async () => {
+  // A function returning a promise never throws: each call rejects.
+  const refused = (url, options) => {
+    let promise;
+    try { promise = Client.connect(url, options); } catch { return "threw"; }
+    return promise.then(() => "connected", (e) => e instanceof TypeError ? "TypeError" : `${e.code} ${e.permission} ${e.resource}`);
+  };
+  const results = [];
+  for (const options of [42, { protocols: ["chat"] }, { headers: 42 }, { headers: { Authorization: "secret" } },
+      { headers: { Cookie: "secret" } }, { headers: { "Sec-WebSocket-Key": "evil" } }, { headers: { "x-test": 1 } }]) {
+    results.push(await refused("ws://127.0.0.1:9/", options));
+  }
+  results.push(await refused("https://127.0.0.1/"));
+  for (const url of ["ws://user:secret@127.0.0.1:9/", "ws://127.0.0.1:9/#part"]) results.push(await refused(url));
+  results.push(await refused("ws://example.com/"));
+  report(results.join("|"));
+})().catch((e) => report(String(e)));"#,
         LOOPBACK,
     );
     assert_eq!(
         shown(&rx, "done"),
-        "done true true true true true true true true true true true"
+        "done TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|TypeError|\
+         TypeError|TypeError|ERR_ACCESS_DENIED network ws://example.com/"
     );
 }
 
 #[test]
 fn a_socket_grant_allows_no_websocket() {
     let (_engine, rx) = start(
-        r#"try { Client.connect("ws://127.0.0.1:9/"); report("connected"); } catch (e) {
-  report(`${e instanceof TypeError} ${/capabilities.network.http/.test(e.message)}`);
-}"#,
+        r#"Client.connect("ws://127.0.0.1:9/").then(() => report("connected"), (e) =>
+  report(`${e.code} ${e.permission} ${e.resource}`));"#,
         r#"{"network":{"sockets":["127.0.0.1:9"]}}"#,
     );
-    assert_eq!(shown(&rx, "done"), "done true true");
+    assert_eq!(
+        shown(&rx, "done"),
+        "done ERR_ACCESS_DENIED network ws://127.0.0.1:9/"
+    );
 }
 
 #[test]
@@ -184,10 +187,12 @@ fn both_websocket_apis_share_the_vm_cap() {
 for (let i = 0; i < 16; i++) open.push(new WebSocket("ws://{address}/"));
 for (let i = 0; i < 16; i++) open.push(Client.connect("ws://{address}/").catch(() => {{}}));
 globalThis.keep = open;
-const capped = [() => new WebSocket("ws://{address}/"), () => Client.connect("ws://{address}/")].map((connect) => {{
-  try {{ connect(); return false; }} catch (e) {{ return e instanceof RangeError && /At most 32/.test(e.message); }}
-}});
-report(capped.join(" "));"#
+// The constructor throws, as it does for a used-up quota; the module's
+// function rejects.
+let thrown = false;
+try {{ new WebSocket("ws://{address}/"); }} catch (e) {{ thrown = e.code === "ERR_NSH_QUOTA_EXCEEDED"; }}
+Client.connect("ws://{address}/").then(() => false, (e) => e.code === "ERR_NSH_QUOTA_EXCEEDED")
+  .then((rejected) => report(`${{thrown}} ${{rejected}}`));"#
         ),
         LOOPBACK,
     );
@@ -248,11 +253,11 @@ fn a_handshake_redirect_fails_without_contacting_its_target() {
     });
     let (_engine, rx) = start(
         &format!(
-            r#"Client.connect("ws://{address}/redirect").then(() => report("opened"), () => report("refused"));"#
+            r#"Client.connect("ws://{address}/redirect").then(() => report("opened"), (e) => report(`${{e.code}} ${{e.status}}`));"#
         ),
         LOOPBACK,
     );
-    assert_eq!(shown(&rx, "done"), "done refused");
+    assert_eq!(shown(&rx, "done"), "done EPROTO 302");
     server.join().unwrap();
     assert_eq!(
         forbidden.accept().unwrap_err().kind(),
@@ -282,18 +287,18 @@ fn messages_that_came_before_the_peer_closed_are_still_read() {
   await new Promise((resolve) => setTimeout(resolve, 300));
   const first = await socket.read();
   const second = await socket.read();
-  const last = await socket.read().then((m) => `read ${{m}}`, (e) => e.message);
+  const last = await socket.read().then((m) => `read ${{m}}`, (e) => e.code);
   report(`${{first}}|${{second}}|${{last}}`);
 }})().catch((e) => report(String(e)));"#
         ),
         LOOPBACK,
     );
-    assert_eq!(shown(&rx, "done"), "done one|two|WebSocket closed by peer");
+    assert_eq!(shown(&rx, "done"), "done one|two|ERR_SOCKET_CLOSED");
     server.join().unwrap();
 }
 
 #[test]
-fn pending_writes_are_capped_in_the_call() {
+fn pending_writes_are_capped() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
@@ -308,8 +313,7 @@ fn pending_writes_are_capped_in_the_call() {
   const socket = await Client.connect("ws://{address}/");
   const chunk = "x".repeat(5 * 1024 * 1024);
   const first = socket.write(chunk);
-  let capped = false;
-  try {{ socket.write(chunk); }} catch (e) {{ capped = e instanceof RangeError && e.message.includes("8388608 byte limit"); }}
+  const capped = await socket.write(chunk).then(() => false, (e) => e.code === "ERR_NSH_QUOTA_EXCEEDED");
   await first;
   // Sent: its bytes no longer count.
   await socket.write(chunk);
@@ -346,7 +350,7 @@ fn too_much_unread_data_closes_the_connection_and_keeps_what_fit() {
   await new Promise((r) => setTimeout(r, 300));
   let read = 0;
   let ended = "";
-  try {{ for (;;) {{ await socket.read(); read++; }} }} catch (e) {{ ended = e.message; }}
+  try {{ for (;;) {{ await socket.read(); read++; }} }} catch (e) {{ ended = e.code; }}
   report(`${{read}} ${{ended}}`);
 }})().catch((e) => report(String(e)));"#
             ),
@@ -354,10 +358,7 @@ fn too_much_unread_data_closes_the_connection_and_keeps_what_fit() {
         );
         assert_eq!(
             shown(&rx, "done"),
-            format!(
-                "done {} WebSocket closed: more than 8 messages or 8388608 bytes arrived unread",
-                count - 1
-            )
+            format!("done {} ERR_NSH_QUOTA_EXCEEDED", count - 1)
         );
         server.join().unwrap();
     }

@@ -959,6 +959,53 @@ fn runtime_modules() {
     assert_eq!(focused, Some(note));
 }
 
+const IMAGE_DENIED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Image } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    () => "ok",
+    (e) => [e.name, e.code, e.permission, e.resource].join(" "),
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Image.getSize("https://evil.io/a.png")),
+    settled(Image.prefetch("https://evil.io/b.png")),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn image_loads_stay_within_the_capabilities() {
+    let (_engine, rx) = start_with(
+        IMAGE_DENIED,
+        Environment::default(),
+        Some(r#"{ "network": { "hosts": ["example.com"] } }"#),
+        None,
+    );
+    let wanted = "Error ERR_ACCESS_DENIED network https://evil.io/a.png | \
+                  Error ERR_ACCESS_DENIED network https://evil.io/b.png";
+    let mut asked = false;
+    let batches = until(&rx, |batch| {
+        asked |= batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::ImageInfo { .. },
+                    ..
+                }
+            )
+        });
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)));
+    assert!(!asked, "a refused image load reached the platform");
+}
+
 const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
 
 const shown = signal("waiting");
@@ -1111,12 +1158,61 @@ fn the_clipboard_round_trips_through_the_platform() {
     );
 }
 
+/// Every clipboard function, as each settles: `ok` or the error's class,
+/// `code`, `permission` and `resource`.
+const CLIPBOARD_DENIED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    () => "ok",
+    (e) => [e.name, e.code, e.permission, JSON.stringify(e.resource)].join(" "),
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Clipboard.writeText("copied")),
+    settled(Clipboard.readText()),
+    settled(Clipboard.hasText()),
+    settled(Clipboard.writeImage("data:image/png;base64,aGk=")),
+    settled(Clipboard.readImage()),
+    settled(Clipboard.hasImage()),
+    settled(Clipboard.readFiles()),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
 #[test]
 fn the_clipboard_needs_its_capability() {
-    let (engine, rx) = start_with(CLIPBOARD, Environment::default(), Some("{}"), None);
-    // Nothing reaches the platform, and reads find nothing.
-    let commands = serve_clipboard(&engine, &rx, "false false ");
-    assert!(commands.is_empty(), "{commands:?}");
+    let (_engine, rx) = start_with(CLIPBOARD_DENIED, Environment::default(), Some("{}"), None);
+    // Every call rejects, and nothing reaches the platform.
+    let wanted = [r#"Error ERR_ACCESS_DENIED clipboard """#; 7].join(" | ");
+    let mut commands = 0;
+    let batches = until(&rx, |batch| {
+        commands += batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::SetClipboard(_)
+                            | Command::ReadClipboard { .. }
+                            | Command::SetClipboardImage(_)
+                            | Command::ReadClipboardImage { .. }
+                            | Command::ReadClipboardFiles { .. },
+                    }
+                )
+            })
+            .count();
+        shows(batch, &wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, &wanted)), "{wanted}");
+    assert_eq!(commands, 0, "a refused call reached the platform");
     let (engine, rx) = start_with(
         CLIPBOARD,
         Environment::default(),
@@ -1274,6 +1370,72 @@ fn picked_images_reach_js_as_files() {
         asked.max_dimension,
         Some(nsh_core::geometry::DevicePixels(1024))
     );
+}
+
+const PICK: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(() => {
+  Picker.pickImages().then(
+    (images) => shown.set(`picked ${images.length}`),
+    (e) => shown.set(`rejected ${e.name} ${e.code} ${e.permission}`),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn the_picker_needs_its_capability() {
+    let (_engine, rx) = start_with(PICK, Environment::default(), Some("{}"), None);
+    let wanted = "rejected Error ERR_ACCESS_DENIED picker";
+    let mut asked = false;
+    let batches = until(&rx, |batch| {
+        asked |= batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::PickImages { .. },
+                    ..
+                }
+            )
+        });
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)));
+    assert!(!asked, "a refused pick reached the platform");
+}
+
+#[test]
+fn a_cancelled_pick_resolves_empty() {
+    let (engine, rx) = start_with(
+        PICK,
+        Environment::default(),
+        Some(r#"{ "picker": true }"#),
+        None,
+    );
+    let control = engine.control();
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickImages { id, .. },
+            } = item
+            {
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: Vec::new(),
+                    },
+                );
+            }
+        }
+        shows(batch, "picked 0")
+    });
+    assert!(batches.iter().any(|b| shows(b, "picked 0")));
 }
 
 const INPUT_TRAITS: &str = r##"import { mount, Text } from "nsh";

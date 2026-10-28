@@ -19,6 +19,7 @@ No release is recorded yet, 0.3.0 included: the first one recorded starts the co
 | Host element props, events, style keys and their values | `crates/nsh-core/src/js/` (`Prop`, `host::EVENTS`, `style_keys!`) | bundles pass them by name; a prop renamed is silently ignored, so the app runs wrong |
 | Tailwind utilities and variants | `crates/nsh-core/src/tailwind/` | resolved at run time from the class strings in the bundle |
 | Behavior: defaults, units, event payloads, the order of callbacks | everywhere | an app relies on what it saw when it was written |
+| Failures: whether a call throws or rejects, the error's class and `code` (and `permission` / `resource` of `ERR_ACCESS_DENIED`) | `nsh_core::element::codes`, each call (`docs/dev/api-naming.md` "Failures") | an app catches and branches on them; error messages are for people and may change, so no app may depend on their text |
 | The TypeScript declarations (`.nsh/types`) | generated (`crates/nsh-js/src/declarations.rs`) | an old app's source must still type-check and build when its team fixes a bug |
 | The package format (`.nshpkg`) and its signatures | `crates/nsh-package` | a package signed for an earlier release still verifies; it carries its JS source, which runs when its bytecode is not this runtime's (`BYTECODE_VERSION` may change freely) |
 

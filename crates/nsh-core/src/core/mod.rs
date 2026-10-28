@@ -1992,20 +1992,15 @@ impl<M: TextEngine> Core<M> {
                 Command::HostCall { id: call, name, .. }
                     if !crate::access::valid_host_name(name) =>
                 {
-                    let message = format!(
-                        "nsh/host: invalid function name {name:?} ({})",
-                        crate::access::HOST_NAME_CHARS
-                    );
-                    self.answer_host(*call, Err(message.clone()));
-                    self.deny(message);
+                    let error = crate::host_channel::invalid_name(name);
+                    self.deny(error.message().to_owned());
+                    self.answer_host(*call, Err(error));
                     continue;
                 }
                 Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
-                    let message = format!(
-                        "nsh/host: `{name}` is not granted: add it to capabilities.host in nsh.json"
-                    );
-                    self.answer_host(*call, Err(message.clone()));
-                    self.deny(message);
+                    let error = crate::host_channel::not_granted(name);
+                    self.deny(error.message().to_owned());
+                    self.answer_host(*call, Err(error));
                     continue;
                 }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
@@ -2776,8 +2771,9 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `prop` with what the app may not reach removed: a refused image
-    /// fails (`onError`), a refused video or web view source shows nothing.
+    /// `prop` with what the app may not reach removed: a refused image,
+    /// video or web view source shows nothing and fails (`onError` with
+    /// `code` `ERR_ACCESS_DENIED`).
     fn check_prop(&mut self, key: Key, prop: Prop) -> Prop {
         if self.access.is_unrestricted() {
             return prop;
@@ -2786,16 +2782,28 @@ impl<M: TextEngine> Core<M> {
         let (id, kind) = (node.id, node.kind);
         // Always reported: the `onError` listener may be set after the
         // source (JS finds the handler when the event is delivered).
-        let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
-            let message = not_granted(what, uri, capability);
+        let report = |core: &mut Self, message: String| {
             core.events.push(crate::element::JsEvent::Event(
                 id,
                 EventKind::Error,
-                EventPayload::Error {
-                    message: message.clone(),
-                },
+                EventPayload::Map(vec![
+                    ("message", PayloadValue::Str(message.clone())),
+                    (
+                        "code",
+                        PayloadValue::Str(crate::element::codes::ACCESS_DENIED.into()),
+                    ),
+                ]),
             ));
             core.deny(message);
+        };
+        let refuse = |core: &mut Self, what: &str, uri: &str, capability: &str| {
+            report(core, not_granted(what, uri, capability));
+        };
+        let no_webviews = |core: &mut Self| {
+            report(
+                core,
+                "web views are not granted: add `webview` to capabilities in nsh.json".into(),
+            );
         };
         match prop {
             Prop::Source(Some(source)) if !self.access.allows_media(&source.uri) => {
@@ -2823,9 +2831,7 @@ impl<M: TextEngine> Core<M> {
             Prop::Native(NativeProp::Html(Some(_)))
                 if kind == Kind::WebView && !self.access.allows_webviews() =>
             {
-                self.deny(
-                    "web views are not granted: add `webview` to capabilities in nsh.json".into(),
-                );
+                no_webviews(self);
                 Prop::Native(NativeProp::Html(None))
             }
             Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
@@ -2843,9 +2849,7 @@ impl<M: TextEngine> Core<M> {
             Prop::Native(NativeProp::Source(crate::WebSource::Html { .. }))
                 if kind == Kind::WebView && !self.access.allows_webviews() =>
             {
-                self.deny(
-                    "web views are not granted: add `webview` to capabilities in nsh.json".into(),
-                );
+                no_webviews(self);
                 Prop::Native(NativeProp::Source(crate::WebSource::None))
             }
             prop => prop,

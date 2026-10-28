@@ -878,7 +878,10 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   `call(name, args)` returns the result or a promise of it. `Command::HostCall` is the command `hostCall` (`encode.rs`;
   the id written whole, not rounded as `num` would), and `nsh.js` `hostCall` answers every one with `onHost`
   `{ type: "reply", id, ok, value?, error? }` (`EventPayload::Json`, `nsh_event`): `ok: false` with the error's message when the page has no host, `call` throws or
-  its promise rejects, or the result is not JSON, since the app's call waits until it is answered. The page sends
+  its promise rejects, or the result is not JSON, since the app's call waits until it is answered; the app's call
+  rejects with that message and `code` `ERR_NSH_HOST_ERROR` (`nsh_core::host_channel::host_error`). A page without a
+  host sets the environment's `host` to `false`, so the core rejects the calls first, with
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. The page sends
   events with `player.hostEvent(event, payload)` (`onHost` `{ type: "event", event, payload }`; one `EventKind` for
   both keeps the kinds within `EventMask`'s 64 bits): the payload is serialized at once (a payload that is
   not JSON throws to the page, not inside a deferred engine call where it would drop the calls queued after it), and

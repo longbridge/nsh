@@ -1,6 +1,6 @@
 //! `openUrl` of `nsh/device`: the platform opens what the embedding app's
 //! URL handler does not take, what the handler takes never reaches the
-//! platform, and refused URLs and capabilities throw; a `TextView` with
+//! platform, and refused URLs and capabilities reject; a `TextView` with
 //! `links="open"` opens its links.
 
 use std::time::Duration;
@@ -109,11 +109,7 @@ const say = (s: string) => log.set([...log(), s]);
 openUrl("https://example.com/a?b=1").then(({ opened }) => say(`web ${opened}`));
 openUrl("mailto:ada@example.com").then(({ opened }) => say(`mail ${opened}`));
 for (const url of ["javascript:alert(1)", "example.com", "file:///etc/passwd"]) {
-  try {
-    openUrl(url);
-  } catch (e) {
-    say(`refused ${(e as Error).name}`);
-  }
+  openUrl(url).catch((e: Error) => say(`refused ${e.name}`));
 }
 
 mount(() => <Text>{log().join(" | ")}</Text>);
@@ -222,11 +218,9 @@ const GUARDED: &str = r#"import { mount, signal, Text } from "nsh";
 import { openUrl } from "nsh";
 
 const log = signal("start");
-try {
-  openUrl("https://example.com");
-} catch (e) {
-  log.set(`denied ${(e as Error).name} ${(e as Error).message}`);
-}
+openUrl("https://example.com").catch((e: Error & { code?: string; permission?: string; resource?: string }) =>
+  log.set(`denied ${e.name} ${e.code} ${e.permission} ${e.resource} ${e.message}`),
+);
 mount(() => <Text>{log()}</Text>);
 "#;
 
@@ -237,7 +231,12 @@ fn opening_urls_is_a_capability() {
         Capabilities::from_json(&serde_json::json!({ "network": { "hosts": ["*"] } })).unwrap(),
     );
     let (engine, rx) = start(app, &HostChannel::new());
-    let (text, urls) = run(&engine, &rx, true, &["denied TypeError"]);
+    let (text, urls) = run(
+        &engine,
+        &rx,
+        true,
+        &["denied Error ERR_ACCESS_DENIED openUrl https://example.com "],
+    );
     assert!(text.contains("\"openUrl\": true"), "{text}");
     assert!(urls.is_empty());
     drop(engine);
