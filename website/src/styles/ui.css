@@ -75,11 +75,12 @@
   background-image: var(--nsh-gallery-finish-light-background-image);
   @apply shadow-(--nsh-gallery-finish-light-box-shadow);
 }
+/* Flat on the surface it sits on: the site's fields are never sunken wells. */
 @utility finish-field {
   border-color: var(--nsh-gallery-input);
-  background-color: var(--nsh-gallery-field);
+  background-color: var(--nsh-gallery-card);
   background-image: none;
-  @apply shadow-(--nsh-gallery-finish-field-box-shadow);
+  box-shadow: none;
 }
 @utility finish-track {
   border-color: var(--nsh-gallery-finish-track-border-color);

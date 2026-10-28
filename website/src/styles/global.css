@@ -411,8 +411,7 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   /* Opens the search dialog; it looks like the Input it leads to (ui.css). */
   border: 1px solid var(--nsh-gallery-input);
   border-radius: var(--radius-control);
-  background: var(--nsh-gallery-field);
-  box-shadow: var(--nsh-gallery-finish-field-box-shadow);
+  background: var(--nsh-gallery-card);
   color: var(--faint);
   font-size: 0.8125rem;
   cursor: pointer;
@@ -504,8 +503,8 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   --pagefind-ui-font: inherit;
 }
 /* Pagefind's field, as the site's Input (ui.css). */
-#search-ui .pagefind-ui__search-input { border: 1px solid var(--nsh-gallery-input); background: var(--nsh-gallery-field); box-shadow: var(--nsh-gallery-finish-field-box-shadow); color: var(--foreground); font-size: 0.95rem; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
-#search-ui .pagefind-ui__search-input:focus-visible { border-color: var(--ring); box-shadow: var(--nsh-gallery-finish-field-box-shadow), 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
+#search-ui .pagefind-ui__search-input { border: 1px solid var(--nsh-gallery-input); background: var(--nsh-gallery-card); color: var(--foreground); font-size: 0.95rem; outline: none; transition: border-color 140ms ease, box-shadow 140ms ease; }
+#search-ui .pagefind-ui__search-input:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
 #search-ui .pagefind-ui__search-input::placeholder { color: var(--faint); opacity: 1; }
 #search-ui .pagefind-ui__search-clear { background: transparent; color: var(--muted-foreground); }
 #search-ui .pagefind-ui__result { border-top: 1px solid var(--line); }

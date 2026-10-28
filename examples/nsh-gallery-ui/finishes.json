@@ -11,22 +11,22 @@
       "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.04)"
     },
     "raised": {
-      "backgroundColor": "#3c3d41",
-      "backgroundImage": "linear-gradient(180deg, #3e3f43 0%, #3a3b3f 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
-      "borderColor": "#2a2b2f"
+      "backgroundColor": "#3a3b3f",
+      "backgroundImage": "linear-gradient(180deg, #3a3b3f 0%, #3a3b3f 100%)",
+      "boxShadow": "0 1px 1px rgba(0,0,0,0.2)",
+      "borderColor": "#4a4b50"
     },
     "hover": {
-      "backgroundColor": "#414246",
-      "backgroundImage": "linear-gradient(180deg, #434448 0%, #3f4044 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
-      "borderColor": "#2a2b2f"
+      "backgroundColor": "#3f4044",
+      "backgroundImage": "linear-gradient(180deg, #3f4044 0%, #3f4044 100%)",
+      "boxShadow": "0 1px 1px rgba(0,0,0,0.2)",
+      "borderColor": "#505156"
     },
     "pressed": {
       "backgroundColor": "#333438",
       "backgroundImage": "linear-gradient(180deg, #333438 0%, #333438 100%)",
       "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.18)",
-      "borderColor": "#2a2b2f"
+      "borderColor": "#434449"
     },
     "light": {
       "backgroundColor": "#c4ec6a",
@@ -56,10 +56,10 @@
       "borderColor": "#8a8d93"
     },
     "pill": {
-      "backgroundColor": "#3c3d41",
-      "backgroundImage": "linear-gradient(180deg, #3e3f43 0%, #3a3b3f 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
-      "borderColor": "#2a2b2f"
+      "backgroundColor": "#3a3b3f",
+      "backgroundImage": "linear-gradient(180deg, #3a3b3f 0%, #3a3b3f 100%)",
+      "boxShadow": "0 1px 1px rgba(0,0,0,0.2)",
+      "borderColor": "#4a4b50"
     },
     "chip": {
       "boxShadow": "0 1px 0 rgba(0,0,0,0.3)"
