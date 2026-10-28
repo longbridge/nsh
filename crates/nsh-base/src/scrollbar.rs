@@ -293,9 +293,11 @@ impl Ctl {
             .map_or(0.0, |(view, content, _)| (content - view).max(0.0))
     }
 
-    /// The content overflows the viewport (tracked).
+    /// The content overflows the viewport (tracked), by more than a point:
+    /// a text view laying out its text as it grows may report it a pixel
+    /// taller than itself (GTK's), which is not content to scroll to.
     fn scrolls(self) -> bool {
-        self.range() > 0.5
+        self.range() > 1.0
     }
 
     /// The thumb's length (tracked).
