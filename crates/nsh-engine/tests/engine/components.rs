@@ -6522,3 +6522,216 @@ fn a_base_plot_moves_its_hover_with_the_keys_while_focused() {
     press(&all, "left");
     all.extend(until(&rx, |b| shows(b, "slice 0")));
 }
+
+const BASE_PLOT_REVERSE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Area, Bar, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View style={{ padding: 40, gap: 40 }}>
+      {/* A reversed y: bars hang from the top edge, the area too. */}
+      <Plot testID="down" data={[{ v: 10 }, { v: 30 }]} y="v" xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 40], reverse: true }} style={{ width: 200, height: 80 }}>
+        <Bar />
+        <Area curve="linear" />
+        <Grid y={[10]} />
+        <PlotAxis placement="left" tickValues={[0, 40]} format={(v) => `y${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Bars across from the right edge: a reversed x. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" yScale={{ type: "band" }} xScale={{ type: "linear", domain: [0, 40], reverse: true }} style={{ width: 200, height: 80 }}>
+        <Bar />
+      </Plot>
+      {/* Bands from the right edge. */}
+      <Plot
+        testID="rows"
+        data={[{ v: 1 }, { v: 2 }, { v: 3 }]}
+        y="v"
+        xScale={{ type: "band", reverse: true }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Bar />
+        <Grid x={[0.5]} />
+        <PlotAxis format={(v) => `r${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Points from the right edge, drawing in from there. */}
+      <Plot data={[{ v: 1 }, { v: 2 }]} y="v" xScale={{ type: "point", reverse: true }} appearGeneration={1} motion={{ appear: { duration: 10000 } }} style={{ width: 100, height: 50 }}>
+        <Line curve="linear" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A scale's `reverse` (visx's option, d3's range written backwards;
+/// `gpui-base`'s `BarAlignment::Top` and `Right`): on a reversed linear y
+/// the domain's smallest value is at the top edge, so bars and an area
+/// grow down from it; on a reversed x the first row and the smallest
+/// value are at the right edge, bars across grow leftward from it, and
+/// the marks draw in from there. The grid, the axes' ticks, the hover's
+/// nearest row and the arrow keys follow the scale: Left and Right move
+/// to the row on their side of the screen, Home / End and screen
+/// readers' increment keep the rows' order.
+#[test]
+fn base_plot_reversed_scales_run_from_the_other_edge() {
+    use nsh_core::{
+        keymap::{KeyMatch, Keymap, Keystroke},
+        platform::Os,
+    };
+    let environment = Environment {
+        os: Os::MacOs,
+        ..Environment::default()
+    };
+    let (engine, rx) = start_in(BASE_PLOT_REVERSE, environment);
+    let mut all = until_drawn(&rx, |d| path_points(&d.ops).first() == Some(&(108.0, -8.0)));
+    all.extend(until(&rx, |b| shows(b, "r2")));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [
+        (_, down),
+        (_, area),
+        (_, grid),
+        (_, across),
+        (_, rows),
+        (_, row_grid),
+        (_, line),
+    ] = &marks[..]
+    else {
+        panic!("seven marks: {marks:?}")
+    };
+    // A reversed y (0 to 40 over 80, from the top): bars from 0 at the top
+    // edge down to their values; the area from the top edge to its line.
+    assert_eq!(
+        bar_rects(&down.ops),
+        [[0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 100.0, 60.0]]
+    );
+    assert_eq!(
+        path_points(&area.ops)[..4],
+        [(50.0, 20.0), (150.0, 60.0), (150.0, 0.0), (50.0, 0.0)]
+    );
+    // The grid line at 10, 20 down (on the middle of a device pixel).
+    let at = path_points(&grid.ops);
+    assert!(at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5), "{at:?}");
+    // A reversed x (0 to 40 over 200, from the right): bars across grow
+    // leftward from the right edge.
+    assert_eq!(
+        bar_rects(&across.ops),
+        [[150.0, 0.0, 50.0, 40.0], [50.0, 40.0, 150.0, 40.0]]
+    );
+    // Reversed bands: the first row's at the right edge; the grid line
+    // between the first two bands at 200.
+    let starts = bar_rects(&rows.ops)
+        .iter()
+        .map(|r| (r[0], r[2]))
+        .collect::<Vec<_>>();
+    assert_eq!(starts, [(200.0, 100.0), (100.0, 100.0), (0.0, 100.0)]);
+    let at = path_points(&row_grid.ops);
+    assert!(at.len() == 2 && at.iter().all(|&(x, _)| (x - 200.0).abs() <= 0.5), "{at:?}");
+    // Points from the right edge, revealed from there (the appear's clip
+    // starts past the right edge, by the canvas's bleed).
+    assert_eq!(
+        path_points(&line.ops),
+        [(108.0, -8.0), (108.0, 58.0), (100.0, 50.0), (0.0, 0.0)]
+    );
+
+    // The axes' ticks: the y scale's 0 at the top, its 40 at the bottom;
+    // the rows from the right.
+    let parent_of = |all: &[MountBatch], child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let near = |all: &[MountBatch], text: &str, plot: &str, (x, y): (f32, f32)| {
+        let id = all
+            .iter()
+            .rev()
+            .find_map(|b| text_ids(b, text))
+            .expect(text);
+        let plot = test_view(all, plot);
+        let f = frame_of(all, id).unwrap();
+        let (mut lx, mut ly) = (f.origin.x.0, f.origin.y.0);
+        let mut at = parent_of(all, id);
+        while at != plot {
+            let f = frame_of(all, at).unwrap();
+            lx += f.origin.x.0;
+            ly += f.origin.y.0;
+            at = parent_of(all, at);
+        }
+        assert!(
+            (lx - x).abs() <= 0.5 && (ly - y).abs() <= 0.5,
+            "{text} at ({lx}, {ly}), not ({x}, {y})"
+        );
+    };
+    near(&all, "y0", "down", (-20.0, 0.0));
+    near(&all, "y40", "down", (-20.0, 70.0));
+    near(&all, "r0", "rows", (240.0, 100.0));
+    near(&all, "r1", "rows", (140.0, 100.0));
+    near(&all, "r2", "rows", (40.0, 100.0));
+
+    // The hover: the row nearest to the pointer, the last one at the left.
+    let plot = test_view(&all, "rows");
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            nsh_core::geometry::point(px(60.0), px(50.0)),
+            nsh_core::geometry::point(px(60.0), px(50.0)),
+            Default::default(),
+            None,
+        )),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+
+    // The keys: Right moves right on the screen, to the row before; Left
+    // to the row after; Home to the first row; increment to the next.
+    let keymap = |all: &[MountBatch]| -> Option<std::sync::Arc<Keymap>> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .next_back()
+    };
+    let press = |all: &[MountBatch], key: &str| {
+        let found = match keymap(all) {
+            Some(k) => k.find(Keystroke::parse(key, Os::MacOs).unwrap(), false, false),
+            None => KeyMatch::None,
+        };
+        let KeyMatch::Fire(id) = found else {
+            panic!("{key} is not bound")
+        };
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    engine
+        .control()
+        .dispatch_event(plot, EventKind::Focus, EventPayload::None);
+    all.extend(until(&rx, |b| {
+        b.items.iter().any(|i| matches!(i, MountItem::Keymap(_)))
+    }));
+    press(&all, "right");
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    press(&all, "home");
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    press(&all, "left");
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    engine.control().dispatch_event(
+        plot,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+}

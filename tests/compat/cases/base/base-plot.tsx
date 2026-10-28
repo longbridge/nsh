@@ -29,6 +29,9 @@
 // along a plot's edges.
 // A sparkline's y domain, the extent of its rows, moves to a new one with
 // `motion.update` as rows come.
+// Reversed scales (`reverse`): bars hanging from the top of a reversed
+// linear y scale in bands from the right edge, and bars across from the
+// right edge of a reversed x; the axis's labels and the hover follow.
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 
@@ -138,6 +141,7 @@ function App() {
       </Plot>
       <PieCase />
       <AxisCase />
+      <ReverseCase />
     </View>
   );
 }
@@ -200,6 +204,33 @@ function AxisCase() {
       <PlotAxis placement="left" tickValues={[0, 50, 100]} labelStyle={{ width: 20, height: 10 }} tickStyle={{ width: 4, height: 1 }} lineClass="w-px" />
       <PlotAxis placement="right" labelPlacement="inside" tickValues={[50]} format={(v) => `in${v}`} labelStyle={{ width: 30, height: 10 }} />
     </Plot>
+  );
+}
+
+/** Bars of 20, 10 and 5 hanging from the top of a reversed y scale of 0
+ * to 40, in three bands from the right edge; under it, the bands' texts.
+ * Bars across from the right edge of a reversed x scale of 0 to 20, the
+ * bands from the bottom edge up. */
+function ReverseCase() {
+  const row = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="hanging"
+        data={SALES}
+        xScale={{ type: "band", reverse: true }}
+        yScale={{ type: "linear", domain: [0, 40], reverse: true }}
+        onHoverChange={({ index }) => row.set(index)}
+        style={{ width: 300, height: 80, marginBottom: 20 }}
+      >
+        <Bar value="w" label={(d: Sale) => `h${d.w}`} labelClass="h-[14px] w-[30px]" />
+        <PlotAxis format={(v) => `rev${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Text>{`reversed ${row()}`}</Text>
+      <Plot data={SALES} xScale={{ type: "linear", domain: [0, 20], reverse: true }} yScale={{ type: "band", reverse: true }} style={{ width: 100, height: 60 }}>
+        <Bar value="w" label={(d: Sale) => `l${d.w}`} labelClass="h-[14px] w-[30px]" />
+      </Plot>
+    </View>
   );
 }
 

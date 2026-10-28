@@ -167,14 +167,19 @@ pub struct PlotProps {
     /// rows in order, evenly from the left edge to the right one), `{
     /// type: "linear", domain? }`, or `{ type: "band", … }` (a band per
     /// row, for bars); with a band y scale it defaults to linear, for
-    /// bars across.
+    /// bars across. `reverse: true` runs it from the right edge: the first
+    /// row, or the domain's smallest value, at the right (bars across
+    /// grow leftward from it, `gpui-base`'s `BarAlignment::Right`).
     pub x_scale: Prop<Option<Scale>>,
     /// How the y axis places values: `{ type: "linear", domain? }` (the
     /// default; without a domain, the extent of what the marks draw), the
     /// domain's smallest value at the bottom edge and its largest at the
     /// top one; or `{ type: "band", … }`, a band per row from the top edge
     /// down, for bars across (the x scale then `linear`, its domain the
-    /// extent of the bars' values without one).
+    /// extent of the bars' values without one). `reverse: true` runs it
+    /// the other way: the domain's smallest value at the top edge (bars
+    /// grow down from it, `gpui-base`'s `BarAlignment::Top`), the rows
+    /// from the bottom edge up.
     pub y_scale: Prop<Option<Scale>>,
     /// The plot follows the pointer (`gpui-base`'s `Plot::interactive`;
     /// default true): it reports the row under it and shows the hover's
@@ -430,21 +435,27 @@ impl PlotContext {
     }
 
     /// Records the clip of the appear while it runs (before what a mark
-    /// draws): the marks show from the leading edge to the appear's
+    /// draws): the marks show from the leading edge, where the x scale
+    /// starts (the right one when it is reversed), to the appear's
     /// progress of the plot's width.
     fn clip(&self, p: Painter, bleed: f32) -> Painter {
         if !self.appearing.get() {
             return p;
         }
         let size = self.size.get();
-        let edge = self.appear.progress().mul(size.width.0);
+        let (w, h) = (size.width.0, size.height.0);
+        let shown = self.appear.progress().mul(w);
         // What the mark draws past the plot's edges (`bleed`) is revealed
         // with the rest, from the leading edge.
+        let (lead, edge) = match self.x_map.get().backward() {
+            true => (w + bleed, shown.mul(-1.0).add(w)),
+            false => (-bleed, shown),
+        };
         p.begin_path()
-            .move_to(-bleed, -bleed)
+            .move_to(lead, -bleed)
             .line_to(&edge, -bleed)
-            .line_to(&edge, size.height.0 + bleed)
-            .line_to(-bleed, size.height.0 + bleed)
+            .line_to(&edge, h + bleed)
+            .line_to(lead, h + bleed)
             .close_path()
             .clip()
     }
@@ -492,7 +503,8 @@ impl PlotContext {
 /// the plot on the platform's animator. The keyboard drives the same
 /// hover: the plot is a stop of the focus (the app's `focus:` classes or
 /// `focusStyle` draw its ring), and while it has it Left / Right move to
-/// the row before / after, Home / End to the first / last, Escape clears
+/// the row on that side (the row before / after; the other way round on
+/// a reversed x scale), Home / End to the first / last, Escape clears
 /// it (`keys.rs`). It is one element for screen readers, with the image
 /// role, the app's `accessibilityLabel` and `accessibilityValue`, and
 /// increment / decrement step through the rows. The app's `class` and
@@ -526,17 +538,26 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         })
     };
     let x_map = computed(move || {
-        let range = [0.0, size.get().width.0];
+        let width = size.get().width.0;
         let len = data.with(|rows| rows.len());
         // Bars across a band y axis put their values along x.
         let fallback = match y_scale.get() {
-            Some(Scale::Band(_)) => Scale::Linear { domain: None },
-            _ => Scale::Point,
+            Some(Scale::Band(_)) => Scale::Linear {
+                domain: None,
+                reverse: false,
+            },
+            _ => Scale::Point { reverse: false },
         };
-        match x_scale.get().unwrap_or(fallback) {
-            Scale::Point => AxisMap::Point { len, range },
+        let scale = x_scale.get().unwrap_or(fallback);
+        // Left to right; reversed, from the right edge.
+        let range = match scale.reversed() {
+            true => [width, 0.0],
+            false => [0.0, width],
+        };
+        match scale {
+            Scale::Point { .. } => AxisMap::Point { len, range },
             Scale::Band(band) => AxisMap::Band(Band::new(len, range, band)),
-            Scale::Linear { domain } => {
+            Scale::Linear { domain, .. } => {
                 // The rows' `x`, or the values of bars across the plot.
                 let domain = domain
                     .or_else(|| match x_values.get() {
@@ -556,20 +577,21 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let y_map = computed(move || {
         let height = size.get().height.0;
         let len = data.with(|rows| rows.len());
-        match y_scale.get() {
-            // Rows from the top edge down.
-            Some(Scale::Point) => AxisMap::Point {
-                len,
-                range: [0.0, height],
-            },
-            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, [0.0, height], band)),
+        let scale = y_scale.get();
+        // Rows from the top edge down, values from the bottom edge up;
+        // reversed, the other way.
+        let (down, up) = match scale.is_some_and(|s| s.reversed()) {
+            true => ([height, 0.0], [0.0, height]),
+            false => ([0.0, height], [height, 0.0]),
+        };
+        match scale {
+            Some(Scale::Point { .. }) => AxisMap::Point { len, range: down },
+            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, down, band)),
             Some(Scale::Linear {
                 domain: Some(domain),
-            }) => AxisMap::Linear(Linear::new(domain, [height, 0.0])),
-            _ => AxisMap::Linear(Linear::new(
-                extent_on(Axis::Y).unwrap_or([0.0, 0.0]),
-                [height, 0.0],
-            )),
+                ..
+            }) => AxisMap::Linear(Linear::new(domain, up)),
+            _ => AxisMap::Linear(Linear::new(extent_on(Axis::Y).unwrap_or([0.0, 0.0]), up)),
         }
     });
     let hover_axis = computed(move || match band_axis.get() {
@@ -811,8 +833,16 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         }
         follow(Some(i), None);
     };
+    // Left and Right follow the screen: the rows along a reversed x scale
+    // run right to left (a pie's slices keep the rows' order).
+    let mirrored = move || {
+        !radial()
+            && hover_axis.get_untracked() == Axis::X
+            && x_map.with_untracked(AxisMap::backward)
+    };
     keys::bind(
         move || focused.get() && interactive.get(),
+        mirrored,
         hovered,
         step_to,
         key_to,
