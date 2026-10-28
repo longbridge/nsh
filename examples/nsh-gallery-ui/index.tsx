@@ -13,6 +13,7 @@ export * from "./theme";
 export { Segmented } from "./segmented";
 export * from "./data-table";
 export * from "./slider";
+export * from "./scrollbar-theme";
 
 /**
  * The thumb of a resize handle (`handleThumbClass`), as gpui-component

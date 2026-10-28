@@ -13,7 +13,9 @@
 //! (a transparent backdrop takes it). A popover stays anchored to its
 //! trigger everywhere: what it shows belongs next to it.
 
-use nsh_core::prelude::*;
+use std::rc::Rc;
+
+use nsh_core::{element::Style, prelude::*};
 
 /// Why a popup opened or closed (`onOpenChange`'s `reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
@@ -321,4 +323,130 @@ fn away(side: Placement, size: Size<Points>) -> (f32, f32) {
         Placement::Left => (-size.width.0, 0.0),
         Placement::Right => (size.width.0, 0.0),
     }
+}
+
+/// Where a dropdown goes and the parts of its frame (`Select`'s,
+/// `Combobox`'s and `DatePicker`'s props).
+#[derive(Clone, Copy)]
+pub(crate) struct DropdownFrame {
+    pub(crate) placement: Prop<Placement>,
+    pub(crate) align: Prop<Align>,
+    pub(crate) offset: Prop<Points>,
+    pub(crate) margin: Prop<Points>,
+    pub(crate) popup_class: Prop<Option<SharedString>>,
+    pub(crate) popup_style: Prop<Style>,
+    pub(crate) backdrop_class: Prop<Option<SharedString>>,
+    pub(crate) backdrop_style: Prop<Style>,
+}
+
+/// What a dropdown asks of its component.
+#[derive(Clone)]
+pub(crate) struct Presence {
+    /// Whether it is open (tracked).
+    pub(crate) open: Rc<dyn Fn() -> bool>,
+    /// The user tried to close it, for this reason.
+    pub(crate) dismiss: Rc<dyn Fn(OpenChangeReason)>,
+    /// It is all there (`true`) or all gone (`false`).
+    pub(crate) shown: Rc<dyn Fn(bool)>,
+}
+
+/// A dropdown while it is open (`Select`'s list, `DatePicker`'s calendar):
+/// on the desktops a popup anchored to the trigger `anchor` names, at least
+/// `width` wide (its width, once it is laid out), never past the room on
+/// its side; on touch screens a sheet at the bottom over a backdrop. It
+/// holds what `content` makes (`true` in a sheet).
+pub(crate) fn dropdown(
+    anchor: ElementRef,
+    width: Signal<Option<Points>>,
+    frame: DropdownFrame,
+    presence: Presence,
+    content: Rc<dyn Fn(bool) -> Vec<AnyElement>>,
+) -> AnyElement {
+    let sheet = !is_desktop();
+    let open = presence.open.clone();
+    let motion = SheetMotion::new(move || sheet && open(), || Placement::Bottom);
+    // The popup waits for the trigger's first layout: open at first
+    // (`defaultOpen`), it would be made before the trigger is (a slot is
+    // filled after the first render) and placed against nothing.
+    let shown = {
+        let open = presence.open.clone();
+        move || {
+            if sheet {
+                motion.shown.get()
+            } else {
+                open() && width.with(Option::is_some)
+            }
+        }
+    };
+    {
+        let open = presence.open.clone();
+        let (opened, closed) = (presence.shown.clone(), presence.shown.clone());
+        lifecycle(
+            move || {
+                if sheet {
+                    motion.there()
+                } else {
+                    open() && width.with(Option::is_some)
+                }
+            },
+            move || opened(true),
+            move || closed(false),
+        );
+    }
+    when(shown, move || {
+        let content = content(sheet);
+        let cancel = {
+            let dismiss = presence.dismiss.clone();
+            move || dismiss(OpenChangeReason::Cancel)
+        };
+        if sheet {
+            let dismiss = presence.dismiss.clone();
+            let backdrop = overlay()
+                .inset_0()
+                .bind_opacity(&motion.fade)
+                .focusable(false)
+                .app_class(frame.backdrop_class)
+                .inline_style(frame.backdrop_style)
+                .on_press(move || dismiss(OpenChangeReason::BackdropPress));
+            let panel = overlay()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                // Below the status bar, whatever the rows.
+                .max_h(move || Length::from(window().height - safe_area().top))
+                .app_class(frame.popup_class)
+                .inline_style(frame.popup_style)
+                .bind_translate_y(&motion.y)
+                .on_layout(move |frame: &Bounds<Points>| motion.laid_out(frame.size))
+                .on_cancel(cancel)
+                .children(content);
+            return vec![backdrop.into_element(), panel.into_element()];
+        }
+        let room = signal(None::<Points>);
+        let dismiss = presence.dismiss.clone();
+        let popup = overlay()
+            // The trigger itself: in a TSX app the app's element, whose
+            // box is what shows (not the slot's view, which a column
+            // stretches).
+            .anchor(&anchor)
+            .placement(frame.placement)
+            .align(frame.align)
+            .offset(frame.offset)
+            .margin(frame.margin)
+            .min_w(move || Length::from(width.get().unwrap_or_default()))
+            // Never past the room on its side: its rows scroll. Until
+            // the core says where it went, the window bounds it, so the
+            // first layout already gives the rows a viewport to
+            // virtualize against (unbounded, a list of thousands would
+            // make every row).
+            .max_h(move || Length::from(room.get().unwrap_or_else(|| window().height)))
+            .app_class(frame.popup_class)
+            .inline_style(frame.popup_style)
+            .on_position(move |p: &OverlayPosition| room.set(Some(p.available.height)))
+            .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
+            .on_cancel(cancel)
+            .children(content);
+        vec![popup.into_element()]
+    })
+    .into_element()
 }

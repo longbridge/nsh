@@ -1606,9 +1606,9 @@ fn overlays(dt: Dt) -> impl IntoElement {
 }
 
 /// `points` on the nearest device pixel, as layout rounds frames
-/// ([`nsh_core::element::ambient::pixel_ratio`]); in `f64` up to there, for
+/// ([`nsh_core::element::pixel_ratio`]); in `f64` up to there, for
 /// the extents of huge tables.
 fn on_pixel(points: f64) -> Length {
-    let ratio = f64::from(nsh_core::element::ambient::pixel_ratio().max(f32::MIN_POSITIVE));
+    let ratio = f64::from(nsh_core::element::pixel_ratio().max(f32::MIN_POSITIVE));
     Length::from(px(((points * ratio).round() / ratio) as f32))
 }

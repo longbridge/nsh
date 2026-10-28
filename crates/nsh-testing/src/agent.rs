@@ -10,8 +10,9 @@
 //! [`Agent`] on a thread of its own, which resolves the selector on the
 //! model, asks the platform ([`Native`]) where the view is on screen and
 //! acts there (a click or a tap, a drag, typed keys), then waits until the
-//! app is quiet: no batch and no native animation for 100 ms, 2 s at
-//! most. [`Native`]'s calls come from that thread; implementations do
+//! app is quiet: no batch and no native animation that ends by itself for
+//! 100 ms, 2 s at most (one that loops forever, a spinner, is not waited
+//! for). [`Native`]'s calls come from that thread; implementations do
 //! their work on the main thread and return when it is done.
 
 use std::{
@@ -1030,7 +1031,8 @@ pub trait Native: Send + Sync {
     /// Answers the dialog the app shows now (the oldest): presses its
     /// button with the text `button`, or closes it without one.
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
-    /// Whether a native animation runs now.
+    /// Whether a native animation runs now that ends by itself: one that
+    /// loops forever (a spinner) does not count, or no step would settle.
     fn animating(&self) -> bool;
     /// A picture of the window, as a PNG.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
@@ -1848,8 +1850,9 @@ impl Agent {
         }
     }
 
-    /// Waits until the app is quiet ([`QUIET`], no native animation),
-    /// [`SETTLE`] at most, then fails if it threw meanwhile.
+    /// Waits until the app is quiet ([`QUIET`], no native animation that
+    /// ends by itself), [`SETTLE`] at most, then fails if it threw
+    /// meanwhile.
     fn settled(&self) -> Result<(), String> {
         let start = Instant::now();
         // When an animation last ran: what it ends with (a screen popped

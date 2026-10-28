@@ -95,6 +95,13 @@ impl Host for Runtime {
                                 ..Default::default()
                             }),
                         )?,
+                        // A video's `onLoad`: `{ duration, size }`, as nsh-js
+                        // builds it (a web view's has no `duration`).
+                        (EventKind::Load, EventPayload::Map(fields))
+                            if fields.iter().any(|(k, _)| *k == "duration") =>
+                        {
+                            events::video_load(fields)?
+                        }
                         _ => events::payload(&self.bindings, payload)?,
                     },
                 ])

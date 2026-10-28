@@ -222,6 +222,7 @@ transform::TransformOp.value                                     # a transform o
 transition::Extra.scale                                          # a scale factor
 transition::Live::opacity ->                                     # an opacity factor
 transition::Live::step(now)                                      # time
+transition::TextColor::step(now)                                 # time
 element::ambient::animated_value(value)                               # an animated value (any quantity)
 element::ambient::font_scale ->                                       # a font scale factor
 element::ambient::keyboard_duration ->                                # time

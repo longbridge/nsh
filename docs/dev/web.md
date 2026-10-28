@@ -362,7 +362,7 @@ server greets it; the dev session publishes no bundles (`DevSession::rust_root`)
 `nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
-(`nsh_core::element::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
+(`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
 prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5.26 MB (1.75 / 1.27 MB).
 
@@ -524,7 +524,11 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
-  border overlay gets its own for border colors, widths and radii, since it draws the border.
+  border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
+  color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,
+  so the runs `op_t` makes again inherit it and a change is a CSS transition of the element's `color`
+  (`transition-colors`), from the color on screen; a text of several colors keeps them in its runs and changes at
+  once, as does one that becomes one color (`web/text-browser.test.mjs`).
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
   transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *

@@ -4,8 +4,8 @@
 // and whose range changes, a drawdown whose day under the pointer or the
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
-// hole) or the arrow keys and closes into a pie, and sales as bars side by
-// side or stacked.
+// hole) or the arrow keys and closes into a pie with its shares written
+// outside, and sales as bars side by side or stacked.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -28,14 +28,16 @@ const price = () => {
  * Tabs on, pressing Right at each stop, until `shown` is on screen: the
  * first plot that reads it out has the focus. With reduced motion: in a
  * desktop window a step waits for the page to settle, which the live
- * price's pulse never does. A desktop window's sidebar comes first in
- * its Tab order, so the walk there is long.
+ * price's pulse never does. The sidebar's stops (its toggle, its search,
+ * its demos as one stop, the appearance) come after the page among the
+ * views, which stack the sidebar above it; AppKit orders its key view
+ * loop by position, which mixes them in with the page's.
  */
 const tabTo = async (shown: string) => {
   await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(80);
+    expect(++tabs).toBeLessThan(30);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
@@ -125,6 +127,20 @@ test("a donut reports the slice under the pointer, none in its hole", async () =
   await app.waitFor("Show as donut");
   await app.hover(pie);
   await app.waitFor("text:/^(NORTH AMERICA|EMEA|APAC|LATIN AMERICA|OTHER)$/");
+});
+
+test("as a pie, the revenue's shares are written outside its ring", async () => {
+  // The donut has none: its shares are in the legend, to a tenth.
+  expect(app.texts()).not.toContain("39%");
+  await app.press("Show as pie");
+  await app.waitFor("Show as donut");
+  // A label per slice, its share whole.
+  for (const share of ["39%", "25%", "22%", "8%", "6%"]) {
+    await app.waitFor(share);
+  }
+  await app.press("Show as donut");
+  await app.waitFor("Show as pie");
+  expect(app.texts()).not.toContain("39%");
 });
 
 test("the donut's slices step with the arrow keys once Tab reaches it", async () => {

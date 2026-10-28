@@ -120,6 +120,8 @@ pub(super) fn merged(js: &Attrs, own: &Attrs) -> Attrs {
             checked: own.state.checked.or(js.state.checked),
             busy: own.state.busy || js.state.busy,
             expanded: own.state.expanded.or(js.state.expanded),
+            pressed: own.state.pressed.or(js.state.pressed),
+            current: own.state.current.or(js.state.current),
         },
         value: own.value.clone().or_else(|| js.value.clone()),
         pointer_events: if own.pointer_events == PointerEvents::default() {

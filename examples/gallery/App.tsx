@@ -1,8 +1,8 @@
-import { computed, effect, mount, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
+import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
-import { Input, NavPage, NavStack } from "nsh/base";
+import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
 import { Icon } from "./icons";
@@ -10,7 +10,7 @@ import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, colors, desktop, header, hovered, IconTile, lazy, Logo, PageHeader, Press, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
+import { Appear, colors, desktop, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
 
 /** The demos: the apps built on NSH, then one demo per element in the
  * website's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
@@ -43,11 +43,13 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Tabs", detail: "A section switcher, a disabled tab", icon: "tabs", screen: lazy(() => import("./demos/Controls").then((m) => m.TabsDemo)) },
       { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
       { name: "Combobox", detail: "Topics picked several at once with search, a reviewer picked alone", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.ComboboxDemo)) },
+      { name: "DatePicker", detail: "A due date on weekdays, a trip's range with presets, a meeting's day and time", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.DatePickerDemo)) },
       { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
       { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
       { name: "NumberInput", detail: "Quantities typed or stepped, within a range, in steps", icon: "stepper", screen: lazy(() => import("./demos/Controls").then((m) => m.NumberInputDemo)) },
       { name: "OtpInput", detail: "A one-time code typed into one field, pasted or filled by the system", icon: "otp", screen: lazy(() => import("./demos/Controls").then((m) => m.OtpInputDemo)) },
       { name: "Slider", detail: "A level and a price range the app owns", icon: "sliders", screen: lazy(() => import("./demos/Controls").then((m) => m.SliderDemo)) },
+      { name: "ColorPicker", detail: "An area, sliders of RGB, HSL, HSB or OKLCH, a field and swatches", icon: "styles", screen: lazy(() => import("./demos/ColorPickerDemo").then((m) => m.ColorPickerDemo)) },
       { name: "Plot", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut and bars, built from plot parts", icon: "chart", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
       { name: "NavStack", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
       { name: "Popover", detail: "A panel anchored to its trigger; a press outside, Escape or back closes it", icon: "popover", screen: lazy(() => import("./demos/Overlays").then((m) => m.PopoverDemo)) },
@@ -204,12 +206,15 @@ const found = computed(() => {
 });
 
 /** A demo in the sidebar: 28 pt, a fill under the pointer, a raised row with
- * an edge and the accent icon when selected. */
-function SidebarRow(props: { demo: DemoEntry }) {
+ * an edge and the accent icon when selected, the focus ring too while the
+ * list has the keyboard focus (`focused`). No stop of Tab: the list is. */
+function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bounds: Bounds) => void }) {
   const active = () => selected().name === props.demo.name;
   return (
     <View
       onPress={() => select(props.demo)}
+      focusable={false}
+      onLayout={({ bounds }) => props.onLayout(bounds)}
       role="button"
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
@@ -226,6 +231,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
         borderColor: active() ? colors.border : "transparent",
         backgroundColor: active() ? colors.sidebarSelected : "transparent",
         boxShadow: active() ? "0 1px 0 rgba(0,0,0,0.04)" : undefined,
+        ...(active() && props.focused ? focusRing() : {}),
       }}
     >
       <Icon name={props.demo.icon} size={15} tint={active() ? colors.accent : colors.muted} />
@@ -248,7 +254,7 @@ function SidebarToggle() {
 /** The sidebar's search: filters the demos by name or group as you type
  * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
 function Search() {
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
   return (
     <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
@@ -265,6 +271,82 @@ function Search() {
         <Icon name="search" size={14} tint={colors.faint} />
       </View>
     </View>
+  );
+}
+
+/**
+ * The sidebar's demos by group (those the search finds): one stop of Tab,
+ * as a macOS source list is. While the list has the keyboard focus, Up and
+ * Down select the demo before and after, Home and End the first and the
+ * last, scrolled into view. Tab moves on past all of them, so the demo's
+ * page is a few stops away rather than one per demo.
+ */
+function DemoList() {
+  const focused = signal(false);
+  let scroller: ScrollRef | undefined;
+  // The offset and the height the list shows, and where each group and
+  // each demo in its group is: what scrolls the selected demo into view.
+  let offset = 0;
+  let height = 0;
+  const groupTops = new Map<string, number>();
+  const rows = new Map<string, { group: string; bounds: Bounds }>();
+  const reveal = (name: string) => {
+    const row = rows.get(name);
+    if (!row || !scroller) return;
+    const top = (groupTops.get(row.group) ?? 0) + row.bounds.origin.y;
+    const bottom = top + row.bounds.size.height;
+    if (top < offset) scroller.scrollTo({ y: top, animated: true });
+    else if (bottom > offset + height) scroller.scrollTo({ y: bottom - height, animated: true });
+  };
+  /** Selects the demo at `to(at, last)` of those shown: `at` the selected one's place (-1 when the search hides it). */
+  const move = (to: (at: number, last: number) => number) => {
+    const demos = found().flatMap((g) => g.demos);
+    if (demos.length === 0) return;
+    const at = demos.findIndex((d) => d.name === selected().name);
+    const demo = demos[Math.min(Math.max(to(at, demos.length - 1), 0), demos.length - 1)];
+    if (demo.name === selected().name) return;
+    select(demo);
+    reveal(demo.name);
+  };
+  // Bound only while the list has the focus: elsewhere the arrows are the
+  // page's (a plot's, a scroll view's).
+  effect(() => {
+    if (!focused()) return;
+    keymap.bind(
+      {
+        up: () => move((at) => at - 1),
+        down: () => move((at) => at + 1),
+        home: () => move(() => 0),
+        end: () => move((_, last) => last),
+      },
+      { repeat: true },
+    );
+  });
+  return (
+    <Scroll
+      ref={(node) => (scroller = node)}
+      onLayout={({ bounds }) => (height = bounds.size.height)}
+      onScroll={(e) => (offset = e.offset.y)}
+      style={{ flex: 1 }}
+    >
+      <View focusable={true} onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} style={{ paddingBottom: 12 }}>
+        <Each of={found()}>
+          {(group) => (
+            <View onLayout={({ bounds }) => groupTops.set(group().title, bounds.origin.y)} style={{ gap: 1 }}>
+              <Text style={{ fontSize: 11, fontWeight: "600", color: colors.muted, letterSpacing: 0.4, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
+                {group().title.toUpperCase()}
+              </Text>
+              <Each of={group().demos}>
+                {(demo) => <SidebarRow demo={demo()} focused={focused()} onLayout={(bounds) => rows.set(demo().name, { group: group().title, bounds })} />}
+              </Each>
+            </View>
+          )}
+        </Each>
+        <If when={found().length === 0}>
+          <Text style={{ fontSize: 12, color: colors.muted, paddingHorizontal: 20, paddingTop: 14 }}>No demo matches “{query().trim()}”</Text>
+        </If>
+      </View>
+    </Scroll>
   );
 }
 
@@ -305,23 +387,7 @@ function Sidebar() {
           <SidebarToggle />
         </View>
         <Search />
-        <Scroll style={{ flex: 1 }}>
-          <View style={{ paddingBottom: 12 }}>
-            <Each of={found()}>
-              {(group) => (
-                <View style={{ gap: 1 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "600", color: colors.muted, letterSpacing: 0.4, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
-                    {group().title.toUpperCase()}
-                  </Text>
-                  <Each of={group().demos}>{(demo) => <SidebarRow demo={demo()} />}</Each>
-                </View>
-              )}
-            </Each>
-            <If when={found().length === 0}>
-              <Text style={{ fontSize: 12, color: colors.muted, paddingHorizontal: 20, paddingTop: 14 }}>No demo matches “{query().trim()}”</Text>
-            </If>
-          </View>
-        </Scroll>
+        <DemoList />
         <View style={{ height: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 16, paddingRight: 10, borderTopWidth: 1, borderTopColor: colors.sidebarBorder }}>
           <Logo size={22} />
           <View style={{ flex: 1, gap: 0 }}>
@@ -445,9 +511,11 @@ function rememberDemo() {
 function App() {
   if (hasWindow) {
     Window.setTitle("Gallery");
-    Window.setTitleBar("hidden", 44);
+    Window.setTitleBar({ style: "hidden", height: 44 });
   }
   rememberDemo();
+  // Every scroll view and list draws the gallery's bar.
+  Scrollbar.setTheme(scrollbarTheme);
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <If when={!desktop()}>

@@ -1197,19 +1197,23 @@ impl Rv {
         self.set_selection(selection, true);
     }
 
-    /// Replaces the document (the ref's `setDocJson`).
-    pub(crate) fn set_doc_json(&self, json: &Value) -> bool {
+    /// Replaces the document (the ref's `setDocJson`): why not, when it
+    /// cannot.
+    pub(crate) fn set_doc_json(&self, json: &Value) -> Result<(), String> {
         let state = self.session.state();
-        let Ok(doc) = state.schema().node_from_json(json) else {
-            return false;
-        };
+        let doc = state
+            .schema()
+            .node_from_json(json)
+            .map_err(|e| format!("setDocJson: not a document of the editor's schema: {e}"))?;
         let mut tr = state.tr();
         let size = state.doc().content().size();
-        if tr.replace_with(0, size, doc.content().clone()).is_err() {
-            return false;
-        }
+        tr.replace_with(0, size, doc.content().clone())
+            .map_err(|e| format!("setDocJson: the document does not fit: {e}"))?;
         tr.set_origin(TransactionOrigin::Api);
-        self.session.dispatch(tr).is_ok()
+        self.session
+            .dispatch(tr)
+            .map(|_| ())
+            .map_err(|e| format!("setDocJson: {e}"))
     }
 
     // The clipboard.

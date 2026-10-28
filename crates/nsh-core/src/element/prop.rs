@@ -175,7 +175,15 @@ impl<T: Clone + PartialEq + 'static> Prop<T> {
             Origin::Bound => {
                 let binding = *self;
                 let node = signal(binding.get_untracked()).node();
-                super::reactive::render_effect(move || node.set::<T>(binding.get()));
+                // The binding is of the region that made the element: when
+                // that region runs again it goes, and the instance with it
+                // once the core releases its host. A write doing both may
+                // still reach this effect first; there is nothing to follow.
+                super::reactive::render_effect(move || {
+                    if binding.node.is_live() {
+                        node.set::<T>(binding.get());
+                    }
+                });
                 Self::of(node, Origin::Held)
             }
         }

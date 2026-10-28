@@ -1118,6 +1118,10 @@ prop label:Amount placeholder Amount
 # Its prefix and suffix around the field.
 expect about
 expect kg
+# The app's element in a slot lays out in the component's row (300 wide,
+# the field 100): `flex: 1` takes what is left, a percentage is of the row.
+frame id:weight-prefix 0 0 170 10
+frame id:weight-suffix 0 0 30 10
 frame parent:text:Up 0 0 30 15
 frame parent:text:Down 0 15 30 15
 style parent:parent:text:Up backgroundColor #0000ffff
@@ -1212,6 +1216,191 @@ covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm
 covers [events] Combobox.onQueryChange
+# base-scrollbar
+tap id:case-base-scrollbar
+# Always shown, where the app places its track; a press in its middle
+# puts the thumb's middle there (the thumb 40 long: 200 of 1000 shown on
+# 200), half its travel: 400 of 800; a drag 40 down goes on from there,
+# 40 of the thumb's 160 of travel: 200 more.
+style label:Pages pointerEvents auto
+frame label:Pages 290 0 10 200
+touch start label:Pages 5 100
+prop id:pages contentOffset y=400
+touch move 5 140
+prop id:pages contentOffset y=600
+touch end
+# While scrolling: hidden (taking no presses) until the target scrolls,
+# then until `motion.idle` after. Its thumb no shorter than 30 (10 of
+# 100): a press at 50 puts its start at 35 of 70, half of 900.
+style label:Feed pointerEvents none
+scroll id:feed 0 100
+style label:Feed pointerEvents auto
+touch start label:Feed 5 50
+touch end
+prop id:feed contentOffset y=450
+wait 400
+style label:Feed pointerEvents none
+# Along a horizontal scroll view: the thumb 50 long (200 of 800 shown on
+# 200); a press at 100 puts its start at 75 of 150, half of 600.
+touch start label:Strip 100 3
+touch end
+prop id:strip contentOffset x=300
+# A theme of the view's own: its bar over its viewport, in place of the
+# platform's indicator, the thumb 48 long (the default shortest) of 100
+# on 1000; a press at 50 puts its start at 26 of 52, half of 900.
+frame label:Own 290 0 10 100
+touch start label:Own 5 50
+touch end
+prop id:own contentOffset y=450
+# The app's theme (`Scrollbar.setTheme`) gives the bar to a scroll view
+# that keeps `scrollbar`.
+frame label:App 290 0 10 100
+touch start label:App 5 50
+touch end
+prop id:app contentOffset y=450
+# A multiline input's own theme: its bar over its text, beside it.
+frame label:Notes 290 0 10 100
+covers [props] scrollbar
+covers [nsh/base] Scrollbar
+covers [props] Scrollbar.scroll
+covers [props] Scrollbar.axis
+covers [props] Scrollbar.mode
+covers [props] Scrollbar.motion
+covers [props] Scrollbar.minThumbLength
+covers [props] Scrollbar.thumbClass
+covers [props] Scrollbar.thumbStyle
+covers [props] accessibilityLabel
+
+# base-date-picker
+tap id:case-base-date-picker
+# The trigger is a combobox named by `accessibilityLabel`, collapsed;
+# screen readers hear the app's value in its `dateFormat`.
+prop label:Due role combobox
+prop label:Due accessibilityState expanded=false
+prop label:Due accessibilityValue text=09.10.2026
+# A press opens the calendar, a sheet on a phone: every item the app's
+# (`renderItem`), the selected day marked and selected for screen
+# readers, the weeks starting on Monday (`firstDayOfWeek`: the 5th, a
+# Monday, first in its row), each item as wide as `itemStyle` says.
+tap id:due
+expect Open: true triggerPress
+prop label:Due accessibilityState expanded=true
+expect M10
+expect Y2026
+expect D9*
+prop label:2026-10-09 role button
+prop label:2026-10-09 accessibilityState selected=true
+frame label:2026-10-05 0 0 20 20
+# Weekends take no press (`disabledMatcher`).
+prop label:2026-10-10 accessibilityState disabled=true
+prop label:2026-10-11 accessibilityState disabled=true
+# Previous and Next turn the month, named for screen readers.
+tap label:NextMonth
+expect M11
+absent M10
+tap label:PrevMonth
+expect M10
+# A day is the value: `onChange` with its ISO date, which the app sets;
+# the popup closes with "select".
+tap label:2026-10-15
+expect Due: 2026-10-15
+expect Open: false select
+absent M10
+prop label:Due accessibilityValue text=15.10.2026
+# `cleanable`: a button screen readers name while there is a value; a
+# press clears it, reported as `null`, and the popup stays closed.
+expect X
+prop label:ClearDue role button
+frame label:ClearDue 0 30 20 20
+tap label:ClearDue
+expect Due: null
+absent X
+absent M10
+noprop label:Due accessibilityValue
+covers [nsh/base] DatePicker
+covers [props] value
+covers [props] accessibilityLabel
+covers [props] DatePicker.dateFormat
+covers [props] DatePicker.trigger
+covers [props] DatePicker.renderItem
+covers [props] DatePicker.itemStyle
+covers [props] DatePicker.firstDayOfWeek
+covers [props] DatePicker.disabledMatcher
+covers [props] DatePicker.previousAccessibilityLabel
+covers [props] DatePicker.nextAccessibilityLabel
+covers [props] DatePicker.cleanable
+covers [props] DatePicker.clearButton
+covers [props] DatePicker.clearButtonStyle
+covers [props] DatePicker.clearButtonAccessibilityLabel
+covers [events] onChange
+covers [events] DatePicker.onOpenChange
+# A range of the picker's own (`defaultValue`), heard as its ends; two
+# months side by side (`numberOfMonths`), the days inside the range in
+# it, its ends selected.
+prop label:Trip accessibilityValue text=2026/10/05 - 2026/10/07
+tap id:trip
+expect M10
+expect M11
+expect D5*~
+expect D6~
+expect D7*~
+# The first press starts a range, shown but not reported until the
+# second ends it; then the popup closes.
+tap label:2026-10-12
+expect D12*
+absent D6~
+expect Trip: none
+tap label:2026-10-14
+expect Trip: ["2026-10-12","2026-10-14"]
+absent M11
+prop label:Trip accessibilityValue text=2026/10/12 - 2026/10/14
+# A preset is a button in the app's look, in a column of the app's look;
+# a press sets its value and closes the popup.
+tap id:trip
+expect Week
+prop label:Week role button
+style label:Week backgroundColor #00ff00ff
+style parent:label:Week backgroundColor #0000ffff
+tap label:Week
+expect Trip: ["2026-10-19","2026-10-25"]
+absent Week
+covers [props] defaultValue
+covers [props] DatePicker.range
+covers [props] DatePicker.numberOfMonths
+covers [props] DatePicker.presets
+covers [props] DatePicker.presetsStyle
+covers [props] DatePicker.presetStyle
+# A date and time (`timePrecision`) on a 12-hour clock (`hourCycle`):
+# heard with the time; the popup holds the app's label of the time and
+# the field's segments (`renderSegment`, `segmentStyle`).
+prop label:Meet accessibilityValue text=2026/10/09 09:30 AM
+tap id:meet
+expect TimeLabel
+expect S09
+expect S30
+expect SAM
+style parent:text:S09 backgroundColor #ff0000ff
+# Picking a day keeps the popup open, reported with the time.
+tap label:2026-10-12
+expect Meet: 2026-10-12T09:30
+expect TimeLabel
+# The field (named by `timeAccessibilityLabel`) edits the selected
+# segment, the hour first: a 2 fits no second digit and moves on.
+type label:MeetTime 2
+expect Meet: 2026-10-12T02:30
+expect S02
+type label:MeetTime 45
+expect Meet: 2026-10-12T02:45
+# A press on the selected day again closes the popup.
+tap label:2026-10-12
+absent TimeLabel
+prop label:Meet accessibilityValue text=2026/10/12 02:45 AM
+covers [props] DatePicker.timePrecision
+covers [props] DatePicker.hourCycle
+covers [props] DatePicker.timeLabel
+covers [props] DatePicker.timeAccessibilityLabel
+covers [props] DatePicker.renderSegment
+covers [props] DatePicker.segmentStyle
 
 # base-select
 tap id:case-base-select
@@ -1386,6 +1575,146 @@ covers [props] Select.searchPlaceholder
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
+
+# base-color-picker
+tap id:case-base-color-picker
+# The parts as the app laid them out: the area 200 by 100, its thumb on
+# the color (full saturation and brightness: the top right corner), its
+# panel under it; each slider's track in the slider, the thumb centered on
+# the value (the hue at 0, the vertical alpha at its top).
+expect Color #ff0000
+frame id:area 0 0 200 100
+frame label:Area 195 -5 10 10
+style label:Area borderWidth 2
+style label:Area backgroundColor #ff0000ff
+style below:label:Area opacity 0.5
+style below:label:Area borderRadius 8
+frame label:Hue -5 5 10 10
+frame below:label:Hue 0 5 200 10
+style below:label:Hue borderRadius 5
+style label:Hue borderWidth 1
+style label:Hue backgroundColor #ff0000ff
+frame label:Alpha 5 -5 10 10
+frame below:label:Alpha 5 0 10 100
+# Adjustable controls for screen readers: the area's value is the color,
+# a slider's its channel's.
+prop label:Area role adjustable
+prop label:Area accessibilityValue min=0 max=100 now=100 text=#ff0000
+prop label:Hue role adjustable
+prop label:Hue accessibilityValue min=0 max=360 now=0 text=0
+prop label:Alpha accessibilityValue min=0 max=100 now=100 text=100
+prop label:Lightness accessibilityState disabled=true
+# The fields: the whole color as `format` writes it, a channel's number.
+prop label:Hex value #ff0000
+prop label:Hex placeholder Color
+prop label:Red value 255
+# A swatch: its color over a checkerboard (squares of 10 in its 20), the
+# app's content over both; selected while it is the picker's color. The
+# other swatch, without a color, shows the picker's, named by it.
+prop label:Blue role button
+prop label:Blue accessibilityState selected=false
+nostyle label:Blue borderWidth
+drawing below:below:id:check fillStyle #ccccccff
+drawing below:below:id:check fillRect 0 0 10 10
+drawing below:below:id:check fillRect 10 10 10 10
+nodrawing below:below:id:check fillRect 10 0...
+prop id:preview accessibilityLabel #ff0000
+# The eyedropper: a button with the app's content, disabled with no
+# eyedropper on the platform.
+prop label:Eyedropper role button
+prop label:Eyedropper accessibilityState disabled=true
+frame id:dropper 0 0 4 4
+# A press picks the swatch's color: reported in `format`, then the
+# change's end.
+tap label:Blue
+expect Color #0000ff80
+expect Formatted rgb(0 0 255 / 0.5)
+expect end rgb(0 0 255 / 0.5)
+prop label:Blue accessibilityState selected=true
+style label:Blue borderWidth 2
+prop id:preview accessibilityLabel #0000ff80
+prop label:Hex value #0000ff80
+# The whole color in any CSS form, read when the field submits it; a
+# channel's number as it is typed, the change's end when it is left.
+event label:Hex onChange text=lime
+event label:Hex onSubmit text=lime
+expect Color #00ff00ff
+expect end rgb(0 255 0)
+event label:Red onChange text=128
+expect Color #80ff00ff
+expect Formatted rgb(128 255 0)
+expect end rgb(0 255 0)
+event label:Red onBlur
+expect end rgb(128 255 0)
+# A drag of the hue's thumb: a quarter of the track, 90 degrees on.
+touch start label:Hue 5 5
+touch move 55 5
+expect Color #00ffffff
+touch end
+expect end rgb(0 255 255)
+frame label:Hue 95 5 10 10
+# A press on the area picks the color under it, a drag goes on from there.
+touch start id:area 100 50
+touch move 50 75
+touch end
+expect Color #304040ff
+expect end rgb(48 64 64)
+# A screen reader's decrement of the alpha: one percent.
+event label:Alpha onAccessibilityAction actionName=decrement
+expect Color #304040fc
+expect Formatted rgb(48 64 64 / 0.99)
+prop label:Alpha accessibilityValue min=0 max=100 now=99 text=99
+# `disabled`: the parts take nothing.
+tap id:disable
+prop label:Hue accessibilityState disabled=true
+tap label:Blue
+expect Color #304040fc
+# A picker of its own color (`defaultValue`), a drag of its
+# brightness to half, reported in OKLCH.
+touch start label:Brightness 5 5
+touch move -95 5
+touch end
+expect Own oklch(51.8% 0.176 142.5)
+# A swatch outside a picker reports its color.
+tap label:Yellow
+expect Chip #ffff00ff
+covers [nsh/base] ColorPicker
+covers [nsh/base] ColorArea
+covers [nsh/base] ColorSlider
+covers [nsh/base] ColorField
+covers [nsh/base] ColorSwatch
+covers [nsh/base] ColorEyeDropper
+covers [props] value
+covers [props] defaultValue
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [props] placeholder
+covers [props] selectedStyle
+covers [props] ColorPicker.format
+covers [props] ColorArea.panelClass
+covers [props] ColorArea.panelStyle
+covers [props] ColorArea.thumbClass
+covers [props] ColorArea.thumbStyle
+covers [props] ColorArea.fillThumb
+covers [props] ColorSlider.colorSpace
+covers [props] ColorSlider.channel
+covers [props] ColorSlider.axis
+covers [props] ColorSlider.trackClass
+covers [props] ColorSlider.trackStyle
+covers [props] ColorSlider.thumbClass
+covers [props] ColorSlider.thumbStyle
+covers [props] ColorSlider.fillThumb
+covers [props] ColorSlider.checkerboardColor
+covers [props] ColorSlider.checkerboardSize
+covers [props] ColorField.channel
+covers [props] ColorField.colorSpace
+covers [props] ColorField.format
+covers [props] ColorSwatch.color
+covers [props] ColorSwatch.checkerboardColor
+covers [props] ColorSwatch.checkerboardSize
+covers [events] onChange
+covers [events] onPress
+covers [events] ColorPicker.onChangeEnd
 
 # base-slider
 tap id:case-base-slider
@@ -1618,6 +1947,29 @@ covers [props] Pie.innerRadius
 covers [props] Pie.outerRadius
 covers [props] Pie.cornerRadius
 covers [props] Arc.cornerRadius
+# A pie's labels: each slice's text at the end of its leader line, 10
+# past the rim (30) toward the slice's middle, then across to that
+# radius; after the end on the right half, before it on the left,
+# centered on it (the app's 20 by 10). A row worth nothing has none.
+expect east
+frame parent:text:east 90 50 0 0
+frame text:east 0 -5 20 10
+frame parent:text:west 10 50 0 0
+frame text:west -20 -5 20 10
+absent south
+# The leader lines (the `labelLine` part), each in its own classes, the
+# style's width over them, from the rim out to the label.
+drawing below:parent:text:east strokeStyle #ff0000ff
+drawing below:parent:text:west strokeStyle #0000ffff
+drawing below:parent:text:east lineWidth 2
+drawing below:parent:text:east stroke path(moveTo 80 50, lineTo 90 50...
+drawing below:parent:text:west stroke path(moveTo 20 50, lineTo 10 50...
+covers [props] Pie.label
+covers [props] Pie.labelClass
+covers [props] Pie.labelStyle
+covers [props] Pie.labelGap
+covers [props] Pie.labelLineClass
+covers [props] Pie.labelLineStyle
 covers [props] Plot.motion
 covers [nsh/base/plot] Plot
 covers [nsh/base/plot] Line
@@ -1718,6 +2070,42 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Bars colored by their rows' regions through the plot's ordinal
+# `colorScale` (their canvas, the sibling below the first bar's label):
+# EU takes the domain's second color, US its first, and APAC, past the
+# domain, the next one, the range repeating from its first.
+expect r10
+drawing below:parent:text:r10 fillStyle #00ff00ff
+drawing below:parent:text:r10 fillStyle #ff0000ff
+covers [props] Plot.colorScale
+covers [props] Bar.color
+# Reversed scales: bands from the right edge (middles 250, 150 and 50)
+# and a y scale of 0 to 40 from the top edge (2 points a value), so the
+# bars hang from the top, each label below its bar's end.
+expect h20
+frame parent:text:h20 250 40 0 0
+frame text:h20 -15 0 30 14
+frame parent:text:h10 150 20 0 0
+frame parent:text:h5 50 10 0 0
+# The axis under it: the first band's text at the right.
+frame parent:parent:parent:text:rev0 200 80 100 10
+frame parent:parent:parent:text:rev2 0 80 100 10
+# The row nearest the pointer, the last one at the left; a screen
+# reader's decrement steps to the row before, in the rows' order.
+expect reversed null
+event id:hanging onMouseMove position.x=40 position.y=10
+expect reversed 2
+event id:hanging onAccessibilityAction actionName=decrement
+expect reversed 1
+event id:hanging onMouseLeave
+expect reversed null
+# Bars across from the right edge of an x scale of 0 to 20 (5 points a
+# value), the bands from the bottom edge up (middles 50, 30 and 10), each
+# label before its bar's end.
+frame parent:text:l20 0 50 0 0
+frame text:l20 -30 -7 30 14
+frame parent:text:l10 50 30 0 0
+frame parent:text:l5 75 10 0 0
 # Texts at values of the plot's scales: the middle row of three at 50 of
 # 0 to 100 is the point (100, 50), each text's top edge on it, starting
 # at it, centered on it or ending at it; half a row from the first row

@@ -410,7 +410,9 @@ impl ListConfig {
             out.push(Prop::Inverted(self.inverted.unwrap_or(false)));
         }
         if self.scrollbar_visible != old.scrollbar_visible {
-            out.push(Prop::Scrollbar(self.scrollbar_visible.unwrap_or(true)));
+            out.push(Prop::Scrollbar(
+                self.scrollbar_visible.unwrap_or(true).into(),
+            ));
         }
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
@@ -1172,6 +1174,19 @@ pub trait Accessible: Element {
         self
     }
 
+    /// Its level for screen readers (TS: `accessibilityLevel`): a
+    /// heading's (1 the top; `gpui-base`'s `aria_level`), a tree item's
+    /// depth (1 at the top); 0 has none.
+    fn accessibility_level(mut self, level: impl IntoReactive<u32>) -> Self {
+        self.node().bind_attr(level, |a, level| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Level((level > 0).then_some(level))),
+            )
+        });
+        self
+    }
+
     /// Its value for screen readers, for a range (a progress bar, a
     /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
     /// indeterminate progress bar keeps its range and leaves out `now`).
@@ -1743,6 +1758,16 @@ pub trait Interactive: Element {
     fn expanded_style(mut self, style: impl IntoReactive<Style>) -> Self {
         Style::apply(self.node(), style, Variant::EXPANDED, |a, patch| {
             super::host::set_in(&mut a.props, Prop::ExpandedStyle(patch))
+        });
+        self
+    }
+
+    /// An app's style while a toggle button is on (`accessibility_state`
+    /// `pressed`, not mixed), as `aria-pressed:` classes apply. Not
+    /// `.active(..)`, a press in progress.
+    fn pressed_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::ARIA_PRESSED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::PressedStyle(patch))
         });
         self
     }

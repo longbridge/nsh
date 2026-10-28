@@ -30,7 +30,7 @@ use nsh_core::{
 use crate::{
     SelectGroup, SelectItem, SelectItemState,
     listbox::{self, Footer, Hooks, Listbox, Move, Parts, Query, Row},
-    popup::{OpenChangeReason, OpenState},
+    popup::{DropdownFrame, OpenChangeReason, OpenState},
 };
 
 /// The props of [`Combobox`].
@@ -442,14 +442,16 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         }),
     };
     let parts = Parts {
-        placement: props.placement,
-        align: props.align,
-        offset: props.offset,
-        margin: props.margin,
-        popup_class: props.popup_class,
-        popup_style: props.popup_style,
-        backdrop_class: props.backdrop_class,
-        backdrop_style: props.backdrop_style,
+        frame: DropdownFrame {
+            placement: props.placement,
+            align: props.align,
+            offset: props.offset,
+            margin: props.margin,
+            popup_class: props.popup_class,
+            popup_style: props.popup_style,
+            backdrop_class: props.backdrop_class,
+            backdrop_style: props.backdrop_style,
+        },
         list_class: props.list_class,
         list_style: props.list_style,
         item_class: props.item_class,

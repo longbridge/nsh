@@ -593,6 +593,102 @@ fn slots_children_and_events() {
     );
 }
 
+const SLOT_LAYOUT: &str = r#"import { mount, Text, View } from "nsh";
+import { Field } from "test/ui";
+
+mount(() => (
+  <View>
+    <Field label={<Text style={{ flex: 1 }}>Grow</Text>} />
+    <Field label={<Text style={{ marginLeft: "auto" }}>End</Text>} />
+    <Field label={<Text style={{ alignSelf: "flex-end" }}>Low</Text>} />
+    <Field label={<Text style={{ width: "50%" }}>Half</Text>} />
+    <Field label={<><Text>One</Text><Text>Two</Text></>} hint={<Text style={{ flex: 1 }}>Hint</Text>} />
+  </View>
+));
+"#;
+
+/// The app's element in a slot the component places as it is lays out as
+/// an item of the component's layout, as its own child would (`Field`'s
+/// label in a 300 × 40 row before a 50 × 20 control): `flex: 1` grows
+/// along the row, `marginLeft: "auto"` pushes it to the control,
+/// `alignSelf` aligns it in the row, a percentage is of the row. Its holder
+/// takes its box and it sits at the holder's origin. A slot the component
+/// styles (`hint`, padded) and a slot of several elements stay boxes of
+/// their own, laid out as columns.
+#[test]
+fn slot_content_lays_out_in_the_components_layout() {
+    let (_engine, rx) = start(SLOT_LAYOUT);
+    let mut batches = vec![
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first frame"),
+    ];
+    while let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) {
+        batches.push(batch);
+    }
+    let id = |wanted| {
+        batches
+            .iter()
+            .find_map(|b| text_ids(b, wanted))
+            .unwrap_or_else(|| panic!("{wanted} rendered"))
+    };
+    let parent_of = |child| {
+        batches
+            .iter()
+            .find_map(|b| {
+                b.items.iter().find_map(|i| match i {
+                    MountItem::Insert {
+                        parent, child: c, ..
+                    } if *c == child => Some(*parent),
+                    _ => None,
+                })
+            })
+            .expect("inserted")
+    };
+    let frame = |id| frame_of(&batches, id).expect("a frame");
+    // (x, y, width, height) of the holder of `wanted`, and its own frame.
+    let boxes = |wanted| {
+        let text = id(wanted);
+        let b = |f: nsh_core::Bounds<Points>| {
+            (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
+        };
+        (b(frame(parent_of(text))), b(frame(text)))
+    };
+
+    let (holder, text) = boxes("Grow");
+    assert_eq!((holder.0, holder.2), (0.0, 250.0), "grows to the control");
+    assert_eq!((text.0, text.1, text.2), (0.0, 0.0, 250.0));
+    let close = |a: f32, b: f32| (a - b).abs() < 0.01;
+    let (holder, text) = boxes("End");
+    assert!(holder.0 > 0.0, "{holder:?}");
+    assert!(
+        close(holder.0 + holder.2, 250.0),
+        "pushed to the control: {holder:?}"
+    );
+    assert_eq!((text.0, text.1), (0.0, 0.0));
+    let (holder, _) = boxes("Low");
+    assert!(
+        close(holder.1 + holder.3, 40.0),
+        "at the row's bottom: {holder:?}"
+    );
+    let (holder, text) = boxes("Half");
+    assert_eq!((holder.2, text.2), (150.0, 150.0), "half the row");
+
+    // Several elements: a column of their own.
+    let (one, _) = boxes("One");
+    let (two, _) = boxes("Two");
+    assert_eq!(one, two, "one holder");
+    let (one, two) = (frame(id("One")), frame(id("Two")));
+    assert_eq!(two.origin.y.0, one.origin.y.0 + one.size.height.0);
+    // Styled by the component: its padded box, after the control.
+    let (holder, text) = boxes("Hint");
+    let label = one.size.width.0.max(two.size.width.0);
+    assert!(
+        close(holder.0, label + 50.0),
+        "after the control: {holder:?}"
+    );
+    assert_eq!(text.0, 8.0, "in the holder's padding");
+}
+
 const METHODS: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Stepper, type StepperRef } from "test/ui";
 
@@ -648,19 +744,19 @@ import { AlertDialog } from "nsh/base";
 
 const shown = signal("waiting");
 setTimeout(async () => {
-  const a = await AlertDialog.show({
+  const { action: a } = await AlertDialog.show({
     title: "Delete the photo?",
     description: "It is gone then.",
     actions: [
-      { label: "Cancel", role: "cancel" },
+      { label: "Cancel", role: "cancel", id: "cancel" },
       { label: "Delete", role: "destructive", id: "delete" },
     ],
   });
-  const b = await AlertDialog.show({
+  const { action: b } = await AlertDialog.show({
     presentation: "actionSheet",
-    actions: [{ label: "Share" }, { label: "Copy" }],
+    actions: [{ label: "Share", id: "share" }, { label: "Copy", id: "copy" }],
   });
-  const c = await AlertDialog.show({ actions: [{ label: "OK" }], closeOnEscape: true });
+  const { action: c } = await AlertDialog.show({ actions: [{ label: "OK", id: "ok" }], closeOnEscape: true });
   let d = "resolved";
   try {
     await AlertDialog.show({ actions: [] });
@@ -673,8 +769,8 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// `AlertDialog.show` resolves with the chosen action's id, else its
-/// label, and with null when it closed without one.
+/// `AlertDialog.show` resolves with `{ action }`: the chosen action's id,
+/// or null when it closed without one.
 #[test]
 fn alert_dialogs_resolve_with_the_action_chosen() {
     let (engine, rx) = start(ALERT);
@@ -719,11 +815,11 @@ fn alert_dialogs_resolve_with_the_action_chosen() {
     let ok = next_dialog();
     assert!(ok.cancelable);
     answer(&ok, -1.0);
-    let batches = until(&rx, |b| shows(b, "answers delete Share null rejected"));
+    let batches = until(&rx, |b| shows(b, "answers delete share null rejected"));
     assert!(
         batches
             .iter()
-            .any(|b| shows(b, "answers delete Share null rejected"))
+            .any(|b| shows(b, "answers delete share null rejected"))
     );
 }
 
@@ -863,12 +959,12 @@ fn runtime_modules() {
     assert_eq!(focused, Some(note));
 }
 
-const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type YNode } from "nsh";
+const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
 
 const shown = signal("waiting");
-let box!: YNode;
-let ghost!: YNode;
-const detached = <View ref={(n: YNode) => (ghost = n)} />;
+let box!: ViewRef;
+let ghost!: ViewRef;
+const detached = <View ref={(n: ViewRef) => (ghost = n)} />;
 setTimeout(async () => {
   const m = (await box.measure())!;
   const none = await ghost.measure();
@@ -3017,6 +3113,110 @@ fn a_popovers_trigger_is_styled_while_open() {
     assert_eq!(style(&closed).unwrap().background_color.0, 0xffff_ffff);
 }
 
+const TOGGLE: &str = r##"import { mount, signal, Text, View } from "nsh";
+
+const bold = signal(false);
+
+mount(() => (
+  <View role="toolbar">
+    <View role="group" accessibilityLabel="Text style">
+      <View
+        testID="bold"
+        role="button"
+        accessibilityState={{ pressed: bold() }}
+        class="bg-white aria-pressed:bg-black"
+        pressedStyle={{ opacity: 0.5 }}
+        onPress={() => bold.set(!bold())}
+      >
+        <Text>{bold() ? "Bold on" : "Bold off"}</Text>
+      </View>
+    </View>
+    <View testID="heading" role="header" accessibilityLevel={2}>
+      <Text>Details</Text>
+    </View>
+    <View testID="pages" role="navigation">
+      <View testID="page" role="link" accessibilityState={{ current: "page" }} />
+    </View>
+    <View testID="item" role="treeitem" accessibilityLevel={0} />
+  </View>
+));
+"##;
+
+/// A toggle button's `aria-pressed:` classes and `pressedStyle` follow its
+/// `accessibilityState.pressed`, which the platform gets with the new
+/// roles, a heading's level and a page's current state; a level that is
+/// no whole number from 1 is none.
+#[test]
+fn a_toggle_is_styled_while_pressed() {
+    use nsh_core::{AccessibilityCurrent, AccessibilityRole, Checked};
+    let (engine, rx) = start(TOGGLE);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let props = |batches: &[MountBatch], test_id: &str| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some((*id, props.accessibility.clone()))
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let first = std::slice::from_ref(&first);
+    let (bold, a) = props(first, "bold");
+    assert_eq!(a.role, AccessibilityRole::Button);
+    assert_eq!(a.state.pressed, Some(Checked::False));
+    let (_, heading) = props(first, "heading");
+    assert_eq!(
+        (heading.role, heading.level),
+        (AccessibilityRole::Header, Some(2))
+    );
+    assert_eq!(props(first, "pages").1.role, AccessibilityRole::Navigation);
+    let (_, page) = props(first, "page");
+    assert_eq!(page.state.current, Some(AccessibilityCurrent::Page));
+    let (_, item) = props(first, "item");
+    assert_eq!((item.role, item.level), (AccessibilityRole::TreeItem, None));
+    let style = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == bold => Some(style.clone()),
+                _ => None,
+            })
+    };
+    let off = style(first).expect("styled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+    // The core sets the state: the platform is not asked to report it.
+    assert!(!first.iter().flat_map(|b| &b.items).any(|i| matches!(
+        i,
+        MountItem::TrackStates { id, states }
+            if *id == bold && states & nsh_core::tailwind::state::ARIA_PRESSED != 0
+    )));
+    let press = || {
+        engine
+            .control()
+            .dispatch_event(bold, EventKind::Press, EventPayload::None)
+    };
+    press();
+    let pressed = until(&rx, |b| shows(b, "Bold on"));
+    assert_eq!(props(&pressed, "bold").1.state.pressed, Some(Checked::True));
+    let on = style(&pressed).expect("restyled");
+    assert_eq!(on.background_color.0, 0x0000_00ff);
+    assert_eq!(on.opacity, 0.5);
+    press();
+    let released = until(&rx, |b| shows(b, "Bold off"));
+    let off = style(&released).expect("restyled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+}
+
 /// A popup reports a change of its open state before its lifecycle
 /// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
 /// there or all gone, also where that is at once (no motion).
@@ -3636,6 +3836,110 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
     until(&rx, |b| shows(b, "Confirmed: go,swift"));
 }
 
+const BASE_DATE_PICKER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { DatePicker } from "nsh/base";
+
+function App() {
+  const value = signal<string | null>("2026-10-10");
+  const range = signal<[string | null, string | null] | null>(null);
+  return (
+    <View>
+      <DatePicker
+        value={value()}
+        onChange={({ value: next }) => value.set(next as string | null)}
+        disabledMatcher={(date) => date.endsWith("-14")}
+        accessibilityLabel="Due"
+        trigger={<View><Text>Pick</Text></View>}
+        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}${item.active ? "*" : ""}` : `${item.kind}`}</Text>}
+      />
+      <DatePicker
+        range
+        value={range()}
+        onChange={({ value: next }) => range.set(next as [string | null, string | null])}
+        presets={[{ label: "Week", value: ["2026-10-19", "2026-10-25"] }]}
+        accessibilityLabel="Trip"
+        trigger={<View><Text>Trip</Text></View>}
+      />
+      <Text>{`Value: ${value()}`}</Text>
+      <Text>{`Range: ${JSON.stringify(range())}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `DatePicker` through its JS face: an ISO date the app owns
+/// (`onChange({ value })` with the string), the app's function of a date
+/// disabling days in the next turn, `renderItem`'s state with the day's
+/// date; a range picker's preset reporting `[start, end]`.
+#[test]
+fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_DATE_PICKER);
+    let find = |batches: &[MountBatch], label: &str, role: AccessibilityRole| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == role
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some((*id, (**props).clone()))
+                }
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Trip", AccessibilityRole::Combobox).is_some()
+    });
+    let (due, props) = find(&first, "Due", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(
+        props
+            .accessibility
+            .value
+            .and_then(|v| v.text.map(|t| t.to_string()))
+            .as_deref(),
+        Some("2026/10/10")
+    );
+    let (trip, _) = find(&first, "Trip", AccessibilityRole::Combobox).unwrap();
+
+    engine
+        .control()
+        .dispatch_event(due, EventKind::Press, EventPayload::None);
+    let opened = until(&rx, |b| shows(b, "2026-10-10*"));
+    // The app's function disables the 14th, a turn later.
+    let disabled = until(&rx, |b| {
+        find(
+            std::slice::from_ref(b),
+            "2026-10-14",
+            AccessibilityRole::Button,
+        )
+        .is_some_and(|(_, p)| p.accessibility.state.disabled)
+    });
+    let (fifteenth, _) = find(&opened, "2026-10-15", AccessibilityRole::Button)
+        .or_else(|| find(&disabled, "2026-10-15", AccessibilityRole::Button))
+        .expect("a day");
+    engine
+        .control()
+        .dispatch_event(fifteenth, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, "Value: 2026-10-15"));
+
+    engine
+        .control()
+        .dispatch_event(trip, EventKind::Press, EventPayload::None);
+    let open = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Week", AccessibilityRole::Button).is_some()
+    });
+    let (week, _) = find(&open, "Week", AccessibilityRole::Button).unwrap();
+    engine
+        .control()
+        .dispatch_event(week, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, r#"Range: ["2026-10-19","2026-10-25"]"#));
+}
+
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
 import { Select } from "nsh/base";
 
@@ -3661,8 +3965,8 @@ mount(() => (
 "##;
 
 /// On a desktop, a TSX `Select`'s trigger is the app's element: the
-/// combobox, and what the popup is placed against and as wide as (not the
-/// slot's view, which the column stretches); open at first (`defaultOpen`),
+/// combobox, and what the popup is placed against and as wide as (its
+/// slot's view lays it out through, taking its box); open at first (`defaultOpen`),
 /// the popup shows its rows once the trigger is laid out.
 #[test]
 fn a_base_select_on_a_desktop_places_its_popup_at_the_apps_trigger() {
@@ -5748,6 +6052,281 @@ fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
     );
 }
 
+const BASE_PLOT_ARC_RETARGET: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Arc, Pie, Plot } from "nsh/base/plot";
+
+function App() {
+  const step = signal(0);
+  setTimeout(() => step.set(1), 50);
+  setTimeout(() => step.set(2), 150);
+  const ends = [Math.PI / 2, Math.PI, 1.5 * Math.PI];
+  const rows = [
+    [{ v: 1 }, { v: 3 }],
+    [{ v: 1 }, { v: 1 }],
+    [{ v: 3 }, { v: 1 }],
+  ];
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows[step()]}
+        y="v"
+        motion={{ update: { duration: 1000 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <Arc endAngle={ends[step()]} innerRadius={30} outerRadius={50} />
+        <Pie innerRadius={10} outerRadius={20} />
+      </Plot>
+      <Text>{`step ${step()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The angles changing again while they move (`motion.update`): the move
+/// stops, the animator is asked how far it had gone, and the next move
+/// starts from the angles drawn there, not from the first move's target;
+/// the arc's and the pie's alike.
+#[test]
+fn base_plot_arc_and_pie_move_on_from_the_angles_drawn() {
+    use std::f32::consts::{FRAC_PI_4, PI};
+
+    use nsh_core::{
+        animation::{AnimationOp, Finished},
+        canvas::Num,
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let reads = |all: &[MountBatch]| -> Vec<u32> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Animation(AnimationOp::Read { request, .. }) => Some(*request),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let (engine, rx) = start(BASE_PLOT_ARC_RETARGET);
+    let mut all = until(&rx, |b| shows(b, "step 2"));
+    if reads(&all).len() < 2 {
+        all.extend(until(&rx, |b| {
+            b.items
+                .iter()
+                .any(|i| matches!(i, MountItem::Animation(AnimationOp::Read { .. })))
+        }));
+    }
+    // The arc's move and the pie's: each asks where it is.
+    let asked = reads(&all);
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    // Halfway, as the platform answers: the first moves draw a quarter
+    // turn and a half (3 o'clock to 6 o'clock) three quarters round.
+    engine.control().animations_finished(
+        asked
+            .iter()
+            .map(|&request| Finished {
+                animation: request,
+                finished: true,
+                value: Some(0.5),
+            })
+            .collect(),
+    );
+    let answered = all.len();
+    all.extend(until(&rx, |_| false));
+    // From there (the canvas's `PI / 4`, 12 o'clock its `-PI / 2`), not
+    // from the first move's target (its `PI / 2`), to three quarters.
+    let arc = rim_ends(&all[answered..], 50.0);
+    let [(arc, Num::Slot(end))] = arc[..] else {
+        panic!("the arc's rim, its end animated: {arc:?}")
+    };
+    let ends = slot_at(&all, arc, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
+    let slices = rim_ends(&all[answered..], 20.0);
+    let (first, Num::Slot(end)) = slices[0] else {
+        panic!("the first slice's rim, its end animated: {slices:?}")
+    };
+    let ends = slot_at(&all, first, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
+}
+
+const BASE_PLOT_PIE_LABELS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Pie, Plot } from "nsh/base/plot";
+
+type Row = { v: number; n: string };
+
+function App() {
+  const late = signal(false);
+  setTimeout(() => late.set(true), 100);
+  const rows = (): Row[] =>
+    late()
+      ? [{ v: 1, n: "a" }, { v: 1, n: "b" }, { v: 0, n: "c" }]
+      : [{ v: 1, n: "a" }, { v: 3, n: "b" }, { v: 0, n: "c" }];
+  return (
+    <View>
+      <Plot data={rows()} y="v" motion={{ update: { duration: 250 } }} style={{ width: 100, height: 100 }}>
+        <Pie
+          outerRadius={40}
+          label={(d: Row) => d.n}
+          labelGap={10}
+          labelClass="h-[10px] w-[20px]"
+          labelLineClass={(_: Row, i: number) => (i === 0 ? "stroke-[#ff0000]" : "stroke-[#0000ff]")}
+        />
+      </Plot>
+      <Plot data={[{ v: 1 }, { v: 3 }]} y="v" style={{ width: 100, height: 100 }}>
+        <Pie outerRadius={40} label="v" hoverLift={6} labelLineStyle={{ stroke: "#00ff00" }} />
+      </Plot>
+      <Text>{late() ? "late" : "early"}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A pie's labels (`gpui-component`'s `PieChart::label`): a text per
+/// slice whose text is not empty, outside the ring toward the slice's
+/// middle, `labelGap` past the rim, then across to that radius on the
+/// slice's side, the text after the line's end on the right half and
+/// before it on the left; the leader line, the app's `labelLine` part,
+/// from the rim to there, each in its own classes. The lines lift with
+/// their slices (`hoverLift`) and move with them over `motion.update`.
+#[test]
+fn base_plot_pie_labels_sit_outside_the_ring_with_leader_lines() {
+    use std::f32::consts::FRAC_1_SQRT_2;
+
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint, PathOp},
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    // The leader lines of the plots' drawings: the view and the drawing
+    // of the one stroked in `color`.
+    let line = |all: &[MountBatch], color: u32| {
+        plot_drawings(all)
+            .into_iter()
+            .find(|(_, d)| {
+                drawn_arcs(&d.ops).is_empty()
+                    && d.ops
+                        .contains(&CanvasOp::StrokeStyle(Paint::Color(Color(color))))
+            })
+            .unwrap_or_else(|| panic!("a line stroked in {color:#x}"))
+    };
+    let starts = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::Path(PathOp::MoveTo(x, y)) => Some((*x, *y)),
+            _ => None,
+        })
+    };
+
+    let (_engine, rx) = start(BASE_PLOT_PIE_LABELS);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    let late = all.len() - 1;
+    all.extend(until(&rx, |_| false));
+    let before = &all[..late];
+    // Slice `a`, 12 to 3 o'clock: its middle up and right, the rim 40 out,
+    // the elbow 50, then across to 50 right of the center. Slice `b`, the
+    // rest: down and left, across to 50 left of it.
+    let (r, e) = (40.0 * FRAC_1_SQRT_2, 50.0 * FRAC_1_SQRT_2);
+    let same = |got: Vec<(f32, f32)>, want: [(f32, f32); 3]| {
+        got.len() == 3
+            && got
+                .iter()
+                .zip(want)
+                .all(|(g, w)| near(g.0, w.0) && near(g.1, w.1))
+    };
+    let (_, a) = line(before, 0xff00_00ff);
+    let got = path_points(&a.ops);
+    assert!(
+        same(
+            got.clone(),
+            [
+                (50.0 + r, 50.0 - r),
+                (50.0 + e, 50.0 - e),
+                (100.0, 50.0 - e)
+            ]
+        ),
+        "{got:?}"
+    );
+    let (_, b) = line(before, 0x0000_ffff);
+    let got = path_points(&b.ops);
+    assert!(
+        same(
+            got.clone(),
+            [(50.0 - r, 50.0 + r), (50.0 - e, 50.0 + e), (0.0, 50.0 + e)]
+        ),
+        "{got:?}"
+    );
+    // The texts at the lines' ends, centered on them: after the end on the
+    // right, before it on the left. Row `c` has no slice, so no label.
+    let parent_of = |child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // Each view's last frame in `batches`.
+    let frame_in = |batches: &[MountBatch], id: u32| {
+        let f = frame_of(batches, id).expect("a frame");
+        (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
+    };
+    // Before the values change: after it, the labels rest at the new
+    // places.
+    let frame = |id: u32| frame_in(before, id);
+    let label = |text: &str| all.iter().find_map(|b| text_ids(b, text)).expect(text);
+    // Layout rounds frames to whole points.
+    let close = |(x, y, w, h): (f32, f32, f32, f32), want: (f32, f32, f32, f32)| {
+        (x - want.0).abs() <= 0.5
+            && (y - want.1).abs() <= 0.5
+            && (w - want.2).abs() <= 0.5
+            && (h - want.3).abs() <= 0.5
+    };
+    let (a, b) = (label("a"), label("b"));
+    assert!(
+        close(frame(parent_of(a)), (100.0, 50.0 - e, 0.0, 0.0)),
+        "{:?}",
+        frame(parent_of(a))
+    );
+    assert!(close(frame(a), (0.0, -5.0, 20.0, 10.0)), "{:?}", frame(a));
+    assert!(
+        close(frame(parent_of(b)), (0.0, 50.0 + e, 0.0, 0.0)),
+        "{:?}",
+        frame(parent_of(b))
+    );
+    assert!(close(frame(b), (-20.0, -5.0, 20.0, 10.0)), "{:?}", frame(b));
+    // Once `a` is half the pie, its label rests at 3 o'clock (the animator
+    // moving it there from where it was).
+    let rest = frame_in(&all, parent_of(a));
+    assert!(close(rest, (100.0, 50.0, 0.0, 0.0)), "{rest:?}");
+    assert!(!all.iter().any(|b| shows(b, "c")));
+
+    // With `hoverLift`, the line moves out with its slice: the animator
+    // places it, at rest where it is without one.
+    let (lifted, l) = line(&all, 0x00ff_00ff);
+    let Some((Num::Slot(x), Num::Slot(y))) = starts(&l) else {
+        panic!("the lifted line's start animated: {:?}", l.ops)
+    };
+    let at = [
+        slot_at(&all, lifted, x, &[1.0])[0],
+        slot_at(&all, lifted, y, &[1.0])[0],
+    ];
+    assert!(near(at[0], 50.0 + r) && near(at[1], 50.0 - r), "{at:?}");
+
+    // The values change (`motion.update`): slice `a` grows to half the
+    // pie, its line moving with it to 3 o'clock.
+    let (moved, a) = line(&all[late..], 0xff00_00ff);
+    let Some((Num::Slot(x), _)) = starts(&a) else {
+        panic!("the line's start animated: {:?}", a.ops)
+    };
+    let xs = slot_at(&all, moved, x, &[1.0, 1.3]);
+    assert!(near(xs[0], 50.0 + r) && near(xs[1], 90.0), "{xs:?}");
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 
@@ -6051,6 +6630,142 @@ fn base_plot_bars_grow_and_fade_natively() {
     let drawings = plot_drawings(&batches);
     assert!(drawings.iter().all(|(_, d)| !grows(d)));
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
+}
+
+const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
+import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
+
+type Row = { region: string; v: number };
+
+const rows: Row[] = [
+  { region: "EU", v: 1 },
+  { region: "US", v: 2 },
+  { region: "APAC", v: 3 },
+  { region: "EU", v: 4 },
+  { region: "LATAM", v: 5 },
+];
+
+function App() {
+  return (
+    <View>
+      {/* The domain's order, the categories past it in the order met, the
+          range repeating; the last slice's class over its color. */}
+      <Plot data={rows} colorScale={{ type: "ordinal", domain: ["US", "EU"], range: ["#ff0000", "#00ff00", "#0000ff"] }} style={{ width: 200, height: 100 }}>
+        <Pie value="v" color="region" sliceClass={(_, i) => (i === 4 ? "fill-[#999999]" : "")} />
+      </Plot>
+      {/* Bars by the app's function of a row; a style over the scale. */}
+      <Plot data={rows} y="v" xScale={{ type: "band" }} colorScale={{ type: "ordinal", domain: ["low", "high"], range: ["#ff0000", "#00ff00"] }} style={{ width: 200, height: 100 }}>
+        <Bar color={(d: Row) => (d.v > 2 ? "high" : "low")} />
+        <Bar color="region" style={{ fill: "#999999" }} />
+      </Plot>
+      {/* A series' first row: rows of its own outside the domain take
+          `unknown`; without a color, `currentColor` (the plot's text). */}
+      <Plot data={rows} y="v" class="text-[#333333]" colorScale={{ type: "ordinal", domain: ["EU"], range: ["#00ff00"], unknown: "#0000ff" }} style={{ width: 200, height: 100 }}>
+        <Line data={[{ region: "US", v: 1 }, { region: "US", v: 2 }]} color="region" />
+        <Line color="region" />
+        <Line />
+        <Area color="region" />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A plot's `colorScale` (`gpui-base`'s `ScaleOrdinal`, d3's
+/// `scaleOrdinal`) colors its marks by the category their `color` reads
+/// of each row (a field, or the app's function a turn later): a pie's
+/// slices and the bars by their rows, a line and an area by their first
+/// row. The domain's categories take the range in order, the others the
+/// next colors as they are met (d3's implicit domain) or `unknown`; the
+/// range repeats. The color is the paint where nothing sets one: the
+/// app's classes and styles win.
+#[test]
+fn base_plot_colors_marks_through_an_ordinal_scale() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Paint},
+    };
+    let (red, green, blue, gray) = (
+        Color(0xff00_00ff),
+        Color(0x00ff_00ff),
+        Color(0x0000_ffff),
+        Color(0x9999_99ff),
+    );
+    let (_engine, rx) = start(BASE_PLOT_COLOR_SCALE);
+    // The bars' function answers a turn after the rows.
+    let mut all = until_drawn(&rx, |d| {
+        !bar_rects(&d.ops).is_empty()
+            && d.ops
+                .contains(&CanvasOp::FillStyle(Paint::Color(Color(0x00ff_00ff))))
+    });
+    all.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&all);
+    let fills = |d: &nsh_core::canvas::Drawing| -> Vec<Color> {
+        d.ops
+            .iter()
+            .filter_map(|op| match op {
+                CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+                _ => None,
+            })
+            .collect()
+    };
+    let stroke = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::StrokeStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+    };
+
+    // The slices, in the rows' order: EU (the domain's second), US (its
+    // first), APAC and LATAM met after it (the third color, then the
+    // first again), the last one's class over its color.
+    let slices: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !drawn_arcs(&d.ops).is_empty())
+        .map(|(_, d)| fills(d))
+        .collect();
+    assert_eq!(
+        slices,
+        [vec![green], vec![red], vec![blue], vec![green], vec![gray]]
+    );
+
+    // Each bar its row's color; the style's fill over every one.
+    let bars: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !bar_rects(&d.ops).is_empty())
+        .collect();
+    let [(_, by_value), (_, styled)] = &bars[..] else {
+        panic!("two bars: {bars:?}")
+    };
+    assert_eq!(fills(by_value), [red, red, green, green, green]);
+    assert_eq!(fills(styled), [gray; 5]);
+
+    // A line of its own rows (US: unknown), one of the plot's (EU first),
+    // one without a color; the area of the plot's rows.
+    let lines: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| {
+            d.ops.iter().any(|op| matches!(op, CanvasOp::Stroke(_)))
+                && !d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .filter_map(|(_, d)| stroke(d))
+        .collect();
+    let [own, plots, plain] = lines[..] else {
+        panic!("three lines: {lines:?}")
+    };
+    assert_eq!((own, plots), (blue, green));
+    assert_eq!(plain, Color(0x3333_33ff));
+    let area = drawings
+        .iter()
+        .find(|(_, d)| {
+            drawn_arcs(&d.ops).is_empty()
+                && bar_rects(&d.ops).is_empty()
+                && d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .map(|(_, d)| fills(d));
+    assert_eq!(area, Some(vec![green]));
 }
 
 const BASE_PLOT_AXIS: &str = r##"import { mount, signal, View } from "nsh";
@@ -6790,4 +7505,223 @@ fn a_base_plot_moves_its_hover_with_the_keys_while_focused() {
     all.extend(until(&rx, |b| shows(b, "slice 2")));
     press(&all, "left");
     all.extend(until(&rx, |b| shows(b, "slice 0")));
+}
+
+const BASE_PLOT_REVERSE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Area, Bar, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View style={{ padding: 40, gap: 40 }}>
+      {/* A reversed y: bars hang from the top edge, the area too. */}
+      <Plot testID="down" data={[{ v: 10 }, { v: 30 }]} y="v" xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 40], reverse: true }} style={{ width: 200, height: 80 }}>
+        <Bar />
+        <Area curve="linear" />
+        <Grid y={[10]} />
+        <PlotAxis placement="left" tickValues={[0, 40]} format={(v) => `y${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Bars across from the right edge: a reversed x. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" yScale={{ type: "band" }} xScale={{ type: "linear", domain: [0, 40], reverse: true }} style={{ width: 200, height: 80 }}>
+        <Bar />
+      </Plot>
+      {/* Bands from the right edge. */}
+      <Plot
+        testID="rows"
+        data={[{ v: 1 }, { v: 2 }, { v: 3 }]}
+        y="v"
+        xScale={{ type: "band", reverse: true }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Bar />
+        <Grid x={[0.5]} />
+        <PlotAxis format={(v) => `r${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Points from the right edge, drawing in from there. */}
+      <Plot data={[{ v: 1 }, { v: 2 }]} y="v" xScale={{ type: "point", reverse: true }} appearGeneration={1} motion={{ appear: { duration: 10000 } }} style={{ width: 100, height: 50 }}>
+        <Line curve="linear" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A scale's `reverse` (visx's option, d3's range written backwards;
+/// `gpui-base`'s `BarAlignment::Top` and `Right`): on a reversed linear y
+/// the domain's smallest value is at the top edge, so bars and an area
+/// grow down from it; on a reversed x the first row and the smallest
+/// value are at the right edge, bars across grow leftward from it, and
+/// the marks draw in from there. The grid, the axes' ticks, the hover's
+/// nearest row and the arrow keys follow the scale: Left and Right move
+/// to the row on their side of the screen, Home / End and screen
+/// readers' increment keep the rows' order.
+#[test]
+fn base_plot_reversed_scales_run_from_the_other_edge() {
+    use nsh_core::{
+        keymap::{KeyMatch, Keymap, Keystroke},
+        platform::Os,
+    };
+    let environment = Environment {
+        os: Os::MacOs,
+        ..Environment::default()
+    };
+    let (engine, rx) = start_in(BASE_PLOT_REVERSE, environment);
+    let mut all = until_drawn(&rx, |d| path_points(&d.ops).first() == Some(&(108.0, -8.0)));
+    all.extend(until(&rx, |b| shows(b, "r2")));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [
+        (_, down),
+        (_, area),
+        (_, grid),
+        (_, across),
+        (_, rows),
+        (_, row_grid),
+        (_, line),
+    ] = &marks[..]
+    else {
+        panic!("seven marks: {marks:?}")
+    };
+    // A reversed y (0 to 40 over 80, from the top): bars from 0 at the top
+    // edge down to their values; the area from the top edge to its line.
+    assert_eq!(
+        bar_rects(&down.ops),
+        [[0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 100.0, 60.0]]
+    );
+    assert_eq!(
+        path_points(&area.ops)[..4],
+        [(50.0, 20.0), (150.0, 60.0), (150.0, 0.0), (50.0, 0.0)]
+    );
+    // The grid line at 10, 20 down (on the middle of a device pixel).
+    let at = path_points(&grid.ops);
+    assert!(
+        at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5),
+        "{at:?}"
+    );
+    // A reversed x (0 to 40 over 200, from the right): bars across grow
+    // leftward from the right edge.
+    assert_eq!(
+        bar_rects(&across.ops),
+        [[150.0, 0.0, 50.0, 40.0], [50.0, 40.0, 150.0, 40.0]]
+    );
+    // Reversed bands: the first row's at the right edge; the grid line
+    // between the first two bands at 200.
+    let starts = bar_rects(&rows.ops)
+        .iter()
+        .map(|r| (r[0], r[2]))
+        .collect::<Vec<_>>();
+    assert_eq!(starts, [(200.0, 100.0), (100.0, 100.0), (0.0, 100.0)]);
+    let at = path_points(&row_grid.ops);
+    assert!(
+        at.len() == 2 && at.iter().all(|&(x, _)| (x - 200.0).abs() <= 0.5),
+        "{at:?}"
+    );
+    // Points from the right edge, revealed from there (the appear's clip
+    // starts past the right edge, by the canvas's bleed).
+    assert_eq!(
+        path_points(&line.ops),
+        [(108.0, -8.0), (108.0, 58.0), (100.0, 50.0), (0.0, 0.0)]
+    );
+
+    // The axes' ticks: the y scale's 0 at the top, its 40 at the bottom;
+    // the rows from the right.
+    let parent_of = |all: &[MountBatch], child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let near = |all: &[MountBatch], text: &str, plot: &str, (x, y): (f32, f32)| {
+        let id = all
+            .iter()
+            .rev()
+            .find_map(|b| text_ids(b, text))
+            .expect(text);
+        let plot = test_view(all, plot);
+        let f = frame_of(all, id).unwrap();
+        let (mut lx, mut ly) = (f.origin.x.0, f.origin.y.0);
+        let mut at = parent_of(all, id);
+        while at != plot {
+            let f = frame_of(all, at).unwrap();
+            lx += f.origin.x.0;
+            ly += f.origin.y.0;
+            at = parent_of(all, at);
+        }
+        assert!(
+            (lx - x).abs() <= 0.5 && (ly - y).abs() <= 0.5,
+            "{text} at ({lx}, {ly}), not ({x}, {y})"
+        );
+    };
+    near(&all, "y0", "down", (-20.0, 0.0));
+    near(&all, "y40", "down", (-20.0, 70.0));
+    near(&all, "r0", "rows", (240.0, 100.0));
+    near(&all, "r1", "rows", (140.0, 100.0));
+    near(&all, "r2", "rows", (40.0, 100.0));
+
+    // The hover: the row nearest to the pointer, the last one at the left.
+    let plot = test_view(&all, "rows");
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            nsh_core::geometry::point(px(60.0), px(50.0)),
+            nsh_core::geometry::point(px(60.0), px(50.0)),
+            Default::default(),
+            None,
+        )),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+
+    // The keys: Right moves right on the screen, to the row before; Left
+    // to the row after; Home to the first row; increment to the next.
+    let keymap = |all: &[MountBatch]| -> Option<std::sync::Arc<Keymap>> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .next_back()
+    };
+    let press = |all: &[MountBatch], key: &str| {
+        let found = match keymap(all) {
+            Some(k) => k.find(Keystroke::parse(key, Os::MacOs).unwrap(), false, false),
+            None => KeyMatch::None,
+        };
+        let KeyMatch::Fire(id) = found else {
+            panic!("{key} is not bound")
+        };
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    engine
+        .control()
+        .dispatch_event(plot, EventKind::Focus, EventPayload::None);
+    all.extend(until(&rx, |b| {
+        b.items.iter().any(|i| matches!(i, MountItem::Keymap(_)))
+    }));
+    press(&all, "right");
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    press(&all, "home");
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    press(&all, "left");
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    engine.control().dispatch_event(
+        plot,
+        EventKind::AccessibilityAction,
+        EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
 }

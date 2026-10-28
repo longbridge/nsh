@@ -588,7 +588,7 @@ pub trait MountSink: Send + 'static {
     }
 
     /// JS or a component's task asked for a display frame
-    /// (`requestAnimationFrame`, `ui::ambient::next_frame`), or lists have
+    /// (`requestAnimationFrame`, `nsh_core::element::next_frame`), or lists have
     /// overscan cells left to bind: call [`EngineControl::frame`] at the
     /// next vsync. Requests are not repeated until that call.
     fn request_frame(&self) {}
@@ -884,6 +884,7 @@ const MAX_ADVANCE_ROUNDS: usize = 100_000;
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
+    InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_core::animation::Finished>),
@@ -973,6 +974,22 @@ impl EngineControl {
     /// engine frame.
     pub fn scroll(&self, id: NodeId, offset: Point<Points>, applied: u32) {
         let _ = self.tx.send(Message::Scroll(id, offset, applied));
+    }
+
+    /// Reports how far a multiline input's text scrolled: its offset, the
+    /// size of the text it scrolls and of its viewport. Sent while a
+    /// built-in bar takes the place of its indicator
+    /// (`InputConfig::replaced`), on every change.
+    pub fn input_scroll(
+        &self,
+        id: NodeId,
+        offset: Point<Points>,
+        content: Size<Points>,
+        viewport: Size<Points>,
+    ) {
+        let _ = self
+            .tx
+            .send(Message::InputScroll(id, offset, content, viewport));
     }
 
     /// Reports the zoom scale of a zoomable scroll view (before the offset
@@ -2444,6 +2461,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
         host: env.host,
+        screen_color: env.screen_color,
     }
 }
 
@@ -2541,6 +2559,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 event.throttle = Duration::from_secs_f32(throttle_ms / 1000.0);
                 event.pending = true;
             }
+        }
+        Message::InputScroll(id, offset, content, viewport) => {
+            state.core.set_input_scroll(id, offset, content, viewport);
         }
         Message::Zoom(id, scale) => state.core.set_zoom(id, scale),
         Message::ComponentSize(id, size) => state.core.set_component_size(id, size),

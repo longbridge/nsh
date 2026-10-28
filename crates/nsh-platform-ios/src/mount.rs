@@ -606,6 +606,8 @@ pub(crate) struct Mounter {
     fps: Option<std::rc::Rc<crate::fps::Fps>>,
     /// Shader views and the GPU device they render with.
     shaders: crate::shader::Shaders,
+    /// Texts whose color transitions.
+    text_colors: crate::interaction::TextColors,
     mtm: MainThreadMarker,
 }
 
@@ -662,6 +664,7 @@ impl Mounter {
             disappearing: Default::default(),
             frame_link: crate::animation::frame_link(&target_for_link),
             shaders: crate::shader::Shaders::new(&target_for_link),
+            text_colors: crate::interaction::TextColors::new(&target_for_link),
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
@@ -862,10 +865,11 @@ impl Mounter {
         true
     }
 
-    /// Whether a native animation runs.
+    /// Whether a native animation runs that ends by itself (not one
+    /// looping forever, which no test step waits for).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.animator.animating()
+        self.animator.finishing()
     }
 
     #[inline]
@@ -1146,14 +1150,21 @@ impl Mounter {
                 layout,
                 content,
             } => {
-                if let Some(Slot {
+                // The views alone: the texts' transitions are borrowed too.
+                if let Some(Some(Slot {
                     native: Native::Text(view),
                     events,
+                    style,
                     ..
-                }) = self.slot(id)
+                })) = self.views.get(id as usize)
                 {
                     let links = !text.links.is_empty() || view.has_links();
                     let events = *events;
+                    if let Some(old) = view.text() {
+                        // Its color moves to the new one over the
+                        // transition, drawn over the new lines.
+                        self.text_colors.text_changed(view, &old, &text, style);
+                    }
                     view.set_layout(text, layout, content);
                     // Pressable spans need the block's press recognizer.
                     if links {
@@ -1187,6 +1198,7 @@ impl Mounter {
                 pull_value,
                 keyboard_dismiss,
                 mirrored,
+                ..
             } => {
                 // A node that stops being vertical drops the width narrowed
                 // while it was: the extent it holds is measured the other way.
@@ -1558,6 +1570,9 @@ impl Mounter {
                 );
                 self.target.scroll_applied(id);
                 scroll.setContentOffset_animated(offset, animated);
+            }
+            (Command::ScrollTo { y, animated, .. }, Native::Input(input)) => {
+                input.scroll_to(y, animated);
             }
             (
                 Command::ZoomTo {
@@ -3674,6 +3689,11 @@ impl Mounter {
     /// The shaders' display link fired.
     pub(crate) fn shader_frame(&mut self) {
         self.shaders.frame();
+    }
+
+    /// The display link of texts whose color transitions fired.
+    pub(crate) fn text_color_frame(&mut self) {
+        self.text_colors.frame();
     }
 
     /// Shader view `id` follows its frame and corners.
