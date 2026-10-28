@@ -1,9 +1,9 @@
-import { type AnimatedValue, cleanup, computed, createAnimatedValue, effect, type JSX, Scroll, signal, Text, token, View } from "nsh";
-import { type CalendarItemState, Checkbox, Collapsible, Combobox, DatePicker, type DateRangePreset, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
+import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, tints, type Tone, toneColor } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, tints, type Tone, toneColor, toneTint } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -207,6 +207,121 @@ function popOn(key: () => unknown): AnimatedValue {
 
 /** Content that settles in with `t` (`settleOn`): it fades in and drops a few points into place. */
 const settle = (t: AnimatedValue) => ({ opacity: t, transform: [{ translateY: t.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] });
+
+/**
+ * Animates the next commit's layout natively: rows that move to their new
+ * places (a list sorted again), chips that come and go and the ones after
+ * them closing up. Everything lands at once with reduced motion.
+ */
+function animateLayout() {
+  if (!reduceMotion()) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+}
+
+/**
+ * A figure that rolls to each new value: the new one comes in from below as
+ * it grows and from above as it shrinks, fading in on `motion.control`'s
+ * spring, clipped to its line; in place with reduced motion.
+ */
+function Ticker(props: { value: number; text: string; size?: number; weight?: "400" | "500" | "600"; color?: string }) {
+  const y = createAnimatedValue(0);
+  const shown = createAnimatedValue(1);
+  let at = props.value;
+  effect(() => {
+    const next = props.value;
+    if (next === at) return;
+    const up = next > at;
+    at = next;
+    if (reduceMotion()) return;
+    y.set(up ? 10 : -10);
+    shown.set(0);
+    y.spring(0, motion.control);
+    shown.spring(1, motion.control);
+  });
+  return (
+    <View style={{ overflow: "hidden" }}>
+      <View style={{ opacity: shown, transform: [{ translateY: y }] }}>
+        <Text style={{ fontSize: props.size ?? size.label, fontWeight: props.weight ?? "500", color: props.color ?? colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>
+          {props.text}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** A status's dot: its color crosses over to a new status's. */
+function Dot(props: { color: string; size?: number }) {
+  const d = props.size ?? 8;
+  return (
+    <View
+      style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: props.color, transitionProperty: "background-color", transitionDuration: reduceMotion() ? 0 : 150 }}
+    />
+  );
+}
+
+/** A person's initials on their tone's tint, edged in it. */
+function Avatar(props: { name: string; tone: Tone; size?: number; ring?: boolean }) {
+  const d = props.size ?? 22;
+  return (
+    <View
+      style={{
+        width: d,
+        height: d,
+        borderRadius: d / 2,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: props.tone === "neutral" ? colors.inset : toneTint(props.tone),
+        borderWidth: props.ring ? 2 : 1,
+        // In a stack, a ring of the card's color parts the faces.
+        borderColor: props.ring ? colors.surface : alpha(props.tone === "neutral" ? colors.text : toneColor(props.tone), 0.25),
+      }}
+    >
+      <Text style={{ fontSize: Math.round(d * 0.42), fontWeight: "600", color: props.tone === "neutral" ? colors.muted : toneColor(props.tone) }}>{initials(props.name)}</Text>
+    </View>
+  );
+}
+
+/**
+ * A value as a chip that pops in as it is added (a motion, which lands at
+ * once with reduced motion), with a button that removes it. `lead` goes
+ * before the label: an avatar, a dot.
+ */
+function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemove: () => void }) {
+  const m = createMotion({ enter: "popIn", duration: 320 });
+  cleanup(() => m.stop());
+  const h = pointer ? 26 : 32;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        height: h,
+        // The lead (a face, a dot) close to the start.
+        paddingLeft: 3,
+        paddingRight: 3,
+        borderRadius: h / 2,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.raised,
+        boxShadow: finish.chip.boxShadow,
+        ...m.style,
+      }}
+    >
+      {props.lead}
+      <Text style={{ fontSize: pointer ? 12 : 14, color: colors.text }}>{props.label}</Text>
+      <BaseButton
+        accessibilityLabel={props.remove}
+        onPress={props.onRemove}
+        class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+        // Nearly the chip's height under a finger.
+        style={{ width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
+        focusStyle={focusRing()}
+      >
+        <Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />
+      </BaseButton>
+    </View>
+  );
+}
 
 /**
  * A choice card (a checkbox's or a radio's): raised while off; edged in the
@@ -565,6 +680,141 @@ const monthDay = (value: string) => `${MONTHS[Number(value.slice(5, 7)) - 1].sli
 const shortDate = (value: string) => `${monthDay(value)}, ${value.slice(0, 4)}${value.length > 10 ? ` · ${value.slice(11, 16)}` : ""}`;
 
 const titleOf = (items: { value: string; title: string }[], value: string | null) => items.find((i) => i.value === value)?.title ?? "None";
+
+const DOWNLOADS: { name: string; kind: string; mb: number; days: number; icon: IconName }[] = [
+  { name: "Quarterly report.pdf", kind: "PDF", mb: 2.4, days: 3, icon: "document" },
+  { name: "Lisbon, 48 photos", kind: "Folder", mb: 212, days: 1, icon: "photos" },
+  { name: "Interview.mov", kind: "Movie", mb: 1240, days: 6, icon: "media" },
+  { name: "Brand assets.zip", kind: "Archive", mb: 86, days: 12, icon: "layers" },
+  { name: "Notes.md", kind: "Text", mb: 0.02, days: 0, icon: "text" },
+];
+type DownloadSort = "name" | "added" | "size" | "kind";
+/** The orders of the downloads, and the way each runs first: names and kinds A to Z, the newest and largest first. */
+const DOWNLOAD_SORTS: { value: DownloadSort; title: string; down: boolean }[] = [
+  { value: "name", title: "Name", down: false },
+  { value: "added", title: "Date added", down: true },
+  { value: "size", title: "Size", down: true },
+  { value: "kind", title: "Kind", down: false },
+];
+const fileSize = (mb: number) => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 1 ? `${Math.round(mb)} MB` : `${Math.round(mb * 1000)} KB`);
+const ago = (days: number) => (days === 0 ? "Today" : days === 1 ? "Yesterday" : `${days} days ago`);
+
+const COUNTRIES: { value: string; title: string; flag: string; dial: string; group: string; days: string; currency: string; disabled?: boolean }[] = [
+  { value: "hk", title: "Hong Kong", flag: "🇭🇰", dial: "+852", group: "Asia", days: "1–2 days", currency: "HKD" },
+  { value: "jp", title: "Japan", flag: "🇯🇵", dial: "+81", group: "Asia", days: "2–3 days", currency: "JPY" },
+  { value: "sg", title: "Singapore", flag: "🇸🇬", dial: "+65", group: "Asia", days: "2–4 days", currency: "SGD" },
+  { value: "kr", title: "South Korea", flag: "🇰🇷", dial: "+82", group: "Asia", days: "3–4 days", currency: "KRW" },
+  { value: "fr", title: "France", flag: "🇫🇷", dial: "+33", group: "Europe", days: "4–6 days", currency: "EUR" },
+  { value: "de", title: "Germany", flag: "🇩🇪", dial: "+49", group: "Europe", days: "4–6 days", currency: "EUR" },
+  { value: "pt", title: "Portugal", flag: "🇵🇹", dial: "+351", group: "Europe", days: "5–7 days", currency: "EUR" },
+  { value: "gb", title: "United Kingdom", flag: "🇬🇧", dial: "+44", group: "Europe", days: "4–5 days", currency: "GBP" },
+  { value: "br", title: "Brazil", flag: "🇧🇷", dial: "+55", group: "Americas", days: "—", currency: "BRL", disabled: true },
+  { value: "ca", title: "Canada", flag: "🇨🇦", dial: "+1", group: "Americas", days: "3–5 days", currency: "CAD" },
+  { value: "mx", title: "Mexico", flag: "🇲🇽", dial: "+52", group: "Americas", days: "6–8 days", currency: "MXN" },
+  { value: "us", title: "United States", flag: "🇺🇸", dial: "+1", group: "Americas", days: "3–5 days", currency: "USD" },
+];
+const COUNTRY_ITEMS = COUNTRIES.map(({ value, title, group, disabled }) => ({ value, title, group, disabled }));
+
+/** An issue's states, each with its tone: a dot of that color marks it. */
+const STATUSES: { value: string; title: string; tone: Tone | "faint" }[] = [
+  { value: "backlog", title: "Backlog", tone: "faint" },
+  { value: "todo", title: "To do", tone: "neutral" },
+  { value: "progress", title: "In progress", tone: "warn" },
+  { value: "review", title: "In review", tone: "info" },
+  { value: "done", title: "Done", tone: "up" },
+  { value: "canceled", title: "Canceled", tone: "danger" },
+];
+const STATUS_ITEMS = STATUSES.map(({ value, title }) => ({ value, title }));
+const statusColor = (value: string | null) => {
+  const tone = STATUSES.find((s) => s.value === value)?.tone ?? "faint";
+  return tone === "faint" ? colors.faint : toneColor(tone);
+};
+const TEAMS = [
+  { value: "design", title: "Design" },
+  { value: "platform", title: "Platform" },
+  { value: "mobile", title: "Mobile" },
+  { value: "web", title: "Web" },
+  { value: "docs", title: "Docs" },
+];
+const PRIORITIES = [
+  { value: "urgent", title: "Urgent" },
+  { value: "high", title: "High" },
+  { value: "low", title: "Low" },
+];
+
+const PEOPLE: { value: string; title: string; role: string; tone: Tone; disabled?: boolean }[] = [
+  { value: "ada", title: "Ada Lovelace", role: "Engineering", tone: "accent" },
+  { value: "grace", title: "Grace Hopper", role: "Platform", tone: "info" },
+  { value: "alan", title: "Alan Turing", role: "Research", tone: "warn" },
+  { value: "katherine", title: "Katherine Johnson", role: "Design", tone: "up" },
+  { value: "margaret", title: "Margaret Hamilton", role: "Mobile", tone: "danger" },
+  { value: "linus", title: "Linus Torvalds", role: "Kernel", tone: "down" },
+  { value: "dennis", title: "Dennis Ritchie", role: "Away until Monday", tone: "neutral", disabled: true },
+];
+/** The most people a task takes. */
+const MAX_PEOPLE = 4;
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("");
+
+const LABELS: { value: string; title: string; tone: Tone }[] = [
+  { value: "bug", title: "bug", tone: "danger" },
+  { value: "feature", title: "feature", tone: "up" },
+  { value: "docs", title: "docs", tone: "info" },
+  { value: "performance", title: "performance", tone: "warn" },
+  { value: "good-first-issue", title: "good first issue", tone: "accent" },
+];
+/** The tones labels the user creates take, in turn. */
+const NEW_TONES: Tone[] = ["accent", "info", "up", "warn", "down"];
+/** The value of a label the user creates: unique, as a label of the same title is never created twice. */
+const NEW_LABEL = "new:";
+
+const COMMANDS: { value: string; title: string; group: string; icon: IconName; keys?: string; disabled?: boolean }[] = [
+  { value: "new-file", title: "New file", group: "Suggestions", icon: "document", keys: "⌘N" },
+  { value: "search", title: "Search everywhere", group: "Suggestions", icon: "search", keys: "⇧⌘F" },
+  { value: "sidebar", title: "Toggle sidebar", group: "View", icon: "sidebar", keys: "⌘B" },
+  { value: "terminal", title: "Toggle terminal", group: "View", icon: "terminal", keys: "⌃`" },
+  { value: "zoom", title: "Reset zoom", group: "View", icon: "search", disabled: true },
+  { value: "dark", title: "Use the dark theme", group: "Appearance", icon: "moon" },
+  { value: "light", title: "Use the light theme", group: "Appearance", icon: "sun" },
+];
+const COMMAND_ITEMS = COMMANDS.map(({ value, title, group, disabled }) => ({ value, title, group, disabled }));
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** An ISO date's day, in local time. */
+const dateOf = (value: string) => new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)));
+/** An ISO date's day of the week, 0 Sunday. */
+const weekday = (value: string) => dateOf(value).getDay();
+/** An ISO date as a row of a booking shows it: `Thu, Oct 29`. */
+const dayTitle = (value: string) => `${DAY_NAMES[weekday(value)]}, ${monthDay(value)}`;
+/** The days from one ISO date to another. */
+const daysBetween = (from: string, to: string) => {
+  const day = (v: string) => Date.UTC(Number(v.slice(0, 4)), Number(v.slice(5, 7)) - 1, Number(v.slice(8, 10)));
+  return Math.round((day(to) - day(from)) / 86_400_000);
+};
+/** A night's rate: Fridays and Saturdays cost more. */
+const nightRate = (value: string) => (weekday(value) === 5 || weekday(value) === 6 ? 220 : 180);
+const CLEANING = 40;
+const SLOTS = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "14:00", "15:30", "16:00"];
+/** Whether the slot `i` of a day is booked already: a few a day, a different few each day. */
+const slotTaken = (date: string, i: number) => (Number(date.slice(8, 10)) + i * 3) % 5 === 0;
+
+const CART: { name: string; detail: string; price: number; stock: number; icon: IconName }[] = [
+  { name: "Linen shirt", detail: "Sand, M", price: 48, stock: 10, icon: "styles" },
+  { name: "Canvas tote", detail: "Natural", price: 22, stock: 3, icon: "layers" },
+  { name: "Wool socks", detail: "Pack of 3", price: 14, stock: 20, icon: "spark" },
+];
+/** The order total from which shipping is free. */
+const FREE_SHIPPING = 150;
+const BILL = 84;
+/** An amount in dollars and cents: `$1,204.50`. */
+const money = (n: number) => {
+  const [whole, cents] = n.toFixed(2).split(".");
+  return `$${count(Number(whole))}.${cents}`;
+};
 
 /** The controls, one demo each in the sidebar. */
 export type Control =
@@ -1264,8 +1514,24 @@ export function Controls(props: { show: Control }) {
   /** The clear button's inset from the trigger's end: centered where the chevron's lane is. The button is in the
       select's view, outside the trigger, so its inset counts the trigger's 1 pt border too. */
   const clearInset = 1 + 10 + size.check / 4 - size.clear / 2;
-  /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
-  function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
+  /** The chevron of a trigger: its icon box takes only the room of its stroke (half the box) in the row, so it
+      turns about its own center; it points down, and up while the list is open. */
+  function Chevron(props: { open: boolean; hidden?: boolean }) {
+    return (
+      <View
+        class="transition-transform duration-150 motion-reduce:transition-none"
+        style={{ display: props.hidden ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
+      >
+        <Icon name="chevron" size={size.check} tint={colors.muted} />
+      </View>
+    );
+  }
+  /**
+   * The trigger: the chosen title and a chevron that turns while the list is open, its border lit then (faded,
+   * as under the pointer). `lead` goes before the title (a flag, a status's dot, faces); `error` edges it in the
+   * danger tone.
+   */
+  function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean; lead?: JSX.Element; error?: boolean }) {
     return (
       <View
         style={{
@@ -1278,57 +1544,85 @@ export function Controls(props: { show: Control }) {
           paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
           borderRadius: radius.control,
           borderWidth: 1,
-          borderColor: props.open ? colors.faint : colors.border,
+          borderColor: props.error ? colors.danger : props.open ? colors.faint : colors.border,
           backgroundColor: colors.raised,
           ...finish.raised,
           // Dimmed while the select is: the app knows, as it passes `disabled`.
           opacity: props.disabled ? dimmed.opacity : 1,
+          transitionProperty: "border-color, opacity",
+          transitionDuration: reduceMotion() ? 0 : 120,
         }}
-        hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
+        hoverStyle={props.disabled || props.error ? undefined : { borderColor: colors.faint }}
         activeStyle={pressed}
         focusStyle={focusRing()}
         disabledStyle={dimmed}
       >
+        {props.lead}
         <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-        {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
-            about its own center; it points down, and up while open. */}
-        <View
-          class="transition-transform duration-150 motion-reduce:transition-none"
-          style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
-        >
-          <Icon name="chevron" size={size.check} tint={colors.muted} />
-        </View>
+        <Chevron open={props.open} hidden={props.clearable} />
       </View>
     );
   }
-  /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
-  function Option(props: { item: SelectItemState; note?: string }) {
+  /**
+   * A row of the list, its look on the row (`itemClass`), which the list keeps while it draws the row's content
+   * again: lit while highlighted (`focus:`, the keys or the pointer on it), the fill and edge fading between rows as
+   * the highlight moves; at once with reduced motion.
+   */
+  const optionClass = "rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70";
+  /** A row's content: bolder with a check while chosen; `lead` before the title (a flag, a dot, a face, an icon), `note` after it. */
+  function Option(props: { item: SelectItemState; note?: string; lead?: JSX.Element; detail?: string }) {
     return (
       <View
         style={{
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          height: pointer ? 32 : 46,
-          paddingHorizontal: 8,
-          borderRadius: 7,
-          borderWidth: 1,
-          borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
-          backgroundColor: props.item.highlighted ? tints.accent : "transparent",
+          // The row's 1-point border on each side.
+          height: props.detail ? (pointer ? 38 : 52) : pointer ? 30 : 44,
+          paddingHorizontal: 7,
           opacity: props.item.disabled ? 0.35 : 1,
         }}
       >
-        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
-          {props.item.title}
-        </Text>
+        {props.lead}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>{props.item.title}</Text>
+          <If when={props.detail}>
+            <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>{props.detail}</Text>
+          </If>
+        </View>
         <If when={props.note}>
-          <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
+          <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
         </If>
         <View style={{ width: 16, alignItems: "center" }}>
           <If when={props.item.selected}>
             <Icon name="check" size={14} tint={colors.accent} />
           </If>
         </View>
+      </View>
+    );
+  }
+  /** The search field at the top of a list: a recessed well. Read in JSX, so it follows the appearance. */
+  const searchClass = `${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`;
+  const searchStyle = () => ({
+    height: pointer ? 32 : 40,
+    paddingHorizontal: 9,
+    marginBottom: 6,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: colors.fieldBorder,
+    backgroundColor: colors.field,
+    ...finish.field,
+  });
+  /** What a list shows while its search matches nothing. */
+  function Empty(props: { label: string }) {
+    return <Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>{props.label}</Text>;
+  }
+  /** A field's message under it: an error in the danger tone, settling in as it shows. */
+  function Message(props: { label: string; tone?: Tone }) {
+    const t = settleOn(() => props.label);
+    return (
+      <View style={settle(t)}>
+        <Text style={{ fontSize: size.detail, color: props.tone ? toneColor(props.tone) : colors.muted }}>{props.label}</Text>
       </View>
     );
   }
@@ -1366,7 +1660,7 @@ export function Controls(props: { show: Control }) {
               // Wider than the trigger with a pointer: the titles whole.
               popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={optionClass}
               trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
               renderItem={(item) => <Option item={item} />}
             />
@@ -1384,24 +1678,15 @@ export function Controls(props: { show: Control }) {
               accessibilityLabel="Font"
               searchable
               searchPlaceholder="Search fonts"
-              searchClass={`${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`}
-              searchStyle={{
-                height: pointer ? 32 : 40,
-                paddingHorizontal: 9,
-                marginBottom: 6,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: colors.fieldBorder,
-                backgroundColor: colors.field,
-                ...finish.field,
-              }}
-              empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>No font matches</Text>}
+              searchClass={searchClass}
+              searchStyle={searchStyle()}
+              empty={<Empty label="No font matches" />}
               offset={4}
               margin={8}
               align="end"
               popupStyle={pointer ? { ...surface(), width: 260 } : surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={optionClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
@@ -1416,6 +1701,254 @@ export function Controls(props: { show: Control }) {
             <Label label="Language" detail="Set by your organization" />
             <Select items={LANGUAGES} value="en" disabled accessibilityLabel="Language" trigger={<Picker title="English" open={false} disabled />} />
           </View>
+        </View>
+      </Card>
+    );
+  }
+
+  /** What the lists of the cards below share: at the trigger's end with a pointer (`width` wide), a sheet on a phone. */
+  const listProps = (width?: number) => ({
+    offset: 4,
+    margin: 8,
+    align: "end" as const,
+    popupStyle: pointer && width ? { ...surface(), width } : surface(),
+    backdropStyle: backdrop,
+    itemClass: optionClass,
+  });
+  /** A clear button over the trigger's end, in place of its chevron (`Picker`'s `clearable`). */
+  const clearProps = (label: string) => ({
+    cleanable: true,
+    clearButtonAccessibilityLabel: label,
+    clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track",
+    clearButtonStyle: { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
+    clearButton: <Icon name="close" size={size.clear - 6} tint={colors.muted} />,
+  });
+
+  function Downloads() {
+    const sort = signal<DownloadSort>("added");
+    const down = signal(true);
+    const open = signal(false);
+    const order = DOWNLOAD_SORTS.map(({ value, title }) => ({ value, title }));
+    const sortTitle = () => titleOf(order, sort());
+    /** How the order runs, in words: what comes first. */
+    const way = () => {
+      const s = sort();
+      if (s === "added") return down() ? "newest first" : "oldest first";
+      if (s === "size") return down() ? "largest first" : "smallest first";
+      return down() ? "Z to A" : "A to Z";
+    };
+    // Each order's natural way (names A to Z, the oldest and smallest first), turned round while `down`.
+    const sorted = computed(() => {
+      const s = sort();
+      const by = (a: (typeof DOWNLOADS)[number], b: (typeof DOWNLOADS)[number]) =>
+        s === "name" ? a.name.localeCompare(b.name) : s === "kind" ? a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) : s === "size" ? a.mb - b.mb : b.days - a.days;
+      const out = DOWNLOADS.slice().sort(by);
+      return down() ? out.reverse() : out;
+    });
+    // The rows move to their new places (`animateLayout`), and the column sorted on leads at the trailing edge.
+    const set = (next: DownloadSort, nextDown: boolean) => {
+      animateLayout();
+      sort.set(next);
+      down.set(nextDown);
+      last.set(`Downloads: ${sortTitle()}, ${way()}`);
+    };
+    const trailing = (f: (typeof DOWNLOADS)[number]) => (sort() === "size" ? fileSize(f.mb) : sort() === "kind" ? f.kind : ago(f.days));
+    const detail = (f: (typeof DOWNLOADS)[number]) =>
+      sort() === "size" ? `${f.kind} · ${ago(f.days)}` : sort() === "kind" ? `${fileSize(f.mb)} · ${ago(f.days)}` : `${f.kind} · ${fileSize(f.mb)}`;
+    return (
+      <Card title="In a list header" subtitle="A quiet sort menu over the rows it orders: they move to their new places">
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingBottom: size.padding, borderBottomWidth: 1, borderColor: colors.line }}>
+          <Text style={{ flex: 1, fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint }}>{`DOWNLOADS · ${DOWNLOADS.length}`}</Text>
+          <Select
+            items={order}
+            value={sort()}
+            onChange={({ value }) => {
+              const next = DOWNLOAD_SORTS.find((s) => s.value === value);
+              if (next) set(next.value, next.down);
+            }}
+            onOpenChange={opened((o) => open.set(o))}
+            accessibilityLabel="Sort downloads"
+            {...listProps(180)}
+            trigger={
+              // A ghost trigger, as list headers have: bare until the pointer is over it, filled while open.
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  height: pointer ? 26 : 34,
+                  paddingHorizontal: 8,
+                  borderRadius: radius.control,
+                  backgroundColor: open() ? token("accent") : "transparent",
+                  transitionProperty: "background-color",
+                  transitionDuration: reduceMotion() ? 0 : 120,
+                }}
+                hoverStyle={open() ? undefined : hovered()}
+                activeStyle={pressed}
+                focusStyle={focusRing()}
+              >
+                <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
+                <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
+                <Chevron open={open()} />
+              </View>
+            }
+            renderItem={(item) => <Option item={item} />}
+          />
+          {/* The way the order runs: the arrow turns over. */}
+          <BaseButton
+            accessibilityLabel={down() ? "Descending" : "Ascending"}
+            onPress={() => set(sort(), !down())}
+            class="items-center justify-center rounded-md enabled:hover:bg-accent active:bg-track"
+            style={{ width: pointer ? 26 : 34, height: pointer ? 26 : 34 }}
+            focusStyle={focusRing()}
+          >
+            <View class="transition-transform duration-200 motion-reduce:transition-none" style={{ transform: [{ rotate: down() ? "0deg" : "180deg" }] }}>
+              <Icon name="arrow-down" size={pointer ? 14 : 16} tint={colors.muted} />
+            </View>
+          </BaseButton>
+        </View>
+        <View>
+          <Each of={sorted()}>
+            {(f, i) => (
+              <View style={{ ...row(i() === 0), paddingVertical: 4 }}>
+                <IconTile name={f().icon} size={pointer ? 26 : 32} tint={colors.muted} />
+                <Label label={f().name} detail={detail(f())} />
+                <Text style={{ fontSize: size.detail, color: colors.text, fontVariant: ["tabular-nums"] }}>{trailing(f())}</Text>
+              </View>
+            )}
+          </Each>
+        </View>
+      </Card>
+    );
+  }
+
+  function Shipping() {
+    const country = signal<string | null>("jp");
+    const open = signal(false);
+    const chosen = () => COUNTRIES.find((c) => c.value === country());
+    const of = (value: string) => COUNTRIES.find((c) => c.value === value)!;
+    // The facts settle in again for each country.
+    const t = settleOn(country);
+    function Flag(props: { value: string }) {
+      return <Text style={{ fontSize: pointer ? 15 : 18 }}>{of(props.value).flag}</Text>;
+    }
+    /** One fact of the delivery: a label over its value, after a hairline but the first. */
+    function Fact(props: { label: string; value: string; first?: boolean }) {
+      return (
+        <View style={{ flex: 1, gap: 2, paddingLeft: props.first ? 0 : size.gap, borderLeftWidth: props.first ? 0 : 1, borderColor: colors.line }}>
+          <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.label}</Text>
+          <Text style={{ fontSize: size.label, fontWeight: "500", color: colors.text, fontVariant: ["tabular-nums"] }}>{props.value}</Text>
+        </View>
+      );
+    }
+    return (
+      <Card title="Shipping" subtitle="Countries by region with their flags and codes; search narrows them">
+        <View style={row(true)}>
+          <Label label="Country" detail="Where your order goes" />
+          <Select
+            items={COUNTRY_ITEMS}
+            value={country()}
+            onChange={({ value }) => {
+              country.set(value);
+              last.set(`Country: ${titleOf(COUNTRIES, value)}`);
+            }}
+            onOpenChange={opened((o) => open.set(o))}
+            accessibilityLabel="Country"
+            searchable
+            searchPlaceholder="Search countries"
+            searchClass={searchClass}
+            searchStyle={searchStyle()}
+            empty={<Empty label="We do not ship there" />}
+            {...listProps(260)}
+            trigger={<Picker title={chosen()?.title ?? "Choose"} lead={chosen() ? <Flag value={chosen()!.value} /> : undefined} open={open()} />}
+            renderItem={(item) => <Option item={item} lead={<Flag value={item.value} />} note={item.disabled ? "Not yet" : of(item.value).dial} />}
+            renderGroup={(group) => <Header group={group} />}
+          />
+        </View>
+        <View style={{ flexDirection: "row", paddingTop: size.padding, borderTopWidth: 1, borderColor: colors.line, ...settle(t) }}>
+          <Fact first label="Arrives in" value={chosen()?.days ?? "—"} />
+          <Fact label="Prices in" value={chosen()?.currency ?? "—"} />
+          <Fact label="Calling code" value={chosen()?.dial ?? "—"} />
+        </View>
+      </Card>
+    );
+  }
+
+  function Issue() {
+    const status = signal<string | null>("progress");
+    const team = signal<string | null>(null);
+    const statusOpen = signal(false);
+    const teamOpen = signal(false);
+    // The team is required: once filing was tried without one, its trigger is edged in red and says so.
+    const tried = signal(false);
+    const filed = signal(0);
+    const missing = () => tried() && team() === null;
+    const shake = createMotion();
+    cleanup(() => shake.stop());
+    const pop = popOn(filed);
+    const file = () => {
+      if (team() === null) {
+        tried.set(true);
+        shake.play("shake");
+        last.set("Issue: a team is required");
+        return;
+      }
+      filed.set(filed() + 1);
+      last.set(`Issue filed: ${titleOf(STATUS_ITEMS, status())}, ${titleOf(TEAMS, team())}`);
+    };
+    return (
+      <Card title="Status and validation" subtitle="Statuses with their colors, a required team, a locked priority">
+        <View>
+          <View style={row(true)}>
+            <Label label="Status" detail="Its dot follows the choice" />
+            <Select
+              items={STATUS_ITEMS}
+              value={status()}
+              onChange={({ value }) => {
+                status.set(value);
+                last.set(`Status: ${titleOf(STATUS_ITEMS, value)}`);
+              }}
+              onOpenChange={opened((o) => statusOpen.set(o))}
+              accessibilityLabel="Status"
+              {...listProps(180)}
+              trigger={<Picker title={titleOf(STATUS_ITEMS, status())} lead={<Dot color={statusColor(status())} />} open={statusOpen()} />}
+              renderItem={(item) => <Option item={item} lead={<Dot color={statusColor(item.value)} />} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: size.label, color: colors.text }}>Team</Text>
+              <Message label={missing() ? "Choose a team to file the issue" : "Required: who picks it up"} tone={missing() ? "danger" : undefined} />
+            </View>
+            <View style={shake.style}>
+              <Select
+                items={TEAMS}
+                value={team()}
+                onChange={({ value }) => {
+                  team.set(value);
+                  last.set(`Team: ${titleOf(TEAMS, value)}`);
+                }}
+                onOpenChange={opened((o) => teamOpen.set(o))}
+                accessibilityLabel="Team"
+                {...listProps(180)}
+                trigger={<Picker title={team() === null ? "Choose a team" : titleOf(TEAMS, team())} placeholder={team() === null} error={missing()} open={teamOpen()} />}
+                renderItem={(item) => <Option item={item} />}
+              />
+            </View>
+          </View>
+          <View style={row(false)}>
+            <Label label="Priority" detail="Set by the triage bot" />
+            <Select items={PRIORITIES} value="high" disabled accessibilityLabel="Priority" trigger={<Picker title="High" open={false} disabled />} />
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap, marginTop: size.padding }}>
+          <Button label="File issue" size={size.switch} flex={pointer ? undefined : 1} onPress={file} />
+          <If when={filed() > 0}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, transform: [{ scale: pop }] }}>
+              <Icon name="check" size={size.check} tint={toneColor("up")} weight={markWeight} />
+              <Text style={{ fontSize: size.detail, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`Filed as NSH-${611 + filed()}`}</Text>
+            </View>
+          </If>
         </View>
       </Card>
     );
@@ -1449,24 +1982,15 @@ export function Controls(props: { show: Control }) {
               accessibilityLabel="Topics"
               searchable
               searchPlaceholder="Search topics"
-              searchClass={`${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`}
-              searchStyle={{
-                height: pointer ? 32 : 40,
-                paddingHorizontal: 9,
-                marginBottom: 6,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: colors.fieldBorder,
-                backgroundColor: colors.field,
-                ...finish.field,
-              }}
-              empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>No topic matches</Text>}
+              searchClass={searchClass}
+              searchStyle={searchStyle()}
+              empty={<Empty label="No topic matches" />}
               offset={4}
               margin={8}
               align="end"
               popupStyle={pointer ? { ...surface(), width: 240 } : surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={optionClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the topics"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
@@ -1495,11 +2019,233 @@ export function Controls(props: { show: Control }) {
               align="end"
               popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={optionClass}
               trigger={<Picker title={names(REVIEWERS, reviewer())[0] ?? "Nobody"} open={reviewerOpen()} placeholder={!reviewer().length} />}
               renderItem={(item) => <Option item={item} />}
             />
           </View>
+        </View>
+      </Card>
+    );
+  }
+
+  /** The chips of a combobox's values, under its row: they pop in, and the others close up as one goes. */
+  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 };
+
+  function People() {
+    const people = signal<string[]>(["ada", "grace"]);
+    const open = signal(false);
+    const person = (value: string) => PEOPLE.find((p) => p.value === value)!;
+    const full = () => people().length >= MAX_PEOPLE;
+    // Once the task has its most people, the others cannot be added (but the chosen can be taken off).
+    const items = () => PEOPLE.map((p) => ({ value: p.value, title: p.title, disabled: p.disabled || (full() && !people().includes(p.value)) }));
+    const set = (next: string[]) => {
+      animateLayout();
+      people.set(next);
+      last.set(`Assignees: ${next.map((v) => person(v).title).join(", ") || "nobody"}`);
+    };
+    return (
+      <Card title="Assignees" subtitle="People with their faces, up to four; each pops in as a chip" right={<Badge label={`${people().length} of ${MAX_PEOPLE}`} tone={full() ? "warn" : "neutral"} />}>
+        <View style={row(true)}>
+          <Label label="Assignees" detail={full() ? "A task takes four people at most" : "Who works on the task"} />
+          <Combobox
+            items={items()}
+            multiple
+            value={people()}
+            onChange={({ value }) => set(value)}
+            onOpenChange={opened((o) => open.set(o))}
+            accessibilityLabel="Assignees"
+            searchable
+            searchPlaceholder="Search people"
+            searchClass={searchClass}
+            searchStyle={searchStyle()}
+            empty={<Empty label="Nobody by that name" />}
+            {...listProps(260)}
+            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+            footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
+            trigger={
+              <Picker
+                title={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
+                placeholder={!people().length}
+                open={open()}
+                lead={
+                  // The faces overlap, each ringed in the card's color.
+                  <If when={people().length}>
+                    <View style={{ flexDirection: "row" }}>
+                      <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                    </View>
+                  </If>
+                }
+              />
+            }
+            renderItem={(item) => (
+              <Option
+                item={item}
+                lead={<Avatar name={item.title} tone={person(item.value).tone} size={pointer ? 24 : 30} />}
+                detail={person(item.value).role}
+              />
+            )}
+          />
+        </View>
+        <View style={chips}>
+          <Each of={people()}>
+            {(v) => (
+              <Chip
+                label={person(v()).title}
+                lead={<Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 18 : 24} />}
+                remove={`Remove ${person(v()).title}`}
+                onRemove={() => set(people().filter((p) => p !== v()))}
+              />
+            )}
+          </Each>
+        </View>
+        <If when={!people().length}>
+          <Caption label="Nobody is on it yet" />
+        </If>
+      </Card>
+    );
+  }
+
+  function Labels() {
+    const labels = signal<string[]>(["bug"]);
+    const made = signal<{ value: string; title: string; tone: Tone }[]>([]);
+    const query = signal("");
+    const open = signal(false);
+    const all = () => [...LABELS, ...made()];
+    const label = (value: string) => all().find((l) => l.value === value);
+    // The query as a new label: offered at the end while no label has that title.
+    const typed = () => query().trim();
+    const fresh = () => typed() !== "" && !all().some((l) => l.title.toLowerCase() === typed().toLowerCase());
+    const items = () => [...all().map(({ value, title }) => ({ value, title })), ...(fresh() ? [{ value: `${NEW_LABEL}${typed()}`, title: `Create “${typed()}”` }] : [])];
+    const set = (next: string[]) => {
+      animateLayout();
+      labels.set(next);
+      last.set(`Labels: ${next.map((v) => label(v)?.title ?? v).join(", ") || "none"}`);
+    };
+    return (
+      <Card title="Labels" subtitle="Type a label that does not exist yet and Return creates it">
+        <View style={row(true)}>
+          <Label label="Labels" detail="Search them, or create one" />
+          <Combobox
+            items={items()}
+            multiple
+            value={labels()}
+            query={query()}
+            onQueryChange={({ query: q }) => query.set(q)}
+            onChange={({ value }) => {
+              // The offer chosen: the label is made, and chosen under its own value.
+              const created = value.find((v) => v.startsWith(NEW_LABEL));
+              if (created) {
+                const title = created.slice(NEW_LABEL.length);
+                made.set([...made(), { value: created, title, tone: NEW_TONES[made().length % NEW_TONES.length] }]);
+                query.set("");
+              }
+              set(value);
+            }}
+            onOpenChange={({ open: o }) => {
+              open.set(o);
+              // The app owns the query: each opening starts with an empty one.
+              if (!o) query.set("");
+            }}
+            accessibilityLabel="Labels"
+            searchable
+            searchPlaceholder="Search or create labels"
+            searchClass={searchClass}
+            searchStyle={searchStyle()}
+            {...listProps(240)}
+            trigger={<Picker title={labels().length ? `${labels().length} ${labels().length === 1 ? "label" : "labels"}` : "Add labels"} placeholder={!labels().length} open={open()} />}
+            renderItem={(item) =>
+              item.value.startsWith(NEW_LABEL) && !label(item.value) ? (
+                <Option item={item} lead={<Icon name="plus" size={14} tint={colors.accent} />} note={pointer ? "Return" : undefined} />
+              ) : (
+                <Option item={item} lead={<Dot color={toneColor(label(item.value)?.tone ?? "neutral")} />} note={label(item.value) && made().includes(label(item.value)!) ? "New" : undefined} />
+              )
+            }
+          />
+        </View>
+        <View style={chips}>
+          <Each of={labels()}>
+            {(v) => (
+              <Chip
+                label={label(v())?.title ?? v()}
+                lead={
+                  <View style={{ paddingLeft: 7 }}>
+                    <Dot color={toneColor(label(v())?.tone ?? "neutral")} />
+                  </View>
+                }
+                remove={`Remove the label ${label(v())?.title ?? v()}`}
+                onRemove={() => set(labels().filter((l) => l !== v()))}
+              />
+            )}
+          </Each>
+        </View>
+      </Card>
+    );
+  }
+
+  function Commands() {
+    const ran = signal<string | null>(null);
+    const open = signal(false);
+    const command = (value: string) => COMMANDS.find((c) => c.value === value)!;
+    const t = settleOn(ran);
+    return (
+      <Card title="Command list" subtitle="Grouped actions with their icons and shortcuts; running one keeps no value">
+        <Combobox
+          items={COMMAND_ITEMS}
+          // A command runs; it is not a value the list keeps.
+          value={[]}
+          onChange={({ value }) => {
+            if (!value.length) return;
+            ran.set(value[0]);
+            last.set(`Command: ${command(value[0]).title}`);
+          }}
+          onOpenChange={opened((o) => open.set(o))}
+          accessibilityLabel="Command"
+          searchable
+          searchPlaceholder="Type a command"
+          searchClass={searchClass}
+          searchStyle={searchStyle()}
+          empty={<Empty label="No command matches" />}
+          {...listProps(300)}
+          align="start"
+          trigger={
+            // A field that opens the list, as a command palette's: the search icon, a hint, the shortcut.
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                height: size.line,
+                paddingHorizontal: 10,
+                borderRadius: radius.control,
+                borderWidth: 1,
+                borderColor: open() ? colors.faint : colors.fieldBorder,
+                backgroundColor: colors.field,
+                ...finish.field,
+                transitionProperty: "border-color",
+                transitionDuration: reduceMotion() ? 0 : 120,
+              }}
+              hoverStyle={{ borderColor: colors.faint }}
+              activeStyle={pressed}
+              focusStyle={focusRing()}
+            >
+              <Icon name="search" size={size.check} tint={colors.faint} />
+              <Text style={{ flex: 1, fontSize: size.label, color: colors.faint }}>Search commands…</Text>
+              <If when={pointer}>
+                <Text style={{ paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+              </If>
+            </View>
+          }
+          renderItem={(item) => (
+            <Option item={item} lead={<Icon name={command(item.value).icon} size={14} tint={item.highlighted ? colors.text : colors.muted} />} note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined} />
+          )}
+          renderGroup={(group) => <Header group={group} />}
+        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, ...settle(t) }}>
+          <If when={ran()} else={<Caption label="Nothing run yet" />}>
+            <Icon name="check" size={size.check} tint={toneColor("up")} weight={markWeight} />
+            <Text style={{ fontSize: size.detail, color: colors.muted }}>{`Ran “${command(ran()!).title}”`}</Text>
+          </If>
         </View>
       </Card>
     );
@@ -1757,6 +2503,285 @@ export function Controls(props: { show: Control }) {
               trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
             />
           </View>
+        </View>
+      </Card>
+    );
+  }
+
+  /** What the calendars of the cards below share: the popup's or sheet's look and the days' cells. */
+  const calendarProps = (align: "start" | "end" = "end") => ({
+    offset: 4,
+    margin: 8,
+    align,
+    popupStyle: surface(),
+    backdropStyle: backdrop,
+    calendarStyle: calendar,
+    headerStyle: header,
+    itemClass: "active:opacity-70",
+  });
+  /** A line of a bill: what it is for, and the amount rolling to each new value. */
+  function BillLine(props: { label: string; amount: number; total?: boolean }) {
+    const pop = popOn(() => props.amount);
+    return (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
+        <Text style={{ flex: 1, fontSize: props.total ? size.label : size.detail, fontWeight: props.total ? "600" : "400", color: props.total ? colors.text : colors.muted }}>{props.label}</Text>
+        <View style={{ transform: [{ scale: props.total ? pop : 1 }] }}>
+          <Ticker value={props.amount} text={money(props.amount)} size={props.total ? size.label + 2 : size.detail} weight={props.total ? "600" : "400"} color={props.total ? colors.text : colors.muted} />
+        </View>
+      </View>
+    );
+  }
+
+  function Booking() {
+    const today = new Date();
+    const first = iso(today);
+    // Two nights next week are sold out; the past cannot be booked.
+    const soldOut = [iso(addDays(today, 8)), iso(addDays(today, 9))];
+    const closed: DateMatcher = (date) => date < first || soldOut.includes(date);
+    const stay = signal<[string | null, string | null] | null>(null);
+    const open = signal(false);
+    const twoMonths = () => pointer && windowSize().width >= 600;
+    const complete = (): [string, string] | null => {
+      const s = stay();
+      return s && s[0] && s[1] ? [s[0], s[1]] : null;
+    };
+    const nights = () => {
+      const c = complete();
+      return c ? daysBetween(c[0], c[1]) : 0;
+    };
+    const lodging = () => {
+      const c = complete();
+      let sum = 0;
+      for (let i = 0; c && i < nights(); i++) sum += nightRate(iso(addDays(dateOf(c[0]), i)));
+      return sum;
+    };
+    const total = () => (nights() ? lodging() + CLEANING : 0);
+    /** One end of the stay in the trigger: a small heading over the day. */
+    function End(props: { label: string; value: string | null }) {
+      return (
+        <View style={{ flex: 1, justifyContent: "center", gap: 1, paddingHorizontal: 12 }}>
+          <Text style={{ fontSize: 10, fontWeight: "600", letterSpacing: 0.6, color: colors.faint }}>{props.label.toUpperCase()}</Text>
+          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.value ? colors.text : colors.faint }}>{props.value ? dayTitle(props.value) : "Add a date"}</Text>
+        </View>
+      );
+    }
+    return (
+      <Card
+        title="Booking"
+        subtitle="Check-in and check-out: the nights and the price follow; past and sold-out nights cannot be picked"
+        right={<Badge label={nights() ? `${nights()} ${nights() === 1 ? "night" : "nights"}` : "No dates"} tone={nights() ? "accent" : "neutral"} />}
+      >
+        <DatePicker
+          range
+          value={stay()}
+          onChange={({ value }) => {
+            const next = Array.isArray(value) ? value : null;
+            stay.set(next);
+            last.set(next ? `Stay: ${next[0]} → ${next[1]}` : "Stay: none");
+          }}
+          onOpenChange={opened((o) => open.set(o))}
+          accessibilityLabel="Stay"
+          numberOfMonths={twoMonths() ? 2 : 1}
+          disabledMatcher={closed}
+          {...calendarProps("start")}
+          bodyStyle={{ gap: monthGap }}
+          renderItem={(item) => <CalendarItem item={item} range={stay()} />}
+          trigger={
+            // Both ends in one field, parted by a hairline; the whole field opens the calendar.
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "stretch",
+                height: pointer ? 46 : 56,
+                borderRadius: radius.control,
+                borderWidth: 1,
+                borderColor: open() ? colors.faint : colors.border,
+                backgroundColor: colors.raised,
+                ...finish.raised,
+                transitionProperty: "border-color",
+                transitionDuration: reduceMotion() ? 0 : 120,
+              }}
+              hoverStyle={{ borderColor: colors.faint }}
+              activeStyle={pressed}
+              focusStyle={focusRing()}
+            >
+              <End label="Check-in" value={stay()?.[0] ?? null} />
+              <View style={{ width: 1, marginVertical: 8, backgroundColor: colors.line }} />
+              <End label="Check-out" value={stay()?.[1] ?? null} />
+            </View>
+          }
+        />
+        <If when={nights()} else={<Caption label="Fridays and Saturdays are $220 a night, other nights $180" />}>
+          <View style={{ gap: 6 }}>
+            <BillLine label={`${nights()} ${nights() === 1 ? "night" : "nights"}`} amount={lodging()} />
+            <BillLine label="Cleaning" amount={CLEANING} />
+            <View style={{ height: 1, backgroundColor: colors.line }} />
+            <BillLine label="Total" amount={total()} total />
+          </View>
+        </If>
+        <View style={{ alignItems: pointer ? "flex-end" : "stretch" }}>
+          <Button
+            label="Reserve"
+            size={size.switch}
+            disabled={!nights()}
+            onPress={() => {
+              const c = complete()!;
+              last.set(`Reserved: ${c[0]} → ${c[1]}, ${money(total())}`);
+            }}
+          />
+        </View>
+      </Card>
+    );
+  }
+
+  function Deadline() {
+    const today = new Date();
+    const due = signal<string | null>(iso(addDays(today, 2)));
+    const open = signal(false);
+    const monday = addDays(today, (8 - today.getDay()) % 7 || 7);
+    const quick: DateRangePreset[] = [
+      { label: "Today", value: iso(today) },
+      { label: "Tomorrow", value: iso(addDays(today, 1)) },
+      { label: "Next Monday", value: iso(monday) },
+      { label: "In two weeks", value: iso(addDays(today, 14)) },
+    ];
+    /** How soon it is due, in words and a tone: sooner is louder. */
+    const soon = (): { label: string; tone: Tone } => {
+      const d = due();
+      if (!d) return { label: "No deadline", tone: "neutral" };
+      const days = daysBetween(iso(today), d);
+      if (days === 0) return { label: "Due today", tone: "danger" };
+      if (days === 1) return { label: "Due tomorrow", tone: "warn" };
+      return { label: `Due in ${days} days`, tone: days <= 3 ? "warn" : "neutral" };
+    };
+    const t = settleOn(due);
+    return (
+      <Card title="Deadline" subtitle="Quick presets beside the calendar; past days cannot be picked">
+        <View>
+          <View style={row(true)}>
+            <View style={{ flex: 1, gap: 4, alignItems: "flex-start" }}>
+              <Text style={{ fontSize: size.label, color: colors.text }}>Deadline</Text>
+              <View style={settle(t)}>
+                <Badge label={soon().label} tone={soon().tone} />
+              </View>
+            </View>
+            <DatePicker
+              value={due()}
+              onChange={({ value }) => {
+                const next = typeof value === "string" ? value : null;
+                due.set(next);
+                last.set(`Deadline: ${next ?? "none"}`);
+              }}
+              onOpenChange={opened((o) => open.set(o))}
+              accessibilityLabel="Deadline"
+              presets={quick}
+              disabledMatcher={{ before: iso(today) }}
+              {...calendarProps()}
+              contentStyle={content}
+              presetsStyle={presets}
+              presetStyle={preset}
+              presetClass="enabled:hover:bg-accent active:opacity-70"
+              renderItem={(item) => <CalendarItem item={item} />}
+              {...clearProps("Clear the deadline")}
+              trigger={<Picker title={due() ? dayTitle(due()!) : "None"} open={open()} placeholder={!due()} clearable={due() !== null} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Sprint start" detail="Locked once the sprint began" />
+            <DatePicker value={iso(addDays(today, -9))} disabled accessibilityLabel="Sprint start" trigger={<Picker title={dayTitle(iso(addDays(today, -9)))} open={false} disabled />} />
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
+  function Slots() {
+    const today = new Date();
+    const first = iso(today);
+    // From tomorrow, on weekdays.
+    const closed: DateMatcher = (date) => date <= first || weekday(date) === 0 || weekday(date) === 6;
+    let soonest = addDays(today, 1);
+    while (soonest.getDay() === 0 || soonest.getDay() === 6) soonest = addDays(soonest, 1);
+    const day = signal<string | null>(iso(soonest));
+    const slot = signal<string | null>(null);
+    const open = signal(false);
+    // A new day's times settle in.
+    const t = settleOn(day);
+    const free = () => (day() ? SLOTS.filter((_, i) => !slotTaken(day()!, i)).length : 0);
+    /** A time's chip: raised while free, in the accent while chosen (faded), struck through while taken. */
+    const chip = (on: boolean) => ({
+      width: pointer ? 62 : ("31.5%" as const),
+      height: pointer ? 30 : 40,
+      alignItems: "center" as const,
+      justifyContent: "center" as const,
+      borderRadius: radius.control,
+      borderWidth: 1,
+      borderColor: on ? colors.accent : colors.border,
+      backgroundColor: on ? tints.accent : colors.raised,
+      boxShadow: on ? "none" : finish.raised.boxShadow,
+      transitionProperty: "transform, border-color, background-color, box-shadow",
+      transitionDuration: reduceMotion() ? 0 : 150,
+    });
+    return (
+      <Card title="Time slots" subtitle="A weekday, then one of its open times; booked ones are struck through" right={<Badge label={`${free()} open`} />}>
+        <View style={row(true)}>
+          <Label label="Day" detail="From tomorrow, on weekdays" />
+          <DatePicker
+            value={day()}
+            onChange={({ value }) => {
+              const next = typeof value === "string" ? value : null;
+              day.set(next);
+              slot.set(null);
+              last.set(`Day: ${next ?? "none"}`);
+            }}
+            onOpenChange={opened((o) => open.set(o))}
+            accessibilityLabel="Appointment day"
+            disabledMatcher={closed}
+            {...calendarProps()}
+            renderItem={(item) => <CalendarItem item={item} />}
+            trigger={<Picker title={day() ? dayTitle(day()!) : "Pick a day"} open={open()} placeholder={!day()} />}
+          />
+        </View>
+        <View style={settle(t)}>
+          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
+            <Each of={SLOTS}>
+              {(s, i) => (
+                <Radio
+                  checked={slot() === s()}
+                  disabled={!day() || slotTaken(day()!, i())}
+                  onChange={() => {
+                    slot.set(s());
+                    last.set(`Slot: ${day()} ${s()}`);
+                  }}
+                  style={chip(slot() === s())}
+                  activeStyle={{ transform: [{ scale: 0.95 }] }}
+                  hoverStyle={slot() === s() ? undefined : { borderColor: colors.faint }}
+                  focusStyle={focusRing()}
+                  disabledStyle={{ opacity: 0.4 }}
+                >
+                  <Text
+                    style={{
+                      fontSize: size.detail,
+                      fontWeight: "500",
+                      fontVariant: ["tabular-nums"],
+                      color: slot() === s() ? colors.accent : colors.text,
+                      textDecorationLine: day() && slotTaken(day()!, i()) ? "line-through" : "none",
+                    }}
+                  >
+                    {s()}
+                  </Text>
+                </Radio>
+              )}
+            </Each>
+          </RadioGroup>
+        </View>
+        <View style={{ alignItems: pointer ? "flex-end" : "stretch" }}>
+          <Button
+            label={slot() && day() ? `Book ${dayTitle(day()!)} at ${slot()}` : "Pick a time"}
+            size={size.switch}
+            disabled={!slot() || !day()}
+            onPress={() => last.set(`Booked: ${dayTitle(day()!)} at ${slot()}`)}
+          />
         </View>
       </Card>
     );
@@ -2297,48 +3322,65 @@ export function Controls(props: { show: Control }) {
     );
   }
 
+  // The number inputs' look, shared by their cards.
+  // One recessed well per input: a stronger border under the pointer and
+  // the keyboard's focus ring while its field edits (`focus-within:`);
+  // the buttons light up under the pointer and while pressed (still with
+  // reduced motion) and fade where a step does nothing (at the minimum
+  // or maximum) or while the input is locked, without their hover.
+  const frame = [
+    pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+    "flex-row items-stretch overflow-hidden border border-input bg-field",
+    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+  ].join(" ");
+  const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  const field = () => ({
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 8,
+    fontSize: size.label,
+    color: colors.text,
+    placeholderColor: colors.faint,
+    fontVariant: ["tabular-nums" as const],
+  });
+  /** A step button's glyph: the gallery's icon, in the muted text color. */
+  function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+    return <Icon name={props.name} size={props.size} tint={colors.muted} />;
+  }
+  /** A quantity: its label and the input at the trailing edge. */
+  function Amount(props: { label: string; detail: JSX.Element; first?: boolean; children: JSX.Element }) {
+    return (
+      <View style={row(!!props.first)}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
+          {props.detail}
+        </View>
+        <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+      </View>
+    );
+  }
+  /** A quieter line under an amount's label. */
+  function Detail(props: { children: JSX.Element; tone?: Tone }) {
+    return <Text style={{ fontSize: size.detail, color: props.tone ? toneColor(props.tone) : colors.muted }}>{props.children}</Text>;
+  }
+  /** A unit or a currency in a number input's well, before or after its field. */
+  function Affix(props: { label: string; end?: boolean }) {
+    return (
+      <View style={{ height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }}>
+        <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>{props.label}</Text>
+      </View>
+    );
+  }
+
   function Quantities() {
     const seats = signal<number | null>(2);
     const price = signal<number | null>(24.5);
     const locked = signal(false);
-    // One recessed well per input: a stronger border under the pointer and
-    // the keyboard's focus ring while its field edits (`focus-within:`);
-    // the buttons light up under the pointer and while pressed (still with
-    // reduced motion) and fade where a step does nothing (at the minimum
-    // or maximum) or while the input is locked, without their hover.
-    const frame = [
-      pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
-      "flex-row items-stretch overflow-hidden border border-input bg-field",
-      "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
-    ].join(" ");
-    const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
-    const field = () => ({
-      flex: 1,
-      minWidth: 0,
-      paddingHorizontal: 8,
-      fontSize: size.label,
-      color: colors.text,
-      placeholderColor: colors.faint,
-      fontVariant: ["tabular-nums" as const],
-    });
-    /** A step button's glyph: the gallery's icon, in the muted text color. */
-    function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
-      return <Icon name={props.name} size={props.size} tint={colors.muted} />;
-    }
-    /** A quantity: its label and the input at the trailing edge. */
-    function Amount(props: { label: string; detail: string; first?: boolean; children: JSX.Element }) {
-      return (
-        <View style={row(!!props.first)}>
-          <Label label={props.label} detail={props.detail} />
-          <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
-        </View>
-      );
-    }
     const show = (v: number | null) => (v === null ? "none" : `${v}`);
     return (
       <Card icon="controls" title="Number input" subtitle="Typed or stepped: the app owns the value">
         <View>
-          <Amount first label="Seats" detail="1 to 8 per booking">
+          <Amount first label="Seats" detail={<Detail>1 to 8 per booking</Detail>}>
             <NumberInput
               value={seats()}
               min={1}
@@ -2357,7 +3399,7 @@ export function Controls(props: { show: Control }) {
               incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
             />
           </Amount>
-          <Amount label="Price" detail="Steps of 0.5">
+          <Amount label="Price" detail={<Detail>Steps of 0.5</Detail>}>
             <NumberInput
               value={price()}
               min={0}
@@ -2376,11 +3418,7 @@ export function Controls(props: { show: Control }) {
               decrementButtonClass={`flex-1 ${press}`}
               incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
               decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
-              prefix={
-                <View style={{ height: "100%", justifyContent: "center", paddingLeft: 10 }}>
-                  <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>$</Text>
-                </View>
-              }
+              prefix={<Affix label="$" />}
             />
           </Amount>
         </View>
@@ -2400,41 +3438,242 @@ export function Controls(props: { show: Control }) {
     );
   }
 
+  function Cart() {
+    const qty = signal<(number | null)[]>([1, 2, 3]);
+    const subtotal = () => CART.reduce((n, c, i) => n + c.price * (qty()[i] ?? 0), 0);
+    const toFree = () => Math.max(0, FREE_SHIPPING - subtotal());
+    const shipping = () => (toFree() === 0 ? 0 : 8);
+    const pop = popOn(() => toFree() === 0);
+    const reached = () => Math.min(100, (subtotal() / FREE_SHIPPING) * 100);
+    /** A line of the cart: the item, a compact stepper held to the stock, and its subtotal rolling to each new value. */
+    function Line(props: { i: number; first: boolean }) {
+      const item = CART[props.i];
+      const n = () => qty()[props.i];
+      const atStock = () => n() !== null && n()! >= item.stock;
+      return (
+        <View style={row(props.first)}>
+          <If when={pointer}>
+            <IconTile name={item.icon} size={30} tint={colors.muted} />
+          </If>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text style={{ numberOfLines: 1, fontSize: size.label, color: colors.text }}>{item.name}</Text>
+            <Message label={atStock() ? `Only ${item.stock} left` : `${item.detail} · ${money(item.price)}`} tone={atStock() ? "warn" : undefined} />
+          </View>
+          <View style={{ width: pointer ? 92 : 108 }}>
+            <NumberInput
+              value={n()}
+              min={1}
+              max={item.stock}
+              accessibilityLabel={`Quantity of ${item.name}`}
+              onChange={({ value }) => {
+                const next = qty().slice();
+                next[props.i] = value;
+                qty.set(next);
+                last.set(`${item.name}: ${value ?? "none"}`);
+              }}
+              class={frame}
+              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: "center" }}
+              decrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-r border-line`}
+              incrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-l border-line`}
+              decrementButton={<Step name="minus" size={pointer ? 12 : 14} />}
+              incrementButton={<Step name="plus" size={pointer ? 12 : 14} />}
+            />
+          </View>
+          <View style={{ width: pointer ? 64 : 70 }}>
+            <Ticker value={item.price * (n() ?? 0)} text={money(item.price * (n() ?? 0))} />
+          </View>
+        </View>
+      );
+    }
+    return (
+      <Card title="Cart" subtitle="Quantities held to the stock; each subtotal and the total roll to their new values" right={<Badge label={`${qty().reduce<number>((a, b) => a + (b ?? 0), 0)} items`} />}>
+        <View>
+          <Each of={CART}>{(_, i) => <Line i={i()} first={i() === 0} />}</Each>
+        </View>
+        <View style={{ gap: 6 }}>
+          <Progress
+            value={reached()}
+            accessibilityLabel="Toward free shipping"
+            trackStyle={rail(4)}
+            indicatorClass={glide}
+            indicatorStyle={{ ...fillOf(4, toFree() === 0 ? "up" : undefined), translate: remaining(reached()) }}
+          />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <If when={toFree() === 0}>
+              <View style={{ transform: [{ scale: pop }] }}>
+                <Icon name="check" size={size.check} tint={toneColor("up")} weight={markWeight} />
+              </View>
+            </If>
+            <Message label={toFree() === 0 ? "Free shipping unlocked" : `Add ${money(toFree())} more for free shipping`} tone={toFree() === 0 ? "up" : undefined} />
+          </View>
+        </View>
+        <View style={{ gap: 6, paddingTop: size.padding, borderTopWidth: 1, borderColor: colors.line }}>
+          <BillLine label="Subtotal" amount={subtotal()} />
+          <BillLine label="Shipping" amount={shipping()} />
+          <BillLine label="Total" amount={subtotal() + shipping()} total />
+        </View>
+      </Card>
+    );
+  }
+
+  function Units() {
+    const tip = signal<number | null>(15);
+    const amount = signal<number | null>(250);
+    const heat = signal<number | null>(21.5);
+    const BALANCE = 1200;
+    const over = () => (amount() ?? 0) > BALANCE;
+    const tipped = () => (BILL * (tip() ?? 0)) / 100;
+    /** How the room feels at the set temperature, and its tone. */
+    const feel = (): { label: string; tone: Tone } => {
+      const c = heat() ?? 21;
+      return c < 19 ? { label: "Cool", tone: "info" } : c <= 24 ? { label: "Comfortable", tone: "up" } : { label: "Warm", tone: "warn" };
+    };
+    /** The buttons at the well's end, the increment over the decrement (new glyphs for each input). */
+    const right = () => ({
+      controlsRight: true,
+      controlsClass: `${pointer ? "w-6" : "w-9"} border-l border-line`,
+      incrementButtonClass: `flex-1 ${press} border-b border-line`,
+      decrementButtonClass: `flex-1 ${press}`,
+      incrementButton: <Step name="chevron-up" size={pointer ? 12 : 14} />,
+      decrementButton: <Step name="chevron-down" size={pointer ? 12 : 14} />,
+    });
+    return (
+      <Card title="Units and limits" subtitle="A percentage, a currency with its code, a temperature in half degrees, a read-only rate">
+        <View>
+          <Amount
+            first
+            label="Tip"
+            detail={
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Ticker value={tipped()} text={money(tipped())} size={size.detail} weight="600" color={colors.muted} />
+                <Detail>{`on a ${money(BILL)} bill`}</Detail>
+              </View>
+            }
+          >
+            <NumberInput
+              value={tip()}
+              min={0}
+              max={30}
+              step={5}
+              accessibilityLabel="Tip"
+              onChange={({ value }) => {
+                tip.set(value);
+                last.set(`Tip: ${value ?? "none"}%`);
+              }}
+              class={frame}
+              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              suffix={<Affix label="%" end />}
+              {...right()}
+            />
+          </Amount>
+          <Amount label="Transfer" detail={<Message label={over() ? `More than your balance of ${money(BALANCE)}` : "$10 to $5,000, in steps of $50"} tone={over() ? "danger" : undefined} />}>
+            <NumberInput
+              value={amount()}
+              min={10}
+              max={5000}
+              step={50}
+              placeholder="0"
+              accessibilityLabel="Transfer amount"
+              onChange={({ value }) => {
+                amount.set(value);
+                last.set(`Transfer: ${value ?? "none"}`);
+              }}
+              class={frame}
+              // Over the balance, the well is edged in the danger tone.
+              style={over() ? { borderColor: colors.danger } : undefined}
+              inputStyle={{ ...field(), paddingLeft: 4, paddingRight: 2 }}
+              prefix={<Affix label="$" />}
+              suffix={<Affix label="USD" end />}
+              {...right()}
+            />
+          </Amount>
+          <Amount
+            label="Thermostat"
+            detail={
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Dot color={toneColor(feel().tone)} size={6} />
+                <Message label={`${feel().label}, 16 to 28 °C`} />
+              </View>
+            }
+          >
+            <NumberInput
+              value={heat()}
+              min={16}
+              max={28}
+              step={0.5}
+              accessibilityLabel="Thermostat"
+              onChange={({ value }) => {
+                heat.set(value);
+                last.set(`Thermostat: ${value ?? "none"}`);
+              }}
+              class={frame}
+              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              suffix={<Affix label="°C" end />}
+              {...right()}
+            />
+          </Amount>
+          <Amount label="Interest rate" detail={<Detail>Set by your bank: select and copy it</Detail>}>
+            <NumberInput
+              value={4.5}
+              readonly
+              accessibilityLabel="Interest rate"
+              class={frame}
+              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2, color: colors.muted }}
+              suffix={<Affix label="%" end />}
+              {...right()}
+            />
+          </Amount>
+        </View>
+      </Card>
+    );
+  }
+
+  // The codes' cells, shared by their cards: recessed wells, the one that
+  // takes the next digit ringed while the code has the focus, its caret
+  // blinking there (steady with reduced motion: the input's own). A verdict
+  // edges and tints them all in its tone, the change faded
+  // (`transition-colors`).
+  const cellClass = (cells: string) =>
+    `${cells} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
+  const cellStyle = (tone?: Tone) => ({ ...finish.inset, backgroundColor: tone ? toneTint(tone) : colors.inset, borderWidth: 1, borderColor: tone ? toneColor(tone) : colors.line });
+  const sixCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
+
   function Verify() {
     const CODE = "246810";
     const code = signal("");
     const verdict = signal("");
-    // The cell that takes the next digit shows the focus ring while the
-    // code has the focus; the caret blinks there (steady with reduced
-    // motion: the input's own).
-    const cell = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
+    // A wrong code shakes the cells.
+    const shake = createMotion();
+    cleanup(() => shake.stop());
+    const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
     return (
-      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them">
+      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them; a wrong code shakes">
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
-          <OtpInput
-            length={6}
-            groups={2}
-            value={code()}
-            onChange={({ value: next }) => {
-              code.set(next);
-              verdict.set("");
-              last.set(`Code: ${next || "empty"}`);
-            }}
-            onComplete={({ value }) => {
-              verdict.set(value === CODE ? "Verified" : "That code is not right");
-              last.set(`Code complete: ${value}`);
-            }}
-            accessibilityLabel="Verification code, 6 digits"
-            class="flex-row items-center gap-3"
-            groupClass="flex-row gap-1.5"
-            cellClass={`${cell} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2`}
-            cellStyle={{ ...finish.inset, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.line }}
-            caretClass="w-0.5 h-6 rounded-full"
-            caretStyle={{ backgroundColor: colors.text }}
-          />
-          <Text style={{ fontSize: size.detail, color: verdict() === "Verified" ? toneColor("up") : verdict() ? toneColor("down") : colors.muted }}>
-            {verdict() || `The code is ${CODE}`}
-          </Text>
+          <View style={shake.style}>
+            <OtpInput
+              length={6}
+              groups={2}
+              value={code()}
+              onChange={({ value: next }) => {
+                code.set(next);
+                verdict.set("");
+                last.set(`Code: ${next || "empty"}`);
+              }}
+              onComplete={({ value }) => {
+                verdict.set(value === CODE ? "Verified" : "That code is not right");
+                if (value !== CODE) shake.play("shake");
+                last.set(`Code complete: ${value}`);
+              }}
+              accessibilityLabel="Verification code, 6 digits"
+              class="flex-row items-center gap-3"
+              groupClass="flex-row gap-1.5"
+              cellClass={cellClass(sixCells)}
+              cellStyle={cellStyle(tone())}
+              caretClass="w-0.5 h-6 rounded-full"
+              caretStyle={{ backgroundColor: colors.text }}
+            />
+          </View>
+          <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
           <Button
             label="Clear"
             variant="secondary"
@@ -2446,6 +3685,255 @@ export function Controls(props: { show: Control }) {
               last.set("Code: cleared");
             }}
           />
+        </View>
+      </Card>
+    );
+  }
+
+  function SignIn() {
+    const CODE = "135790";
+    /** The seconds before a code can be sent again. */
+    const WAIT = 30;
+    type Phase = "idle" | "sent" | "checking" | "wrong" | "locked" | "done";
+    const phase = signal<Phase>("idle");
+    const code = signal("");
+    const tries = signal(3);
+    const left = signal(0);
+    let input: OtpInputRef | undefined;
+    let tick: ReturnType<typeof setInterval> | undefined;
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const stopTick = () => {
+      if (tick !== undefined) clearInterval(tick);
+      tick = undefined;
+    };
+    const after = (ms: number, run: () => void) => {
+      if (later !== undefined) clearTimeout(later);
+      later = setTimeout(() => {
+        later = undefined;
+        run();
+      }, ms);
+    };
+    cleanup(() => {
+      stopTick();
+      if (later !== undefined) clearTimeout(later);
+    });
+    const shake = createMotion();
+    cleanup(() => shake.stop());
+    const send = () => {
+      phase.set("sent");
+      code.set("");
+      tries.set(3);
+      left.set(WAIT);
+      stopTick();
+      tick = setInterval(() => {
+        left.set(left() - 1);
+        if (left() <= 0) stopTick();
+      }, 1000);
+      // Once the cells take input again (the next turn's commit), the keyboard goes to them.
+      after(0, () => input?.focus());
+      last.set("Sign-in: code sent");
+    };
+    // The server's answer takes a moment; a wrong code shakes the cells and empties them, the third locks them.
+    const verify = (value: string) => {
+      phase.set("checking");
+      after(600, () => {
+        if (value === CODE) {
+          stopTick();
+          phase.set("done");
+          last.set("Sign-in: verified");
+          return;
+        }
+        const rest = tries() - 1;
+        tries.set(rest);
+        code.set("");
+        shake.play("shake");
+        phase.set(rest === 0 ? "locked" : "wrong");
+        last.set(rest === 0 ? "Sign-in: locked" : `Sign-in: wrong code, ${rest} left`);
+        if (rest > 0) input?.focus();
+      });
+    };
+    const message = (): { label: string; tone?: Tone } => {
+      switch (phase()) {
+        case "idle":
+          return { label: "We will text a code to +1 555 010 2299" };
+        case "sent":
+          return { label: `Enter the code we sent (${CODE}), or paste it` };
+        case "checking":
+          return { label: "Checking…" };
+        case "wrong":
+          return { label: `That code is wrong: ${tries()} ${tries() === 1 ? "try" : "tries"} left`, tone: "danger" };
+        case "locked":
+          return { label: "Too many tries: send a new code", tone: "danger" };
+        case "done":
+          return { label: "Signed in", tone: "up" };
+      }
+    };
+    const tone = (): Tone | undefined => (phase() === "wrong" || phase() === "locked" ? "danger" : phase() === "done" ? "up" : undefined);
+    const waiting = () => (phase() === "sent" || phase() === "wrong") && left() > 0;
+    /** The check that pops in once signed in. */
+    function Signed() {
+      const m = createMotion({ enter: "popIn" });
+      cleanup(() => m.stop());
+      return (
+        <View style={{ width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: tints.up, ...m.style }}>
+          <Icon name="check" size={12} tint={toneColor("up")} weight={markWeight} />
+        </View>
+      );
+    }
+    return (
+      <Card title="Sign in" subtitle="Send a code, then wait to resend it; a wrong one shakes, three lock the cells">
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <View style={shake.style}>
+            <OtpInput
+              ref={(r) => (input = r)}
+              length={6}
+              groups={2}
+              value={code()}
+              disabled={phase() !== "sent" && phase() !== "wrong"}
+              onChange={({ value }) => {
+                code.set(value);
+                if (phase() === "wrong") phase.set("sent");
+              }}
+              onComplete={({ value }) => {
+                last.set(`Sign-in code: ${value}`);
+                verify(value);
+              }}
+              accessibilityLabel="Sign-in code, 6 digits"
+              class="flex-row items-center gap-3"
+              groupClass="flex-row gap-1.5"
+              cellClass={cellClass(sixCells)}
+              cellStyle={cellStyle(tone())}
+              caretClass="w-0.5 h-6 rounded-full"
+              caretStyle={{ backgroundColor: colors.text }}
+            />
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <If when={phase() === "done"}>
+              <Signed />
+            </If>
+            <Message label={message().label} tone={message().tone} />
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: pointer ? 28 : 36 }}>
+            <If when={phase() === "idle"}>
+              <Button label="Send code" size={size.switch} onPress={send} />
+            </If>
+            <If when={waiting()}>
+              <Text style={{ fontSize: size.detail, color: colors.muted }}>Resend code in</Text>
+              <Ticker value={left()} text={`0:${String(left()).padStart(2, "0")}`} size={size.detail} color={colors.muted} />
+            </If>
+            <If when={phase() === "locked" || ((phase() === "sent" || phase() === "wrong") && left() <= 0)}>
+              <Button label="Resend code" variant="secondary" size={size.switch} onPress={send} />
+            </If>
+            <If when={phase() === "done"}>
+              <Button
+                label="Sign out"
+                variant="secondary"
+                size={size.switch}
+                onPress={() => {
+                  phase.set("idle");
+                  code.set("");
+                  last.set("Sign-in: signed out");
+                }}
+              />
+            </If>
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
+  function Pin() {
+    type PinStep = "choose" | "confirm" | "mismatch" | "set";
+    const pin = signal("");
+    const step = signal<PinStep>("choose");
+    const shown = signal(false);
+    let chosen = "";
+    const shake = createMotion();
+    cleanup(() => shake.stop());
+    const message = (): { label: string; tone?: Tone } =>
+      step() === "choose"
+        ? { label: "Choose a 4-digit PIN" }
+        : step() === "confirm"
+          ? { label: "Enter it again" }
+          : step() === "mismatch"
+            ? { label: "The PINs do not match: choose one again", tone: "danger" }
+            : { label: "PIN set", tone: "up" };
+    /** How far along: a bar for each of the two entries, filled (faded) once it is behind. */
+    const done = () => (step() === "confirm" ? 1 : step() === "set" ? 2 : 0);
+    const pinCells = pointer ? "w-11 h-11 text-xl" : "w-13 h-13 text-2xl";
+    return (
+      <Card title="PIN" subtitle="Four masked digits, entered twice: a mismatch shakes and starts over" right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
+        <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            <Each of={[0, 1]}>
+              {(i) => (
+                <View
+                  style={{
+                    width: 28,
+                    height: 4,
+                    borderRadius: 2,
+                    backgroundColor: done() > i() ? colors.accent : colors.track,
+                    transitionProperty: "background-color",
+                    transitionDuration: reduceMotion() ? 0 : 200,
+                  }}
+                />
+              )}
+            </Each>
+          </View>
+          <Message label={message().label} tone={message().tone} />
+          <View style={shake.style}>
+            <OtpInput
+              length={4}
+              masked={!shown()}
+              value={pin()}
+              disabled={step() === "set"}
+              onChange={({ value }) => pin.set(value)}
+              onComplete={({ value }) => {
+                pin.set("");
+                if (step() !== "confirm") {
+                  chosen = value;
+                  step.set("confirm");
+                  last.set("PIN: entered once");
+                } else if (value === chosen) {
+                  step.set("set");
+                  last.set("PIN: set");
+                } else {
+                  shake.play("shake");
+                  step.set("mismatch");
+                  last.set("PIN: no match");
+                }
+              }}
+              accessibilityLabel="PIN, 4 digits"
+              class="flex-row items-center gap-2"
+              cellClass={cellClass(pinCells)}
+              cellStyle={cellStyle(step() === "mismatch" ? "danger" : step() === "set" ? "up" : undefined)}
+              caretClass="w-0.5 h-6 rounded-full"
+              caretStyle={{ backgroundColor: colors.text }}
+            />
+          </View>
+          <View style={{ flexDirection: "row", gap: size.gap }}>
+            <Button
+              label={shown() ? "Hide digits" : "Show digits"}
+              variant="ghost"
+              size={size.switch}
+              onPress={() => {
+                shown.set(!shown());
+                last.set(`PIN: digits ${shown() ? "shown" : "hidden"}`);
+              }}
+            />
+            <If when={step() === "set"}>
+              <Button
+                label="Change PIN"
+                variant="secondary"
+                size={size.switch}
+                onPress={() => {
+                  step.set("choose");
+                  chosen = "";
+                  last.set("PIN: change");
+                }}
+              />
+            </If>
+          </View>
         </View>
       </Card>
     );
@@ -2464,14 +3952,14 @@ export function Controls(props: { show: Control }) {
     Checkbox: [Filter, Checklist, Consent, Channels, BoxStates],
     Radio: [Plans, Delivery, Reading],
     Tabs: [Sections, Project],
-    Select: [Choices],
-    Combobox: [Tags],
-    DatePicker: [Dates],
+    Select: [Choices, Downloads, Shipping, Issue],
+    Combobox: [Tags, People, Labels, Commands],
+    DatePicker: [Dates, Booking, Deadline, Slots],
     Collapsible: [Disclosure, Faq],
     Progress: [Transfers, Uploads, Steps, Meters],
     Slider: [Levels, Equalizer],
-    NumberInput: [Quantities],
-    OtpInput: [Verify],
+    NumberInput: [Quantities, Cart, Units],
+    OtpInput: [Verify, SignIn, Pin],
   };
   return <DemoPage cards={[...cards[props.show], Last]} />;
 }
