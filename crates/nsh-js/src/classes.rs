@@ -1078,6 +1078,13 @@ impl JsHost for CallHost<'_> {
         Ok(to_raw(crate::host::json_to_js(self.cx, v)))
     }
 
+    fn new_function(&self, f: Box<dyn Fn()>) -> Result<JsRaw, PropError> {
+        self.checked(js::closure(self.cx, Vec::new(), move |_, _, _| {
+            f();
+            Ok(V::undefined())
+        }))
+    }
+
     fn wrap(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
         let existing = classes(self.cx)
             .wrappers
@@ -1169,7 +1176,8 @@ impl JsHost for CallHost<'_> {
                     return;
                 }
                 // SAFETY: the function lives, and so does its VM; a release
-                // runs outside JS, holding no other reference to the graph.
+                // (outside JS, or a `Stop` JS calls) holds no other
+                // reference to the graph.
                 let removed = unsafe { crate::reactive::graph(cx) }
                     .remove_cleanup(owner, |c| js::same(*c, raw));
                 if let Some(removed) = removed {

@@ -43,11 +43,11 @@ use nsh_core::{
 };
 
 use crate::{
-    listbox::{self, Hooks, Listbox, Move, Parts, Row},
-    popup::{OpenChangeReason, OpenState},
+    listbox::{self, Hooks, Listbox, Move, Parts, Query, Row},
+    popup::{DropdownFrame, OpenChangeReason, OpenState},
 };
 
-/// An item of a [`Select`]'s list.
+/// An item of a [`Select`]'s or a `Combobox`'s list.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct SelectItem {
@@ -101,7 +101,7 @@ pub struct SelectItemState {
     pub title: SharedString,
     /// The item cannot be chosen.
     pub disabled: bool,
-    /// It is the chosen item (the select's value).
+    /// It is selected: the select's value, one of the combobox's.
     pub selected: bool,
     /// The keys or the pointer are on it: Return or a press chooses it.
     pub highlighted: bool,
@@ -390,7 +390,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
     let value = ValueState::new(props.value, props.default_value);
     let current = computed(move || value.get());
-    let lb = Listbox::new(props.items, props.searchable);
+    let lb = Listbox::new(props.items, props.searchable, Query::own());
     // The app's element in the slot (or the view around what a Rust parent
     // fills it with): the combobox, what takes the keyboard, and what the
     // list is placed against.
@@ -532,8 +532,10 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
 
     let hooks = Hooks {
         open: Rc::new(move || open.get()),
-        value: current,
+        selected: Rc::new(move |v| current.with(|c| c.as_ref() == Some(v))),
         choose,
+        // Its query is the search field's own.
+        query_changed: Rc::new(|_| {}),
         dismiss,
         shown: Rc::new(move |shown| {
             if shown {
@@ -549,14 +551,16 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         }),
     };
     let parts = Parts {
-        placement: props.placement,
-        align: props.align,
-        offset: props.offset,
-        margin: props.margin,
-        popup_class: props.popup_class,
-        popup_style: props.popup_style,
-        backdrop_class: props.backdrop_class,
-        backdrop_style: props.backdrop_style,
+        frame: DropdownFrame {
+            placement: props.placement,
+            align: props.align,
+            offset: props.offset,
+            margin: props.margin,
+            popup_class: props.popup_class,
+            popup_style: props.popup_style,
+            backdrop_class: props.backdrop_class,
+            backdrop_style: props.backdrop_style,
+        },
         list_class: props.list_class,
         list_style: props.list_style,
         item_class: props.item_class,
@@ -569,6 +573,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         render_item: props.render_item,
         render_group: props.render_group,
         empty: props.empty,
+        footer: None,
     };
     let toggle = change;
     // Bound on the slot: in a TSX app they go to the app's element in it
@@ -590,7 +595,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                 current.with(|v| {
                     props
                         .items
-                        .with(|items| listbox::chosen_title(items, v.as_deref()))
+                        .with(|items| listbox::selected_titles(items, v.as_slice()))
                 })
             })
             .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))

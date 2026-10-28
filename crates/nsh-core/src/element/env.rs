@@ -1,5 +1,5 @@
 //! What components read from the environment: the surface, system UI, the
-//! user's settings ([`super::ambient::window`] and the like).
+//! user's settings ([`super::window`] and the like).
 
 use crate::{
     EdgeInsets, Points, Size,
@@ -46,6 +46,9 @@ pub struct Environment {
     /// The embedding app answers `nsh/host`'s calls
     /// ([`crate::platform::Environment::host`]).
     pub host: bool,
+    /// The platform picks colors from the screen
+    /// ([`crate::platform::Environment::screen_color`]).
+    pub screen_color: bool,
 }
 
 impl Default for Environment {
@@ -68,6 +71,7 @@ impl Default for Environment {
             locale: Locale::EN_US,
             apple_keyboard: false,
             host: false,
+            screen_color: false,
         }
     }
 }

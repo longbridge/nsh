@@ -447,8 +447,9 @@ export function QuantityStepper(props: QuantityStepperProps) {
 
 组件拥有它创建的东西，它创建的一切都随它消失：它的 `<If>` 分支隐藏、它的行被移除或它的页面被弹出时。在 Rust 中，任务、
 定时器和间隔（`spawn`、`set_timeout`、`set_interval`）以及按键绑定（`on_key`）随创建它们时的归属者结束；在 TSX 中，用
-[`cleanup`](./reactivity.md#cleanup) 注册停止操作，或从 effect 中返回它。开始监听的函数返回一个停止监听的函数
-（`() => void`），组件渲染期间注册的内容随组件一起移除，`keymap.bind` 就是如此。
+[`cleanup`](./reactivity.md#cleanup) 注册停止操作，或从 effect 中返回它。监听用 `on(event, listener)`
+（`host.on(name, listener)`、`BackHandler.on("press", listener)`），它返回一个停止监听的函数（`() => void`，Rust 中返回
+`Stop`），组件渲染期间注册的内容随组件一起移除，`keymap.bind` 的绑定也是如此。
 
 某个东西意外地一直在运行时，先检查在组件之外创建的 effect 和 computed 值（在事件处理函数或定时器回调中创建的没有归属者，会
 一直存在）、注册时没有保留停止操作的监听，以及从没有组件归属的 store 启动的工作。被丢弃的 `resource` 加载会中止（TSX 中的
@@ -818,7 +819,7 @@ const liked = signal<Set<number>>(new Set());
 （组件的 props 和事件、crate 的导出、宿主应用的原生组件和模块接收的函数）采用同样的纪律：
 
 - 输入只增加可选成员；类型只放宽；默认值和行为保持不变（新行为需要主动开启）；
-- 选项是一个对象（`scrollTo({ x, y, animated })`），而不是第三个位置参数；
+- 参数可能增加的函数把选项放在一个对象里（`scrollTo({ x, y, animated })`），而不是再加一个位置参数；永远不会增加的参数（例如范围的起点和终点）保持为位置参数；
 - 模式是可以增加取值的字符串联合类型，而不是以后需要第三种状态的布尔值；
 - 一个值只有一种类型：`version: string`，而不是 `string | number`；
 - 函数返回一个可以增加字段的对象，而不是元组或单独的值；
@@ -883,7 +884,7 @@ const liked = signal<Set<number>>(new Set());
 | 其他事件 | `on<Event>`，现在时，一个对象 | `onPress()`、`onSubmit({ text })` |
 | 阶段 | `<act>Start`、`<act>End` | `onPanStart`、`onLoadStart` |
 | 鼠标位于视图上方 | `Enter` / `Move` / `Leave`，与 DOM 相同 | `onMouseEnter`、`onMouseMove`、`onMouseLeave` |
-| 开始监听 | 返回 `() => void` | `keymap.bind(..)` |
+| 开始监听 | `on(event, listener)`，返回 `() => void` | `host.on(name, l)`、`BackHandler.on("press", l)` |
 | 环境中的值 | 访问器，旁边是 `set<Value>` | `colorScheme()`、`setColorScheme` |
 | 只读的布尔值 | `is<Adjective>`、`has<Noun>` | `isAvailable` |
 

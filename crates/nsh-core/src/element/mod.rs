@@ -13,10 +13,10 @@
 //! effect whose runs patch that part alone, and a region ([`dynamic`],
 //! [`when`], [`each`], [`catch_error`]) makes its own elements again. State
 //! is signals the view makes (under the component's owner: they go with
-//! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
+//! it), changed by listeners, timers and tasks ([`spawn`]); the
 //! component's listeners hear its elements' events first and decide what
 //! reaches JS ([`Scope::emit`]). The environment and the design tokens are
-//! signals too ([`ambient::window`], [`ambient::tokens`]): reading one in a binding
+//! signals too ([`window`], [`tokens`]): reading one in a binding
 //! subscribes it.
 //!
 //! Props are a struct (`#[derive(Props)]`), events an enum
@@ -30,7 +30,7 @@
 //! expands, so both stay dense. How the core runs components:
 //! `docs/dev/components.md`.
 
-pub mod ambient;
+mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
@@ -48,7 +48,6 @@ mod events;
 pub(crate) mod flow;
 pub(crate) mod host;
 mod js;
-#[cfg(test)]
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
@@ -70,6 +69,7 @@ pub(crate) mod task;
 pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
+pub(crate) mod watch;
 
 /// Whether this build carries the text of declarations: the documentation
 /// and TypeScript of the specs, which only make `.nsh/types`. The
@@ -100,7 +100,7 @@ pub use nsh_macros::{
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
 pub use self::{
-    ambient::text_measurer,
+    ambient::*,
     animated::{
         Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
         DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
@@ -126,9 +126,9 @@ pub use self::{
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
-        Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
-        Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
-        declarations,
+        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec, Method,
+        MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
+        ScrollbarSource, declarations,
     },
     element_ref::{ComponentRef, ElementRef},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
@@ -144,7 +144,8 @@ pub use self::{
         Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader,
         video, web_view, web_view_html,
     },
-    js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
+    js::{JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
+    json_host::from_json,
     keyboard::Keyboard,
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,
@@ -169,7 +170,7 @@ pub use self::{
     },
     system::{
         CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
-        Quotas, System, io_code,
+        Quotas, Stop, System, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},

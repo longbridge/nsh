@@ -386,11 +386,11 @@ fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
         spawn(async move {
             let choice = alert_dialog()
                 .title("Discard your changes?")
-                .cancel("Keep editing")
-                .destructive("Discard")
+                .cancel("keep", "Keep editing")
+                .destructive("discard", "Discard")
                 .show()
                 .await;
-            if choice == Ok(Some("Discard".into())) {
+            if choice.is_ok_and(|r| r.action.as_deref() == Some("discard")) {
                 routes.update(|r| { r.pop(); });
             }
         });
@@ -422,14 +422,14 @@ function EditNote() {
   const text = signal("");
   const dirty = () => text().length > 0;
   const confirm = async () => {
-    const choice = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
-    if (choice === "discard") nav.pop();
+    if (action === "discard") nav.pop();
   };
   return (
     <NavPage title="Edit" popOnBack={!dirty()} onBackPress={() => dirty() && confirm()}>
@@ -568,7 +568,7 @@ function Editor() {
   // 只在选择时监听：其他时候由栈返回，并带有手势的预览。
   effect(() => {
     if (selecting()) {
-      BackHandler.onBackPress(() => {
+      BackHandler.on("press", () => {
         selecting.set(false);
         return true;
       });
@@ -578,7 +578,7 @@ function Editor() {
 }
 ```
 
-在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.onBackPress` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
+在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.on` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/mobile`，`BackHandler` 的调用会立即返回，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
 
 ## 标签页与其他布局
 

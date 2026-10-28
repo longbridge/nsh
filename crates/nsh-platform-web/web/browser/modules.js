@@ -13,6 +13,18 @@ export function createModules(invoke, values, live, wake, makeComponent) {
     values.classPeers.delete(id);
     invoke(203, [id]);
   });
+  // A function Rust made (a `Stop`): it calls back into Rust, which
+  // drops what it runs once the function is collected.
+  const functions = new FinalizationRegistry(id => { if (live()) invoke(209, [id]); });
+  values.makeFunction = id => {
+    const fn = () => {
+      if (!live()) return;
+      invoke(208, [id]);
+      wake();
+    };
+    functions.register(fn, id);
+    return fn;
+  };
   const call = (op, prefix, receiver, args, promise, throws) => {
     if (!live()) throw new Error("the app was disposed");
     let id = 0, result;

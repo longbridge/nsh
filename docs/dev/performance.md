@@ -217,6 +217,18 @@ message or a due timer (7, none between pastes).
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## The browser engine (published web apps)
+
+Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
+
+- A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
+  however many values the app holds: the weak tracing runs at most every 100ms after the call
+  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
+  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+- The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
+  (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
+  ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
+
 ## The performance monitor (`nsh_engine::perf`)
 
 `PerfMonitor` collects one surface's timings for an on-screen monitor (`--fps`; the macOS backend's `fps.rs` draws it)

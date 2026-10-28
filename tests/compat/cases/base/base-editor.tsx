@@ -171,7 +171,7 @@ export default function BaseEditor() {
         }}
       />
       <View testID="find" style={{ height: 20 }} onPress={() => query.set("x")} />
-      <View testID="replace-all" style={{ height: 20 }} onPress={async () => read.set(`replaced ${await editor.replaceAll("y")}`)} />
+      <View testID="replace-all" style={{ height: 20 }} onPress={async () => read.set(`replaced ${(await editor.replaceAll("y")).count}`)} />
       <View
         testID="read"
         style={{ height: 20 }}

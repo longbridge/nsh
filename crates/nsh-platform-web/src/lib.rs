@@ -317,9 +317,10 @@ fn page() -> Environment {
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
-/// shortcuts are Apple's) and `host` (the page answers `nsh/host` calls:
-/// `createPlayer`'s `host`); missing keys keep their value. Called before the app
-/// starts and on every change; the idiom and `host` are the ones at start, as on every
+/// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
+/// `createPlayer`'s `host`) and `screenColor` (the browser has an
+/// `EyeDropper`); missing keys keep their value. Called before the app starts
+/// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
 /// # Safety
@@ -374,6 +375,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     env.host = flag("host").unwrap_or(env.host);
+    env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -385,6 +387,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
+        e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
     })
 }
@@ -604,7 +607,7 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
             query: nsh_dev::protocol::SceneQuery::Animating,
         }) => {
             let animating =
-                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.animating()));
+                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.finishing()));
             serde_json::json!({ "done": animating })
         }
         Ok(step) => {
@@ -982,6 +985,7 @@ pub unsafe extern "C" fn nsh_event(
                             "canGoForward" => "canGoForward",
                             "loaded" => "loaded",
                             "total" => "total",
+                            "color" => "color",
                             _ => return None,
                         };
                         let v = match v {
@@ -1322,6 +1326,27 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
             }
         }
         app.control.scroll(id, point(px(x), px(y)), applied);
+    })
+}
+
+/// The text of multiline input `id` scrolled to `y`, or its height
+/// (`content`) or its viewport's changed, while a built-in bar takes the
+/// place of its indicator.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_scroll(
+    id: u32,
+    y: f32,
+    width: f32,
+    content: f32,
+    viewport: f32,
+) -> f64 {
+    send(|app| {
+        app.control.input_scroll(
+            id,
+            point(px(0.0), px(y)),
+            size(px(width), px(content.max(viewport))),
+            size(px(width), px(viewport)),
+        );
     })
 }
 

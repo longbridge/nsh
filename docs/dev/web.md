@@ -33,6 +33,11 @@ class and module faces; the same core reactive graph and virtualized list machin
 JS values cross through generation-checked arena handles. Weak tracing connects Rust-owned callbacks and
 payloads to their JS peers; externally held Rust values remain strong. DOM child edges are traced separately,
 so detached trees with callback cycles can be collected. Explicit owner disposal remains deterministic.
+The tracing runs off the calls: an outermost entry promotes weakened values back only when some were demoted, and
+the trace and the demotion run at most every 100ms once the outermost call returned (`Values.schedule`), so a call
+costs the same however many values the app holds. A string crosses in one call, encoded straight into Rust's
+buffer; a row of a table crosses in one (`JsHost::primitives` / `primitive_entries`, op 49, packed by `values.js`
+and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
@@ -371,7 +376,7 @@ dev session publishes no bundles (`DevSession::rust_root`). The browser host's e
 `nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
-(`nsh_core::element::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
+(`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no browser host, so smaller than
 the prebuilt runtime, which a TSX entry needs.
 
@@ -524,7 +529,11 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
-  border overlay gets its own for border colors, widths and radii, since it draws the border.
+  border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
+  color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,
+  so the runs `op_t` makes again inherit it and a change is a CSS transition of the element's `color`
+  (`transition-colors`), from the color on screen; a text of several colors keeps them in its runs and changes at
+  once, as does one that becomes one color (`web/text-browser.test.mjs`).
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
   transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
@@ -635,6 +644,11 @@ as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by t
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Input
+
+`autoComplete` reaches both `<input>` and `<textarea>` as HTML's `autocomplete` attribute.
+`src/encode/input.rs` maps every `AutoFill` variant to its HTML token (`Password` to
+`current-password`, `Birthdate` to `bday`, `Off` to `off`). `Default` leaves the attribute unset;
+returning to it removes an earlier hint. The browser decides which autofill suggestions to offer.
 
 `nsh.js` turns browser input into what the desktop backends report (`docs/dev/linux.md` is the reference), and phone
 browsers' touches into what phones report:

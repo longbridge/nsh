@@ -198,10 +198,10 @@ function Unsaved() {
   const text = signal("");
   const focused = signal(false);
   const confirm = async () => {
-    const action = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
@@ -386,7 +386,7 @@ export function Navigation() {
   effect(() => {
     if (!intercept()) return;
     // Removed with the effect when it runs again.
-    BackHandler.onBackPress(() => {
+    BackHandler.on("press", () => {
       backs.set(backs() + 1);
       return true;
     });

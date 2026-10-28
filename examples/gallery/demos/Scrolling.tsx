@@ -1,4 +1,4 @@
-import { Canvas, List, platform, Scroll, type ScrollEvent, signal, Text, View, type YNode } from "nsh";
+import { Canvas, List, platform, Scroll, type ScrollEvent, type ScrollRef, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { createAnimatedValue } from "nsh";
 import { windowSize } from "nsh";
@@ -285,7 +285,7 @@ function Events() {
 
 /** Pinch to zoom (natively); tap a tile to zoom in on it. */
 function Zoom() {
-  let scroll: YNode | undefined;
+  let scroll: ScrollRef | undefined;
   const scale = signal(1);
   const bounces = signal(true);
   const tiles = Array.from({ length: 24 }, (_, i) => i);

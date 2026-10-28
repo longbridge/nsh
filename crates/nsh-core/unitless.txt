@@ -222,6 +222,7 @@ transform::TransformOp.value                                     # a transform o
 transition::Extra.scale                                          # a scale factor
 transition::Live::opacity ->                                     # an opacity factor
 transition::Live::step(now)                                      # time
+transition::TextColor::step(now)                                 # time
 element::ambient::animated_value(value)                               # an animated value (any quantity)
 element::ambient::font_scale ->                                       # a font scale factor
 element::ambient::keyboard_duration ->                                # time
@@ -323,6 +324,8 @@ element::js::JsHost::new_number(n)                                    # a generi
 element::js::JsHost::number ->                                        # a generic number (a JS value, a recorded slot)
 element::js::JsIn::as_date ->                                         # time (a JS Date's milliseconds since the epoch)
 element::js::JsIn::as_number ->                                       # a generic number (a JS value, a recorded slot)
+element::js::JsPrimitive::Date.0                                      # time (a JS Date's milliseconds since the epoch)
+element::js::JsPrimitive::Number.0                                    # a generic number (a JS value, a recorded slot)
 element::module::ConstantValue::Number.0                              # a generic number (a module constant's JS value)
 element::responder::PanGesture.vx                                     # a velocity, points per second
 element::responder::PanGesture.vy                                     # a velocity, points per second

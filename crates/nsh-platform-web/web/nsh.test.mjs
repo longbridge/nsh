@@ -53,6 +53,33 @@ const failing = () => {
 const events = (sent) =>
   sent.filter(([name, p]) => name === "onHost" && p.type === "event").map(([, p]) => p.event);
 
+test("input autofill hints are set, changed and cleared on both field kinds", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const field = {
+    classList: { toggle() {} },
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  const el = { _field: field };
+  player.view = () => el;
+  for (const multiline of [false, true]) {
+    field.tagName = multiline ? "TEXTAREA" : "INPUT";
+    const config = { multiline };
+    const update = () => player.op_in(["in", 1, config, null]);
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "the browser decides by default");
+    for (const token of ["username", "current-password", "new-password", "one-time-code", "off"]) {
+      config.autoComplete = token;
+      update();
+      assert.equal(attrs.get("autocomplete"), token);
+    }
+    delete config.autoComplete;
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "returning to default clears the hint");
+  }
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);

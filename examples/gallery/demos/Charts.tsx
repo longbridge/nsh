@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel, RadialGrid, RadialLine } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -70,7 +70,7 @@ const SECONDS = ["−60s", "−45s", "−30s", "−15s", "now"];
 const OPEN = 41.2;
 /** The first tick's time of day, in seconds. */
 const START = 10 * 3600 + 42 * 60;
-/** How a re-fit of the live plot's y domain glides: its marks over `motion.update`, the gutter with the layout. */
+/** How a re-fit of the live plot's y domain glides: its marks and labels over `motion.update`, the newest dot with the layout. */
 const REFIT = { duration: 450, easing: "easeInOut" } as const;
 const refitLayout = {
   duration: REFIT.duration,
@@ -87,13 +87,16 @@ const clock = (t: number) => {
 /**
  * A minute of a price, a tick a second: the newest point is the plot's
  * right edge, its dot breathing while the stream runs, its price tagged in
- * the gutter at its height, inside a channel of each tick's high and low
- * over the last ten (an area whose `y0` is a field of each row: a band).
+ * the gutter at its height and the window's high written over its point
+ * (a `PlotLabel` each, placed by the plot's scales), inside a channel of
+ * each tick's high and low over the last ten (an area whose `y0` is a
+ * field of each row: a band).
  * The y domain holds still while the window fits in it and re-fits only
  * when the price leaves it or uses too little of it, so the grid does not
- * jump with every tick; a re-fit glides, the line, the band and the grid
- * on the plot's `motion.update`, the gutter's labels and the newest dot
- * with a layout animation of the same length.
+ * jump with every tick; a re-fit glides, the line, the band, the grid,
+ * the axis' labels and the two `PlotLabel`s on the plot's
+ * `motion.update`, the newest dot with a layout animation of the same
+ * length.
  */
 function Live() {
   const next = random(29);
@@ -137,6 +140,10 @@ function Live() {
   const grid = () => ticks(domain()[0], domain()[1]);
   const high = () => Math.max(...points().map((p) => p.price));
   const low = () => Math.min(...points().map((p) => p.price));
+  /** The row of the window's high (its first, if it repeats). */
+  const peak = () => points().findIndex((p) => p.price === high());
+  /** The high's text centered over it, kept off the plot's ends. */
+  const peakAlign = (): "left" | "center" | "right" => (peak() < 8 ? "left" : peak() > LIVE_POINTS - 9 ? "right" : "center");
   const breathing = () => running() && !reduceMotion();
   return (
     <Card icon="stocks" title="Live price" subtitle="A tick a second in its ten-second range, the last price tagged at its height">
@@ -210,29 +217,44 @@ function Live() {
             </If>
             <View style={{ position: "absolute", left: -4.5, top: -4.5, width: 9, height: 9, borderRadius: 4.5, borderWidth: 2, borderColor: colors.inset, backgroundColor: toneColor(tone()) }} />
           </View>
-          {/* The gutter: the grid's values clear of the last price's tag, the tag at its height. */}
+          {/* The gutter: the grid's values clear of the last price's tag. */}
           <PlotAxis
             placement="right"
             tickValues={grid().filter((v) => Math.abs(y(v) - y(last())) > 14)}
             format={(v) => fixed(v)}
             labelStyle={{ ...axis, paddingLeft: 10 }}
           />
-          <View
-            style={{
-              position: "absolute",
-              left: "100%",
-              marginLeft: 6,
-              top: y(last()) - 10,
-              height: 20,
-              paddingHorizontal: 6,
-              borderRadius: 6,
-              justifyContent: "center",
-              backgroundColor: toneColor(tone()),
-              pointerEvents: "none",
-            }}
-          >
-            <Text style={{ fontSize: 11, fontFamily: mono, fontWeight: "600", color: colors.surface, fontVariant: ["tabular-nums"] }}>{fixed(last())}</Text>
-          </View>
+          {/* The window's high over its point, and the last price's tag at its height in the gutter. */}
+          <PlotLabel
+            texts={[
+              {
+                text: `High ${fixed(high())}`,
+                x: peak(),
+                y: high(),
+                align: peakAlign(),
+                class: "-translate-y-full",
+                style: { ...axis, color: colors.muted, paddingBottom: 6 },
+              },
+              {
+                text: fixed(last()),
+                x: LIVE_POINTS - 1,
+                y: last(),
+                class: "-translate-y-1/2",
+                style: {
+                  marginLeft: 6,
+                  paddingHorizontal: 6,
+                  lineHeight: 20,
+                  borderRadius: 6,
+                  backgroundColor: toneColor(tone()),
+                  fontSize: 11,
+                  fontFamily: mono,
+                  fontWeight: "600",
+                  color: colors.surface,
+                  fontVariant: ["tabular-nums"],
+                },
+              },
+            ]}
+          />
           {/* The window's seconds under it, the first and last at its ends. */}
           <PlotAxis ticks={SECONDS.length} format={(_, i) => SECONDS[i]} labelStyle={below} />
         </Plot>
@@ -618,29 +640,37 @@ const REGIONS = [
   { name: "Other", revenue: 74 },
 ];
 const REVENUE = REGIONS.reduce((sum, r) => sum + r.revenue, 0);
-/** The theme's series colors: a slice's fill, its legend key's background. */
-const FILLS = ["fill-chart-1", "fill-chart-2", "fill-chart-3", "fill-chart-4", "fill-chart-5"];
-const KEYS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
+/** The theme's series colors, in the regions' order (read where used, so
+ * they follow the appearance): the plot's ordinal `colorScale` gives each
+ * region's slice the next one, as the legend gives its key. */
+const palette = () => [chart.s1, chart.s2, chart.s3, chart.s4, chart.s5];
+/** The leader lines of the pie's labels, each in its slice's color. */
+const STROKES = ["stroke-chart-1", "stroke-chart-2", "stroke-chart-3", "stroke-chart-4", "stroke-chart-5"];
 const money = (k: number) => (k >= 1000 ? `$${(k / 1000).toFixed(2)}M` : `$${k}k`);
 const portion = (k: number) => `${((k / REVENUE) * 100).toFixed(1)}%`;
+/** A slice's label: its share, whole. */
+const percent = (k: number) => `${Math.round((k / REVENUE) * 100)}%`;
 /** The ring's size, its rim 8 points in (room for the lift), the gaps
  * between slices 2 points wide there. */
 const RING = pointer ? 168 : 176;
 const RIM = RING / 2 - 8;
+/** As a pie the ring draws in to leave room for its labels outside. */
+const PIE_RIM = Math.round(RIM * 0.66);
 
 /**
  * Revenue by region as a donut: 2-point gaps of even width, softly rounded
  * corners, the hovered slice lifted and the others dimmed, its value in
  * the hole, a legend with tabular figures at the trailing edge whose
  * hovered row stands out; it closes into a pie, the hole's radius moving
- * on `motion.update`.
+ * on `motion.update` as the ring draws in, its shares written outside
+ * at the ends of leader lines in the slices' colors.
  */
 function Revenue() {
   const hover = signal<number | null>(null);
   const donut = signal(true);
   const shown = () => (hover() == null ? undefined : REGIONS[hover()!]);
   return (
-    <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, the hovered slice lifted">
+    <Card icon="stocks" title="Revenue by region" subtitle="A donut of shares, or a pie labeled around its rim">
       {/* The legend sits beside the ring where the card has room for its
           names and below it where it has not, never cutting a name short. */}
       <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 24 : 16 }}>
@@ -653,16 +683,22 @@ function Revenue() {
           onHoverChange={({ index }) => hover.set(index)}
           focusStyle={{ ...focusRing(4), borderRadius: RING / 2 }}
           style={{ width: RING, height: RING }}
+          colorScale={{ type: "ordinal", range: palette() }}
         >
           <Pie
             value="revenue"
             innerRadius={donut() ? RIM * 0.62 : 0}
-            outerRadius={RIM}
+            outerRadius={donut() ? RIM : PIE_RIM}
             padAngle={2 / RIM}
             cornerRadius={3}
-            sliceClass={(_, i) => FILLS[i % FILLS.length]}
+            color="name"
             hoverLift={6}
             hoverDim={0.64}
+            label={donut() ? undefined : (d: (typeof REGIONS)[number]) => percent(d.revenue)}
+            labelGap={10}
+            labelStyle={{ paddingHorizontal: 4, fontSize: 11, fontFamily: mono, color: colors.muted, fontVariant: ["tabular-nums"] }}
+            labelLineClass={(_, i) => STROKES[i % STROKES.length]}
+            labelLineStyle={{ strokeWidth: 1 }}
           />
           {/* The total in the hole fades as it opens and closes. */}
           <View
@@ -688,7 +724,7 @@ function Revenue() {
                 opacity: hover() == null || hover() === i ? 1 : 0.45,
               }}
             >
-              <View class={KEYS[i]} style={{ width: 8, height: 8, borderRadius: 2 }} />
+              <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: palette()[i] }} />
               <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: colors.text }}>{r.name}</Text>
               <Text style={{ fontSize: 13, color: colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>{money(r.revenue)}</Text>
               <Text style={{ width: 48, fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{portion(r.revenue)}</Text>
@@ -816,6 +852,131 @@ function Sales() {
   );
 }
 
+/** A portfolio's lean on six factors, scored 0 to 100, and two benchmarks'. */
+const FACTORS = [
+  { name: "Value", ours: 72, index: 46, peers: 64 },
+  { name: "Momentum", ours: 58, index: 62, peers: 40 },
+  { name: "Quality", ours: 86, index: 55, peers: 71 },
+  { name: "Size", ours: 34, index: 70, peers: 52 },
+  { name: "Low vol", ours: 64, index: 42, peers: 78 },
+  { name: "Yield", ours: 48, index: 52, peers: 66 },
+];
+type Factor = (typeof FACTORS)[number];
+const BENCHMARKS = [
+  { value: "index", label: "vs Index", name: "Index" },
+  { value: "peers", label: "vs Peers", name: "Peers" },
+] as const;
+type Benchmark = (typeof BENCHMARKS)[number]["value"];
+/** The radar's side and its rim: room inside the plot for the hover dots,
+ * the factors' names past the rim. */
+const RADAR = pointer ? 196 : 204;
+const RADAR_RIM = "78%";
+/** Where the names sit: a share of the plot's side out from its middle. */
+const LABEL_AT = 44;
+const mean = (pick: (f: Factor) => number) => FACTORS.reduce((s, f) => s + pick(f), 0) / FACTORS.length;
+/** A name's side of its place: away from the center. */
+const away = (v: number) => (v > 0.01 ? "flex-start" : v < -0.01 ? "flex-end" : "center");
+
+/**
+ * A portfolio's factor exposure as a radar against a benchmark: hexagonal
+ * hairline rings and spokes, the benchmark a dashed outline, the portfolio
+ * a citrus outline over a wash that deepens toward the rim, growing out of
+ * the center and morphing to the other benchmark (`motion.update`). The
+ * factor nearest the pointer by angle, or the keys' factor, is read out
+ * beside it with both scores and the spread, its name lit at the rim.
+ */
+function Factors() {
+  const bench = signal<Benchmark>("index");
+  const hover = signal<number | null>(null);
+  const shown = () => (hover() == null ? undefined : FACTORS[hover()!]);
+  const benchName = () => BENCHMARKS.find((b) => b.value === bench())!.name;
+  const ours = () => shown()?.ours ?? mean((f) => f.ours);
+  const theirs = () => (shown() ? shown()![bench()] : mean((f) => f[bench()]));
+  const spread = () => ours() - theirs();
+  const lead = FACTORS.reduce((a, b) => (b.ours > a.ours ? b : a));
+  return (
+    <Card icon="stocks" title="Factor exposure" subtitle="A portfolio against its benchmark on six factors">
+      {/* The readout beside the radar where the card has room for it, below where it has not. */}
+      <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 20 : 12 }}>
+        <Plot
+          data={FACTORS}
+          yScale={{ type: "linear", domain: [0, 100] }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 550, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 380, damping: 34 } }}
+          accessibilityLabel={`Factor exposure against the ${benchName().toLowerCase()}, leaning most on ${lead.name} at ${lead.ours}`}
+          accessibilityValue={{ text: shown() && `${shown()!.name}: ${shown()!.ours}, ${benchName().toLowerCase()} ${theirs()}` }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={{ ...focusRing(4), borderRadius: RADAR / 2 }}
+          style={{ width: RADAR, height: RADAR, marginHorizontal: 40, marginVertical: 10 }}
+        >
+          <RadialGrid rings={[25, 50, 75]} outerRadius={RADAR_RIM} style={{ stroke: colors.line }} />
+          <RadialGrid rings={[100]} spokes outerRadius={RADAR_RIM} style={{ stroke: colors.border }} />
+          <RadialLine
+            radius={bench()}
+            closed
+            outerRadius={RADAR_RIM}
+            style={{ stroke: colors.muted, strokeDasharray: "3 3", fill: alpha(colors.muted, 0.06) }}
+            hoverDotStyle={{ width: 7, height: 7, borderRadius: 4, borderWidth: 1.5, borderColor: colors.surface, backgroundColor: colors.muted }}
+          />
+          <RadialLine
+            radius="ours"
+            closed
+            outerRadius={RADAR_RIM}
+            dot
+            dotStyle={{ width: 4, height: 4, borderRadius: 2, backgroundColor: chart.s1 }}
+            backgroundStyle={{ backgroundImage: `radial-gradient(circle, ${alpha(chart.s1, 0.04)}, ${alpha(chart.s1, 0.3)})` }}
+            style={{ stroke: chart.s1, strokeWidth: 2 }}
+            hoverDotStyle={{ width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: colors.surface, backgroundColor: chart.s1 }}
+          />
+          {/* Each factor's name past the rim at its angle, growing away from the center; the hovered one lit. */}
+          {FACTORS.map((f, i) => {
+            const angle = (2 * Math.PI * i) / FACTORS.length;
+            const [sin, cos] = [Math.sin(angle), Math.cos(angle)];
+            return (
+              <View
+                style={{
+                  position: "absolute",
+                  left: `${50 + LABEL_AT * sin}%`,
+                  top: `${50 - LABEL_AT * cos}%`,
+                  width: 0,
+                  height: 0,
+                  alignItems: away(sin),
+                  justifyContent: away(-cos),
+                  pointerEvents: "none",
+                }}
+              >
+                <Text style={{ width: 64, numberOfLines: 1, fontSize: 10.5, fontFamily: mono, textAlign: sin > 0.01 ? "left" : sin < -0.01 ? "right" : "center", color: hover() === i ? chart.s1 : colors.faint }}>
+                  {f.name}
+                </Text>
+              </View>
+            );
+          })}
+        </Plot>
+        <View style={{ alignSelf: "stretch", flexGrow: 1, flexBasis: pointer ? 200 : undefined, justifyContent: "center", gap: 12 }}>
+          <View style={{ gap: 2 }}>
+            <Text style={tipTitle}>{shown()?.name.toUpperCase() ?? "ALL SIX FACTORS"}</Text>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+              <Text style={{ fontSize: 26, fontWeight: "600", letterSpacing: -0.6, color: colors.text, fontVariant: ["tabular-nums"] }}>{fixed(ours(), 1)}</Text>
+              <Text style={{ fontSize: 12, color: colors.muted }}>{shown() ? "score" : "mean score"}</Text>
+            </View>
+          </View>
+          <View style={{ gap: 6 }}>
+            <Legend color={chart.s1} label="Portfolio" value={fixed(ours(), 1)} />
+            <Legend color={colors.muted} label={benchName()} value={fixed(theirs(), 1)} />
+          </View>
+          <Figures>
+            <Figure label="Spread" value={signed(spread(), 1)} tone={spread() >= 0 ? "up" : "down"} />
+            <Figure label="Lead" value={lead.name} />
+          </Figures>
+        </View>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 220 : undefined }}>
+        <Segmented options={BENCHMARKS} value={bench()} size={size.switch} onChange={(next) => bench.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
 /**
  * Charts: what an app builds from `nsh/base/plot`'s parts and its own
  * views, with no chart component in between. A live price streamed a tick
@@ -824,10 +985,12 @@ function Sales() {
  * pointer read out; a portfolio's value over its underwater plot, the
  * worst run shaded and the hovered day marked on both; capacity rings that
  * sweep in for each period; revenue as a donut whose hovered slice lifts;
- * and sales as bars side by side or stacked. Values on the axes are small
+ * sales as bars side by side or stacked; and a portfolio's factor
+ * exposure as a radar against a benchmark, the factor under the pointer
+ * read out. Values on the axes are small
  * monospaced figures the plots' `PlotAxis` parts lay along their edges,
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Factors]} />;
 }

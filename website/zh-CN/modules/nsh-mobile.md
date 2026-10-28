@@ -125,7 +125,7 @@ mount(App);
 在 iOS 和 Mac Catalyst 上可用；在 Android 上是一个空的隐藏视图。
 
 ```ts
-function InputAccessoryView(props: InputAccessoryViewProps): YNode | null;
+function InputAccessoryView(props: InputAccessoryViewProps): JSX.Element;
 
 interface InputAccessoryViewProps {
   nativeID: string;
@@ -180,13 +180,13 @@ fn Note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, type YNode } from "nsh";
+import { type InputRef, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/mobile";
 
 function Note() {
   const text = signal("");
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <View>
       <Input
@@ -215,7 +215,7 @@ function Note() {
 
 ```ts
 const BackHandler: {
-  onBackPress(listener: () => boolean | void): () => void;
+  on(event: "press", listener: () => boolean | void): () => void;
   exitApp(): void;
 };
 ```
@@ -224,7 +224,7 @@ const BackHandler: {
 
 | 成员 | Rust | 说明 |
 |---|---|---|
-| `onBackPress(listener)` | `on_back_press(listener)` | `listener` 处理了这次返回时返回 `true`。返回一个停止监听的函数；在组件渲染（或 effect 运行）期间添加的监听器随之停止，Rust 与 TSX 都是如此。 |
+| `on("press", listener)` | `on_back_press(listener)` | `listener` 处理了这次返回时返回 `true`。返回一个停止监听的函数；在组件渲染（或 effect 运行）期间添加的监听器随之停止，Rust 与 TSX 都是如此。 |
 | `exitApp()` | 监听器返回 `false` | 退出应用。Rust 监听器返回 `false` 时，返回操作继续传递，由导航栈返回或应用退出。 |
 
 ```rust tabs
@@ -239,8 +239,8 @@ fn Editor() -> impl IntoElement {
             return false; // 交给应用返回或退出
         }
         spawn(async move {
-            let answer = alert_dialog().title("Discard changes?").cancel("Keep").destructive("Discard").show().await;
-            if answer == Ok(Some("Discard".into())) {
+            let answer = alert_dialog().title("Discard changes?").cancel("keep", "Keep").destructive("discard", "Discard").show().await;
+            if answer.is_ok_and(|r| r.action.as_deref() == Some("discard")) {
                 dirty.set(false); // 下一次返回即离开
             }
         });
@@ -258,12 +258,12 @@ import { AlertDialog } from "nsh/base";
 function Editor() {
   const dirty = signal(false);
   // Editor 移除时停止监听。
-  BackHandler.onBackPress(() => {
+  BackHandler.on("press", () => {
     if (!dirty()) return false; // 交给应用返回或退出
     AlertDialog.show({
       title: "Discard changes?",
-      actions: [{ label: "Keep", role: "cancel" }, { label: "Discard", role: "destructive", id: "discard" }],
-    }).then((id) => id === "discard" && BackHandler.exitApp());
+      actions: [{ label: "Keep", role: "cancel", id: "keep" }, { label: "Discard", role: "destructive", id: "discard" }],
+    }).then(({ action }) => action === "discard" && BackHandler.exitApp());
     return true;
   });
   // ...

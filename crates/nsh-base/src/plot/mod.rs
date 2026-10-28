@@ -2,10 +2,12 @@
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes, the pointer over it and its motion;
 //! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], and the radial
-//! [`Pie`] and [`Arc`]) draw what it holds, each a canvas filling the plot
-//! (a pie one per slice), and its [`PlotAxis`]es label its edges with the
-//! ticks of its scales, natively: the rows are read once when the app
-//! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
+//! [`Pie`], [`Arc`], [`RadialLine`] and [`RadialGrid`]) draw what it
+//! holds, each a canvas filling the plot (a pie one per slice), its
+//! [`PlotAxis`]es label its edges with the ticks of its scales and its
+//! [`PlotLabel`]s write texts at values of them, natively: the rows are
+//! read once when the app sets them, scaled, recorded and drawn in Rust,
+//! so no JS runs per point,
 //! and the pointer, the hover's glide and fade, the appear and the scales'
 //! moves to new domains (`tween.rs`) run in Rust and on the platform's
 //! animator (the app hears of a new index, nothing more). Marks paint with
@@ -24,8 +26,10 @@ mod axis;
 mod bar;
 mod grid;
 mod keys;
+mod label;
 mod line;
 mod pie;
+mod radial_line;
 mod scale;
 mod series;
 mod tween;
@@ -47,9 +51,16 @@ pub use self::{
     },
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
+    label::{PlotLabel, PlotLabelElement, PlotLabelProps, PlotText, PlotTextAlign, plot_label},
     line::{Curve, Line, LineElement, LineProps, line},
-    pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
-    scale::{BandScale, Scale},
+    pie::{
+        Arc, ArcElement, ArcProps, Pie, PieElement, PieLabelStyle, PieProps, SliceClass, arc, pie,
+    },
+    radial_line::{
+        RadialGrid, RadialGridElement, RadialGridProps, RadialLine, RadialLineElement,
+        RadialLineProps, radial_grid, radial_line,
+    },
+    scale::{BandScale, OrdinalScale, Scale},
 };
 use self::{
     bar::{BarEntry, BarLayout},
@@ -73,7 +84,10 @@ pub fn registry() -> Registry {
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
-        .register::<PlotAxis>();
+        .register::<RadialLine>()
+        .register::<RadialGrid>()
+        .register::<PlotAxis>()
+        .register::<PlotLabel>();
     registry
 }
 
@@ -167,14 +181,19 @@ pub struct PlotProps {
     /// rows in order, evenly from the left edge to the right one), `{
     /// type: "linear", domain? }`, or `{ type: "band", … }` (a band per
     /// row, for bars); with a band y scale it defaults to linear, for
-    /// bars across.
+    /// bars across. `reverse: true` runs it from the right edge: the first
+    /// row, or the domain's smallest value, at the right (bars across
+    /// grow leftward from it, `gpui-base`'s `BarAlignment::Right`).
     pub x_scale: Prop<Option<Scale>>,
     /// How the y axis places values: `{ type: "linear", domain? }` (the
     /// default; without a domain, the extent of what the marks draw), the
     /// domain's smallest value at the bottom edge and its largest at the
     /// top one; or `{ type: "band", … }`, a band per row from the top edge
     /// down, for bars across (the x scale then `linear`, its domain the
-    /// extent of the bars' values without one).
+    /// extent of the bars' values without one). `reverse: true` runs it
+    /// the other way: the domain's smallest value at the top edge (bars
+    /// grow down from it, `gpui-base`'s `BarAlignment::Top`), the rows
+    /// from the bottom edge up.
     pub y_scale: Prop<Option<Scale>>,
     /// The plot follows the pointer (`gpui-base`'s `Plot::interactive`;
     /// default true): it reports the row under it and shows the hover's
@@ -237,6 +256,14 @@ pub struct PlotProps {
     /// the pointer for `"pointer"`; 0 by default.
     #[prop(default)]
     pub tooltip_offset: Prop<Points>,
+    /// The colors of the categories the marks' `color` reads of their
+    /// rows (`gpui-base`'s `ScaleOrdinal`, d3's `scaleOrdinal`): `{ type:
+    /// "ordinal", domain?, range, unknown? }`. A slice's or a bar's color
+    /// is its row's, a line's or an area's its first row's; it is the
+    /// mark's `fill` (a line's `stroke`) where nothing sets one, so the
+    /// app's classes and styles, the mark's or inherited from the plot,
+    /// win over it. None by default: the marks take no color of a scale.
+    pub color_scale: Prop<Option<OrdinalScale>>,
     /// The marks, drawn in order over each other (each fills the plot),
     /// and whatever the app lays over them.
     pub children: Prop<Children>,
@@ -247,9 +274,10 @@ pub struct PlotProps {
 pub enum PlotEvent {
     /// The pointer came over another row (`gpui-base`'s
     /// `TooltipState::index`): the index of the row nearest to it along
-    /// the x axis (the y axis when only that one has bands), or of the
-    /// slice of a `Pie` under it; `null` once it leaves the plot (or, over
-    /// a pie, its slices).
+    /// the x axis (the y axis when only that one has bands), of the slice
+    /// of a `Pie` under it, or of a `RadialLine`'s row nearest to it by
+    /// angle; `null` once it leaves the plot (or, over a pie, its slices;
+    /// over a radial line, its outer radius).
     #[args(index)]
     HoverChange(Option<u32>),
 }
@@ -349,8 +377,18 @@ struct PlotContext {
     hits: Signal<Vec<Hit>>,
     /// The plot follows the pointer.
     interactive: Prop<bool>,
+    /// The plot's own hover dot (`dotClass` / `dotStyle`), for the marks
+    /// that place their hover dot themselves (a radial line's, at the
+    /// hovered row's vertex).
+    dot: HoverDot,
     /// The axis with bands (the x axis when both have them).
     band_axis: Memo<Option<Axis>>,
+    /// The colors of the marks' categories.
+    color_scale: Prop<Option<OrdinalScale>>,
+    /// The categories outside `color_scale`'s domain the marks have met,
+    /// in order, and the scale they were met for (d3's implicit domain:
+    /// they keep their colors while the scale stays).
+    met: Stored<(Option<OrdinalScale>, Vec<SharedString>)>,
 }
 
 /// A radial mark's test of the row under a point of the plot
@@ -430,21 +468,27 @@ impl PlotContext {
     }
 
     /// Records the clip of the appear while it runs (before what a mark
-    /// draws): the marks show from the leading edge to the appear's
+    /// draws): the marks show from the leading edge, where the x scale
+    /// starts (the right one when it is reversed), to the appear's
     /// progress of the plot's width.
     fn clip(&self, p: Painter, bleed: f32) -> Painter {
         if !self.appearing.get() {
             return p;
         }
         let size = self.size.get();
-        let edge = self.appear.progress().mul(size.width.0);
+        let (w, h) = (size.width.0, size.height.0);
+        let shown = self.appear.progress().mul(w);
         // What the mark draws past the plot's edges (`bleed`) is revealed
         // with the rest, from the leading edge.
+        let (lead, edge) = match self.x_map.get().backward() {
+            true => (w + bleed, shown.mul(-1.0).add(w)),
+            false => (-bleed, shown),
+        };
         p.begin_path()
-            .move_to(-bleed, -bleed)
+            .move_to(lead, -bleed)
             .line_to(&edge, -bleed)
-            .line_to(&edge, size.height.0 + bleed)
-            .line_to(-bleed, size.height.0 + bleed)
+            .line_to(&edge, h + bleed)
+            .line_to(lead, h + bleed)
             .close_path()
             .clip()
     }
@@ -478,21 +522,37 @@ impl PlotContext {
         let p = p.op(CanvasOp::Transform([sx, none, none, sy, ox, oy]));
         trace(p).restore()
     }
+
+    /// The colors `colorScale` gives `categories` (`None`: the plot has no
+    /// scale), a category met first taking the next color (d3's implicit
+    /// domain).
+    fn colors(&self, categories: &[SharedString]) -> Option<std::sync::Arc<[Option<Hsla>]>> {
+        let scale = self.color_scale.get()?;
+        Some(self.met.with(|(of, met)| {
+            if of.as_ref() != Some(&scale) {
+                *of = Some(scale.clone());
+                met.clear();
+            }
+            categories.iter().map(|c| scale.color(met, c)).collect()
+        }))
+    }
 }
 
 /// A plot (`gpui-base`'s `Plot`): the rows of data a chart shows, the
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
-/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`), each fill it and draw in
-/// order over each other. It reports the row nearest to the pointer, or the
-/// slice of a pie under it (`onHoverChange`), and
+/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`,
+/// `RadialGrid`), each fill it and draw in order over each other. It
+/// reports the row nearest to the pointer, the slice of a pie under it, or
+/// a radial line's row nearest to it by angle (`onHoverChange`), and
 /// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
 /// a mark's `hoverDotClass`, `tooltipContent`), moved and faded natively
 /// with `motion`, the tooltip placed by `tooltipPlacement` and kept inside
 /// the plot on the platform's animator. The keyboard drives the same
 /// hover: the plot is a stop of the focus (the app's `focus:` classes or
 /// `focusStyle` draw its ring), and while it has it Left / Right move to
-/// the row before / after, Home / End to the first / last, Escape clears
+/// the row on that side (the row before / after; the other way round on
+/// a reversed x scale), Home / End to the first / last, Escape clears
 /// it (`keys.rs`). It is one element for screen readers, with the image
 /// role, the app's `accessibilityLabel` and `accessibilityValue`, and
 /// increment / decrement step through the rows. The app's `class` and
@@ -526,17 +586,26 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         })
     };
     let x_map = computed(move || {
-        let range = [0.0, size.get().width.0];
+        let width = size.get().width.0;
         let len = data.with(|rows| rows.len());
         // Bars across a band y axis put their values along x.
         let fallback = match y_scale.get() {
-            Some(Scale::Band(_)) => Scale::Linear { domain: None },
-            _ => Scale::Point,
+            Some(Scale::Band(_)) => Scale::Linear {
+                domain: None,
+                reverse: false,
+            },
+            _ => Scale::Point { reverse: false },
         };
-        match x_scale.get().unwrap_or(fallback) {
-            Scale::Point => AxisMap::Point { len, range },
+        let scale = x_scale.get().unwrap_or(fallback);
+        // Left to right; reversed, from the right edge.
+        let range = match scale.reversed() {
+            true => [width, 0.0],
+            false => [0.0, width],
+        };
+        match scale {
+            Scale::Point { .. } => AxisMap::Point { len, range },
             Scale::Band(band) => AxisMap::Band(Band::new(len, range, band)),
-            Scale::Linear { domain } => {
+            Scale::Linear { domain, .. } => {
                 // The rows' `x`, or the values of bars across the plot.
                 let domain = domain
                     .or_else(|| match x_values.get() {
@@ -556,20 +625,21 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let y_map = computed(move || {
         let height = size.get().height.0;
         let len = data.with(|rows| rows.len());
-        match y_scale.get() {
-            // Rows from the top edge down.
-            Some(Scale::Point) => AxisMap::Point {
-                len,
-                range: [0.0, height],
-            },
-            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, [0.0, height], band)),
+        let scale = y_scale.get();
+        // Rows from the top edge down, values from the bottom edge up;
+        // reversed, the other way.
+        let (down, up) = match scale.is_some_and(|s| s.reversed()) {
+            true => ([height, 0.0], [0.0, height]),
+            false => ([0.0, height], [height, 0.0]),
+        };
+        match scale {
+            Some(Scale::Point { .. }) => AxisMap::Point { len, range: down },
+            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, down, band)),
             Some(Scale::Linear {
                 domain: Some(domain),
-            }) => AxisMap::Linear(Linear::new(domain, [height, 0.0])),
-            _ => AxisMap::Linear(Linear::new(
-                extent_on(Axis::Y).unwrap_or([0.0, 0.0]),
-                [height, 0.0],
-            )),
+                ..
+            }) => AxisMap::Linear(Linear::new(domain, up)),
+            _ => AxisMap::Linear(Linear::new(extent_on(Axis::Y).unwrap_or([0.0, 0.0]), up)),
         }
     });
     let hover_axis = computed(move || match band_axis.get() {
@@ -656,7 +726,13 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         hovered,
         hits,
         interactive: props.interactive,
+        dot: HoverDot {
+            class: props.dot_class,
+            style: props.dot_style,
+        },
         band_axis,
+        color_scale: props.color_scale,
+        met: stored((None, Vec::new())),
     });
 
     let place = TooltipPlace::new(props.tooltip_placement, props.tooltip_offset);
@@ -811,8 +887,16 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         }
         follow(Some(i), None);
     };
+    // Left and Right follow the screen: the rows along a reversed x scale
+    // run right to left (a pie's slices keep the rows' order).
+    let mirrored = move || {
+        !radial()
+            && hover_axis.get_untracked() == Axis::X
+            && x_map.with_untracked(AxisMap::backward)
+    };
     keys::bind(
         move || focused.get() && interactive.get(),
+        mirrored,
         hovered,
         step_to,
         key_to,

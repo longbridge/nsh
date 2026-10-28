@@ -573,6 +573,12 @@ impl Input {
         self.bind_prop(multiline, |multiline: bool| Prop::Multiline(multiline))
     }
 
+    /// Whether a multiline input's scroll bar shows (default yes): the
+    /// platform's indicator, or the app's built-in bar once it set one.
+    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    }
+
     /// At most `length` characters.
     pub fn max_length(self, length: impl IntoReactive<u32>) -> Self {
         self.bind_prop(length, |length: u32| Prop::MaxLength(Some(length)))
@@ -704,7 +710,7 @@ impl Scroll {
 
     /// Whether the scroll indicator shows (default yes).
     pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows))
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
     }
 
     /// Pinch zoom between `min` and `max`.
@@ -1472,7 +1478,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 /// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
 /// [`Painter::num`], [`Painter::paint`] and [`Painter::op`]. Text is
-/// measured with [`super::ambient::measure_text`].
+/// measured with [`super::measure_text`].
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,

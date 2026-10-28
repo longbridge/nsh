@@ -380,11 +380,11 @@ fn edit_note(routes: Signal<Vec<Route>>) -> Screen {
         spawn(async move {
             let choice = alert_dialog()
                 .title("Discard your changes?")
-                .cancel("Keep editing")
-                .destructive("Discard")
+                .cancel("keep", "Keep editing")
+                .destructive("discard", "Discard")
                 .show()
                 .await;
-            if choice == Ok(Some("Discard".into())) {
+            if choice.is_ok_and(|r| r.action.as_deref() == Some("discard")) {
                 routes.update(|r| { r.pop(); });
             }
         });
@@ -416,14 +416,14 @@ function EditNote() {
   const text = signal("");
   const dirty = () => text().length > 0;
   const confirm = async () => {
-    const choice = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
-    if (choice === "discard") nav.pop();
+    if (action === "discard") nav.pop();
   };
   return (
     <NavPage title="Edit" popOnBack={!dirty()} onBackPress={() => dirty() && confirm()}>
@@ -562,7 +562,7 @@ function Editor() {
   // Listening only while selecting: otherwise the stack pops, with the gesture's preview.
   effect(() => {
     if (selecting()) {
-      BackHandler.onBackPress(() => {
+      BackHandler.on("press", () => {
         selecting.set(false);
         return true;
       });
@@ -573,7 +573,7 @@ function Editor() {
 ```
 
 A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
-`BackHandler.onBackPress` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
+`BackHandler.on` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/mobile` can be imported on iOS too, where `BackHandler`'s calls return at once, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
 ## Tabs and other layouts
 

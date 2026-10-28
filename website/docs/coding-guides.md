@@ -479,9 +479,10 @@ export function QuantityStepper(props: QuantityStepperProps) {
 A component owns what it creates, and everything it created goes away with it: when its `<If>` branch hides, its row
 is removed or its page is popped. In Rust, tasks, timers and intervals (`spawn`, `set_timeout`, `set_interval`) and key
 bindings (`on_key`) end with the owner they were made under; in TSX, register the stop with
-[`cleanup`](./reactivity.md#cleanup) or return it from the effect. A function that starts listening returns a
-function that stops it (`() => void`), and what is registered while a component renders goes away with the component,
-as `keymap.bind` does.
+[`cleanup`](./reactivity.md#cleanup) or return it from the effect. Listening is `on(event, listener)`
+(`host.on(name, listener)`, `BackHandler.on("press", listener)`), which returns a function that stops it
+(`() => void`, from Rust a `Stop`), and what is registered while a component renders goes away with the component, as
+`keymap.bind`'s bindings do.
 
 When something keeps running unexpectedly, first inspect effects and computed values created outside a component (in
 an event handler or a timer callback they have no owner and live forever), listeners registered without their stop,
@@ -913,7 +914,8 @@ as they are. Apply the same discipline to what an app or a component library exp
 props and events, its crate's exports, the functions a host app's native components and modules receive):
 
 - inputs gain optional members only; types only widen; defaults and behavior stay (new behavior is opt-in);
-- options are one object (`scrollTo({ x, y, animated })`), never a third positional parameter;
+- a function whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`), never a
+  further positional parameter; parameters that never will, such as a range's start and end, stay positional;
 - a mode is a string union, which can gain values, rather than a boolean that later needs a third state;
 - a value has one type: `version: string`, never `string | number`;
 - what a function returns is an object, which can gain a field, rather than a tuple or a bare value;
@@ -988,7 +990,7 @@ word (`readonly`, `multiline`).
 | Any other event | `on<Event>`, present tense, one object | `onPress()`, `onSubmit({ text })` |
 | A phase | `<act>Start`, `<act>End` | `onPanStart`, `onLoadStart` |
 | The mouse over a view | `Enter` / `Move` / `Leave`, the DOM's | `onMouseEnter`, `onMouseMove`, `onMouseLeave` |
-| Starting to listen | Returns `() => void` | `keymap.bind(..)` |
+| Starting to listen | `on(event, listener)`, returns `() => void` | `host.on(name, l)`, `BackHandler.on("press", l)` |
 | A value of the environment | An accessor, `set<Value>` beside it | `colorScheme()`, `setColorScheme` |
 | A read-only boolean | `is<Adjective>`, `has<Noun>` | `isAvailable` |
 

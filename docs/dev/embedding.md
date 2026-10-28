@@ -114,7 +114,7 @@
     listener of that name is added; a job then delivers what was kept, in order, at the end of the turn that added it
     (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
     uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
-    listener unsubscribes during a callback, the rest keep their original order and age in the inbox.
+    listener stops during a callback, the rest keep their original order and age in the inbox.
   - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
     engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
     rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
@@ -142,18 +142,20 @@
     the URL check and the `openUrl` capability, where no `host.call` name of the app can reach it or be mistaken for
     it. The core keeps each request (`Action::OpenUrl` → `Core::take_url_opens`); the engine (`State::open_urls`,
     after each commit round) runs the handler on the engine thread with an `OpenUrlRequest`, answered once from any
-    thread: `handled()` resolves the app's promise `true` (`Core::answer_open_url`), `decline()` or dropping it
+    thread: `handled()` resolves the app's promise with `{ opened: true }` (`Core::answer_open_url`), `decline()` or dropping it
     hands the URL to the platform (`Message::UrlHandled` → `Core::open_url_on_platform`: `Command::OpenUrl` on the
     root, answered by `EventKind::OpenUrl` `{ id, opened }`). Without a handler the platform opens it at once. The
     SDKs' handlers are synchronous on the main thread (Swift `(URL) -> Bool`, Java `boolean openUrl(String)`), reached
     as the call handlers are.
 - **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
   `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
-  change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
-  engine thread; tokio's channels need no runtime there, their wakers wake the engine) posts the current state, then
-  awaits each change and posts it (`Callback::post`, which runs the callback in the engine's next JS turn). The
-  host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
-  them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
+  change it, and an `on(event, listener: Callback<State>, cx: CallCx) -> Result<Stop, String>` keeps every app
+  informed: the task it starts (`cx.start`, on the engine thread; tokio's channels need no runtime there, their
+  wakers wake the engine) posts the current state, then awaits each change and posts it (`Callback::post`, which
+  runs the callback in the engine's next JS turn). The `Stop` it returns is JS's stop function: it drops the
+  listener, so the task ends at the next change, when the app calls it or when what called `on` goes (a component,
+  or the module's run under hot module replacement); otherwise the task ends with the engine. The host's own UI
+  reads and changes the same channel, so a change from the host, or from any app, reaches all of them. `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
 - **Each engine's own part of the host** (`nsh_core::element::EngineContext`): a host serving several engines (windows,
   panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
@@ -271,7 +273,7 @@ NSH draws (`src/layers.rs`).
   channel" above: launch parameters, events, calls and posts); through the native components the latter registers
   (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
   of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
-  subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
+  listen to the desk (`Trading.on("change", …)`), whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
   `changed()`), so the host and every ticket show the same symbol and orders. A component can render GPUI
   Kit widgets in its box (`NativeComponent::render`), which take their own input: the example's "Extended hours" is a
   GPUI Kit `Switch` (`src/switch.rs`, `host.switch`) that reports its natural size (`ComponentContext::set_size`: its

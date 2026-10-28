@@ -1152,7 +1152,7 @@ pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
          Positions, columns, sticky headers and viewability are computed natively.\n\n\
          Rows are recycled: keep per-item state in your data (keyed by id), not in\n\
          signals created inside the row.",
-        &["<T>(props: ListProps<T>): YNode"],
+        &["<T>(props: ListProps<T>): JSX.Element"],
     ),
 )];
 
@@ -1180,7 +1180,7 @@ export interface ViewabilityConfig {
 /** A list's props: its own, and those of the scroll view it is (the test
  * id, accessibility, classes, touch and layout events, ...), which it
  * passes on as they are. */
-export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHostProps, ListHostProps {
+export interface ListProps<T> extends Omit<ViewProps, "children" | "ref">, ScrollingHostProps, ListHostProps {
   each: readonly T[];
   /** Above the items, scrolling with them. */
   header?: ListSlot;
@@ -1209,7 +1209,7 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
   onLoadMoreAtStart?: () => void;
   /** How close to the start (in viewports) `onLoadMoreAtStart` fires; default 1. */
   loadMoreAtStartThreshold?: number;
-  ref?: YNode | ((node: YNode) => void);
+  ref?: ListRef | ((node: ListRef) => void);
   /** Renders one row. Called once per recycled cell; `item` and `index`
    * change when the cell is reused for another item. */
   children: (item: () => T, index: () => number) => JSX.Element;

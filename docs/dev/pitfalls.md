@@ -58,9 +58,13 @@ Things that were found the hard way. Read the section of the area you change bef
   tall was 78 pixels while a child as tall was 79, so a scroll view cut the child's last row of pixels off; and a text measured
   21⅓ points (56 pixels) laid out at 22 (58), the 2 pixels below its last line. Text measurements are rounded up to a device
   pixel (`MeasureCache` holds the ratio and drops its sizes when the ratio changes, which lays everything out again); at one
-  pixel per point this is Taffy's rounding to the bit. Android's `lineHeight` is a whole number of pixels, rounded to the
+  pixel per point this is Taffy's rounding, but for a value within a 64th of a half, which rounds up. Android's `lineHeight` is a whole number of pixels, rounded to the
   nearest as a TextView's dp line height is (`ExactLineHeight`): rounded up, 21 points at 2.625 were 56 pixels, a third of
-  a point per line taller than the design.
+  a point per line taller than the design. Sizes and offsets are counted in whole pixels before they become points
+  (`pixel`, `span`): `round(to) - round(from)` in points differs in its last bits with where the edges are, and a 28 point
+  row at 2.625 (73.5 pixels) has every other edge on a half pixel, which an `f32`'s hair rounds either way. As a scroll
+  moved DataTable's body a pixel, every frame in it was sent again (460–1000 mount items a frame on a Pixel 10 Pro instead
+  of 3); a half pixel is snapped first, so it always rounds up.
 - **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
   traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
   its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
