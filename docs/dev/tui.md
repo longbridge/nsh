@@ -251,7 +251,7 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and the machine's real OS.
+component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and reports the machine's operating system (macOS, Windows or Linux), as the desktop development hosts do, so `fs/promises` and `process` run under the app's declared capabilities and `platform.os` names the real system.
 
 ## Points per Cell
 
@@ -306,11 +306,21 @@ A **Page background** is the fill of the surface root, an app's top-level view, 
 view fill of exactly the same RGBA color. These fills draw `Color::Reset`, so the terminal supplies its own
 background. A matching fill resets the background even when it lies over a colored card; it does not inherit that
 card's color. Other fills keep the app's colors, including colors that differ by a single channel value.
+The app's top-level view is the surface root's first child: the core shows overlays (popovers, tooltips, fixed
+views) in the root after it, and their fills are ordinary fills, so a popup and the page views sharing its color
+keep that color.
 
 The attached tree's page colors are collected before drawing, after complete mount batches and animated values
 have been applied. This makes matching independent of paint order and follows style changes, animation frames,
 detachments and app replacement. Transparent fills
-remain transparent. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
+remain transparent.
+
+Translucent fills, borders, text, canvas dots and field text blend their alpha and the view's opacity over the
+Cell beneath them. A Cell showing the terminal's background stands for the page color under it: the fill of the
+nearest enclosing view with a page background, else the app's page color (the outermost page fill; overlays sit
+there), else black. A view whose opacity, multiplied through its ancestors, is below 3% draws nothing: blending
+would change no channel by more than 8 of 255, while its borders and glyphs would still replace the glyphs under
+them. It keeps its hit regions. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
 separate interaction work.
 
 ## Navigation stacks
@@ -534,7 +544,8 @@ A match moves keyboard focus to the nearest focusable view around it (a button's
 reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
 at the default scale) as focus traversal does. A match in other text clears focus and
 becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
-control after or before it in reading order.
+control after or before it in tree order, so a match in a page panel moves within that panel rather than to a
+sidebar beside it on the same rows.
 
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
@@ -559,7 +570,7 @@ indicators sized by the app. Page backgrounds retain the terminal-background pol
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
-acceptance described below. Decorative shadows (including Tailwind rings), gradients and 3D transforms retain
+acceptance described below. Decorative shadows (including Tailwind rings) and 3D transforms retain
 their documented degradation below; the gallery's outline-based control focus styles are rendered.
 
 ## Mouse and text selection
@@ -672,7 +683,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
-| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
+| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background (the page color where the terminal's shows); nothing below 3% opacity |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
 | Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout; edges crossing the view's glyphs move outward to free Cells |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
@@ -688,11 +699,13 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
+| Input accessories (`InputAccessoryView`) | Left unmounted, as on the desktops: no software keyboard to show them over |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Syntax highlighting | The built-in Editor, DiffView and TextView token colors |
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
-| Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| Shadows, blur, materials, 3D transforms and blend modes | Decorative features left out silently in this slice |
+| View gradients (`backgroundImage`: linear, radial and conic) | Each layer's middle stop as a flat fill over the view's background color, bottom layer first, as canvas gradients |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
 | Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |

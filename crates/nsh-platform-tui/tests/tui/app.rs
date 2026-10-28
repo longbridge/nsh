@@ -500,3 +500,24 @@ fn negative_half_cell_edges_round_towards_the_positive_direction() {
     assert_eq!(buffer[(1, 0)].bg, ratatui_core::style::Color::Reset);
     assert_eq!(buffer[(0, 1)].bg, ratatui_core::style::Color::Reset);
 }
+
+#[component]
+fn ReportedOs() -> impl IntoElement {
+    view().child(text(format!("os {:?}", os())))
+}
+
+#[test]
+fn the_surface_reports_the_machines_operating_system() {
+    let expected = if cfg!(target_os = "macos") {
+        "os MacOs"
+    } else if cfg!(target_os = "windows") {
+        "os Windows"
+    } else {
+        "os Linux"
+    };
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 4)).unwrap();
+    view.load(App::Rust(Root::new::<ReportedOs>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, expected);
+}

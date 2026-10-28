@@ -555,7 +555,7 @@ impl Keyboard {
         match action {
             Action::Next | Action::Previous | Action::Left | Action::Right => {
                 self.pending_scroll_focus = None;
-                let mut candidates = self.candidates(tree, geometry);
+                let candidates = self.candidates(tree, geometry);
                 if candidates.is_empty() {
                     return if crate::navigation::focus_scope(tree) == ROOT_ID {
                         Handled::Ignored
@@ -564,22 +564,21 @@ impl Keyboard {
                     };
                 }
                 let current = candidates.iter().position(|g| Some(g.id) == self.focused);
+                // A plain-text search point continues to the controls beside it
+                // in tree order, so a sidebar on the same rows is not visited first.
                 let point = self
                     .search_point
-                    .and_then(|id| geometry.iter().find(|g| g.id == id))
-                    .map(|g| (g.bounds.top, g.bounds.left));
-                if point.is_some() && current.is_none() {
-                    // A plain-text search point continues spatially to its nearest control.
-                    candidates.sort_by_key(|g| (g.bounds.top, g.bounds.left));
-                }
+                    .filter(|&id| geometry.iter().any(|g| g.id == id))
+                    .and_then(|id| tree.get(id))
+                    .map(|view| view.tree_order);
+                let order = |g: &&Geometry| tree.get(g.id).unwrap().tree_order;
                 let next = match (action, point) {
-                    (Action::Next, Some(point)) if current.is_none() => candidates
-                        .iter()
-                        .position(|g| (g.bounds.top, g.bounds.left) >= point)
-                        .or(Some(0)),
+                    (Action::Next, Some(point)) if current.is_none() => {
+                        candidates.iter().position(|g| order(g) > point).or(Some(0))
+                    }
                     (Action::Previous, Some(point)) if current.is_none() => candidates
                         .iter()
-                        .rposition(|g| (g.bounds.top, g.bounds.left) < point)
+                        .rposition(|g| order(g) < point)
                         .or(Some(candidates.len() - 1)),
                     (Action::Next | Action::Previous, _) => nsh_core::input::tab_stop(
                         current,

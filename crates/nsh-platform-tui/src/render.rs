@@ -39,7 +39,15 @@ struct Painter<'a> {
     area: Rect,
     cells: CellSize,
     page_backgrounds: &'a [nsh_core::Color],
+    /// The color of the page under the views being drawn, which the Cells
+    /// drawn with the terminal's background stand for when colors blend.
+    page: Color,
 }
+
+/// Below this opacity a view draws nothing: blending changes no channel by
+/// more than 8 of 255, while a border or glyph would still replace the
+/// glyph under it.
+const INVISIBLE_OPACITY: f32 = 0.03;
 
 pub(crate) fn draw(
     tree: &mut Mounter,
@@ -62,6 +70,9 @@ pub(crate) fn draw(
         area,
         cells,
         page_backgrounds: &page_backgrounds,
+        page: page_backgrounds
+            .first()
+            .map_or(Color::Rgb(0, 0, 0), |&page| rgb(page)),
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -156,37 +167,40 @@ impl Painter<'_> {
         } else {
             clip
         };
-        if !visible.is_empty() {
+        let outer_page = self.page;
+        if !visible.is_empty() && opacity >= INVISIBLE_OPACITY {
             let fill = view
                 .animated
                 .background
                 .unwrap_or(view.style.background_color);
-            if !fill.is_transparent() {
-                let page_background = self.page_backgrounds.contains(&fill);
-                if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
-                    let background = if page_background {
-                        Color::Reset
-                    } else {
-                        blend(fill, opacity, Color::Reset)
-                    };
-                    Block::default()
-                        .style(Style::reset().bg(background))
-                        .render(visible, self.buffer);
-                    for y in visible.y..visible.bottom() {
-                        for x in visible.x..visible.right() {
-                            self.buffer[(x, y)].set_symbol(" ");
-                        }
-                    }
-                } else {
-                    for y in visible.y..visible.bottom() {
-                        for x in visible.x..visible.right() {
-                            let background = blend(fill, opacity, self.buffer[(x, y)].bg);
-                            self.buffer[(x, y)].set_symbol(" ");
-                            Block::default()
-                                .style(Style::reset().bg(background))
-                                .render(Rect::new(x, y, 1, 1), self.buffer);
-                        }
-                    }
+            fill_cells(
+                self.buffer,
+                self.page_backgrounds,
+                self.page,
+                visible,
+                fill,
+                opacity,
+            );
+            if self.page_backgrounds.contains(&fill) {
+                self.page = rgb(fill);
+            }
+            // A Cell holds one background color: each gradient layer draws its
+            // middle stop, as canvas gradients do, bottom layer first.
+            let gradients = view
+                .style
+                .effects
+                .as_ref()
+                .map_or(&[][..], |effects| &effects.background_images[..]);
+            for gradient in gradients.iter().rev() {
+                if let Some(stop) = gradient.stops.get(gradient.stops.len() / 2) {
+                    fill_cells(
+                        self.buffer,
+                        self.page_backgrounds,
+                        self.page,
+                        visible,
+                        stop.color,
+                        opacity,
+                    );
                 }
             }
             let widths = &view.style.borders.widths;
@@ -247,7 +261,7 @@ impl Painter<'_> {
                 for y in edge.y..edge.bottom() {
                     for x in edge.x..edge.right() {
                         let cell = &mut self.buffer[(x, y)];
-                        cell.set_fg(blend(*color, opacity, cell.bg));
+                        cell.set_fg(blend(*color, opacity, cell.bg, self.page));
                     }
                 }
             }
@@ -279,7 +293,7 @@ impl Painter<'_> {
                                 _ => None,
                             });
                             if let Some(color) = color {
-                                cell.set_fg(blend(color, opacity, cell.bg));
+                                cell.set_fg(blend(color, opacity, cell.bg, self.page));
                             }
                         }
                     }
@@ -295,6 +309,7 @@ impl Painter<'_> {
                     self.buffer,
                     opacity,
                     view.animated.color,
+                    self.page,
                 );
             }
             if let Some(canvas) = &view.canvas {
@@ -306,6 +321,7 @@ impl Painter<'_> {
                     self.cells,
                     opacity,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
+                    self.page,
                 );
             }
             if let Some(component) = &mut view.component {
@@ -354,7 +370,10 @@ impl Painter<'_> {
                 press,
             );
         }
-        if let Some((stroke, color)) = outline {
+        self.page = outer_page;
+        if let Some((stroke, color)) = outline
+            && opacity >= INVISIBLE_OPACITY
+        {
             self.outline(stroke, bounds, clip, color, opacity);
         }
     }
@@ -427,22 +446,71 @@ impl Painter<'_> {
                 let cell = &mut self.buffer[(x, y)];
                 if cell.symbol() == " " {
                     cell.set_symbol(symbol);
-                    cell.set_fg(blend(color, opacity, cell.bg));
+                    cell.set_fg(blend(color, opacity, cell.bg, self.page));
                 }
             }
         }
     }
 }
 
-pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> Color {
+/// Fills the `visible` Cells with `fill`: page backgrounds with the terminal's
+/// own, opaque fills replace what is there, translucent ones blend over it.
+fn fill_cells(
+    buffer: &mut Buffer,
+    page_backgrounds: &[nsh_core::Color],
+    page: Color,
+    visible: Rect,
+    fill: nsh_core::Color,
+    opacity: f32,
+) {
+    if fill.is_transparent() {
+        return;
+    }
+    let page_background = page_backgrounds.contains(&fill);
+    if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
+        let background = if page_background {
+            Color::Reset
+        } else {
+            blend(fill, opacity, Color::Reset, page)
+        };
+        Block::default()
+            .style(Style::reset().bg(background))
+            .render(visible, buffer);
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                buffer[(x, y)].set_symbol(" ");
+            }
+        }
+    } else {
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                let background = blend(fill, opacity, buffer[(x, y)].bg, page);
+                buffer[(x, y)].set_symbol(" ");
+                Block::default()
+                    .style(Style::reset().bg(background))
+                    .render(Rect::new(x, y, 1, 1), buffer);
+            }
+        }
+    }
+}
+
+/// Blends `color` at `opacity` over a Cell's `background`; a Cell drawn with
+/// the terminal's background shows the `page` color.
+pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color, page: Color) -> Color {
     let packed = color.0;
     let alpha = (packed & 255) as f32 / 255.0 * opacity;
-    let (r, g, b) = match background {
-        Color::Rgb(r, g, b) => (r, g, b),
+    let (r, g, b) = match (background, page) {
+        (Color::Rgb(r, g, b), _) | (_, Color::Rgb(r, g, b)) => (r, g, b),
         _ => (0, 0, 0),
     };
     let channel = |shift: u32, base: u8| {
         (((packed >> shift) & 255) as f32 * alpha + f32::from(base) * (1.0 - alpha)).round() as u8
     };
     Color::Rgb(channel(24, r), channel(16, g), channel(8, b))
+}
+
+/// `color`'s red, green and blue as a Cell color.
+fn rgb(color: nsh_core::Color) -> Color {
+    let [r, g, b, _] = color.0.to_be_bytes();
+    Color::Rgb(r, g, b)
 }

@@ -9,6 +9,7 @@ mod app;
 
 mod canvas;
 mod controls;
+mod fills;
 mod focus_navigation;
 mod keyboard;
 mod modal_focus;

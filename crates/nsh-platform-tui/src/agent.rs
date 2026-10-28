@@ -229,8 +229,8 @@ impl Native for TuiNative {
     }
 
     fn press_keys(&self, keys: &str) -> Result<(), String> {
-        let os = nsh_engine::Environment::default().os;
-        let stroke = nsh_core::keymap::Keystroke::parse(keys, os).map_err(|e| e.to_string())?;
+        let stroke =
+            nsh_core::keymap::Keystroke::parse(keys, super::OS).map_err(|e| e.to_string())?;
         let name = match stroke.key {
             nsh_core::keymap::Key::Char(c) => c.to_string(),
             nsh_core::keymap::Key::F(n) => format!("F{n}"),

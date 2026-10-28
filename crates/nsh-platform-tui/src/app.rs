@@ -19,6 +19,16 @@ use crate::{
     surface::{Message, Sink, Surface},
 };
 
+/// The machine's operating system, reported as the desktop hosts report theirs:
+/// files, processes and OS-specific behavior follow it.
+pub(crate) const OS: nsh_core::platform::Os = if cfg!(target_os = "macos") {
+    nsh_core::platform::Os::MacOs
+} else if cfg!(target_os = "windows") {
+    nsh_core::platform::Os::Windows
+} else {
+    nsh_core::platform::Os::Linux
+};
+
 /// Called from the engine thread to schedule a render on the embedding thread.
 pub type WakeCallback = Arc<dyn Fn() + Send + Sync>;
 
@@ -142,6 +152,7 @@ impl AppView {
     /// Creates an empty surface; it takes over no terminal state or event loop.
     pub fn new(options: AppOptions) -> Self {
         let environment = Environment {
+            os: OS,
             idiom: Idiom::Desktop,
             color_scheme: options.appearance.resolve(options.capabilities.background),
             reduce_motion: true,

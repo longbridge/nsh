@@ -9,7 +9,7 @@ use nsh_engine::EngineControl;
 use ratatui_core::{
     buffer::Buffer,
     layout::{Position, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Widget,
 };
@@ -421,6 +421,7 @@ impl Field {
         self.cursor
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
         config: &InputConfig,
@@ -429,6 +430,7 @@ impl Field {
         buffer: &mut Buffer,
         opacity: f32,
         color: Option<nsh_core::Color>,
+        page: Color,
     ) {
         if !config.multiline {
             bounds.top += (bounds.bottom - bounds.top - 1).max(0) / 2;
@@ -470,6 +472,7 @@ impl Field {
             color,
             opacity,
             buffer[(self.visible.x, self.visible.y)].bg,
+            page,
         ));
         if config.style.font_weight >= 600 {
             style = style.add_modifier(Modifier::BOLD);
