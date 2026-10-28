@@ -108,6 +108,28 @@ The values below are the dark theme's.
   a plain `#f3f3ef` square. The graphite app icon is the gallery's, not
   the site's.
 
+## Controls
+
+Every control is a component of `src/components/ui/`, after shadcn/ui:
+`Button` (variants `default` — the citrus primary —, `secondary` — raised —,
+`outline`, `ghost`, `destructive`, `link`; sizes `xs`, `sm`, `default`, `lg`
+and the square `icon-*`), `ButtonGroup`, `Input` (with an `icon` slot, an
+input group), `Label`, `Select` (a trigger like an input and a listbox popup,
+driven by `src/lib/ui/select.ts`), `Badge`, `Toggle`, `ToggleGroup` /
+`ToggleGroupItem` (variant `segmented` for switches between views, `outline`
+with `spacing` for filter chips, `count` for a quiet number), `TabsList` /
+`TabsTrigger`. As shadcn's components do, they mark their parts with
+`data-slot` and their look with `data-variant` / `data-size`, and their state
+is ARIA (`aria-pressed`, `aria-checked`, `aria-selected`, `aria-expanded`):
+the look is one file, `src/styles/ui.css`, shadcn's class lists applied to
+those selectors, with shadcn's tokens (`primary`, `secondary`, `accent`,
+`muted`, `border`, `input`, `ring`, ...) mapped onto the gallery's theme and
+the surfaces given its finishes (raised, hover, pressed, the citrus `light`,
+field, track, menu). HTML written as a string (`src/lib/demo.js`,
+`src/lib/remark-code-tabs.js`, buttons a script adds) uses the same
+attributes. A page never styles a control itself: it places it (margins,
+widths) and picks a variant; a new kind of control is a new component.
+
 ## Typography
 
 The platform font (SF Pro, Segoe UI, Roboto; PingFang / Noto Sans SC for
