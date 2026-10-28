@@ -12,7 +12,7 @@ Build web apps with Native Shell using the same components, styles and applicati
 
 `nsh package --target web` publishes the app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), and `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)). Every live demo on this site uses this web backend.
 
-Published TSX apps use the browser JavaScript engine. Packaging selects a lite runtime for apps that use the core components and standard APIs it serves, and the full runtime for other apps. Syntax highlighting data loads when code is first highlighted.
+Published TSX apps use the browser JavaScript engine. Packaging links each app its own runtime, holding only the `nsh/base` components and standard modules the app imports: an app built from the core components downloads about 1.1 MB. Syntax highlighting data loads when code is first highlighted.
 
 ## What runs where
 
@@ -148,7 +148,7 @@ page and files named after their content.
 | `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
-| `nsh.<digest>.wasm` | The Rust engine, layout and components, plus a Rust app’s own crate. TSX runs in browser JavaScript; packaging selects the lite or full runtime from the APIs the app imports. |
+| `nsh.<digest>.wasm` | The Rust engine, layout and components, plus a Rust app’s own crate. TSX runs in browser JavaScript; packaging links it with only the components and standard modules the app imports. |
 | `nsh-syntaxes.<digest>.bin` | The syntaxes code is highlighted with (bat's set: 0.92 MB, 0.8 MB with brotli), downloaded the first time a code block, an `Editor` or a `DiffView` shows code in a language |
 | `nsh-bindgen.<digest>.js` | The wasm-bindgen glue of an app whose crates call [browser APIs from Rust](#browser-apis-from-rust), minified |
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
@@ -161,6 +161,19 @@ page and files named after their content.
 `<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
 new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
 works from any directory of any host (`https://example.com/apps/counter/`).
+
+### Runtime size
+
+Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and only the `nsh/base` components,
+standard modules and shaders the app imports. Measured with `nsh package --target web` (MB = 10^6 bytes, gzip
+level 9):
+
+| App | Uses | `nsh.<digest>.wasm` | gzip |
+|---|---|---|---|
+| `examples/counter` | The core components | 3.40 MB | 1.12 MB |
+| A `Shader` view | The core components and shaders | 4.34 MB | 1.42 MB |
+| `Editor`, `Plot` and `zlib` | The core components, two more parts of `nsh/base` and `zlib` | 7.02 MB | 2.32 MB |
+| `examples/gallery` | Every component, `zlib` and shaders | 11.22 MB | 3.56 MB |
 
 ### Deploy it
 
@@ -216,7 +229,7 @@ The output directory holds:
 
 | File | What it is |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | The runtime of published apps (about 15.1 MB, 4.6 MB gzipped, 3.4 MB with brotli; built with the `web` profile), the same build as the player's `nsh.wasm` |
+| `gallery/nsh.<digest>.wasm` | The gallery's runtime, linked for it by `nsh package` (it uses every component and `zlib`: about 11.8 MB, 3.6 MB gzipped) |
 | `gallery/nsh-syntaxes.<digest>.bin` | The syntaxes the runtime highlights code with, fetched the first time a demo shows code in a language |
 | `nsh-playground.wasm` | The same plus NSH's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
 | `gallery/nsh.<digest>.js` | The DOM runtime (minified): loads the wasm, applies batches, turns input into events |

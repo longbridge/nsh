@@ -133,7 +133,7 @@ pub(crate) fn within<'a>(
     scope: impl IntoIterator<Item = &'a Range<usize>>,
 ) -> Vec<Range<usize>> {
     let mut scope: Vec<&Range<usize>> = scope.into_iter().collect();
-    scope.sort_by_key(|r| (r.start, r.end));
+    crate::sort::sort_by_key(&mut scope, |r| (r.start, r.end));
     matches
         .into_iter()
         .filter(|m| {

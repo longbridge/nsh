@@ -1017,6 +1017,12 @@ class Player {
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
+    // The parts of `nsh/base`, the standard modules and the features
+    // (shaders) this runtime has:
+    // one linked for an app (`nsh package`) exports only those it uses.
+    for (const name of Object.keys(instance.exports)) {
+      if (/^nsh_(part|std|feature)_/.test(name)) instance.exports[name]();
+    }
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
     this.wasm.nsh_app_init?.();

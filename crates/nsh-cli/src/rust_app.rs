@@ -1429,9 +1429,7 @@ opt-level = \"s\"
         // A Rust app's runtime is one: it has no JS, so no hot updates.
         let features: &[&str] = match kind {
             _ if rust => &[],
-            crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => {
-                &["--features", "browser"]
-            }
+            crate::runtime::WebKind::Browser => &["--features", "browser"],
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -2190,7 +2188,7 @@ fn nsh_crate(source: &Path, name: &str) -> PathBuf {
 /// published apps, `web-dev` for development ([`RustApp::web_dev_profile`]).
 fn web_profile(kind: crate::runtime::WebKind) -> &'static str {
     match kind {
-        crate::runtime::WebKind::Browser | crate::runtime::WebKind::Lite => "web",
+        crate::runtime::WebKind::Browser => "web",
         crate::runtime::WebKind::Dev => "web-dev",
     }
 }

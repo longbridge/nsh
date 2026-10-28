@@ -847,7 +847,7 @@ impl AreaCx {
                 let mut on = Vec::new();
                 told.with(|told| {
                     let mut ids: Vec<&PanelId> = now.keys().collect();
-                    ids.sort();
+                    crate::sort::sort_by(&mut ids, |a, b| a.cmp(b));
                     for panel in ids {
                         let active = now[panel];
                         match told.get(panel) {

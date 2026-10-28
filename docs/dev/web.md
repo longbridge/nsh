@@ -21,8 +21,8 @@ signed packages, hardening and VM limits are the native hosts' (`sandbox.md`).
 
 | Artifact | Feature | Purpose |
 |---|---|---|
-| `nsh-browser.wasm` | `browser` (the default) | Published TSX apps, the website's demos (as `play/nsh.wasm`) |
-| `nsh-browser-lite.wasm` | `browser-core`, no defaults | Published TSX apps using core components |
+| `nsh-browser.wasm` | `browser,linkable` | What `nsh package` links each published TSX app's runtime from; never served as it is |
+| `play/nsh.wasm` | `browser` (the default) | The website's demos: every part |
 | `nsh-dev.wasm` | `dev` | The development host: hot updates, `nsh test --target web` |
 | `nsh-playground.wasm` | `compiler` | The playground: also compiles TSX in the page |
 
@@ -157,17 +157,38 @@ build to the same file) and takes `nsh.js` from the crate.
   input's value, where a dialog's button is, where a text's characters are: each run knows its first character's
   offset). The input itself is the browser's trusted input, sent by the CLI.
 
-### The lite runtime
+### Runtimes linked for each app
 
-`nsh package --target web` selects `nsh-browser-lite.wasm` when the bundle uses only the core exports of
-`nsh/base`, no `nsh/base/plot`, `zlib` or `crypto`, no crypto globals and no computed module specifiers
-(`web::serves_lite`, `NativeUse`). Otherwise it selects `nsh-browser.wasm`. Both execute browser ES modules.
-Apps with custom Rust components get their own full runtime.
+A published app's runtime holds only what the app uses: `nsh package --target web` links it from
+`nsh-browser.wasm` without a Rust toolchain or a linker. What is optional is reached only through an exported
+gate, a function that registers it: one per part of `nsh/base` (`nsh_part_core`, `nsh_part_editor`, ...,
+`base_parts!` in `src/lib.rs`) and one per standard module whose operations are Rust (`nsh_std_zlib`,
+`src/browser/standard.rs`). `nsh.js` calls every gate the module exports before anything starts, so a runtime
+with all of them (the website's, the development host's) serves every app.
 
-The full `browser` feature includes `browser-core`, `base-full`, `std-zlib` and `std-crypto`. The lite runtime
-builds with `--no-default-features --features browser-core`: core base components, browser bindings and URL
-operations. The optional Rust hashing and compression operations are excluded. Browser globals remain those
-of the browser. The full runtime fetches syntax data on first highlight; the lite package contains no syntax data.
+`nsh-browser.wasm` is built with the feature `linkable`: `build.rs` passes `--emit-relocs`, so the module keeps
+its symbol table and relocations. The CLI's `web::linked_gates` reads which gates an app needs from the bundle
+(`NativeUse`: the names it imports from `nsh/base`, each mapped to the part that exports it, `nsh/base/plot`,
+`zlib`; `import * as`, a computed `import()` or no analysis keep every gate), and `web/prune.rs` keeps what the
+other exports and those gates reach, as `wasm-ld --gc-sections` would have: functions, table entries, data and
+globals reachable through the relocations, then renumbers functions and table slots, moves the kept data
+together and patches every relocated site. The output carries no symbols or relocations.
+
+Measured with `nsh package --target web` (2026-10-28, MB of 10^6 bytes, gzip -9):
+
+| The app | Uses | Runtime | gzip |
+|---|---|---|---|
+| `examples/counter` | `nsh/base`'s core | 3.40 | 1.12 |
+| a `Shader` view | the core, shaders | 4.34 | 1.42 |
+| `Editor`, `Plot`, `zlib` | the core, two parts, `zlib` | 7.02 | 2.32 |
+| `examples/gallery` | every part, `zlib`, shaders | 11.22 | 3.56 |
+
+Shaders are a gate too (`nsh_feature_shader`, `src/shader.rs`): it sets the core's compiler of shader sources
+(`nsh_core::shader::set_compile`, naga's WGSL front end) and the translation to GLSL ES, about 0.9 MB of naga. The
+compiled `<Shader>` tag leaves no import of `Shader` (it calls `nsh:rt`'s `element("shader")`), so the bundler
+counts a string `shader` anywhere in the bundle as a shader view (`NativeUse::shader`).
+
+Apps with Rust components of their own get a runtime built for them, with every part.
 The QuickJS measurements below are historical (the web ran QuickJS in WebAssembly until 2026-10) and do not
 measure these runtimes.
 

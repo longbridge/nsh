@@ -116,11 +116,51 @@ fn ui_sets() -> Vec<Registry> {
         .unwrap_or_else(|| vec![base_set()])
 }
 
-/// `nsh/base`: every part of it.
+/// `nsh/base`: the parts the page asked for (`nsh_part_*`, which it calls
+/// for each the module exports before it starts anything).
 #[cfg(feature = "base-full")]
 fn base_set() -> Registry {
-    nsh_base::registry()
+    nsh_base::registry_of(PARTS.with(|p| p.borrow().clone()))
 }
+
+thread_local! {
+    /// The `nsh/base` parts `nsh_part_*` asked for.
+    #[cfg(feature = "base-full")]
+    static PARTS: RefCell<Vec<nsh_base::parts::Part>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Exports one `nsh_part_<name>` per part of `nsh/base`: the page calls
+/// those of the parts its app uses, and a runtime linked for the app keeps
+/// only the parts it exports.
+macro_rules! base_parts {
+    ($($name:ident => $export:ident),* $(,)?) => {$(
+        /// Adds this part of `nsh/base` to the apps started from now on.
+        #[cfg(feature = "base-full")]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export() {
+            PARTS.with(|p| {
+                let mut parts = p.borrow_mut();
+                let part = nsh_base::parts::$name as nsh_base::parts::Part;
+                if !parts.iter().any(|q| std::ptr::fn_addr_eq(*q, part)) {
+                    parts.push(part);
+                }
+            });
+        }
+    )*};
+}
+
+base_parts!(
+    core => nsh_part_core,
+    text_view => nsh_part_text_view,
+    editor => nsh_part_editor,
+    diff => nsh_part_diff,
+    rich_editor => nsh_part_rich_editor,
+    data_table => nsh_part_data_table,
+    table => nsh_part_table,
+    dock => nsh_part_dock,
+    resizable => nsh_part_resizable,
+    plot => nsh_part_plot,
+);
 
 /// `nsh/base` in the lite runtime (feature `base-full` off): its core part,
 /// so the other parts' code stays out of the module.
