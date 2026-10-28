@@ -151,9 +151,10 @@ the playground lists every demo but this one (it compiles single files).
 Behind the hero, `HeroField.astro` draws the sky from close up, inside a
 galaxy, with a fragment shader (WebGL, two passes: the nebula's field into a
 texture of a texel every 11 px, then the sky per pixel, sampling it). The
-nebula fills the hero from the first frame in every color of the spectrum,
-each region a pure hue of its own that slowly turns, lying in belts as Jupiter's clouds do,
-folded and eddying, cut by dust and a dark rift; its core sits where the
+nebula fills the hero from the first frame, quietly, in many hues along one
+arc from the accent's lime round to teal, azure, indigo and violet, so it
+sits with the site, each region a hue of its own that slowly sways, lying
+in belts as Jupiter's clouds do, folded and eddying; its core sits where the
 copy gives way to the device, placed from their boxes. Four layers of stars
 of different temperatures, nearer ones larger, faster and fewer, drift and
 twinkle; the brightest wear diffraction spikes, and now and then a meteor
