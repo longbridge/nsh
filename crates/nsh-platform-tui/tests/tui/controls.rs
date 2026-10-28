@@ -4,6 +4,105 @@ use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
 use super::app::{draw_until, surface};
 
+#[component]
+fn CompactOutlinedRow() -> impl IntoElement {
+    let focused = signal(false);
+    view()
+        .flex_1()
+        .child(text(move || format!("focused {}", focused.get())).h(px(16.0)))
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(36.0))
+                .justify_center()
+                .px(px(16.0))
+                .on_press(|_: &()| {})
+                .on_focus(move |_: &()| focused.set(true))
+                .focus(|style| {
+                    style
+                        .outline(px(2.0))
+                        .outline_offset(px(-2.0))
+                        .outline_color(nsh_core::color::rgb(0x123456))
+                })
+                .child(text("Stocks").h(px(16.0))),
+        )
+}
+
+#[test]
+fn a_compact_focus_outline_preserves_the_entire_text_content_row() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+    view.load(App::Rust(Root::new::<CompactOutlinedRow>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Stocks");
+    let before = terminal.backend().buffer().clone();
+    view.handle(key("Tab"));
+    draw_until(&mut view, &mut terminal, &rx, "focused true");
+    let buffer = terminal.backend().buffer();
+    for column in 2..18 {
+        assert_eq!(
+            buffer[(column, 2)].symbol(),
+            before[(column, 2)].symbol(),
+            "outline entered text content at column {column}"
+        );
+    }
+    assert_eq!(buffer[(0, 2)].symbol(), "└");
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn outlines_preserve_wide_text_and_its_blank_cells_in_either_paint_order() {
+    for (content_first, background) in [
+        (false, "transparent"),
+        (true, "transparent"),
+        (false, "#abcdef"),
+        (true, "#abcdef"),
+    ] {
+        let mut snapshots = Vec::new();
+        for outlined in [false, true] {
+            let content =
+                r#"<Text style={{ position: "absolute", width: 160, height: 16 }}>中 A</Text>"#;
+            let outline = format!(
+                r##"<View style={{{{ position: "absolute", width: 160, height: 48, backgroundColor: "{background}",
+                outlineStyle: "solid", outlineWidth: {}, outlineOffset: -2, outlineColor: "#123456" }}}} />"##,
+                if outlined { 2 } else { 0 }
+            );
+            let children = if content_first {
+                format!("{content}{outline}")
+            } else {
+                format!("{outline}{content}")
+            };
+            let source = format!(
+                r#"import {{ mount, Text, View }} from "nsh";
+                mount(() => <View style={{{{ flex: 1 }}}}>{children}
+                <Text style={{{{ position: "absolute", top: 80 }}}}>Ready</Text></View>);"#
+            );
+            let code = nsh_bundler::compile_module("Outline.tsx", &source, &[]).unwrap();
+            let (mut view, rx) = surface();
+            let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+            view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
+            draw_until(&mut view, &mut terminal, &rx, "Ready");
+            snapshots.push(terminal.backend().buffer().clone());
+        }
+        if content_first && background != "transparent" {
+            assert_eq!(
+                snapshots[1][(0, 0)].symbol(),
+                "┌",
+                "a later background replaces the old content mask"
+            );
+        } else {
+            for column in 0..20 {
+                assert_eq!(
+                    snapshots[0][(column, 0)],
+                    snapshots[1][(column, 0)],
+                    "content first: {content_first}, column: {column}"
+                );
+            }
+        }
+        assert_eq!(snapshots[1][(19, 2)].symbol(), "┘");
+    }
+}
+
 fn key(name: &str) -> Input {
     Input::Key {
         key: name.into(),

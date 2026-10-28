@@ -408,6 +408,19 @@ Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f, 240 frames each: both
 bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
 commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.
 
+Outline content protection (base `cfca68dd`, same macOS host, release, 240 frames per workload):
+
+| Workload | Before median / p95 | After median / p95 |
+|---|---|---|
+| Long list, 500 rows | 0.536 / 0.600 ms | 0.546 / 0.697 ms |
+| DataTable, 10,000 × 24 | 1.992 / 2.532 ms | 1.985 / 2.531 ms |
+
+Both remain below the 4 ms budget. Output stays at about 3,719 B / 958 Cells and 7,352 B / 1,038 Cells per frame,
+respectively. These are single paired runs, not a statistical performance comparison. The identical official
+gallery bundle in a 200 × 50 tmux terminal has 3,778 ops / 3,152 mount items / 1,132 nodes in its first commit
+before and after; its debug commit time was 24,167 / 17,796 µs (a smoke measurement). C-n to Photos and Enter
+work in both hosts; the focused label changes from `Photos──────` to `Photos      ` after content protection.
+
 
 ## Terminal idle CPU
 
