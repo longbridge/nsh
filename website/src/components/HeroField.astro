@@ -26,11 +26,11 @@
     --hero-star-rose: #ece8de;
     --hero-star-gold: #e2f0c4;
     --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-nebula-lime: rgba(200, 242, 109, 0.42);
+    --hero-nebula-lime: rgba(200, 242, 109, 0.5);
     --hero-nebula-green: rgba(214, 218, 208, 0.32);
     --hero-nebula-teal: rgba(150, 156, 150, 0.28);
     --hero-nebula-gold: rgba(232, 236, 224, 0.34);
-    --hero-nebula-citrus: rgba(200, 242, 109, 0.46);
+    --hero-nebula-citrus: rgba(200, 242, 109, 0.56);
     --hero-deep: rgba(10, 11, 13, 0.5);
   }
   html.light,
@@ -41,11 +41,11 @@
     --hero-star-rose: #44423c;
     --hero-star-gold: #4f6e0c;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-nebula-lime: rgba(110, 160, 20, 0.24);
+    --hero-nebula-lime: rgba(110, 160, 20, 0.3);
     --hero-nebula-green: rgba(40, 42, 38, 0.12);
     --hero-nebula-teal: rgba(70, 74, 68, 0.1);
     --hero-nebula-gold: rgba(30, 32, 28, 0.1);
-    --hero-nebula-citrus: rgba(110, 160, 20, 0.28);
+    --hero-nebula-citrus: rgba(110, 160, 20, 0.34);
     --hero-deep: rgba(0, 0, 0, 0);
   }
   .hero-field {
@@ -256,13 +256,13 @@
       // between them, and gather in clusters.
       vec3 c0, c1, c2, c3;
       vec2 qc = mix(p, q, 0.7);
-      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.9 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
+      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.45 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
       float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
       float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, 0.12 + 0.4 * thick, 0.0, c2);
       float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, 0.18 + 0.3 * thick, 0.15, c3);
       // The galaxy's unresolved stars: a faint grain where it is thick.
       vec3 cg;
-      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.85 * thick, 0.0, cg) * 0.32;
+      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.3 * thick, 0.0, cg) * 0.32;
       float sum = s0 + s1 + s2 + s3 + grain;
       rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3 + cg * grain) / max(sum, 1e-4);
       return sum;
@@ -364,7 +364,7 @@
       float h = f.g * 1.3 + belt * 0.22 + time * 0.012;
       vec4 hue = mix(nebula[1], nebula[2], 1.0 - abs(fract(h * 0.5) * 2.0 - 1.0));
       hue = mix(hue, nebula[3], clamp(smoothstep(0.78, 0.95, f.b) * 0.7 * cloud, 0.0, 1.0));
-      float lit = smoothstep(0.15, 0.6, fine * cloud);
+      float lit = smoothstep(0.0, 0.4, fine * cloud) * 0.85 + 0.15 * cloud;
       hue = mix(hue, mix(nebula[0], nebula[4], smoothstep(0.3, 0.8, f.b)), lit);
       float gn = hue.a * (band * (0.06 + 0.35 * cloud + 1.3 * fine * (0.35 + 0.65 * cloud)) + gx.z * cloud * 0.25 + gx.y * 0.25 * cloud) * (0.55 + 0.6 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
