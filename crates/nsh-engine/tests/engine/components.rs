@@ -4501,6 +4501,96 @@ fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     until(&rx, |b| shows(b, r#"Range: ["2026-10-19","2026-10-25"]"#));
 }
 
+const BASE_CALENDAR_MATCHER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Calendar } from "nsh/base";
+
+function App() {
+  const asked = signal(0);
+  return (
+    <View>
+      <Calendar
+        defaultValue="2026-10-10"
+        numberOfMonths={2}
+        previousAccessibilityLabel="Previous"
+        nextAccessibilityLabel="Next"
+        disabledMatcher={(date) => {
+          asked.set(asked() + 1);
+          return date.endsWith("-14");
+        }}
+      />
+      <Text>{`Asked: ${asked()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Calendar`'s JS `disabledMatcher` is asked about each shown date once,
+/// in one JS turn: a turn of the months asks only about the days it
+/// brings, and a turn back asks nothing (its answers stay).
+#[test]
+fn a_calendars_js_matcher_is_asked_once_per_date() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_CALENDAR_MATCHER);
+    let button = |batches: &[MountBatch], label: &str| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == AccessibilityRole::Button
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+    };
+    let asked = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => {
+                    text.text.strip_prefix("Asked: ").map(str::to_owned)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // October 2026 (September 27 to October 31) and November (November 1
+    // to December 5): 70 days, asked in one turn.
+    let first = until(&rx, |b| shows(b, "Asked: 70"));
+    assert_eq!(asked(&first).last().map(String::as_str), Some("70"));
+    let next = button(&first, "Next").expect("Next");
+    let previous = button(&first, "Previous").expect("Previous");
+
+    // November and December (November 29 to January 2): only December 6
+    // to January 2 are new.
+    engine
+        .control()
+        .dispatch_event(next, EventKind::Press, EventPayload::None);
+    let turned = until(&rx, |b| shows(b, "Asked: 98"));
+    assert_eq!(
+        asked(&turned),
+        ["98"],
+        "a turn asks only about the days it brings, in one turn"
+    );
+
+    // Back to October and November: every day was answered.
+    engine
+        .control()
+        .dispatch_event(previous, EventKind::Press, EventPayload::None);
+    let back = until(&rx, |_| false);
+    assert!(!back.is_empty(), "the months turned back");
+    assert_eq!(
+        asked(&back),
+        Vec::<String>::new(),
+        "a turn back asks nothing"
+    );
+}
+
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
 import { Select } from "nsh/base";
 

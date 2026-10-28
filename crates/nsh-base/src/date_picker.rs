@@ -543,15 +543,23 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
     });
     let default_time = move || props.default_time.get().map_or(NaiveTime::MIN, |t| t.0);
     // The times of the start and end, as the user left them: a value's
-    // own, else the default.
-    let times = signal((NaiveTime::MIN, NaiveTime::MIN));
-    effect(move || {
+    // own, else the default. A time the user set that the value does not
+    // hold (no day picked yet, or the app keeps its value) shows until the
+    // value changes: derived, not copied by an effect.
+    let edited = signal(None::<(DateTime, (NaiveTime, NaiveTime))>);
+    let times = computed(move || {
         let v = current.get();
+        if let Some(times) = edited.with(|e| e.filter(|(at, _)| *at == v).map(|(_, t)| t)) {
+            return times;
+        }
         let fallback = default_time();
         let start = v.start().map_or(fallback, |v| v.time());
         let end = v.end().map_or(start, |v| v.time());
-        untracked(|| times.set((start, end)));
+        (start, end)
     });
+    let set_times = move |t: (NaiveTime, NaiveTime)| {
+        edited.set(Some((current.get_untracked(), t)));
+    };
     let date = computed(move || current.with(DateTime::date).shaped(props.range.get()));
     // The popup edits the time: a single date with a precision.
     let edits_time = computed(move || props.time_precision.get().is_some() && !props.range.get());
@@ -589,7 +597,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
         let change = change.clone();
         Rc::new(move || {
             let t = untracked(default_time);
-            times.set((t, t));
+            set_times((t, t));
             let none = Date::Single(None).shaped(props.range.get_untracked());
             report(DateTime::of(none, t, t));
             change(false, OpenChangeReason::Select);
@@ -748,7 +756,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                                         v.start().map_or(untracked(default_time), |v| v.time()),
                                         v.end().map_or(untracked(default_time), |v| v.time()),
                                     );
-                                    times.set((start, end));
+                                    set_times((start, end));
                                     report(v);
                                     change(false, OpenChangeReason::Select);
                                 })
@@ -770,7 +778,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                 move || {
                     let field_time = move || times.get().0;
                     let changed: Rc<dyn Fn(NaiveTime)> = Rc::new(move |t| {
-                        times.update(|(start, _)| *start = t);
+                        set_times((t, times.get_untracked().1));
                         let d = date.get_untracked();
                         if d.is_complete() {
                             report(with_times(d));
