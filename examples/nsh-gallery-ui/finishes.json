@@ -11,22 +11,22 @@
       "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.04)"
     },
     "raised": {
-      "backgroundColor": "#36373c",
-      "backgroundImage": "linear-gradient(180deg, #3a3b40 0%, #333439 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 1px rgba(0,0,0,0.25)",
-      "borderColor": "#46484e"
+      "backgroundColor": "#3a3b3f",
+      "backgroundImage": "linear-gradient(180deg, #3f4044 0%, #36373b 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "borderColor": "#2a2b2f"
     },
     "hover": {
-      "backgroundColor": "#3b3c41",
-      "backgroundImage": "linear-gradient(180deg, #3f4045 0%, #38393e 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 1px rgba(0,0,0,0.25)",
-      "borderColor": "#4d4f55"
+      "backgroundColor": "#3f4044",
+      "backgroundImage": "linear-gradient(180deg, #444549 0%, #3b3c40 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "borderColor": "#2a2b2f"
     },
     "pressed": {
-      "backgroundColor": "#313237",
-      "backgroundImage": "linear-gradient(180deg, #313237 0%, #313237 100%)",
-      "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.14)",
-      "borderColor": "#44464c"
+      "backgroundColor": "#333438",
+      "backgroundImage": "linear-gradient(180deg, #333438 0%, #333438 100%)",
+      "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.18)",
+      "borderColor": "#2a2b2f"
     },
     "light": {
       "backgroundColor": "#c4ec6a",
@@ -56,10 +56,10 @@
       "borderColor": "#8a8d93"
     },
     "pill": {
-      "backgroundColor": "#36373c",
-      "backgroundImage": "linear-gradient(180deg, #3a3b40 0%, #333439 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 1px rgba(0,0,0,0.25)",
-      "borderColor": "#46484e"
+      "backgroundColor": "#3a3b3f",
+      "backgroundImage": "linear-gradient(180deg, #3f4044 0%, #36373b 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "borderColor": "#2a2b2f"
     },
     "chip": {
       "boxShadow": "0 1px 0 rgba(0,0,0,0.3)"
