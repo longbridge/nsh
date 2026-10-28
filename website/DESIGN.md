@@ -152,14 +152,13 @@ Behind the hero, `HeroField.astro` draws the night sky from inside a galaxy
 with a fragment shader (WebGL, two passes: the clouds' field into a texture
 of a texel every 11 px, then the sky per pixel, sampling it). The hero's sky
 darkens toward the night, fading out along its bottom into the page. The
-nebula takes the accent's family, lime through green to teal by region, with
-gold and bright citrus in a few small clouds; its wisps are ridged and
-brightest, lying in belts as Jupiter's clouds do, gathered within the content
-column. A river of stars and star dust runs diagonally through the middle.
-The stars are crisp discs, most faint and a few bright (the brightest wear
-long diffraction spikes), of different temperatures, crowding in the river
-and the clouds, few between them, and gathered in clusters; they drift
-slowly, nearer ones faster, and now and then a meteor crosses. Presses act
+nebula is in the site's graphite greys, its brightest wisps lit in the
+primary's green; the wisps are ridged, lying in belts as Jupiter's clouds do,
+gathered within the content column. About a hundred stars, crisp round discs
+(gravity bends the space they sit in, never their shape), most faint and a
+few bright, the brightest with long diffraction spikes, a few more where the
+clouds are; they drift slowly, nearer ones faster, and now and then a meteor
+crosses. Presses act
 on gravity: a held press is a small mass that bends the starlight toward
 it; released, it sends a gentle wave that carries the stars outward as it
 passes before they settle back, and turns their drift to a new heading. The

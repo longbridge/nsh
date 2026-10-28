@@ -22,30 +22,30 @@
   :root {
     --hero-star: rgba(236, 244, 255, 0.9);
     --hero-star-hot: var(--citrus, #c8f26d);
-    --hero-star-blue: #b4ccff;
-    --hero-star-rose: #ffb49a;
-    --hero-star-gold: #f2e69a;
+    --hero-star-blue: #e4e8ec;
+    --hero-star-rose: #ece8de;
+    --hero-star-gold: #e2f0c4;
     --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-nebula-lime: rgba(190, 240, 100, 0.42);
-    --hero-nebula-green: rgba(110, 210, 120, 0.4);
-    --hero-nebula-teal: rgba(60, 190, 170, 0.38);
-    --hero-nebula-gold: rgba(232, 220, 110, 0.38);
-    --hero-nebula-citrus: rgba(214, 250, 130, 0.44);
-    --hero-deep: rgba(3, 5, 14, 0.55);
+    --hero-nebula-lime: rgba(200, 242, 109, 0.42);
+    --hero-nebula-green: rgba(214, 218, 208, 0.32);
+    --hero-nebula-teal: rgba(150, 156, 150, 0.28);
+    --hero-nebula-gold: rgba(232, 236, 224, 0.34);
+    --hero-nebula-citrus: rgba(200, 242, 109, 0.46);
+    --hero-deep: rgba(10, 11, 13, 0.5);
   }
   html.light,
   html:not(.dark) {
     --hero-star: rgba(22, 23, 26, 0.6);
     --hero-star-hot: #5a7a12;
-    --hero-star-blue: #3557b0;
-    --hero-star-rose: #b0503a;
-    --hero-star-gold: #9a8410;
+    --hero-star-blue: #3a3d42;
+    --hero-star-rose: #44423c;
+    --hero-star-gold: #4f6e0c;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-nebula-lime: rgba(110, 160, 30, 0.14);
-    --hero-nebula-green: rgba(50, 150, 70, 0.12);
-    --hero-nebula-teal: rgba(20, 140, 125, 0.12);
-    --hero-nebula-gold: rgba(170, 150, 20, 0.12);
-    --hero-nebula-citrus: rgba(130, 180, 30, 0.14);
+    --hero-nebula-lime: rgba(110, 160, 20, 0.24);
+    --hero-nebula-green: rgba(40, 42, 38, 0.12);
+    --hero-nebula-teal: rgba(70, 74, 68, 0.1);
+    --hero-nebula-gold: rgba(30, 32, 28, 0.1);
+    --hero-nebula-citrus: rgba(110, 160, 20, 0.28);
     --hero-deep: rgba(0, 0, 0, 0);
   }
   .hero-field {
@@ -124,6 +124,9 @@
 
   // The second pass, per pixel, in CSS px with the origin at the top left.
   const SKY = `
+    #ifdef GL_OES_standard_derivatives
+    #extension GL_OES_standard_derivatives : enable
+    #endif
     precision highp float;
     uniform sampler2D field;
     uniform vec2 size;      // the hero, CSS px
@@ -204,6 +207,13 @@
       float show = smoothstep(pick, pick + 0.12, density);
       float r = max(big * (0.6 + 0.4 * pow(hash(id + seed + 7.1), 3.0)), 0.6 / dpr);
       vec2 v = q - spot;
+      #ifdef GL_OES_standard_derivatives
+      // Back to the screen: gravity stretches the space the stars sit in,
+      // never the stars themselves, so they stay round.
+      vec2 ex = dFdx(p) * dpr, ey = dFdy(p) * dpr;
+      float det = ex.x * ey.y - ey.x * ex.y;
+      if (abs(det) > 1e-3) v = vec2(ey.y * v.x - ey.x * v.y, ex.x * v.y - ex.y * v.x) / det;
+      #endif
       float d = length(v);
       float twinkle = 0.82 + 0.18 * sin(time * (0.5 + 1.2 * pick) + pick * 60.0);
       float hue = hash(id + seed + 3.3);
@@ -229,31 +239,14 @@
     // The three layers of stars, far to near: the nearer, the
     // larger, faster and fewer, and bent more by gravity (q); the galaxy
     // holds a few more.
-    // Star clusters, as the sky holds them: in some cells of a coarse grid
-    // over the stars' own coordinates (so they drift with them), a tight
-    // round group, densest at its middle.
-    float clusters(vec2 q) {
-      vec2 id = floor(q / 520.0);
-      if (hash(id + 71.3) > 0.4) return 0.0;
-      vec2 at = (id + 0.3 + 0.4 * vec2(hash(id + 3.7), hash(id + 9.2))) * 520.0;
-      float r = 40.0 + 40.0 * hash(id + 5.5);
-      return exp(-dot(q - at, q - at) / (r * r));
-    }
-
     float starfield(vec2 p, vec2 q, float thick, float band, float detail, out vec3 rgb) {
-      // Not scattered evenly: the stars crowd where the clouds are, are few
-      // between them, and gather in clusters.
-      vec3 c0, c1, c2, c3;
-      vec2 qc = mix(p, q, 0.7);
-      float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.9 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
-      float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
-      float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, 0.12 + 0.4 * thick, 0.0, c2);
-      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, 0.18 + 0.3 * thick, 0.15, c3);
-      // The galaxy's unresolved stars: a faint grain where it is thick.
-      vec3 cg;
-      float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.85 * thick, 0.0, cg) * 0.32;
-      float sum = s0 + s1 + s2 + s3 + grain;
-      rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3 + cg * grain) / max(sum, 1e-4);
+      // A hundred or so stars, a little more where the clouds are.
+      vec3 c1, c2, c3;
+      float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, 0.03 + 0.08 * thick, 0.0, c1) * 0.8;
+      float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, 0.2 + 0.2 * thick, 0.0, c2);
+      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, 0.4 + 0.2 * thick, 0.3, c3);
+      float sum = s1 + s2 + s3;
+      rgb = (c1 * s1 + c2 * s2 + c3 * s3) / max(sum, 1e-4);
       return sum;
     }
 
@@ -344,17 +337,14 @@
       // couple of hundred px beyond it.
       vec2 fd = max(frame.xy - p, p - frame.zw);
       float clear = sky * (1.0 - smoothstep(0.0, 220.0, length(max(fd, 0.0))));
-      // The accent's family: lime through green to teal by region, gold and
-      // bright citrus in a few small clouds, their wisps paler and brightest.
+      // Graphite clouds, as the site's own greys, the primary's green lighting
+      // only their highlights: the brightest wisps.
       float belt = belts(p, f.r, detail);
       float h = f.g * 1.3 + belt * 0.22 + time * 0.012;
-      float x = (1.0 - abs(fract(h * 0.5) * 2.0 - 1.0)) * 2.0;
-      vec4 cool = mix(nebula[0], nebula[1], clamp(x, 0.0, 1.0));
-      cool = mix(cool, nebula[2], clamp(x - 1.0, 0.0, 1.0));
-      vec4 warm = mix(nebula[3], nebula[4], smoothstep(0.3, 0.8, f.b));
-      float warmth = clamp(smoothstep(0.78, 0.95, f.b) * 0.7 * cloud, 0.0, 1.0);
-      vec4 hue = mix(cool, warm, warmth);
-      hue.rgb = mix(hue.rgb, vec3(1.0), 0.2 * fine * cloud);
+      vec4 hue = mix(nebula[1], nebula[2], 1.0 - abs(fract(h * 0.5) * 2.0 - 1.0));
+      hue = mix(hue, nebula[3], clamp(smoothstep(0.78, 0.95, f.b) * 0.7 * cloud, 0.0, 1.0));
+      float lit = smoothstep(0.15, 0.6, fine * cloud);
+      hue = mix(hue, mix(nebula[0], nebula[4], smoothstep(0.3, 0.8, f.b)), lit);
       float gn = hue.a * (band * (0.06 + 0.35 * cloud + 1.3 * fine * (0.35 + 0.65 * cloud)) + gx.z * cloud * 0.25 + gx.y * 0.25 * cloud) * (0.55 + 0.6 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
       float g = clamp(gn + gw, 0.0, 1.0);
@@ -413,6 +403,8 @@
     const hero = (canvas.closest('.hero') as HTMLElement | null) ?? canvas.parentElement!;
     const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
     if (!gl) return;
+    // Keeps the stars round where gravity bends their space.
+    gl.getExtension('OES_standard_derivatives');
     let fieldPass: ReturnType<typeof link>, skyPass: ReturnType<typeof link>;
     try {
       fieldPass = link(gl, FIELD);
