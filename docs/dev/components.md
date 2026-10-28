@@ -995,9 +995,12 @@ platforms report every scroll view's offset and the core lays out its content, s
 content (a list's extent as it grows) and the viewport with nothing in JS. The thumb's length is the viewport's share
 of the content along the rail (the track's content box, measured), no shorter than `minThumbLength`; its place the
 offset's share of the scroll range, held to the ends while the target overscrolls (a `translate` along the axis, so
-the track's padding and the app's alignment place it across). A press on the thumb drags it by the pointer's offset;
-a press on the track puts the thumb's middle there and a drag goes on from there, both as `ScrollTo` commands to the
-target. `mode` decides when it shows: `scrolling` (a move of the target, until `hideDelay` after), `hover` (also
+the track's padding and the app's alignment place it across). The length and the place are on a view of the bar's own
+around the thumb part, which the app's transitions never reach: a `transition-all` on the thumb (for a thumb that
+widens) would otherwise animate its place and make it trail the content. A press on the thumb drags it by the
+pointer's offset; a press on the track puts the thumb's middle there and a drag goes on from there, both as
+`ScrollTo` commands to the target. A drag moves the thumb in the batch that sends the command, not when the platform
+reports the scroll a frame or two later, and while it goes on the reports of earlier commands do not move it back. `mode` decides when it shows: `scrolling` (a move of the target, until `hideDelay` after), `hover` (also
 while the mouse is over the target: `watch_hover`) or `always`; the pointer on the track and a drag keep it, and it
 never shows while the content fits. Hidden, the track is at `opacity: 0` and takes no presses: its look and motion
 (`transition-opacity`, a thumb growing on `group-hover:`) are the app's. The target's own indicator stays the app's

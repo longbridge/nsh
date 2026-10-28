@@ -26,8 +26,9 @@ struct HarnessProps {
 
 /// A scroll view 300 by 200 of `content` points with its own indicator
 /// off, and a bar 10 wide over its right edge, labelled `Bar` (its track
-/// 200 long: the thumb is 40 long over 1000 points and travels 160); the
-/// offset the scroll view last reported.
+/// 200 long: the thumb is 40 long over 1000 points and travels 160; it has
+/// a transition, as a thumb that widens does); the offset the scroll view
+/// last reported.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let content = element_ref();
@@ -58,7 +59,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                         .right_0()
                         .bottom_0()
                         .w(px(10.0))
-                        .thumb_style(|s| s.w_full()),
+                        .thumb_style(|s| s.w_full().transition_all().duration(150.0)),
                 ),
         )
         .child(text(move || format!("Offset {}", offset.get().round())))
@@ -74,6 +75,8 @@ struct Shown {
     /// Each batch that scrolled the target: whether it also moved a view
     /// (the thumb).
     scrolls: Vec<bool>,
+    /// Whether a view that moved also had a transition.
+    moved_with_transition: bool,
 }
 
 #[derive(Clone, Default)]
@@ -109,6 +112,12 @@ fn start(mode: ScrollbarMode, content: f32) -> (Headless, Seen) {
         });
         if scrolled {
             seen.scrolls.push(moved);
+        }
+        if batch.items.iter().any(|item| {
+            matches!(item, MountItem::ViewStyle { style, .. }
+                if style.transform != Transform::default() && style.transition.is_some())
+        }) {
+            seen.moved_with_transition = true;
         }
         for item in &batch.items {
             match item {
@@ -155,9 +164,16 @@ fn a_drag_moves_the_thumb_in_the_batch_that_scrolls() {
     app.wait_for("text:Offset 600").unwrap();
     // Not a frame later, when the platform reports the scroll: the thumb
     // would trail the pointer.
-    let scrolls = seen.0.lock().unwrap().scrolls.clone();
-    assert!(!scrolls.is_empty());
-    assert!(scrolls.iter().all(|&moved| moved), "{scrolls:?}");
+    let seen = seen.0.lock().unwrap();
+    assert!(!seen.scrolls.is_empty());
+    assert!(
+        seen.scrolls.iter().all(|&moved| moved),
+        "{:?}",
+        seen.scrolls
+    );
+    // The thumb's transition (the harness's `transition_all`) does not
+    // animate its place.
+    assert!(!seen.moved_with_transition);
 }
 
 #[test]

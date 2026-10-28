@@ -378,15 +378,7 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
     let shown = computed(move || ctl.shown(mode.get()));
     let axis = ctl.axis;
     let thumb = view()
-        .flex_shrink_0()
-        .map(|v| match axis {
-            Axis::Vertical => v
-                .h(move || Length::from(px(ctl.thumb())))
-                .translate_y(move || DefiniteLength::from(px(ctl.position()))),
-            Axis::Horizontal => v
-                .w(move || Length::from(px(ctl.thumb())))
-                .translate_x(move || DefiniteLength::from(px(ctl.position()))),
-        })
+        .flex_1()
         .claim_touches(TouchClaim::on_start().ask(|request: &ClaimRequest| request.claim()))
         // A scroll view around it does not take the drag over.
         .keep_touches(true)
@@ -396,6 +388,23 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
         .on_responder_terminate(move |_: &ResponderEvent| ctl.release())
         .app_class(props.thumb_class)
         .inline_style(props.thumb_style);
+    // The thumb's place and length, on a view of the bar's own around it:
+    // the app's transitions on the thumb (a `transition-all` for a thumb
+    // that widens) would make it trail the content.
+    let holder = view()
+        .flex_shrink_0()
+        .map(|v| match axis {
+            Axis::Vertical => v
+                .flex_col()
+                .h(move || Length::from(px(ctl.thumb())))
+                .translate_y(move || DefiniteLength::from(px(ctl.position()))),
+            Axis::Horizontal => v
+                .flex_row()
+                .w(move || Length::from(px(ctl.thumb())))
+                .translate_x(move || DefiniteLength::from(px(ctl.position()))),
+        })
+        .pointer_events(PointerEvents::BoxNone)
+        .child(thumb);
     // The thumb's room: the track's content box, measured.
     let rail = view()
         .flex_1()
@@ -408,7 +417,7 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
             ctl.rail_origin.replace(frame.origin);
             ctl.rail.set(frame.size.along(axis).0);
         })
-        .child(thumb);
+        .child(holder);
     view()
         .group()
         .map(|v| match axis {
