@@ -5,6 +5,8 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Nav from './Nav.astro';
 import SiteFooter from './SiteFooter.astro';
+import Badge from './ui/Badge.astro';
+import Button from './ui/Button.astro';
 import { getShowcaseReadme, type ShowcaseApp } from '../lib/showcases';
 import { url, type Lang } from '../lib/site';
 
@@ -18,6 +20,7 @@ const zh = lang === 'zh-CN';
 const media = url(`apps/${app.id}`);
 const html = await getShowcaseReadme(app, media);
 // Screenshots the README places in its text appear there, not twice.
+const external = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>';
 const previews = app.previews.filter((name) => !html.includes(`${media}/${name}`));
 ---
 
@@ -29,16 +32,19 @@ const previews = app.previews.filter((name) => !html.includes(`${media}/${name}`
 >
   <Nav lang={lang} currentPath={Astro.url.pathname} langHref={url(zh ? `apps/${app.id}` : `zh-CN/apps/${app.id}`)} />
   <main id="main" class="showcase-detail">
-    <a class="showcase-detail__back" href={url(zh ? 'zh-CN/apps' : 'apps')}>← {zh ? '全部应用' : 'All apps'}</a>
+    <Button variant="ghost" size="sm" class="showcase-detail__back" href={url(zh ? 'zh-CN/apps' : 'apps')}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      {zh ? '全部应用' : 'All apps'}
+    </Button>
     <header>
-      {app.featured && <span class="showcase-detail__featured">Featured</span>}
+      {app.featured && <Badge variant="secondary">Featured</Badge>}
       <h1>{app.name}</h1>
       <p class="showcase-detail__author">{app.author}</p>
       <p class="showcase-detail__description">{app.description}</p>
       <p class="showcase-detail__meta">{app.platforms.join(' / ')}{app.stars !== null && ` · ★ ${app.stars.toLocaleString('en')} GitHub Stars`}</p>
       <nav aria-label={zh ? '应用链接' : 'App links'}>
-        {app.website && <a href={app.website} target="_blank" rel="noopener noreferrer">{zh ? '官网' : 'Website'} ↗</a>}
-        {app.source && <a href={app.source} target="_blank" rel="noopener noreferrer">{zh ? '源码' : 'Source'} ↗</a>}
+        {app.website && <Button variant="secondary" size="sm" href={app.website} target="_blank" rel="noopener noreferrer">{zh ? '官网' : 'Website'}<Fragment set:html={external} /></Button>}
+        {app.source && <Button variant="secondary" size="sm" href={app.source} target="_blank" rel="noopener noreferrer">{zh ? '源码' : 'Source'}<Fragment set:html={external} /></Button>}
       </nav>
     </header>
     <div class="showcase-detail__previews">
@@ -51,14 +57,11 @@ const previews = app.previews.filter((name) => !html.includes(`${media}/${name}`
 
 <style>
   .showcase-detail { max-width: 62rem; margin: 0 auto; padding: 2.5rem clamp(1rem, 3vw, 2.5rem) 4rem; }
-  .showcase-detail__back { display: inline-block; margin-bottom: 1.75rem; color: var(--muted-foreground); text-decoration: none; }
-  .showcase-detail__back:hover { color: var(--foreground); }
-  .showcase-detail__featured { color: var(--muted-foreground); font: 600 0.6875rem/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; }
+  .showcase-detail :global(.showcase-detail__back) { margin: 0 0 1.25rem -0.75rem; }
   .showcase-detail h1 { margin: 0.6rem 0; font-size: clamp(2rem, 4vw, 3rem); font-weight: 660; letter-spacing: -0.035em; line-height: 1.15; }
   .showcase-detail__author, .showcase-detail__meta { margin: 0.25rem 0; color: var(--muted-foreground); font-size: 0.9rem; }
   .showcase-detail__description { max-width: 46rem; margin: 1rem 0; font-size: 1.1rem; line-height: 1.7; }
-  .showcase-detail header nav { display: flex; gap: 1.5rem; margin: 1.25rem 0 2rem; }
-  .showcase-detail header nav a { color: var(--doc-link); }
+  .showcase-detail header nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.25rem 0 2rem; }
   .showcase-detail__previews { display: grid; gap: 1.5rem; justify-items: center; }
   .showcase-detail__previews img, .showcase-detail__readme :global(img), .showcase-detail__readme :global(video) { display: block; max-width: 100%; max-height: 80vh; width: auto; height: auto; border: 1px solid var(--border); border-radius: var(--radius-card); }
   .showcase-detail__readme { margin-top: 2.5rem; overflow-wrap: anywhere; }

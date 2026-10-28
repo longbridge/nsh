@@ -580,6 +580,22 @@ impl Dt {
         let allowed = untracked(|| self.selectable_kinds());
         let rows = self.row_count();
         let columns = self.st.borrow().columns.len();
+        // A ref's command cannot throw: a row or column the table does not
+        // have leaves the selection as it is, logged.
+        let (row, column) = match next {
+            Selection::Row(r) => (Some(r), None),
+            Selection::Column(c) => (None, Some(c)),
+            Selection::Cell(r, c) => (Some(r), Some(c)),
+            Selection::None => (None, None),
+        };
+        if let Some(row) = row.filter(|&r| r >= rows) {
+            log::warn!("DataTable.select: row {row} out of range (the table has {rows})");
+            return;
+        }
+        if let Some(column) = column.filter(|&c| c >= columns) {
+            log::warn!("DataTable.select: column {column} out of range (the table has {columns})");
+            return;
+        }
         self.set_selection(selection::clamp(next, allowed, rows, columns), report);
         self.reveal_selection();
     }
@@ -716,10 +732,11 @@ impl Dt {
     pub(crate) fn scroll_to_row(&self, row: usize, animated: bool) {
         let g = untracked(|| self.geo());
         let rows = self.row_count();
-        if rows == 0 {
+        if row >= rows {
+            log::warn!("DataTable.scrollToRow: row {row} out of range (the table has {rows})");
             return;
         }
-        let top = row.min(rows - 1) as f64 * g.row_height as f64;
+        let top = row as f64 * g.row_height as f64;
         self.scroll_rows_to(&g, top, animated);
     }
 
@@ -728,6 +745,7 @@ impl Dt {
         let start = {
             let st = self.st.borrow();
             let Some(def) = st.defs.iter().position(|c| c.key == key) else {
+                log::warn!("DataTable.scrollToColumn: no column `{key}`");
                 return;
             };
             let Some(display) = st.columns.display_of(def) else {
@@ -1194,8 +1212,11 @@ impl Dt {
 
     pub(crate) fn set_column_width(&self, key: &str, width: Points, report: bool) {
         let def = self.st.borrow().defs.iter().position(|c| c.key == key);
-        if let Some(def) = def {
-            self.set_width(def, width.0, report);
+        match def {
+            Some(def) => {
+                self.set_width(def, width.0, report);
+            }
+            None => log::warn!("DataTable.setColumnWidth: no column `{key}`"),
         }
     }
 
@@ -1209,10 +1230,18 @@ impl Dt {
             .collect()
     }
 
-    /// Fits the column `key` to its widest text and title.
-    pub(crate) fn fit_column(&self, key: &str) -> Option<Points> {
-        let def = self.st.borrow().defs.iter().position(|c| c.key == key)?;
-        self.fit(def).map(Points)
+    /// Fits the column `key` to its widest text and title; a `TypeError`
+    /// for a key no column has.
+    pub(crate) fn fit_column(&self, key: &str) -> Result<Points, JsError> {
+        let no_column = || JsError::Type(format!("DataTable.fitColumn: no column `{key}`"));
+        let def = self
+            .st
+            .borrow()
+            .defs
+            .iter()
+            .position(|c| c.key == key)
+            .ok_or_else(no_column)?;
+        self.fit(def).map(Points).ok_or_else(no_column)
     }
 
     pub(crate) fn fit(&self, def: usize) -> Option<f32> {

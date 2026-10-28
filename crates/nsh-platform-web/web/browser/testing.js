@@ -125,6 +125,14 @@ function installFetch(target, call, active, wake) {
           if (entry.reject) entry.reject(error); else entry.controller?.error(error);
           break;
         }
+        case 4: {
+          // Refused by the capabilities: a TypeError as fetch's, with the
+          // code, the capability and the URL refused.
+          finish(id);
+          const error = Object.assign(failure(data[0]), { code: "ERR_ACCESS_DENIED", permission: "network", resource: data[1] });
+          if (entry.reject) entry.reject(error); else entry.controller?.error(error);
+          break;
+        }
       }
     } finally { wake(); }
   }]);

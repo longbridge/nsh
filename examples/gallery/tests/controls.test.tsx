@@ -36,7 +36,7 @@ test("a switch turns a setting on and off, and one that needs it is disabled whi
   expect(app.texts()).toContain("Turn on notifications first");
   expect(app.enabled("Badges")).toBe(false);
   expect(app.enabled("Previews")).toBe(false);
-  await expect(() => app.press("Badges")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Badges")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   // The track is pressable too, not only the label.
   await app.press("role:switch[/^Notifications/]");
   await app.waitFor("Notifications: on");
@@ -96,15 +96,15 @@ test("a checklist counts the tasks done, choice cards and disabled boxes take no
   await app.press("Email");
   await app.waitFor("Email: true");
   expect(app.texts()).toContain("Notifying you by push and email");
-  await expect(() => app.press("SMS")).rejects.toThrow("is disabled");
-  await expect(() => app.press("Required")).rejects.toThrow("is disabled");
+  await expect(() => app.press("SMS")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+  await expect(() => app.press("Required")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   await app.press("Large");
   await app.waitFor("Large: true");
 });
 
 test("consent choices: the necessary one is always on, accept all checks the rest", async () => {
   await show("Checkbox", "Consent");
-  await expect(() => app.press("Necessary (always on)")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Necessary (always on)")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   await app.press("Accept all");
   await app.waitFor("Consent: all accepted");
   await app.press("Save choices");
@@ -122,7 +122,7 @@ test("a radio picks one plan of the set, and a disabled plan takes no press", as
   await app.press("Team");
   await app.waitFor("Plan: Team");
   expect(app.texts()).toContain("Continue with Team");
-  await expect(() => app.press("Enterprise")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Enterprise")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   await app.press("Continue with Team");
   await app.waitFor("Continue: Team, $12 / mo");
   // A checked radio stays checked and reports nothing.
@@ -136,10 +136,10 @@ test("choice cards and sized rings pick one each, a locked one takes no press", 
   await show("Radio", "Choice cards");
   await app.press("Express");
   await app.waitFor("Delivery: Express");
-  await expect(() => app.press("Same day")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Same day")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   await app.press("Large");
   await app.waitFor("Text size: Large");
-  await expect(() => app.press("Huge")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Huge")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
 });
 
 test("tabs show the section the app selects, and a disabled tab takes no press", async () => {
@@ -150,7 +150,7 @@ test("tabs show the section the app selects, and a disabled tab takes no press",
   await app.waitFor("Tab: Activity");
   expect(app.texts()).toContain("Deployed to production");
   expect(app.texts()).not.toContain("Visitors");
-  await expect(() => app.press("Billing")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Billing")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   await app.press("role:tab[Members]");
   await app.waitFor("Grace Hopper");
   // The selected tab reports its presses too.
@@ -167,7 +167,7 @@ test("underlined tabs show their own content, with counts", async () => {
   await app.waitFor("Project: Pull requests");
   expect(app.texts()).toContain("Read fonts from the bundle");
   expect(app.texts()).not.toContain("Support right-to-left menus");
-  await expect(() => app.press("Wiki")).rejects.toThrow("is disabled");
+  await expect(() => app.press("Wiki")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
 });
 
 test("a collapsible shows its content while the app has it open, and keeps it while collapsed", async () => {

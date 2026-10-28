@@ -393,6 +393,20 @@ forever, such as a loading spinner, keeps running in the background while steps 
 CSS animation does in a browser's tests. A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
 screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
 
+The failures a test may expect carry a `code`, which stays as it is; their messages are for people and may change, so
+a test matches the code:
+
+| `code` | The step or query |
+|---|---|
+| `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
+| `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
+| `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
+| `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
+
+```tsx
+await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+```
+
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
 The query reports an error for a missing, ambiguous or empty span. Updating a span’s `testID` reuses its text
@@ -448,7 +462,9 @@ test("calls reach the page's host", async () => {
 ### Expectations
 
 `expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
-does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`.
+does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow`
+checks what calling it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it
+settles to, as in Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
 
 | Check | Holds when |
 |---|---|
@@ -459,8 +475,13 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 | `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
 | `toBeNull()` | The value is `null` (or `undefined`). |
 | `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
-| `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
-| `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
+| `toMatchObject(subset)` | The value has every property of `subset`, each equal, and objects in it match in turn; other properties are not looked at, and arrays match item by item, all of them. |
+| `toThrow(expected?)` | `expect(fn)`: calling `fn` throws. Given `expected`, the error matches it: its message contains a string or matches a `RegExp`; an error class (`TypeError`, a class of the app's) is the error's `name`, and `Error` matches every error; an error has the same message. |
+| `rejects.toThrow(expected?)` | `expect(promise)`: the promise rejects, with an error matching `expected` as `toThrow` says. |
+| `rejects.toMatchObject(subset)` | `expect(promise)`: the promise rejects with a value matching `subset` as `toMatchObject` says: an error's own properties (`code`, `permission`, ...) with its `name` and `message`. |
+| `resolves.toBe(expected)`, `resolves.toEqual(expected)`, `resolves.toMatchObject(subset)` | `expect(promise)`: the promise resolves to a value that holds the check. |
+
+`rejects` and `resolves` have a `.not` of their own too: `await expect(load()).resolves.not.toBe(null)`.
 
 ### On a real platform
 

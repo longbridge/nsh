@@ -1566,7 +1566,9 @@ pub enum Command {
         /// Animate the change.
         animated: bool,
     },
-    /// Animate the layout changes of the next commit (on the root).
+    /// Animate the layout changes of the next commit. On the root, all of
+    /// them; on a node, with its `update`, only the frames that node's
+    /// change moves (`ElementRef::animate_layout`, `core/layout_scope.rs`).
     LayoutAnimation(LayoutAnimation),
     /// Leave the app (Android back handling; on the root).
     ExitApp,

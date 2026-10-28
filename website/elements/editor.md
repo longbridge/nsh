@@ -563,7 +563,8 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
 value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `caretBounds()`, `folds()`, ...) return a `Promise` of it in JS, so `await`
-them: `const text = await editor.value()`.
+them: `const text = await editor.value()`. A method given a line past the text (`fold`, `scrollToLine`, `goToLine`,
+...) changes nothing and logs a warning naming the method and the line.
 
 | Method | Description |
 |---|---|

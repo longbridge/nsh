@@ -4,5 +4,5 @@ test("without a page host, calls reject", async () => {
   const app = await open("./App.tsx");
   expect(app.shows("available: false")).toBe(true);
   await app.press("label:echo");
-  await app.waitFor("text:result: rejected: nsh/host: this platform has no host");
+  await app.waitFor("text:/result: rejected: ERR_FEATURE_UNAVAILABLE_ON_PLATFORM /");
 });

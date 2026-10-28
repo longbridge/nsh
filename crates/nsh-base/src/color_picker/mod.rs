@@ -418,7 +418,7 @@ pub fn ColorArea(props: ColorAreaProps, _cx: Scope<NoEvent>) -> impl IntoElement
             }
         })
         .pointer_events(PointerEvents::None)
-        .disabled(props.disabled)
+        .disabled(disabled)
         .accessible(true)
         .role(AccessibilityRole::Adjustable)
         .optional_label(props.accessibility_label)
@@ -445,7 +445,7 @@ pub fn ColorArea(props: ColorAreaProps, _cx: Scope<NoEvent>) -> impl IntoElement
         .app_class(props.thumb_class)
         .inline_style(props.thumb_style);
     view()
-        .disabled(props.disabled)
+        .disabled(disabled)
         .on_layout(move |frame: &Bounds<Points>| {
             size.replace(frame.size);
         })
@@ -748,7 +748,7 @@ pub fn ColorSlider(props: ColorSliderProps, _cx: Scope<NoEvent>) -> impl IntoEle
             };
             s.bg(AdaptiveColor::from(fill))
         })
-        .disabled(props.disabled)
+        .disabled(move || ctl.disabled())
         .accessible(true)
         .role(AccessibilityRole::Adjustable)
         .optional_label(props.accessibility_label)
@@ -784,7 +784,7 @@ pub fn ColorSlider(props: ColorSliderProps, _cx: Scope<NoEvent>) -> impl IntoEle
         .app_class(props.thumb_class)
         .inline_style(props.thumb_style);
     view()
-        .disabled(props.disabled)
+        .disabled(move || ctl.disabled())
         .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
             if !untracked(|| ctl.disabled()) {
                 request.claim();
@@ -879,7 +879,7 @@ pub fn ColorField(props: ColorFieldProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .readonly(move || props.disabled.get() || picker.disabled())
-        .disabled(props.disabled)
+        .disabled(move || props.disabled.get() || picker.disabled())
         .optional_label(props.accessibility_label)
         .on_change(move |text: &str| {
             draft.set(Some(text.to_owned()));

@@ -349,8 +349,19 @@ unsafe extern "C" fn set_application_menu(
     result.err().unwrap_or(UNDEFINED)
 }
 
-/// `Menu.popup(items, at?)`.
+/// `Menu.popup(items, at?)`: a promise, which a wrong item rejects.
 unsafe extern "C" fn popup(
+    cx: *mut JsContext,
+    this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    // SAFETY: QuickJS's arguments, passed on.
+    crate::web::js::rejecting(cx, unsafe { popup_menu(cx, this, argc, argv) })
+}
+
+/// [`popup`]'s work: its promise, or the exception of what it refuses.
+unsafe fn popup_menu(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,

@@ -311,6 +311,10 @@ mod imp {
             self.host.fetch_event(id, event);
         }
 
+        pub(crate) fn fetch_refused(&self, id: RequestId, message: &str, url: &str) {
+            self.host.fetch_refused(id, message, url);
+        }
+
         pub(crate) fn collect_garbage(&self) {
             self.host.collect_garbage();
         }
@@ -464,6 +468,10 @@ mod stub {
         }
 
         pub(crate) fn fetch_event(&self, _: u32, _: crate::FetchEvent) {
+            match *self {}
+        }
+
+        pub(crate) fn fetch_refused(&self, _: u32, _: &str, _: &str) {
             match *self {}
         }
 

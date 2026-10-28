@@ -420,8 +420,8 @@ impl Sys {
         Ok(count)
     }
 
-    /// `n` doubled later: a negative one throws in the call, a zero one
-    /// rejects.
+    /// `n` doubled later: a negative one is refused in the call, a zero
+    /// one fails in the task (both reject).
     pub(crate) fn later(n: i32) -> Result<Later<i32>, JsError> {
         if n < 0 {
             return Err(JsError::Range(format!("{n} is negative")));
@@ -675,7 +675,10 @@ setTimeout(async () => {
   lines.push(msg(() => Sys.reversed([1, 2])));
   lines.push(`${Sys.mayConnect(4000)} ${Sys.mayConnect(4001)}`);
   lines.push(`${Sys.take(2, true)} ${Sys.take(2, false)} ${msg(() => Sys.take(1, false))}`);
-  lines.push(msg(() => Sys.later(-1)));
+  let thrown = "no";
+  let refused;
+  try { refused = Sys.later(-1); } catch { thrown = "yes"; }
+  lines.push(`thrown ${thrown} ${await settled(refused)}`);
   lines.push(await settled(Sys.later(21)));
   lines.push(await settled(Sys.later(0)));
   const e = new Emitter();
@@ -693,7 +696,7 @@ mount(() => <Text>{shown()}</Text>);
 "#;
 
 #[test]
-fn calls_take_bytes_the_vms_system_and_start_tasks_that_throw_in_the_call() {
+fn calls_take_bytes_the_vms_system_and_start_tasks_that_reject_what_they_refuse() {
     let (_engine, rx) = start_with(
         SYSTEM,
         vec![registry()],
@@ -702,7 +705,7 @@ fn calls_take_bytes_the_vms_system_and_start_tasks_that_throw_in_the_call() {
     assert_eq!(
         shown(&rx, "done"),
         "done true 255,2,1|TypeError: Sys.reversed: `bytes`: expected a Uint8Array, got an array|\
-         true false|1 2 RangeError: at most 1|RangeError: -1 is negative|42|Error: zero|\
+         true false|1 2 RangeError: at most 1|thrown no RangeError: -1 is negative|42|Error: zero|\
          a hi,b hi|null"
     );
 }

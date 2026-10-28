@@ -120,14 +120,20 @@
     (after the code adding it, so listeners added together all hear it). A listener that throws is reported as an
     uncaught error; the others still run. Delivery takes one event at a time (`HostInbox::pop`): when the last
     listener stops during a callback, the rest keep their original order and age in the inbox.
-  - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM, `RangeError` past it). The
-    engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once, with a `HostCall`; no handler
-    rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
+  - *Calls* (`host.call(name, data)`): a promise kept by id (at most 1024 waiting per VM; one more rejects with
+    `ERR_NSH_QUOTA_EXCEEDED`). The engine (`EngineBridge`) runs the handler of `name` on the engine thread, at once,
+    with a `HostCall`; no handler rejects at once. The handler answers once from any thread (`resolve`, `reject`, `reply`, or `into_reply` to answer
     elsewhere): `Message::HostReply(id, result)` settles the promise in the engine's next turn. A `HostReply` dropped
     unanswered rejects ("did not answer"), so a handler that panics (caught) or forgets fails the call rather than
     leaving it pending; an answer for an engine that stopped goes nowhere. Calls use the platform API's timeout:
     30 seconds by default, `{ timeout: 0 }` to wait without a deadline, on the app's clock. Calls and posts require
-    `capabilities.host` and the same function-name validation as the platform transport. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
+    `capabilities.host` and the same function-name validation as the platform transport. A call never throws: what
+    fails rejects it, with the same errors as the platform transport's, built by `nsh_core::host_channel`
+    (`host_error`: the handler's message, its own error or "no handler" / "did not answer", `code`
+    `ERR_NSH_HOST_ERROR`; `not_granted`: `ERR_ACCESS_DENIED`, `permission` `"host"`, `resource` the name;
+    `timed_out`: `ETIMEDOUT`; `no_host`: `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`; `too_many_calls`:
+    `ERR_NSH_QUOTA_EXCEEDED`; `invalid_name`: a `TypeError`), so an app branches on `code` whichever transport answers.
+    `host.post` is synchronous and throws the name's `TypeError` or `ERR_ACCESS_DENIED`. *Posts* (`host.post`) reach the same handler with nothing to answer (`HostCall::is_post`); without a
     handler they are dropped.
   - *Threads*: the main thread never waits for JS and JS never waits for the main thread. Rust handlers run on the
     engine thread and must not block it; the SDKs' glue hops to the main thread (iOS: `DispatchQueue.main` in

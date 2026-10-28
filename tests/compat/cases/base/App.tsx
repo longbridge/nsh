@@ -17,6 +17,7 @@ import BaseDataTable from "./base-data-table";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseEditor from "./base-editor";
+import BaseLink from "./base-link";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
 import BaseNumberInput from "./base-number-input";
@@ -57,6 +58,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-editor": BaseEditor,
+  "base-link": BaseLink,
   "base-nav-page": BaseNavPage,
   "base-nav-stack": BaseNavStack,
   "base-number-input": BaseNumberInput,

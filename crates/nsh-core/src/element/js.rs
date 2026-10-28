@@ -152,7 +152,8 @@ pub trait JsHost {
     fn callback(&self, v: JsRaw) -> Option<Rc<dyn CallbackHandle>>;
     /// Any value `v`, kept alive until the handle goes, to give back to JS
     /// later ([`CallbackHandle::value`]): the rows a component reads, to
-    /// hand them to the app's functions one by one. `None` where the host
+    /// hand them to the app's functions one by one; a promise a
+    /// [`super::Callback::settling`] answers with. `None` where the host
     /// keeps no values.
     fn retain(&self, _v: JsRaw) -> Option<Rc<dyn CallbackHandle>> {
         None

@@ -578,7 +578,7 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, String>> {
+) -> Answer<Result<crate::JsonValue, super::JsError>> {
     let (answer, action) = super::services::host_call(name, args);
     act(action);
     answer

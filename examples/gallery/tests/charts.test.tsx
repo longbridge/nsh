@@ -7,8 +7,10 @@
 // hole) or the arrow keys and closes into a pie with its shares written
 // outside, sales as bars side by side or stacked, a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
-// benchmark, and a quarter's income as flows between its accounts, read
-// out under the arrow keys and moving into the next quarter's.
+// benchmark, a quarter's income as flows between its accounts, read out
+// under the arrow keys and moving into the next quarter's, and a
+// watchlist whose sparklines come with their rows as its list scrolls and
+// show each period.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -213,3 +215,16 @@ test("the flows read out the account the arrow keys step to", async () => {
   await app.wait(100);
   expect(app.texts()).not.toContain("TAX");
 }, 120000);
+
+test("the watchlist's sparklines come with their rows and show each period", async () => {
+  await app.waitFor("label:/^AAPL, 1D: /");
+  // Down to the last symbols and back: the list makes their rows, each
+  // with its sparkline, as they scroll in.
+  await app.scroll("id:watchlist", 52 * 13);
+  await app.waitFor("label:/^SHOP, 1D: /");
+  await app.scroll("id:watchlist", -52 * 13);
+  await app.waitFor("label:/^AAPL, 1D: /");
+  await app.press("role:tab[1W]");
+  await app.waitFor("label:/^AAPL, 1W: /");
+  expect(app.count("label:/^AAPL, 1D: /")).toBe(0);
+});

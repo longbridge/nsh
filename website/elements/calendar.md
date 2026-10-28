@@ -149,8 +149,9 @@ press), as `gpui-base`'s.
 | `{ from, to }` | The days from `from` to `to`, inclusive (either left out is open). |
 | `(date) => boolean` | The days for which the function returns `true`, given each shown day's ISO date. |
 
-The function is asked once per shown day, in the next JS turn, so its answer is a pure function of the date. A
-disabled day is `disabled` and `muted`: it takes no press, and Return and Space do not pick it.
+The function is asked once per shown day, in the next JS turn, and not again for a day it answered: turning the
+months asks only about the days they bring, so its answer is a pure function of the date. Passing another function
+asks again. A disabled day is `disabled` and `muted`: it takes no press, and Return and Space do not pick it.
 
 ## Items
 

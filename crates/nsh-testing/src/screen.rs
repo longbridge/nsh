@@ -72,16 +72,6 @@ fn utf16_slice(text: &str, start: u32, end: u32) -> String {
         .collect()
 }
 
-/// Why a [`Pick::Disabled`] match takes no step on `what` (the kind of
-/// view the step looks for).
-pub(crate) fn disabled(what: &str) -> &'static str {
-    if what == "scroll view" {
-        "does not scroll: the user cannot scroll it (`scrollable` is false)"
-    } else {
-        "is disabled"
-    }
-}
-
 /// What a back does ([`Screen::back_target`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Back {
@@ -709,7 +699,7 @@ impl Screen {
         let (id, start) = match hits.as_slice() {
             [(id, Some(start))] => (*id, *start),
             [(_, None)] => return Err(format!("span `{selector}` has no characters")),
-            [] => return Err(format!("no span matches `{selector}`")),
+            [] => return Err(crate::failure::not_found("span", selector)),
             many => {
                 return Err(format!(
                     "`{selector}` matches {} spans; add `nth=<n>` or name the text views to look in",
@@ -722,7 +712,7 @@ impl Screen {
             .and_then(|v| v.attributed.as_ref())
             .and_then(|text| text.span_at(start))
             .map(|span| span.style)
-            .ok_or_else(|| format!("no span matches `{selector}`"))
+            .ok_or_else(|| crate::failure::not_found("span", selector))
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -1170,7 +1160,7 @@ impl Screen {
                 Ok(!self.disabled_from(id, None)
                     && self.input(id).is_none_or(|i| i.config.editable))
             }
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1193,7 +1183,7 @@ impl Screen {
                     None => return Ok(false),
                 }
             },
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1205,7 +1195,7 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).is_some_and(|v| v.selected)),
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1221,7 +1211,7 @@ impl Screen {
                 .get(&id)
                 .map(|v| v.accessibility_state)
                 .unwrap_or_default()),
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1233,7 +1223,7 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).and_then(|v| v.level)),
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }

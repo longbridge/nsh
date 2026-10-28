@@ -370,6 +370,19 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 （错误信息会列出屏幕上的文字）、应用在此期间抛出了异常，或者应用请求了只有真实平台才能回答的内容时，步骤会 reject，
 测试随之失败。
 
+测试可能要预期的失败都带有一个 `code`，它保持不变；错误消息是给人看的，可能会变，所以测试匹配 code：
+
+| `code` | 步骤或查询 |
+|---|---|
+| `ERR_NSH_TEST_NOT_FOUND` | 屏幕上没有视图匹配选择器，或者打开的菜单没有这一项。 |
+| `ERR_NSH_TEST_DISABLED` | 选择器指向的视图已禁用（用户不能滚动的滚动视图、已禁用的菜单项）。 |
+| `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
+| `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
+
+```tsx
+await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+```
+
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
 没有匹配、匹配不唯一或 span 为空时会报错。更新 span 的 `testID` 会复用文本排版，保持 `onTextLayout` 的回调次数。
@@ -417,7 +430,9 @@ test("calls reach the page's host", async () => {
 ### 断言
 
 `expect(value)` 按 JSON 的方式比较值（`undefined` 视为 `null`，数字按数值比较），每个检查不成立时都会抛出异常。
-`.not` 把检查反过来：`expect(app.texts()).not.toContain("Error")`。
+`.not` 把检查反过来：`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常；
+给出 promise 或返回 promise 的函数时，`rejects` 和 `resolves` 检查它的结果，与 Jest 相同：
+`await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`。
 
 | 检查 | 成立条件 |
 |---|---|
@@ -428,8 +443,13 @@ test("calls reach the page's host", async () => {
 | `toHaveLength(n)` | 数组有 `n` 项，或者字符串有 `n` 个 UTF-16 单元。 |
 | `toBeNull()` | 值为 `null`（或 `undefined`）。 |
 | `toBeGreaterThan(n)`、`toBeGreaterThanOrEqual(n)`、`toBeLessThan(n)`、`toBeLessThanOrEqual(n)` | 数字与 `n` 满足相应的大小关系。 |
-| `toThrow(message?)` | `expect(fn)`：调用 `fn` 会抛出异常；给了 `message` 时，异常消息要匹配它。 |
-| `rejects.toThrow(message?)` | `expect(fn)`：`fn` 返回的 promise 会 reject：`await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`。 |
+| `toMatchObject(subset)` | 值具有 `subset` 的每个属性，且各自相等，其中的对象也依次匹配；不看其他属性，数组逐项匹配，项数相同。 |
+| `toThrow(expected?)` | `expect(fn)`：调用 `fn` 会抛出异常。给了 `expected` 时，异常要匹配它：消息包含字符串或匹配 `RegExp`；错误类（`TypeError`、应用自己的类）要与异常的 `name` 相同，`Error` 匹配所有错误；错误对象要消息相同。 |
+| `rejects.toThrow(expected?)` | `expect(promise)`：promise 会 reject，异常按 `toThrow` 的规则匹配 `expected`。 |
+| `rejects.toMatchObject(subset)` | `expect(promise)`：promise 会 reject，reject 的值按 `toMatchObject` 的规则匹配 `subset`：错误自身的属性（`code`、`permission` 等），加上它的 `name` 和 `message`。 |
+| `resolves.toBe(expected)`、`resolves.toEqual(expected)`、`resolves.toMatchObject(subset)` | `expect(promise)`：promise resolve 的值满足相应的检查。 |
+
+`rejects` 和 `resolves` 也有自己的 `.not`：`await expect(load()).resolves.not.toBe(null)`。
 
 ### 在真实平台上运行
 

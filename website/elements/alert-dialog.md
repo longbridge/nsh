@@ -94,8 +94,8 @@ alert_dialog().title(..).description(..).action(..).cancel(..).destructive(..).s
 
 The result is `{ action }` (`AlertDialogResult`): the chosen action's `id`, or `null` (`None`) when the dialog closed
 without an action: a press outside it, Escape or the back button, where
-`closeOnBackdropPress` and `closeOnEscape` allow it. It is an error (a rejected promise, an `Err`) when there are no
-actions. In Rust, `nsh_base::alert_dialog()` sets the dialog up with a method per option and per action, in the order
+`closeOnBackdropPress` and `closeOnEscape` allow it. Without actions the promise rejects with a `TypeError` (an `Err`
+in Rust). In Rust, `nsh_base::alert_dialog()` sets the dialog up with a method per option and per action, in the order
 the actions show, and `.show()` shows it; await its answer in a task (`spawn`).
 
 ## Action sheets

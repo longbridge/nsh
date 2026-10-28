@@ -350,8 +350,8 @@ impl fmt::Debug for Held {
 
 /// Work a function or member that is not `async` starts in the JS call
 /// and finishes as a task of the core: JS gets a promise of `T`. What the
-/// call does before returning it (checking its arguments, taking a quota)
-/// throws as a synchronous call's error does; the task's `Err` rejects
+/// call refuses before returning it (an argument, a grant, a quota)
+/// rejects the promise, as the task's `Err` does
 /// (a [`JsError`] with its class and properties, any other error as an
 /// `Error` with its message). TS: `Promise<T>`.
 #[must_use = "the work runs only when the call returns it"]
@@ -457,6 +457,22 @@ impl JsError {
         self.with("code", code)
     }
 
+    /// What a call the app's capabilities do not grant fails with, as
+    /// Node's permission model: an `Error` with `code`
+    /// [`codes::ACCESS_DENIED`], `permission` (the capability: `"fs"`,
+    /// `"network"`, `"clipboard"`, ...) and `resource` (the path, URL or
+    /// name asked for; `""` when the capability has none).
+    pub fn access_denied(
+        message: impl Into<String>,
+        permission: &str,
+        resource: impl Into<String>,
+    ) -> Self {
+        JsError::Error(message.into())
+            .with_code(codes::ACCESS_DENIED)
+            .with("permission", permission)
+            .with("resource", resource.into())
+    }
+
     /// Its message.
     pub fn message(&self) -> &str {
         match self {
@@ -472,6 +488,25 @@ impl JsError {
             _ => None,
         }
     }
+}
+
+/// The `code`s of the errors NSH's calls fail with besides an I/O
+/// error's (`ENOENT`, `EACCES`, ...: [`io_code`]). Apps branch on them; the
+/// messages are for people and may change.
+pub mod codes {
+    /// The app's capabilities do not grant the call
+    /// ([`super::JsError::access_denied`]; Node's permission model's).
+    pub const ACCESS_DENIED: &str = "ERR_ACCESS_DENIED";
+    /// The platform the app runs on has no such feature (Node's).
+    pub const UNAVAILABLE: &str = "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+    /// A quota of the runtime is used up: calls waiting at once, open
+    /// sockets, storage.
+    pub const QUOTA_EXCEEDED: &str = "ERR_NSH_QUOTA_EXCEEDED";
+    /// The call ran out of time.
+    pub const TIMED_OUT: &str = "ETIMEDOUT";
+    /// The embedding app answered a `host.call` with an error (its handler
+    /// failed, or it handles no such name); the message is the host's.
+    pub const HOST_ERROR: &str = "ERR_NSH_HOST_ERROR";
 }
 
 /// An I/O error as Node reports it: `Error` with the message and the

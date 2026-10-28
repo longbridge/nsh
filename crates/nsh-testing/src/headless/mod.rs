@@ -66,7 +66,8 @@ pub use self::{
     stub::{RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse, StubRoute},
 };
 use crate::{
-    screen::{self, Back, Pick, Screen},
+    failure,
+    screen::{Back, Pick, Screen},
     selector::Selector,
 };
 
@@ -964,7 +965,11 @@ impl Headless {
     pub fn back(&mut self) -> Result<(), String> {
         self.step("back");
         if !self.go_back(true) {
-            return Err(format!("nothing to go back from; {}", self.on_screen()));
+            return Err(format!(
+                "{}; {}",
+                failure::NOTHING_TO_GO_BACK_FROM,
+                self.on_screen()
+            ));
         }
         self.done()
     }
@@ -1029,7 +1034,7 @@ impl Headless {
                 Pumped::Timeout => {
                     if Instant::now() >= deadline {
                         self.check()?;
-                        return Err(format!("the app rendered nothing in {} s", WAIT.as_secs()));
+                        return Err(failure::rendered_nothing(WAIT));
                     }
                 }
             }
@@ -1069,8 +1074,8 @@ impl Headless {
                 Pumped::Timeout => {
                     if Instant::now() >= deadline {
                         return Err(format!(
-                            "{what} never happened in {} ms; {}",
-                            timeout.as_millis(),
+                            "{}; {}",
+                            failure::never_happened(what, timeout),
                             self.on_screen()
                         ));
                     }
@@ -1121,7 +1126,8 @@ impl Headless {
         match pick {
             Pick::One(id) => Ok(id),
             Pick::None => Err(format!(
-                "no {what} matches `{selector}`; {}",
+                "{}; {}",
+                failure::not_found(what, selector),
                 self.on_screen()
             )),
             Pick::Many(n) => Err(format!(
@@ -1129,8 +1135,8 @@ impl Headless {
                  a view around it (`id:list >> {selector}`)"
             )),
             Pick::Disabled => Err(format!(
-                "`{selector}` {}; {}",
-                screen::disabled(what),
+                "{}; {}",
+                failure::disabled(selector, what),
                 self.on_screen()
             )),
         }

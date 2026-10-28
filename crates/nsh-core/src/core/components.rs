@@ -503,7 +503,7 @@ pub(super) struct Components {
     next_pick: u32,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
-    host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, String>>>,
+    host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
     next_host_call: u64,
     /// URLs being opened (`openUrl`), by request id: their answers.
     url_opens: FxHashMap<u32, AnswerSlot<bool>>,
@@ -4755,7 +4755,7 @@ impl<M: TextEngine> Core<M> {
                 if !self.components.environment.host {
                     answer
                         .borrow_mut()
-                        .deliver(Err(crate::runtime::host::NO_HOST.into()));
+                        .deliver(Err(crate::host_channel::no_host()));
                     return;
                 }
                 let id = self.components.next_host_call;
@@ -4781,7 +4781,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 if !self.access.allows_open_url(&url) {
                     answer.borrow_mut().deliver(false);
-                    self.deny(crate::open_url::not_granted(&url));
+                    self.deny(crate::open_url::not_granted(&url).message().to_owned());
                     return;
                 }
                 let id = self.components.next_url_open;
@@ -4970,7 +4970,11 @@ impl<M: TextEngine> Core<M> {
     /// The answer to host call `id`: the host's value, or its error. A
     /// call that timed out (`runtime/host.rs`) takes none: its late answer
     /// is dropped.
-    pub(super) fn answer_host(&mut self, id: u64, result: Result<crate::JsonValue, String>) {
+    pub(super) fn answer_host(
+        &mut self,
+        id: u64,
+        result: Result<crate::JsonValue, crate::element::JsError>,
+    ) {
         match self.components.host_calls.remove(&id) {
             Some(answer) if std::rc::Rc::strong_count(&answer) > 1 => {
                 answer.borrow_mut().deliver(result);
@@ -5180,11 +5184,12 @@ impl<M: TextEngine> Core<M> {
                 let result = if reply.get("ok").and_then(crate::JsonValue::as_bool) == Some(true) {
                     Ok(reply.get("value").cloned().unwrap_or_default())
                 } else {
-                    Err(reply
-                        .get("error")
-                        .and_then(crate::JsonValue::as_str)
-                        .unwrap_or("nsh/host: the call failed")
-                        .to_owned())
+                    Err(crate::host_channel::host_error(
+                        reply
+                            .get("error")
+                            .and_then(crate::JsonValue::as_str)
+                            .unwrap_or("nsh/host: the call failed"),
+                    ))
                 };
                 self.answer_host(call, result);
                 true

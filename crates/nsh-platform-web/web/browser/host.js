@@ -18,10 +18,13 @@ export function createHost(invoke, reactive, dom, environment, live, platform = 
     }
     if (failure) throw failure.error;
   };
+  // `nsh_core::host_channel`'s errors, as the native channel rejects with.
+  const failure = (message, code) => Object.assign(new Error(message), { code });
+  // A string is the embedding app's own error message.
   const settle = (id, ok, value) => {
     const item = pending.get(id); if (!item) return;
     pending.delete(id); clearTimeout(item.timer);
-    if (ok) item.resolve(value); else item.reject(value instanceof Error ? value : new Error(String(value)));
+    if (ok) item.resolve(value); else item.reject(value instanceof Error ? value : failure(String(value), "ERR_NSH_HOST_ERROR"));
   };
   const host = { ...platform,
     params: initial[1],
@@ -47,9 +50,9 @@ export function createHost(invoke, reactive, dom, environment, live, platform = 
       return new Promise((resolve, reject) => {
         nameOf(name);
         const timeout = options?.timeout === undefined ? 30000 : Number(options.timeout);
-        if (!Number.isFinite(timeout) || timeout < 0) throw new TypeError("host.call: invalid timeout");
-        if (pending.size >= 1024) throw new RangeError("host.call: too many pending calls");
-        const id = next++, timer = timeout ? setTimeout(() => settle(id, false, `host.call(${name}) timed out after ${timeout} ms`), timeout) : null;
+        if (!Number.isFinite(timeout) || timeout < 0) throw new RangeError(`nsh/host: invalid timeout ${timeout}`);
+        if (pending.size >= 1024) throw failure(`host.call("${name}"): 1024 calls already wait for the embedding app's answers`, "ERR_NSH_QUOTA_EXCEEDED");
+        const id = next++, timer = timeout ? setTimeout(() => settle(id, false, failure(`nsh/host: ${name} timed out after ${timeout} ms`, "ETIMEDOUT")), timeout) : null;
         pending.set(id, { resolve, reject, timer });
         try { invoke(431, [name, data, id]); } catch (error) { settle(id, false, error); }
       });

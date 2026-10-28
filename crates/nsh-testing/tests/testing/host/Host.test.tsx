@@ -10,7 +10,7 @@ test("the page's host answers calls", async () => {
 test("a call the host fails rejects with its message", async () => {
   const app = await open("./App.tsx");
   await app.press("label:fail");
-  await app.waitFor("text:result: rejected: boom");
+  await app.waitFor("text:result: rejected: ERR_NSH_HOST_ERROR boom");
   await app.press("label:big");
   await app.waitFor("text:/result: rejected: .*BigInt/");
 });
@@ -29,7 +29,7 @@ test("each app gets a host of its own", async () => {
 test("a function the app does not declare is refused", async () => {
   const app = await open("./App.tsx");
   await app.press("label:other");
-  await app.waitFor("text:/result: rejected: .*capabilities\\.host/");
+  await app.waitFor("text:/result: rejected: ERR_ACCESS_DENIED /");
 });
 
 test("a call the host does not answer times out on the app's clock", async () => {
@@ -38,7 +38,7 @@ test("a call the host does not answer times out on the app's clock", async () =>
   await app.clock.runFor(900);
   expect(app.shows("result: (none)")).toBe(true);
   await app.clock.runFor(200);
-  await app.waitFor("text:result: rejected: nsh/host: slow timed out after 1000 ms");
+  await app.waitFor("text:/result: rejected: ETIMEDOUT /");
 });
 
 test("the host's timers run on the app's clock", async () => {

@@ -168,7 +168,11 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |
 
 Positions count as ProseMirror's do: a text counts its UTF-16 code units, a leaf node one, a node with content its
-two boundaries. Anything that must outlive edits keeps an id in a node's attributes or a mark.
+two boundaries. Anything that must outlive edits keeps an id in a node's attributes or a mark. A position query
+(`resolve(pos)`, `nodeAt(pos)`, `coordsAtPos(pos)`, `findParentNode(name, pos)`, ...) throws a `RangeError` for a
+position outside the document (`0` to `doc.content.size`), as ProseMirror's `resolve` does, and answers `null` where
+nothing is there (`nodeAt` at the end of a node, `coordsAtPos` with no view showing the editor). `run` and `can` throw
+a `TypeError` for a command, node or mark type the editor does not know.
 
 ### Taking over transactions
 
@@ -198,7 +202,7 @@ editor.run(command("toggleBold"));
 
 `StarterKit` brings `Document`, `Paragraph`, the text node, `Heading`, `Blockquote`, `BulletList`, `OrderedList`,
 `ListItem`, `TaskList`, `TaskItem`, `CodeBlock`, `HardBreak`, `HorizontalRule`, `RichImage` (Tiptap's `Image`),
-`Bold`, `Italic`, `Strike`, `Code`, `Underline`, `Link`, `Highlight`, `Subscript`, `Superscript`, `RichTextStyle` (Tiptap's `TextStyle`),
+`Bold`, `Italic`, `Strike`, `Code`, `Underline`, `RichLink` (Tiptap's `Link`), `Highlight`, `Subscript`, `Superscript`, `RichTextStyle` (Tiptap's `TextStyle`),
 `TextAlign`, `History`, `TrailingNode`, `Typography` and `ListKeymap`. An option named as one set to `false` leaves
 it out, an object configures it (`heading: { levels }`, `history: { depth }`, `textAlign: { types }`,
 `codeBlock: { enableTabIndentation }`). Each class's `configure(options)` and `extend({...})` make a

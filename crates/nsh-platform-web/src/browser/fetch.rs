@@ -85,7 +85,8 @@ impl Fetches {
     /// Tells the listener what happened to request `id`: `[id, 0, status,
     /// statusText, url, redirected, [[name, value], …]]` for the head,
     /// `[id, 1, bytes]` for body data, `[id, 2]` at its end and `[id, 3,
-    /// message]` when it failed.
+    /// message]` when it failed (`[id, 4, message, url]` when the
+    /// capabilities refused it: [`Self::refused`]).
     pub(super) fn event(&self, id: u32, event: FetchEvent) {
         let Some(listener) = self.listener.borrow().clone() else {
             return;
@@ -122,6 +123,26 @@ impl Fetches {
         match args {
             Ok(Some(args)) => report(listener.call(&Value(0), &args)),
             Ok(None) => {}
+            Err(error) => report(Err(error)),
+        }
+    }
+
+    /// Tells the listener that the capabilities refused request `id`:
+    /// `[id, 4, message, url]`.
+    pub(super) fn refused(&self, id: u32, message: &str, url: &str) {
+        let Some(listener) = self.listener.borrow().clone() else {
+            return;
+        };
+        let args = (|| {
+            Value::array([
+                Value::number(id.into()),
+                Value::number(4.0),
+                Value::string(message)?,
+                Value::string(url)?,
+            ])
+        })();
+        match args {
+            Ok(args) => report(listener.call(&Value(0), &args)),
             Err(error) => report(Err(error)),
         }
     }

@@ -244,7 +244,8 @@ out of the proposal. A view showing a `patch` shows excerpts of the files, and i
 
 `ref={diff}` gives the view's methods (`DiffViewRef`). Methods that return a value (`hunks()`, `stats()`) return a
 `Promise` of it in JS, so `await` them: `const changes = await diff.hunks()`. For counts shown on screen,
-`onStatsChange` reports them as they change.
+`onStatsChange` reports them as they change. A method given a change, a separator or a file the diff does not have
+changes nothing and logs a warning naming the method and the value.
 
 | Method | Description |
 |---|---|

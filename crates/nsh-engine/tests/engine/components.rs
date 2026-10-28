@@ -959,6 +959,53 @@ fn runtime_modules() {
     assert_eq!(focused, Some(note));
 }
 
+const IMAGE_DENIED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Image } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    () => "ok",
+    (e) => [e.name, e.code, e.permission, e.resource].join(" "),
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Image.getSize("https://evil.io/a.png")),
+    settled(Image.prefetch("https://evil.io/b.png")),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn image_loads_stay_within_the_capabilities() {
+    let (_engine, rx) = start_with(
+        IMAGE_DENIED,
+        Environment::default(),
+        Some(r#"{ "network": { "hosts": ["example.com"] } }"#),
+        None,
+    );
+    let wanted = "Error ERR_ACCESS_DENIED network https://evil.io/a.png | \
+                  Error ERR_ACCESS_DENIED network https://evil.io/b.png";
+    let mut asked = false;
+    let batches = until(&rx, |batch| {
+        asked |= batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::ImageInfo { .. },
+                    ..
+                }
+            )
+        });
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)));
+    assert!(!asked, "a refused image load reached the platform");
+}
+
 const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
 
 const shown = signal("waiting");
@@ -1111,12 +1158,61 @@ fn the_clipboard_round_trips_through_the_platform() {
     );
 }
 
+/// Every clipboard function, as each settles: `ok` or the error's class,
+/// `code`, `permission` and `resource`.
+const CLIPBOARD_DENIED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    () => "ok",
+    (e) => [e.name, e.code, e.permission, JSON.stringify(e.resource)].join(" "),
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Clipboard.writeText("copied")),
+    settled(Clipboard.readText()),
+    settled(Clipboard.hasText()),
+    settled(Clipboard.writeImage("data:image/png;base64,aGk=")),
+    settled(Clipboard.readImage()),
+    settled(Clipboard.hasImage()),
+    settled(Clipboard.readFiles()),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
 #[test]
 fn the_clipboard_needs_its_capability() {
-    let (engine, rx) = start_with(CLIPBOARD, Environment::default(), Some("{}"), None);
-    // Nothing reaches the platform, and reads find nothing.
-    let commands = serve_clipboard(&engine, &rx, "false false ");
-    assert!(commands.is_empty(), "{commands:?}");
+    let (_engine, rx) = start_with(CLIPBOARD_DENIED, Environment::default(), Some("{}"), None);
+    // Every call rejects, and nothing reaches the platform.
+    let wanted = [r#"Error ERR_ACCESS_DENIED clipboard """#; 7].join(" | ");
+    let mut commands = 0;
+    let batches = until(&rx, |batch| {
+        commands += batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::SetClipboard(_)
+                            | Command::ReadClipboard { .. }
+                            | Command::SetClipboardImage(_)
+                            | Command::ReadClipboardImage { .. }
+                            | Command::ReadClipboardFiles { .. },
+                    }
+                )
+            })
+            .count();
+        shows(batch, &wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, &wanted)), "{wanted}");
+    assert_eq!(commands, 0, "a refused call reached the platform");
     let (engine, rx) = start_with(
         CLIPBOARD,
         Environment::default(),
@@ -1274,6 +1370,72 @@ fn picked_images_reach_js_as_files() {
         asked.max_dimension,
         Some(nsh_core::geometry::DevicePixels(1024))
     );
+}
+
+const PICK: &str = r#"import { mount, signal, Text } from "nsh";
+import { Picker } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(() => {
+  Picker.pickImages().then(
+    (images) => shown.set(`picked ${images.length}`),
+    (e) => shown.set(`rejected ${e.name} ${e.code} ${e.permission}`),
+  );
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn the_picker_needs_its_capability() {
+    let (_engine, rx) = start_with(PICK, Environment::default(), Some("{}"), None);
+    let wanted = "rejected Error ERR_ACCESS_DENIED picker";
+    let mut asked = false;
+    let batches = until(&rx, |batch| {
+        asked |= batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::PickImages { .. },
+                    ..
+                }
+            )
+        });
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)));
+    assert!(!asked, "a refused pick reached the platform");
+}
+
+#[test]
+fn a_cancelled_pick_resolves_empty() {
+    let (engine, rx) = start_with(
+        PICK,
+        Environment::default(),
+        Some(r#"{ "picker": true }"#),
+        None,
+    );
+    let control = engine.control();
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::PickImages { id, .. },
+            } = item
+            {
+                control.dispatch_event(
+                    ROOT_ID,
+                    EventKind::Pick,
+                    EventPayload::Picked {
+                        id: *id,
+                        files: Vec::new(),
+                    },
+                );
+            }
+        }
+        shows(batch, "picked 0")
+    });
+    assert!(batches.iter().any(|b| shows(b, "picked 0")));
 }
 
 const INPUT_TRAITS: &str = r##"import { mount, Text } from "nsh";
@@ -4499,6 +4661,96 @@ fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
         .control()
         .dispatch_event(week, EventKind::Press, EventPayload::None);
     until(&rx, |b| shows(b, r#"Range: ["2026-10-19","2026-10-25"]"#));
+}
+
+const BASE_CALENDAR_MATCHER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Calendar } from "nsh/base";
+
+function App() {
+  const asked = signal(0);
+  return (
+    <View>
+      <Calendar
+        defaultValue="2026-10-10"
+        numberOfMonths={2}
+        previousAccessibilityLabel="Previous"
+        nextAccessibilityLabel="Next"
+        disabledMatcher={(date) => {
+          asked.set(asked() + 1);
+          return date.endsWith("-14");
+        }}
+      />
+      <Text>{`Asked: ${asked()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Calendar`'s JS `disabledMatcher` is asked about each shown date once,
+/// in one JS turn: a turn of the months asks only about the days it
+/// brings, and a turn back asks nothing (its answers stay).
+#[test]
+fn a_calendars_js_matcher_is_asked_once_per_date() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_CALENDAR_MATCHER);
+    let button = |batches: &[MountBatch], label: &str| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == AccessibilityRole::Button
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+    };
+    let asked = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => {
+                    text.text.strip_prefix("Asked: ").map(str::to_owned)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // October 2026 (September 27 to October 31) and November (November 1
+    // to December 5): 70 days, asked in one turn.
+    let first = until(&rx, |b| shows(b, "Asked: 70"));
+    assert_eq!(asked(&first).last().map(String::as_str), Some("70"));
+    let next = button(&first, "Next").expect("Next");
+    let previous = button(&first, "Previous").expect("Previous");
+
+    // November and December (November 29 to January 2): only December 6
+    // to January 2 are new.
+    engine
+        .control()
+        .dispatch_event(next, EventKind::Press, EventPayload::None);
+    let turned = until(&rx, |b| shows(b, "Asked: 98"));
+    assert_eq!(
+        asked(&turned),
+        ["98"],
+        "a turn asks only about the days it brings, in one turn"
+    );
+
+    // Back to October and November: every day was answered.
+    engine
+        .control()
+        .dispatch_event(previous, EventKind::Press, EventPayload::None);
+    let back = until(&rx, |_| false);
+    assert!(!back.is_empty(), "the months turned back");
+    assert_eq!(
+        asked(&back),
+        Vec::<String>::new(),
+        "a turn back asks nothing"
+    );
 }
 
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
@@ -8821,6 +9073,148 @@ fn base_plot_label_moves_with_the_domain() {
     assert!((x - 100.0).abs() < 0.01 && y.abs() < 0.01, "({x}, {y})");
     let (x, y) = moved(&mut animator, 0.25);
     assert!(x.abs() < 0.01 && y.abs() < 0.01, "({x}, {y})");
+}
+
+const BASE_PLOT_APPEAR_SCOPE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Line, Plot, PlotAppearScope } from "nsh/base/plot";
+
+function App() {
+  const shown = signal(true);
+  const key = signal("a");
+  const scope = signal(1);
+  const rows = [{ v: 1 }, { v: 2 }, { v: 3 }];
+  return (
+    <View>
+      <PlotAppearScope id={scope()}>
+        <If when={shown()}>
+          <Plot data={rows} y="v" interactive={false} appearGeneration={`row ${key()}`} motion={{ appear: { duration: 300 } }} style={{ width: 100, height: 40 }}>
+            <Line />
+          </Plot>
+        </If>
+      </PlotAppearScope>
+      {/* Outside a scope: made again, it draws in again. */}
+      <If when={shown()}>
+        <Plot data={rows} y="v" interactive={false} appearGeneration={1} motion={{ appear: { duration: 200 } }} style={{ width: 100, height: 40 }}>
+          <Line />
+        </Plot>
+      </If>
+      <Text>{`state ${shown()} ${key()} ${scope()}`}</Text>
+      <View testID="toggle" onPress={() => shown.set(!shown())} style={{ height: 20 }} />
+      <View testID="key" onPress={() => key.set(key() === "a" ? "b" : "a")} style={{ height: 20 }} />
+      <View testID="rename" onPress={() => scope.set(scope() + 1)} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `PlotAppearScope` (`gpui-base`'s): a plot made again inside it (a row
+/// a list brings back) whose generation finished there shows whole at
+/// once and starts no appear, where one outside a scope draws in again;
+/// a new generation replays, one taken away before it finished draws in
+/// again, a plot's last generation is forgotten once it finishes another,
+/// and a new `id` draws the scope's plots in afresh while they stay.
+#[test]
+fn base_plot_appear_scope_remembers_the_appears_that_finished() {
+    use nsh_core::{
+        animation::{AnimationOp, Driver, Finished},
+        canvas::CanvasOp,
+    };
+    // The last appear of `ms` started (its time, 0 to 1).
+    let started = |batches: &[MountBatch], ms: f32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::Animation(AnimationOp::Start {
+                    animation,
+                    driver:
+                        Driver::Timing {
+                            to, duration_ms, ..
+                        },
+                    ..
+                }) if *to == 1.0 && *duration_ms == ms => Some(*animation),
+                _ => None,
+            })
+    };
+    let clipped = |batches: &[MountBatch]| {
+        plot_drawings(batches)
+            .iter()
+            .filter(|(_, d)| d.ops.iter().any(|op| matches!(op, CanvasOp::Clip(..))))
+            .count()
+    };
+    let (engine, rx) = start(BASE_PLOT_APPEAR_SCOPE);
+    let settled = |batches: &mut Vec<MountBatch>| batches.extend(until(&rx, |_| false));
+    let mut first = until(&rx, |b| shows(b, "state true a 1"));
+    settled(&mut first);
+    let (Some(inside), Some(outside)) = (started(&first, 300.0), started(&first, 200.0)) else {
+        panic!("both plots draw in")
+    };
+    let finish = |animations: &[u32]| {
+        engine.control().animations_finished(
+            animations
+                .iter()
+                .map(|&animation| Finished::new(animation, true))
+                .collect(),
+        );
+        until(&rx, |_| false)
+    };
+    let done = finish(&[inside, outside]);
+    assert_eq!(plot_drawings(&done).len(), 2);
+    assert_eq!(clipped(&done), 0);
+
+    let press = |id: &str| {
+        engine
+            .control()
+            .dispatch_event(test_view(&first, id), EventKind::Press, EventPayload::None)
+    };
+    let after = |id: &str, state: &str| {
+        press(id);
+        let mut batches = until(&rx, |b| shows(b, state));
+        settled(&mut batches);
+        batches
+    };
+    // Made again: whole at once inside the scope, drawn in again outside.
+    after("toggle", "state false a 1");
+    let back = after("toggle", "state true a 1");
+    assert_eq!(started(&back, 300.0), None);
+    let Some(outside) = started(&back, 200.0) else {
+        panic!("the plot outside the scope draws in again")
+    };
+    assert_eq!(clipped(&back), 1);
+    finish(&[outside]);
+
+    // A new generation replays, the other plot stays.
+    let replayed = after("key", "state true b 1");
+    assert!(started(&replayed, 300.0).is_some());
+    assert_eq!(started(&replayed, 200.0), None);
+    // Taken away before it finished: drawn in again from the start.
+    after("toggle", "state false b 1");
+    let back = after("toggle", "state true b 1");
+    let (Some(inside), Some(outside)) = (started(&back, 300.0), started(&back, 200.0)) else {
+        panic!("an unfinished appear replays")
+    };
+    finish(&[inside, outside]);
+    // Its last generation was forgotten when this one finished.
+    let again = after("key", "state true a 1");
+    let Some(inside) = started(&again, 300.0) else {
+        panic!("going back replays")
+    };
+    finish(&[inside]);
+    after("toggle", "state false a 1");
+    let back = after("toggle", "state true a 1");
+    let Some(outside) = started(&back, 200.0) else {
+        panic!("the plot outside the scope draws in again")
+    };
+    assert_eq!(started(&back, 300.0), None);
+    finish(&[outside]);
+
+    // A new id forgets: the plot in the scope draws in again where it is.
+    let renamed = after("rename", "state true a 2");
+    assert!(started(&renamed, 300.0).is_some());
+    assert_eq!(started(&renamed, 200.0), None);
 }
 
 const BASE_PLOT_KEYS: &str = r##"import { mount, signal, Text, View } from "nsh";

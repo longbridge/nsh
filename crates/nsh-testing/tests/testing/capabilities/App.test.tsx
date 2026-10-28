@@ -9,5 +9,5 @@ test("the app runs under the capabilities its nsh.json declares", async () => {
     },
   });
   await app.waitFor("declared: ok 200");
-  await app.waitFor("text:/other: refused .+/");
+  await app.waitFor("text:other: refused ERR_ACCESS_DENIED");
 });

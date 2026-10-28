@@ -1459,6 +1459,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "canGoForward" => "canGoForward",
                 "data" => "data",
                 "message" => "message",
+                "code" => "code",
                 "duration" => "duration",
                 "width" => "width",
                 "height" => "height",

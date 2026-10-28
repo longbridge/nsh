@@ -245,7 +245,8 @@ closing docks still work, so a locked workspace is still a workspace to use.
 ## Methods
 
 `ref={area}` gives the area's methods (`DockAreaRef`), for commands, shortcuts and menus of the app's. Each edit is
-reported with `onLayoutChange` as the user's are.
+reported with `onLayoutChange` as the user's are. A method given a panel, a group, a tab index or a dock the layout
+does not have leaves the layout as it is and logs a warning naming the method and the value.
 
 | Method | Description |
 |---|---|

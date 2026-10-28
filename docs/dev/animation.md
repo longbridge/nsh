@@ -77,7 +77,13 @@
 - **Layout animation**: `LayoutAnimation.configureNext(config)` (or the `easeInEaseOut` / `linear` / `spring` presets) animates
   the next commit's frames, insertions and removals natively. The presets are `LayoutAnimation::EASE_IN_EASE_OUT` /
   `LINEAR` / `SPRING` in Rust (what Rust components pass to `animate_layout`), handed to `nsh`'s `LayoutAnimation` as data; the config's
-  decoding and types come from the same module.
+  decoding and types come from the same module. That animates every frame of the commit, app-wide; a component that
+  sizes one region (a reveal) scopes it with `ElementRef::animate_layout(transition)`, `Command::LayoutAnimation`
+  sent to the region's node: only the frames its change moves animate (its subtree's, its ancestors' children, and
+  the content of those that changed size). The platforms know nothing of the scope: before handing out the batch,
+  the core leads each run of frames with the layout animation it takes, an empty one for the rest
+  (`core/layout_scope.rs`), as the platforms animate a frame with the last `MountItem::LayoutAnimation` before it.
+  Insertions and removals are not scoped (their animations are decided per batch on iOS, Android and the web).
 - **Desktop backends** (Windows, GPUI, Linux, macOS): one platform-free copy of what they animate. `nsh_core::transition`
   holds a view's layout animation, style transition and keyframes (`Live`: curves, springs, interpolation of frames,
   colors, transforms, shadows and corner radii, timing), which each backend steps on its frame clock and applies to its
@@ -127,7 +133,7 @@ maps to what:
 | `Sequence` | `Animated.sequence` / `Animation::sequence` (each step starts at the exact end of the one before) |
 | `Stagger` / `StaggerOrigin` (first, last, center, index) | `Animated.stagger(ms, list, { from })` / `Animation::stagger_from`, `StaggerFrom` |
 | `Presence` / `PresencePhase` (keeps content mounted while it exits) | `createMotion({ enter })` / `motion().entering(..)` for entrances, `await play(exit)` then removing the view for exits. Gap: no presence component that keeps a removed view mounted through its exit |
-| `MotionReveal` (measured vertical reveal, clipped) | `nsh/base`'s `Collapsible` `reveal`: a clip view between zero and the content's height whose change is a layout animation of its commit (a critically damped spring of `spring_control`'s time), the content kept until it has closed (`docs/dev/components.md` "Children, slots and rows"). Heights are not bindable to animated values, so a reveal is a layout animation, not a progress the app drives; no reveal element of its own yet |
+| `MotionReveal` (measured vertical reveal, clipped) | `nsh/base`'s `Collapsible` `reveal`: a clip view between zero and the content's height whose change is a layout animation of the frames it moves (`ElementRef::animate_layout`; a critically damped spring of `spring_control`'s time), the content kept until it has closed (`docs/dev/components.md` "Children, slots and rows"). Heights are not bindable to animated values, so a reveal is a layout animation, not a progress the app drives; no reveal element of its own yet |
 | Reduced motion (transitions and springs snap) | Motions land at their end; the low-level `Animated` / `timing` / `keyframes` play as written and apps choose with `reduce_motion()` |
 | `MotionTransform` (translation, scale, rotation, opacity bundle) | A `Motion`'s channels (opacity, translate X / Y, rotate, rotate X / Y, scale, scale X / Y), bound with `style={m.style}` / `bind_motion` |
 

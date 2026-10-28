@@ -130,8 +130,9 @@ pub enum MemberCall {
     /// As a task of the core, started in order with the UI's ops; JS gets
     /// a promise.
     Async(AsyncCall),
-    /// In the JS call, returning a task's start ([`super::Later`]): what
-    /// the call throws throws there; JS gets a promise of the task.
+    /// In the JS call, returning a task's start ([`super::Later`]): JS gets
+    /// a promise of the task, rejected with what the call refuses (a
+    /// method returning a promise never throws).
     Start(AsyncCall),
 }
 
@@ -789,7 +790,7 @@ pub(crate) mod __private {
         Ok(Box::new(move || value.into_future()))
     }
 
-    /// [`start`] of a `Result`: an `Err` throws in the call.
+    /// [`start`] of a `Result`: an `Err` rejects the call's promise.
     pub fn start_result<T: Ret + 'static, E: crate::element::IntoThrown>(
         value: Result<crate::element::Later<T>, E>,
     ) -> Result<TaskStart, Thrown> {

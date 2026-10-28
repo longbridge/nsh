@@ -131,6 +131,13 @@ pub trait Host {
     fn fetch_event(&self, id: u32, event: FetchEvent) {
         let _ = (id, event);
     }
+    /// Fail request `id`, which the app's capabilities do not grant:
+    /// `message` says why, `url` is the URL refused (`fetch` rejects with
+    /// `code` `ERR_ACCESS_DENIED`).
+    fn fetch_refused(&self, id: u32, message: &str, url: &str) {
+        let _ = url;
+        self.fetch_event(id, FetchEvent::Failed(message.to_owned()));
+    }
     /// The reason the host stopped, if it did.
     fn fatal(&self) -> Option<String>;
     /// Stop the host and cancel pending callbacks and promises.
@@ -317,6 +324,9 @@ impl Script {
     }
     pub(crate) fn fetch_event(&self, id: u32, event: FetchEvent) {
         self.0.fetch_event(id, event);
+    }
+    pub(crate) fn fetch_refused(&self, id: u32, message: &str, url: &str) {
+        self.0.fetch_refused(id, message, url);
     }
     pub(crate) fn collect_garbage(&self) {}
     pub(crate) fn fatal(&self) -> Option<String> {

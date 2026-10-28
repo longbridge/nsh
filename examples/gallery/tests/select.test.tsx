@@ -54,7 +54,7 @@ describe("on a phone", () => {
     expect(app.texts()).toContain("SERIF");
     // A font that is not installed takes no press.
     expect(app.enabled("role:option[Playfair Display]")).toBe(false);
-    await expect(() => app.press("role:option[Playfair Display]")).rejects.toThrow("is disabled");
+    await expect(() => app.press("role:option[Playfair Display]")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
     // Ignoring case; the sections without a match go. Each match shows its
     // title (the rows the app draws stay in their own rows as others go).
     await app.type("text:Search fonts", "M");
@@ -83,7 +83,7 @@ describe("on a phone", () => {
 
   test("a disabled select does not open", async () => {
     expect(app.enabled("role:combobox[Language]")).toBe(false);
-    await expect(() => app.press("role:combobox[Language]")).rejects.toThrow("is disabled");
+    await expect(() => app.press("role:combobox[Language]")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
   });
 
   test("a sort menu in a list header orders the downloads, and its arrow turns the order round", async () => {

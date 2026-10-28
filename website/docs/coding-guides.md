@@ -919,6 +919,8 @@ props and events, its crate's exports, the functions a host app's native compone
 - a mode is a string union, which can gain values, rather than a boolean that later needs a third state;
 - a value has one type: `version: string`, never `string | number`;
 - what a function returns is an object, which can gain a field, rather than a tuple or a bare value;
+- a function returning a Promise reports every failure by rejecting it, and a failure the caller can handle carries a
+  `code`, as NSH's own do: callers branch on codes, while messages are for people and may change;
 - a rename keeps the old name as a `@deprecated` alias of the same implementation.
 
 In Rust, private fields are the default for behavioral state that must evolve without breaking callers. Public fields
@@ -945,12 +947,15 @@ the fallback behavior:
 
 A platform branch must preserve the semantic contract even if presentation differs. For example, a dialog is a sheet
 on iOS and a layer over the window on the desktops, but the app still needs a coherent open state. Test the shared
-behavior headless and the platform's part with `nsh test --target`.
+behavior headless and the platform's part with `nsh test --target`. Give every branch on a value NSH reports
+(`platform.os`, a state, a reason) a `default`: later releases add platforms and cases, and an app delivered
+today runs on them ([Compatibility](./compatibility.md)).
 
 An app declares what it reaches outside its VM in `nsh.json` `"capabilities"`: the hosts it fetches from, the pages a
 web view shows, the clipboard, the status bar ([Sandbox and Capabilities](./sandbox-and-capabilities.md)). An app
 that will be delivered into other apps lists exactly what it uses, and handles a refused request as it handles a
-failed one: a host app may grant less than the app declares.
+failed one: a host app may grant less than the app declares. A refused call fails with `code` `"ERR_ACCESS_DENIED"`,
+its `permission` naming the capability and its `resource` what was asked for.
 
 ## File and naming conventions
 
