@@ -154,8 +154,8 @@ bun install --frozen-lockfile --cwd ../nsh-showcases
 
 `SHOWCASES_DIR` points at a checkout elsewhere. Without one the site builds
 with an empty App Stories page; `NSH_REQUIRE_SHOWCASES=1` (the deployment's)
-requires the catalog. CI checks it out into `.showcases` with the
-`SHOWCASES_TOKEN` secret, and the catalog's workflow dispatches
+requires the catalog. CI checks it out into `.showcases` and requires it,
+and the catalog's workflow dispatches
 `website.yml` after each merge and its weekly star refresh, with its
 `DOCS_DISPATCH_TOKEN` secret.
 
