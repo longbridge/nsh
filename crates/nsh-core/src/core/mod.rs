@@ -56,7 +56,7 @@ const NO_KEY: Key = Key::MAX;
 
 /// Rounds of binding the components' own lists per commit, at most.
 const MAX_VIRTUAL_ROUNDS: u32 = 8;
-/// The longest run without white space a multiline input's value is
+/// The longest run without a line-break opportunity a multiline input's value is
 /// measured with unbroken (`broken_runs`): longer than a line of any input,
 /// so ordinary text measures as it is shown.
 const MEASURED_RUN: usize = 1024;
@@ -7157,7 +7157,7 @@ fn pressable(events: EventMask) -> bool {
 }
 
 /// `content` with a line break after every [`MEASURED_RUN`] characters of
-/// a run without white space, as a multiline input's value is measured.
+/// a run without a line-break opportunity, as a multiline input's value is measured.
 ///
 /// Line breakers search back over the whole run for a break opportunity
 /// at the end of every line they lay out (CoreText through ICU), so one
@@ -7168,22 +7168,24 @@ fn pressable(events: EventMask) -> bool {
 /// grow by a line per break, and text without such runs is measured as is.
 fn broken_runs(content: &str) -> std::borrow::Cow<'_, str> {
     let mut broken: Option<String> = None;
-    let (mut run, mut from) = (0, 0);
-    for (i, c) in content.char_indices() {
-        if c.is_whitespace() {
-            run = 0;
-            continue;
+    let (mut start, mut from) = (0, 0);
+    for (end, _) in unicode_linebreak::linebreaks(content) {
+        let mut run = 0;
+        for (offset, c) in content[start..end].char_indices() {
+            let i = start + offset;
+            // The final character may itself provide the break (space or
+            // newline). Do not introduce another line immediately before it.
+            if run == MEASURED_RUN && i + c.len_utf8() < end {
+                let broken = broken.get_or_insert_with(|| {
+                    String::with_capacity(content.len() + content.len() / MEASURED_RUN)
+                });
+                broken.push_str(&content[from..i]);
+                broken.push('\n');
+                (run, from) = (0, i);
+            }
+            run += 1;
         }
-        run += 1;
-        let end = i + c.len_utf8();
-        if run == MEASURED_RUN && end < content.len() {
-            let broken = broken.get_or_insert_with(|| {
-                String::with_capacity(content.len() + content.len() / MEASURED_RUN)
-            });
-            broken.push_str(&content[from..end]);
-            broken.push('\n');
-            (run, from) = (0, end);
-        }
+        start = end;
     }
     match broken {
         Some(mut broken) => {

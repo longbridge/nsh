@@ -3038,6 +3038,14 @@ fn multiline_inputs_measure_long_runs_in_pieces() {
             "b".repeat(1024)
         )
     );
+    // Existing breaks are not duplicated, and non-breaking spaces do not
+    // let a long unbreakable run evade the limit.
+    let ending = format!("{}\n", "a".repeat(1024));
+    assert_eq!(measured(&c, &ending), format!("{ending}\u{200b}"));
+    let nbsp = "a\u{a0}".repeat(1200);
+    assert!(measured(&c, &nbsp).contains('\n'));
+    let cjk = "漢".repeat(2500);
+    assert_eq!(measured(&c, &cjk), cjk);
     // Text without such runs, and a single line, measure as they are.
     let prose = "lorem ipsum ".repeat(500);
     assert_eq!(measured(&c, &prose), prose);
