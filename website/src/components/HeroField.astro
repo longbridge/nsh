@@ -27,10 +27,7 @@
     --hero-star-rose: #ffb49a;
     --hero-star-gold: #f2e69a;
     --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-nebula-teal: rgba(60, 220, 235, 0.42);
-    --hero-nebula-blue: rgba(70, 120, 255, 0.46);
-    --hero-nebula-violet: rgba(150, 96, 255, 0.44);
-    --hero-nebula-rose: rgba(255, 90, 170, 0.44);
+    --hero-nebula: rgba(255, 255, 255, 0.46);
   }
   html.light,
   html:not(.dark) {
@@ -40,10 +37,7 @@
     --hero-star-rose: #b0503a;
     --hero-star-gold: #9a8410;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-nebula-teal: rgba(10, 160, 180, 0.16);
-    --hero-nebula-blue: rgba(50, 90, 230, 0.16);
-    --hero-nebula-violet: rgba(120, 70, 230, 0.15);
-    --hero-nebula-rose: rgba(230, 60, 140, 0.13);
+    --hero-nebula: rgba(190, 190, 190, 0.2);
   }
   .hero-field {
     position: absolute;
@@ -141,10 +135,7 @@
     uniform vec3 starRose;
     uniform vec3 starGold;
     uniform vec4 glowColor;
-    uniform vec4 tealColor;       // the nebula's other hues, with the accent (glowColor)
-    uniform vec4 blueColor;
-    uniform vec4 violetColor;
-    uniform vec4 roseColor;
+    uniform vec4 nebulaColor;     // the nebula's lightness (rgb, scaling its hues) and strength (alpha)
     ${NOISE}
     vec4 sampleField(vec2 p) { return texture2D(field, vec2(p.x / size.x, 1.0 - p.y / size.y)); }
 
@@ -322,19 +313,17 @@
       // The nebula under the stars: the clouds inside the band and the core,
       // their hues weaving, the dust lanes and the rift dark, brighter where
       // a wave passes, lying in belts as Jupiter's do.
-      float cloud = smoothstep(0.3, 0.75, f.r);
+      float cloud = smoothstep(0.2, 0.68, f.r);
       float fine = smoothstep(0.55, 0.92, detail);
       float clear = (1.0 - 0.85 * dust) * sky;
-      // Each region keeps a color of its own rather than a blend of all:
-      // blue going teal in the open band, rose and violet in every other
-      // belt, where the clouds gather and toward the core.
+      // Every color of the spectrum, each region keeping a pure hue of its
+      // own: the hue follows where the clouds lie, shifts belt to belt and
+      // slowly turns; the brightest filaments pale a little.
       float belt = belts(p, f.r, detail);
-      float patchy = clamp(smoothstep(0.5, 0.8, f.g) * (0.4 + 0.6 * cloud) * 0.6 + smoothstep(0.6, 0.95, belt) * 0.7, 0.0, 1.0);
-      vec4 cool = mix(blueColor, tealColor, smoothstep(0.3, 0.8, f.b));
-      vec4 bloom = mix(roseColor, violetColor, smoothstep(0.65, 0.95, f.g));
-      vec4 hue = mix(cool, bloom, patchy);
-      hue = mix(hue, bloom, clamp(gx.z * 1.2, 0.0, 1.0) * 0.6);
-      float gn = hue.a * (band * (0.12 + cloud * (0.45 + 0.9 * fine)) * 1.3 + gx.z * (0.35 + 0.65 * cloud) * 0.7) * (0.45 + 0.75 * belt) * clear;
+      float h = f.g * 1.3 + f.b * 0.5 + belt * 0.22 + time * 0.012;
+      vec4 hue = vec4((0.5 + 0.5 * cos(6.2832 * (h + vec3(0.0, 0.33, 0.67)))) * nebulaColor.rgb, nebulaColor.a);
+      hue.rgb = mix(hue.rgb, nebulaColor.rgb, 0.18 * fine * cloud);
+      float gn = hue.a * (band * (0.3 + cloud * (0.45 + 0.9 * fine)) * 1.2 + gx.z * (0.35 + 0.65 * cloud) * 0.7) * (0.45 + 0.75 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
       float g = clamp(gn + gw, 0.0, 1.0);
       vec3 glowRgb = (hue.rgb * gn + glowColor.rgb * gw) / max(gn + gw, 1e-4);
@@ -450,10 +439,7 @@
       gl!.uniform3fv(u('starRose'), color('--hero-star-rose', [1, 0.71, 0.6, 1]).slice(0, 3));
       gl!.uniform3fv(u('starGold'), color('--hero-star-gold', [0.95, 0.9, 0.6, 1]).slice(0, 3));
       gl!.uniform4fv(u('glowColor'), color('--hero-glow', [0.78, 0.95, 0.43, 0.16]));
-      gl!.uniform4fv(u('tealColor'), color('--hero-nebula-teal', [0.22, 0.77, 0.77, 0.17]));
-      gl!.uniform4fv(u('blueColor'), color('--hero-nebula-blue', [0.3, 0.45, 1, 0.2]));
-      gl!.uniform4fv(u('violetColor'), color('--hero-nebula-violet', [0.59, 0.36, 0.96, 0.19]));
-      gl!.uniform4fv(u('roseColor'), color('--hero-nebula-rose', [1, 0.31, 0.62, 0.3]));
+      gl!.uniform4fv(u('nebulaColor'), color('--hero-nebula', [1, 1, 1, 0.46]));
     }
 
     function layout() {
