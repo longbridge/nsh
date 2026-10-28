@@ -119,7 +119,7 @@
     },
     "track": {
       "boxShadow": "inset 0 1px 1px rgba(20,20,10,0.05)",
-      "borderColor": "#dcdcd5"
+      "borderColor": "#cdcdc5"
     },
     "fill": {
       "backgroundImage": "linear-gradient(180deg, #cdf47c 0%, #c4ed68 100%)",
@@ -144,13 +144,13 @@
     "glass": {
       "backgroundColor": "rgba(249,249,246,0.8)",
       "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 0 rgba(20,20,10,0.04)",
-      "borderColor": "#dcdcd5",
+      "borderColor": "#cdcdc5",
       "backdropFilter": "blur(20px)"
     },
     "menu": {
       "backgroundColor": "#f9f9f6",
       "boxShadow": "0 1px 0 rgba(20,20,10,0.04), 0 12px 28px -10px rgba(20,20,10,0.22)",
-      "borderColor": "#dcdcd5"
+      "borderColor": "#cdcdc5"
     }
   }
 }
