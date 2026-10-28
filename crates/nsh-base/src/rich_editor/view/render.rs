@@ -672,7 +672,7 @@ fn inline_of(
             _ => {}
         }
     }
-    widgets.sort_by_key(|w| (w.0, w.1));
+    crate::sort::sort_by_key(&mut widgets, |w| (w.0, w.1));
     let mut out = Inline::default();
     let mut text_at = 0u32;
     let mut emitted = 0usize;

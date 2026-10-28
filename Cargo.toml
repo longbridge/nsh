@@ -91,6 +91,8 @@ flate2 = "1"
 brotli = { version = "9", default-features = false, features = ["std"] }
 zstd = { version = "0.14", default-features = false }
 tar = { version = "0.4", default-features = false }
+# Pruning the web runtime to what an app uses (`nsh package --target web`).
+wasmparser = { version = "0.262", default-features = false, features = ["std", "validate", "simd"] }
 base64 = "0.22"
 getrandom = "0.3"
 slab = "0.4"

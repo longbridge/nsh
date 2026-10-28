@@ -12,7 +12,7 @@ demo: counter
 
 `nsh package --target web` 把应用发布成可放在任何 Web 服务器或 CDN 上的静态站点（[发布应用](#发布应用)），`nsh run --target web` 在你编辑时把它运行在浏览器里（[在浏览器里开发](#在浏览器里开发)）。本站每一个实时演示都使用这个 Web 后端。
 
-发布的 TSX 应用使用浏览器的 JavaScript 引擎。打包时，仅使用轻量运行时所支持的基础组件和标准 API 的应用会自动选择轻量运行时，其余应用使用完整运行时。语法高亮数据在首次高亮代码时加载。
+发布的 TSX 应用使用浏览器的 JavaScript 引擎。打包时为每个应用链接一个专属运行时，只包含应用导入的 `nsh/base` 组件和标准模块：只用基础组件的应用下载约 1.1 MB。语法高亮数据在首次高亮代码时加载。
 
 ## 各部分在哪里运行
 
@@ -157,7 +157,7 @@ nsh package App.tsx --target web --run
 | `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
-| `nsh.<digest>.wasm` | Rust 引擎、布局和组件，以及 Rust 应用自己的 crate。TSX 应用使用浏览器 JS；打包时根据应用导入的 API 选择轻量或完整运行时。 |
+| `nsh.<digest>.wasm` | Rust 引擎、布局和组件，以及 Rust 应用自己的 crate。TSX 应用使用浏览器 JS；打包时只链接应用导入的组件和标准模块。 |
 | `nsh-syntaxes.<digest>.bin` | 代码高亮用的语法定义（bat 的语法集：0.92 MB，brotli 后 0.8 MB），代码块、`Editor` 或 `DiffView` 第一次显示某种语言的代码时下载 |
 | `nsh-bindgen.<digest>.js` | 应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时所需的 wasm-bindgen 胶水代码，已压缩 |
 | `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
@@ -211,7 +211,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 | 文件 | 内容 |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | 已发布应用使用的运行时（约 15.1 MB，gzip 后 4.6 MB，brotli 后 3.4 MB；用 `web` profile 构建），与播放器的 `nsh.wasm` 是同一个构建 |
+| `gallery/nsh.<digest>.wasm` | gallery 的运行时，由 `nsh package` 为它链接（它用到全部组件和 `zlib`：约 11.8 MB，gzip 后 3.6 MB） |
 | `gallery/nsh-syntaxes.<digest>.bin` | 运行时高亮代码用的语法定义，演示第一次显示某种语言的代码时下载 |
 | `nsh-playground.wasm` | 同上，另含 NSH 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
 | `gallery/nsh.<digest>.js` | DOM 运行时（已压缩）：加载 wasm，应用批次，把输入转成事件 |

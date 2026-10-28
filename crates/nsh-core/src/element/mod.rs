@@ -249,7 +249,12 @@ pub mod __private {
         fn pick(event: &Self) -> Option<&Self::Data>;
     }
 
-    pub use super::{callback::NamedArgs, class::__private::*, value::object_field};
+    pub use super::{
+        callback::NamedArgs,
+        class::__private::*,
+        prop::{set_held, set_plain},
+        value::object_field,
+    };
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

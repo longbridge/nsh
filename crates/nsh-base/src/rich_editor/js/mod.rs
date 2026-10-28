@@ -55,7 +55,9 @@ use super::{
 };
 
 fn attrs_json(attrs: &super::model::Attrs) -> JsonValue {
-    JsonValue::Object(attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    JsonValue::Object(super::model::json_object(
+        &mut attrs.iter().map(|(k, v)| (k.clone(), v.clone())),
+    ))
 }
 
 fn rect_json(b: &nsh_core::prelude::Bounds<nsh_core::prelude::Points>) -> JsonValue {

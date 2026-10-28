@@ -30,6 +30,11 @@ std-crypto = ["dep:sha2", "dep:sha1", "dep:md-5", "dep:hmac", "dep:crc32fast", "
 # The playground's build (`nsh-playground.wasm`): also compiles TSX in the
 # page (`nsh_compile`; nsh's JSX compiler, no rolldown), about 3 MB more.
 compiler = ["browser", "dep:nsh-bundler"]
+# The runtime `nsh package` links an app's from (`nsh-browser.wasm`): it
+# keeps its symbols and relocations, and the CLI drops the parts of
+# `nsh/base` and the standard modules the app does not use. Never served
+# as it is.
+linkable = []
 # The development host's (`nsh-dev.wasm`): development bundles with hot
 # module replacement, and the model of the app that `nsh test --target web`
 # asks about (`nsh_testing::agent`).

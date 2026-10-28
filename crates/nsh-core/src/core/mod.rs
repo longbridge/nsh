@@ -2722,7 +2722,7 @@ impl<M: TextEngine> Core<M> {
                         })
                         .cloned();
                     let compiled = compiled.unwrap_or_else(|| {
-                        let compiled = crate::shader::Shader::compile(source);
+                        let compiled = crate::shader::compile_source(source);
                         // Bounded: an app making sources on the fly does not
                         // keep them all.
                         if self.shaders.len() >= 64 {
@@ -4883,15 +4883,8 @@ impl<M: TextEngine> Core<M> {
             // final layout, laid out again with the rest.
             let attachments =
                 !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
-            let engine = &self.text_engine;
-            let cache = &mut self.measure_cache;
-            if attachments
-                || !self
-                    .layout
-                    .measures_as_before(layout, |input, _, cx, style| {
-                        measure_leaf(engine, cache, input, cx, style)
-                    })
-            {
+            let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
+            if attachments || !self.layout.measures_as_before(layout, measure) {
                 self.layout.mark_dirty(layout);
                 self.needs_layout = true;
             }
@@ -5540,23 +5533,17 @@ impl<M: TextEngine> Core<M> {
 
     /// Lays out the tree under `root` within `available`.
     fn layout_root(&mut self, root: LayoutId, available: taffy::Size<AvailableSpace>) {
-        let engine = &self.text_engine;
-        let cache = &mut self.measure_cache;
+        let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
         self.layout
-            .compute_layout_with_measure(root, available, |input, _, cx, style| {
-                measure_leaf(engine, cache, input, cx, style)
-            });
+            .compute_layout_with_measure(root, available, measure);
     }
 
     /// Lays out the relayout boundaries a change inside made dirty
     /// (`LayoutTree::relayout_boundaries`), returning those laid out on
     /// their own: their subtrees' frames are new.
     fn relayout_boundaries(&mut self) -> Vec<Key> {
-        let engine = &self.text_engine;
-        let cache = &mut self.measure_cache;
-        self.layout.relayout_boundaries(|input, _, cx, style| {
-            measure_leaf(engine, cache, input, cx, style)
-        })
+        let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
+        self.layout.relayout_boundaries(measure)
     }
 
     /// Whether `key` is out of the layout: `display: none` on it or on a
@@ -6755,6 +6742,22 @@ fn min_content_width<M: TextEngine>(
     }
     cx.min_content = Some(width);
     width
+}
+
+/// What measures the leaves in every layout pass ([`measure_leaf`]): one
+/// closure type for all of them, so Taffy's algorithms, generic over it,
+/// are made once.
+fn leaf_measure<'a, M: TextEngine>(
+    engine: &'a M,
+    cache: &'a mut MeasureCache,
+) -> impl FnMut(
+    taffy::LayoutInput,
+    LayoutId,
+    Option<&mut LeafContext<M::Prepared>>,
+    &taffy::Style,
+) -> taffy::LayoutOutput
++ 'a {
+    move |input, _, cx, style| measure_leaf(engine, cache, input, cx, style)
 }
 
 /// A leaf's layout (`taffy::compute_leaf_layout`): Taffy resolves its

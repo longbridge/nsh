@@ -42,6 +42,7 @@ mod roving;
 mod select;
 mod sheet;
 mod slider;
+mod sort;
 mod switch;
 mod syntax;
 mod table;

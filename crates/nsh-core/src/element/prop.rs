@@ -334,3 +334,48 @@ impl<T> IntoProp<T, PropHandle> for Reactive<T> {
         self
     }
 }
+
+/// A field's new value from JS (`None`: unset, back to its default `init`):
+/// what each arm of `#[derive(Props)]`'s `set` does, once per type rather
+/// than once per field.
+fn take_prop<T: Clone + 'static>(
+    value: Option<super::AnyValue>,
+    js: &'static str,
+    init: fn() -> T,
+) -> Result<T, super::PropError> {
+    match value {
+        Some(v) => v.take::<T>().ok_or_else(|| of_another_type(js)),
+        None => Ok(init()),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn of_another_type(js: &'static str) -> super::PropError {
+    super::PropError(format!("`{js}`: a value of another type"))
+}
+
+/// `#[derive(Props)]`'s `set` of a `Prop<T>` field `js`: whether it changed.
+#[inline(never)]
+pub fn set_held<T: Clone + PartialEq + 'static>(
+    prop: &mut Prop<T>,
+    value: Option<super::AnyValue>,
+    js: &'static str,
+    init: fn() -> T,
+) -> Result<bool, super::PropError> {
+    Ok(prop.__set(Reactive::Static(take_prop(value, js, init)?)))
+}
+
+/// `#[derive(Props)]`'s `set` of a plain field `js`: whether it changed.
+#[inline(never)]
+pub fn set_plain<T: Clone + PartialEq + 'static>(
+    field: &mut T,
+    value: Option<super::AnyValue>,
+    js: &'static str,
+    init: fn() -> T,
+) -> Result<bool, super::PropError> {
+    let value = take_prop(value, js, init)?;
+    let changed = *field != value;
+    *field = value;
+    Ok(changed)
+}
