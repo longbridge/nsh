@@ -623,12 +623,12 @@ export function hostPlayerFrame(frame) {
   const win = frame.ownerDocument.defaultView, leases = new Set();
   const closeAll = () => { for (const close of [...leases]) close(); };
   const message = (event) => {
-    if (event.source !== frame.contentWindow || event.data !== "nsh:viewport" || !event.ports[0]) return;
+    if (event.source !== frame.contentWindow || event.data?.type !== "nsh:viewport" || !event.ports[0]) return;
     const port = event.ports[0];
     let release;
     const close = () => { release?.(); release = null; port.close(); leases.delete(close); };
     try {
-      const lease = frameViewport(frame);
+      const lease = frameViewport(frame, event.data.colorScheme === "dark" ? "dark" : "light");
       release = lease.release;
       leases.add(close);
       port.onmessage = (e) => { if (e.data === "release") close(); };
@@ -647,6 +647,18 @@ export function hostPlayerFrame(frame) {
     win.removeEventListener("message", message);
     frame.removeEventListener("load", closeAll);
   };
+}
+
+/** The color scheme `doc` is drawn with: `"dark"` or `"light"`. An iframe
+ * whose scheme differs from its document's is painted opaque, so a frame
+ * lifted over its page takes its document's. */
+function usedColorScheme(doc) {
+  const win = doc.defaultView;
+  let value = win.getComputedStyle(doc.documentElement).colorScheme;
+  if (!value || value === "normal") value = doc.querySelector('meta[name="color-scheme"]')?.content ?? "";
+  const words = value.split(/\s+/);
+  if (words.includes("dark") && words.includes("light")) return win.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return words.includes("dark") ? "dark" : "light";
 }
 
 /** A modal owns the page around its branch until the last lease ends. */
@@ -680,7 +692,7 @@ function lockViewportPage(branch) {
 
 /** Elevate the iframe itself without moving/reloading its document. Its
  * popovers can then cover the host viewport while the app keeps its size. */
-function frameViewport(frame) {
+function frameViewport(frame, colorScheme) {
   if (frame._nshViewport) {
     const state = frame._nshViewport;
     state.users++;
@@ -696,7 +708,7 @@ function frameViewport(frame) {
     // A same-origin ancestor chain is lifted all the way to its outer page.
     const parentFrame = win.frameElement;
     if (!parentFrame) throw new Error("install hostPlayerFrame in the outer embedding page");
-    outer = frameViewport(parentFrame);
+    outer = frameViewport(parentFrame, usedColorScheme(doc));
     rect = { left: outer.rect.left + rect.left * outer.rect.sx, top: outer.rect.top + rect.top * outer.rect.sy,
       sx: sx * outer.rect.sx, sy: sy * outer.rect.sy };
   }
@@ -712,7 +724,8 @@ function frameViewport(frame) {
   frame.setAttribute("popover", "manual");
   for (const [name, value] of Object.entries({ position: "fixed", inset: "0", width: "100%", height: "100%",
     "min-width": "0", "min-height": "0", "max-width": "none", "max-height": "none",
-    "border-radius": "0", "clip-path": "none", background: "transparent", margin: "0", border: "0", padding: "0", transform: "none", "box-sizing": "border-box" })) {
+    "border-radius": "0", "clip-path": "none", background: "transparent", margin: "0", border: "0", padding: "0", transform: "none", "box-sizing": "border-box",
+    "color-scheme": colorScheme })) {
     frame.style.setProperty(name, value, "important");
   }
   try { frame.showPopover(); } catch (error) {
@@ -3993,8 +4006,13 @@ class Player {
   placeModal(el) {
     const viewport = this.viewportDialogs;
     const [w, h] = viewport ? [el.clientWidth, el.clientHeight] : this.size;
-    const box = viewport ? { left: 0, top: 0, right: w, bottom: h } : undefined;
-    const insets = this.safeProbe ? this.safeArea(box) : [0, 0, 0, 0];
+    // The safe area is measured in the window's pixels; a layer at the
+    // app's scale (`scaleLayer`) is laid out in the app's.
+    const [sx, sy] = (viewport && this.frameScale) || [1, 1];
+    const box = viewport ? { left: 0, top: 0, right: w * sx, bottom: h * sy } : undefined;
+    const insets = this.safeProbe
+      ? this.safeArea(box).map((inset, i) => Math.round(inset / (i % 2 ? sx : sy)))
+      : [0, 0, 0, 0];
     const frame = [0, 0, w, h];
     el._frame = frame;
     if (!viewport) this.placeFrame(el);
@@ -4113,17 +4131,25 @@ class Player {
       for (const [p, value, priority] of saved) root.style.setProperty(p, value, priority);
       for (const [node, value, priority] of backgrounds) node.style.setProperty("background", value, priority);
       release?.();
-      if (this.frameSession === session) this.frameSession = null;
+      if (this.frameSession === session) {
+        this.frameSession = null;
+        this.frameScale = null;
+        for (const layer of layers) this.scaleLayer(layer);
+      }
     };
     window.addEventListener("pagehide", close, { once: true });
     const ready = (lease) => {
       if (cancelled) { lease.release(); return; }
       release = lease.release; pin(lease.rect);
-      for (const layer of layers) if (layer._kind === "modal") this.placeModal(layer);
+      this.frameScale = [lease.rect.sx, lease.rect.sy];
+      for (const layer of layers) {
+        this.scaleLayer(layer);
+        if (layer._kind === "modal") this.placeModal(layer);
+      }
     };
     try {
       if (window.frameElement) {
-        ready(frameViewport(window.frameElement));
+        ready(frameViewport(window.frameElement, usedColorScheme(document)));
         return;
       }
     } catch (error) {
@@ -4140,7 +4166,7 @@ class Player {
     // is private to this request, and its host checks the source window.
     const request = () => {
       if (cancelled) return;
-      window.parent.postMessage("nsh:viewport", "*", [channel.port2]);
+      window.parent.postMessage({ type: "nsh:viewport", colorScheme: usedColorScheme(document) }, "*", [channel.port2]);
       timer = setTimeout(() => {
         console.warn("[nsh] install hostPlayerFrame(iframe) on the embedding page for viewport dialogs");
         close();
@@ -4172,6 +4198,22 @@ class Player {
     }
     if (el.matches(":popover-open")) el.hidePopover();
     el.showPopover();
+    this.scaleLayer(el);
+  }
+
+  /** Draws layer `el` over the window at the app's scale: the website
+   * shows its phone and desktop frames scaled down, and a dialog over the
+   * page keeps the size it has in the app. It is laid out as large as the
+   * window divided by that scale, then scaled to cover the window. */
+  scaleLayer(el) {
+    const [sx, sy] = this.frameScale ?? [1, 1];
+    const scaled = sx !== 1 || sy !== 1;
+    if (!scaled && !el._scaled) return;
+    el._scaled = scaled;
+    el.style.width = scaled ? `${100 / sx}%` : "";
+    el.style.height = scaled ? `${100 / sy}%` : "";
+    el.style.scale = scaled ? `${sx} ${sy}` : "";
+    el.style.transformOrigin = scaled ? "0 0" : "";
   }
 
   /** Going back or Escape on a modal: it asks to close (`onRequestClose`,
@@ -5125,11 +5167,17 @@ class Player {
   mousePoint(el, e) {
     let a = 1, b = 0, c = 0, d = 1;
     for (let node = el; node; node = node.parentElement) {
-      const transform = getComputedStyle(node).transform;
-      if (transform !== "none") {
-        const m = new DOMMatrix(transform);
+      const style = getComputedStyle(node);
+      if (style.transform !== "none") {
+        const m = new DOMMatrix(style.transform);
         [a, b, c, d] = [m.a * a + m.c * b, m.b * a + m.d * b,
           m.a * c + m.c * d, m.b * c + m.d * d];
+      }
+      // `scale` applies after `transform` (a layer at the app's scale,
+      // `scaleLayer`).
+      if (style.scale && style.scale !== "none") {
+        const [sx, sy = sx] = style.scale.split(" ").map(Number);
+        [a, b, c, d] = [sx * a, sy * b, sx * c, sy * d];
       }
       // Top-layer views ignore their DOM ancestors' transforms (including
       // the preserved app scale inside an elevated iframe).
@@ -5699,7 +5747,22 @@ class Player {
    * or `layer`, a dialog over the window. */
   point(e, layer = this.windowLayer(e.target)) {
     const [left, top] = this.origin(layer);
-    return [e.clientX - left, e.clientY - top];
+    const [sx, sy] = this.layerScale(layer);
+    return [e.clientX / sx - left, e.clientY / sy - top];
+  }
+
+  /** The scale layer `layer` is drawn at (`scaleLayer`): its points are
+   * the window's divided by it. */
+  layerScale(layer) {
+    return (layer && this.frameScale) || [1, 1];
+  }
+
+  /** The top left of `el` in the coordinates `point` gives for `layer`. */
+  corner(el, layer) {
+    const r = el.getBoundingClientRect();
+    const [left, top] = this.origin(layer);
+    const [sx, sy] = this.layerScale(layer);
+    return [r.left / sx - left, r.top / sy - top];
   }
 
   /** The dialog over the window (`viewportDialogs`) that `node` is in, if
@@ -5722,13 +5785,13 @@ class Player {
     for (const [id, p] of this.pointers) {
       if (!p.touchPath.length) continue;
       const target = p.touchPath[0];
-      const rect = this.view(target)?.getBoundingClientRect();
-      const [left, top] = this.origin(p.layer);
+      const view = this.view(target);
+      const [left, top] = view ? this.corner(view, p.layer) : [0, 0];
       points.push({
         id, target, path: p.touchPath,
         pageX: p.x, pageY: p.y,
-        x: rect ? p.x + left - rect.left : p.x,
-        y: rect ? p.y + top - rect.top : p.y,
+        x: p.x - left,
+        y: p.y - top,
         changed: id === changedId,
       });
     }
@@ -5835,10 +5898,9 @@ class Player {
    * keyboard (`keyPress`), which has no pointer. */
   pressPayload(p) {
     if (p.x === undefined) return null;
-    const r = p.press.getBoundingClientRect();
-    const [left, top] = this.origin(p.layer);
+    const [left, top] = this.corner(p.press, p.layer);
     return {
-      position: { x: p.x + left - r.left, y: p.y + top - r.top },
+      position: { x: p.x - left, y: p.y - top },
       pagePosition: { x: p.x, y: p.y },
       modifiers: p.modifiers,
       clicks: p.clicks,
@@ -6072,10 +6134,9 @@ class Player {
   startPinchZoom(el, a, b) {
     for (const p of [a, b]) this.pressOut(p, false);
     cancelAnimationFrame(el._zoomAnimation);
-    const r = el.getBoundingClientRect();
-    const [left, top] = this.origin(a.layer);
-    const fx = (a.x + b.x) / 2 + left - r.left;
-    const fy = (a.y + b.y) / 2 + top - r.top;
+    const [left, top] = this.corner(el, a.layer);
+    const fx = (a.x + b.x) / 2 - left;
+    const fy = (a.y + b.y) / 2 - top;
     this.twoFinger = { zoom: el, dist: Math.hypot(a.x - b.x, a.y - b.y), scale: el._zoom, point: this.contentPoint(el, fx, fy) };
   }
 
@@ -6084,9 +6145,8 @@ class Player {
     if (t.zoom) {
       const [a, b] = [...this.pointers.values()];
       if (!a || !b) return;
-      const r = t.zoom.getBoundingClientRect();
-      const [left, top] = this.origin(a.layer);
-      t.focus = [(a.x + b.x) / 2 + left - r.left, (a.y + b.y) / 2 + top - r.top];
+      const [left, top] = this.corner(t.zoom, a.layer);
+      t.focus = [(a.x + b.x) / 2 - left, (a.y + b.y) / 2 - top];
       const scale = this.limitZoom(t.zoom, (t.scale * Math.hypot(a.x - b.x, a.y - b.y)) / Math.max(1, t.dist), true);
       this.zoomContent(t.zoom, scale, t.point[0], t.point[1], t.focus[0], t.focus[1]);
       return;
