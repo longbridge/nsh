@@ -364,7 +364,7 @@ export function ButtonDemo() {
                   focusStyle={focusRing(-2)}
                   style={{ ...half, width: pointer ? 26 : 40, backgroundColor: open() ? alpha("#000000", 0.1) : "transparent" }}
                 >
-                  <View style={{ transform: [{ rotate: open() ? "180deg" : "0deg" }], transitionProperty: "transform", transitionDuration: reduceMotion() ? 0 : 180 }}>
+                  <View style={{ alignSelf: "stretch", flexGrow: 1, alignItems: "center", justifyContent: "center", transform: [{ rotate: open() ? "180deg" : "0deg" }], transitionProperty: "transform", transitionDuration: reduceMotion() ? 0 : 180 }}>
                     <Icon name="chevron-down" size={pointer ? 12 : 14} tint={state() === "done" ? colors.up : colors.onAccent} weight={2} />
                   </View>
                 </View>
@@ -387,7 +387,7 @@ export function ButtonDemo() {
                         <Icon name="check" size={14} tint={colors.accent} weight={2} />
                       </If>
                     </View>
-                    <View style={{ flex: 1, gap: 2 }}>
+                    <View style={{ flexShrink: 1, gap: 2 }}>
                       <Text style={{ fontSize: pointer ? 13 : 16, fontWeight: "500", color: colors.text }}>{s().label}</Text>
                       <Text style={{ fontSize: pointer ? 12 : 14, color: colors.muted }}>{s().note}</Text>
                     </View>
