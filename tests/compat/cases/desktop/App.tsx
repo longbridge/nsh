@@ -13,6 +13,7 @@ import WindowOpen from "./window-open";
 import WindowProps from "./window-props";
 import WindowRef from "./window-ref";
 import LinkHover from "./link-hover";
+import HomeDirAccess from "./home-dir-access";
 
 const cases: Record<string, () => JSX.Element> = {
   "link-hover": LinkHover,
@@ -22,6 +23,7 @@ const cases: Record<string, () => JSX.Element> = {
   "window-access": WindowAccess,
   "window-props": WindowProps,
   "tray-click": TrayClick,
+  "home-dir-access": HomeDirAccess,
 };
 const shown = signal("");
 

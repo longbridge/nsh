@@ -16,6 +16,8 @@
 //!   },
 //!   "webview": { "hosts": ["*.example.com"], "input": true },
 //!   "statusBar": true,
+//!   "window": true,
+//!   "homeDir": true,
 //!   "host": ["getUserInfo", "bridge.*"],
 //!   "openUrl": { "schemes": ["https", "mailto"] }
 //! }
@@ -39,11 +41,16 @@
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
-//! host's events need no grant, the host sends them. An app without
-//! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar, the clipboard, the picker,
-//! speech recognition and opening URLs; raw sockets, processes, the filesystem and the host's
-//! functions always require an explicit declaration.
+//! host's events need no grant, the host sends them. `window` lets the app
+//! control its window and set the application menu (`nsh/desktop`'s
+//! `Window` and `Menu.setApplicationMenu`; context menus, shown in the
+//! app's own view, need none); `homeDir` lets `os.homedir()` tell the
+//! user's home directory. An app without `"capabilities"` (a standalone
+//! app, its developer's own) retains unrestricted HTTP, web views, the
+//! status bar, the clipboard, the picker, speech recognition, opening URLs,
+//! the window and the home directory; raw sockets, processes, the
+//! filesystem and the host's functions always require an explicit
+//! declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
 //! other key narrows it and is optional: `methods` (any when left out),
@@ -392,6 +399,11 @@ pub struct Capabilities {
     pub notifications: bool,
     /// The app may play sound (`Sound` and `AudioPlayer` of `nsh`).
     pub audio: bool,
+    /// The app may control its window and set the application menu
+    /// (`nsh/desktop`'s `Window`, `Menu.setApplicationMenu`).
+    pub window: bool,
+    /// `os.homedir()` may tell the user's home directory.
+    pub home_dir: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -577,6 +589,8 @@ impl Capabilities {
             speech: true,
             notifications: true,
             audio: true,
+            window: true,
+            home_dir: true,
             open_url: Some(OpenUrlGrant::default()),
             // Every kind and level, but no overlays or capture protection.
             windows: Some(WindowsGrant::default()),
@@ -631,7 +645,7 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 13] = [
+        const KNOWN: [&str; 15] = [
             "windows",
             "network",
             "webview",
@@ -641,6 +655,8 @@ impl Capabilities {
             "speech",
             "notifications",
             "audio",
+            "window",
+            "homeDir",
             "openUrl",
             "process",
             "fs",
@@ -779,6 +795,16 @@ impl Capabilities {
             caps.audio = audio
                 .as_bool()
                 .ok_or("capabilities.audio must be a boolean")?;
+        }
+        if let Some(window) = obj.get("window") {
+            caps.window = window
+                .as_bool()
+                .ok_or("capabilities.window must be a boolean")?;
+        }
+        if let Some(home_dir) = obj.get("homeDir") {
+            caps.home_dir = home_dir
+                .as_bool()
+                .ok_or("capabilities.homeDir must be a boolean")?;
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -1027,6 +1053,12 @@ impl Capabilities {
         }
         if self.audio {
             obj.insert("audio".into(), true.into());
+        }
+        if self.window {
+            obj.insert("window".into(), true.into());
+        }
+        if self.home_dir {
+            obj.insert("homeDir".into(), true.into());
         }
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
@@ -1762,6 +1794,17 @@ impl Access {
         self.each(|c| c.audio)
     }
 
+    /// Whether the app may control its window and set the application
+    /// menu (`nsh/desktop`).
+    pub fn allows_window(&self) -> bool {
+        self.each(|c| c.window)
+    }
+
+    /// Whether `os.homedir()` may tell the user's home directory.
+    pub fn allows_home_dir(&self) -> bool {
+        self.each(|c| c.home_dir)
+    }
+
     /// Whether `nsh/host` may call the embedding app's function `name`.
     pub fn allows_host(&self, name: &str) -> bool {
         self.each(|c| c.allows_host(name))
@@ -2353,8 +2396,39 @@ mod tests {
         assert!(!access.allows_picker());
         assert!(!access.allows_speech());
         assert!(!access.allows_audio());
+        assert!(!access.allows_window());
+        assert!(!access.allows_home_dir());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
+    }
+
+    #[test]
+    fn the_window_and_the_home_directory_are_capabilities() {
+        // Undeclared: granted, as they always were.
+        let all = Access::all();
+        assert!(all.allows_window() && all.allows_home_dir());
+        // Declared: only when listed, and the embedder may take them away.
+        let access = |declared: &str, granted: Option<&str>| Access {
+            declared: caps(declared),
+            granted: granted.map(caps),
+        };
+        let listed = access(r#"{ "window": true, "homeDir": true }"#, None);
+        assert!(listed.allows_window() && listed.allows_home_dir());
+        let window = access(r#"{ "window": true }"#, None);
+        assert!(window.allows_window() && !window.allows_home_dir());
+        let narrowed = access(
+            r#"{ "window": true, "homeDir": true }"#,
+            Some(r#"{ "homeDir": true }"#),
+        );
+        assert!(!narrowed.allows_window() && narrowed.allows_home_dir());
+        assert!(!access(r#"{ "window": false }"#, None).allows_window());
+        assert!(Capabilities::from_json(&serde_json::json!({ "window": "yes" })).is_err());
+        assert!(Capabilities::from_json(&serde_json::json!({ "homeDir": 1 })).is_err());
+        // Written only when granted, read back the same.
+        let both = caps(r#"{ "window": true, "homeDir": true }"#);
+        assert_eq!(Capabilities::from_json(&both.to_json()).unwrap(), both);
+        let none = Capabilities::default().to_json();
+        assert!(none.get("window").is_none() && none.get("homeDir").is_none());
     }
 
     #[test]

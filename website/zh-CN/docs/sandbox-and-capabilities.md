@@ -110,6 +110,8 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     "speech": true,
     "notifications": true,
     "audio": true,
+    "window": true,
+    "homeDir": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -192,6 +194,14 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 ### `notifications`
 
 `"notifications": true` 允许应用显示系统通知并设置应用图标的角标（[`Notifications`](../modules/nsh.md#notifications)）。需要询问的系统仍会向用户请求一次权限。
+
+### `window`
+
+`"window": true` 允许应用在桌面上触及自己视图之外的东西（[`nsh/desktop`](../modules/nsh-desktop.md)）：主窗口（任何 `<Window>` 之外的 `currentWindow()`、`Window.get("main")`：它的标题、标题栏、模式、位置与大小、层级、置于最前、关闭）、应用菜单（`Menu.setApplicationMenu`）、托盘、全局快捷键、`quit` 和 `restart`。没有这项能力时它们什么也不做。右键菜单（`Menu.popup`）显示在应用自己的视图中，应用打开的窗口由 [`windows`](#windows) 授权，两者都不需要这项能力。
+
+### `homeDir`
+
+`"homeDir": true` 允许 [`os.homedir()`](../modules/standard-modules.md) 返回用户的主目录；没有这项能力时调用会抛出 `code` 为 `ERR_ACCESS_DENIED` 的错误。这个路径只是名称：在那里读写文件仍需要 `fs` 授权。
 
 ### `openUrl`
 

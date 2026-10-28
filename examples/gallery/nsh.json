@@ -74,6 +74,8 @@
         "panel",
         "popup"
       ]
-    }
+    },
+    "window": true,
+    "homeDir": true
   }
 }

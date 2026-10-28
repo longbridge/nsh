@@ -120,6 +120,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
     "speech": true,
     "notifications": true,
     "audio": true,
+    "window": true,
+    "homeDir": true,
     "host": ["getUserInfo", "bridge.*"],
     "openUrl": { "schemes": ["https", "mailto"] },
     "windows": { "kinds": ["normal", "dialog", "panel"], "max": 4 }
@@ -213,6 +215,20 @@ needs a `network` grant for its host.
 
 `"notifications": true` lets the app show system notifications and set its icon's badge
 ([`Notifications`](../modules/nsh.md#notifications)). The system still asks the user once, where it asks.
+
+### `window`
+
+`"window": true` lets the app reach past its own view on the desktop ([`nsh/desktop`](../modules/nsh-desktop.md)): the
+main window (`currentWindow()` outside any `<Window>`, `Window.get("main")`: its title, title bar, mode, frame and
+level, bringing it to the front, closing it), the application menu (`Menu.setApplicationMenu`), the tray, global
+shortcuts, `quit` and `restart`. Without it they do nothing. Context menus (`Menu.popup`) show in the app's own view,
+and windows the app opens are granted by [`windows`](#windows), so neither needs it.
+
+### `homeDir`
+
+`"homeDir": true` lets [`os.homedir()`](../modules/standard-modules.md) tell the user's home directory; without it the
+call throws an error with `code` `ERR_ACCESS_DENIED`. The path is only a name: reading or writing there still needs
+`fs` grants.
 
 ### `openUrl`
 

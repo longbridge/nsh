@@ -205,3 +205,8 @@ style id:material-surface glassEffect regular
 covers [props] macos
 covers [props] macos.backdrop
 covers [styles] glassTintColor
+# window-refused
+tap id:case-window-refused
+wait 300
+expect Minimized: false
+covers [nsh/desktop] currentWindow

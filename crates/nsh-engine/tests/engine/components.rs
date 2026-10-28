@@ -2463,6 +2463,83 @@ fn app_quit_reaches_the_platform() {
     }
 }
 
+const WINDOW: &str = r#"import { mount, Text } from "nsh";
+import { Menu, currentWindow } from "nsh/desktop";
+import os from "os";
+
+Menu.setApplicationMenu([{ label: "File", submenu: [{ role: "quit" }] }]);
+Menu.popup([{ label: "Copy link", onSelect: () => {} }]);
+let home: string;
+try {
+  home = typeof os.homedir();
+} catch (e) {
+  home = (e as Error & { code?: string }).code ?? "thrown";
+}
+
+function App() {
+  const win = currentWindow();
+  win.set({ title: "Spoofed" });
+  win.minimize();
+  return <Text>{`home ${home}`}</Text>;
+}
+
+mount(() => <App />);
+"#;
+
+/// The main window, the application menu and `os.homedir()` are granted by
+/// `window` and `homeDir`, which apps without a declaration keep; context
+/// menus, in the app's own view, need neither.
+#[test]
+fn the_window_and_the_home_directory_are_capabilities() {
+    use nsh_core::desktop::{DesktopCommand, WindowRequest};
+
+    let run = |capabilities: Option<&str>, home: &str| {
+        let environment = Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        };
+        let (_engine, rx) = start_with(WINDOW, environment, capabilities, None);
+        let batches = until(&rx, |batch| shows(batch, home));
+        assert!(
+            batches.iter().any(|b| shows(b, home)),
+            "{capabilities:?}: no {home:?}"
+        );
+        let mut seen = batches
+            .into_iter()
+            .flat_map(|b| b.items)
+            .filter_map(|item| match item {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Desktop(command),
+                } => Some(match *command {
+                    DesktopCommand::SetAttributes(_) => "title",
+                    DesktopCommand::Request(WindowRequest::Minimize) => "minimize",
+                    DesktopCommand::SetMenu(_) => "menu",
+                    DesktopCommand::PopupMenu { .. } => "popup",
+                    _ => "other",
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        seen.sort_unstable();
+        seen
+    };
+    let all = ["menu", "minimize", "popup", "title"];
+    // Declared without them: refused (`os.homedir()` throws
+    // `ERR_ACCESS_DENIED`).
+    assert_eq!(run(Some("{}"), "home ERR_ACCESS_DENIED"), ["popup"]);
+    // Declared with them.
+    assert_eq!(
+        run(
+            Some(r#"{ "window": true, "homeDir": true }"#),
+            "home string"
+        ),
+        all
+    );
+    // Not declared: as before.
+    assert_eq!(run(None, "home string"), all);
+}
+
 /// German's data stands for what the bundle of an app listing it carries.
 const LOCALE: &str = r#"import { mount, Text } from "nsh";
 import { fontScale, locale } from "nsh";
