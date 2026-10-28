@@ -18,10 +18,12 @@
 
 mod alert_dialog;
 mod button;
+mod calendar;
 mod checkbox;
 mod collapsible;
 mod combobox;
 mod data_table;
+mod date_picker;
 mod diff;
 pub mod dock;
 pub mod editor;
@@ -50,6 +52,7 @@ mod table;
 mod tabs;
 pub mod text_view;
 mod theme;
+mod time_field;
 mod toast;
 mod tooltip;
 mod window;
@@ -67,6 +70,10 @@ pub use crate::{
         AlertDialogResult, AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
+    calendar::{
+        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
+        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+    },
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
@@ -76,6 +83,10 @@ pub use crate::{
         DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress,
         DataTableProps, DataTableRange, DataTableRows, DataTableSelection, DataTableSort,
         DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
+    },
+    date_picker::{
+        DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,
+        DateRangePreset, DateTime, PickedDate, date_picker,
     },
     diff::{
         DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,
@@ -149,6 +160,10 @@ pub use crate::{
         TextViewParts, TextViewProps, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
+    time_field::{
+        HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
+        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+    },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,
@@ -192,12 +207,12 @@ pub mod parts {
     use nsh_core::element::Registry;
 
     use crate::{
-        AlertDialog, Button, Checkbox, Collapsible, Combobox, ContextMenu, DataTable, DiffView,
-        DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Popover, Progress,
-        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
-        Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
-        TableHeader, TableRow, Tabs, TextView, Toast, ToastStack, Tooltip, plot, rich_editor,
-        toast,
+        AlertDialog, Button, Calendar, Checkbox, Collapsible, Combobox, ContextMenu, DataTable,
+        DatePicker, DiffView, DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput,
+        OtpInput, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
+        Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
+        TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast,
+        ToastStack, Tooltip, plot, rich_editor, toast,
     };
 
     /// What a part does: registers its components, classes and modules.
@@ -231,8 +246,10 @@ pub mod parts {
             .register::<Popover>()
             .register::<Sheet>()
             .register::<Tooltip>()
+            .register::<Calendar>()
             .register::<Checkbox>()
             .register::<Collapsible>()
+            .register::<DatePicker>()
             .register::<Combobox>()
             .register::<Select>()
             .register::<NumberInput>()
@@ -247,6 +264,7 @@ pub mod parts {
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
+            .register::<TimeField>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
@@ -329,11 +347,13 @@ mod tests {
             components,
             [
                 "Button",
+                "Calendar",
                 "Checkbox",
                 "Collapsible",
                 "Combobox",
                 "ContextMenu",
                 "DataTable",
+                "DatePicker",
                 "DiffView",
                 "DockArea",
                 "Editor",
@@ -366,6 +386,7 @@ mod tests {
                 "TableRow",
                 "Tabs",
                 "TextView",
+                "TimeField",
                 "Toast",
                 "ToastStack",
                 "Tooltip"

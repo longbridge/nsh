@@ -165,7 +165,7 @@ const ECHOES: usize = 16;
 /// Takes `value` out of `echoes`, the codes the input reported and has not
 /// seen come back, with those reported before it: whether it is one of
 /// them (the app took the user's change, maybe a key or more behind).
-fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
+pub(crate) fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
     match echoes.iter().position(|e| e == value) {
         Some(at) => {
             echoes.drain(..=at);
@@ -480,7 +480,7 @@ fn group_count(length: usize, requested: usize) -> usize {
 
 /// `c` as an ASCII digit: itself, or a full-width digit's (`０`–`９`, an
 /// East Asian input method's) as `gpui-base`'s `to_digit_char` maps them.
-fn digit(c: char) -> Option<char> {
+pub(crate) fn digit(c: char) -> Option<char> {
     if c.is_ascii_digit() {
         return Some(c);
     }
@@ -490,7 +490,7 @@ fn digit(c: char) -> Option<char> {
 
 /// What the field lost at its end (characters) and what it gained, from
 /// `before` to `after`.
-fn diff<'a>(before: &str, after: &'a str) -> (usize, &'a str) {
+pub(crate) fn diff<'a>(before: &str, after: &'a str) -> (usize, &'a str) {
     let prefix = before
         .char_indices()
         .zip(after.chars())
@@ -522,7 +522,7 @@ fn edit(shown: &str, deleted: usize, inserted: &str, length: usize) -> String {
 }
 
 /// `text`'s length in UTF-16 units, as inputs count their selection.
-fn utf16_len(text: &str) -> u32 {
+pub(crate) fn utf16_len(text: &str) -> u32 {
     text.encode_utf16().count() as u32
 }
 
