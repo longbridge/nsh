@@ -105,6 +105,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, placed by `tooltipPlacement` and moved and faded with the cross line. |
 | `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. With the keyboard, it goes beside the first line's or area's point at the row (the middle of a bar's band, the middle of a pie's slice). |
 | `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | The distance between the tooltip and what places it: the top edge for `"top"`, the cross line and the pointer for `"pointer"`. |
+| `colorScale` | `.color_scale(..)` | `OrdinalScale` | none | The colors of the categories the marks' `color` reads, as d3's `scaleOrdinal`: `{ type: "ordinal", domain?, range, unknown? }` ([Colors by category](#colors-by-category)). |
 | `children` | `.child(..)` | `JSX.Element` | none | The marks, drawn in order over each other, and whatever the app lays over them. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The plot's size and look; the marks inherit its paint properties, as CSS inherits them. `focus:` / `focus-visible:` classes and `focusStyle` draw its focus ring. |
 
@@ -159,6 +160,7 @@ reversed.
 | `Area` | `y0` | `number \| string \| (d, index) => number` | the y scale's low edge | Its bottom edge: a number is a baseline on the y scale; a field or a function gives each row its own bottom value, which makes the area a band (a day's low to its high, a forecast's range). Without one, the area closes to the edge where the y scale's smallest values are: the bottom edge, the top one on a reversed scale (an area hanging from the top). A row without a value at either edge is skipped. |
 | `Grid` | `x` | `number[]` | none | Where its vertical lines go, as values of the x scale (row indices on a `point` scale). |
 | `Grid` | `y` | `number[]` | none | Where its horizontal lines go, as values of the y scale. |
+| `Line`, `Area` | `color` | `string \| (d, index) => string` | none | The category of its rows, its color from the plot's `colorScale`: its first row's category gives the line's `stroke` (the area's `fill`) where nothing sets one ([Colors by category](#colors-by-category)). |
 
 Each mark fills the plot and paints with its [SVG paint properties](../modules/style-reference.md#svg-paint), its own
 over those of the plot, as CSS inherits them:
@@ -234,9 +236,10 @@ each row's bar starting where the one before it in the stack ends:
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | The radius of each corner of its bars; `{ topLeft: 4, topRight: 4 }` rounds the tips of upright bars. A radius larger than half a bar fits it. |
 | `stagger` | `number` | `0` | With the plot's appear, the bars start one after another, row by row, over this share of it (0 to 0.95), each growing for the rest; 0 grows them together. |
 | `inactiveOpacity` | `number` | none | The opacity of its bars away from the row under the pointer while the pointer is over the plot, so that row stands out: it fades in and out with the hover and passes from bar to bar as the hover glides. |
-| `label` | `string \| (d, index) => string` | none | The text at each bar's value end: a field (its number) or a function returning the text the app formats. |
+| `label` | `string \| (d, index) => string` | none | The text at each bar's value end: a field (its text, or its number) or a function returning the text the app formats. |
 | `labelClass`, `labelStyle` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text centered on the bar, above an upright bar's end (below one growing down), after a bar across (before one growing back). Its padding is its distance from the bar. |
 | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: each bar's box, whose background (`bg-linear-to-t from-… to-…`, from the bottom of the bar to its top) shows only inside the bar, under its `fill`. With one, `fill` is `none` where none is set. |
+| `color` | `string \| (d, index) => string` | none | Each bar's category, its color from the plot's `colorScale`: the bar's `fill` where nothing sets one ([Colors by category](#colors-by-category)). |
 
 The band scale lays out a band per row of the plot, in order, as d3's `scaleBand` does:
 
@@ -249,8 +252,8 @@ The band scale lays out a band per row of the plot, in order, as d3's `scaleBand
 | `groupPadding` | `0` | The gap between the bars side by side in a band, a share of each bar's place. |
 | `reverse` | `false` | The bands run from the other edge: the first row's at the right of the x axis, at the bottom of the y axis; the bars side by side in a band keep their order. |
 
-A bar paints with its `fill` (`fill-*`; inherited from the plot as CSS inherits it), `currentColor` where none is set,
-and shows no hover dot. On a band scale, the hover finds the band under the pointer, and the plot's cross line sits in
+A bar paints with its `fill` (`fill-*`; inherited from the plot as CSS inherits it), `currentColor` where none is set
+(its category's color with `color`), and shows no hover dot. On a band scale, the hover finds the band under the pointer, and the plot's cross line sits in
 that band, as wide as it: `crossLineClass="w-full h-full bg-foreground/5"` tints the band, `w-px` keeps a line in its
 middle. The bars' values and base make the value scale's domain when the plot has none. With the plot's appear, each
 bar grows out of its stack's base; the motion, the fading and the gliding run on the platform's animator, and the
@@ -355,12 +358,13 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | none | The style of every slice, over its classes (`fill`, `stroke`, `strokeWidth`). |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | How far the slice under the pointer grows past the others, in points: on the plot's `pointer` spring, faded in and out with the hover. |
 | `Pie` | `hoverDim` | `.hover_dim(..)` | `number` (0 to 1) | `0` | How much the other slices fade while one is under the pointer, as a share of their opacity, with the hover's fade. |
+| `Pie` | `color` | `.color(..)` | `keyof T \| (d: T, index: number) => string` | none | Each slice's category, its color from the plot's `colorScale`: the slice's `fill` where nothing sets one ([Colors by category](#colors-by-category)). |
 | `Pie` | `label` | `.label(..)` | `string \| (d: T, index: number) => string` | none | The text beside each slice: a field (its number) or a function returning the text the app formats. A row whose text is empty, or a slice narrower than half a degree, has none. |
 | `Pie` | `labelClass`, `labelStyle` | `.label_class(..)`, `.label_style(..)` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text outside the ring at the end of its leader line, centered on it, after it on the right half of the pie and before it on the left. Its padding is its distance from the line's end. |
 | `Pie` | `labelGap` | `.label_gap(..)` | `number` | `15` | How far past the rim the labels sit, in points. |
 | `Pie` | `labelLineClass`, `labelLineStyle` | `.label_line_class(..)`, `.label_line_style(..)` | `string \| (d: T, index: number) => string`, `StyleProp<ViewStyle>` | none | The `labelLine` part: each label's leader line, from the rim at the slice's middle out to the label's radius, then across to the text. Its `stroke` (`currentColor` where none is set), `strokeWidth` and `strokeDasharray`, the same on every line or a function of the slice's row; shown once styled. |
 
-A slice and an arc fill with `fill` (`currentColor` where none is set) and stroke their edges with `stroke` (none where
+A slice and an arc fill with `fill` (`currentColor` where none is set, a slice's category's color with `color`) and stroke their edges with `stroke` (none where
 none is set), their own over the pie's and the plot's as CSS inherits them: a stroke in the surface's color
 (`stroke-card stroke-2`) cuts gaps between the slices too. Their values take no part in the plot's scales. A pie's
 slices are drawn again only when the rows, their values, the angles, the radii or the plot's size change; the pointer
@@ -389,6 +393,44 @@ element laid over the plot, as a donut's center is.
   labelLineClass="stroke-border"
 />
 ```
+
+## Colors by category
+
+A plot's `colorScale` gives categories their colors, as d3's `scaleOrdinal` does, and a mark's `color` names the
+category of each row: a field (its text, or its number) or a function of the row. The `domain`'s categories take the
+`range`'s colors in order, and the range starts again from its first color when the domain is longer. A category
+outside the domain takes `unknown`; without one, it joins the domain the first time a mark meets it (the marks in
+order, each its rows in order) and takes the next color, so with no `domain` at all the categories take the colors
+in the order the rows bring them. The colors are the app's: CSS colors, the theme's tokens among them.
+
+```tsx
+import { Pie, Plot } from "nsh/base/plot";
+import { token } from "nsh";
+
+const regions = [
+  { name: "North America", revenue: 482 },
+  { name: "EMEA", revenue: 312 },
+  { name: "APAC", revenue: 268 },
+];
+
+<Plot data={regions} colorScale={{ type: "ordinal", range: [token("chart-1"), token("chart-2"), token("chart-3")] }} class="size-44">
+  <Pie value="revenue" color="name" innerRadius="62%" />
+</Plot>
+```
+
+A slice and a bar take their row's color; a `Line` and an `Area` are one series each and take their first row's,
+so a line of rows of its own (`data`) is in its rows' color, and one scale keeps a category's color the same across
+a pie, bars and lines. The color is the mark's `fill` (a line's `stroke`) where nothing sets one, in the place of
+`currentColor`: the app's classes and styles come first, the part's (`sliceClass`, `sliceStyle`), the mark's and
+those it inherits from the plot, so `sliceClass={(d) => (d.name === "Other" ? "fill-muted" : "")}` sets one slice
+apart while the scale colors the others. Beside a `background` part, a bar's and an area's `fill` stays `none`.
+
+| `OrdinalScale` | Type | Default | Description |
+|---|---|---|---|
+| `type` | `"ordinal"` | (required) | The kind of scale. |
+| `domain` | `string[]` | none | The categories, in order. A category written twice keeps its first place. |
+| `range` | `string[]` | (required) | The colors, in order (CSS colors); category `i` takes color `i % range.length`. |
+| `unknown` | `string` | none | The color of every category outside the domain; without one, each takes the next color. |
 
 ## PlotAxis
 

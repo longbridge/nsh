@@ -510,6 +510,9 @@ pub(super) struct Components {
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
     next_url_open: u32,
+    /// Colors being picked on the screen, by request id: their answers.
+    screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
+    next_screen_color: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -597,6 +600,8 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             next_url_open: 0,
+            screen_colors: FxHashMap::default(),
+            next_screen_color: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -2826,7 +2831,10 @@ impl<M: TextEngine> Core<M> {
         cursor: &mut usize,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
-        // this view's own when the view styles it.
+        // this view's own when the view gives it anything, which lays its
+        // one node out through while it styles none of its layout (as JS's
+        // holders: `lay_out_through`).
+        let mut wrapper = false;
         if let ElKind::Slot(name) = el.kind
             && inst.fills.iter().any(|f| f.name == name)
         {
@@ -2838,6 +2846,7 @@ impl<M: TextEngine> Core<M> {
                 filled.kind = ElKind::Filled(name);
                 el.children = vec![filled];
                 el.key.get_or_insert_with(|| format!("slot:{name}").into());
+                wrapper = true;
             }
         }
         match std::mem::replace(&mut el.kind, ElKind::Plain) {
@@ -3007,7 +3016,11 @@ impl<M: TextEngine> Core<M> {
                     }
                 };
                 let prev = at.and_then(|j| old[j].take());
-                out.push(self.reconcile_node(prev, el, part, host, inst));
+                let e = self.reconcile_node(prev, el, part, host, inst);
+                if wrapper && let Ok(key) = self.key(e.id) {
+                    self.lay_out_through(key);
+                }
+                out.push(e);
             }
         }
     }
@@ -4691,6 +4704,19 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
             }
+            Action::PickScreenColor(answer) => {
+                if !self.components.environment.screen_color {
+                    answer.borrow_mut().deliver(None);
+                    return;
+                }
+                let id = self.components.next_screen_color;
+                self.components.next_screen_color = id.wrapping_add(1);
+                self.components.screen_colors.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickScreenColor { id },
+                });
+            }
         }
     }
 
@@ -4951,6 +4977,16 @@ impl<M: TextEngine> Core<M> {
                     _ => false,
                 };
                 self.answer_open_url(request as u32, opened);
+                true
+            }
+            EventKind::ScreenColor if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let color = number("color").map(|packed| crate::Color(packed as u32).into());
+                if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
+                    answer.borrow_mut().deliver(color);
+                }
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

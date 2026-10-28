@@ -1,7 +1,10 @@
 //! `nsh/base`'s components in a Rust app, run headless (`nsh_testing`):
 //! what a user does with them and what the app hears and shows.
 
+mod calendar;
+mod color_picker;
 mod combobox;
+mod date_picker;
 mod diff;
 mod dock;
 mod editor;
@@ -21,3 +24,4 @@ mod sheet;
 mod slider;
 mod tabs;
 mod text_view;
+mod time_field;

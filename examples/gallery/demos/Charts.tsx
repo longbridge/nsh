@@ -618,9 +618,10 @@ const REGIONS = [
   { name: "Other", revenue: 74 },
 ];
 const REVENUE = REGIONS.reduce((sum, r) => sum + r.revenue, 0);
-/** The theme's series colors: a slice's fill, its legend key's background. */
-const FILLS = ["fill-chart-1", "fill-chart-2", "fill-chart-3", "fill-chart-4", "fill-chart-5"];
-const KEYS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
+/** The theme's series colors, in the regions' order (read where used, so
+ * they follow the appearance): the plot's ordinal `colorScale` gives each
+ * region's slice the next one, as the legend gives its key. */
+const palette = () => [chart.s1, chart.s2, chart.s3, chart.s4, chart.s5];
 /** The leader lines of the pie's labels, each in its slice's color. */
 const STROKES = ["stroke-chart-1", "stroke-chart-2", "stroke-chart-3", "stroke-chart-4", "stroke-chart-5"];
 const money = (k: number) => (k >= 1000 ? `$${(k / 1000).toFixed(2)}M` : `$${k}k`);
@@ -660,6 +661,7 @@ function Revenue() {
           onHoverChange={({ index }) => hover.set(index)}
           focusStyle={{ ...focusRing(4), borderRadius: RING / 2 }}
           style={{ width: RING, height: RING }}
+          colorScale={{ type: "ordinal", range: palette() }}
         >
           <Pie
             value="revenue"
@@ -667,7 +669,7 @@ function Revenue() {
             outerRadius={donut() ? RIM : PIE_RIM}
             padAngle={2 / RIM}
             cornerRadius={3}
-            sliceClass={(_, i) => FILLS[i % FILLS.length]}
+            color="name"
             hoverLift={6}
             hoverDim={0.64}
             label={donut() ? undefined : (d: (typeof REGIONS)[number]) => percent(d.revenue)}
@@ -700,7 +702,7 @@ function Revenue() {
                 opacity: hover() == null || hover() === i ? 1 : 0.45,
               }}
             >
-              <View class={KEYS[i]} style={{ width: 8, height: 8, borderRadius: 2 }} />
+              <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: palette()[i] }} />
               <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: colors.text }}>{r.name}</Text>
               <Text style={{ fontSize: 13, color: colors.text, fontVariant: ["tabular-nums"], textAlign: "right" }}>{money(r.revenue)}</Text>
               <Text style={{ width: 48, fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"], textAlign: "right" }}>{portion(r.revenue)}</Text>

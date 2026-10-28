@@ -353,6 +353,29 @@ impl Step {
         }
     }
 
+    /// Whether what runs now never ends by itself: it runs in a loop
+    /// without a number of iterations (every unfinished part of a parallel
+    /// does).
+    fn endless(&self) -> bool {
+        match self {
+            Step::Run { .. } | Step::Delay { .. } => false,
+            Step::Sequence { steps, index, .. } => steps.get(*index).is_some_and(Step::endless),
+            Step::Parallel { steps, ends, .. } => {
+                let mut running = steps
+                    .iter()
+                    .zip(ends)
+                    .filter(|(_, end)| end.is_none())
+                    .peekable();
+                running.peek().is_some() && running.all(|(step, _)| step.endless())
+            }
+            Step::Loop {
+                iterations,
+                current,
+                ..
+            } => iterations.is_none() || current.endless(),
+        }
+    }
+
     /// Stops what runs (values stay where they are).
     fn stop(&mut self, g: &mut Graph, finished: &mut Vec<Finished>) {
         match self {
@@ -650,6 +673,21 @@ impl Graph {
     /// True while any animation runs (the platform keeps its frame clock on).
     pub fn is_animating(&self) -> bool {
         !self.animating.is_empty() || !self.programs.is_empty() || !self.snaps.is_empty()
+    }
+
+    /// True while an animation that ends by itself runs: as
+    /// [`Graph::is_animating`], without the composite animations that run
+    /// a loop with no end now (a spinner), which only stopping them ends.
+    /// What waits for the animations to end (a test's step) waits for
+    /// these.
+    pub fn is_finishing(&self) -> bool {
+        !self.snaps.is_empty()
+            || self.programs.iter().any(|p| !p.root.endless())
+            // The steps of composite animations are their programs'.
+            || self
+                .animating
+                .iter()
+                .any(|&node| self.running_id(node).is_some_and(|id| id < LEAF_IDS))
     }
 
     /// The scroll view whose scroll value is `source` came to rest (its
@@ -1399,6 +1437,85 @@ mod tests {
         g.set(1, 7.0, &mut f);
         g.apply(AnimationOp::ResetComposite { key: 2 }, &mut f);
         assert_eq!(g.value(1), Some(10.0));
+    }
+
+    #[test]
+    fn endless_loops_do_not_finish() {
+        let forever = |node, ms| Composite::Loop {
+            child: Box::new(Composite::Run {
+                node,
+                driver: timing(360.0, ms),
+            }),
+            iterations: None,
+            reset: true,
+        };
+        let mut g = Graph::default();
+        let mut f = Vec::new();
+        values(&mut g, &mut f, &[1, 2, 3, 4]);
+        // A spinner alone animates, and never finishes.
+        g.apply(
+            AnimationOp::StartComposite {
+                animation: 1,
+                key: 1,
+                spec: forever(1, 900.0),
+            },
+            &mut f,
+        );
+        run(&mut g, &mut f, 0.0, 0.1);
+        assert!(g.is_animating() && !g.is_finishing());
+        // An animation of JS's beside it finishes.
+        g.apply(
+            AnimationOp::Start {
+                node: 2,
+                animation: 2,
+                driver: timing(1.0, 200.0),
+            },
+            &mut f,
+        );
+        assert!(g.is_finishing());
+        run(&mut g, &mut f, 0.1, 0.4);
+        assert!(g.is_animating() && !g.is_finishing());
+        // An entrance before a loop finishes, then the loop runs on; so
+        // does the part of a parallel that ends, beside one that loops.
+        for (animation, spec) in [
+            (
+                3,
+                Composite::Sequence(vec![
+                    Composite::Run {
+                        node: 3,
+                        driver: timing(1.0, 200.0),
+                    },
+                    forever(3, 500.0),
+                ]),
+            ),
+            (
+                4,
+                Composite::Parallel {
+                    children: vec![
+                        forever(4, 500.0),
+                        Composite::Run {
+                            node: 3,
+                            driver: timing(0.0, 200.0),
+                        },
+                    ],
+                    stop_together: true,
+                },
+            ),
+        ] {
+            g.apply(
+                AnimationOp::StartComposite {
+                    animation,
+                    key: animation,
+                    spec,
+                },
+                &mut f,
+            );
+            run(&mut g, &mut f, 1.0, 1.1);
+            assert!(g.is_finishing());
+            run(&mut g, &mut f, 1.1, 1.4);
+            assert!(g.is_animating() && !g.is_finishing());
+            g.apply(AnimationOp::StopAnimation { animation }, &mut f);
+        }
     }
 
     #[test]

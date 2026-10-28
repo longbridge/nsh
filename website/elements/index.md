@@ -194,6 +194,7 @@ an `<Input>`, an `ImageStyle` on an `<Image>`, a `ViewStyle` elsewhere.
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`, `.indeterminate_style(style)` | `indeterminate:` | While `accessibilityState.checked` is `"mixed"` (a checkbox that is neither checked nor unchecked). |
 | `selectedStyle` | `.selected(\|s\| ..)` | `selected:` | While `accessibilityState.selected` is `true` (a selected `Button`, a tab). |
 | `expandedStyle` | `.expanded(\|s\| ..)`, `.expanded_style(style)` | `aria-expanded:` | While `accessibilityState.expanded` is `true` (a `Popover`'s or `Menu`'s trigger while its popup is open). |
+| `pressedStyle` | `.aria_pressed(\|s\| ..)`, `.pressed_style(style)` | `aria-pressed:` | While `accessibilityState.pressed` is `true` (a toggle button that is on; `"mixed"` is not pressed). Not `activeStyle`, a press in progress. |
 
 ```rust tabs
 view()
@@ -458,7 +459,8 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
-| `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded? }` | The state assistive technologies report (`checked` may be `"mixed"`). |
+| `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
+| `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |

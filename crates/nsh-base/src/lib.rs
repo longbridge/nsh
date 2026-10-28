@@ -1,6 +1,6 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a
+//! controls (`Button`, `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
 //! `RadioGroup`, `Slider`, `Switch`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
@@ -18,10 +18,13 @@
 
 mod alert_dialog;
 mod button;
+mod calendar;
 mod checkbox;
 mod collapsible;
+mod color_picker;
 mod combobox;
 mod data_table;
+mod date_picker;
 mod diff;
 pub mod dock;
 pub mod editor;
@@ -50,6 +53,7 @@ mod table;
 mod tabs;
 pub mod text_view;
 mod theme;
+mod time_field;
 mod toast;
 mod tooltip;
 mod window;
@@ -67,8 +71,20 @@ pub use crate::{
         AlertDialogResult, AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
+    calendar::{
+        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
+        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+    },
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
+    color_picker::{
+        ColorArea, ColorAreaElement, ColorAreaProps, ColorChannel, ColorEyeDropper,
+        ColorEyeDropperElement, ColorEyeDropperEvent, ColorEyeDropperProps, ColorField,
+        ColorFieldElement, ColorFieldProps, ColorFormat, ColorPicker, ColorPickerElement,
+        ColorPickerEvent, ColorPickerProps, ColorSlider, ColorSliderElement, ColorSliderProps,
+        ColorSpace, ColorSwatch, ColorSwatchElement, ColorSwatchEvent, ColorSwatchProps,
+        color_area, color_eye_dropper, color_field, color_picker, color_slider, color_swatch,
+    },
     combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
@@ -76,6 +92,10 @@ pub use crate::{
         DataTableElement, DataTableEvent, DataTableHeaderCell, DataTablePart, DataTablePress,
         DataTableProps, DataTableRange, DataTableRows, DataTableSelection, DataTableSort,
         DataTableSortDirection, DataTableStyles, DataTableTarget, data_table,
+    },
+    date_picker::{
+        DatePicker, DatePickerElement, DatePickerEvent, DatePickerProps, DatePickerValue,
+        DateRangePreset, DateTime, PickedDate, date_picker,
     },
     diff::{
         DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,
@@ -149,6 +169,10 @@ pub use crate::{
         TextViewParts, TextViewProps, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
+    time_field::{
+        HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
+        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+    },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,
@@ -192,12 +216,13 @@ pub mod parts {
     use nsh_core::element::Registry;
 
     use crate::{
-        AlertDialog, Button, Checkbox, Collapsible, Combobox, ContextMenu, DataTable, DiffView,
-        DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Popover, Progress,
-        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
-        Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
-        TableHeader, TableRow, Tabs, TextView, Toast, ToastStack, Tooltip, plot, rich_editor,
-        toast,
+        AlertDialog, Button, Calendar, Checkbox, Collapsible, ColorArea, ColorEyeDropper,
+        ColorField, ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable,
+        DatePicker, DiffView, DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput,
+        OtpInput, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
+        Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
+        TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast,
+        ToastStack, Tooltip, plot, rich_editor, toast,
     };
 
     /// What a part does: registers its components, classes and modules.
@@ -218,7 +243,7 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// checkboxes, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
+    /// checkboxes, color pickers, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
     /// menus, popovers, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
@@ -231,9 +256,17 @@ pub mod parts {
             .register::<Popover>()
             .register::<Sheet>()
             .register::<Tooltip>()
+            .register::<Calendar>()
             .register::<Checkbox>()
             .register::<Collapsible>()
+            .register::<DatePicker>()
             .register::<Combobox>()
+            .register::<ColorPicker>()
+            .register::<ColorArea>()
+            .register::<ColorSlider>()
+            .register::<ColorField>()
+            .register::<ColorSwatch>()
+            .register::<ColorEyeDropper>()
             .register::<Select>()
             .register::<NumberInput>()
             .register::<OtpInput>()
@@ -247,6 +280,7 @@ pub mod parts {
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
+            .register::<TimeField>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
@@ -329,11 +363,19 @@ mod tests {
             components,
             [
                 "Button",
+                "Calendar",
                 "Checkbox",
                 "Collapsible",
+                "ColorArea",
+                "ColorEyeDropper",
+                "ColorField",
+                "ColorPicker",
+                "ColorSlider",
+                "ColorSwatch",
                 "Combobox",
                 "ContextMenu",
                 "DataTable",
+                "DatePicker",
                 "DiffView",
                 "DockArea",
                 "Editor",
@@ -366,6 +408,7 @@ mod tests {
                 "TableRow",
                 "Tabs",
                 "TextView",
+                "TimeField",
                 "Toast",
                 "ToastStack",
                 "Tooltip"

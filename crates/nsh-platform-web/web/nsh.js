@@ -1589,6 +1589,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      screenColor: typeof window.EyeDropper === "function",
     };
   }
 
@@ -2091,6 +2092,9 @@ class Player {
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
     set("aria-expanded", p.expanded);
+    set("aria-pressed", p.pressed);
+    set("aria-current", p.current);
+    set("aria-level", p.level);
     const [min, max, now, text] = p.value ?? [];
     set("aria-valuemin", min);
     set("aria-valuemax", max);
@@ -4378,6 +4382,7 @@ class Player {
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
+      case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
@@ -4435,6 +4440,18 @@ class Player {
    * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
+  // `pickScreenColor`: the browser's eyedropper (`EyeDropper`, which the
+  // environment's `screenColor` reports). The color packed as 0xRRGGBBAA;
+  // none when the user pressed Escape.
+  async pickScreenColor(request) {
+    let color;
+    try {
+      const { sRGBHex } = await new EyeDropper().open();
+      color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
+    } catch {}
+    this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
   // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
   // new tab, another scheme (mailto:, tel:, ...) through the browser's
   // handler. Whether the browser let it open (a blocked pop-up is false).

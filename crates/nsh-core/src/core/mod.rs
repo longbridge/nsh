@@ -2099,8 +2099,7 @@ impl<M: TextEngine> Core<M> {
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
         let kind = Kind::of(tag);
         let key = self.alloc(id, kind)?;
-        let mut style = Style::default().layout;
-        crate::style::resolve_normal_alignment(&mut style);
+        let style = crate::style::unstyled_layout();
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
@@ -2254,6 +2253,22 @@ impl<M: TextEngine> Core<M> {
             text.push("\u{200b}", style);
         }
         text
+    }
+
+    /// `key` holds a slot's content in a Rust component's tree (JS's holder
+    /// of a slot or a render, or the node a view wraps its fill in): while
+    /// nothing styles its layout and it holds one node, that node is laid
+    /// out in its place, as the component's own child (`layout_tree`'s
+    /// "holders laid out through"). A list's holder (an `Items` slot) is a
+    /// list, laid out as one.
+    pub(super) fn lay_out_through(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if node.kind == Kind::View
+            && let Some(layout) = node.layout
+        {
+            self.layout.set_holder(layout);
+            self.needs_layout = true;
+        }
     }
 
     /// Pushes the effective taffy style of `key`: the JS style, adjusted
@@ -2904,10 +2919,12 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::ComponentSlot(name) => {
                 self.set_slot_name(id, name);
+                self.lay_out_through(key);
                 return Ok(());
             }
             Prop::ComponentRender(slot) => {
                 self.set_render_holder(id, slot);
+                self.lay_out_through(key);
                 return Ok(());
             }
             Prop::RustProp(name, value) => {
@@ -3400,6 +3417,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Indeterminate, patch);
                 return Ok(());
             }
+            Prop::PressedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Pressed, patch);
+                return Ok(());
+            }
             Prop::ExpandedStyle(patch) => {
                 self.set_part_style(key, classes::Part::Expanded, patch);
                 return Ok(());
@@ -3478,20 +3499,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     AccessibilityProp::LiveRegion(v) => a.live_region = v,
                     AccessibilityProp::Actions(v) => a.actions = v,
+                    AccessibilityProp::Level(v) => a.level = v,
                 }
-                let selected =
-                    (a.state.selected != before.state.selected).then_some(a.state.selected);
-                let is_checked =
-                    |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::True);
-                let checked = (is_checked(&a.state) != is_checked(&before.state))
-                    .then(|| is_checked(&a.state));
-                let is_mixed =
-                    |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::Mixed);
-                let indeterminate =
-                    (is_mixed(&a.state) != is_mixed(&before.state)).then(|| is_mixed(&a.state));
-                let is_expanded = |s: &crate::AccessibilityState| s.expanded == Some(true);
-                let expanded = (is_expanded(&a.state) != is_expanded(&before.state))
-                    .then(|| is_expanded(&a.state));
+                let states = classes::accessibility_states(&a.state);
+                let states_changed = states != classes::accessibility_states(&before.state);
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -3499,26 +3510,11 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
-                if selected.is_some()
-                    || checked.is_some()
-                    || indeterminate.is_some()
-                    || expanded.is_some()
-                {
+                if states_changed {
                     if flags != 0 {
                         self.mark(key, flags);
                     }
-                    if let Some(selected) = selected {
-                        self.set_selected(key, selected);
-                    }
-                    if let Some(checked) = checked {
-                        self.set_checked(key, checked);
-                    }
-                    if let Some(indeterminate) = indeterminate {
-                        self.set_indeterminate(key, indeterminate);
-                    }
-                    if let Some(expanded) = expanded {
-                        self.set_expanded(key, expanded);
-                    }
+                    self.set_accessibility_states(key, states);
                     return Ok(());
                 }
             }

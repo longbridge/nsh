@@ -430,6 +430,7 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::MacOs,
         idiom: Idiom::Desktop,
+        screen_color: true,
         ..Environment::default()
     }
 }

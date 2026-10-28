@@ -869,6 +869,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Host,
     EventKind::Pick,
     EventKind::OpenUrl,
+    EventKind::ScreenColor,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,
