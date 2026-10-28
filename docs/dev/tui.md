@@ -87,7 +87,10 @@ The Unix session saves the descriptor flags and enables nonblocking input/output
 reading zero bytes or EIO forever, never returning to the host's signal check. The event parsing and conversion
 remain crossterm's. On non-macOS Unix, the reader's millisecond poll truncation can spin over a fractional
 millisecond; decoding is capped at 50 microseconds and `run_app` sleeps the remainder of its 16 ms wait.
-On macOS the reader uses select with microsecond waits. Neither path retries a failed host poll.
+On macOS the reader uses select with microsecond waits. Every Unix decode poll gets at least 50 microseconds,
+including when another frame is already due: crossterm's `use-dev-tty` reader skips its input and parser queue
+entirely at zero timeout. Continuous frames therefore retain an input opportunity between draws. Neither path
+retries a failed host poll.
 
 Terminal and OSC 52 writes share the cancellable output path, with buffered frame encoding. Output backpressure
 waits for writability in 16 ms slices and checks shutdown between waits; errors propagate. Once the loop ends,
@@ -716,7 +719,11 @@ during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
 app replacement, binding removal, page backgrounds, transform geometry and presses, and canvas slots. The
 `animation` host fixture checks final Cells and callbacks through `nsh test --target tui`.
-The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
+The host's unit checks cover crossterm conversion and busy-frame input. The latter runs the real `run_app`,
+parser and AppView in an isolated process on a private PTY. Each backend flush requests an app update and waits
+for its engine wakeup, forcing a due frame at every input poll without timing sleeps. Queued Ctrl+N keys must
+focus four controls in order and Enter must activate the fourth. The two ignored lifecycle checks require a
+real terminal; the ignored input worker is launched automatically by its supervising test.
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui
