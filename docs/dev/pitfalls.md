@@ -130,6 +130,12 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **An input's `pointerEvents` is UIKit's, not `NshView`'s**: inputs are a plain container around a text view, with no
+  `hitTest:` of NSH's, so `none` / `box-none` turn the container's user interaction off (`set_view_props`); it can still
+  become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
+  the touches of whatever lies under it. A JS responder that blocks also cancels the `PressRecognizer`s of the views
+  around it (`set_js_responder`): they keep tracking a finger a descendant took, and its lift was a press on them.
+
 - **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
   check the entire ancestor chain before a stack updates a shared system tab bar, including from transition
   callbacks. Visibility changes synchronize the newly visible stack after the batch. `TabBar.hidden` and the
