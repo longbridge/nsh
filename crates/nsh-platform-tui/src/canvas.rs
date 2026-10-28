@@ -83,7 +83,9 @@ impl CanvasView {
 }
 
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, at the view's `opacity`.
+/// `bounds`, at the view's `opacity`, over a `page` color where the Cells
+/// show the terminal's background.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
@@ -92,11 +94,12 @@ pub(crate) fn draw(
     cells: CellSize,
     opacity: f32,
     projection: crate::animation::Projection,
+    page: Color,
 ) {
     if visible.is_empty() {
         return;
     }
-    let mut replay = Replay::new(canvas, buffer, bounds, visible, cells, opacity);
+    let mut replay = Replay::new(canvas, buffer, bounds, visible, cells, opacity, page);
     let m = projection.matrix.0;
     replay.base = [
         m[0] as f32,
@@ -132,7 +135,7 @@ pub(crate) fn draw(
     }
     for label in labels {
         let cell = &mut buffer[(visible.x + label.column, visible.y + label.row)];
-        let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg));
+        let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg, page));
         if label.bold {
             style = style.add_modifier(Modifier::BOLD);
         }
@@ -162,6 +165,8 @@ struct Dots {
     /// The background of each visible Cell, which translucent paints blend
     /// over.
     backgrounds: Vec<Color>,
+    /// The color a Cell showing the terminal's background stands for.
+    page: Color,
     painted: u32,
 }
 
@@ -178,7 +183,7 @@ impl Dots {
     fn paint(&mut self, index: usize, color: nsh_core::Color, alpha: f32) {
         let under = self.colors[index].map_or_else(|| self.background(index), |(c, _)| c);
         self.painted += 1;
-        self.colors[index] = Some((blend(color, alpha, under), self.painted));
+        self.colors[index] = Some((blend(color, alpha, under, self.page), self.painted));
     }
 
     /// Calls `visit` with each dot whose center `outline` holds by `rule`.
@@ -383,6 +388,7 @@ impl<'a> Replay<'a> {
         visible: Rect,
         cells: CellSize,
         opacity: f32,
+        page: Color,
     ) -> Self {
         let offset = [
             i32::from(visible.x) - bounds.left,
@@ -410,6 +416,7 @@ impl<'a> Replay<'a> {
                 ],
                 colors: vec![None; width * height],
                 backgrounds,
+                page,
                 painted: 0,
             },
             labels: Vec::new(),

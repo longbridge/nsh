@@ -307,7 +307,14 @@ keep that color.
 The attached tree's page colors are collected before drawing, after complete mount batches and animated values
 have been applied. This makes matching independent of paint order and follows style changes, animation frames,
 detachments and app replacement. Transparent fills
-remain transparent. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
+remain transparent.
+
+Translucent fills, borders, text, canvas dots and field text blend their alpha and the view's opacity over the
+Cell beneath them. A Cell showing the terminal's background stands for the page color under it: the fill of the
+nearest enclosing view with a page background, else the app's page color (the outermost page fill; overlays sit
+there), else black. A view whose opacity, multiplied through its ancestors, is below 3% draws nothing: blending
+would change no channel by more than 8 of 255, while its borders and glyphs would still replace the glyphs under
+them. It keeps its hit regions. The terminal Key scheme and the Minibuffer are described below; mouse-capture controls are
 separate interaction work.
 
 ## Navigation stacks
@@ -662,7 +669,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
-| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
+| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background (the page color where the terminal's shows); nothing below 3% opacity |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
 | Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout; edges crossing the view's glyphs move outward to free Cells |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
