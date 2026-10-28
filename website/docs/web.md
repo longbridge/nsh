@@ -162,6 +162,19 @@ page and files named after their content.
 new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
 works from any directory of any host (`https://example.com/apps/counter/`).
 
+### Runtime size
+
+Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and only the `nsh/base` components,
+standard modules and shaders the app imports. Measured with `nsh package --target web` (MB = 10^6 bytes, gzip
+level 9):
+
+| App | Uses | `nsh.<digest>.wasm` | gzip |
+|---|---|---|---|
+| `examples/counter` | The core components | 3.40 MB | 1.12 MB |
+| A `Shader` view | The core components and shaders | 4.34 MB | 1.42 MB |
+| `Editor`, `Plot` and `zlib` | The core components, two more parts of `nsh/base` and `zlib` | 7.02 MB | 2.32 MB |
+| `examples/gallery` | Every component, `zlib` and shaders | 11.22 MB | 3.56 MB |
+
 ### Deploy it
 
 Upload the directory to any static host: an object store behind a CDN, Cloudflare Pages, Netlify, GitHub Pages,

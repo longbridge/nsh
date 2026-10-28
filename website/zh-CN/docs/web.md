@@ -169,6 +169,17 @@ nsh package App.tsx --target web --run
 
 `<digest>` 是文件内容 SHA-256 的前几位：文件名只在内容变化时才变化，所以新版本只会改动 `index.html` 和真正变化了的文件。所有 URL 都是相对的，站点放在任何主机的任何目录下都能运行（`https://example.com/apps/counter/`）。
 
+### 运行时大小
+
+打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用导入的 `nsh/base` 组件、标准模块和着色器，没有用到的不会打包进去。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计，gzip 压缩级别 9）：
+
+| 应用 | 用到的功能 | `nsh.<digest>.wasm` | gzip |
+|---|---|---|---|
+| `examples/counter` | 基础组件 | 3.40 MB | 1.12 MB |
+| 一个 `Shader` 视图 | 基础组件和着色器 | 4.34 MB | 1.42 MB |
+| `Editor`、`Plot` 和 `zlib` | 基础组件、`nsh/base` 的另外两部分和 `zlib` | 7.02 MB | 2.32 MB |
+| `examples/gallery` | 全部组件、`zlib` 和着色器 | 11.22 MB | 3.56 MB |
+
 ### 部署
 
 把目录上传到任意静态托管：CDN 后面的对象存储、Cloudflare Pages、Netlify、GitHub Pages、nginx。遵循两条规则，加载就快，更新也可靠：
