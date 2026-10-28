@@ -729,7 +729,7 @@ const icon = (name: string, size = 16) =>
   .stage { --w: 392px; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
   .device {
     width: var(--w); padding: 0 8px 8px; border: 1px solid var(--border); border-radius: 20px;
-    background: var(--card) var(--finish-card-bg); box-shadow: var(--finish-card), var(--shadow-window);
+    background: var(--card) var(--finish-card-bg); box-shadow: var(--finish-card);
   }
   .device__bar { display: flex; align-items: center; gap: 8px; height: 40px; margin: 0 -8px; padding: 0 14px; border-radius: 20px 20px 0 0; background: linear-gradient(180deg, color-mix(in srgb, var(--foreground) 3%, transparent), transparent); }
   .device__tile { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--accent-border); border-radius: 7px; background: var(--finish-accent-bg); box-shadow: var(--finish-accent); color: var(--on-citrus); }
