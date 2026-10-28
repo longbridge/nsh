@@ -4,8 +4,8 @@
 // and whose range changes, a drawdown whose day under the pointer or the
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
-// hole) or the arrow keys and closes into a pie, and sales as bars side by
-// side or stacked.
+// hole) or the arrow keys and closes into a pie, sales as bars side by
+// side or stacked, and a quarter's income as flows between its accounts.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -137,4 +137,12 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   await app.press("role:tab[Stacked]");
   await app.waitFor("96");
   expect(app.texts()).not.toContain("63");
+});
+
+test("a quarter's income flows from its segments to net income", async () => {
+  // The flows are one image, named with what they show; the margins under them.
+  expect(app.count("role:image[Income flows: $85.5B revenue, $19.9B net income, a net margin of 23.3%]")).toBe(1);
+  expect(app.texts()).toContain("SEGMENTS");
+  expect(app.texts()).toContain("46.4%");
+  expect(app.texts()).toContain("27.4%");
 });

@@ -246,7 +246,7 @@ import type {
 
 ### Plot（`nsh/base/plot`）
 
-构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Bar, Grid, Pie, Arc } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point`、`linear` 或 `band` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`；`Area` 和 `Bar` 可以在形状内显示背景（渐变，`bg-linear-*`）。柱子立在 `band` 比例尺的条带里，并排或用 `stack` 堆叠，随 plot 出现时长出，指针下那一行以外的柱子会变淡，每根柱子末端可以有 `label` 部件。悬停的十字线、圆点（每个图形可用 `hoverDotClass` 设置自己的圆点）和提示框（`tooltipPlacement`，留在 plot 内）是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。`Pie` 按每一行把一整圈分成扇区（设置 `innerRadius` 即为环形图），每个扇区用自己的类着色（`sliceClass`，行的函数）；`Arc` 绘制两个角度之间的一段扇形（仪表的轨道和数值）；在饼图上，plot 报告指针下的扇区，它会抬起（`hoverLift`），其他扇区变淡（`hoverDim`）。见 [Plot](../elements/plot.md)。
+构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Bar, Grid, Pie, Arc, Sankey } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point`、`linear` 或 `band` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`；`Area` 和 `Bar` 可以在形状内显示背景（渐变，`bg-linear-*`）。柱子立在 `band` 比例尺的条带里，并排或用 `stack` 堆叠，随 plot 出现时长出，指针下那一行以外的柱子会变淡，每根柱子末端可以有 `label` 部件。悬停的十字线、圆点（每个图形可用 `hoverDotClass` 设置自己的圆点）和提示框（`tooltipPlacement`，留在 plot 内）是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。`Pie` 按每一行把一整圈分成扇区（设置 `innerRadius` 即为环形图），每个扇区用自己的类着色（`sliceClass`，行的函数）；`Arc` 绘制两个角度之间的一段扇形（仪表的轨道和数值）；在饼图上，plot 报告指针下的扇区，它会抬起（`hoverLift`），其他扇区变淡（`hoverDim`）。`Sankey` 绘制各行之间的流（`links`），按 d3-sankey 的方式布局，每个节点和流带用自己的类着色。见 [Plot](../elements/plot.md)。
 
 <a id="workspaces"></a>
 

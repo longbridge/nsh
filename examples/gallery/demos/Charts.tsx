@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, Sankey } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -816,6 +816,107 @@ function Sales() {
   );
 }
 
+/** A quarter's income, in billions: two segments into revenue, revenue
+ * into gross profit and its cost, gross profit into operating income and
+ * expenses, operating income into net income and tax. */
+const ACCOUNTS = [
+  "Products",
+  "Services",
+  "Revenue",
+  "Gross profit",
+  "Cost of revenue",
+  "Operating income",
+  "Operating expenses",
+  "Net income",
+  "Tax",
+].map((name) => ({ name }));
+const INCOME = [
+  { source: 0, target: 2, value: 61.6 },
+  { source: 1, target: 2, value: 23.9 },
+  { source: 2, target: 3, value: 39.7 },
+  { source: 2, target: 4, value: 45.8 },
+  { source: 3, target: 5, value: 23.4 },
+  { source: 3, target: 6, value: 16.3 },
+  { source: 5, target: 7, value: 19.9 },
+  { source: 5, target: 8, value: 3.5 },
+];
+const SALES_IN = 61.6 + 23.9;
+/** Each account's color: what is kept in the accent, the segments in
+ * graphite, what is spent quiet; a ribbon fades from its source's to its
+ * target's. */
+const NODE = ["fill-chart-2", "fill-chart-3", "fill-chart-1", "fill-chart-1", "fill-chart-4", "fill-chart-1", "fill-chart-4", "fill-chart-1", "fill-chart-4"];
+const FROM = ["from-chart-2/30", "from-chart-3/30", "from-chart-1/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30"];
+const TO = ["to-chart-2/30", "to-chart-3/30", "to-chart-1/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30"];
+/** The flow's five columns, left to right (EBIT: operating income). */
+const COLUMNS = ["Segments", "Revenue", "Gross", "EBIT", "Net"];
+const FLOW_HEIGHT = pointer ? 196 : 220;
+/** Where column `i`'s nodes start, across the plot. */
+const column = (i: number): `${number}%` => `${(i / (COLUMNS.length - 1)) * 100}%`;
+const margin = (part: number) => `${fixed((part / SALES_IN) * 100, 1)}%`;
+
+/**
+ * A quarter's income as flows: each account a hairline node, each flow a
+ * ribbon fading from its source's color to its target's, what is kept in
+ * the accent and what is spent quiet, drawn in from the left; the columns
+ * captioned above and the margins below.
+ */
+function Flows() {
+  return (
+    <Card icon="stocks" title="Flows" subtitle="A quarter's revenue from its segments to net income">
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+        <Legend color={chart.s2} label="Products" value="$61.6B" />
+        <Legend color={chart.s3} label="Services" value="$23.9B" />
+        <Legend color={chart.s1} label="Kept" />
+        <Legend color={chart.s4} label="Spent" />
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        {/* Each caption starts at its column's nodes, the last ends there. */}
+        <View style={{ height: 13, marginBottom: 10 }}>
+          {COLUMNS.map((c, i) => (
+            <Text
+              style={{
+                ...axis,
+                letterSpacing: 0.8,
+                position: "absolute",
+                left: i < COLUMNS.length - 1 ? column(i) : undefined,
+                right: i === COLUMNS.length - 1 ? 0 : undefined,
+              }}
+            >
+              {c.toUpperCase()}
+            </Text>
+          ))}
+        </View>
+        <Plot
+          data={ACCOUNTS}
+          interactive={false}
+          appearGeneration={1}
+          motion={{ appear: { duration: 1100, easing: "easeOut" } }}
+          accessibilityLabel={`Income flows: $${fixed(SALES_IN, 1)}B revenue, $19.9B net income, a net margin of ${margin(19.9)}`}
+          style={{ height: FLOW_HEIGHT }}
+        >
+          <Sankey
+            links={INCOME}
+            nodeAlign="left"
+            nodeWidth={3}
+            nodePadding={14}
+            nodeCornerRadius={1.5}
+            nodeClass={(_, i) => NODE[i]}
+            linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+          />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Revenue" value={`$${fixed(SALES_IN, 1)}B`} />
+          <Figure label="Gross margin" value={margin(39.7)} />
+          <Figure label="Operating" value={margin(23.4)} />
+          <Figure label="Net margin" value={margin(19.9)} tone="up" />
+        </Figures>
+      </View>
+    </Card>
+  );
+}
+
 /**
  * Charts: what an app builds from `nsh/base/plot`'s parts and its own
  * views, with no chart component in between. A live price streamed a tick
@@ -824,10 +925,11 @@ function Sales() {
  * pointer read out; a portfolio's value over its underwater plot, the
  * worst run shaded and the hovered day marked on both; capacity rings that
  * sweep in for each period; revenue as a donut whose hovered slice lifts;
- * and sales as bars side by side or stacked. Values on the axes are small
+ * sales as bars side by side or stacked; and a quarter's income as flows
+ * from its segments to net income. Values on the axes are small
  * monospaced figures the plots' `PlotAxis` parts lay along their edges,
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Flows]} />;
 }

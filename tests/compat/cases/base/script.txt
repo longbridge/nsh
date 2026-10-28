@@ -1718,6 +1718,32 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# A sankey fills its plot (its nodes and ribbons are canvases over all
+# of it); the pointer over a node finds no row of the plot's. A plot
+# whose links make a cycle lays out as any other, drawing nothing.
+prop id:flows role image
+prop id:flows accessibilityLabel Flows
+frame id:sankey 0 0 200 100
+expect flow null
+event id:flows onMouseMove position.x=4 position.y=50
+expect flow null
+event id:flows onMouseLeave
+prop id:cycle accessibilityLabel Cycle
+covers [nsh/base/plot] Sankey
+covers [props] Sankey.links
+covers [props] Sankey.nodeWidth
+covers [props] Sankey.nodePadding
+covers [props] Sankey.nodeAlign
+covers [props] Sankey.iterations
+covers [props] Sankey.valueScale
+covers [props] Sankey.minLinkWidth
+covers [props] Sankey.nodeCornerRadius
+covers [props] Sankey.nodeClass
+covers [props] Sankey.nodeStyle
+covers [props] Sankey.linkClass
+covers [props] Sankey.linkStyle
+covers [props] Sankey.linkBackgroundClass
+covers [props] Sankey.linkBackgroundStyle
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

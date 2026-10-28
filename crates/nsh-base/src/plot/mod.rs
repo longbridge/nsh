@@ -1,9 +1,10 @@
 //! `nsh/base/plot`: the parts charts are built from, as `gpui-base`'s
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes, the pointer over it and its motion;
-//! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], and the radial
-//! [`Pie`] and [`Arc`]) draw what it holds, each a canvas filling the plot
-//! (a pie one per slice), and its [`PlotAxis`]es label its edges with the
+//! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], the radial [`Pie`]
+//! and [`Arc`], and the [`Sankey`] of flows) draw what it holds, each a
+//! canvas filling the plot (a pie one per slice, a sankey one per node
+//! and ribbon), and its [`PlotAxis`]es label its edges with the
 //! ticks of its scales, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
 //! and the pointer, the hover's glide and fade, the appear and the scales'
@@ -22,10 +23,12 @@
 mod area;
 mod axis;
 mod bar;
+mod class;
 mod grid;
 mod keys;
 mod line;
 mod pie;
+mod sankey;
 mod scale;
 mod series;
 mod tween;
@@ -46,9 +49,14 @@ pub use self::{
         PlotAxisProps, TickFormat, plot_axis,
     },
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
+    class::RowClass,
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
     pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
+    sankey::{
+        Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
+        SankeyValueScale, sankey,
+    },
     scale::{BandScale, Scale},
 };
 use self::{
@@ -73,7 +81,8 @@ pub fn registry() -> Registry {
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
-        .register::<PlotAxis>();
+        .register::<PlotAxis>()
+        .register::<Sankey>();
     registry
 }
 

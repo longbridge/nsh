@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Grid、Pie 和 Arc 以及 PlotAxis：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、指针下的数据行或扇区和动效，没有自己的外观。"
+description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Grid、Pie、Arc 和 Sankey 以及 PlotAxis：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、指针下的数据行或扇区和动效，没有自己的外观。"
 order: 20.9
 group: base
 demo: el-plot
@@ -8,7 +8,7 @@ demo: el-plot
 
 # Plot
 
-Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形；`PlotAxis` 用比例尺的刻度为一条边加上标签。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
+Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形，`Sankey` 是各行之间的流向图；`PlotAxis` 用比例尺的刻度为一条边加上标签。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
 
 ```rust tabs
 use nsh_base::{
@@ -71,7 +71,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`、`Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc` 和 `PlotAxis` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
+`Plot`、`Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`、`Sankey` 和 `PlotAxis` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
 
 ## Plot
 
@@ -294,6 +294,84 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 扇区和 arc 用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于饼图和 plot 上的值：使用界面背景色的描边（`stroke-card stroke-2`）同样可以在扇区之间切出间隙。它们的数值不计入 plot 的比例尺。饼图的扇区只在数据行、数值、角度、半径或 plot 的尺寸变化时重绘；指针只通过动画器推动抬起和变淡。
 
 饼图的数据行在坐标轴上没有位置，所以带饼图的 plot 通常把提示框放在指针旁边（`tooltipPlacement="pointer"`）：十字线和提示框跟随指针，没有悬停圆点。环形图中间的内容是应用自己叠放在 plot 上的元素（悬停扇区的数值或总数），图例也是，每个色块使用对应扇区的颜色。
+
+## Sankey
+
+`Sankey` 绘制 plot 各行之间的流向：每一行是一个节点，`links` 列出它们之间的流，`{ source, target, value }`，前两项是两行在 plot 的 `data` 中的序号。它按 d3-sankey 的方式在 plot 的尺寸内布局：节点按列排列（`nodeAlign`），每个节点的高度取流入和流出中较大的一方，同一列的节点相隔 `nodePadding`，再经过 `iterations` 轮松弛向各自的流靠拢；每条 link 是一条流带，从源节点的右边缘连到目标节点的左边缘，两端的宽度各是它在那一侧所占的份额，所以即使节点的流入和流出不相等，它的两侧也都被流带铺满。每一列在 plot 中垂直居中；连续几列都只有一个等高节点时，这些列会交错错开一点，让它们之间的流带弯曲起来。`valueScale="sqrt"` 按数值的平方根决定尺寸，避免一条特别大的流把小的流压得看不见。
+
+每个节点和每条流带都是一个独立的画布，即 `node` 和 `link` 部件，所以各自可以用自己的类着色：`nodeClass` 可以是所有节点共用的类，也可以是节点所在行的函数；`linkClass` 可以是所有流带共用的类，也可以是 link 的函数。`linkBackground` 部件在每条流带内显示背景，背景框从源节点延伸到目标节点：用 link 的函数可以让每条流带显示从源节点颜色到目标节点颜色的渐变。流带画在节点下面，两者都随 plot 的出场动画从起始边缘画入。在 sankey 上，指针找不到任何行。
+
+```tsx
+import { Plot, Sankey } from "nsh/base/plot";
+
+type Step = { name: string };
+
+const steps: Step[] = [{ name: "Visits" }, { name: "Sign-ups" }, { name: "Bounced" }, { name: "Trials" }, { name: "Paid" }, { name: "Churned" }];
+const flows = [
+  { source: 0, target: 1, value: 4200 },
+  { source: 0, target: 2, value: 5800 },
+  { source: 1, target: 3, value: 2600 },
+  { source: 3, target: 4, value: 1100 },
+  { source: 3, target: 5, value: 1500 },
+];
+// 每一步的颜色：节点的填充色，以及从它出发、到它为止的流带渐变两端。
+const FILLS = ["fill-chart-1", "fill-chart-2", "fill-muted", "fill-chart-3", "fill-chart-4", "fill-muted"];
+const FROM = ["from-chart-1/40", "from-chart-2/40", "from-muted/40", "from-chart-3/40", "from-chart-4/40", "from-muted/40"];
+const TO = ["to-chart-1/40", "to-chart-2/40", "to-muted/40", "to-chart-3/40", "to-chart-4/40", "to-muted/40"];
+
+export function Funnel() {
+  return (
+    <Plot data={steps} accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid" class="h-64">
+      <Sankey
+        links={flows}
+        nodeWidth={8}
+        nodePadding={16}
+        nodeCornerRadius={2}
+        nodeClass={(_, i) => FILLS[i]}
+        linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+      />
+    </Plot>
+  );
+}
+```
+
+```rust
+use nsh_base::plot::{RowClass, SankeyLinkClass, SankeyLinks, plot, sankey};
+use nsh_core::{element::Rows, prelude::*};
+
+fn funnel() -> impl IntoElement {
+    plot()
+        .data(Rows::from_columns(4, []))
+        .accessibility_label("Visits to paid")
+        .h(px(256.0))
+        .child(
+            sankey()
+                .links(SankeyLinks::new([(0, 1, 4200.0), (1, 2, 2600.0), (2, 3, 1100.0)]))
+                .node_width(px(8.0))
+                .node_class(RowClass::from_fn(|i| format!("fill-chart-{}", i + 1).into()))
+                .link_class(SankeyLinkClass::from("fill-foreground/10")),
+        )
+}
+```
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `links` | `.links(..)` | `SankeyLink[]`（`{ source: number; target: number; value: number }`） | 必填 | 各条流：从 `source` 行流向 `target` 行（它们在 plot 的 `data` 中的序号），`value` 是流量。数值不是数字或小于零的 link 不承载流量，也不画流带。 |
+| `nodeWidth` | `.node_width(..)` | `number` | `24` | 每个节点的宽度，单位为点。 |
+| `nodePadding` | `.node_padding(..)` | `number` | `8` | 同一列节点之间的间距，单位为点；列太挤时会变小。 |
+| `nodeAlign` | `.node_align(..)` | `"justify" \| "left" \| "right" \| "center"` | `"justify"` | 每个节点放在哪一列，同 d3-sankey：按它离第一列的深度（`"left"`），按它的流所允许的最右位置（`"right"`），按深度但只发出流的节点紧挨它的目标（`"center"`），或按深度但只接收流的节点放在最后一列（`"justify"`）。 |
+| `iterations` | `.iterations(..)` | `number` | `6` | 让节点向各自的流靠拢的松弛轮数。 |
+| `valueScale` | `.value_scale(..)` | `"linear" \| "sqrt"` | `"linear"` | 高度和宽度与数值成正比，或与数值的平方根成正比。 |
+| `minLinkWidth` | `.min_link_width(..)` | `number` | `1` | 流带的最小宽度，单位为点，让很小的流也看得见。 |
+| `nodeCornerRadius` | `.node_corner_radius(..)` | `number` | `0` | 每个节点圆角的半径，单位为点。 |
+| `nodeClass` | `.node_class(..)` | `string \| (d: T, index: number) => string` | 无 | 每个节点的类（`fill-*`、`stroke-*`）：所有节点相同，或节点所在行及其序号的函数；数据行或函数变化时，每行调用一次。 |
+| `nodeStyle` | `.node_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有节点的样式，优先于它们的类。 |
+| `linkClass` | `.link_class(..)` | `string \| (link: SankeyLink, index: number) => string` | 无 | 每条流带的类：所有流带相同，或 link 及其在 `links` 中序号的函数。 |
+| `linkStyle` | `.link_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有流带的样式，优先于它们的类。 |
+| `linkBackgroundClass` | `.link_background_class(..)` | `string \| (link: SankeyLink, index: number) => string` | 无 | 每条流带背景的类（`bg-*`，渐变：`bg-linear-to-r from-… to-…`），显示在流带内，背景框从源节点延伸到目标节点，位于流带的 `fill` 之下。设置了背景时，流带的 `fill` 在没有设置时为 `none`。 |
+| `linkBackgroundStyle` | `.link_background_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有流带背景的样式，优先于它们的类。 |
+
+节点和流带用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于 sankey 和 plot 上的值。没有任何流经过的节点高 1 点。只有 links、选项或 plot 的尺寸变化时才会重新布局，指针和出场动画都不会触发布局。构成环的 links，或指向 plot 中不存在的行的 links，什么也不画，并记录一条警告。它的数值不计入 plot 的比例尺。
 
 ## PlotAxis
 

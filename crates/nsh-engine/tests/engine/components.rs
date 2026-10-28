@@ -5594,6 +5594,220 @@ fn base_plot_arc_corners_are_rounded_and_clamped() {
     );
 }
 
+const BASE_PLOT_SANKEY: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Sankey } from "nsh/base/plot";
+
+type Stage = { name: string };
+const FILLS = ["fill-[#ff0000]", "fill-[#00ff00]", "fill-[#0000ff]"];
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const two: Stage[] = [{ name: "a" }, { name: "b" }];
+  return (
+    <View>
+      {/* A fan-out of 36 and 12 from one node, the layout's first
+          placement (no relaxation). */}
+      <Plot
+        testID="plot"
+        data={[{ name: "a" }, { name: "b" }, { name: "c" }]}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 104 }}
+      >
+        <Sankey
+          links={[
+            { source: 0, target: 1, value: 36 },
+            { source: 0, target: 2, value: 12 },
+          ]}
+          nodeWidth={10}
+          iterations={0}
+          nodeCornerRadius={2}
+          nodeClass={(_: Stage, i: number) => FILLS[i]}
+          linkClass="fill-[#999999]"
+        />
+      </Plot>
+      {/* A cycle, a row the plot does not have, an index that is none:
+          nothing drawn. */}
+      <Plot data={two} style={{ width: 200, height: 100 }}>
+        <Sankey links={[{ source: 0, target: 1, value: 1 }, { source: 1, target: 0, value: 1 }]} />
+      </Plot>
+      <Plot data={two} style={{ width: 200, height: 100 }}>
+        <Sankey links={[{ source: 0, target: 5, value: 1 }]} />
+      </Plot>
+      <Plot data={two} style={{ width: 200, height: 100 }}>
+        <Sankey links={[{ source: 0.5, target: 1, value: 1 }]} />
+      </Plot>
+      {/* Appearing (for long): its nodes and ribbon clipped from the
+          leading edge. */}
+      <Plot data={two} appearGeneration={1} motion={{ appear: { duration: 100000 } }} style={{ width: 200, height: 100 }}>
+        <Sankey links={[{ source: 0, target: 1, value: 1 }]} linkBackgroundClass="bg-linear-to-r from-[#ff0000] to-[#0000ff]" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base/plot`'s `Sankey` (`gpui-base`'s sankey layout,
+/// `gpui-component`'s `SankeyChart` painting): the plot's rows are its
+/// nodes, a canvas each, placed in columns as d3-sankey places them, and a
+/// ribbon per link from its source's right edge to its target's left edge,
+/// as wide at each end as its share of that side, its curves' control
+/// points at the middle. Each node takes its row's classes, each ribbon
+/// the links'. Links that make a cycle or name no row draw nothing; with
+/// the plot's appear everything clips from the leading edge, and a
+/// background shows inside the ribbon. The pointer over it finds no row.
+#[test]
+fn base_plot_sankey_layout() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, GradientShape, Num, Paint, PathOp},
+        geometry::point,
+    };
+    let (engine, rx) = start(BASE_PLOT_SANKEY);
+    // The nodes' classes come a turn after the rows.
+    let mut all = until_drawn(&rx, |d| {
+        d.ops
+            .contains(&CanvasOp::FillStyle(Paint::Color(Color(0x0000_ffff))))
+    });
+    all.extend(until(&rx, |_| false));
+    let clipped =
+        |d: &nsh_core::canvas::Drawing| d.ops.iter().any(|op| matches!(op, CanvasOp::Clip(..)));
+    let raw = plot_canvases(&all);
+    let drawings = plot_drawings(&all);
+    // Only the first plot and the appearing one draw: three nodes and two
+    // ribbons, two nodes, a ribbon and its background.
+    let (appearing, fan): (Vec<_>, Vec<_>) = drawings.iter().partition(|(_, d)| clipped(d));
+    assert_eq!((fan.len(), appearing.len()), (5, 4), "{drawings:?}");
+    let rect = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::Path(PathOp::RoundRect(r, corners)) => Some((*r, *corners)),
+            _ => None,
+        })
+    };
+    let fill = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+    };
+    let c = Num::Const;
+    // The nodes: 10 wide, a column at each end (190 = 200 - 10); the
+    // source 96 tall (48 at 2 a unit: the crowded column's 104 less one
+    // gap of 8, over 48), centered; its targets 72 and 24 tall, 8 apart.
+    // Corners of 2; each its row's fill.
+    let mut nodes: Vec<_> = fan
+        .iter()
+        .filter_map(|(id, d)| Some((*id, rect(d)?, fill(d))))
+        .collect();
+    let at = |n: &Num| match n {
+        Num::Const(v) => *v,
+        _ => f32::NAN,
+    };
+    nodes.sort_by(|a, b| {
+        (at(&a.1.0[0]), at(&a.1.0[1]))
+            .partial_cmp(&(at(&b.1.0[0]), at(&b.1.0[1])))
+            .unwrap()
+    });
+    let shapes: Vec<_> = nodes.iter().map(|(_, (r, _), f)| (*r, *f)).collect();
+    assert_eq!(
+        shapes,
+        [
+            ([c(0.0), c(4.0), c(10.0), c(96.0)], Some(Color(0xff00_00ff))),
+            (
+                [c(190.0), c(0.0), c(10.0), c(72.0)],
+                Some(Color(0x00ff_00ff))
+            ),
+            (
+                [c(190.0), c(80.0), c(10.0), c(24.0)],
+                Some(Color(0x0000_ffff))
+            ),
+        ]
+    );
+    assert_eq!(nodes[0].1.1, [c(2.0); 4]);
+    // The ribbons: from the source's right edge to each target's left
+    // edge, 72 and 24 wide at both ends, stacked in the source in its
+    // targets' order; the links' fill.
+    let mut ribbons: Vec<_> = fan
+        .iter()
+        .filter(|(_, d)| rect(d).is_none())
+        .map(|(id, d)| (*id, path_points(&d.ops), fill(d)))
+        .collect();
+    ribbons.sort_by(|a, b| a.1[0].1.total_cmp(&b.1[0].1));
+    assert_eq!(
+        ribbons.iter().map(|r| (&r.1[..], r.2)).collect::<Vec<_>>(),
+        [
+            (
+                &[(10.0, 4.0), (190.0, 0.0), (190.0, 72.0), (10.0, 76.0)][..],
+                Some(Color(0x9999_99ff))
+            ),
+            (
+                &[(10.0, 76.0), (190.0, 80.0), (190.0, 104.0), (10.0, 100.0)][..],
+                Some(Color(0x9999_99ff))
+            ),
+        ]
+    );
+    // `sankeyLinkHorizontal`: the control points at the horizontal middle,
+    // level with each end.
+    let (_, first) = fan.iter().find(|(id, _)| *id == ribbons[0].0).unwrap();
+    let cubic = first.ops.iter().find_map(|op| match op {
+        CanvasOp::Path(PathOp::CubicTo(n)) => Some(*n),
+        _ => None,
+    });
+    assert_eq!(
+        cubic,
+        Some([c(100.0), c(4.0), c(100.0), c(0.0), c(190.0), c(0.0)])
+    );
+    // A ribbon reaches past the plot by the strokes' room and half its
+    // least width (1), a node by the strokes' room.
+    let bleed = |id: u32| {
+        raw.iter()
+            .find(|(i, _)| *i == id)
+            .and_then(|(_, d)| match d.ops.first() {
+                Some(CanvasOp::Translate(Num::Const(x), _)) => Some(*x),
+                _ => None,
+            })
+    };
+    assert_eq!(bleed(ribbons[0].0), Some(9.0));
+    assert_eq!(bleed(nodes[0].0), Some(8.0));
+    // Appearing: its ribbon's background part fills the ribbon with the
+    // app's gradient across its box, from the source's right edge (24, the
+    // default node width) to the target's left edge.
+    let gradient = appearing
+        .iter()
+        .find_map(|(_, d)| {
+            d.ops.iter().find_map(|op| match op {
+                CanvasOp::FillStyle(Paint::Gradient(g)) => Some(g.clone()),
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| panic!("a gradient: {appearing:?}"));
+    assert_eq!(
+        gradient.shape,
+        GradientShape::Linear {
+            start: point(px(24.0), px(50.0)),
+            end: point(px(176.0), px(50.0)),
+        }
+    );
+    assert_eq!(gradient.stops[0].1, Color(0xff00_00ff));
+
+    // The pointer over a node finds no row.
+    let plot = test_view(&all, "plot");
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseMove,
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            point(px(5.0), px(50.0)),
+            point(px(5.0), px(50.0)),
+            Default::default(),
+            None,
+        )),
+    );
+    let after = until(&rx, |b| shows(b, "hover 0"));
+    assert!(!after.iter().any(|b| shows(b, "hover 0")));
+}
+
 const BASE_PLOT_ARC_TWEEN: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Arc, Pie, Plot } from "nsh/base/plot";
 
