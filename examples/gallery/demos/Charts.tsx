@@ -816,102 +816,115 @@ function Sales() {
   );
 }
 
-/** A quarter's income, in billions: two segments into revenue, revenue
+/** Two quarters' income, in billions: two segments into revenue, revenue
  * into gross profit and its cost, gross profit into operating income and
  * expenses, operating income into net income and tax. */
-const ACCOUNTS = [
-  "Products",
-  "Services",
-  "Revenue",
-  "Gross profit",
-  "Cost of revenue",
-  "Operating income",
-  "Operating expenses",
-  "Net income",
-  "Tax",
-].map((name) => ({ name }));
-const INCOME = [
-  { source: 0, target: 2, value: 61.6 },
-  { source: 1, target: 2, value: 23.9 },
-  { source: 2, target: 3, value: 39.7 },
-  { source: 2, target: 4, value: 45.8 },
-  { source: 3, target: 5, value: 23.4 },
-  { source: 3, target: 6, value: 16.3 },
-  { source: 5, target: 7, value: 19.9 },
-  { source: 5, target: 8, value: 3.5 },
+const ACCOUNTS = ["Products", "Services", "Revenue", "Gross profit", "Cost", "Operating", "OpEx", "Net income", "Tax"].map((name) => ({ name }));
+const PAIRS = [
+  [0, 2],
+  [1, 2],
+  [2, 3],
+  [2, 4],
+  [3, 5],
+  [3, 6],
+  [5, 7],
+  [5, 8],
 ];
-const SALES_IN = 61.6 + 23.9;
+const QUARTERS = [
+  { value: "q3", label: "Q3" },
+  { value: "q4", label: "Q4" },
+] as const;
+type Quarter = (typeof QUARTERS)[number]["value"];
+const FLOWED: Record<Quarter, number[]> = {
+  q3: [61.6, 23.9, 39.7, 45.8, 23.4, 16.3, 19.9, 3.5],
+  q4: [68.2, 25.1, 43.6, 49.7, 27.0, 16.6, 23.1, 3.9],
+};
+const income = (q: Quarter) => PAIRS.map(([source, target], i) => ({ source, target, value: FLOWED[q][i] }));
+/** What flows through account `i`: the most into or out of it. */
+const through = (q: Quarter, i: number) => {
+  const sum = (end: 0 | 1) => PAIRS.reduce((s, pair, k) => (pair[end] === i ? s + FLOWED[q][k] : s), 0);
+  return Math.max(sum(0), sum(1));
+};
 /** Each account's color: what is kept in the accent, the segments in
  * graphite, what is spent quiet; a ribbon fades from its source's to its
  * target's. */
 const NODE = ["fill-chart-2", "fill-chart-3", "fill-chart-1", "fill-chart-1", "fill-chart-4", "fill-chart-1", "fill-chart-4", "fill-chart-1", "fill-chart-4"];
 const FROM = ["from-chart-2/30", "from-chart-3/30", "from-chart-1/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30"];
 const TO = ["to-chart-2/30", "to-chart-3/30", "to-chart-1/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30"];
-/** The flow's five columns, left to right (EBIT: operating income). */
-const COLUMNS = ["Segments", "Revenue", "Gross", "EBIT", "Net"];
 const FLOW_HEIGHT = pointer ? 196 : 220;
-/** Where column `i`'s nodes start, across the plot. */
-const column = (i: number): `${number}%` => `${(i / (COLUMNS.length - 1)) * 100}%`;
-const margin = (part: number) => `${fixed((part / SALES_IN) * 100, 1)}%`;
+const billions = (v: number) => `$${fixed(v, 1)}B`;
 
 /**
- * A quarter's income as flows: each account a hairline node, each flow a
- * ribbon fading from its source's color to its target's, what is kept in
- * the accent and what is spent quiet, drawn in from the left; the columns
- * captioned above and the margins below.
+ * Two quarters' income as flows: each account a hairline node named beside
+ * it (left of the segments, right of the results, above the rest), each
+ * flow a ribbon fading from its source's color to its target's, what is
+ * kept in the accent and what is spent quiet, drawn in from the left. The
+ * account under the pointer or the arrow keys is read out over the flows,
+ * the links away from it fading; the quarters' flows move into each other.
  */
 function Flows() {
+  const quarter = signal<Quarter>("q3");
+  const hover = signal<number | null>(null);
+  const revenue = () => through(quarter(), 2);
+  const shown = () => hover() ?? 2;
+  const share = (v: number) => `${fixed((v / revenue()) * 100, 1)}%`;
+  const margin = (i: number) => share(through(quarter(), i));
+  const label = () => QUARTERS.find((q) => q.value === quarter())!.label;
   return (
     <Card icon="stocks" title="Flows" subtitle="A quarter's revenue from its segments to net income">
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
-        <Legend color={chart.s2} label="Products" value="$61.6B" />
-        <Legend color={chart.s3} label="Services" value="$23.9B" />
-        <Legend color={chart.s1} label="Kept" />
-        <Legend color={chart.s4} label="Spent" />
-      </View>
-      <View style={{ marginTop: size.gap + 4 }}>
-        {/* Each caption starts at its column's nodes, the last ends there. */}
-        <View style={{ height: 13, marginBottom: 10 }}>
-          {COLUMNS.map((c, i) => (
-            <Text
-              style={{
-                ...axis,
-                letterSpacing: 0.8,
-                position: "absolute",
-                left: i < COLUMNS.length - 1 ? column(i) : undefined,
-                right: i === COLUMNS.length - 1 ? 0 : undefined,
-              }}
-            >
-              {c.toUpperCase()}
-            </Text>
-          ))}
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{ACCOUNTS[shown()].name.toUpperCase()}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>
+            {billions(through(quarter(), shown()))}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.muted }}>{`${margin(shown())} of ${label()} revenue`}</Text>
         </View>
+      </View>
+      <View style={{ marginTop: size.gap + 18, marginBottom: 6 }}>
         <Plot
           data={ACCOUNTS}
-          interactive={false}
           appearGeneration={1}
-          motion={{ appear: { duration: 1100, easing: "easeOut" } }}
-          accessibilityLabel={`Income flows: $${fixed(SALES_IN, 1)}B revenue, $19.9B net income, a net margin of ${margin(19.9)}`}
-          style={{ height: FLOW_HEIGHT }}
+          motion={{ appear: { duration: 1100, easing: "easeOut" }, update: { duration: 600, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 420, damping: 40 } }}
+          accessibilityLabel={`Income flows, ${label()}: ${billions(revenue())} revenue, ${billions(through(quarter(), 7))} net income, a net margin of ${margin(7)}`}
+          accessibilityValue={{ text: hover() == null ? undefined : `${ACCOUNTS[hover()!].name}: ${billions(through(quarter(), hover()!))}, ${margin(hover()!)} of revenue` }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={focusRing(4)}
+          // Room for the segments' names left of them and the results' right.
+          style={{ height: FLOW_HEIGHT, marginLeft: 58, marginRight: 64 }}
         >
           <Sankey
-            links={INCOME}
+            links={income(quarter())}
             nodeAlign="left"
             nodeWidth={3}
-            nodePadding={14}
+            nodePadding={20}
             nodeCornerRadius={1.5}
+            hoverDim={0.7}
             nodeClass={(_, i) => NODE[i]}
             linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+            nodeLabel={(d: (typeof ACCOUNTS)[number]) => d.name}
+            nodeLabelStyle={{ ...axis, color: colors.muted, padding: 5, numberOfLines: 1 }}
           />
         </Plot>
       </View>
       <View style={{ marginTop: size.gap + 4 }}>
         <Figures>
-          <Figure label="Revenue" value={`$${fixed(SALES_IN, 1)}B`} />
-          <Figure label="Gross margin" value={margin(39.7)} />
-          <Figure label="Operating" value={margin(23.4)} />
-          <Figure label="Net margin" value={margin(19.9)} tone="up" />
+          <Figure label="Revenue" value={billions(revenue())} />
+          <Figure label="Gross margin" value={margin(3)} />
+          <Figure label="Operating" value={margin(5)} />
+          <Figure label="Net margin" value={margin(7)} tone="up" />
         </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 160 : undefined }}>
+        <Segmented
+          options={QUARTERS}
+          value={quarter()}
+          size={size.switch}
+          onChange={(next) => {
+            quarter.set(next);
+            hover.set(null);
+          }}
+        />
       </View>
     </Card>
   );

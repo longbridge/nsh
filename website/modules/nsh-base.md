@@ -297,7 +297,7 @@ natively; axis labels are the app's own elements. A `Pie` splits the turn into a
 `innerRadius`), each painted with its own classes (`sliceClass`, a function of its row), and an `Arc` draws one sector
 between two angles (a gauge's track and value); over a pie the plot reports the slice under the pointer, which lifts
 (`hoverLift`) while the others fade (`hoverDim`). A `Sankey` draws flows between the rows (`links`), laid out as
-d3-sankey lays them out, each node and ribbon painted with its own classes. See [Plot](../elements/plot.md).
+d3-sankey lays them out, each node and ribbon painted with its own classes, its nodes labelled, hovered and moving to new flows. See [Plot](../elements/plot.md).
 
 ## Workspaces
 

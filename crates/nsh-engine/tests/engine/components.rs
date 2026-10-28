@@ -5657,7 +5657,7 @@ mount(App);
 /// points at the middle. Each node takes its row's classes, each ribbon
 /// the links'. Links that make a cycle or name no row draw nothing; with
 /// the plot's appear everything clips from the leading edge, and a
-/// background shows inside the ribbon. The pointer over it finds no row.
+/// background shows inside the ribbon.
 #[test]
 fn base_plot_sankey_layout() {
     use nsh_core::{
@@ -5665,7 +5665,7 @@ fn base_plot_sankey_layout() {
         canvas::{CanvasOp, GradientShape, Num, Paint, PathOp},
         geometry::point,
     };
-    let (engine, rx) = start(BASE_PLOT_SANKEY);
+    let (_engine, rx) = start(BASE_PLOT_SANKEY);
     // The nodes' classes come a turn after the rows.
     let mut all = until_drawn(&rx, |d| {
         d.ops
@@ -5791,21 +5791,358 @@ fn base_plot_sankey_layout() {
         }
     );
     assert_eq!(gradient.stops[0].1, Color(0xff00_00ff));
+}
 
-    // The pointer over a node finds no row.
+const BASE_PLOT_SANKEY_HOVER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Sankey } from "nsh/base/plot";
+
+type Stage = { name: string };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={[{ name: "a" }, { name: "b" }, { name: "c" }]}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 104 }}
+      >
+        <Sankey
+          links={[
+            { source: 0, target: 1, value: 36 },
+            { source: 0, target: 2, value: 12 },
+          ]}
+          nodeWidth={10}
+          iterations={0}
+          hoverDim={0.5}
+          nodeLabel={(d: Stage) => d.name}
+          valueLabel={(_: Stage, value: number) => `v${value}`}
+          nodeLabelStyle={{ width: 30, height: 40 }}
+        />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A `Sankey`'s node hover, keys and labels (`gpui-component`'s
+/// `SankeyChart`): the pointer over a node reports its row, and the links
+/// not attached to it fade by `hoverDim` on the animator, none drawn
+/// again; off the nodes, none. The keys step through the nodes. Each
+/// node's label (its value over its name) is a point with no size beside
+/// it: left of the first column's nodes, right of the last's, at their
+/// middles, kept inside the plot's top and bottom.
+#[test]
+fn base_plot_sankey_hovers_its_nodes_and_labels_them() {
+    use nsh_core::{
+        animation::Animator,
+        canvas::{CanvasOp, PathOp},
+        geometry::{point, size},
+        keymap::{KeyMatch, Keymap, Keystroke},
+        platform::Os,
+    };
+    let environment = Environment {
+        os: Os::MacOs,
+        ..Environment::default()
+    };
+    let (engine, rx) = start_in(BASE_PLOT_SANKEY_HOVER, environment);
+    // The labels' texts come a turn after the rows and the links.
+    let mut all = until(&rx, |b| shows(b, "v12"));
+    all.extend(until(&rx, |_| false));
+    let id_of = |text: &str| {
+        all.iter()
+            .find_map(|b| text_ids(b, text))
+            .unwrap_or_else(|| panic!("{text}"))
+    };
+    let parent = |all: &[MountBatch], id: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == id => Some(*parent),
+                _ => None,
+            })
+            .expect("a parent")
+    };
+    let frame = |id: u32| frame_of(&all, id).expect("laid out");
+    let bounds = |x: f32, y: f32, w: f32, h: f32| {
+        nsh_core::Bounds::new(point(px(x), px(y)), size(px(w), px(h)))
+    };
+    // Each label's value over its name, in a box of the app's 30 by 40:
+    // the first column's left of its node (0) at its middle (52); the
+    // last's right of theirs (200), at 36, and at 84 rather than 92, the
+    // box kept inside the plot's bottom (104).
+    for (name, value, at, content) in [
+        ("a", "v48", (0.0, 52.0), (-30.0, -20.0)),
+        ("b", "v36", (200.0, 36.0), (0.0, -20.0)),
+        ("c", "v12", (200.0, 84.0), (0.0, -20.0)),
+    ] {
+        let lines = parent(&all, id_of(name));
+        assert_eq!(parent(&all, id_of(value)), lines);
+        let anchor = parent(&all, lines);
+        assert_eq!(frame(anchor), bounds(at.0, at.1, 0.0, 0.0), "{name}");
+        assert_eq!(
+            frame(lines),
+            bounds(content.0, content.1, 30.0, 40.0),
+            "{name}"
+        );
+    }
+
     let plot = test_view(&all, "plot");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // The ribbons, by where they start: to `b`, then to `c`.
+    let mut ribbons: Vec<_> = plot_drawings(&all)
+        .into_iter()
+        .filter(|(_, d)| {
+            d.ops
+                .iter()
+                .any(|op| matches!(op, CanvasOp::Path(PathOp::CubicTo(_))))
+        })
+        .map(|(id, d)| (id, path_points(&d.ops)[0].1))
+        .collect();
+    ribbons.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let [(to_b, _), (to_c, _)] = ribbons[..] else {
+        panic!("two ribbons: {ribbons:?}")
+    };
+    let opacity = |all: &[MountBatch], view: u32| {
+        let mut animator = Animator::default();
+        for item in all.iter().flat_map(|b| b.items.iter()) {
+            animator.apply(item);
+        }
+        let mut out = f32::NAN;
+        animator.write(
+            |id| (id == view).then_some(id),
+            |_, values, _| out = values.opacity.unwrap_or(f32::NAN),
+        );
+        out
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    assert!(near(opacity(&all, to_c), 1.0));
+    // Over `a`: both its links stay.
+    hover(5.0, 50.0);
+    let over = until(&rx, |b| shows(b, "hover 0"));
+    assert!(plot_drawings(&over).is_empty(), "nothing drawn again");
+    all.extend(over);
+    all.extend(until(&rx, |_| false));
+    assert!(near(opacity(&all, to_b), 1.0) && near(opacity(&all, to_c), 1.0));
+    // Over `b`: the link to `c` fades by half.
+    hover(195.0, 30.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    assert!(near(opacity(&all, to_b), 1.0), "{}", opacity(&all, to_b));
+    assert!(near(opacity(&all, to_c), 0.5), "{}", opacity(&all, to_c));
+    // Over a ribbon, between the nodes: none.
+    hover(100.0, 50.0);
+    all.extend(until(&rx, |b| shows(b, "hover null")));
     engine.control().dispatch_event(
         plot,
-        EventKind::MouseMove,
-        EventPayload::Mouse(nsh_core::MouseEvent::new(
-            point(px(5.0), px(50.0)),
-            point(px(5.0), px(50.0)),
-            Default::default(),
-            None,
-        )),
+        EventKind::MouseLeave,
+        EventPayload::Mouse(nsh_core::MouseEvent::default()),
     );
-    let after = until(&rx, |b| shows(b, "hover 0"));
-    assert!(!after.iter().any(|b| shows(b, "hover 0")));
+    all.extend(until(&rx, |_| false));
+
+    // The keys step through the nodes in the rows' order.
+    let keymap = |all: &[MountBatch]| -> Option<std::sync::Arc<Keymap>> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .next_back()
+    };
+    let press = |all: &[MountBatch], key: &str| {
+        let found = keymap(all).map_or(KeyMatch::None, |k| {
+            k.find(Keystroke::parse(key, Os::MacOs).unwrap(), false, false)
+        });
+        let KeyMatch::Fire(id) = found else {
+            panic!("{key} is not bound")
+        };
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    engine
+        .control()
+        .dispatch_event(plot, EventKind::Focus, EventPayload::None);
+    all.extend(until(&rx, |b| {
+        b.items.iter().any(|i| matches!(i, MountItem::Keymap(_)))
+    }));
+    press(&all, "right");
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    press(&all, "right");
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    press(&all, "end");
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+    all.extend(until(&rx, |_| false));
+    press(&all, "escape");
+    all.extend(until(&rx, |b| shows(b, "hover null")));
+}
+
+const BASE_PLOT_SANKEY_UPDATE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Sankey } from "nsh/base/plot";
+
+function App() {
+  const late = signal(false);
+  setTimeout(() => late.set(true), 50);
+  const motion = { update: { duration: 200, easing: "linear" as const } };
+  return (
+    <View>
+      {/* The same two links, reordered, 12 and 36 rather than 36 and 12. */}
+      <Plot data={[{ n: 0 }, { n: 1 }, { n: 2 }]} motion={motion} style={{ width: 200, height: 104 }}>
+        <Sankey
+          links={
+            late()
+              ? [{ source: 0, target: 2, value: 36 }, { source: 0, target: 1, value: 12 }]
+              : [{ source: 0, target: 1, value: 36 }, { source: 0, target: 2, value: 12 }]
+          }
+          nodeWidth={10}
+          iterations={0}
+        />
+      </Plot>
+      {/* A node and a link new to it. */}
+      <Plot data={late() ? [{ n: 0 }, { n: 1 }, { n: 2 }] : [{ n: 0 }, { n: 1 }]} motion={motion} style={{ width: 200, height: 100 }}>
+        <Sankey
+          links={late() ? [{ source: 0, target: 1, value: 1 }, { source: 0, target: 2, value: 1 }] : [{ source: 0, target: 1, value: 1 }]}
+          nodeWidth={10}
+          iterations={0}
+        />
+      </Plot>
+      <Text>{late() ? "late" : "early"}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A `Sankey` moving to new flows (`motion.update`, d3's transitions of a
+/// sankey's attributes): each node and ribbon keeps its canvas (links are
+/// told apart by source and target, so a reordered one is the same
+/// ribbon) and every number of it moves from the old layout to the new
+/// on the animator, half-way at half the time; a node new to it grows
+/// from its middle, a link new to it from its least width. With reduced
+/// motion the new layout shows at once.
+#[test]
+fn base_plot_sankey_moves_to_new_flows() {
+    use nsh_core::{
+        animation::{AnimationOp, Driver},
+        canvas::{CanvasOp, Num, PathOp},
+    };
+    let updates = |b: &MountBatch| {
+        b.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Animation(AnimationOp::Start {
+                    driver: Driver::Timing { duration_ms, .. },
+                    ..
+                }) if *duration_ms == 200.0
+            )
+        })
+    };
+    let (_engine, rx) = start(BASE_PLOT_SANKEY_UPDATE);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(all.iter().any(updates), "the flows move over the update");
+    let switched = all.iter().position(|b| shows(b, "late")).unwrap();
+    let before = plot_drawings(&all[..switched]);
+    let after = plot_drawings(&all[switched..]);
+    // Only the second plot's new node and link are new canvases.
+    let new: Vec<_> = after
+        .iter()
+        .filter(|(id, _)| !before.iter().any(|(b, _)| b == id))
+        .collect();
+    assert_eq!(new.len(), 2, "{new:?}");
+    let latest = plot_drawings(&all);
+    let drawing = |id: u32| &latest.iter().find(|(i, _)| *i == id).unwrap().1;
+    // A number of a drawing at the update's start, half-way and end.
+    let at = |id: u32, n: Num| match n {
+        Num::Slot(slot) => slot_at(&all, id, slot, &[1.0, 1.1, 1.2]),
+        Num::Const(c) => vec![c; 3],
+    };
+    let near = |got: Vec<f32>, want: [f32; 3]| {
+        assert!(
+            got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-3),
+            "{got:?} is not {want:?}"
+        )
+    };
+    let rect = |id: u32| {
+        drawing(id).ops.iter().find_map(|op| match op {
+            CanvasOp::Path(PathOp::Rect(r)) => Some(*r),
+            _ => None,
+        })
+    };
+    let ends = |id: u32| {
+        let ops = &drawing(id).ops;
+        let line = ops.iter().find_map(|op| match op {
+            CanvasOp::Path(PathOp::LineTo(_, y)) => Some(*y),
+            _ => None,
+        });
+        let last = ops.iter().rev().find_map(|op| match op {
+            CanvasOp::Path(PathOp::CubicTo(n)) => Some(n[5]),
+            _ => None,
+        });
+        (line.unwrap(), last.unwrap())
+    };
+    // The first plot's ribbon to `b`, by where it was: its bottom edge
+    // from 72 to 24 at the target, from 76 to 28 at the source.
+    let to_b = before
+        .iter()
+        .find(|(_, d)| {
+            path_points(&d.ops) == [(10.0, 4.0), (190.0, 0.0), (190.0, 72.0), (10.0, 76.0)]
+        })
+        .map(|(id, _)| *id)
+        .expect("the ribbon to b");
+    let (t_bottom, s_bottom) = ends(to_b);
+    near(at(to_b, t_bottom), [72.0, 48.0, 24.0]);
+    near(at(to_b, s_bottom), [76.0, 52.0, 28.0]);
+    // Its node `c`: from 80, 24 tall to 32, 72 tall.
+    let c = before
+        .iter()
+        .find(|(id, _)| rect(*id).is_some_and(|r| r[1] == Num::Const(80.0)))
+        .map(|(id, _)| *id)
+        .expect("node c");
+    let r = rect(c).unwrap();
+    near(at(c, r[1]), [80.0, 56.0, 32.0]);
+    near(at(c, r[3]), [24.0, 48.0, 72.0]);
+    // The second plot's new node grows from its middle (77) to 54..100;
+    // its new ribbon from a point thick (72.5) to 50 at its source's top.
+    let node = new.iter().find(|(id, _)| rect(*id).is_some()).unwrap().0;
+    let ribbon = new.iter().find(|(id, _)| rect(*id).is_none()).unwrap().0;
+    let r = rect(node).unwrap();
+    near(at(node, r[1]), [77.0, 65.5, 54.0]);
+    near(at(node, r[3]), [0.0, 23.0, 46.0]);
+    let start = drawing(ribbon).ops.iter().find_map(|op| match op {
+        CanvasOp::Path(PathOp::MoveTo(_, y)) => Some(*y),
+        _ => None,
+    });
+    near(at(ribbon, start.unwrap()), [72.5, 61.25, 50.0]);
+
+    // Reduced motion: the new flows at once.
+    let environment = Environment {
+        reduce_motion: true,
+        ..Environment::default()
+    };
+    let (_engine, rx) = start_in(BASE_PLOT_SANKEY_UPDATE, environment);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    all.extend(until(&rx, |_| false));
+    assert!(!all.iter().any(updates));
 }
 
 const BASE_PLOT_ARC_TWEEN: &str = r##"import { mount, signal, Text, View } from "nsh";

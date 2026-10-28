@@ -55,7 +55,7 @@ pub use self::{
     pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
     sankey::{
         Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
-        SankeyValueScale, sankey,
+        SankeyValueLabel, SankeyValueScale, sankey,
     },
     scale::{BandScale, Scale},
 };

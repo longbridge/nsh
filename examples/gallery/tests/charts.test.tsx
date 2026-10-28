@@ -5,7 +5,8 @@
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
 // hole) or the arrow keys and closes into a pie, sales as bars side by
-// side or stacked, and a quarter's income as flows between its accounts.
+// side or stacked, and a quarter's income as flows between its accounts,
+// read out under the arrow keys and moving into the next quarter's.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -139,10 +140,27 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   expect(app.texts()).not.toContain("63");
 });
 
-test("a quarter's income flows from its segments to net income", async () => {
-  // The flows are one image, named with what they show; the margins under them.
-  expect(app.count("role:image[Income flows: $85.5B revenue, $19.9B net income, a net margin of 23.3%]")).toBe(1);
-  expect(app.texts()).toContain("SEGMENTS");
+test("a quarter's income flows from its segments to net income, and into the next quarter's", async () => {
+  // The flows are one image, named with what they show; each account named beside its node, the margins under them.
+  expect(app.count("role:image[Income flows, Q3: $85.5B revenue, $19.9B net income, a net margin of 23.3%]")).toBe(1);
+  for (const name of ["Products", "Gross profit", "Net income"]) expect(app.texts()).toContain(name);
   expect(app.texts()).toContain("46.4%");
-  expect(app.texts()).toContain("27.4%");
+  // The next quarter's flows: the readout and the margins follow.
+  await app.press("role:tab[Q4]");
+  await app.waitFor("$93.3B");
+  expect(app.count("role:image[Income flows, Q4: $93.3B revenue, $23.1B net income, a net margin of 24.8%]")).toBe(1);
 });
+
+test("the flows read out the account the arrow keys step to", async () => {
+  // The first Right on the flows starts at their first account.
+  await tabTo("PRODUCTS");
+  expect(app.texts()).toContain("$61.6B");
+  await app.keyboard.press("right");
+  await app.waitFor("SERVICES");
+  await app.keyboard.press("end");
+  await app.waitFor("TAX");
+  // Escape clears the hover: revenue is read out again.
+  await app.keyboard.press("escape");
+  await app.wait(100);
+  expect(app.texts()).not.toContain("TAX");
+}, 120000);

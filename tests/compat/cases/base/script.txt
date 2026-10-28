@@ -1719,15 +1719,36 @@ covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
 # A sankey fills its plot (its nodes and ribbons are canvases over all
-# of it); the pointer over a node finds no row of the plot's. A plot
-# whose links make a cycle lays out as any other, drawing nothing.
+# of it). Its first column is one node, `visits`, 8 wide down the plot's
+# middle: the pointer over it reports its row, over the ribbons right of
+# it none. A screen reader steps through the nodes in the rows' order.
+# Each node is labelled with its value (its most in or out, 100 for
+# `visits`) over its name. New flows move in; their labels follow. A
+# plot whose links make a cycle lays out as any other, drawing nothing.
 prop id:flows role image
 prop id:flows accessibilityLabel Flows
 frame id:sankey 0 0 200 100
 expect flow null
 event id:flows onMouseMove position.x=4 position.y=50
+expect flow 0
+event id:flows onMouseMove position.x=30 position.y=50
 expect flow null
 event id:flows onMouseLeave
+event id:flows onAccessibilityAction actionName=increment
+expect flow 0
+event id:flows onAccessibilityAction actionName=increment
+expect flow 1
+event id:flows onMouseLeave
+expect flow null
+expect visits
+expect v100
+expect trials
+expect v60
+expect paid
+expect v25
+tap id:more-flows
+expect v70
+expect v35
 prop id:cycle accessibilityLabel Cycle
 covers [nsh/base/plot] Sankey
 covers [props] Sankey.links
@@ -1744,6 +1765,13 @@ covers [props] Sankey.linkClass
 covers [props] Sankey.linkStyle
 covers [props] Sankey.linkBackgroundClass
 covers [props] Sankey.linkBackgroundStyle
+covers [props] Sankey.hoverDim
+covers [props] Sankey.nodeLabel
+covers [props] Sankey.valueLabel
+covers [props] Sankey.nodeLabelClass
+covers [props] Sankey.nodeLabelStyle
+covers [props] Sankey.valueLabelClass
+covers [props] Sankey.valueLabelStyle
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

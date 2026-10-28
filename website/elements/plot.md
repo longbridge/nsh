@@ -354,10 +354,22 @@ Each node and each ribbon is a canvas of its own, the `node` and `link` parts, s
 `nodeClass` is the same classes on every node or a function of the node's row, and `linkClass` the same on every
 ribbon or a function of the link. The `linkBackground` part shows a background inside each ribbon, a box from its
 source to its target: a function of the link gives each ribbon a gradient from its source's color to its target's.
-The ribbons draw under the nodes, and both draw in from the leading edge with the plot's appear. Over a sankey the
-pointer finds no row.
+The ribbons draw under the nodes, and both draw in from the leading edge with the plot's appear.
+
+Over a sankey, the plot reports the node under the pointer (`onHoverChange`, the node's row; none over a ribbon), its
+tooltip follows the pointer, and the links not attached to that node fade by `hoverDim`, on the platform's animator
+with the plot's `motion`. The keys step through the nodes in the rows' order, the tooltip beside each node's middle.
+`nodeLabel` names each node and `valueLabel` gives its value, the value over the name when both are set: left of a node
+in the first column, right of one in the last, centered above one between them, as `gpui-component`'s chart places
+them; a label beside a node stays between the plot's top and bottom, and one past the plot's edge sits in the room the
+app leaves around it (its margin). The `nodeLabel` part's padding is the gap to its node and its classes its text
+(`max-w-20 truncate` cuts a long name short); the labels fade in with the appear. When the app changes the flows, every
+node and ribbon moves from its old place to its new one with the plot's `motion.update`, its label with it: a node new
+to the flows grows from its middle, a link new to them from its least width, and the ones that go leave at once. Links
+are told apart by their source and target, so reordering `links` moves nothing.
 
 ```tsx
+import { signal } from "nsh";
 import { Plot, Sankey } from "nsh/base/plot";
 
 type Step = { name: string };
@@ -376,8 +388,17 @@ const FROM = ["from-chart-1/40", "from-chart-2/40", "from-muted/40", "from-chart
 const TO = ["to-chart-1/40", "to-chart-2/40", "to-muted/40", "to-chart-3/40", "to-chart-4/40", "to-muted/40"];
 
 export function Funnel() {
+  const hovered = signal<number | null>(null);
   return (
-    <Plot data={steps} accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid" class="h-64">
+    <Plot
+      data={steps}
+      accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid"
+      accessibilityValue={{ text: hovered() == null ? undefined : steps[hovered()!].name }}
+      onHoverChange={({ index }) => hovered.set(index)}
+      appearGeneration={1}
+      motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 500 }, enter: { duration: 120 }, exit: { duration: 160 } }}
+      class="mx-20 h-64"
+    >
       <Sankey
         links={flows}
         nodeWidth={8}
@@ -385,6 +406,11 @@ export function Funnel() {
         nodeCornerRadius={2}
         nodeClass={(_, i) => FILLS[i]}
         linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+        hoverDim={0.7}
+        nodeLabel={(d: Step) => d.name}
+        valueLabel={(_: Step, value: number) => value.toLocaleString("en-US")}
+        nodeLabelClass="px-2 py-1 text-xs text-muted-foreground"
+        valueLabelClass="font-medium text-foreground"
       />
     </Plot>
   );
@@ -426,11 +452,18 @@ fn funnel() -> impl IntoElement {
 | `linkStyle` | `.link_style(..)` | `StyleProp<ViewStyle>` | none | The style of every ribbon, over its classes. |
 | `linkBackgroundClass` | `.link_background_class(..)` | `string \| (link: SankeyLink, index: number) => string` | none | The classes of each ribbon's background (`bg-*`, a gradient: `bg-linear-to-r from-… to-…`), shown inside the ribbon over a box from its source to its target, under its `fill`. With a background, a ribbon's `fill` is `none` where none is set. |
 | `linkBackgroundStyle` | `.link_background_style(..)` | `StyleProp<ViewStyle>` | none | The style of every ribbon's background, over its classes. |
+| `hoverDim` | `.hover_dim(..)` | `number` (0 to 1) | `0` | How much the links not attached to the node under the pointer fade, as a share of their opacity, on the plot's `pointer` spring and with the hover's fade. |
+| `nodeLabel` | `.node_label(..)` | `keyof T \| (d: T, index: number) => string` | none | The name beside each node: a field, or a function of the node's row and its index. |
+| `valueLabel` | `.value_label(..)` | `(d: T, value: number, index: number) => string` | none | The value beside each node, over its name: a function of its row and the most that flows into or out of it (in the links' values, whatever the `valueScale`). |
+| `nodeLabelClass` | `.node_label_class(..)` | `string` | none | The classes of each label, the `nodeLabel` part: its padding the gap to its node, its text styles both lines'. |
+| `nodeLabelStyle` | `.node_label_style(..)` | `StyleProp<TextStyle>` | none | The style of each label, over its classes. |
+| `valueLabelClass` | `.value_label_class(..)` | `string` | none | The classes of the value line, the `valueLabel` part, over the label's. |
+| `valueLabelStyle` | `.value_label_style(..)` | `StyleProp<TextStyle>` | none | The style of the value line, over its classes. |
 
 A node and a ribbon fill with `fill` (`currentColor` where none is set) and stroke with `stroke` (none where none is
 set), their own over the sankey's and the plot's as CSS inherits them. A node with nothing through it is a point tall.
 The layout runs again only when the links, the options or the plot's size change, never for the pointer or the
-appear. Links that make a cycle, or name a row the plot does not have, draw nothing and log a warning. Its values take
+appear; the plot's size changing moves nothing. Links that make a cycle, or name a row the plot does not have, draw nothing and log a warning. Its values take
 no part in the plot's scales.
 
 ## PlotAxis
@@ -496,8 +529,8 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 
 | Key | Type | What moves |
 |---|---|---|
-| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
+| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a sankey's nodes and ribbons from the leading edge, its labels fading in. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it; and a sankey's nodes, ribbons and labels, from the old flows' layout to the new one. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |
@@ -525,7 +558,7 @@ is the app's: a `focus-visible:` class or a `focusStyle` (`focus-visible:outline
 
 | Keys | What they do |
 |---|---|
-| Right, Left | Move to the next or the previous row (over a pie, its slices in the rows' order); with no row hovered, Right starts at the first row and Left at the last. |
+| Right, Left | Move to the next or the previous row (over a pie, its slices in the rows' order; over a sankey, its nodes); with no row hovered, Right starts at the first row and Left at the last. |
 | Home, End | Move to the first or the last row. |
 | Escape | Clears the hover. |
 

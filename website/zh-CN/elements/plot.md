@@ -299,9 +299,12 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 
 `Sankey` 绘制 plot 各行之间的流向：每一行是一个节点，`links` 列出它们之间的流，`{ source, target, value }`，前两项是两行在 plot 的 `data` 中的序号。它按 d3-sankey 的方式在 plot 的尺寸内布局：节点按列排列（`nodeAlign`），每个节点的高度取流入和流出中较大的一方，同一列的节点相隔 `nodePadding`，再经过 `iterations` 轮松弛向各自的流靠拢；每条 link 是一条流带，从源节点的右边缘连到目标节点的左边缘，两端的宽度各是它在那一侧所占的份额，所以即使节点的流入和流出不相等，它的两侧也都被流带铺满。每一列在 plot 中垂直居中；连续几列都只有一个等高节点时，这些列会交错错开一点，让它们之间的流带弯曲起来。`valueScale="sqrt"` 按数值的平方根决定尺寸，避免一条特别大的流把小的流压得看不见。
 
-每个节点和每条流带都是一个独立的画布，即 `node` 和 `link` 部件，所以各自可以用自己的类着色：`nodeClass` 可以是所有节点共用的类，也可以是节点所在行的函数；`linkClass` 可以是所有流带共用的类，也可以是 link 的函数。`linkBackground` 部件在每条流带内显示背景，背景框从源节点延伸到目标节点：用 link 的函数可以让每条流带显示从源节点颜色到目标节点颜色的渐变。流带画在节点下面，两者都随 plot 的出场动画从起始边缘画入。在 sankey 上，指针找不到任何行。
+每个节点和每条流带都是一个独立的画布，即 `node` 和 `link` 部件，所以各自可以用自己的类着色：`nodeClass` 可以是所有节点共用的类，也可以是节点所在行的函数；`linkClass` 可以是所有流带共用的类，也可以是 link 的函数。`linkBackground` 部件在每条流带内显示背景，背景框从源节点延伸到目标节点：用 link 的函数可以让每条流带显示从源节点颜色到目标节点颜色的渐变。流带画在节点下面，两者都随 plot 的出场动画从起始边缘画入。
+
+在 sankey 上，plot 报告指针下的节点（`onHoverChange` 报告节点所在的行；在流带上则没有），提示框跟随指针，不与该节点相连的流带按 `hoverDim` 变淡，由平台的动画器按 plot 的 `motion` 推动。方向键按行的顺序在节点之间移动，提示框位于节点中点旁边。`nodeLabel` 为每个节点标上名称，`valueLabel` 给出它的数值，两者都设置时数值在上、名称在下：第一列的节点标在左边，最后一列的标在右边，中间各列的居中标在节点上方，与 `gpui-component` 的图表一致；节点旁边的标签保持在 plot 的上下边缘之内，超出 plot 边缘的标签位于应用在它周围留出的空间（外边距）里。`nodeLabel` 部件的内边距就是它与节点的间距，它的类决定文字样式（`max-w-20 truncate` 截断过长的名称）；标签随出场动画淡入。应用改变流时，每个节点和流带都按 plot 的 `motion.update` 从旧位置移动到新位置，标签随之移动：新出现的节点从中点长出，新出现的 link 从最小宽度展开，消失的立即移除。link 按源节点和目标节点区分，所以调整 `links` 的顺序不会产生移动。
 
 ```tsx
+import { signal } from "nsh";
 import { Plot, Sankey } from "nsh/base/plot";
 
 type Step = { name: string };
@@ -320,8 +323,17 @@ const FROM = ["from-chart-1/40", "from-chart-2/40", "from-muted/40", "from-chart
 const TO = ["to-chart-1/40", "to-chart-2/40", "to-muted/40", "to-chart-3/40", "to-chart-4/40", "to-muted/40"];
 
 export function Funnel() {
+  const hovered = signal<number | null>(null);
   return (
-    <Plot data={steps} accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid" class="h-64">
+    <Plot
+      data={steps}
+      accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid"
+      accessibilityValue={{ text: hovered() == null ? undefined : steps[hovered()!].name }}
+      onHoverChange={({ index }) => hovered.set(index)}
+      appearGeneration={1}
+      motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 500 }, enter: { duration: 120 }, exit: { duration: 160 } }}
+      class="mx-20 h-64"
+    >
       <Sankey
         links={flows}
         nodeWidth={8}
@@ -329,6 +341,11 @@ export function Funnel() {
         nodeCornerRadius={2}
         nodeClass={(_, i) => FILLS[i]}
         linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+        hoverDim={0.7}
+        nodeLabel={(d: Step) => d.name}
+        valueLabel={(_: Step, value: number) => value.toLocaleString("en-US")}
+        nodeLabelClass="px-2 py-1 text-xs text-muted-foreground"
+        valueLabelClass="font-medium text-foreground"
       />
     </Plot>
   );
@@ -370,8 +387,15 @@ fn funnel() -> impl IntoElement {
 | `linkStyle` | `.link_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有流带的样式，优先于它们的类。 |
 | `linkBackgroundClass` | `.link_background_class(..)` | `string \| (link: SankeyLink, index: number) => string` | 无 | 每条流带背景的类（`bg-*`，渐变：`bg-linear-to-r from-… to-…`），显示在流带内，背景框从源节点延伸到目标节点，位于流带的 `fill` 之下。设置了背景时，流带的 `fill` 在没有设置时为 `none`。 |
 | `linkBackgroundStyle` | `.link_background_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有流带背景的样式，优先于它们的类。 |
+| `hoverDim` | `.hover_dim(..)` | `number`（0 到 1） | `0` | 有节点位于指针下时，不与它相连的流带变淡的程度，即不透明度降低的比例，按 plot 的 `pointer` 弹簧变化，随悬停淡入淡出。 |
+| `nodeLabel` | `.node_label(..)` | `keyof T \| (d: T, index: number) => string` | 无 | 每个节点旁的名称：字段名，或节点所在行及其序号的函数。 |
+| `valueLabel` | `.value_label(..)` | `(d: T, value: number, index: number) => string` | 无 | 每个节点旁、名称上方的数值：节点所在行和流入、流出中较大一方（按 links 的原始数值，与 `valueScale` 无关）的函数。 |
+| `nodeLabelClass` | `.node_label_class(..)` | `string` | 无 | 每个标签的类，即 `nodeLabel` 部件：内边距是它与节点的间距，文字样式作用于两行文字。 |
+| `nodeLabelStyle` | `.node_label_style(..)` | `StyleProp<TextStyle>` | 无 | 每个标签的样式，优先于它的类。 |
+| `valueLabelClass` | `.value_label_class(..)` | `string` | 无 | 数值那一行的类，即 `valueLabel` 部件，优先于标签的类。 |
+| `valueLabelStyle` | `.value_label_style(..)` | `StyleProp<TextStyle>` | 无 | 数值那一行的样式，优先于它的类。 |
 
-节点和流带用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于 sankey 和 plot 上的值。没有任何流经过的节点高 1 点。只有 links、选项或 plot 的尺寸变化时才会重新布局，指针和出场动画都不会触发布局。构成环的 links，或指向 plot 中不存在的行的 links，什么也不画，并记录一条警告。它的数值不计入 plot 的比例尺。
+节点和流带用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于 sankey 和 plot 上的值。没有任何流经过的节点高 1 点。只有 links、选项或 plot 的尺寸变化时才会重新布局，指针和出场动画都不会触发布局；plot 的尺寸变化不会产生移动。构成环的 links，或指向 plot 中不存在的行的 links，什么也不画，并记录一条警告。它的数值不计入 plot 的比例尺。
 
 ## PlotAxis
 
@@ -424,8 +448,8 @@ const rows = [
 
 | 键 | 类型 | 作用 |
 |---|---|---|
-| `appear` | timing | 有 `appearGeneration` 时图形逐渐绘出：折线和区域从起始边缘绘出，柱子从 `base` 长出（柱子设置 `stagger` 时依次长出）；饼图和 arc 的圆环从起点顺时针扫出。 |
-| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线和 `PlotAxis` 一起移动。 |
+| `appear` | timing | 有 `appearGeneration` 时图形逐渐绘出：折线和区域从起始边缘绘出，柱子从 `base` 长出（柱子设置 `stagger` 时依次长出）；饼图和 arc 的圆环从起点顺时针扫出；sankey 的节点和流带从起始边缘画入，标签随之淡入。 |
+| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线和 `PlotAxis` 一起移动；以及 sankey 的节点、流带和标签，从旧的流的布局移动到新的布局。 |
 | `enter` | timing | 指针移到 plot 上时，悬停部件淡入。 |
 | `exit` | timing | 指针离开后，悬停部件淡出。 |
 | `pointer` | spring | 指针在 plot 上移动时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起。 |
@@ -442,7 +466,7 @@ domain 的过渡与 d3 过渡比例尺 domain 的方式相同：每个数值都�
 
 | 按键 | 作用 |
 |---|---|
-| 右方向键、左方向键 | 移动到下一行或上一行（饼图按行的顺序移动到各扇区）；没有悬停的行时，右方向键从第一行开始，左方向键从最后一行开始。 |
+| 右方向键、左方向键 | 移动到下一行或上一行（饼图按行的顺序移动到各扇区，sankey 移动到各节点）；没有悬停的行时，右方向键从第一行开始，左方向键从最后一行开始。 |
 | Home、End | 移动到第一行或最后一行。 |
 | Escape | 清除悬停。 |
 
