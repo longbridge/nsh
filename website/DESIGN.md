@@ -158,7 +158,7 @@ wisps, which lie in belts as Jupiter's clouds do; darker reaches open here
 and there. Its light opens between the copy and the device from the first
 frame, dims behind the device, and is softly capped. The stars are crisp
 round discs (gravity bends the space they sit in, never their shape) in the
-site's blue, teal and citrus besides white, most faint and a few bright, the
+site's blue, teal and citrus and in red, orange and violet besides white, most faint and a few bright, the
 brightest with long diffraction spikes; some wear a tilted ring, some have
 companions orbiting them. They crowd where the clouds are, with a fine grain
 of star dust, gather in clusters and leave voids; they drift slowly, nearer
