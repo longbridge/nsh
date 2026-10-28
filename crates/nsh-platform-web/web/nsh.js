@@ -1873,6 +1873,7 @@ class Player {
     const from = update && el._frame && !el._track && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
+    const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
     el._frame = [x, y, w, h];
     this.placeFrame(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
@@ -1881,7 +1882,8 @@ class Player {
       a.onfinish = () => { if (el._frameAnimation === a) el._frameAnimation = null; };
       el._frameAnimation = a;
     }
-    if (el._kind === "canvas") this.drawSoon(el);
+    // A canvas moved keeps its pixels (rows of a table move every scroll).
+    if (el._kind === "canvas" && resized) this.drawSoon(el);
     if (el._shader) this.shaderDirty(el);
     if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h, this.screenInsets(screen));
   }
@@ -1940,7 +1942,12 @@ class Player {
       return;
     }
     if (prop.startsWith("canvas:")) {
-      el._slots[Number(prop.slice(7))] = isNaN(Number(value)) ? value : Number(value);
+      const slot = Number(prop.slice(7));
+      const v = isNaN(Number(value)) ? value : Number(value);
+      // The animator sends every bound value with each batch: a value
+      // that stayed draws nothing again.
+      if (el._slots[slot] === v) return;
+      el._slots[slot] = v;
       this.drawSoon(el);
       return;
     }
@@ -1952,6 +1959,11 @@ class Player {
       if (el._track) this.placeTrack(el);
       return;
     }
+    // The animator sends every bound value with each batch. Compared with
+    // what the view shows, not what was last sent: navigation and modals'
+    // motions write a view's transform and opacity too.
+    const shown = prop === "border-color" || prop === "color" ? el._animation[prop] : el.style.getPropertyValue(prop);
+    if (shown === value) return;
     el._animation[prop] = value;
     if (prop === "border-color") {
       // Borders are drawn by an overlay.

@@ -228,6 +228,11 @@ Headless Chromium over CDP, a published package (`nsh package --target web`), 20
 - The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
   (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
   ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
+- The same demo scrolled, the frame rate unlimited (`--disable-frame-rate-limit`): the animator sends every bound
+  value with each batch (the gallery's sidebar: ~69 canvas slots, ~26 transforms, ~7 opacities), and `nsh.js` writes
+  and draws only those that changed, and draws a canvas again when its size changes, not when it moves. The wheel,
+  300 steps of 30pt: main thread ~3.8s instead of ~4.5s, median frame ~9.2ms instead of ~12.2ms; its scroll bar
+  dragged 150 steps: script ~4.3ms per batch instead of ~5.6ms.
 
 ## The performance monitor (`nsh_engine::perf`)
 
