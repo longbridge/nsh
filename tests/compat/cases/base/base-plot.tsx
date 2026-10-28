@@ -333,6 +333,8 @@ function RadarCase() {
       </Plot>
       <Text>{`axis ${axis()}`}</Text>
     </View>
+  );
+}
 
 /** Texts at values of a plot of three rows by 0 to 100: each 20 by 10,
  * its top on the middle row's point at 50, starting at it, centered on it
