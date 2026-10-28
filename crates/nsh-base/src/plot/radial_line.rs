@@ -326,9 +326,9 @@ impl Outline {
         let (w, h) = (size.width.0, size.height.0);
         self.line
             .iter()
-            .flat_map(|s| s.nums().chunks_exact(2))
-            .fold(0.0_f32, |over, p| {
-                over.max(-p[0]).max(p[0] - w).max(-p[1]).max(p[1] - h)
+            .flat_map(|s| s.nums().as_chunks::<2>().0)
+            .fold(0.0_f32, |over, &[x, y]| {
+                over.max(-x).max(x - w).max(-y).max(y - h)
             })
     }
 }
@@ -605,9 +605,7 @@ pub fn RadialLine(props: RadialLineProps, _cx: Scope<NoEvent>) -> impl IntoEleme
                     style: dot_style,
                 };
                 each(
-                    move || {
-                        rest.with(|f| f.vertices.iter().map(|v| v.row).collect::<Vec<u32>>())
-                    },
+                    move || rest.with(|f| f.vertices.iter().map(|v| v.row).collect::<Vec<u32>>()),
                     |row| *row,
                     move |row, _| dot.view(row.get_untracked()),
                 )
@@ -809,7 +807,9 @@ pub fn RadialGrid(props: RadialGridProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         let size = plot.size.get();
         let to = shape.get();
         let ring = Ring::of(size, to.inner, to.outer);
-        let from = update.from().map(|(f, t)| (f, Ring::of(size, f.inner, f.outer), t));
+        let from = update
+            .from()
+            .map(|(f, t)| (f, Ring::of(size, f.inner, f.outer), t));
         let t = from.map(|(.., t)| t);
         let map = |s: GridShape, r: Ring| s.domain.map(|d| Linear::new(d, [r.inner, r.outer]));
         let (to_map, from_map) = (map(to, ring), from.and_then(|(f, r, _)| map(f, r)));
@@ -817,10 +817,7 @@ pub fn RadialGrid(props: RadialGridProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         // A point `r` out at `angle` (pie angles), moving out from where
         // `r0` put it.
         let at = |angle: f32, r0: f32, r: f32| {
-            let ([x0, y0], [x, y]) = (
-                polar(ring.center, angle, r0),
-                polar(ring.center, angle, r),
-            );
+            let ([x0, y0], [x, y]) = (polar(ring.center, angle, r0), polar(ring.center, angle, r));
             (lerp(t, x0, x), lerp(t, y0, y))
         };
         let len = plot.rows.with(|rows| rows.len());
@@ -931,7 +928,13 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let want = [[50.0, 40.0], [60.0, 50.0], [50.0, 60.0], [40.0, 50.0], [50.0, 40.0]];
+        let want = [
+            [50.0, 40.0],
+            [60.0, 50.0],
+            [50.0, 60.0],
+            [40.0, 50.0],
+            [50.0, 40.0],
+        ];
         assert!(pts.iter().zip(want).all(|(a, b)| near(*a, b)), "{pts:?}");
         assert_eq!(o.line.last(), Some(&Seg::Close));
         assert_eq!(o.area, o.line);
@@ -948,13 +951,21 @@ mod tests {
     #[test]
     fn a_smooth_closed_line_wraps_its_tangents() {
         let o = Outline::of(&square(0.0), Curve::Natural, true, false);
-        let cubics: Vec<_> = o.line.iter().filter(|s| matches!(s, Seg::Cubic(_))).collect();
+        let cubics: Vec<_> = o
+            .line
+            .iter()
+            .filter(|s| matches!(s, Seg::Cubic(_)))
+            .collect();
         assert_eq!(cubics.len(), 4);
         // The first leaves 12 o'clock level, its tangent from 9 o'clock
         // to 3 o'clock.
-        let Seg::Cubic(c) = cubics[0] else { unreachable!() };
+        let Seg::Cubic(c) = cubics[0] else {
+            unreachable!()
+        };
         assert!(near([c[0], c[1]], [50.0 + 20.0 / 6.0, 40.0]), "{c:?}");
-        let Seg::Cubic(last) = cubics[3] else { unreachable!() };
+        let Seg::Cubic(last) = cubics[3] else {
+            unreachable!()
+        };
         assert!(near([last[4], last[5]], [50.0, 40.0]));
     }
 

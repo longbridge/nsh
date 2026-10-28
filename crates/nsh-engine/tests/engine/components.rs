@@ -5740,8 +5740,19 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
     });
     all.extend(until(&rx, |_| false));
     assert_eq!(plot_bleeds(&all), [8.0; 3]);
+    // The marks by their paint: the grid's green stroke, the closed
+    // line's red fill, and the smooth line.
     let latest = plot_drawings(&all);
-    let [(_, grid), (a_id, a), (_, b)] = &latest[..] else {
+    let paints = |d: &nsh_core::canvas::Drawing, op: &CanvasOp| d.ops.contains(op);
+    let green = CanvasOp::StrokeStyle(Paint::Color(Color(0x00ff_00ff)));
+    let red = CanvasOp::FillStyle(Paint::Color(Color(0xff00_0080)));
+    let pick = |keep: &dyn Fn(&nsh_core::canvas::Drawing) -> bool| {
+        latest.iter().filter(|(_, d)| keep(d)).collect::<Vec<_>>()
+    };
+    let grids = pick(&|d| paints(d, &green));
+    let closed = pick(&|d| paints(d, &red));
+    let smooth = pick(&|d| !paints(d, &green) && !paints(d, &red));
+    let ([(_, grid)], [(a_id, a)], [(_, b)]) = (&grids[..], &closed[..], &smooth[..]) else {
         panic!("a grid and two lines: {latest:?}")
     };
     // The grid: rings at 5 and 10 of 0 to 10 (25 and 50 out from the
@@ -5774,7 +5785,10 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
         CanvasOp::FillStyle(Paint::Color(Color(0xff00_0080)))
     );
     let line = line_ops(&a.ops);
-    assert_eq!(line[0], CanvasOp::StrokeStyle(Paint::Color(Color(0xff00_00ff))));
+    assert_eq!(
+        line[0],
+        CanvasOp::StrokeStyle(Paint::Color(Color(0xff00_00ff)))
+    );
     near(
         &path_points(line),
         &[
@@ -5786,7 +5800,10 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
         ],
     );
     assert!(line.contains(&CanvasOp::Path(PathOp::Close)));
-    assert!(a.ops.contains(&CanvasOp::Fill(None, nsh_core::canvas::FillRule::NonZero)));
+    assert!(
+        a.ops
+            .contains(&CanvasOp::Fill(None, nsh_core::canvas::FillRule::NonZero))
+    );
     // The smooth one: from 10 out (5 of 0 to 10 at 25) to 40 (80% of 50),
     // a cubic to each next row, open.
     let line = line_ops(&b.ops);

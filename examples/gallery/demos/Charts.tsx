@@ -834,7 +834,7 @@ type Benchmark = (typeof BENCHMARKS)[number]["value"];
 /** The radar's side and its rim: room inside the plot for the hover dots,
  * the factors' names past the rim. */
 const RADAR = pointer ? 196 : 204;
-const RIM = "78%";
+const RADAR_RIM = "78%";
 /** Where the names sit: a share of the plot's side out from its middle. */
 const LABEL_AT = 44;
 const mean = (pick: (f: Factor) => number) => FACTORS.reduce((s, f) => s + pick(f), 0) / FACTORS.length;
@@ -872,19 +872,19 @@ function Factors() {
           focusStyle={{ ...focusRing(4), borderRadius: RADAR / 2 }}
           style={{ width: RADAR, height: RADAR, marginHorizontal: 40, marginVertical: 10 }}
         >
-          <RadialGrid rings={[25, 50, 75]} outerRadius={RIM} style={{ stroke: colors.line }} />
-          <RadialGrid rings={[100]} spokes outerRadius={RIM} style={{ stroke: colors.border }} />
+          <RadialGrid rings={[25, 50, 75]} outerRadius={RADAR_RIM} style={{ stroke: colors.line }} />
+          <RadialGrid rings={[100]} spokes outerRadius={RADAR_RIM} style={{ stroke: colors.border }} />
           <RadialLine
             radius={bench()}
             closed
-            outerRadius={RIM}
+            outerRadius={RADAR_RIM}
             style={{ stroke: colors.muted, strokeDasharray: "3 3", fill: alpha(colors.muted, 0.06) }}
             hoverDotStyle={{ width: 7, height: 7, borderRadius: 4, borderWidth: 1.5, borderColor: colors.surface, backgroundColor: colors.muted }}
           />
           <RadialLine
             radius="ours"
             closed
-            outerRadius={RIM}
+            outerRadius={RADAR_RIM}
             dot
             dotStyle={{ width: 4, height: 4, borderRadius: 2, backgroundColor: chart.s1 }}
             backgroundStyle={{ backgroundImage: `radial-gradient(circle, ${alpha(chart.s1, 0.04)}, ${alpha(chart.s1, 0.3)})` }}
