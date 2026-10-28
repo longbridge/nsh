@@ -255,9 +255,9 @@ in view. `renderGroup` draws a section's header the same way:
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (touch screens) the list is in. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Touch screens: the backdrop behind the sheet. |
 | `listClass`, `listStyle` | `.list_class(..)`, `.list_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The list, the scroll view of the rows. |
-| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each item's row: `focus:` while highlighted, `selected:` while chosen, `disabled:` while it cannot be. |
+| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item's row, its text styles inherited by its title: `focus:` while highlighted, `selected:` while chosen, `disabled:` while it cannot be. |
 | `groupClass`, `groupStyle` | `.group_class(..)`, `.group_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each section's header. |
-| `searchClass`, `searchStyle` | `.search_class(..)`, `.search_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The search field. |
+| `searchClass`, `searchStyle` | `.search_class(..)`, `.search_style(..)` | `string`, `StyleProp<InputStyle>` | none | The search field: its box and its text (`color`, `fontSize`, `placeholderColor`). |
 | `clearButtonClass`, `clearButtonStyle` | `.clear_button_class(..)`, `.clear_button_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The clear button (`cleanable`); `disabled:` with the select. |
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | none | The content of the clear button: a cross, an icon. |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | none | What screen readers call the clear button. |

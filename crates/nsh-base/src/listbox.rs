@@ -38,7 +38,7 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_core::{
     AccessibilityValue,
-    element::{Style, input},
+    element::{InputPartStyle, Style, TextPartStyle, input},
     keymap::When,
     prelude::*,
     time::{Instant, now},
@@ -584,11 +584,11 @@ pub(crate) struct Parts {
     pub(crate) list_class: Prop<Option<SharedString>>,
     pub(crate) list_style: Prop<Style>,
     pub(crate) item_class: Prop<Option<SharedString>>,
-    pub(crate) item_style: Prop<Style>,
+    pub(crate) item_style: Prop<TextPartStyle>,
     pub(crate) group_class: Prop<Option<SharedString>>,
     pub(crate) group_style: Prop<Style>,
     pub(crate) search_class: Prop<Option<SharedString>>,
-    pub(crate) search_style: Prop<Style>,
+    pub(crate) search_style: Prop<InputPartStyle>,
     pub(crate) search_placeholder: Prop<Option<SharedString>>,
     pub(crate) render_item: Prop<Option<Renderer<SelectItemState>>>,
     pub(crate) render_group: Prop<Option<Renderer<SelectGroup>>>,
@@ -728,7 +728,7 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                 // keyboard comes when the user asks.
                 .auto_focus(!sheet)
                 .app_class(parts.search_class)
-                .inline_style(parts.search_style)
+                .inline_style(move || parts.search_style.get())
                 .on_change(move |text: &str| lb.set_query(text))
         },
     );
@@ -871,7 +871,7 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         })
         .project_focused(highlighted)
         .app_class(parts.item_class)
-        .inline_style(parts.item_style)
+        .inline_style(move || parts.item_style.get())
         .element_ref(&me)
         // The pointer highlights a row, as long as no button is down.
         .on_mouse_move(move |e: &MouseEvent| {

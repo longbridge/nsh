@@ -108,7 +108,7 @@ so the app verifies the code there.
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No focus and no editing; `disabled:` styles apply to the input and its parts, and screen readers say it is dimmed. |
 | `groups` | `.groups(..)` | `number` | `1` | How many groups the cells are split into, as evenly as they go (3 + 3 for six digits in two); at least one, at most one per cell. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the field: what the code is for and how many digits it has. |
-| `cellClass`, `cellStyle` | `.cell_class(..)`, `.cell_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each cell: its size, border and text. |
+| `cellClass`, `cellStyle` | `.cell_class(..)`, `.cell_style(\|s\| ..)` | `string`, `StyleProp<TextStyle>` | none | Each cell: its size, border and text (`color`, `fontSize`, which its digit inherits). |
 | `groupClass`, `groupStyle` | `.group_class(..)`, `.group_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each group of cells (`flex-row gap-2`). |
 | `caretClass`, `caretStyle` | `.caret_class(..)`, `.caret_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The caret: its width, height and color. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The input itself: the row (or column) around its groups. |

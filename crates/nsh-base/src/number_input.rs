@@ -5,7 +5,7 @@
 
 use nsh_core::{
     AccessibilityActionDef, AccessibilityValue,
-    element::{Style, TextPartStyle, input},
+    element::{InputPartStyle, Style, input},
     keymap::When,
     prelude::*,
 };
@@ -59,7 +59,7 @@ pub struct NumberInputProps {
     /// The style of the text field, over `inputClass`: its text styles too
     /// (`color`, `fontSize`, `textAlign`, `placeholderColor`).
     #[prop(default)]
-    pub input_style: Prop<TextPartStyle>,
+    pub input_style: Prop<InputPartStyle>,
     /// The Tailwind classes of the decrement button; `hover:`, `active:`
     /// while pressed, `disabled:` with the input and at `min` (where a step
     /// down does nothing).

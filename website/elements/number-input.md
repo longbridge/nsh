@@ -129,7 +129,7 @@ The field takes:
 | `placeholder` | `.placeholder(..)` | `string` | none | Shown while the field is empty. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the field, when no visible label names it. |
 | `controlsRight` | `.controls_right(..)` | `boolean` | `false` | Both buttons in a column on the right of the field, the increment over the decrement. Read when the input is made. |
-| `inputClass`, `inputStyle` | `.input_style(\|s\| ..)` | `string`, `StyleProp<TextStyle>` | none | The field: its box and its text (`color`, `fontSize`, `textAlign`, `placeholderColor`). |
+| `inputClass`, `inputStyle` | `.input_style(\|s\| ..)` | `string`, `StyleProp<InputStyle>` | none | The field: its box and its text (`color`, `fontSize`, `textAlign`, `placeholderColor`, `caretColor`). |
 | `decrementButtonClass`, `decrementButtonStyle` | `.decrement_button_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The decrement button. |
 | `incrementButtonClass`, `incrementButtonStyle` | `.increment_button_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The increment button. |
 | `decrementButton`, `incrementButton` | `.decrement_button(..)`, `.increment_button(..)` | `JSX.Element` | none | The content of the buttons: a sign, an icon. |

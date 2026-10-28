@@ -241,9 +241,9 @@ mount(App);
 | `popupClass`、`popupStyle` | `.popup_class(..)`、`.popup_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 列表所在的弹出层（桌面）或 sheet（触摸屏）。 |
 | `backdropClass`、`backdropStyle` | `.backdrop_class(..)`、`.backdrop_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 触摸屏：sheet 后面的背景层。 |
 | `listClass`、`listStyle` | `.list_class(..)`、`.list_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 列表，即这些行所在的滚动视图。 |
-| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个条目的行：高亮时应用 `focus:`，选中时应用 `selected:`，禁用时应用 `disabled:`。 |
+| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个条目的行（文字样式由条目标题继承）：高亮时应用 `focus:`，选中时应用 `selected:`，禁用时应用 `disabled:`。 |
 | `groupClass`、`groupStyle` | `.group_class(..)`、`.group_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个分组的标题。 |
-| `searchClass`、`searchStyle` | `.search_class(..)`、`.search_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 搜索框。 |
+| `searchClass`、`searchStyle` | `.search_class(..)`、`.search_style(..)` | `string`、`StyleProp<InputStyle>` | 无 | 搜索框：它的盒子和文字（`color`、`fontSize`、`placeholderColor`）。 |
 | `clearButtonClass`、`clearButtonStyle` | `.clear_button_class(..)`、`.clear_button_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 清除按钮（`cleanable`）；`disabled:` 跟随选择框。 |
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | 无 | 清除按钮的内容：一个叉号、一个图标。 |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对清除按钮的称呼。 |

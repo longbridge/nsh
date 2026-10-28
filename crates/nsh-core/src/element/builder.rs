@@ -971,10 +971,11 @@ impl JsValue for Style {
     }
 }
 
-/// The style of a component's part that shows or edits text (a number
-/// input's field): a [`Style`] whose TypeScript type takes the text styles
-/// too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`,
-/// `placeholderColor`), as the part is a text or an input. Its setter takes
+/// The style of a component's part that shows text (a select's rows, a
+/// one-time code's cells): a [`Style`] whose TypeScript type takes the text
+/// styles too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`),
+/// which the part's texts inherit. A part that edits text takes an
+/// [`InputPartStyle`]. Its setter takes
 /// the typed styles' closure, as a `Style`'s does; the part applies it with
 /// [`Element::inline_style`] (it is `Into<Style>`).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1002,6 +1003,47 @@ impl From<TextPartStyle> for Style {
 impl JsValue for TextPartStyle {
     fn ts_type(_types: &mut super::TsTypes) -> String {
         "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
+/// The style of a component's part that edits text (a number input's
+/// field, a select's search field): a [`Style`] whose TypeScript type takes
+/// the input styles too (`StyleProp<InputStyle>`: the text styles and
+/// `placeholderColor`, `caretColor`, `selectionColor`). As
+/// [`TextPartStyle`], its setter takes the typed styles' closure.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct InputPartStyle(pub Style);
+
+impl From<Style> for InputPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for InputPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<InputPartStyle> for Style {
+    fn from(style: InputPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for InputPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<InputStyle>".into()
     }
 
     fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {

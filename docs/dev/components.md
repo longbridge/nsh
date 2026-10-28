@@ -364,9 +364,11 @@ reasons: `reactive-components.md`.
     slot's setter takes the content to fill it with (`.header(text(..))`), an `Items` field's a `VirtualList`
     (`.items(virtual_list(..))`); a style field's (`Prop<Style>` or `Style`: `Button`'s `selected_style`) the
     typed styles' closure, as the state styles take (`.selected_style(|s| s.bg(..).text_color(..))`), made into
-    the field's `Style` (`From<StyleRefinement>`); a part that shows or edits text takes a `TextPartStyle`
-    (`NumberInput`'s `input_style`), the same closure, typed `StyleProp<TextStyle>` in TypeScript so the app's
-    `color`, `fontSize` or `placeholderColor` check, and applied with `.inline_style(move || props.input_style.get())`; a render prop's (`Option<Renderer<T>>`: `TextView`'s
+    the field's `Style` (`From<StyleRefinement>`); a part that shows text takes a `TextPartStyle` (`Select`'s
+    `item_style`, `OtpInput`'s `cell_style`), the same closure, typed `StyleProp<TextStyle>` in TypeScript so the
+    app's `color` or `fontSize` check (the part's texts inherit them), and a part that edits text an `InputPartStyle`
+    (`NumberInput`'s `input_style`, `Select`'s `search_style`), typed `StyleProp<InputStyle>` for `placeholderColor`,
+    `caretColor` and `selectionColor` too; both are applied with `.inline_style(move || props.input_style.get())`; a render prop's (`Option<Renderer<T>>`: `TextView`'s
     `render_image`) the closure rendering a `&T` (`.render_image(|image| ..)`, made a `Renderer`); the children are
     the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is

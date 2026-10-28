@@ -109,10 +109,10 @@ pub use self::{
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
-        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive,
-        IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig, ListElement,
-        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, TextPartStyle, View,
-        image, text, view,
+        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, InputPartStyle,
+        Interactive, IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig,
+        ListElement, Listener, ParentElement, Position, Slot, SlotElement, Style, Text,
+        TextPartStyle, View, image, text, view,
     },
     call::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,

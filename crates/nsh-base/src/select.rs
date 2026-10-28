@@ -35,7 +35,9 @@
 use std::rc::Rc;
 
 use nsh_core::{
-    element::{JsHost, JsIn, JsKind, JsOwned, PropError, Style, TsTypes},
+    element::{
+        InputPartStyle, JsHost, JsIn, JsKind, JsOwned, PropError, Style, TextPartStyle, TsTypes,
+    },
     keymap::When,
     prelude::*,
 };
@@ -249,9 +251,10 @@ pub struct SelectProps {
     /// or the pointer are on it), `selected:` while chosen, `disabled:`
     /// while it cannot be.
     pub item_class: Prop<Option<SharedString>>,
-    /// The inline style of each item's row, over its classes.
+    /// The inline style of each item's row, over its classes: its text
+    /// styles too (`color`, `fontSize`), which its title inherits.
     #[prop(default)]
-    pub item_style: Prop<Style>,
+    pub item_style: Prop<TextPartStyle>,
     /// The classes of each section's header.
     pub group_class: Prop<Option<SharedString>>,
     /// The inline style of each section's header, over its classes.
@@ -259,9 +262,10 @@ pub struct SelectProps {
     pub group_style: Prop<Style>,
     /// The classes of the search field.
     pub search_class: Prop<Option<SharedString>>,
-    /// The inline style of the search field, over its classes.
+    /// The inline style of the search field, over its classes: its text
+    /// styles too (`color`, `fontSize`, `placeholderColor`).
     #[prop(default)]
-    pub search_style: Prop<Style>,
+    pub search_style: Prop<InputPartStyle>,
     /// The classes of the clear button (with `cleanable`, while an item is
     /// chosen); `disabled:` with the select. It comes after the trigger,
     /// which it is not part of: the app places it, over the trigger's end

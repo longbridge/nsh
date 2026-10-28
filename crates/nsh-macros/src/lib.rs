@@ -201,11 +201,11 @@ fn is_number(ty: &Type) -> bool {
     )
 }
 
-/// Whether `ty` is a style (`nsh_core::element::Style`, or `TextPartStyle`
-/// for a part that shows text), whose setter takes the typed styles'
-/// closure.
+/// Whether `ty` is a style (`nsh_core::element::Style`, `TextPartStyle`
+/// for a part that shows text, `InputPartStyle` for one that edits it),
+/// whose setter takes the typed styles' closure.
 fn is_style(ty: &Type) -> bool {
-    matches!(last_segment(ty), Some((id, None)) if id == "Style" || id == "TextPartStyle")
+    matches!(last_segment(ty), Some((id, None)) if id == "Style" || id == "TextPartStyle" || id == "InputPartStyle")
 }
 
 /// `PressDown` -> `press_down`, `HTMLView` -> `html_view`.

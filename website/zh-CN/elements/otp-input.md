@@ -98,7 +98,7 @@ mount(App);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不能获得焦点，不能编辑；`disabled:` 样式作用于输入框和它的部件，屏幕阅读器读出它不可用。 |
 | `groups` | `.groups(..)` | `number` | `1` | 格子尽量平均地分成几组（六位分两组是 3 + 3）；至少一组，最多每个格子一组。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器为输入框读出的内容：验证码的用途和位数。 |
-| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个格子：尺寸、边框和文字。 |
+| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个格子：尺寸、边框和文字（`color`、`fontSize`，由格子里的数字继承）。 |
 | `groupClass`、`groupStyle` | `.group_class(..)`、`.group_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每组格子（`flex-row gap-2`）。 |
 | `caretClass`、`caretStyle` | `.caret_class(..)`、`.caret_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 光标：宽度、高度和颜色。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 输入框本身：包住各组的行（或列）。 |
