@@ -722,6 +722,10 @@ const icon = (name: string, size = 16) =>
   .hero__snippet { display: inline-flex; align-items: stretch; margin-top: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--code-bg); box-shadow: var(--finish-inset); font: 0.78rem/1 var(--font-mono); overflow: hidden; max-width: 100%; }
   .hero__snippet span { padding: 0.55rem 0.65rem; border-right: 1px solid var(--border); color: var(--faint); }
   .hero__snippet code { padding: 0.55rem 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--code-fg); }
+  /* On the light page a raised white field, as the chips above it, its
+     label on the muted surface. */
+  :global(html.light) .hero__snippet { background: var(--card); box-shadow: var(--shadow-raise); }
+  :global(html.light) .hero__snippet span { background: var(--muted); color: var(--muted-foreground); }
 
   /* The live chat in a card frame of the site's design (the card finish),
      a slim bar with the file and a live badge, the app on an inset surface;
