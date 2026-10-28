@@ -152,7 +152,7 @@ Behind the hero, `HeroField.astro` draws the dot grid with a fragment
 shader (WebGL, two passes: the flow field into a texture of a texel every
 11 px, then the dots and the aurora per pixel, sampling it). A slowly
 flowing, domain-warped noise field runs through the grid as bands of light:
-the dots swell in a band, and on its crest take the accent, teal or violet
+the dots swell in a band, and on its crest take the accent, amber or coral
 as a second, slower field weaves the three hues; a faint aurora of the same
 hues glows under them. The field gathers beside the device, so that stage
 never goes dark, and fades over the copy and the caption. A press gathers
