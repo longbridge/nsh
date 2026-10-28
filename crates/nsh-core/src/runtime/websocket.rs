@@ -296,8 +296,7 @@ impl WebSocketConnection {
                                 }
                             }
                             // Browsers expose pending bytes but no drain event.
-                            crate::element::ambient::timer(std::time::Duration::from_millis(10))
-                                .await;
+                            crate::element::timer(std::time::Duration::from_millis(10)).await;
                         }
                     })
                     .await;
@@ -403,9 +402,7 @@ async fn timeout<T>(
 ) -> Result<T, String> {
     use std::future::Future;
     let mut work = std::pin::pin!(work);
-    let mut timer = std::pin::pin!(crate::element::ambient::timer(
-        std::time::Duration::from_secs(30)
-    ));
+    let mut timer = std::pin::pin!(crate::element::timer(std::time::Duration::from_secs(30)));
     poll_fn(|cx| {
         if let Poll::Ready(result) = work.as_mut().poll(cx) {
             return Poll::Ready(result);

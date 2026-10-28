@@ -20322,3 +20322,495 @@ mod remount {
         assert!(c.commit().is_none(), "nothing left to send");
     }
 }
+
+mod built_in_scrollbars {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{
+        Prop, ScrollbarSetting,
+        element::{
+            AnyElement, BuiltInScrollbar, Component, NoEvent, Props, Registry, Scope,
+            ScrollbarSource,
+        },
+        prelude::*,
+    };
+
+    /// A bar: a view with a thumb.
+    #[derive(Default)]
+    struct Bar;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct BarProps {}
+
+    impl Component for Bar {
+        type Props = BarProps;
+        type Event = NoEvent;
+
+        fn view(_: BarProps, _: Scope<NoEvent>) -> impl IntoElement {
+            view().child(view().w(px(4.0)).h(px(20.0)))
+        }
+    }
+
+    /// Bars for vertical views only: horizontal ones keep the platform's.
+    fn bars(of: &BuiltInScrollbar) -> Option<AnyElement> {
+        (!of.horizontal).then(|| Bar::element(BarProps {}).into_element())
+    }
+
+    /// The app draws every bar with `bars`.
+    fn app_theme() -> (ScrollbarSource, crate::element::AnyValue) {
+        (bars, crate::element::AnyValue::new(()))
+    }
+
+    /// A core whose sets make bars: a scroll view 2 of 300 by 200 with a
+    /// child 4 of 1000 points, its `scrollbar` `setting`.
+    fn scroll_view(
+        builtin: bool,
+        setting: Option<ScrollbarSetting>,
+    ) -> (Core<FakeEngine>, MountBatch) {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(builtin.then(|| app_theme()));
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(300.0)),
+                    ("height", StyleValue::Number(200.0)),
+                ],
+            ),
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("height", StyleValue::Number(1000.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ];
+        if let Some(setting) = setting {
+            ops.push(Op::SetProp {
+                id: 2,
+                prop: Prop::Scrollbar(setting),
+            });
+        }
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        (c, batch)
+    }
+
+    /// The core's children of view 2 (odd ids) that a batch inserts.
+    fn bars_in(batch: &MountBatch) -> Vec<NodeId> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Insert {
+                    parent: 2, child, ..
+                } if child % 2 == 1 => Some(*child),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn indicator(batch: &MountBatch) -> Option<bool> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollConfig {
+                id: 2,
+                scrollbar_visible,
+                ..
+            } => Some(*scrollbar_visible),
+            _ => None,
+        })
+    }
+
+    fn replaced(batch: &MountBatch) -> Option<bool> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollConfig {
+                id: 2, replaced, ..
+            } => Some(*replaced),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn views_keep_the_platforms_indicator_until_the_app_draws_bars() {
+        let (_, batch) = scroll_view(false, None);
+        assert!(bars_in(&batch).is_empty());
+        assert_eq!(indicator(&batch), Some(true));
+        assert_eq!(replaced(&batch), Some(false));
+    }
+
+    #[test]
+    fn a_built_in_bar_covers_the_viewport_and_stays_there() {
+        let (_, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar: {:?}", batch.items)
+        };
+        assert_eq!(indicator(&batch), Some(false), "the bar takes its place");
+        assert_eq!(replaced(&batch), Some(true), "on every axis");
+        assert_eq!(frame_of(&batch, bar), Some(rect(0.0, 0.0, 300.0, 200.0)));
+        let sticky = batch.items.iter().find_map(|i| match i {
+            MountItem::StickyCells { id: 2, cells } => Some(cells.clone()),
+            _ => None,
+        });
+        let cells = sticky.expect("the bar is pinned");
+        assert_eq!(cells.len(), 1);
+        assert_eq!((cells[0].cell, cells[0].start), (bar, Points(0.0)));
+        assert!(cells[0].end.0 > 1000.0, "across all of the content");
+        // Out of the content's layout: the content size is the child's.
+        let content = batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ScrollContent { id: 2, size, .. } => Some(*size),
+            _ => None,
+        });
+        assert_eq!(content, Some(size_pt(300.0, 1000.0)));
+    }
+
+    #[test]
+    fn what_the_app_appends_goes_below_the_bar() {
+        let (mut c, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let before = batch.items.iter().find_map(|i| match i {
+            MountItem::Insert {
+                parent: 2,
+                child: 6,
+                before,
+            } => Some(*before),
+            _ => None,
+        });
+        assert_eq!(before, Some(Some(bar)));
+        let key = c.key(2).unwrap();
+        let ids: Vec<NodeId> = c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect();
+        assert_eq!(ids, [4, 6, bar]);
+    }
+
+    #[test]
+    fn a_raised_or_sticky_child_still_goes_below_the_bar() {
+        let (mut c, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        let raised = |v: f32| {
+            style(&[
+                ("zIndex", StyleValue::Number(v)),
+                ("position", StyleValue::Str("sticky")),
+            ])
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::SetStyle {
+                    id: 6,
+                    style: raised(100.0),
+                    patch: StylePatch::default(),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let before = batch.items.iter().find_map(|i| match i {
+            MountItem::Insert {
+                parent: 2,
+                child: 6,
+                before,
+            } => Some(*before),
+            _ => None,
+        });
+        assert_eq!(before, Some(Some(bar)), "the bar draws above it");
+    }
+
+    /// A core drawing every bar with `bars`: in a view 2, a multiline (or
+    /// single-line) input 6 of 300 by 100, 50 down, and a view 8 10 high
+    /// after it.
+    fn input_view(multiline: bool) -> (Core<FakeEngine>, MountBatch) {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some(app_theme()));
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                style_op(2, &[("paddingTop", StyleValue::Number(50.0))]),
+                Op::Create {
+                    id: 6,
+                    tag: Tag::Input,
+                },
+                Op::SetProp {
+                    id: 6,
+                    prop: Prop::Multiline(multiline),
+                },
+                style_op(
+                    6,
+                    &[
+                        ("width", StyleValue::Number(300.0)),
+                        ("height", StyleValue::Number(100.0)),
+                    ],
+                ),
+                Op::Create {
+                    id: 8,
+                    tag: Tag::View,
+                },
+                style_op(8, &[("height", StyleValue::Number(10.0))]),
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 8,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        (c, batch)
+    }
+
+    /// The last config batch `batch` sends input 6.
+    fn input_config(batch: &MountBatch) -> Option<crate::InputConfig> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Input { id: 6, config } => Some((**config).clone()),
+            _ => None,
+        })
+    }
+
+    /// Where a batch inserts the core's views (odd ids) into view 2.
+    fn bars_beside(batch: &MountBatch) -> Vec<(NodeId, Option<NodeId>)> {
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Insert {
+                    parent: 2,
+                    child,
+                    before,
+                } if child % 2 == 1 => Some((*child, *before)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_multiline_input_gets_a_bar_over_it_in_its_indicators_place() {
+        let (c, batch) = input_view(true);
+        let [(bar, before)] = bars_beside(&batch)[..] else {
+            panic!("one bar: {:?}", batch.items)
+        };
+        assert_eq!(before, Some(8), "just above the input");
+        assert_eq!(frame_of(&batch, bar), frame_of(&batch, 6));
+        assert_eq!(frame_of(&batch, bar), Some(rect(0.0, 50.0, 300.0, 100.0)));
+        let config = input_config(&batch).expect("the input's config");
+        assert!(config.replaced && !config.scrollbar_visible);
+        // Not one of the view's children, nor pinned as a scroll view's.
+        let key = c.key(2).unwrap();
+        assert_eq!(c.nodes[key as usize].children.len(), 3);
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::StickyCells { .. }))
+        );
+    }
+
+    #[test]
+    fn a_single_line_input_keeps_no_bar() {
+        let (_, batch) = input_view(false);
+        assert!(bars_beside(&batch).is_empty());
+        let config = input_config(&batch).expect("the input's config");
+        assert!(!config.replaced && config.scrollbar_visible);
+    }
+
+    #[test]
+    fn an_input_bar_follows_the_input_and_goes_with_it() {
+        let (mut c, batch) = input_view(true);
+        let [(bar, _)] = bars_beside(&batch)[..] else {
+            panic!("one bar")
+        };
+        // Moved after view 8: the bar is made again just above it.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar))
+        );
+        let [(moved, before)] = bars_beside(&batch)[..] else {
+            panic!("the bar made again: {:?}", batch.items)
+        };
+        assert_eq!(before, None);
+        let key = c.key(2).unwrap();
+        let ids: Vec<NodeId> = c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect();
+        assert_eq!(ids, [8, 6, moved]);
+        assert_eq!(frame_of(&batch, 6), Some(rect(0.0, 60.0, 300.0, 100.0)));
+        assert_eq!(frame_of(&batch, moved), frame_of(&batch, 6));
+        // Released with the input.
+        apply(&mut c, vec![Op::Release { id: 6 }]);
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == moved))
+        );
+        assert!(c.key(moved).is_err());
+    }
+
+    #[test]
+    fn an_input_reports_its_scrolling_to_watches() {
+        let (mut c, _) = input_view(true);
+        c.set_input_scroll(
+            6,
+            point(px(0.0), px(40.0)),
+            size_pt(280.0, 400.0),
+            size_pt(280.0, 90.0),
+        );
+        let report = c.scroll_report(6).expect("a report");
+        assert_eq!(report.offset, point(px(0.0), px(40.0)));
+        assert_eq!(report.content_size, size_pt(280.0, 400.0));
+        assert_eq!(report.size, size_pt(280.0, 90.0));
+    }
+
+    #[test]
+    fn a_theme_of_the_views_own_shows_a_bar_and_false_none() {
+        let theme = ScrollbarSetting::Themed(std::sync::Arc::new(json!({ "mode": "always" })));
+        let (_, batch) = scroll_view(false, Some(theme));
+        assert_eq!(bars_in(&batch).len(), 1);
+        assert_eq!(indicator(&batch), Some(false));
+        let (_, batch) = scroll_view(true, Some(ScrollbarSetting::Hidden));
+        assert!(bars_in(&batch).is_empty());
+        assert_eq!(indicator(&batch), Some(false));
+    }
+
+    #[test]
+    fn turning_bars_off_releases_them_and_brings_the_indicator_back() {
+        let (mut c, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        c.set_builtin_scrollbars(None);
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar)),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(indicator(&batch), Some(true));
+        assert!(c.decorated.is_empty());
+    }
+
+    #[test]
+    fn a_view_the_set_makes_no_bar_for_keeps_its_indicator() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.scrollbars_from(bars);
+        c.set_components(registry);
+        c.set_builtin_scrollbars(Some(app_theme()));
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Horizontal(true),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert!(bars_in(&batch).is_empty());
+        assert_eq!(indicator(&batch), Some(true));
+    }
+
+    #[test]
+    fn releasing_the_view_releases_its_bar() {
+        let (mut c, batch) = scroll_view(true, None);
+        let [bar] = bars_in(&batch)[..] else {
+            panic!("one bar")
+        };
+        apply(&mut c, vec![Op::Release { id: 4 }, Op::Release { id: 2 }]);
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id } if *id == bar))
+        );
+        assert!(c.key(bar).is_err());
+        assert!(c.decorated.is_empty());
+    }
+}

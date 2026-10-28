@@ -50,8 +50,12 @@ export function Physics() {
         break;
       case "coast":
         // Coast with the release velocity, then spring home unless grabbed again.
-        x.decay({ velocity: e.velocity.x, deceleration: 0.992 }).then((done) => done && settle(x, 0, 0));
-        y.decay({ velocity: e.velocity.y, deceleration: 0.992 }).then((done) => done && settle(y, 0, 0));
+        x.decay({ velocity: e.velocity.x, deceleration: 0.992 }).then(({ finished }) => {
+          if (finished) settle(x, 0, 0);
+        });
+        y.decay({ velocity: e.velocity.y, deceleration: 0.992 }).then(({ finished }) => {
+          if (finished) settle(y, 0, 0);
+        });
         corner.set("—");
         break;
       case "snap": {

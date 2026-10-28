@@ -1,4 +1,4 @@
-import { type Bounds, cleanup, computed, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
+import { type Bounds, cleanup, computed, type InputRef, List, Overlay, type Point, signal, Text, untracked, View, type ViewRef } from "nsh";
 import { Button, DockArea, type DockAreaRef, Editor, type EditorDecoration, type EditorDiagnostic, type EditorPosition, type EditorRange, type EditorRef, type EditorSearchResult, type EditorSelection, Menu, MenuItem, MenuSeparator, TextView, Input } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
 import { openUrl, platform, windowSize } from "nsh";
@@ -248,7 +248,7 @@ export function EditorDemo() {
   const texts: Partial<Record<Language, string>> = {};
   let editor: EditorRef | undefined;
   let area: DockAreaRef | undefined;
-  let toolbar: YNode | undefined;
+  let toolbar: ViewRef | undefined;
   // Whether the problems' dock shows (`onDockOpenChange`): open in the
   // full presentation, none at first at compact width, where the area is
   // less than 600 wide (a phone's window).
@@ -392,7 +392,7 @@ export function EditorDemo() {
   // A diagnostic code's page (a lint rule's), in the browser.
   const openRule = async (href: string) => {
     try {
-      if (!(await openUrl(href))) last.set("No app opens links");
+      if (!(await openUrl(href)).opened) last.set("No app opens links");
     } catch (error) {
       last.set(String(error));
     }
@@ -440,7 +440,7 @@ export function EditorDemo() {
         >
           <View class="flex-row items-center gap-0.5">
             <Input
-              ref={(node: YNode) => node.focus()}
+              ref={(node: InputRef) => node.focus()}
               value={query()}
               onChange={({ value }) => query.set(value)}
               onSubmit={() => editor?.run("findNext")}
@@ -478,7 +478,7 @@ export function EditorDemo() {
               label="Replace all"
               icon="replace-all"
               onPress={async () => {
-                const n = (await editor?.replaceAll(replacement())) ?? 0;
+                const n = (await editor?.replaceAll(replacement()))?.count ?? 0;
                 last.set(`Replaced ${n}`);
               }}
             />
@@ -601,7 +601,7 @@ export function EditorDemo() {
   const menuOpen = signal<"language" | "options" | null>(null);
   return (
     <View class="flex-1 bg-background">
-      <View ref={(node: YNode) => (toolbar = node)} class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5">
+      <View ref={(node: ViewRef) => (toolbar = node)} class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5">
         <Menu
           offset={4}
           margin={8}

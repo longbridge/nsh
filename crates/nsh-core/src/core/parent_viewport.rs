@@ -682,7 +682,7 @@ impl<M: TextEngine> Core<M> {
             {
                 bits |= ignored::BEHAVIOR;
             }
-            if !scroll.scrollbar_visible {
+            if scroll.scrollbar != crate::ScrollbarSetting::Shown {
                 bits |= ignored::SCROLLBAR;
             }
         }

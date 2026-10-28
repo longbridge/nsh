@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
+//! `RadioGroup`, `Slider`, `Switch`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -40,6 +40,7 @@ mod radio;
 mod resizable;
 pub mod rich_editor;
 mod roving;
+mod scrollbar;
 mod select;
 mod sheet;
 mod slider;
@@ -63,7 +64,7 @@ pub use nsh_core::element::{Input, input};
 pub use crate::{
     alert_dialog::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
-        AlertDialogRole, alert_dialog,
+        AlertDialogResult, AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
@@ -88,9 +89,9 @@ pub use crate::{
         EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
         EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorRect, EditorScrollBeyond, EditorSearch,
-        EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, EditorToken,
-        editor,
+        EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll, EditorScrollBeyond,
+        EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
+        EditorToken, editor,
     },
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
@@ -120,6 +121,11 @@ pub use crate::{
         ResizeHandle, ResizeHandleContext, ResizeHandleElement, ResizeHandleEvent,
         ResizeHandleProps, ResizeHandleState, h_resizable, resizable_panel, resizable_panel_group,
         resize_handle, v_resizable,
+    },
+    scrollbar::{
+        Scrollbar, ScrollbarElement, ScrollbarEntrance, ScrollbarLook, ScrollbarMode,
+        ScrollbarMotion, ScrollbarProps, ScrollbarTarget, ScrollbarTheme, scrollbar,
+        set_scrollbar_theme,
     },
     select::{
         Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
@@ -188,8 +194,8 @@ pub mod parts {
     use crate::{
         AlertDialog, Button, Checkbox, Collapsible, Combobox, ContextMenu, DataTable, DiffView,
         DockArea, Editor, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Popover, Progress,
-        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Select, Sheet, Slider, Submenu,
-        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider,
+        Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
         TableHeader, TableRow, Tabs, TextView, Toast, ToastStack, Tooltip, plot, rich_editor,
         toast,
     };
@@ -212,7 +218,7 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// checkboxes, radios, switches, sliders, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
+    /// checkboxes, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
     /// menus, popovers, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
@@ -234,6 +240,9 @@ pub mod parts {
             .register::<Radio>()
             .register::<RadioGroup>()
             .register::<Slider>()
+            .register::<Scrollbar>()
+            .module::<Scrollbar>()
+            .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
             .register::<Progress>()
             .register::<Tab>()
@@ -340,6 +349,7 @@ mod tests {
                 "ResizablePanel",
                 "ResizablePanelGroup",
                 "RichEditor",
+                "Scrollbar",
                 "Select",
                 "Sheet",
                 "Slider",
@@ -369,6 +379,7 @@ mod tests {
                 "RichEditorApi",
                 "RichExtensionApi",
                 "RichTableApi",
+                "Scrollbar",
                 "TextView"
             ]
         );

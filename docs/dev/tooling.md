@@ -7,7 +7,7 @@
   (the UI sets as data: `nsh_core::element::description::SetDescription`, each with its generated declarations)
   makes the declarations of everything NSH serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
   the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/base.d.ts`, `nsh/mobile.d.ts`,
-  an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
+  an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, the refs (`ViewRef` and each element's own over it), the JSX namespace; `nsh` exports them),
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
   frames, the web APIs and the control flow components `If` / `Each`), and from the bundler `nsh/assets.d.ts` (what

@@ -1187,6 +1187,7 @@ impl Mounter {
                 pull_value,
                 keyboard_dismiss,
                 mirrored,
+                ..
             } => {
                 // A node that stops being vertical drops the width narrowed
                 // while it was: the extent it holds is measured the other way.
@@ -1558,6 +1559,9 @@ impl Mounter {
                 );
                 self.target.scroll_applied(id);
                 scroll.setContentOffset_animated(offset, animated);
+            }
+            (Command::ScrollTo { y, animated, .. }, Native::Input(input)) => {
+                input.scroll_to(y, animated);
             }
             (
                 Command::ZoomTo {

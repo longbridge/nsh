@@ -2581,11 +2581,12 @@ class Player {
 
   // Scroll views
 
-  op_sc([, id, horizontal, indicator]) {
+  op_sc([, id, horizontal, indicator, , replaced]) {
     const el = this.view(id);
     if (!el) return;
     el._horizontal = horizontal;
     el._indicator = indicator;
+    el._replaced = replaced;
     this.scrollOverflow(el);
     el.classList.toggle("nsh-noindicator", !indicator);
     if (el._bar && !this.barShown(el)) this.showBar(el);
@@ -2798,9 +2799,10 @@ class Player {
 
   /** Whether `el` has a bar: a scroll view along one axis with its
    * indicator, and horizontal ones always (a mouse without a horizontal
-   * wheel has no other way to move them, as mouse drags do not scroll). */
+   * wheel has no other way to move them, as mouse drags do not scroll),
+   * unless a built-in bar of the app's takes their place. */
   barShown(el) {
-    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || el._horizontal);
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || (el._horizontal && !el._replaced));
   }
 
   /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
@@ -3408,6 +3410,9 @@ class Player {
     else field.removeAttribute("maxlength");
     el._config = config;
     field.classList.toggle("nsh-ph", !!config.placeholderColor);
+    // A built-in bar of the app's takes the textarea's indicator's place.
+    field.classList.toggle("nsh-noindicator", !!config.noIndicator);
+    this.inputScrolled(el, field);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
       setTimeout(() => field.focus(), 0);
@@ -3416,6 +3421,10 @@ class Player {
 
   wireInput(el, field) {
     field.addEventListener("input", () => this.textChanged(el, field));
+    field.addEventListener("scroll", () => this.inputScrolled(el, field), { passive: true });
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(() => this.inputScrolled(el, field)).observe(field);
+    }
     // An input method's composition: the app's value is held while it
     // lasts (`op_iv`), since setting a field's value ends the composition
     // and commits its text as typed (pinyin letters instead of the
@@ -3470,7 +3479,18 @@ class Player {
     field.addEventListener("paste", (e) => this.pasted(el, e));
   }
 
+  /** Reports how far `el`'s textarea scrolled, and its text's height and
+   * its viewport's, while a built-in bar takes its indicator's place. */
+  inputScrolled(el, field) {
+    if (!el._config?.replaced || field.tagName !== "TEXTAREA") return;
+    const now = [field.scrollTop, field.clientWidth, field.scrollHeight, field.clientHeight];
+    if (field._scrolled?.every((v, i) => v === now[i])) return;
+    field._scrolled = now;
+    this.call((w) => w.nsh_input_scroll(el._id, ...now));
+  }
+
   textChanged(el, field) {
+    this.inputScrolled(el, field);
     if (field.value === field._known) return;
     field._known = field.value;
     field._count++;
@@ -4311,6 +4331,11 @@ class Player {
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "scrollTo":
         if (!el) break;
+        // A textarea's text (a built-in bar's drags).
+        if (el._field) {
+          el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
+          break;
+        }
         el._applied++;
         this.stopGlide(el, args[0], args[1]);
         el._smooth = args[2] ? [args[0], args[1]] : null;

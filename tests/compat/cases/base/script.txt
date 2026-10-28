@@ -1212,6 +1212,60 @@ covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm
 covers [events] Combobox.onQueryChange
+# base-scrollbar
+tap id:case-base-scrollbar
+# Always shown, where the app places its track; a press in its middle
+# puts the thumb's middle there (the thumb 40 long: 200 of 1000 shown on
+# 200), half its travel: 400 of 800; a drag 40 down goes on from there,
+# 40 of the thumb's 160 of travel: 200 more.
+style label:Pages pointerEvents auto
+frame label:Pages 290 0 10 200
+touch start label:Pages 5 100
+prop id:pages contentOffset y=400
+touch move 5 140
+prop id:pages contentOffset y=600
+touch end
+# While scrolling: hidden (taking no presses) until the target scrolls,
+# then until `motion.idle` after. Its thumb no shorter than 30 (10 of
+# 100): a press at 50 puts its start at 35 of 70, half of 900.
+style label:Feed pointerEvents none
+scroll id:feed 0 100
+style label:Feed pointerEvents auto
+touch start label:Feed 5 50
+touch end
+prop id:feed contentOffset y=450
+wait 400
+style label:Feed pointerEvents none
+# Along a horizontal scroll view: the thumb 50 long (200 of 800 shown on
+# 200); a press at 100 puts its start at 75 of 150, half of 600.
+touch start label:Strip 100 3
+touch end
+prop id:strip contentOffset x=300
+# A theme of the view's own: its bar over its viewport, in place of the
+# platform's indicator, the thumb 48 long (the default shortest) of 100
+# on 1000; a press at 50 puts its start at 26 of 52, half of 900.
+frame label:Own 290 0 10 100
+touch start label:Own 5 50
+touch end
+prop id:own contentOffset y=450
+# The app's theme (`Scrollbar.setTheme`) gives the bar to a scroll view
+# that keeps `scrollbar`.
+frame label:App 290 0 10 100
+touch start label:App 5 50
+touch end
+prop id:app contentOffset y=450
+# A multiline input's own theme: its bar over its text, beside it.
+frame label:Notes 290 0 10 100
+covers [props] scrollbar
+covers [nsh/base] Scrollbar
+covers [props] Scrollbar.scroll
+covers [props] Scrollbar.axis
+covers [props] Scrollbar.mode
+covers [props] Scrollbar.motion
+covers [props] Scrollbar.minThumbLength
+covers [props] Scrollbar.thumbClass
+covers [props] Scrollbar.thumbStyle
+covers [props] accessibilityLabel
 
 # base-select
 tap id:case-base-select
@@ -1618,6 +1672,29 @@ covers [props] Pie.innerRadius
 covers [props] Pie.outerRadius
 covers [props] Pie.cornerRadius
 covers [props] Arc.cornerRadius
+# A pie's labels: each slice's text at the end of its leader line, 10
+# past the rim (30) toward the slice's middle, then across to that
+# radius; after the end on the right half, before it on the left,
+# centered on it (the app's 20 by 10). A row worth nothing has none.
+expect east
+frame parent:text:east 90 50 0 0
+frame text:east 0 -5 20 10
+frame parent:text:west 10 50 0 0
+frame text:west -20 -5 20 10
+absent south
+# The leader lines (the `labelLine` part), each in its own classes, the
+# style's width over them, from the rim out to the label.
+drawing below:parent:text:east strokeStyle #ff0000ff
+drawing below:parent:text:west strokeStyle #0000ffff
+drawing below:parent:text:east lineWidth 2
+drawing below:parent:text:east stroke path(moveTo 80 50, lineTo 90 50...
+drawing below:parent:text:west stroke path(moveTo 20 50, lineTo 10 50...
+covers [props] Pie.label
+covers [props] Pie.labelClass
+covers [props] Pie.labelStyle
+covers [props] Pie.labelGap
+covers [props] Pie.labelLineClass
+covers [props] Pie.labelLineStyle
 covers [props] Plot.motion
 covers [nsh/base/plot] Plot
 covers [nsh/base/plot] Line
@@ -1718,6 +1795,33 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Reversed scales: bands from the right edge (middles 250, 150 and 50)
+# and a y scale of 0 to 40 from the top edge (2 points a value), so the
+# bars hang from the top, each label below its bar's end.
+expect h20
+frame parent:text:h20 250 40 0 0
+frame text:h20 -15 0 30 14
+frame parent:text:h10 150 20 0 0
+frame parent:text:h5 50 10 0 0
+# The axis under it: the first band's text at the right.
+frame parent:parent:parent:text:rev0 200 80 100 10
+frame parent:parent:parent:text:rev2 0 80 100 10
+# The row nearest the pointer, the last one at the left; a screen
+# reader's decrement steps to the row before, in the rows' order.
+expect reversed null
+event id:hanging onMouseMove position.x=40 position.y=10
+expect reversed 2
+event id:hanging onAccessibilityAction actionName=decrement
+expect reversed 1
+event id:hanging onMouseLeave
+expect reversed null
+# Bars across from the right edge of an x scale of 0 to 20 (5 points a
+# value), the bands from the bottom edge up (middles 50, 30 and 10), each
+# label before its bar's end.
+frame parent:text:l20 0 50 0 0
+frame text:l20 -30 -7 30 14
+frame parent:text:l10 50 30 0 0
+frame parent:text:l5 75 10 0 0
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

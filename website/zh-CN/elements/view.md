@@ -205,7 +205,7 @@ const files = signal<string[]>([]);
 
 ## ref 方法
 
-普通 view 没有自己的命令。`ref`（Rust 中为 `.element_ref(&handle)`）拿到它的节点，例如可以传给 `setAccessibilityFocus`（[`nsh` 的无障碍 API](../modules/nsh.md#accessibility)），或者测量它（Rust 中为 `handle.measure()`）。
+普通 view 的 ref 是 `ViewRef`：`focus()`、`blur()` 和 `measure()`。`ref`（Rust 中为 `.element_ref(&handle)`）拿到它的节点，例如可以传给 `setAccessibilityFocus`（[`nsh` 的无障碍 API](../modules/nsh.md#accessibility)），或者测量它（Rust 中为 `handle.measure()`）。
 
 ## 文本中的视图
 
