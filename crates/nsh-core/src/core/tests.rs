@@ -5350,6 +5350,233 @@ fn expanded_style_follows_the_accessibility_state() {
 }
 
 #[test]
+fn pressed_style_and_aria_variants_follow_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState, Checked, StyleValue as V};
+    // A toggle button: styled while on, its icon by its group's state;
+    // `aria-busy:`, `aria-checked:` and `aria-selected:` as Tailwind has
+    // them.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "group bg-zinc-200 aria-pressed:bg-emerald-500 aria-busy:rounded-[1px] \
+         aria-checked:rounded-[2px] aria-selected:rounded-[3px]",
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-aria-pressed:translate-x-4"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::PressedStyle(patch(&[("opacity", V::Number(0.7))])),
+            },
+        ],
+    );
+    let state = |s: AccessibilityState| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(s)),
+    };
+    let pressed = |pressed| AccessibilityState {
+        pressed,
+        ..AccessibilityState::default()
+    };
+    apply(&mut c, vec![state(pressed(Some(Checked::True)))]);
+    let batch = c.commit().unwrap();
+    let toggle = view_style_of(&batch, 2).unwrap();
+    assert_eq!(toggle.background_color, Color(0x00bc_7dff));
+    assert_eq!(toggle.opacity, 0.7);
+    assert_eq!(
+        view_style_of(&batch, 3).unwrap().transform.ops()[0].value,
+        16.0
+    );
+    // The platform never tracks it.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id: 2, states }
+            if states & crate::tailwind::state::ACCESSIBILITY != 0
+    )));
+    // Mixed is not pressed, nor is off.
+    for off in [Some(Checked::Mixed), Some(Checked::False), None] {
+        apply(&mut c, vec![state(pressed(off))]);
+        let batch = c.commit().unwrap();
+        let toggle = view_style_of(&batch, 2).unwrap();
+        assert_eq!(toggle.background_color, Color(0xe4e4_e7ff), "{off:?}");
+        assert_eq!(toggle.opacity, 1.0, "{off:?}");
+        apply(&mut c, vec![state(pressed(Some(Checked::True)))]);
+        c.commit().unwrap();
+    }
+    // The `aria-*` variants of the other states, later ones winning.
+    for (s, radius) in [
+        (
+            AccessibilityState {
+                busy: true,
+                ..AccessibilityState::default()
+            },
+            1.0,
+        ),
+        (
+            AccessibilityState {
+                busy: true,
+                checked: Some(Checked::True),
+                ..AccessibilityState::default()
+            },
+            2.0,
+        ),
+        (
+            AccessibilityState {
+                busy: true,
+                checked: Some(Checked::True),
+                selected: true,
+                ..AccessibilityState::default()
+            },
+            3.0,
+        ),
+        // `aria-checked:` is `checked` true, never mixed.
+        (
+            AccessibilityState {
+                checked: Some(Checked::Mixed),
+                ..AccessibilityState::default()
+            },
+            0.0,
+        ),
+    ] {
+        apply(&mut c, vec![state(s)]);
+        let batch = c.commit().unwrap();
+        let style = view_style_of(&batch, 2).expect("restyled");
+        assert_eq!(style.border_radius, px(radius), "{s:?}");
+    }
+}
+
+/// The accessibility state's new members and `accessibilityLevel`, from
+/// their JS shapes.
+#[test]
+fn pressed_current_and_level_decode_from_js() {
+    use crate::{
+        AccessibilityCurrent, AccessibilityProp, Checked,
+        js::host::{HostCx, HostProps},
+    };
+    let decode = |name: &str, v: serde_json::Value| {
+        AccessibilityProp::decode(name, &J(v), &mut HostCx::default())
+            .expect(name)
+            .expect("a value")
+    };
+    let state = |v| match decode("accessibilityState", v) {
+        AccessibilityProp::State(s) => s,
+        p => panic!("{p:?}"),
+    };
+    let s = state(serde_json::json!({ "pressed": true, "current": "page" }));
+    assert_eq!(s.pressed, Some(Checked::True));
+    assert_eq!(s.current, Some(AccessibilityCurrent::Page));
+    let s = state(serde_json::json!({ "pressed": "mixed", "current": true }));
+    assert_eq!(s.pressed, Some(Checked::Mixed));
+    assert_eq!(s.current, Some(AccessibilityCurrent::True));
+    let s = state(serde_json::json!({ "pressed": false, "current": false }));
+    assert_eq!(s.pressed, Some(Checked::False));
+    assert_eq!(s.current, None);
+    for (word, current) in [
+        ("step", AccessibilityCurrent::Step),
+        ("location", AccessibilityCurrent::Location),
+        ("date", AccessibilityCurrent::Date),
+        ("time", AccessibilityCurrent::Time),
+    ] {
+        let s = state(serde_json::json!({ "current": word }));
+        assert_eq!(s.current, Some(current));
+    }
+    let s = state(serde_json::json!({ "pressed": "yes", "current": "now" }));
+    assert_eq!((s.pressed, s.current), (None, None));
+    for (v, level) in [
+        (serde_json::json!(2), Some(2)),
+        (serde_json::json!(1), Some(1)),
+        (serde_json::json!(0), None),
+        (serde_json::json!(-1), None),
+        (serde_json::json!(1.5), None),
+        (serde_json::json!("2"), None),
+    ] {
+        assert_eq!(
+            decode("accessibilityLevel", v.clone()),
+            AccessibilityProp::Level(level),
+            "{v}"
+        );
+    }
+    let role = |name: &str| match decode("role", serde_json::json!(name)) {
+        AccessibilityProp::Role(r) => r,
+        p => panic!("{p:?}"),
+    };
+    use crate::AccessibilityRole as R;
+    for (name, r) in [
+        ("group", R::Group),
+        ("region", R::Region),
+        ("navigation", R::Navigation),
+        ("tree", R::Tree),
+        ("treeitem", R::TreeItem),
+        ("menuitemcheckbox", R::MenuItemCheckbox),
+        ("menuitemradio", R::MenuItemRadio),
+    ] {
+        assert_eq!(role(name), r);
+    }
+}
+
+/// The new accessibility props go with the view's props, and nothing is
+/// sent for a view that sets none of them.
+#[test]
+fn level_and_new_states_go_with_the_view_props() {
+    use crate::{AccessibilityCurrent, AccessibilityProp, AccessibilityState};
+    let mut c = core();
+    view_with_classes(&mut c, 2, "aria-pressed:bg-black");
+    let batch = c.commit().unwrap();
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ViewProps { id: 2, .. })),
+        "{:?}",
+        batch.items
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Accessibility(AccessibilityProp::Level(Some(3))),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+                    current: Some(AccessibilityCurrent::Step),
+                    ..AccessibilityState::default()
+                })),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let props: Vec<_> = batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ViewProps { id: 2, props } => Some(props),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(props.len(), 1, "{:?}", batch.items);
+    assert_eq!(props[0].accessibility.level, Some(3));
+    assert_eq!(
+        props[0].accessibility.state.current,
+        Some(AccessibilityCurrent::Step)
+    );
+    // A current item changes no style: nothing restyles.
+    assert!(view_style_of(&batch, 2).is_none(), "{:?}", batch.items);
+}
+
+#[test]
 fn checked_style_follows_the_accessibility_state() {
     use crate::{AccessibilityProp, AccessibilityState, Checked, StyleValue as V};
     // A switch: the track by its checked state, the thumb by its group's.
@@ -16845,53 +17072,58 @@ fn image_scales_drop_invalid_values() {
     );
 }
 
-/// The JS shapes, through the host decoding (a JSON stand-in for JS
-/// values).
+/// A JSON stand-in for JS values, for the host decoding.
+struct J(serde_json::Value);
+
+/// A JSON array as [`J`]'s list.
+struct L(Vec<serde_json::Value>);
+
+impl crate::js::host::HostList for L {
+    type Item = J;
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn item(&self, i: usize) -> Option<J> {
+        self.0.get(i).cloned().map(J)
+    }
+}
+
+impl crate::js::host::HostInput for J {
+    type List = L;
+    fn is_nullish(&self) -> bool {
+        self.0.is_null()
+    }
+    fn is_object(&self) -> bool {
+        self.0.is_object() || self.0.is_array()
+    }
+    fn as_bool(&self) -> Option<bool> {
+        self.0.as_bool()
+    }
+    fn as_number(&self) -> Option<f64> {
+        self.0.as_f64()
+    }
+    fn as_string(&self) -> Option<String> {
+        self.0.as_str().map(str::to_owned)
+    }
+    fn field(&self, key: &str) -> Option<J> {
+        self.0.get(key).cloned().map(J)
+    }
+    fn as_list(&self) -> Option<L> {
+        self.0.as_array().cloned().map(L)
+    }
+    fn entries(&self) -> Vec<(String, J)> {
+        Vec::new()
+    }
+    fn truthy(&self) -> bool {
+        !self.0.is_null()
+    }
+}
+
+/// The JS shapes, through the host decoding.
 #[test]
 fn image_scales_decode_from_js() {
-    use crate::js::host::{HostCx, HostInput, HostList, HostValue};
+    use crate::js::host::{HostCx, HostValue};
 
-    struct J(serde_json::Value);
-    struct L(Vec<serde_json::Value>);
-    impl HostList for L {
-        type Item = J;
-        fn len(&self) -> usize {
-            self.0.len()
-        }
-        fn item(&self, i: usize) -> Option<J> {
-            self.0.get(i).cloned().map(J)
-        }
-    }
-    impl HostInput for J {
-        type List = L;
-        fn is_nullish(&self) -> bool {
-            self.0.is_null()
-        }
-        fn is_object(&self) -> bool {
-            self.0.is_object() || self.0.is_array()
-        }
-        fn as_bool(&self) -> Option<bool> {
-            self.0.as_bool()
-        }
-        fn as_number(&self) -> Option<f64> {
-            self.0.as_f64()
-        }
-        fn as_string(&self) -> Option<String> {
-            self.0.as_str().map(str::to_owned)
-        }
-        fn field(&self, key: &str) -> Option<J> {
-            self.0.get(key).cloned().map(J)
-        }
-        fn as_list(&self) -> Option<L> {
-            self.0.as_array().cloned().map(L)
-        }
-        fn entries(&self) -> Vec<(String, J)> {
-            Vec::new()
-        }
-        fn truthy(&self) -> bool {
-            !self.0.is_null()
-        }
-    }
     let decode = |v: serde_json::Value| ImageSource::decode(&J(v), &mut HostCx::default());
 
     let source = decode(serde_json::json!({

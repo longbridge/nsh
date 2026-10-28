@@ -72,6 +72,10 @@ export interface StateStyleProps<S = ViewStyle> {
   /** While `accessibilityState.expanded` is `true` (`aria-expanded:`): a
    * `Popover`'s or `Menu`'s trigger while its popup is open. */
   expandedStyle?: StyleProp<S>;
+  /** While `accessibilityState.pressed` is `true` (`aria-pressed:`;
+   * `"mixed"` is not pressed): a toggle button that is on. Not
+   * `activeStyle`, a press in progress. */
+  pressedStyle?: StyleProp<S>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */

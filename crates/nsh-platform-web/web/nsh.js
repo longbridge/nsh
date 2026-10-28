@@ -2091,6 +2091,9 @@ class Player {
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
     set("aria-expanded", p.expanded);
+    set("aria-pressed", p.pressed);
+    set("aria-current", p.current);
+    set("aria-level", p.level);
     const [min, max, now, text] = p.value ?? [];
     set("aria-valuemin", min);
     set("aria-valuemax", max);

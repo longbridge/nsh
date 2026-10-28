@@ -1863,6 +1863,79 @@ mod tests {
         );
     }
 
+    /// A toolbar's group of a toggle button, a heading with its level and
+    /// a pagination's current page.
+    #[component]
+    fn Formatting() -> impl IntoElement {
+        let bold = signal(false);
+        view()
+            .child(
+                view()
+                    .role(AccessibilityRole::Group)
+                    .label("Text style")
+                    .child(
+                        view()
+                            .test_id("bold")
+                            .role(AccessibilityRole::Button)
+                            .label("Bold")
+                            .accessibility_state(move || AccessibilityState {
+                                pressed: Some(if bold.get() {
+                                    nsh_core::Checked::True
+                                } else {
+                                    nsh_core::Checked::False
+                                }),
+                                ..AccessibilityState::default()
+                            })
+                            .on_press(move || bold.update(|b| *b = !*b))
+                            .child(text("B")),
+                    ),
+            )
+            .child(
+                text("Details")
+                    .test_id("details")
+                    .role(AccessibilityRole::Header)
+                    .accessibility_level(2_u32),
+            )
+            .child(
+                view()
+                    .role(AccessibilityRole::Navigation)
+                    .label("Pages")
+                    .child(
+                        view()
+                            .test_id("page-2")
+                            .role(AccessibilityRole::Link)
+                            .accessibility_state(AccessibilityState {
+                                current: Some(nsh_core::AccessibilityCurrent::Page),
+                                ..AccessibilityState::default()
+                            })
+                            .child(text("2")),
+                    ),
+            )
+    }
+
+    #[test]
+    fn roles_find_groups_and_states_follow_a_toggle() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Formatting>())).unwrap();
+        app.first_render().unwrap();
+        let screen = app.screen();
+        assert_eq!(screen.count("role:group[Text style]"), Ok(1));
+        assert_eq!(screen.count("role:navigation[Pages] >> role:link"), Ok(1));
+        assert_eq!(screen.accessibility_level("id:details"), Ok(Some(2)));
+        assert_eq!(
+            screen.accessibility_state("id:page-2").map(|s| s.current),
+            Ok(Some(nsh_core::AccessibilityCurrent::Page))
+        );
+        let pressed = |app: &Headless| {
+            app.screen()
+                .accessibility_state("role:button[Bold]")
+                .map(|s| s.pressed)
+        };
+        assert_eq!(pressed(&app), Ok(Some(nsh_core::Checked::False)));
+        app.press("role:button[Bold]").unwrap();
+        app.wait(Duration::from_millis(50)).unwrap();
+        assert_eq!(pressed(&app), Ok(Some(nsh_core::Checked::True)));
+    }
+
     /// The metrics of a line of text in a canvas font.
     #[component]
     fn Metrics() -> impl IntoElement {

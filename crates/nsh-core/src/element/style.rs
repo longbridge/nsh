@@ -183,6 +183,9 @@ impl Variant {
     pub(crate) const INDETERMINATE: Self = Self::states(state::INDETERMINATE);
     /// While expanded (set by the core from the accessibility state).
     pub(crate) const EXPANDED: Self = Self::states(state::EXPANDED);
+    /// While a toggle button is on (set by the core from the
+    /// accessibility state).
+    pub(crate) const ARIA_PRESSED: Self = Self::states(state::ARIA_PRESSED);
     /// In dark appearance.
     const DARK: Self = Self {
         states: 0,
@@ -228,6 +231,8 @@ impl Variant {
             (state::CHECKED, rank::CHECKED),
             (state::INDETERMINATE, rank::INDETERMINATE),
             (state::EXPANDED, rank::EXPANDED),
+            (state::ARIA_PRESSED, rank::ARIA_PRESSED),
+            (state::BUSY, rank::ARIA_BUSY),
         ];
         for (bit, key) in keys {
             if self.group_states & bit != 0 {
@@ -4040,6 +4045,16 @@ pub trait Styled: Sized {
     fn expanded(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::EXPANDED, s);
+        self
+    }
+
+    /// Styles while a toggle button is on (Tailwind's `aria-pressed:`):
+    /// the element's accessibility state says it is pressed, not mixed
+    /// (`gpui-base`'s `Toggle` styled `pressed`). Not `.active(..)`, a
+    /// press in progress.
+    fn aria_pressed(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::ARIA_PRESSED, s);
         self
     }
 

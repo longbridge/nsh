@@ -3277,6 +3277,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Indeterminate, patch);
                 return Ok(());
             }
+            Prop::PressedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Pressed, patch);
+                return Ok(());
+            }
             Prop::ExpandedStyle(patch) => {
                 self.set_part_style(key, classes::Part::Expanded, patch);
                 return Ok(());
@@ -3355,20 +3359,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     AccessibilityProp::LiveRegion(v) => a.live_region = v,
                     AccessibilityProp::Actions(v) => a.actions = v,
+                    AccessibilityProp::Level(v) => a.level = v,
                 }
-                let selected =
-                    (a.state.selected != before.state.selected).then_some(a.state.selected);
-                let is_checked =
-                    |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::True);
-                let checked = (is_checked(&a.state) != is_checked(&before.state))
-                    .then(|| is_checked(&a.state));
-                let is_mixed =
-                    |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::Mixed);
-                let indeterminate =
-                    (is_mixed(&a.state) != is_mixed(&before.state)).then(|| is_mixed(&a.state));
-                let is_expanded = |s: &crate::AccessibilityState| s.expanded == Some(true);
-                let expanded = (is_expanded(&a.state) != is_expanded(&before.state))
-                    .then(|| is_expanded(&a.state));
+                let states = classes::accessibility_states(&a.state);
+                let states_changed = states != classes::accessibility_states(&before.state);
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -3376,26 +3370,11 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
-                if selected.is_some()
-                    || checked.is_some()
-                    || indeterminate.is_some()
-                    || expanded.is_some()
-                {
+                if states_changed {
                     if flags != 0 {
                         self.mark(key, flags);
                     }
-                    if let Some(selected) = selected {
-                        self.set_selected(key, selected);
-                    }
-                    if let Some(checked) = checked {
-                        self.set_checked(key, checked);
-                    }
-                    if let Some(indeterminate) = indeterminate {
-                        self.set_indeterminate(key, indeterminate);
-                    }
-                    if let Some(expanded) = expanded {
-                        self.set_expanded(key, expanded);
-                    }
+                    self.set_accessibility_states(key, states);
                     return Ok(());
                 }
             }
