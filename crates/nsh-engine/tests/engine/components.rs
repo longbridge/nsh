@@ -3542,6 +3542,100 @@ fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
     assert_eq!(chosen(&trigger).as_deref(), Some("Apple"));
 }
 
+const BASE_COMBOBOX: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Combobox } from "nsh/base";
+
+const tags = [
+  { value: "rust", title: "Rust" },
+  { value: "go", title: "Go" },
+  { value: "swift", title: "Swift" },
+];
+
+function App() {
+  const value = signal<string[]>(["go"]);
+  const confirmed = signal("none");
+  return (
+    <View>
+      <Combobox
+        items={tags}
+        multiple
+        value={value()}
+        onChange={({ value: next }) => value.set(next)}
+        onConfirm={({ value: next }) => confirmed.set(next.join(","))}
+        accessibilityLabel="Tags"
+        trigger={<View><Text>Pick</Text></View>}
+        renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
+        footer={<Text>Footer</Text>}
+      />
+      <Text>{`Value: ${value().join(",")}`}</Text>
+      <Text>{`Confirmed: ${confirmed()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Combobox` through its JS face: an array value the app
+/// owns, toggled by presses with `multiple` while the list stays open (the
+/// app's rows and footer in it), `onChange({ value })` with the array and
+/// `onConfirm({ value })` once it closes; screen readers hear the selected
+/// titles.
+#[test]
+fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_COMBOBOX);
+    let find = |batches: &[MountBatch], label: &str, role: AccessibilityRole| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == role
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some((*id, (**props).clone()))
+                }
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Tags", AccessibilityRole::Combobox).is_some()
+    });
+    let (trigger, props) = find(&first, "Tags", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(
+        props
+            .accessibility
+            .value
+            .and_then(|v| v.text.map(|t| t.to_string()))
+            .as_deref(),
+        Some("Go")
+    );
+
+    engine
+        .control()
+        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+    let opened = until(&rx, |b| shows(b, "Swift!"));
+    assert!(opened.iter().any(|b| shows(b, "Go on!")));
+    assert!(opened.iter().any(|b| shows(b, "Footer")));
+    let (swift, _) = find(&opened, "Swift", AccessibilityRole::Option).expect("an option");
+
+    // A press toggles Swift in; the list stays open.
+    engine
+        .control()
+        .dispatch_event(swift, EventKind::Press, EventPayload::None);
+    let toggled = until(&rx, |b| shows(b, "Value: go,swift"));
+    assert!(toggled.iter().any(|b| shows(b, "Swift on!")));
+    assert!(!toggled.iter().any(|b| shows(b, "Confirmed: go,swift")));
+
+    // Closing confirms the array.
+    engine
+        .control()
+        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, "Confirmed: go,swift"));
+}
+
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
 import { Select } from "nsh/base";
 

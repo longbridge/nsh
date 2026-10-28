@@ -356,7 +356,11 @@ fn the_clear_button_clears_the_value_and_leaves_the_list_closed() {
         app.press("text:Clear").unwrap();
         app.log_ends("change:none");
         app.gone("text:Clear");
-        assert!(!app.shows("role:listbox"), "the list stays closed");
+        assert_eq!(
+            app.screen().count("role:listbox").unwrap(),
+            0,
+            "the list stays closed"
+        );
         if controlled {
             app.see("Value: none");
         }
