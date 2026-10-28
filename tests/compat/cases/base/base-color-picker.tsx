@@ -33,11 +33,11 @@ function App() {
         value={color()}
         format="rgb"
         disabled={disabled()}
-        onChange={(value, text) => {
+        onChange={({ value, formatted: text }) => {
           color.set(value);
           formatted.set(text);
         }}
-        onChangeEnd={(_value, text) => ended.set(`end ${text}`)}
+        onChangeEnd={({ formatted: text }) => ended.set(`end ${text}`)}
       >
         <ColorArea
           testID="area"
@@ -95,7 +95,7 @@ function App() {
             <View testID="check" style={{ width: 4, height: 4 }} />
           </ColorSwatch>
           <ColorSwatch testID="preview" class="w-[20px] h-[20px]" />
-          <ColorEyeDropper accessibilityLabel="Eyedropper" class="w-[20px] h-[20px]" onPick={value => color.set(value)}>
+          <ColorEyeDropper accessibilityLabel="Eyedropper" class="w-[20px] h-[20px]" onPick={({ color: value }) => color.set(value)}>
             <View testID="dropper" style={{ width: 4, height: 4 }} />
           </ColorEyeDropper>
         </View>
@@ -104,7 +104,7 @@ function App() {
       <Text>{`Formatted ${formatted()}`}</Text>
       <Text>{ended()}</Text>
       <View testID="disable" onPress={() => disabled.set(!disabled())} style={{ width: 20, height: 20 }} />
-      <ColorPicker defaultValue="#00ff00" format="oklch" onChangeEnd={(_value, text) => own.set(text)}>
+      <ColorPicker defaultValue="#00ff00" format="oklch" onChangeEnd={({ formatted }) => own.set(formatted)}>
         <ColorSlider
           class="w-[200px] h-[20px] justify-center"
           channel="brightness"

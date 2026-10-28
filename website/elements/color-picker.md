@@ -113,7 +113,7 @@ function Channel(props: { channel: ColorChannel; letter: string }) {
 function App() {
   const primary = signal("oklch(54.6% 0.215 262.9)");
   return (
-    <ColorPicker value={primary()} format="oklch" onChange={(_value, formatted) => primary.set(formatted)} class="gap-3">
+    <ColorPicker value={primary()} format="oklch" onChange={({ formatted }) => primary.set(formatted)} class="gap-3">
       <ColorArea accessibilityLabel="Saturation and brightness" class="h-40" panelClass="rounded-lg" thumbClass={`size-[18px] ${thumb}`} fillThumb />
       <Channel channel="lightness" letter="L" />
       <Channel channel="chroma" letter="C" />
@@ -140,10 +140,10 @@ The color is a CSS color: hex (`#3b82f6`, `#3b82f680` with its alpha), `rgb()`, 
 name; in Rust an `Hsla`. The app owns it with `value` and sets the one `onChange` reports, as for every control of
 `nsh/base`; or it leaves the color to the picker with `defaultValue` and hears the changes all the same.
 
-- `onChange(value, formatted)` reports each color the user asks for: at each step of a drag on the area or a slider,
+- `onChange({ value, formatted })` reports each color the user asks for: at each step of a drag on the area or a slider,
   for each key, a field's number as it is typed, a swatch pressed. `value` is the color, `formatted` the same color
   written as `format` says (`"hex"`, `"rgb"`, `"hsl"`, `"hsb"` or `"oklch"`), ready to save or to set as a token.
-- `onChangeEnd(value, formatted)` reports the color the change ended at, once: when the pointer lifts, after each key,
+- `onChangeEnd({ value, formatted })` reports the color the change ended at, once: when the pointer lifts, after each key,
   when a field is left or submitted, when a swatch is pressed.
 - The picker keeps the color in each space as the user set it. A gray keeps its hue and saturation, so the hue slider
   stays where the user left it; a color edited in OKLCH keeps its lightness, chroma and hue as typed, also past what
@@ -249,10 +249,10 @@ has no eyedropper the button is disabled, and `disabled:hidden` hides it there.
 
 | Event | Of | Rust | Payload | When |
 |---|---|---|---|---|
-| `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | The user changed the color. |
-| `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | The change ended. Once per change. |
-| `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `(color: string)` | The swatch was pressed; it works alone too, as a palette's chip. |
-| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `(color: string)` | The user picked a color on the screen; it works alone too. |
+| `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `({ value: string, formatted: string })` | The user changed the color. |
+| `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `({ value: string, formatted: string })` | The change ended. Once per change. |
+| `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `({ color: string })` | The swatch was pressed; it works alone too, as a palette's chip. |
+| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `({ color: string })` | The user picked a color on the screen; it works alone too. |
 
 In Rust, `ColorPickerEvent::Change(Hsla, SharedString)` and `ColorPickerEvent::ChangeEnd(Hsla, SharedString)` carry the
 color and its `formatted` text.

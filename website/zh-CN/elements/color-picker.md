@@ -109,7 +109,7 @@ function Channel(props: { channel: ColorChannel; letter: string }) {
 function App() {
   const primary = signal("oklch(54.6% 0.215 262.9)");
   return (
-    <ColorPicker value={primary()} format="oklch" onChange={(_value, formatted) => primary.set(formatted)} class="gap-3">
+    <ColorPicker value={primary()} format="oklch" onChange={({ formatted }) => primary.set(formatted)} class="gap-3">
       <ColorArea accessibilityLabel="Saturation and brightness" class="h-40" panelClass="rounded-lg" thumbClass={`size-[18px] ${thumb}`} fillThumb />
       <Channel channel="lightness" letter="L" />
       <Channel channel="chroma" letter="C" />
@@ -134,9 +134,9 @@ mount(App);
 颜色是 CSS 颜色：十六进制（`#3b82f6`，带透明度的 `#3b82f680`）、`rgb()`、`hsl()`、`hsb()`、`oklch()` 或 CSS 颜色名；Rust 中是
 `Hsla`。应用通过 `value` 持有它，并设置 `onChange` 报告的颜色，与 `nsh/base` 的其他控件一样；也可以用 `defaultValue` 把颜色交给选择器自己保存，照样收到变化。
 
-- `onChange(value, formatted)` 报告用户要的每个颜色：拖动区域或滑块的每一步、每次按键、在字段中输入的数字、按下的色板。`value` 是颜色，`formatted`
+- `onChange({ value, formatted })` 报告用户要的每个颜色：拖动区域或滑块的每一步、每次按键、在字段中输入的数字、按下的色板。`value` 是颜色，`formatted`
   是按 `format`（`"hex"`、`"rgb"`、`"hsl"`、`"hsb"` 或 `"oklch"`）写出的同一颜色，可以直接保存或设为 token。
-- `onChangeEnd(value, formatted)` 报告一次变化结束时的颜色，只报一次：指针抬起时、每次按键后、字段失去焦点或提交时、按下色板时。
+- `onChangeEnd({ value, formatted })` 报告一次变化结束时的颜色，只报一次：指针抬起时、每次按键后、字段失去焦点或提交时、按下色板时。
 - 选择器按用户设置的样子保存颜色在每个空间中的通道值。灰色保留色相和饱和度，所以色相滑块停在用户放下的位置；在 OKLCH 中编辑的颜色保留输入的明度、色度和色相，超出
   sRGB 时也一样（报告的颜色是 sRGB 能显示的最接近颜色，`"oklch"` 的 `formatted` 保留通道值）。
 - 应用设置的、不是选择器报告的 `value` 会替换所有空间中的颜色。
@@ -236,10 +236,10 @@ mount(App);
 
 | 事件 | 所属 | Rust | 参数 | 时机 |
 |---|---|---|---|---|
-| `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | 用户修改了颜色。 |
-| `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `(value: string, formatted: string)` | 一次修改结束，每次修改只报一次。 |
-| `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `(color: string)` | 色板被按下；色板也可以单独使用，作为调色板的色块。 |
-| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `(color: string)` | 用户在屏幕上取到了颜色；吸管也可以单独使用。 |
+| `onChange` | `ColorPicker` | `.on_change(\|e: &ColorPickerEvent\| ..)` | `({ value: string, formatted: string })` | 用户修改了颜色。 |
+| `onChangeEnd` | `ColorPicker` | `.on_change_end(\|e: &ColorPickerEvent\| ..)` | `({ value: string, formatted: string })` | 一次修改结束，每次修改只报一次。 |
+| `onPress` | `ColorSwatch` | `.on_press(\|color: &Hsla\| ..)` | `({ color: string })` | 色板被按下；色板也可以单独使用，作为调色板的色块。 |
+| `onPick` | `ColorEyeDropper` | `.on_pick(\|color: &Hsla\| ..)` | `({ color: string })` | 用户在屏幕上取到了颜色；吸管也可以单独使用。 |
 
 Rust 中 `ColorPickerEvent::Change(Hsla, SharedString)` 和 `ColorPickerEvent::ChangeEnd(Hsla, SharedString)` 携带颜色及其
 `formatted` 文本。

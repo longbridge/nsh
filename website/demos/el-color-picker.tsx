@@ -41,17 +41,17 @@ function App() {
       <Split
         gap={14}
         inspector={
-<Log title="onChangeEnd(value, formatted)" lines={events()} minHeight={92} />
+<Log title="onChangeEnd({ value, formatted })" lines={events()} minHeight={92} />
         }
       >
         <View style={{ ...ui().card, borderRadius: 16, padding: 16 }}>
           <ColorPicker
             value={color()}
-            onChange={(value, formatted) => {
+            onChange={({ value, formatted }) => {
               color.set(value);
               text.set(formatted);
             }}
-            onChangeEnd={(_value, formatted) => events.set([formatted, ...events()].slice(0, 5))}
+            onChangeEnd={({ formatted }) => events.set([formatted, ...events()].slice(0, 5))}
             style={{ gap: 12 }}
           >
             <ColorArea

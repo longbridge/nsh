@@ -106,11 +106,11 @@ export function ColorPickerDemo() {
       <Card icon="styles" title="ColorPicker" subtitle="An area, sliders of any space, a field and swatches">
         <ColorPicker
           value={color()}
-          onChange={(value, formatted) => {
+          onChange={({ value, formatted }) => {
             color.set(value);
             text.set(formatted);
           }}
-          onChangeEnd={(_value, formatted) => last.set(`Picked ${formatted}`)}
+          onChangeEnd={({ formatted }) => last.set(`Picked ${formatted}`)}
           style={{ gap: 12 }}
         >
           <ColorArea
@@ -205,8 +205,8 @@ export function ColorPickerDemo() {
         <ColorPicker
           value={primary()}
           format="oklch"
-          onChange={(_value, formatted) => primary.set(formatted)}
-          onChangeEnd={(_value, formatted) => last.set(`--primary: ${formatted}`)}
+          onChange={({ formatted }) => primary.set(formatted)}
+          onChangeEnd={({ formatted }) => last.set(`--primary: ${formatted}`)}
           style={{ gap: 10 }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
