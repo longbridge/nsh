@@ -26,6 +26,12 @@
 //!   year, `disabled:` on the dates that cannot be picked). Without
 //!   `renderItem` an item shows its number, and Previous / Next `‹` / `›`,
 //!   as `gpui-base`'s default labels.
+//! - **Layout**: the grid fills the width it is given, as a table's
+//!   columns do: the months share the body, and the weekdays, the days and
+//!   the months and years to pick share their rows equally (`flex: 1`), so
+//!   a calendar in a sheet as wide as a phone spans it, and one in a popup
+//!   that fits its content keeps the items' own widths. The app's
+//!   `itemClass` / `monthClass` (`flex-none`) take that back.
 
 use std::{collections::HashSet, rc::Rc};
 
@@ -975,7 +981,11 @@ fn rows(grid: Grid, items: Vec<AnyElement>, per_row: usize) -> AnyElement {
     let mut rows = Vec::new();
     let mut items = items.into_iter().peekable();
     while items.peek().is_some() {
-        let row: Vec<_> = items.by_ref().take(per_row).collect();
+        let mut row: Vec<_> = items.by_ref().take(per_row).collect();
+        // A short last row keeps the columns of the others.
+        while row.len() < per_row {
+            row.push(view().flex_1().into_element());
+        }
         rows.push(
             view()
                 .flex_row()
@@ -1199,6 +1209,7 @@ fn picker_item(grid: Grid, kind: CalendarItemKind, value: i32) -> AnyElement {
     });
     let key: SharedString = format!("{}-{value}", if is_month { "month" } else { "year" }).into();
     item(grid, key, state, move || value.to_string().into(), None)
+        .flex_1()
         .on_press(move || {
             grid.page.update(|p| {
                 let (year, month) = if is_month {
@@ -1251,6 +1262,7 @@ fn month(
                             move || day.to_string().into(),
                             None,
                         )
+                        .flex_1()
                         .into_element()
                     })
                     .collect::<Vec<_>>(),
@@ -1275,6 +1287,7 @@ fn month(
             .collect::<Vec<_>>()
     });
     view()
+        .flex_1()
         .app_class(config.month_class)
         .inline_style(config.month_style)
         .child(weekdays)
@@ -1331,6 +1344,7 @@ fn day(
         move || iso(date),
         Some(Rc::new(move || date.day().to_string().into())),
     )
+    .flex_1()
     .element_ref(&me)
     .on_layout(move |_: &Bounds<Points>| {
         if !laid_out.get_untracked() {

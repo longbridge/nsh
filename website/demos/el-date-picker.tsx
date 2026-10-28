@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, token, View } from "nsh";
+import { type JSX, mount, signal, Text, token, View, windowSize } from "nsh";
 import { type CalendarItemState, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentState } from "nsh/base";
 import { button, desktop, Log, Panel, Segmented, size, Split, tint, ui, wide } from "./palette";
 
@@ -35,6 +35,12 @@ const controlText = desktop ? 13 : size.label;
 const cell = desktop ? 32 : 42;
 /** The gap between the months of a calendar of two. */
 const monthGap = 16;
+/**
+ * On a touch screen the calendar spans the sheet (the window less the sheet's padding), its columns sharing it: the
+ * header's titles split what Previous and Next leave, so the month and the year meet in the middle, and each month's
+ * title of two is over its month.
+ */
+const toggleWidth = () => Math.floor((windowSize().width - 2 * 10) / 2 - cell);
 
 /** A popup at the trigger with a pointer, a sheet at the bottom on a touch screen. */
 const surface = () =>
@@ -54,7 +60,8 @@ const preset = () =>
   desktop
     ? { height: 28, paddingHorizontal: 8, borderRadius: 6, justifyContent: "center" as const, fontSize: 13, color: ui().text }
     : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: ui().border, justifyContent: "center" as const, fontSize: 14, color: ui().text };
-const calendar = desktop ? { padding: 2 } : { alignSelf: "center" as const };
+/** The calendar: in the popup with a pointer; across the sheet on a touch screen, as the time's row under it. */
+const calendar = desktop ? { padding: 2 } : {};
 /** The time's row under a hairline, its label at the start and the field at the end, on the calendar's edges. */
 const time = () => ({
   gap: 10,
@@ -62,7 +69,7 @@ const time = () => ({
   paddingTop: 8,
   borderTopWidth: 1,
   borderColor: ui().border,
-  ...(desktop ? { paddingHorizontal: 2 } : { alignSelf: "center" as const, width: 7 * cell }),
+  ...(desktop ? { paddingHorizontal: 2 } : {}),
 });
 /** The time's field: a recessed well as the number inputs', with their hover and the keyboard's ring while it edits. */
 const timeField = [
@@ -127,7 +134,7 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
     return (
       <Text
         style={{
-          width: title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
+          width: !desktop ? toggleWidth() : title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
           paddingHorizontal: 3,
           textAlign: title ? "center" : kind === "monthToggle" ? "right" : "left",
           fontSize: size.label,
@@ -140,14 +147,14 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
     );
   }
   if (kind === "weekday") {
-    return <Text style={{ width: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, color: ui().faint }}>{WEEKDAYS[props.item.value]}</Text>;
+    return <Text style={{ minWidth: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, color: ui().faint }}>{WEEKDAYS[props.item.value]}</Text>;
   }
   if (kind === "month" || kind === "year") {
     // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month.
     return (
       <View
         style={{
-          width: (7 * cell) / (kind === "month" ? 3 : 5),
+          minWidth: (7 * cell) / (kind === "month" ? 3 : 5),
           height: cell + 6,
           alignItems: "center",
           justifyContent: "center",
@@ -161,14 +168,15 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
       </View>
     );
   }
-  // A day. The band reaches from the start's middle to the end's.
+  // A day, as wide as its column (the calendar's columns share its width). The band reaches from the start's middle
+  // to the end's.
   const band = () => {
     const r = props.range;
     if (!props.item.inRange || !Array.isArray(r) || r[0] === r[1]) return null;
-    return { left: props.item.date === r[0] ? cell / 2 : 0, right: props.item.date === r[1] ? cell / 2 : 0 };
+    return { left: props.item.date === r[0] ? ("50%" as const) : 0, right: props.item.date === r[1] ? ("50%" as const) : 0 };
   };
   return (
-    <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
+    <View style={{ minWidth: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
       <View style={{ position: "absolute", top: 2, bottom: 2, left: band()?.left ?? 0, right: band()?.right ?? 0, backgroundColor: band() ? tint(ui().accent, 0.14) : "transparent" }} />
       <View
         style={{
@@ -344,7 +352,7 @@ function App() {
               trigger={<Trigger title={stayTitle()} placeholder="Check-in – check-out" open={stayOpen()} />}
             />
           </Field>
-          <Field label="Meeting" detail="A day, then its time; the day again closes the calendar">
+          <Field label="Meeting" detail={desktop ? "A day, then its time; the day again closes the calendar" : "A tap picks the day; open it again for the time"}>
             <DatePicker
               value={meeting()}
               onChange={({ value }) => {

@@ -1380,18 +1380,23 @@ expect S09
 expect S30
 expect SAM
 style parent:text:S09 backgroundColor #ff0000ff
-# Picking a day keeps the popup open, reported with the time.
+# On a touch screen (as here) a tap on a day picks it at its time and
+# closes the sheet; the desktops keep the popup open for the time until
+# the selected day is pressed again.
 tap label:2026-10-12
 expect Meet: 2026-10-12T09:30
+absent TimeLabel
+# Open again for the time: the field (named by `timeAccessibilityLabel`)
+# edits the selected segment, the hour first: a 2 fits no second digit
+# and moves on.
+tap id:meet
 expect TimeLabel
-# The field (named by `timeAccessibilityLabel`) edits the selected
-# segment, the hour first: a 2 fits no second digit and moves on.
 type label:MeetTime 2
 expect Meet: 2026-10-12T02:30
 expect S02
 type label:MeetTime 45
 expect Meet: 2026-10-12T02:45
-# A press on the selected day again closes the popup.
+# A tap on the day closes the sheet again, the time kept.
 tap label:2026-10-12
 absent TimeLabel
 prop label:Meet accessibilityValue text=2026/10/12 02:45 AM

@@ -122,10 +122,11 @@ change with `onChange({ value })`; the app sets `value` to follow it. Left out, 
 - A single date: a press on a day sets the value and closes the popup.
 - With `range`, the first press starts the range and the second ends it, as a [calendar's](./calendar.md#value); the
   complete range sets the value and closes the popup.
-- With `timePrecision` (a single date only), a time field shows under the calendar. Picking a day keeps the popup open
-  and reports the date with its time; every edit of the time is reported too; a press on the selected day again closes
-  the popup. A day picked before any time gets `defaultTime` (default `00:00`). `hourCycle` is how the field counts
-  the hours.
+- With `timePrecision` (a single date only), a time field shows under the calendar and every edit of the time is
+  reported. On the desktops, picking a day keeps the popup open for the time and reports the date with its time; a
+  press on the selected day again closes the popup. On phones and tablets, a tap on a day picks it at its time and
+  closes the sheet, as a single date does; the sheet opens again for the time. A day picked before any time gets
+  `defaultTime` (default `00:00`). `hourCycle` is how the field counts the hours.
 
 `cleanable` adds a clear button while there is a value: a press clears it (`onChange({ value: null })`). It comes
 after the trigger, not inside it, so a press on it never opens the popup; the app places it and fills it

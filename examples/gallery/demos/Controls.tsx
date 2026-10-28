@@ -2257,6 +2257,12 @@ export function Controls(props: { show: Control }) {
   /** The gap between the months of a calendar of two. */
   const monthGap = 16;
   /**
+   * On a touch screen the calendar spans the sheet (the window less the sheet's padding), its columns sharing it: the
+   * header's titles split what Previous and Next leave, so the month and the year meet in the middle, and each month's
+   * title of two is over its month.
+   */
+  const toggleWidth = () => Math.floor((windowSize().width - 2 * 10) / 2 - cell);
+  /**
    * An item of the calendar (`renderItem`): Previous and Next as chevrons, the month and year toggles
    * (or each month's title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent`
    * fill (gpui-component's), the selected ones on the accent's, the days of a complete range on a band from end to end (`range` says where it
@@ -2279,7 +2285,7 @@ export function Controls(props: { show: Control }) {
       return (
         <Text
           style={{
-            width: title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
+            width: !pointer ? toggleWidth() : title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
             paddingHorizontal: 3,
             textAlign: title ? "center" : kind === "monthToggle" ? "right" : "left",
             fontSize: size.label,
@@ -2292,14 +2298,14 @@ export function Controls(props: { show: Control }) {
       );
     }
     if (kind === "weekday") {
-      return <Text style={{ width: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, fontWeight: "600", color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
+      return <Text style={{ minWidth: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, fontWeight: "600", color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
     }
     if (kind === "month" || kind === "year") {
       // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month.
       return (
         <View
           style={{
-            width: (7 * cell) / (kind === "month" ? 3 : 5),
+            minWidth: (7 * cell) / (kind === "month" ? 3 : 5),
             height: cell + 6,
             alignItems: "center",
             justifyContent: "center",
@@ -2313,14 +2319,15 @@ export function Controls(props: { show: Control }) {
         </View>
       );
     }
-    // A day. The band reaches from the start's middle to the end's.
+    // A day, as wide as its column (the calendar's columns share its width). The band reaches from the start's middle
+    // to the end's.
     const band = () => {
       const r = props.range;
       if (!props.item.inRange || !r || r[0] === r[1]) return null;
-      return { left: props.item.date === r[0] ? cell / 2 : 0, right: props.item.date === r[1] ? cell / 2 : 0 };
+      return { left: props.item.date === r[0] ? ("50%" as const) : 0, right: props.item.date === r[1] ? ("50%" as const) : 0 };
     };
     return (
-      <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ minWidth: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
         <View style={{ position: "absolute", top: 2, bottom: 2, left: band()?.left ?? 0, right: band()?.right ?? 0, backgroundColor: band() ? tints.accent : "transparent" }} />
         <View
           style={{
@@ -2376,9 +2383,10 @@ export function Controls(props: { show: Control }) {
     ? { height: 28, paddingHorizontal: 8, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text }
     : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, fontSize: 14, color: colors.text };
   const header = { marginBottom: 4 };
-  const calendar = pointer ? { padding: 4 } : { alignSelf: "center" as const };
+  /** The calendar: in the popup with a pointer; across the sheet on a touch screen, as the time's row under it. */
+  const calendar = pointer ? { padding: 4 } : {};
   /** The time's row under a hairline, its label at the start and the field at the end, on the calendar's edges. */
-  const time = { gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: colors.border, ...(pointer ? { paddingHorizontal: 4 } : { alignSelf: "center" as const, width: 7 * cell }) };
+  const time = { gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: colors.border, ...(pointer ? { paddingHorizontal: 4 } : {}) };
   /** The time's field: a recessed well as the number inputs', with their hover and the keyboard's ring while it edits. */
   const timeField = [
     pointer ? "h-8 rounded-md px-2" : "h-11 rounded-lg px-3",
@@ -2471,7 +2479,7 @@ export function Controls(props: { show: Control }) {
             />
           </View>
           <View style={row(false)}>
-            <Label label="Meeting" detail="A day, then its time; the day again closes" />
+            <Label label="Meeting" detail={pointer ? "A day, then its time; the day again closes" : "A tap picks the day; open it again for the time"} />
             <DatePicker
               value={meeting()}
               onChange={({ value }) => {

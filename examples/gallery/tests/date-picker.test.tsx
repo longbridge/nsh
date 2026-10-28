@@ -52,19 +52,24 @@ describe("on a phone", () => {
     await app.waitFor("Oct 31 – Nov 1");
   });
 
-  test("the meeting's sheet stays open for its time, and its day again closes it", async () => {
+  test("a tap on the meeting's day closes its sheet, which opens again for the time", async () => {
     await app.press("role:combobox[Meeting]");
     await app.waitFor("label:2026-10-29");
+    // One tap: the day at the default time, and the sheet goes.
     await app.press("label:2026-10-29");
-    // The day at the default time; the sheet stays.
     await app.waitFor("Meeting: 2026-10-29T09:00");
-    expect(app.shows("label:2026-10-29")).toBe(true);
-    // The time field takes digits: the hour, then the minute.
+    await app.waitUntil(() => !app.shows("label:2026-10-29"));
+    await app.waitFor("Oct 29, 2026 · 09:00");
+    // Open again for the time: the field takes digits, the hour, then the minute.
+    await app.press("role:combobox[Meeting]");
+    await app.waitFor("label:Meeting time");
     await app.type("label:Meeting time", "1430");
     await app.waitFor("Meeting: 2026-10-29T14:30");
-    await app.press("label:2026-10-29");
-    await app.waitUntil(() => !app.shows("label:2026-10-29"));
-    await app.waitFor("Oct 29, 2026 · 14:30");
+    // Another day keeps the time, and closes the sheet.
+    await app.press("label:2026-10-30");
+    await app.waitFor("Meeting: 2026-10-30T14:30");
+    await app.waitUntil(() => !app.shows("label:2026-10-30"));
+    await app.waitFor("Oct 30, 2026 · 14:30");
   });
 
   test("a stay takes a check-in and a check-out from today on: the nights and the price follow", async () => {

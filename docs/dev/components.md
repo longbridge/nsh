@@ -1001,7 +1001,9 @@ footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return clo
 touch screens) around presets, a calendar and, with `timePrecision`, a time field. Its calendar is `calendar.rs`'s grid
 with every prop of `Calendar` passed on (`calendar::Config`); opening it on the desktops puts the keyboard on the
 days (`Grid::focus_days`). A complete date is the value and closes it with `"select"`; with a time the popup stays
-open, each edit reported, until the selected day is pressed again. The trigger's keys are bound while it has the
+open on the desktops, each edit reported, until the selected day is pressed again (`gpui-component`'s double click),
+while in a sheet (touch screens, the `sheet` the content is made for) a tap on a day picks it at its time and closes,
+as a single date does: a touch has no double click (`api-naming.md`). The trigger's keys are bound while it has the
 focus: Return opens and closes (`gpui-base`'s `Confirm`), Delete and Backspace clear while it is closed. The value
 crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the precision of `timePrecision`
 (`PickedDate`).
@@ -1010,7 +1012,11 @@ crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the preci
 `Date` and `Matcher`. Its days are one Tab stop: only the cursor's day (`stop`) is focusable, and the arrow, Home / End and
 Page keys move the cursor, turning the months past the shown ones (`gpui-base`'s days take presses only). A
 JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the shown days in a spawned task (the
-next JS turn), its answers kept as a set; a newer page's answers replace an older one's. `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
+next JS turn), its answers kept as a set; a newer page's answers replace an older one's. The grid fills the width it
+is given, as a table's columns do: the months share the body and the items of a row (weekdays, days, the months and
+years to pick) share it equally (`flex: 1`; a short last row of years is padded), so a calendar in a phone's sheet
+spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own.
+`TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
 selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change
 coming back.
