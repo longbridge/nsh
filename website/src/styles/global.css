@@ -838,24 +838,26 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   pre[data-language="plaintext"]::before, pre[data-language="txt"]::before, pre[data-language="text"]::before, pre:not([data-language])::before { content: "Text"; }
   pre code { display: block; padding: 0.9rem 1.1rem 1rem; overflow-x: auto; background: var(--code-surface); font-size: 0.92em; line-height: 1.7; tab-size: 2; }
 
-  /* The copy button sits in the header row: a small glass control. */
+  /* The copy button sits in the header row as a ghost icon button (the
+     site's Button `ghost`): no surface until the pointer is on it. Its
+     corners follow the card's, inset by the gap between them. */
   .doc-code-copy {
     position: absolute;
-    top: 0.3rem;
-    right: 0.4rem;
+    top: 0.25rem;
+    right: 0.25rem;
     display: grid;
     place-items: center;
-    width: 1.65rem;
-    height: 1.65rem;
-    border-radius: 8px;
-    background: var(--glass-fill);
-    box-shadow: var(--glass-edge);
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 10px;
+    background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
     opacity: 0.75;
-    transition: opacity 150ms ease, color 150ms ease;
+    transition: opacity 150ms ease, color 150ms ease, background-color 150ms ease;
   }
   pre:hover .doc-code-copy, pre:focus-within .doc-code-copy, .doc-code-copy[data-copied] { opacity: 1; }
+  .doc-code-copy:hover { background: color-mix(in srgb, var(--accent) 60%, transparent); }
   .doc-code-copy:hover, .doc-code-copy[data-copied] { color: var(--foreground); }
   .doc-code-copy[data-copied] { color: var(--success); }
   .doc-code-copy svg { width: 0.85rem; height: 0.85rem; }
@@ -877,14 +879,16 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
     display: flex;
     align-items: center;
     min-height: 2.5rem;
-    padding: 0.3rem 2.6rem 0.3rem 0.4rem;
+    /* One gap on every side, so the tabs' corners nest in the card's
+       (14px), and the tabs' in theirs: 14 - 6 = 8, 8 - 3 = 5. */
+    padding: 6px 2.6rem 6px 6px;
     border-bottom: 1px solid var(--divider);
     overflow-x: auto;
     scrollbar-width: none;
   }
-  .code-tabs__list { flex: none; }
+  .code-tabs__list { flex: none; border-radius: 8px; }
   .code-tabs__tab { white-space: nowrap; }
-  .code-tabs .doc-code-copy { top: 0.42rem; }
+  .code-tabs .doc-code-copy { top: 6px; right: 6px; border-radius: 8px; }
   .code-tabs__panel:focus-visible { outline-offset: -2px; }
   .code-tabs__panel[hidden] { display: none; }
   .code-tabs pre {
