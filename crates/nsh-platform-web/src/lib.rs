@@ -914,7 +914,7 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
             query: nsh_dev::protocol::SceneQuery::Animating,
         }) => {
             let animating =
-                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.animating()));
+                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.finishing()));
             serde_json::json!({ "done": animating })
         }
         Ok(step) => {
