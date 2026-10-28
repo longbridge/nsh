@@ -452,8 +452,9 @@ export function Controls(props: { show: Control }) {
       ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
       : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
   const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
-  /** The clear button's inset from the trigger's end: centered where the chevron's lane is. */
-  const clearInset = 10 + size.check / 4 - size.clear / 2;
+  /** The clear button's inset from the trigger's end: centered where the chevron's lane is. The button is in the
+      select's view, outside the trigger, so its inset counts the trigger's 1 pt border too. */
+  const clearInset = 1 + 10 + size.check / 4 - size.clear / 2;
   /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
   function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
     return (
