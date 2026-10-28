@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, toggles, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -27,7 +27,7 @@ from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 use nsh_base::{
     MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, color_area, color_field, color_picker,
     color_slider, color_swatch, dialog, diff_view, dock_area, editor,
-    calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, v_resizable,
+    calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, toggle, toggle_group, v_resizable,
 };
 ```
 
@@ -87,6 +87,8 @@ import {
   Toast,
   ToastManager,
   ToastStack,
+  Toggle,
+  ToggleGroup,
   Tooltip,
 } from "nsh/base";
 import type {
@@ -174,6 +176,8 @@ import type {
   ToastProps,
   ToastStackProps,
   ToastTransitionStatus,
+  ToggleGroupProps,
+  ToggleProps,
 } from "nsh/base";
 ```
 
@@ -187,6 +191,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Radio`](../elements/radio.md), [`RadioGroup`](../elements/radio.md) | `radio()`, `radio_group()` | One option of a set the user picks one of, and the set; the app owns which one is checked. |
 | [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
+| [`Toggle`](../elements/toggle.md), [`ToggleGroup`](../elements/toggle.md) | `toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them; the app owns which ones are pressed. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a searchable list of items, as a select's; the app owns `value` and draws the trigger. |
 | [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
@@ -258,6 +263,16 @@ activation, the disabled state and the tab role and selected state for screen re
 screen readers announce and holds no value: the app tells each tab whether it is selected (`selected`), hears
 presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
 `group-selected:` classes follow it. See [Tabs](../elements/tabs.md).
+
+### Toggle and ToggleGroup
+
+A button that is on or off (bold, a favorite, a view option), and a toolbar of them. A toggle owns its behavior and
+has no look: presses, keyboard activation, the disabled state and the button role with its pressed state for screen
+readers. The group is the toolbar screen readers announce, one stop of the keyboard focus whose arrow keys move
+between its toggles without pressing them, and holds no value: the app tells each toggle whether it is pressed
+(`pressed`), hears the value it asks for (`onChange`), and keeps any number pressed or exactly one. `disabled` on the
+group disables every toggle in it. The app's icon or label is the toggle's children, whose `group-aria-pressed:`
+classes follow it. See [Toggle](../elements/toggle.md).
 
 ### Select
 
@@ -561,7 +576,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Toggle](../elements/toggle.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and
   [Input](../elements/input.md).
