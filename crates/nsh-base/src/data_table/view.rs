@@ -245,6 +245,10 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
         })
+        .on_scroll_end({
+            let dt = dt.clone();
+            move |_: &Point<Points>| dt.rest()
+        })
         .child(
             view()
                 .flex_row()

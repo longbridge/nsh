@@ -14,7 +14,7 @@ use super::{
     DataTableColumn, DataTableContextMenu, DataTableDump, DataTableEvent, DataTablePress,
     DataTableProps, DataTableRange, DataTableSelection, DataTableSort, DataTableSortDirection,
     DataTableTarget,
-    axis::Axis,
+    axis::{Anchor, Axis},
     columns::{Columns, Spec},
     selection::{self, Move, Nav, Selectable, Selection},
 };
@@ -101,6 +101,11 @@ pub(crate) struct Dt {
     pub(crate) vscroll: ElementRef,
     pub(crate) hscroll: ElementRef,
     pub(crate) strip: ElementRef,
+    /// Scroll offsets are followed from an anchor (`axis.rs`): where the
+    /// scroll bar is not dragged, so a scaled axis moves as far as a finger.
+    anchored: bool,
+    anchor_x: Signal<Anchor>,
+    anchor_y: Signal<Anchor>,
     rows_window: RowWindow,
     cols_window: RowWindow,
     /// The width a resize drag started from.
@@ -147,6 +152,9 @@ impl Dt {
             vscroll: element_ref(),
             hscroll: element_ref(),
             strip: element_ref(),
+            anchored: !nsh_core::element::is_desktop(),
+            anchor_x: signal(Anchor::default()),
+            anchor_y: signal(Anchor::default()),
             // Rows are short, columns wide: a window of columns reaches
             // less far.
             rows_window: RowWindow::default(),
@@ -418,8 +426,8 @@ impl Dt {
             (height - header).max(0.0) as f64,
         );
         let x = Axis::new(scroll_width, (width - lead - fixed).max(0.0) as f64);
-        let cx = x.content_offset(self.scroll_x.get().0 as f64);
-        let cy = y.content_offset(self.scroll_y.get().0 as f64);
+        let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x);
+        let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y);
         Geo {
             row_height,
             header,
@@ -681,8 +689,7 @@ impl Dt {
         let top = row as f64 * g.row_height as f64;
         let to = g.y.reveal(g.cy, top, top + g.row_height as f64);
         if to != g.cy {
-            let y = g.y.scroll_points(to);
-            self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
+            self.scroll_rows_to(&g, to, false);
         }
     }
 
@@ -702,8 +709,7 @@ impl Dt {
         };
         let to = g.x.reveal(g.cx, target.0, target.1);
         if to != g.cx {
-            let x = g.x.scroll_points(to);
-            self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
+            self.scroll_columns_to(&g, to, false);
         }
     }
 
@@ -714,9 +720,7 @@ impl Dt {
             return;
         }
         let top = row.min(rows - 1) as f64 * g.row_height as f64;
-        let y = g.y.scroll_points(top);
-        self.vscroll
-            .scroll_to(Point { x: Points::ZERO, y }, animated);
+        self.scroll_rows_to(&g, top, animated);
     }
 
     pub(crate) fn scroll_to_column(&self, key: &str, animated: bool) {
@@ -734,9 +738,99 @@ impl Dt {
             }
             st.columns.start(display) - st.columns.fixed_width()
         };
-        let x = g.x.scroll_points(start);
+        self.scroll_columns_to(&g, start, animated);
+    }
+
+    /// The content offset scroll offset `scroll` of `axis` shows.
+    fn offset_on(&self, axis: &Axis, scroll: Points, anchor: Signal<Anchor>) -> f64 {
+        let scroll = scroll.0 as f64;
+        if self.anchored {
+            axis.content_offset_from(scroll, anchor.get())
+        } else {
+            axis.content_offset(scroll)
+        }
+    }
+
+    /// Scrolls the rows to content offset `content` at the top.
+    fn scroll_rows_to(&self, g: &Geo, content: f64, animated: bool) {
+        let y = self.offset_to(&g.y, g.cy, content, animated, self.anchor_y, self.scroll_y);
+        self.vscroll
+            .scroll_to(Point { x: Points::ZERO, y }, animated);
+    }
+
+    /// Scrolls the scrolling columns to content offset `content` at the
+    /// start.
+    fn scroll_columns_to(&self, g: &Geo, content: f64, animated: bool) {
+        let x = self.offset_to(&g.x, g.cx, content, animated, self.anchor_x, self.scroll_x);
         self.hscroll
             .scroll_to(Point { x, y: Points::ZERO }, animated);
+    }
+
+    /// The scroll offset that shows content offset `content`, from `from`.
+    /// Followed from an anchor, an animated scroll within reach moves one
+    /// to one from where it is (the content glides as far as the scroll);
+    /// any other takes the anchor of `content`, the scroll view going where
+    /// its bar stands for it, and the offset is taken at once so no frame
+    /// shows the new anchor with the old offset.
+    fn offset_to(
+        &self,
+        axis: &Axis,
+        from: f64,
+        content: f64,
+        animated: bool,
+        anchor: Signal<Anchor>,
+        scroll: Signal<Points>,
+    ) -> Points {
+        if !self.anchored || !axis.scaled() {
+            return axis.scroll_points(content);
+        }
+        let now = scroll.get_untracked();
+        if animated {
+            let here = Anchor {
+                scroll: now.0 as f64,
+                content: from,
+            };
+            let to = here.scroll + (content - from);
+            if (axis.content_offset_from(to, here) - content).abs() < 0.5 {
+                anchor.set(here);
+                return Points(to as f32);
+            }
+        }
+        let a = axis.anchor_at(
+            content,
+            f64::from(nsh_core::element::pixel_ratio()),
+        );
+        anchor.set(a);
+        scroll.set(Points(a.scroll as f32));
+        Points(a.scroll as f32)
+    }
+
+    /// A scroll came to rest: followed from an anchor, the scroll views
+    /// move, unseen, to where their bars stand for the content shown.
+    pub(crate) fn rest(&self) {
+        if !self.anchored {
+            return;
+        }
+        let g = untracked(|| self.geo());
+        let ratio = f64::from(nsh_core::element::pixel_ratio());
+        if g.y.scaled() {
+            let a = g.y.anchor_at(g.cy, ratio);
+            let y = Points(a.scroll as f32);
+            if y != self.scroll_y.get_untracked() {
+                self.anchor_y.set(a);
+                self.scroll_y.set(y);
+                self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
+            }
+        }
+        if g.x.scaled() {
+            let a = g.x.anchor_at(g.cx, ratio);
+            let x = Points(a.scroll as f32);
+            if x != self.scroll_x.get_untracked() {
+                self.anchor_x.set(a);
+                self.scroll_x.set(x);
+                self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
+            }
+        }
     }
 
     // Presses.
@@ -1055,8 +1149,7 @@ impl Dt {
         }
         let to = g.x.reveal(g.cx, end - 1.0, end);
         if to != g.cx {
-            let x = g.x.scroll_points(to);
-            self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
+            self.scroll_columns_to(&g, to, false);
         }
     }
 

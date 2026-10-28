@@ -58,6 +58,15 @@ work the same way on the horizontal axis. Offsets the table scrolls to (`scrollT
 `Axis::scroll_points`: the 32-bit float that does not stop short of the row, since far down a scaled axis one step of
 that float is several content points. Columns hold prefix sums, so finding the column at an x is a binary search.
 
+Scaled, a finger would move the content as many times as far as itself as the ratio says (a million rows of 28 points:
+nine times, a slow drag of 3 rows moving 25). Where no scroll bar is dragged (not `is_desktop()`), offsets are followed
+from an anchor instead (`Anchor`, `Axis::content_offset_from`): the content moves as far as the scroll for half the room
+to the scroll view's end that way, faster past that so the ends still meet. When a scroll comes to rest (`ScrollEnd`,
+`Dt::rest`) the anchor moves to where the bar stands for the content shown (`Axis::anchor_at`, on a device pixel) and the
+scroll view is scrolled there, unseen: the cells are placed from the content offset, which does not change. A scroll the
+table makes takes the anchor of its target the same way; an animated one within reach moves one to one from where it
+is. On the desktops the offset stays scaled: dragging the bar must reach the whole content.
+
 ## Columns' own classes, fitting, bounce
 
 A column's `cellClass` and `headerClass` come after the part's classes (`column_parts`, `view.rs`). Two presses of a
