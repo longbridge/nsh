@@ -842,7 +842,8 @@ const liked = signal<Set<number>>(new Set());
 - 按平台设置的样式使用 `ios:`、`android:` 和 `web:` 类名。
 
 平台分支即使表现不同，也必须保留语义契约。例如对话框在 iOS 上是面板，在桌面上是覆盖窗口的一层，但应用仍需要一致的打开状态。
-共享的行为在无界面环境中测试，平台的部分用 `nsh test --target` 测试。
+共享的行为在无界面环境中测试，平台的部分用 `nsh test --target` 测试。按 NSH 报告的值（`platform.os`、状态、原因）分支时，每个分支都要有
+`default`：之后的版本会增加平台和情况，今天下发的应用也要在上面运行（[兼容性](./compatibility.md)）。
 
 应用在 `nsh.json` 的 `"capabilities"` 中声明它在 VM 之外能访问的内容：可以请求的主机、Web 视图显示的页面、剪贴板、状态栏
 （[沙箱与权限](./sandbox-and-capabilities.md)）。将被下发到其他应用中的应用，准确列出它用到的内容，并像处理失败的请求那样

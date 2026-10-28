@@ -342,8 +342,10 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   in [`longbridge/nsh-compat`](https://github.com/longbridge/nsh-compat) shipped is never removed or renamed: modules,
   exports and their members, `nsh:rt` (what compiled JSX calls: append-only, signatures and semantics kept), globals,
   props, events and payload keys, style keys and values, Tailwind utilities. A rename or move keeps the old name as a
-  `@deprecated` alias of the same implementation, for good. Types only widen; inputs gain optional members only;
-  behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
+  `@deprecated` alias of the same implementation, for good. Types only widen, a union gaining members whichever way it
+  goes (what apps read too: `platform.os`, a state, a reason; apps handle a value they do not know); inputs gain
+  optional members only; behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are
+  read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
   change until the first release recorded, which is not chosen yet (0.3.0 is not recorded). A new API lands with its test, a case in
