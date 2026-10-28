@@ -21165,3 +21165,72 @@ mod built_in_scrollbars {
         assert!(c.decorated.is_empty());
     }
 }
+
+#[test]
+fn frames_of_a_subtree_moved_by_whole_points_are_not_walked_again() {
+    let mut c = core();
+    let at = |top: f32, left: f32, width: f32, height: f32| {
+        vec![
+            ("position", StyleValue::Str("absolute")),
+            ("top", StyleValue::Number(top)),
+            ("left", StyleValue::Number(left)),
+            ("width", StyleValue::Number(width)),
+            ("height", StyleValue::Number(height)),
+        ]
+    };
+    let mut ops = Vec::new();
+    for (id, parent, style) in [
+        (2, ROOT_ID, at(0.0, 0.0, 200.0, 200.0)),
+        (4, 2, at(5.0, 10.0, 50.0, 20.0)),
+        (6, 4, at(2.0, 3.0, 10.0, 10.0)),
+    ] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    let first = c.commit().unwrap();
+    assert_eq!(frame_of(&first, 6), Some(rect(3.0, 2.0, 10.0, 10.0)));
+    // The rows' origin of a table, scrolled: it moves, what is in it does
+    // not, relative to it.
+    apply(&mut c, vec![style_op(2, &at(-37.0, 0.0, 200.0, 200.0))]);
+    let moved = c.commit().unwrap();
+    assert_eq!(frame_of(&moved, 2), Some(rect(0.0, -37.0, 200.0, 200.0)));
+    assert_eq!(frame_of(&moved, 4), None);
+    assert_eq!(frame_of(&moved, 6), None);
+    // A change deep inside is still sent, and so is a view added there.
+    apply(
+        &mut c,
+        vec![
+            style_op(6, &at(2.0, 3.0, 12.0, 10.0)),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            style_op(8, &at(1.0, 1.0, 4.0, 4.0)),
+            Op::Insert {
+                parent: 4,
+                child: 8,
+                before: None,
+            },
+        ],
+    );
+    let changed = c.commit().unwrap();
+    assert_eq!(frame_of(&changed, 6), Some(rect(3.0, 2.0, 12.0, 10.0)));
+    assert_eq!(frame_of(&changed, 8), Some(rect(1.0, 1.0, 4.0, 4.0)));
+    assert_eq!(frame_of(&changed, 4), None);
+    // A view shown again gets its frame back though nothing in it changed.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("display", StyleValue::Str("none"))])],
+    );
+    let hidden = c.commit().unwrap();
+    assert_eq!(frame_of(&hidden, 6), Some(Bounds::default()));
+    apply(&mut c, vec![style_op(4, &at(5.0, 10.0, 50.0, 20.0))]);
+    let shown = c.commit().unwrap();
+    assert_eq!(frame_of(&shown, 6), Some(rect(3.0, 2.0, 12.0, 10.0)));
+}

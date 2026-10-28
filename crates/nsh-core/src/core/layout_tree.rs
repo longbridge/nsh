@@ -70,6 +70,10 @@ struct LayoutNode<C> {
     /// Its style is a view's that nothing styles ([`unstyled`]); kept for
     /// holders only.
     unstyled: bool,
+    /// Its layout, its style or its children changed, or a node's under it
+    /// did, since the core last emitted its frame
+    /// ([`LayoutTree::mark_stale`]); a stale node's ancestors are stale.
+    stale: bool,
     /// A leaf's answers to the inputs the layout asked of it since its
     /// cache was last cleared, each once: what the layouts above it were
     /// computed from. `None` once there were more than [`MEASURED`] to keep.
@@ -90,6 +94,7 @@ impl<C> LayoutNode<C> {
             children: Vec::new(),
             cache: Cache::new(),
             unrounded: Layout::new(),
+            stale: true,
             detailed: DetailedLayoutInfo::None,
             context,
             tag: None,
@@ -218,6 +223,7 @@ impl<C> LayoutTree<C> {
     /// Replaces `node`'s style: its own size may change, so its parent is
     /// laid out again (whether it is a boundary or not).
     pub(crate) fn set_style(&mut self, node: NodeId, style: Style) {
+        self.mark_stale(node);
         let n = &mut self.nodes[key(node)];
         if n.holder {
             n.unstyled = unstyled(&style);
@@ -259,6 +265,7 @@ impl<C> LayoutTree<C> {
         self.nodes[key(child)].parent = Some(parent);
         self.nodes[key(parent)].children.insert(index, child);
         self.mark_dirty(parent);
+        self.mark_stale(child);
     }
 
     /// Detaches `child` from `parent`.
@@ -274,6 +281,7 @@ impl<C> LayoutTree<C> {
     /// the module's docs), or up to the first boundary on the way, `node`
     /// included, which is queued to be laid out again on its own.
     pub(crate) fn mark_dirty(&mut self, node: NodeId) {
+        self.mark_stale(node);
         let mut at = Some(node);
         while let Some(node) = at {
             self.nodes[key(node)].clear_cache();
@@ -287,6 +295,39 @@ impl<C> LayoutTree<C> {
             }
             at = self.nodes[key(node)].parent;
         }
+    }
+
+    /// Sets `node`'s unrounded layout; a changed one makes it stale.
+    fn set_unrounded(&mut self, node: NodeId, layout: Layout) {
+        let n = &mut self.nodes[key(node)];
+        if n.unrounded != layout {
+            n.unrounded = layout;
+            self.mark_stale(node);
+        }
+    }
+
+    /// `node`'s frame, and those of the nodes above it, are to be emitted
+    /// again: something about it changed. All the way up, never stopping at
+    /// a stale node: one the core's walks do not reach (a view not made yet,
+    /// a list's cell) stays stale under emitted ones.
+    pub(crate) fn mark_stale(&mut self, node: NodeId) {
+        let mut at = Some(node);
+        while let Some(node) = at {
+            let n = &mut self.nodes[key(node)];
+            n.stale = true;
+            at = n.parent;
+        }
+    }
+
+    /// Whether nothing in `node`'s subtree changed since
+    /// [`LayoutTree::emitted`] was last called on it.
+    pub(crate) fn stale(&self, node: NodeId) -> bool {
+        self.nodes[key(node)].stale
+    }
+
+    /// The core emitted `node`'s frame (and goes on to its children).
+    pub(crate) fn emitted(&mut self, node: NodeId) {
+        self.nodes[key(node)].stale = false;
     }
 
     /// Whether what changes inside `node` cannot change what its parent's
@@ -560,7 +601,7 @@ where
             && self.tree.through(parent)
         {
             own.location = taffy::Point::ZERO;
-            self.tree.nodes[key(node)].unrounded = own;
+            self.tree.set_unrounded(node, own);
             node = parent;
             own = Layout {
                 location: layout.location,
@@ -568,7 +609,7 @@ where
                 ..Layout::with_order(layout.order)
             };
         }
-        self.tree.nodes[key(node)].unrounded = own;
+        self.tree.set_unrounded(node, own);
     }
 
     fn resolve_calc_value(&self, _: *const (), _: f32) -> f32 {
