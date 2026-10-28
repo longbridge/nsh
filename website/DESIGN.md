@@ -158,12 +158,11 @@ layers of stars, nearer ones larger, faster and fewer, drift and twinkle,
 thickest in the band; the brightest wear diffraction spikes, and now and
 then a meteor crosses. The nebula takes the accent and its neighbors mint
 and pale gold, so the sky stays one green family, and in the dark theme the
-sky around it deepens. A faint mesh of space sinks into the core's well.
-Presses act on gravity: a held press is a mass that grows with the hold
-and bends the mesh and the starlight toward it; released, it leaves as a
+sky around it deepens. Presses act on gravity: a held press is a mass that
+grows with the hold and bends the starlight toward it; released, it leaves as a
 gravitational wave whose size, reach and life grow with the hold, varied a
-little by chance (up to four at once), shaking the mesh and lighting the
-stars it passes. Every mask is a smooth gradient: the sky fades toward the
+little by chance (up to four at once), shaking and lighting the stars it
+passes. Every mask is a smooth gradient: the sky fades toward the
 copy and the caption. The colors are the `--hero-*` tokens. It moves all the
 time, pauses off screen and in hidden tabs, draws one still frame and takes
 no presses with reduced motion, never takes pointer events itself, and

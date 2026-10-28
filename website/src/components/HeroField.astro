@@ -214,11 +214,10 @@
       vec4 gx = galaxy(p, f.r, detail);
       float band = gx.x;
 
-      // Gravity bends space, drawn as a mesh: the galaxy's core is a well
-      // the mesh sinks toward; a held press is a mass that grows with the
-      // hold, drawing the mesh and the starlight in; released, it leaves as a
-      // gravitational wave, rings running out from there that shake the
-      // mesh and the stars and light both as they pass (a larger wave, from a
+      // Gravity bends the starlight: the galaxy's core is a well; a held
+      // press is a mass that grows with the hold, drawing the starlight in;
+      // released, it leaves as a gravitational wave, rings running out from
+      // there that shake the stars and light them as they pass (a larger wave, from a
       // longer hold and a little chance, runs faster, farther and longer).
       // q: where the bent space at p comes from.
       vec2 q = p;
@@ -261,14 +260,6 @@
         q += away * (0.25 + 0.6 * held) * reach * reach / (d * d + reach * reach);
       }
       float hit = clamp(wave + flash, 0.0, 1.0);
-
-      // The mesh of space, drifting slowly: one line every 64 px of the bent
-      // coordinates, so it gathers into the wells and ripples with the waves.
-      vec2 m = abs(fract((q + vec2(time * 4.0, time * 1.5)) / 64.0 + 0.5) - 0.5) * 64.0;
-      float lineDist = min(m.x, m.y);
-      float mesh = exp(-lineDist * lineDist / (0.35 + 0.25 / dpr));
-      float meshA = clamp(mesh * starColor.a * ((0.045 + 0.09 * band + 0.16 * gx.z) * sky + 0.5 * hit * (0.12 + 0.88 * sky)), 0.0, 1.0);
-      vec3 meshRgb = mix(starMint, hotColor, clamp(hit * 1.5 + 0.3 * gx.z, 0.0, 1.0));
 
       // The stars, far to near: the nearer, the larger, faster and fewer;
       // dust and the rift hide the far ones, and the galaxy is thick with
@@ -320,13 +311,11 @@
       vec3 glowRgb = (hue.rgb * gn + mix(starGold, starColor.rgb, 0.6) * gh + glowColor.rgb * gw) / max(gn + gh + gw, 1e-4);
       float va = clamp(voidColor.a * sky * (1.0 - 0.6 * band + 0.8 * gx.y), 0.0, 1.0);
 
-      // Premultiplied: the stars over the mesh over the nebula over the deepening.
+      // Premultiplied: the stars over the nebula over the deepening.
       vec3 rgb = voidColor.rgb * va;
       float a = va;
       rgb = glowRgb * g + rgb * (1.0 - g);
       a = g + a * (1.0 - g);
-      rgb = meshRgb * meshA + rgb * (1.0 - meshA);
-      a = meshA + a * (1.0 - meshA);
       rgb = starRgb * sa + rgb * (1.0 - sa);
       a = sa + a * (1.0 - sa);
       gl_FragColor = vec4(rgb, a);
