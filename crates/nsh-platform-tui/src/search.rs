@@ -467,7 +467,8 @@ fn column(row: &Row, start: usize) -> usize {
 
 fn text_bounds(g: &Geometry, content: Bounds<Points>, cells: CellSize, area: Rect) -> CellBounds {
     CellBounds::new(
-        Bounds::new(g.frame.origin + content.origin, content.size),
+        g.text_frame
+            .unwrap_or_else(|| Bounds::new(g.frame.origin + content.origin, content.size)),
         cells,
         area,
     )

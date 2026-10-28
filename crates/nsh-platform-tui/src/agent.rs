@@ -103,7 +103,11 @@ impl TuiNative {
 impl Native for TuiNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_view(move |view, _| {
-            let bounds = view.geometry.iter().find(|geometry| geometry.id == id)?.bounds;
+            let bounds = view
+                .geometry
+                .iter()
+                .find(|geometry| geometry.id == id)?
+                .bounds;
             let cells = view.options.cells;
             Some(Bounds::new(
                 bounds.origin(cells, view.area),
@@ -119,13 +123,16 @@ impl Native for TuiNative {
 
     fn text_bounds(&self, id: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
         self.on_view(move |view, _| {
-            let (origin, visible) = displayed(view, id)?;
-            let (layout, content) = view.tree.get(id)?.text.as_ref()?;
+            let (_, visible) = displayed(view, id)?;
+            let (layout, _) = view.tree.get(id)?.text.as_ref()?;
             let mut ranges = Vec::new();
             CellTextEngine::new(view.options.cells).range_rects(layout, start..end, &mut ranges);
             let range = ranges.first()?;
             let content = CellBounds::new(
-                Bounds::new(origin + content.origin, content.size),
+                view.geometry
+                    .iter()
+                    .find(|geometry| geometry.id == id)?
+                    .text_frame?,
                 view.options.cells,
                 view.area,
             );
