@@ -283,7 +283,7 @@ scroll offsets. Parent rounding is never added to a child's point position. The 
 exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
 width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
 its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
-A positive point gap between sibling one-line texts reserves at least one blank Cell, including reverse rows;
+A positive point gap between sibling one-line texts reserves at least one Cell of separation, including reverse rows;
 a zero gap keeps the texts adjacent. Canvas text calls apply the same minimum gap as whole runs, independently
 of draw order. Existing ancestor and canvas clipping still apply.
 Text measurement still counts the whole Cells that fit within a point width, separately from positioning edges.
@@ -305,6 +305,12 @@ its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks
 only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border when no sibling text or content is drawn through it. A box
 with only one or two columns omits vertical strokes, preserving
 space for labels and tiny value indicators. Border corners follow each resolved corner radius independently.
+A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill color, preserving the
+background beneath it. Its opacity blends the stroke over that background (or the known page color); gradient
+layers blend over the preceding stroke color. A fill at
+exactly half a Cell remains a background fill. When both dimensions are thin, the longer normalized Cell extent
+chooses the line direction. Hairlines use absolute edges; rounded controls and compact canvases keep their
+center-row rule. Containers retain background fills for their contents.
 A sub-Cell fill preserves already-painted glyphs that it does not overlap in point space, even when both
 quantize to the same Cell; fills that overlap text in points keep their normal paint order.
 Rounded fills sample the Cell centers against circular corner arcs; continuous curves use the same coarse
@@ -717,6 +723,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Outlines, including control focus outlines | A complete single-Cell stroke in free Cells, or recoloring the view's own edge Cells while retaining their symbols |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
+| Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill color; the background remains visible |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |

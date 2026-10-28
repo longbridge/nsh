@@ -173,12 +173,18 @@ fn a_subcell_progress_rail_is_visible_and_zero_progress_stays_empty() {
         terminal.backend().buffer()[(0, 0)].bg,
         Color::Rgb(0x12, 0x34, 0x56)
     );
+    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "progress 50");
     assert_eq!(
-        terminal.backend().buffer()[(9, 0)].bg,
+        terminal.backend().buffer()[(9, 0)].fg,
         Color::Rgb(0xab, 0xcd, 0xef)
+    );
+    assert_eq!(terminal.backend().buffer()[(9, 0)].symbol(), "─");
+    assert_eq!(
+        terminal.backend().buffer()[(9, 0)].bg,
+        Color::Rgb(0x12, 0x34, 0x56)
     );
     assert_eq!(
         terminal.backend().buffer()[(10, 0)].bg,
@@ -449,7 +455,13 @@ fn SelectedAccentBars() -> impl IntoElement {
                         .h(px(18.0))
                         .rounded(px(1.5))
                         .bg(accent)
-                        .opacity(move || if selected.get() == index { 1.0 } else { 0.0 }),
+                        .opacity(move || {
+                            if selected.get() == index {
+                                1.0_f32
+                            } else {
+                                0.0_f32
+                            }
+                        }),
                 )
                 .child(text(format!("Sidebar {index}")))
         }))

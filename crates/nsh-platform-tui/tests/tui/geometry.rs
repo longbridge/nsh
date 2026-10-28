@@ -498,9 +498,9 @@ fn even_a_subcell_anchor_keeps_its_row_when_a_tooltip_opens_below() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(2, 1)].symbol(), " ");
-    assert_eq!(buffer[(2, 1)].bg, Color::Rgb(0x12, 0x34, 0x56));
-    assert_eq!(buffer[(2, 2)].bg, Color::Rgb(0xab, 0xcd, 0xef));
+    assert_eq!(buffer[(2, 1)].symbol(), "─");
+    assert_eq!(buffer[(2, 1)].fg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(2, 2)].fg, Color::Rgb(0xab, 0xcd, 0xef));
 }
 
 #[component]
@@ -708,7 +708,9 @@ fn a_subcell_separator_keeps_disjoint_text_that_quantizes_to_its_row() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(2, 4)].symbol(), "L");
-    assert_eq!(buffer[(10, 4)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(10, 4)].fg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(10, 4)].symbol(), "─");
+    assert_eq!(buffer[(10, 4)].bg, Color::Reset);
     assert_eq!(buffer[(2, 8)].symbol(), " ");
     assert_eq!(buffer[(2, 8)].bg, Color::Rgb(0x12, 0x34, 0x56));
 }
@@ -848,4 +850,129 @@ fn positive_gaps_between_canvas_labels_keep_a_cell_without_spacing_graphemes() {
     assert!(row(1).contains("09:09 10:15"), "{}", row(1));
     assert!(row(3).contains("09:09 10:15"), "{}", row(3));
     assert!(row(5).contains("09:0910:15"), "{}", row(5));
+}
+
+#[component]
+fn HairlineFills() -> impl IntoElement {
+    let color = nsh_core::color::rgb(0x123456);
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x101113))
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(16.0))
+                .w(px(80.0))
+                .h(px(1.0))
+                .bg(color),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(48.0))
+                .w(px(3.0))
+                .h(px(32.0))
+                .rounded(px(1.5))
+                .bg(color),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(96.0))
+                .w(px(80.0))
+                .h(px(48.0))
+                .border_t(px(1.0))
+                .border_color(color),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(128.0))
+                .top(px(16.0))
+                .w(px(80.0))
+                .h(px(8.0))
+                .bg(color),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(128.0))
+                .top(px(48.0))
+                .w(px(80.0))
+                .h(px(1.0))
+                .bg(color)
+                .child(text("child")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(128.0))
+                .top(px(80.0))
+                .w(px(80.0))
+                .h(px(1.0))
+                .bg(color)
+                .opacity(0.5),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(128.0))
+                .top(px(112.0))
+                .w(px(80.0))
+                .h(px(1.0))
+                .bg(nsh_core::color::rgb(0xff0000))
+                .bg_linear_to_r()
+                .gradient_from(nsh_core::color::rgba(0x0000ff80))
+                .gradient_to(nsh_core::color::rgba(0x0000ff80)),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(224.0))
+                .top(px(112.0))
+                .w(px(80.0))
+                .h(px(1.0))
+                .bg_linear_to_r()
+                .gradient_from(nsh_core::color::rgb(0x00ff00))
+                .gradient_to(nsh_core::color::rgb(0x00ff00)),
+        )
+        .child(view().absolute().top(px(160.0)).child(text("ready")))
+}
+
+#[test]
+fn childless_hairline_fills_draw_border_weight_glyphs_and_keep_the_background() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<HairlineFills>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    for column in 2..12 {
+        assert_eq!(buffer[(column, 1)].symbol(), "─");
+        assert_eq!(buffer[(column, 1)].fg, Color::Rgb(0x12, 0x34, 0x56));
+        assert_eq!(buffer[(column, 1)].bg, Color::Reset);
+        assert_eq!(buffer[(column, 1)].symbol(), buffer[(column, 6)].symbol());
+        assert_eq!(buffer[(column, 1)].fg, buffer[(column, 6)].fg);
+    }
+    for row in 3..5 {
+        assert_eq!(buffer[(2, row)].symbol(), "│");
+        assert_eq!(buffer[(2, row)].fg, Color::Rgb(0x12, 0x34, 0x56));
+        assert_eq!(buffer[(2, row)].bg, Color::Reset);
+    }
+    assert_eq!(buffer[(16, 1)].symbol(), " ");
+    assert_eq!(buffer[(16, 1)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(16, 3)].symbol(), "c");
+    assert_eq!(buffer[(16, 3)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(16, 5)].symbol(), "─");
+    assert_eq!(buffer[(16, 5)].fg, Color::Rgb(17, 35, 53));
+    assert_eq!(buffer[(16, 5)].bg, Color::Reset);
+    assert_eq!(buffer[(16, 7)].symbol(), "─");
+    assert_eq!(buffer[(16, 7)].fg, Color::Rgb(127, 0, 128));
+    assert_eq!(buffer[(16, 7)].bg, Color::Reset);
+    assert_eq!(buffer[(28, 7)].symbol(), "─");
+    assert_eq!(buffer[(28, 7)].fg, Color::Rgb(0, 255, 0));
+    assert_eq!(buffer[(28, 7)].bg, Color::Reset);
 }

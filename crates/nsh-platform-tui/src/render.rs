@@ -15,6 +15,7 @@ use crate::{
 
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
 const MIN_BORDERED_EXTENT: i32 = 3;
+const HAIRLINE_CELL_FRACTION: f32 = 0.5;
 
 pub(crate) struct Hit {
     pub(crate) node: NodeId,
@@ -49,6 +50,13 @@ struct Outline {
     clip: Rect,
     color: nsh_core::Color,
     opacity: f32,
+}
+
+#[derive(Clone, Copy)]
+struct FillPaint {
+    color: nsh_core::Color,
+    opacity: f32,
+    line: Option<&'static str>,
 }
 
 struct Painter<'a> {
@@ -140,7 +148,11 @@ impl Painter<'_> {
         if view.concealed || view.style.hidden || opacity <= 0.0 {
             return;
         }
-        let compact = view.kind == ViewKind::Canvas || !view.style.radii().is_zero();
+        let mut projection = parent.view(view);
+        let local_frame = Bounds::new(Point::default(), view.frame.size);
+        let line = hairline_fill(view, projection.bounds(local_frame).size, self.cells);
+        let compact =
+            line.is_none() && (view.kind == ViewKind::Canvas || !view.style.radii().is_zero());
         let project = |frame: Bounds<Points>| {
             let mut bounds = CellBounds::new(frame, self.cells, self.area);
             // Compact canvases and rounded controls share their one-line sibling's center row.
@@ -154,8 +166,6 @@ impl Painter<'_> {
             }
             bounds
         };
-        let mut projection = parent.view(view);
-        let local_frame = Bounds::new(Point::default(), view.frame.size);
         if let Some(anchor) = view.props.overlay_anchor {
             let anchor_bounds = anchor
                 .node
@@ -480,13 +490,17 @@ impl Painter<'_> {
                         || !protected[usize::from(y - visible.y) * usize::from(visible.width)
                             + usize::from(x - visible.x)])
             };
+            let paint = FillPaint {
+                color: fill,
+                opacity,
+                line,
+            };
             fill_cells(
                 self.buffer,
                 self.page_backgrounds,
                 self.page,
                 visible,
-                fill,
-                opacity,
+                paint,
                 covered,
             );
             if self.page_backgrounds.contains(&fill) {
@@ -506,8 +520,10 @@ impl Painter<'_> {
                         self.page_backgrounds,
                         self.page,
                         visible,
-                        stop.color,
-                        opacity,
+                        FillPaint {
+                            color: stop.color,
+                            ..paint
+                        },
                         covered,
                     );
                 }
@@ -817,6 +833,39 @@ impl Painter<'_> {
     }
 }
 
+fn hairline_fill(
+    view: &crate::view::NshView,
+    size: nsh_core::Size<Points>,
+    cells: CellSize,
+) -> Option<&'static str> {
+    if view.kind != ViewKind::View || !view.children.is_empty() || view.component.is_some() {
+        return None;
+    }
+    let horizontal =
+        size.height > Points::ZERO && size.height < cells.height() * HAIRLINE_CELL_FRACTION;
+    let vertical = size.width > Points::ZERO && size.width < cells.width() * HAIRLINE_CELL_FRACTION;
+    let fill = view
+        .animated
+        .background
+        .unwrap_or(view.style.background_color);
+    let has_fill = !fill.is_transparent()
+        || view
+            .style
+            .effects
+            .as_ref()
+            .is_some_and(|effects| !effects.background_images.is_empty());
+    if !has_fill || !(horizontal || vertical) {
+        return None;
+    }
+    Some(
+        if vertical && (!horizontal || size.height / cells.height() >= size.width / cells.width()) {
+            "│"
+        } else {
+            "─"
+        },
+    )
+}
+
 fn border_has_sibling_content(
     tree: &Mounter,
     id: NodeId,
@@ -1031,19 +1080,22 @@ fn fill_cells(
     page_backgrounds: &[nsh_core::Color],
     page: Color,
     visible: Rect,
-    fill: nsh_core::Color,
-    opacity: f32,
+    paint: FillPaint,
     covered: impl Fn(u16, u16) -> bool,
 ) {
+    let FillPaint {
+        color: fill,
+        opacity,
+        line,
+    } = paint;
     if fill.is_transparent() {
         return;
     }
+    let opaque = (fill.0 & 255 == 255 && opacity >= 1.0).then(|| rgb(fill));
     let constant = if page_backgrounds.contains(&fill) {
         Some(Color::Reset)
-    } else if fill.0 & 255 == 255 && opacity >= 1.0 {
-        Some(rgb(fill))
     } else {
-        None
+        opaque
     };
     for y in visible.y..visible.bottom() {
         for x in visible.x..visible.right() {
@@ -1051,9 +1103,21 @@ fn fill_cells(
                 continue;
             }
             let cell = &mut buffer[(x, y)];
-            let background = constant.unwrap_or_else(|| blend(fill, opacity, cell.bg, page));
-            cell.reset();
-            cell.set_bg(background);
+            if let Some(line) = line {
+                let background = cell.bg;
+                let under_stroke = if cell.symbol() == line {
+                    cell.fg
+                } else {
+                    background
+                };
+                let foreground = opaque.unwrap_or_else(|| blend(fill, opacity, under_stroke, page));
+                cell.reset();
+                cell.set_bg(background).set_fg(foreground).set_symbol(line);
+            } else {
+                let background = constant.unwrap_or_else(|| blend(fill, opacity, cell.bg, page));
+                cell.reset();
+                cell.set_bg(background);
+            }
         }
     }
 }
