@@ -3542,6 +3542,100 @@ fn a_base_select_reads_null_as_nothing_chosen_and_renders_the_apps_rows() {
     assert_eq!(chosen(&trigger).as_deref(), Some("Apple"));
 }
 
+const BASE_COMBOBOX: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Combobox } from "nsh/base";
+
+const tags = [
+  { value: "rust", title: "Rust" },
+  { value: "go", title: "Go" },
+  { value: "swift", title: "Swift" },
+];
+
+function App() {
+  const value = signal<string[]>(["go"]);
+  const confirmed = signal("none");
+  return (
+    <View>
+      <Combobox
+        items={tags}
+        multiple
+        value={value()}
+        onChange={({ value: next }) => value.set(next)}
+        onConfirm={({ value: next }) => confirmed.set(next.join(","))}
+        accessibilityLabel="Tags"
+        trigger={<View><Text>Pick</Text></View>}
+        renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
+        footer={<Text>Footer</Text>}
+      />
+      <Text>{`Value: ${value().join(",")}`}</Text>
+      <Text>{`Confirmed: ${confirmed()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Combobox` through its JS face: an array value the app
+/// owns, toggled by presses with `multiple` while the list stays open (the
+/// app's rows and footer in it), `onChange({ value })` with the array and
+/// `onConfirm({ value })` once it closes; screen readers hear the selected
+/// titles.
+#[test]
+fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_COMBOBOX);
+    let find = |batches: &[MountBatch], label: &str, role: AccessibilityRole| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == role
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some((*id, (**props).clone()))
+                }
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Tags", AccessibilityRole::Combobox).is_some()
+    });
+    let (trigger, props) = find(&first, "Tags", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(
+        props
+            .accessibility
+            .value
+            .and_then(|v| v.text.map(|t| t.to_string()))
+            .as_deref(),
+        Some("Go")
+    );
+
+    engine
+        .control()
+        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+    let opened = until(&rx, |b| shows(b, "Swift!"));
+    assert!(opened.iter().any(|b| shows(b, "Go on!")));
+    assert!(opened.iter().any(|b| shows(b, "Footer")));
+    let (swift, _) = find(&opened, "Swift", AccessibilityRole::Option).expect("an option");
+
+    // A press toggles Swift in; the list stays open.
+    engine
+        .control()
+        .dispatch_event(swift, EventKind::Press, EventPayload::None);
+    let toggled = until(&rx, |b| shows(b, "Value: go,swift"));
+    assert!(toggled.iter().any(|b| shows(b, "Swift on!")));
+    assert!(!toggled.iter().any(|b| shows(b, "Confirmed: go,swift")));
+
+    // Closing confirms the array.
+    engine
+        .control()
+        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, "Confirmed: go,swift"));
+}
+
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
 import { Select } from "nsh/base";
 
@@ -5652,6 +5746,104 @@ fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
         matches!(slices[1], (_, Num::Const(end)) if near(end, 3.0 * FRAC_PI_2)),
         "{slices:?}"
     );
+}
+
+const BASE_PLOT_ARC_RETARGET: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Arc, Pie, Plot } from "nsh/base/plot";
+
+function App() {
+  const step = signal(0);
+  setTimeout(() => step.set(1), 50);
+  setTimeout(() => step.set(2), 150);
+  const ends = [Math.PI / 2, Math.PI, 1.5 * Math.PI];
+  const rows = [
+    [{ v: 1 }, { v: 3 }],
+    [{ v: 1 }, { v: 1 }],
+    [{ v: 3 }, { v: 1 }],
+  ];
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows[step()]}
+        y="v"
+        motion={{ update: { duration: 1000 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <Arc endAngle={ends[step()]} innerRadius={30} outerRadius={50} />
+        <Pie innerRadius={10} outerRadius={20} />
+      </Plot>
+      <Text>{`step ${step()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The angles changing again while they move (`motion.update`): the move
+/// stops, the animator is asked how far it had gone, and the next move
+/// starts from the angles drawn there, not from the first move's target;
+/// the arc's and the pie's alike.
+#[test]
+fn base_plot_arc_and_pie_move_on_from_the_angles_drawn() {
+    use std::f32::consts::{FRAC_PI_4, PI};
+
+    use nsh_core::{
+        animation::{AnimationOp, Finished},
+        canvas::Num,
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let reads = |all: &[MountBatch]| -> Vec<u32> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Animation(AnimationOp::Read { request, .. }) => Some(*request),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let (engine, rx) = start(BASE_PLOT_ARC_RETARGET);
+    let mut all = until(&rx, |b| shows(b, "step 2"));
+    if reads(&all).len() < 2 {
+        all.extend(until(&rx, |b| {
+            b.items
+                .iter()
+                .any(|i| matches!(i, MountItem::Animation(AnimationOp::Read { .. })))
+        }));
+    }
+    // The arc's move and the pie's: each asks where it is.
+    let asked = reads(&all);
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    // Halfway, as the platform answers: the first moves draw a quarter
+    // turn and a half (3 o'clock to 6 o'clock) three quarters round.
+    engine.control().animations_finished(
+        asked
+            .iter()
+            .map(|&request| Finished {
+                animation: request,
+                finished: true,
+                value: Some(0.5),
+            })
+            .collect(),
+    );
+    let answered = all.len();
+    all.extend(until(&rx, |_| false));
+    // From there (the canvas's `PI / 4`, 12 o'clock its `-PI / 2`), not
+    // from the first move's target (its `PI / 2`), to three quarters.
+    let arc = rim_ends(&all[answered..], 50.0);
+    let [(arc, Num::Slot(end))] = arc[..] else {
+        panic!("the arc's rim, its end animated: {arc:?}")
+    };
+    let ends = slot_at(&all, arc, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
+    let slices = rim_ends(&all[answered..], 20.0);
+    let (first, Num::Slot(end)) = slices[0] else {
+        panic!("the first slice's rim, its end animated: {slices:?}")
+    };
+    let ends = slot_at(&all, first, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
 }
 
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
