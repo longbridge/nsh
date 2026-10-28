@@ -7,15 +7,14 @@ test("the sidebar's demos are one stop of Tab, whose Up and Down select the demo
   const app = await open("../App.tsx", { platform: "macos", width: 1200, height: 800, clock: {} });
   await app.press("role:button[Checkbox]");
   await app.waitFor("Select all");
-  // Tab on to the demos, past the page's checkboxes (the sidebar, stacked
-  // above the page, comes after it among the views): Down there selects
-  // Radio, the demo after Checkbox.
-  let tabs = 0;
-  while (!app.shows("Continue with Plus")) {
-    expect(++tabs).toBeLessThan(20);
-    await app.keyboard.press("tab");
-    await app.keyboard.press("down");
-  }
+  // From the search field above them (`mod+k`), one Tab reaches the demos (the
+  // page's stops come before or after the sidebar's by the platform's
+  // order, so the test starts beside the list): Down there selects Radio,
+  // the demo after Checkbox.
+  await app.keyboard.press("mod+k");
+  await app.keyboard.press("tab");
+  await app.keyboard.press("down");
+  await app.waitFor("Continue with Plus");
   await app.keyboard.press("down");
   await app.waitFor("Notifications");
   await app.keyboard.press("up");
