@@ -189,3 +189,29 @@ fn cell_extent(origin: Points, value: Points, unit: Points) -> i32 {
         0
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct TextRun {
+    pub(crate) points: nsh_core::Bounds<Points>,
+    pub(crate) cells: CellBounds,
+}
+
+impl TextRun {
+    pub(crate) fn separated<'a>(mut self, previous: impl Iterator<Item = &'a Self>) -> Self {
+        let mut limits = CellBounds::UNBOUNDED;
+        for previous in previous.filter(|previous| {
+            previous.cells.top == self.cells.top
+                && previous.cells.right > previous.cells.left
+                && previous.cells.bottom > previous.cells.top
+        }) {
+            if self.points.left() > previous.points.right() {
+                limits.left = limits.left.max(previous.cells.right.saturating_add(1));
+            } else if self.points.right() < previous.points.left() {
+                limits.right = limits.right.min(previous.cells.left.saturating_sub(1));
+            }
+        }
+        limits.right = limits.right.max(limits.left);
+        self.cells = self.cells.fitted(limits);
+        self
+    }
+}

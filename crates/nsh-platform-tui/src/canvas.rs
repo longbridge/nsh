@@ -32,7 +32,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use self::path::{Dash, IDENTITY, Matrix, Outline, apply, distance, mean_scale, multiply};
-use crate::{CellSize, geometry::CellBounds, render::blend};
+use crate::{
+    CellSize,
+    geometry::{CellBounds, TextRun},
+    render::blend,
+};
 
 const DOTS_ACROSS: usize = 2;
 const DOTS_DOWN: usize = 4;
@@ -113,7 +117,9 @@ pub(crate) fn draw(
     for op in &canvas.drawing.ops {
         replay.op(op);
     }
-    let Replay { dots, labels, .. } = replay;
+    let Replay {
+        dots, mut labels, ..
+    } = replay;
     let mut scratch = Buffer::empty(Rect::new(0, 0, visible.width, visible.height));
     Canvas::default()
         .marker(Marker::Braille)
@@ -133,22 +139,59 @@ pub(crate) fn draw(
             }
         }
     }
+    let mut order: Vec<_> = (0..labels.len()).collect();
+    order.sort_by(|&a, &b| {
+        labels[a]
+            .run
+            .cells
+            .top
+            .cmp(&labels[b].run.cells.top)
+            .then_with(|| {
+                labels[a]
+                    .run
+                    .points
+                    .left()
+                    .0
+                    .total_cmp(&labels[b].run.points.left().0)
+            })
+    });
+    let mut placed = Vec::with_capacity(order.len());
+    for index in order {
+        labels[index].run = labels[index].run.separated(placed.iter());
+        placed.push(labels[index].run);
+    }
     for label in labels {
-        let cell = &mut buffer[(visible.x + label.column, visible.y + label.row)];
-        let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg, page));
-        if label.bold {
-            style = style.add_modifier(Modifier::BOLD);
+        let row = label.run.cells.top as u16;
+        let mut offset = 0;
+        for grapheme in label.text.graphemes(true) {
+            let column = label.run.cells.left.saturating_add(offset);
+            offset = offset.saturating_add(grapheme.width() as i32);
+            if !(0..i32::from(visible.width)).contains(&column) {
+                continue;
+            }
+            let column = column as u16;
+            let probe = (usize::from(row) * DOTS_DOWN + DOTS_DOWN / 2) * dots.width
+                + usize::from(column) * DOTS_ACROSS
+                + DOTS_ACROSS / 2;
+            if label.clip.as_ref().is_some_and(|clip| !clip[probe]) {
+                continue;
+            }
+            let cell = &buffer[(visible.x + column, visible.y + row)];
+            let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg, page));
+            if label.bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if label.italic {
+                style = style.add_modifier(Modifier::ITALIC);
+            }
+            buffer.set_stringn(
+                visible.x + column,
+                visible.y + row,
+                grapheme,
+                usize::from(visible.width - column),
+                style,
+            );
         }
-        if label.italic {
-            style = style.add_modifier(Modifier::ITALIC);
-        }
-        buffer.set_stringn(
-            visible.x + label.column,
-            visible.y + label.row,
-            &label.grapheme,
-            usize::from(visible.width - label.column),
-            style,
-        );
     }
 }
 
@@ -321,11 +364,11 @@ impl Shape for Dots {
     }
 }
 
-/// A grapheme of canvas text on a visible Cell.
-struct Label {
-    column: u16,
-    row: u16,
-    grapheme: String,
+/// A canvas text call, kept together while its gap to neighbouring calls projects to Cells.
+struct Label<'a> {
+    run: TextRun,
+    text: &'a str,
+    clip: Option<Rc<[bool]>>,
     color: nsh_core::Color,
     alpha: f32,
     bold: bool,
@@ -369,7 +412,7 @@ impl Default for State {
 struct Replay<'a> {
     canvas: &'a CanvasView,
     dots: Dots,
-    labels: Vec<Label>,
+    labels: Vec<Label<'a>>,
     cells: CellSize,
     /// The visible Cells' offset from the canvas's first Cell.
     offset: [i32; 2],
@@ -529,20 +572,20 @@ impl<'a> Replay<'a> {
         self.state.clip = Some(clip.into());
     }
 
-    fn text(&mut self, text: &str, x: f32, y: f32, max_width: Option<f32>, paint: Paint) {
+    fn text(&mut self, text: &'a str, x: f32, y: f32, max_width: Option<f32>, paint: Paint) {
         let Some((color, alpha)) = self.ink(&paint) else {
             return;
         };
         let (cell_width, cell_height) = (self.cells.width().0, self.cells.height().0);
         let max_cells = max_width.map_or(usize::MAX, |w| (w / cell_width).max(0.0) as usize);
-        let mut graphemes = Vec::new();
+        let mut text_end = 0;
         let mut width_cells = 0;
-        for grapheme in text.graphemes(true) {
+        for (start, grapheme) in text.grapheme_indices(true) {
             let width = grapheme.width();
             if width_cells + width > max_cells {
                 break;
             }
-            graphemes.push((grapheme, width_cells));
+            text_end = start + grapheme.len();
             width_cells += width;
         }
         let [anchor_x, anchor_y] = apply(&self.state.matrix, x, y);
@@ -560,36 +603,36 @@ impl<'a> Replay<'a> {
         };
         let row = (anchor_y / cell_height - rows_above + 0.5).floor() as i32 - self.offset[1];
         let first_column = (left / cell_width + 0.5).floor() as i32 - self.offset[0];
-        let columns = (self.dots.width / DOTS_ACROSS) as i32;
         let rows = (self.dots.height / DOTS_DOWN) as i32;
-        if !(0..rows).contains(&row) {
+        if !(0..rows).contains(&row) || width_cells == 0 {
             return;
         }
-        for (grapheme, at) in graphemes {
-            let column = first_column + at as i32;
-            if !(0..columns).contains(&column) {
-                continue;
-            }
-            // The dot right of and below the Cell's center stands for it.
-            let probe = (row as usize * DOTS_DOWN + DOTS_DOWN / 2) * self.dots.width
-                + column as usize * DOTS_ACROSS
-                + DOTS_ACROSS / 2;
-            if self.clipped_out(probe) {
-                continue;
-            }
-            self.labels.push(Label {
-                column: column as u16,
-                row: row as u16,
-                grapheme: grapheme.to_owned(),
-                color,
-                alpha,
-                bold: self.state.bold,
-                italic: self.state.italic,
-            });
-        }
+        self.labels.push(Label {
+            run: TextRun {
+                points: nsh_core::Bounds::new(
+                    nsh_core::Point::new(
+                        nsh_core::Points(left),
+                        nsh_core::Points(anchor_y - rows_above * cell_height),
+                    ),
+                    nsh_core::Size::new(nsh_core::Points(text_width), self.cells.height()),
+                ),
+                cells: CellBounds {
+                    left: first_column,
+                    right: first_column.saturating_add(width_cells as i32),
+                    top: row,
+                    bottom: row + 1,
+                },
+            },
+            text: &text[..text_end],
+            clip: self.state.clip.clone(),
+            color,
+            alpha,
+            bold: self.state.bold,
+            italic: self.state.italic,
+        });
     }
 
-    fn op(&mut self, op: &CanvasOp) {
+    fn op(&mut self, op: &'a CanvasOp) {
         match op {
             CanvasOp::Save => self.saved.push(self.state.clone()),
             CanvasOp::Restore => {

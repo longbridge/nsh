@@ -712,3 +712,140 @@ fn a_subcell_separator_keeps_disjoint_text_that_quantizes_to_its_row() {
     assert_eq!(buffer[(2, 8)].symbol(), " ");
     assert_eq!(buffer[(2, 8)].bg, Color::Rgb(0x12, 0x34, 0x56));
 }
+
+#[component]
+fn AdjacentLabels() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(16.0))
+                .flex_row()
+                .gap(px(2.0))
+                .child(text("All"))
+                .child(text("22"))
+                .child(text("Up")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(48.0))
+                .flex_row_reverse()
+                .gap(px(2.0))
+                .child(text("All"))
+                .child(text("22"))
+                .child(text("Up")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(80.0))
+                .flex_row()
+                .child(text("All"))
+                .child(text("22")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(128.0))
+                .w(px(64.0))
+                .h(px(32.0))
+                .border_1()
+                .flex_row()
+                .items_center()
+                .gap(px(2.0))
+                .child(text("All"))
+                .child(text("22"))
+                .child(text("Up")),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(176.0))
+                .w(px(128.0))
+                .h(px(32.0))
+                .border_1()
+                .items_center()
+                .justify_center()
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(24.0))
+                        .top(px(3.0))
+                        .w(px(80.0))
+                        .h(px(26.0))
+                        .border_1()
+                        .rounded(px(8.0))
+                        .bg(nsh_core::color::rgb(0x123456)),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .gap(px(2.0))
+                        .child(text("All"))
+                        .child(text("22")),
+                ),
+        )
+        .child(view().absolute().top(px(112.0)).child(text("ready")))
+}
+
+#[test]
+fn positive_gaps_between_sibling_labels_keep_a_cell_in_either_row_direction() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 14)).unwrap();
+    view.load(App::Rust(Root::new::<AdjacentLabels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let row = |y| (0..40).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+    assert!(row(1).contains("All 22 Up"), "{}", row(1));
+    assert!(row(3).contains("Up 22 All"), "{}", row(3));
+    assert!(row(5).contains("All22"), "{}", row(5));
+    assert!(row(9).contains("All 22"), "{}", row(9));
+    assert!(row(12).contains("All 22"), "{}", row(12));
+}
+
+#[component]
+fn AdjacentCanvasLabels() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .fill_color(nsh_core::color::rgb(0xffffff))
+                    .text_baseline(nsh_core::canvas::CanvasTextBaseline::Top)
+                    .fill_text("09:09", 0.0, 0.0)
+                    .fill_text("10:15", 42.0, 0.0)
+                    .fill_text("10:15", 42.0, 32.0)
+                    .fill_text("09:09", 0.0, 32.0)
+                    .fill_text("09:09", 0.0, 64.0)
+                    .fill_text("10:15", 40.0, 64.0),
+            )
+            .absolute()
+            .left(px(16.0))
+            .top(px(16.0))
+            .w(px(200.0))
+            .h(px(96.0)),
+        )
+        .child(view().absolute().top(px(128.0)).child(text("ready")))
+}
+
+#[test]
+fn positive_gaps_between_canvas_labels_keep_a_cell_without_spacing_graphemes() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<AdjacentCanvasLabels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let row = |y| (0..40).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+    assert!(row(1).contains("09:09 10:15"), "{}", row(1));
+    assert!(row(3).contains("09:09 10:15"), "{}", row(3));
+    assert!(row(5).contains("09:0910:15"), "{}", row(5));
+}

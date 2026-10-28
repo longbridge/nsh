@@ -1,10 +1,16 @@
+use std::collections::HashMap;
+
 use nsh_core::{Bounds, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind};
 use ratatui_core::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 use ratatui_widgets::{block::Block, borders::Borders};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    CellSize, animation::Projection, geometry::CellBounds, mount::Mounter, text::CellLayout,
+    CellSize,
+    animation::Projection,
+    geometry::{CellBounds, TextRun},
+    mount::Mounter,
+    text::CellLayout,
 };
 
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
@@ -46,6 +52,7 @@ struct Outline {
 }
 
 struct Painter<'a> {
+    text_runs: HashMap<NodeId, Vec<TextRun>>,
     outlines: Vec<Outline>,
     tree: &'a mut Mounter,
     buffer: &'a mut Buffer,
@@ -82,6 +89,7 @@ pub(crate) fn draw(
     };
     let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
     let mut painter = Painter {
+        text_runs: HashMap::new(),
         outlines: Vec::new(),
         tree,
         buffer,
@@ -111,12 +119,15 @@ impl Painter<'_> {
         &mut self,
         id: NodeId,
         parent: Projection,
-        clip: Clip,
+        mut clip: Clip,
         opacity: f32,
         pointer: bool,
         press: Option<(NodeId, Point<Points>)>,
     ) {
         let text_stack = text_stack(self.tree, id);
+        let text_parent = horizontal_text_parent(self.tree, id, parent);
+        let sibling_content =
+            border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -166,6 +177,49 @@ impl Painter<'_> {
                 self.cells.height() * rows as f32,
             ));
         }
+        let text_run = text_parent.and_then(|parent| {
+            view.text.as_ref().and_then(|(layout, content)| {
+                let layout = layout.downcast::<CellLayout>()?;
+                if layout.rows.len() != 1 {
+                    return None;
+                }
+                let row = &layout.rows[0];
+                let width = row.glyphs.iter().map(|glyph| glyph.width).sum::<usize>() as i32;
+                if width == 0 {
+                    return None;
+                }
+                let indent = row.indent as i32;
+                let points = projection.bounds(Bounds::new(
+                    content.origin + Point::new(self.cells.width() * indent as f32, Points::ZERO),
+                    nsh_core::Size::new(self.cells.width() * width as f32, self.cells.height()),
+                ));
+                let mut cells = CellBounds::new(points, self.cells, self.area);
+                cells.right = cells.left.saturating_add(width);
+                cells.bottom = cells.top.saturating_add(1);
+                let run = TextRun { points, cells }
+                    .separated(self.text_runs.get(&parent).into_iter().flatten());
+                let delta = run.cells.left.saturating_sub(cells.left);
+                let frame = project(projection.bounds(local_frame));
+                let narrowed = run.cells.right - run.cells.left < width;
+                if delta > 0 || narrowed {
+                    let edge = run
+                        .cells
+                        .left
+                        .saturating_sub(cells.left.saturating_sub(frame.left));
+                    clip.borders.left = clip.borders.left.max(edge).min(clip.borders.right);
+                }
+                if delta < 0 || narrowed {
+                    let edge = run
+                        .cells
+                        .right
+                        .saturating_add(frame.right.saturating_sub(cells.right));
+                    clip.borders.right = clip.borders.right.min(edge).max(clip.borders.left);
+                }
+                projection =
+                    projection.snapped(Point::new(self.cells.width() * delta as f32, Points::ZERO));
+                Some((parent, run, indent, width))
+            })
+        });
         let frame = projection.bounds(local_frame);
         let bounds = project(frame);
         let content_projection = projection;
@@ -288,8 +342,10 @@ impl Painter<'_> {
             .map_or(view.style.borders.colors, |color| [color; 4]);
         let sides = [widths.top, widths.right, widths.bottom, widths.left]
             .map(|width| width > Points::ZERO);
-        let has_content =
-            view.kind != ViewKind::View || !view.children.is_empty() || view.component.is_some();
+        let has_content = view.kind != ViewKind::View
+            || !view.children.is_empty()
+            || view.component.is_some()
+            || sibling_content;
         let sides = std::array::from_fn::<_, 4, _>(|i| {
             let extent = if i % 2 == 0 {
                 bounds.bottom - bounds.top
@@ -310,6 +366,19 @@ impl Painter<'_> {
             CellBounds::new(content_projection.bounds(*content), self.cells, self.area)
                 .fitted(inner)
         });
+        if let Some(((parent, mut run, indent, width), text)) = text_run.zip(text_bounds) {
+            run.cells = CellBounds {
+                left: text.left.saturating_add(indent).min(text.right),
+                right: text
+                    .left
+                    .saturating_add(indent)
+                    .saturating_add(width)
+                    .min(text.right),
+                top: text.top,
+                bottom: text.top.saturating_add(1).min(text.bottom),
+            };
+            self.text_runs.entry(parent).or_default().push(run);
+        }
         self.geometry.push(Geometry {
             id,
             bounds,
@@ -746,6 +815,143 @@ impl Painter<'_> {
             }
         }
     }
+}
+
+fn border_has_sibling_content(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+) -> bool {
+    let Some(view) = tree.get(id) else {
+        return false;
+    };
+    if view.kind != ViewKind::View
+        || !view.children.is_empty()
+        || (view.style.borders.widths.top <= Points::ZERO
+            && view.style.borders.widths.bottom <= Points::ZERO)
+    {
+        return false;
+    }
+    let bounds = projection
+        .view(view)
+        .bounds(Bounds::new(Point::default(), view.frame.size));
+    let projected = CellBounds::new(bounds, cells, area);
+    if projected.bottom - projected.top != 2 {
+        return false;
+    }
+    let Some(parent) = view.parent.and_then(|id| tree.get(id)) else {
+        return false;
+    };
+    let Some(index) = parent.children.iter().position(|&child| child == id) else {
+        return false;
+    };
+    let transparent = view
+        .animated
+        .background
+        .unwrap_or(view.style.background_color)
+        .is_transparent()
+        && view
+            .style
+            .effects
+            .as_ref()
+            .is_none_or(|effects| effects.background_images.is_empty());
+    parent
+        .children
+        .iter()
+        .enumerate()
+        .any(|(position, &child)| {
+            child != id
+                && (transparent || position > index)
+                && subtree_content_intersects(tree, child, projection, cells, bounds)
+        })
+}
+
+fn subtree_content_intersects(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    bounds: Bounds<Points>,
+) -> bool {
+    let Some(view) = tree.get(id) else {
+        return false;
+    };
+    if view.concealed
+        || view.style.hidden
+        || view.kind == ViewKind::Modal
+        || view.animated.opacity.unwrap_or(view.style.opacity) < INVISIBLE_OPACITY
+    {
+        return false;
+    }
+    let projection = projection.view(view);
+    if let Some((layout, content)) = &view.text
+        && let Some(layout) = layout.downcast::<CellLayout>()
+    {
+        for (row_index, row) in layout.rows.iter().enumerate() {
+            let mut column = row.indent;
+            for glyph in &row.glyphs {
+                let glyph_bounds = Bounds::new(
+                    content.origin
+                        + Point::new(
+                            cells.width() * column as f32,
+                            cells.height() * row_index as f32,
+                        ),
+                    nsh_core::Size::new(cells.width() * glyph.width as f32, cells.height()),
+                );
+                if !glyph.text.chars().all(char::is_whitespace)
+                    && projection.bounds(glyph_bounds).intersects(&bounds)
+                {
+                    return true;
+                }
+                column += glyph.width;
+            }
+        }
+    }
+    if (view.input.is_some() || view.canvas.is_some() || view.component.is_some())
+        && projection
+            .bounds(Bounds::new(Point::default(), view.frame.size))
+            .intersects(&bounds)
+    {
+        return true;
+    }
+    let offset = view
+        .scroll
+        .as_ref()
+        .map_or_else(Point::default, |scroll| scroll.origin());
+    let projection = projection.translated(Point::new(-offset.x, -offset.y));
+    view.children
+        .iter()
+        .any(|&child| subtree_content_intersects(tree, child, projection, cells, bounds))
+}
+
+fn horizontal_text_parent(tree: &Mounter, id: NodeId, projection: Projection) -> Option<NodeId> {
+    let view = tree.get(id)?;
+    view.text.as_ref()?;
+    let parent = view.parent?;
+    let siblings = &tree.get(parent)?.children;
+    if siblings.len() < 2 {
+        return None;
+    }
+    let bounds = projection
+        .view(view)
+        .bounds(Bounds::new(Point::default(), view.frame.size));
+    siblings
+        .iter()
+        .any(|&sibling| {
+            sibling != id
+                && tree.get(sibling).is_some_and(|sibling| {
+                    if sibling.text.is_none() {
+                        return false;
+                    }
+                    let other = projection
+                        .view(sibling)
+                        .bounds(Bounds::new(Point::default(), sibling.frame.size));
+                    bounds.top() < other.bottom() && other.top() < bounds.bottom()
+                })
+        })
+        .then_some(parent)
 }
 
 // A vertical stack of terminal text must keep one Cell per measured line,

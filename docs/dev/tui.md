@@ -283,6 +283,9 @@ scroll offsets. Parent rounding is never added to a child's point position. The 
 exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
 width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
 its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
+A positive point gap between sibling one-line texts reserves at least one blank Cell, including reverse rows;
+a zero gap keeps the texts adjacent. Canvas text calls apply the same minimum gap as whole runs, independently
+of draw order. Existing ancestor and canvas clipping still apply.
 Text measurement still counts the whole Cells that fit within a point width, separately from positioning edges.
 A compact canvas or rounded control (less than one and a half Cells tall) occupies its center row, so a centered icon and a
 one-line label share a row even when their point heights differ.
@@ -294,7 +297,7 @@ so contraction reduces quantized gaps without collapsing two labels onto one row
 starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
 keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
 its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A box with
-only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border. A box
+only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border when no sibling text or content is drawn through it. A box
 with only one or two columns omits vertical strokes, preserving
 space for labels and tiny value indicators. Border corners follow each resolved corner radius independently.
 A sub-Cell fill preserves already-painted glyphs that it does not overlap in point space, even when both
@@ -708,6 +711,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Borders | Reserved inner Cell rect; per-side colors and per-corner glyphs; compact boxes omit horizontal or vertical strokes to keep room for content |
 | Outlines, including control focus outlines | A complete single-Cell stroke in free Cells, or recoloring the view's own edge Cells while retaining their symbols |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
+| Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
