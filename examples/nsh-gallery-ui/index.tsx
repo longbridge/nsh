@@ -72,6 +72,7 @@ export function Press(props: {
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
       style={[props.style ?? null, { transform: [{ scale: s }], opacity: props.disabled ? 0.4 : 1 }]}
+      focusStyle={focusRing()}
     >
       {props.children}
     </View>

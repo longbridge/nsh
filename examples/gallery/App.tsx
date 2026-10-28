@@ -9,7 +9,7 @@ import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
+import { Appear, Badge, colors, desktop, focusRing, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
 
 /** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
@@ -188,6 +188,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
       class={active() ? "bg-accent" : "hover:bg-hover active:bg-accent"}
+      focusStyle={focusRing()}
       style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: radius.control, cursor: "pointer" }}
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
