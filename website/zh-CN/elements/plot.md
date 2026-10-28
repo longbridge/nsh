@@ -82,7 +82,7 @@ mount(App);
 | `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | x 轴如何放置各行：`point`（按顺序从左边缘到右边缘均匀分布；只有一行时放在中间）、带可选 `domain` 的 `linear`，或 `band`（每行一个条带，用于柱子；见 [Bar](#bar)）。y 轴为 `band` 时默认为 `linear`，用于横向柱子。`reverse: true` 让它从右边缘开始（[反向比例尺](#反向比例尺)）。 |
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | y 轴如何放置数值：定义域的最小值在底边，最大值在顶边。没有 `domain` 时取各图形所绘制数值的范围。`band` 从顶边向下每行布置一个条带，用于横放的柱子。`reverse: true` 让它反过来：最小值在顶边，各行从底边向上排列（[反向比例尺](#反向比例尺)）。 |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | plot 跟随指针和键盘：报告指针下的行并显示悬停部件；它也是 Tab 的一个停靠点，方向键移动悬停的行（[键盘](#键盘)）。为 `false` 时只绘制图形（例如列表中的迷你图），在它上面的点按交给周围的视图。plot 是否提供键盘操作，在创建时确定。 |
-| `motion` | `.motion(..)` | `PlotMotion` | 无 | 出现动效、悬停淡入淡出的时间，以及悬停跟随指针所用的弹簧（见下文）。 |
+| `motion` | `.motion(..)` | `PlotMotion` | 无 | 出现动效、悬停淡入淡出的时间，以及按键移动悬停时所用的弹簧（见下文）。 |
 | `appearGeneration` | `.appear_generation(..)` | `number` | 无 | 启用出现动效：plot 第一次显示时图形逐渐绘出，此值每次变化时再播放一次（换一支股票、换一个周期）。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对图表读出的内容：图表显示了什么，以及值得注意的地方。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 无 | 屏幕阅读器读出的数值：应用对指针下那一行的描述。 |
@@ -197,7 +197,7 @@ const sales = [
 | `stack` | `string` | 无 | 加入的堆叠：`stack` 相同的柱子按顺序堆叠（没有值的行不增加高度）。 |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | 柱子每个角的半径；`{ topLeft: 4, topRight: 4 }` 让竖立的柱子顶端变圆。超过柱子一半的半径会缩小以适应柱子。 |
 | `stagger` | `number` | `0` | plot 出现时，柱子按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每根柱子用剩下的时间长完；为 0 时一起生长。 |
-| `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的柱子的不透明度，让那一行突出：随悬停淡入淡出，并随悬停的滑动从一根柱子交给下一根。 |
+| `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的柱子的不透明度，让那一行突出：随悬停淡入淡出，并随悬停从一根柱子交给下一根。 |
 | `label` | `string \| (d, index) => string` | 无 | 每根柱子数值末端的文字：字段（它的文字或数字），或返回应用格式化后文字的函数。 |
 | `labelClass`、`labelStyle` | `string`、`StyleProp<TextStyle>` | 无 | `label` 部件：以柱子为中心的文字，位于竖立柱子末端的上方（向下生长时在下方），横放柱子末端之后（向回生长时在之前）。它的内边距就是与柱子的距离。 |
 | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：每根柱子的盒子，盒子的背景（`bg-linear-to-t from-… to-…`，从柱子底部到顶部）只在柱子内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
@@ -434,7 +434,7 @@ export function Compare(props: { metrics: Metric[] }) {
 | `RadialLine` | `closed` | `.closed(..)` | `boolean` | `false` | 从最后一个点继续连回第一个点：雷达图的多边形。不闭合时，它的区域收拢到中心（或沿内缘回到起点）。 |
 | `RadialLine` | `dot`、`dotClass`、`dotStyle` | `.dot(..)`、`.dot_class(..)`、`.dot_style(..)` | `boolean`、`string`、`StyleProp<ViewStyle>` | `false` | 在每个点上显示圆点：以点为中心的视图，尺寸、背景和边框由应用决定。圆点随线一起长出和移动。 |
 | `RadialLine` | `backgroundClass`、`backgroundStyle` | `.background_class(..)`、`.background_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：包围外圆的盒子，盒子的背景（`bg-*`、渐变）只在它的区域内显示，位于 `fill` 之下，与 area 的背景相同。 |
-| `RadialLine` | `hoverDotClass`、`hoverDotStyle` | `.hover_dot_class(..)`、`.hover_dot_style(..)` | `string`、`StyleProp<ViewStyle>` | plot 的 `dotClass`、`dotStyle` | 它的悬停圆点，位于它在指针下那一行的点上，按 plot 的 `pointer` 弹簧滑到下一行；`hidden` 表示不显示。 |
+| `RadialLine` | `hoverDotClass`、`hoverDotStyle` | `.hover_dot_class(..)`、`.hover_dot_style(..)` | `string`、`StyleProp<ViewStyle>` | plot 的 `dotClass`、`dotStyle` | 它的悬停圆点，位于它在指针下那一行的点上，与指针在同一帧移动；按键切换行时按 plot 的 `pointer` 弹簧滑到下一行；`hidden` 表示不显示。 |
 | `RadialGrid` | `rings` | `.rings(..)` | `number[]` | 无 | 圆环的位置，取 y 比例尺上的值：每个圆环离中心的距离与径向线对这个值的距离相同。 |
 | `RadialGrid` | `spokes` | `.spokes(..)` | `boolean` | `false` | 在每一行的角度上，从 `innerRadius` 到 `outerRadius` 画一条线。 |
 | `RadialGrid` | `circular` | `.circular(..)` | `boolean` | `false` | 圆环画成圆（只占一圈的一部分时是圆弧）。默认是穿过各行角度的多边形，plot 少于三行时是圆。 |
@@ -664,7 +664,9 @@ const [peak, last] = [3, rows.length - 1];
 | `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开；过渡途中再次改变时，从当前绘制的位置继续）；径向线的点过渡到新的数值、角度和半径（新出现的行从内半径长出），径向网格的圆环随之移动；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线、`PlotAxis` 和 `PlotLabel` 一起移动；以及 sankey 的节点、流带和标签，从旧的流的布局移动到新的布局，过渡途中再次改变时从当前绘制的位置继续。 |
 | `enter` | timing | 指针移到 plot 上时，悬停部件淡入。 |
 | `exit` | timing | 指针离开后，悬停部件淡出。 |
-| `pointer` | spring | 指针在 plot 上移动时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起，径向线的悬停圆点按它从一行的点滑到下一行的点。 |
+| `pointer` | spring | 按键或屏幕阅读器切换悬停的行时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起。 |
+
+悬停部件与指针在同一帧移动：指针移动时，十字线、圆点和提示框立即落在指针下的那一行，紧跟手的移动，它们的淡入淡出（`enter`、`exit`）仍然带有动画。
 
 动效在平台的动画器上运行，不需要每帧运行 JS；对偏好减少动态效果的用户立即完成。列表为回到视野的行重新创建 plot 时，图形会再绘出一次；可以把行的键名作为它的 `appearGeneration`。
 
@@ -825,5 +827,5 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
 - 出现动效用平台动画器推动的值裁剪折线和区域、让柱子长出；柱子在悬停行以外变淡，是动画器根据悬停位置算出的不透明度；悬停部件是由动画器移动和淡入淡出的视图，动画器还根据 plot 和提示框的尺寸把提示框留在 plot 内。
 - area 的背景画在它自己的画布里，裁剪到 area 的形状，使用的渐变与平台为视图的 `bg-linear-*` 绘制的相同；它的类名变化（外观、`dark:`）只会重新发送绘图，不需要重新录制。
 - 饼图的每个扇区画在自己的画布里；指针下的扇区在 Rust 中根据扇区的角度和半径找出，它的抬起是一个半径、其他扇区的变淡是一个不透明度，都由动画器推动；出现动效的扫出也以同样方式推动扇区的角度，所以两者都不需要重新录制绘图。
-- 径向线指针下的行在 Rust 中根据各点的角度找出；它的悬停圆点是由动画器按 `pointer` 弹簧移动的视图；出现或过渡到新数值时，各点是由动画器从原来位置推动的数，所以每次变化只录制一次。
+- 径向线指针下的行在 Rust 中根据各点的角度找出；它的悬停圆点是由动画器摆放在指针下那一行的视图（按键切换时按 `pointer` 弹簧滑动）；出现或过渡到新数值时，各点是由动画器从原来位置推动的数，所以每次变化只录制一次。
 - 坐标轴的标签、刻度线和轴线是平台自己的文字和视图，由 Rust 中的布局根据 plot 的尺寸和比例尺摆放：plot 尺寸变化时它们随图形一起移动，定义域变化时标签会重新写出。

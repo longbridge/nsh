@@ -175,50 +175,57 @@ pub(crate) fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
     }
 }
 
-/// The caret's blinking (`gpui-base`'s `BlinkCursor`).
+/// The caret's blinking (`gpui-base`'s `BlinkCursor`): its opacity, moved
+/// natively by a looping animation, so a blink costs the engine nothing
+/// (no task wakes, no view comes or goes).
 #[derive(Clone, Copy)]
 struct Blink {
-    visible: Signal<bool>,
-    task: Stored<Option<Spawned<()>>>,
+    opacity: AnimatedValue,
+    run: Stored<Option<Animation>>,
 }
 
 impl Blink {
     fn new() -> Self {
         Self {
-            visible: signal(false),
-            task: stored(None),
+            opacity: animated_value(1.0),
+            run: stored(None),
         }
     }
 
-    fn cancel(self) {
-        if let Some(task) = self.task.replace(None) {
-            task.cancel();
+    /// Stops blinking, where it is.
+    fn stop(self) {
+        if let Some(run) = self.run.replace(None) {
+            run.stop();
         }
     }
 
     /// Shows the caret, then blinks it after `hold` (none with reduced
-    /// motion).
+    /// motion): hidden for `BLINK`, shown for `BLINK`, and so on.
     fn start(self, hold: Duration) {
-        self.cancel();
-        self.visible.set(true);
+        self.stop();
+        self.opacity.set(1.0);
         if untracked(reduce_motion) {
             return;
         }
-        let visible = self.visible;
-        let task = spawn(async move {
-            timer(hold).await;
-            loop {
-                visible.update(|v| *v = !*v);
-                timer(BLINK).await;
-            }
-        });
-        self.task.replace(Some(task));
-    }
-
-    /// Hides the caret (the input lost the focus).
-    fn stop(self) {
-        self.cancel();
-        self.visible.set(false);
+        let ms = |d: Duration| d.as_secs_f32() * 1000.0;
+        let jump = Easing::Steps(1, StepPosition::JumpEnd);
+        let frames = [
+            Keyframe::at(0.0, 0.0).ease(jump),
+            Keyframe::at(0.5, 1.0).ease(jump),
+            Keyframe::at(1.0, 0.0),
+        ];
+        let blink = Animation::keyframes(
+            &self.opacity,
+            frames,
+            KeyframeTiming::new(2.0 * ms(BLINK))
+                .easing(Easing::Linear)
+                .infinite(),
+        );
+        // A delay before the loop, not the keyframes' own: theirs would
+        // hold the first keyframe, hidden.
+        let run = Animation::sequence([Animation::delay(ms(hold)), blink]);
+        run.start();
+        self.run.replace(Some(run));
     }
 }
 
@@ -456,14 +463,15 @@ impl Cells {
                     },
                 )
                 .otherwise(move || {
+                    // Mounted while the cell takes the next digit; it
+                    // blinks natively.
                     when(
-                        move || {
-                            self.focused.get() && self.blink.visible.get() && self.active() == ix
-                        },
+                        move || self.focused.get() && self.active() == ix,
                         move || {
                             view()
                                 .app_class(self.caret_class)
                                 .inline_style(self.caret_style)
+                                .bind_opacity(&self.blink.opacity)
                         },
                     )
                 }),

@@ -83,7 +83,8 @@ export type IconName =
   | "popover"
   | "tooltip"
   | "sheet"
-  | "button";
+  | "button"
+  | "external";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -133,6 +134,12 @@ const glyphs: Record<IconName, Draw> = {
   button: (c) => {
     rect(c, 2.5, 6, 15, 8, 3);
     line(c, [7, 10, 13, 10]);
+  },
+  external: (c) => {
+    // An arrow out of the top right corner of a box.
+    line(c, [9, 4, 4, 4, 4, 16, 16, 16, 16, 11]);
+    line(c, [11.5, 3.5, 16.5, 3.5, 16.5, 8.5]);
+    line(c, [16.5, 3.5, 9.5, 10.5]);
   },
   checkbox: (c) => {
     rect(c, 3.5, 3.5, 13, 13, 3);

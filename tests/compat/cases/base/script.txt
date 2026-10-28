@@ -99,6 +99,46 @@ covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
 covers [props] selectedStyle
+# base-link
+tap id:case-base-link
+# The link role on the link alone, no look of its own: the app's
+# `hoverStyle` while the platform reports it hovered.
+prop id:docs role link
+prop id:docs accessibilityState {}
+listens id:docs onPress
+nostyle id:docs backgroundColor
+state id:docs hovered
+style id:docs opacity 0.5
+state id:docs none
+style id:docs opacity 1
+# A press reports where it goes (`onOpen` with its `href`), then the
+# press.
+tap text:Docs
+expect Log: open https://example.com/docs, press
+# `accessibilityLabel`: what screen readers say, and what a label finds;
+# `openWith="app"` leaves the opening to `onOpen`.
+prop id:order role link
+prop id:order accessibilityLabel Order 42
+tap label:Order 42
+expect Log: open https://example.com/docs, press, route /orders/42
+# `disabled`: screen readers say so, `disabledStyle` applies, presses do
+# nothing (the platform gets no press to report).
+prop id:archived accessibilityState disabled=true
+style id:archived opacity 0.25
+tap id:enable
+prop id:archived accessibilityState {}
+style id:archived opacity 1
+listens id:archived onPress
+tap text:Archived
+expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+covers [nsh/base] Link
+covers [props] Link.href
+covers [props] accessibilityLabel
+covers [props] disabled
+covers [props] disabledStyle
+covers [props] hoverStyle
+covers [events] Link.onOpen
+covers [events] onPress
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the
@@ -1060,6 +1100,119 @@ covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
 
+# base-collapsible-reveal
+# With `reveal`: the clipping region is there while closed, zero high, so
+# the gap (4) comes before it: the collapsible is 24 high.
+tap id:case-base-collapsible-reveal
+expect Summary
+absent Details
+frame id:region 0 20 390 24
+frame id:after 0 44 390 20
+# Open: the details in the region, the view after it below them (the
+# frames are where the reveal ends; the platform springs them there).
+tap id:trigger
+expect Details
+frame id:region 0 20 390 54
+frame id:details 0 0 390 30
+frame id:after 0 74 390 20
+# Closed: the frames at once, the details out once the region has closed.
+tap id:trigger
+frame id:region 0 20 390 24
+frame id:after 0 44 390 20
+wait 400
+absent Details
+covers [props] Collapsible.reveal
+
+# base-accordion
+tap id:case-base-accordion
+# A group of level-2 headings over buttons, each saying whether its item
+# is expanded. Closed, each item is its trigger's 20 points: the kept and
+# the plain panels are out of the layout, the revealed one zero high.
+expect Open: none
+prop id:faq role group
+prop id:header-a role header
+prop id:trigger-a role button
+prop id:trigger-a accessibilityState expanded=false
+nostyle id:trigger-a backgroundColor
+style id:trigger-a opacity 1
+frame id:faq 0 20 390 60
+frame id:item-b 0 20 390 20
+frame id:item-c 0 40 390 20
+absent Shipping details
+absent Returns details
+listens id:trigger-a onPress
+# A press reports the next value; the app sets it: the panel under its
+# header, a region named by the app, the trigger expanded and styled
+# (`aria-expanded:`, `expandedStyle`).
+tap text:Shipping
+expect Open: a
+expect Changes: 1
+expect Shipping details
+prop id:trigger-a accessibilityState expanded=true
+style id:trigger-a backgroundColor #00ff00ff
+style id:trigger-a opacity 0.5
+prop id:panel-a role region
+prop id:panel-a accessibilityLabel Shipping
+frame id:item-a 0 0 390 50
+frame id:panel-a 0 20 390 30
+frame id:item-b 0 50 390 20
+frame id:faq 0 20 390 90
+# One open at a time: another item replaces it. The revealed panel's
+# frames are where its spring ends.
+tap text:Returns
+expect Open: b
+expect Changes: 2
+expect Returns details
+prop id:trigger-a accessibilityState expanded=false
+prop id:trigger-b accessibilityState expanded=true
+nostyle id:trigger-a backgroundColor
+absent Shipping details
+frame id:item-a 0 0 390 20
+frame id:item-b 0 20 390 50
+frame id:faq 0 20 390 90
+# The open item's trigger closes it; the revealed panel springs shut and
+# its content leaves once it has.
+tap text:Returns
+expect Open: none
+frame id:item-b 0 20 390 20
+frame id:faq 0 20 390 60
+wait 400
+absent Returns details
+# With `multiple`, opening one leaves the others open.
+tap id:multiple
+tap text:Returns
+tap text:Shipping
+expect Open: b,a
+expect Shipping details
+expect Returns details
+frame id:faq 0 20 390 120
+tap text:Returns
+expect Open: a
+absent Returns details
+# A disabled item takes no presses, dimmed for screen readers; it shows
+# what the app's value says.
+prop id:trigger-c accessibilityState disabled=true expanded=false
+tap text:Billing
+expect Changes: 6
+tap id:open-billing
+expect Billing details
+prop id:trigger-c accessibilityState disabled=true expanded=true
+covers [nsh/base] Accordion
+covers [nsh/base] AccordionItem
+covers [nsh/base] AccordionHeader
+covers [nsh/base] AccordionTrigger
+covers [nsh/base] AccordionPanel
+covers [props] Accordion.value
+covers [props] Accordion.multiple
+covers [props] AccordionItem.value
+covers [props] AccordionItem.disabled
+covers [props] AccordionHeader.level
+covers [props] AccordionTrigger.expandedStyle
+covers [props] AccordionPanel.reveal
+covers [props] AccordionPanel.keepMounted
+covers [props] accessibilityLabel
+covers [events] Accordion.onChange
+
 # base-otp-input
 tap id:case-base-otp-input
 # One field over the cells for the keyboard and screen readers: the
@@ -1083,12 +1236,13 @@ type label:Code 12a
 expect Code [12]
 prop label:Code value 12
 # The focus: the caret (50 high, 4 below the cell's top) in the cell that
-# takes the next digit, gone while it blinks off.
+# takes the next digit; it stays while it blinks (its opacity moves
+# natively), so the layout holds still.
 event label:Code onFocus
 expect Focused yes
 frame id:otp 0 20 390 60
 wait 600
-frame id:otp 0 20 390 26
+frame id:otp 0 20 390 60
 # Up to the length: complete, the last cell `focus:`.
 type label:Code 345
 expect Code [1234]
@@ -2984,7 +3138,7 @@ covers [nsh/base] Highlight
 covers [nsh/base] History
 covers [nsh/base] HorizontalRule
 covers [nsh/base] Italic
-covers [nsh/base] Link
+covers [nsh/base] RichLink
 covers [nsh/base] ListItem
 covers [nsh/base] ListKeymap
 covers [nsh/base] OrderedList

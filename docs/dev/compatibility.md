@@ -46,7 +46,10 @@ good, whatever the version number says. Between releases, and before the first c
    pass in (props, styles, options, configs) gains optional members only. Parameter names are not part of a type:
    TypeScript compares function types by structure, so `(data: number) => void` and `(value: number) => void` are one
    type, and a function, method or callback may rename its parameters; their count, optionality and types may not
-   change.
+   change. A union gains members whichever way it goes: what apps read too (`platform.os`, a resource's state, the
+   reason a popup closed), as the DOM's types grow in TypeScript's own declarations. An app handles a value it does
+   not know (a `switch`'s `default`), and the checks count a member added to such a union as compatible. A new member
+   comes with a new case (a new platform, a new way to close); a case an app saw keeps the value it reported (rule 4).
 4. **Behavior is kept.** Defaults, units, coordinate spaces, the payload of an event and when it fires stay as they
    were. New behavior is opt-in, through a new prop, option or value. A bug fix that changes what a working app sees
    is a behavior change: fix it behind an opt-in, or make sure no app can rely on the old result.

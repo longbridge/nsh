@@ -1,7 +1,9 @@
 //! `nsh/base`'s components in a Rust app, run headless (`nsh_testing`):
 //! what a user does with them and what the app hears and shows.
 
+mod accordion;
 mod calendar;
+mod collapsible;
 mod color_picker;
 mod combobox;
 mod date_picker;
@@ -12,6 +14,7 @@ mod editor_completion;
 mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
+mod link;
 mod number_input;
 mod otp_input;
 mod plot;

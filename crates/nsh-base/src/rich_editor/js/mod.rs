@@ -885,8 +885,10 @@ impl RichEditorSession {
         )
     }
 
-    /// The document as JSON (ProseMirror's shape).
-    pub(crate) fn get_json(&self) -> NodeJson {
+    /// The document as JSON (ProseMirror's shape), named as Tiptap's
+    /// `getJSON`: `#[class]` keeps a name's case past its first letter.
+    #[allow(non_snake_case)]
+    pub(crate) fn getJSON(&self) -> NodeJson {
         self.doc()
     }
 
@@ -1690,6 +1692,21 @@ mod tests {
         plugins::{KeyBindings, RichPluginKind, RichPluginSpec, plugins_of},
         *,
     };
+
+    /// The document's JSON is `getJSON()`, as Tiptap names it and the docs
+    /// say: `#[class]` writes a method's name as Rust spells it past its
+    /// first letter, so `get_json` would be `getJson`.
+    #[test]
+    fn the_document_is_read_with_get_json() {
+        use nsh_core::element::Class;
+        let names: Vec<_> = RichEditorSession::DEF
+            .members
+            .iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(names.contains(&"getJSON"), "{names:?}");
+        assert!(!names.contains(&"getJson"), "{names:?}");
+    }
 
     fn editor(markdown: &str) -> EditorSession {
         let schema = starter::schema();

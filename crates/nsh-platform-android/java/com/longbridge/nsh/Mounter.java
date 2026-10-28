@@ -888,7 +888,9 @@ final class Mounter {
         }
         Box.Frame f = Box.frame(v);
         Transition t = layoutAnimation != null ? layoutAnimation[1] : null;
-        boolean moves = t != null && !created.contains(id) && f.right > f.left && f.bottom > f.top;
+        // A view never placed has no frame to move from; one placed zero
+        // high (a collapsed reveal) or zero wide grows from it, as on iOS.
+        boolean moves = t != null && !created.contains(id) && (f.right > f.left || f.bottom > f.top);
         int[] from = {f.left, f.top, f.right, f.bottom};
         int[] to = {px(x), px(y), px(x + w), px(y + h)};
         Animator running = layoutAnimators.get(id);

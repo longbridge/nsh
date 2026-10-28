@@ -188,3 +188,68 @@ fn a_twelve_hour_clock_switches_am_and_pm() {
     see(&mut app, "PM^");
     assert_eq!(log(&app), "21:30:00 09:30:00 21:30:00");
 }
+
+/// A field at 09:30 with its own labels (no `renderSegment`).
+#[component]
+fn Plain() -> impl IntoElement {
+    view().child(
+        time_field()
+            .accessibility_label("Start time")
+            .default_value(TimeOfDay(NaiveTime::from_hms_opt(9, 30, 0).unwrap()))
+            .w(px(200.0))
+            .h(px(30.0)),
+    )
+}
+
+#[test]
+fn editing_makes_no_views() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use nsh_core::MountItem;
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<Plain>())
+    };
+    config.environment.os = Os::MacOs;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let made = Arc::new(AtomicUsize::new(0));
+    let seen = made.clone();
+    app.observe(move |_, batch| {
+        let n = batch
+            .items
+            .iter()
+            .filter(|i| matches!(i, MountItem::Create { .. } | MountItem::Delete { .. }))
+            .count();
+        seen.fetch_add(n, Ordering::Relaxed);
+    });
+    app.first_render().unwrap();
+    app.wait_for("text:09").unwrap();
+    app.press("text:09").unwrap();
+    app.idle(std::time::Duration::from_millis(50)).unwrap();
+    made.store(0, Ordering::Relaxed);
+    // Digits, steps, moves between segments and Tab: the segments stay, their
+    // texts change.
+    for key in [
+        "1",
+        "4",
+        "up",
+        "left",
+        "down",
+        "tab",
+        "shift+tab",
+        "backspace",
+    ] {
+        app.press_key(key).unwrap();
+    }
+    see(&mut app, "00");
+    app.idle(std::time::Duration::from_millis(50)).unwrap();
+    assert_eq!(
+        made.load(Ordering::Relaxed),
+        0,
+        "views created or deleted while editing"
+    );
+}

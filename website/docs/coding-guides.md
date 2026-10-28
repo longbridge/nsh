@@ -946,7 +946,9 @@ the fallback behavior:
 
 A platform branch must preserve the semantic contract even if presentation differs. For example, a dialog is a sheet
 on iOS and a layer over the window on the desktops, but the app still needs a coherent open state. Test the shared
-behavior headless and the platform's part with `nsh test --target`.
+behavior headless and the platform's part with `nsh test --target`. Give every branch on a value NSH reports
+(`platform.os`, a state, a reason) a `default`: later releases add platforms and cases, and an app delivered
+today runs on them ([Compatibility](./compatibility.md)).
 
 An app declares what it reaches outside its VM in `nsh.json` `"capabilities"`: the hosts it fetches from, the pages a
 web view shows, the clipboard, the status bar ([Sandbox and Capabilities](./sandbox-and-capabilities.md)). An app

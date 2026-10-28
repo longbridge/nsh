@@ -8,7 +8,9 @@
 //! its edges with the ticks of its scales and its [`PlotLabel`]s write
 //! texts at values of them, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
-//! and the pointer, the hover's glide and fade, the appear and the scales'
+//! and the pointer, the hover's fade and its glide between rows the keys
+//! step to (the pointer's own moves it follows at once, in the same
+//! frame), the appear and the scales'
 //! moves to new domains (`tween.rs`) run in Rust and on the platform's
 //! animator (the app hears of a new index, nothing more). Marks paint with
 //! SVG's paint properties, CSS's on any element
@@ -101,14 +103,19 @@ pub fn registry() -> Registry {
 
 /// The timing of a plot's motion (`gpui-base`'s `PlotMotion`): how its
 /// marks appear and change shape, how the hover fades in and out, and the
-/// spring the hover follows the pointer with. Each is the app's; none moves at once, as
+/// spring it glides to the row the keys step to (the pointer's moves it
+/// follows at once). Each is the app's; none moves at once, as
 /// `gpui-base`'s zero durations do, and so does every one while the user
 /// asks for reduced motion.
 #[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
 pub struct PlotMotion {
-    /// The spring the cross line, the dots and the tooltip follow the row
-    /// under the pointer with (`with_pointer`); none: they move to it at
-    /// once.
+    /// The spring the cross line, the dots and the tooltip glide to the
+    /// next row with when the keys or a screen reader step the hover there
+    /// (`with_pointer`), and a pie's slice under the pointer lifts with;
+    /// none: they move at once. The pointer's own moves never take it:
+    /// pointer-driven motion follows the pointer in the same frame (the
+    /// parts snap to the row nearest to it), so the hover never trails the
+    /// hand. `gpui-base` springs pointer moves too, but snaps by default.
     pub pointer: Option<Spring>,
     /// How the hover fades in when the pointer comes over the plot
     /// (`with_enter`).
@@ -214,7 +221,7 @@ pub struct PlotProps {
     #[prop(default = true)]
     pub interactive: Prop<bool>,
     /// The timing of its motion: the appear, the moves to new shapes and
-    /// domains (`update`), the hover's fade and the pointer's spring; none
+    /// domains (`update`), the hover's fade and the keys' glide; none
     /// by default, so everything shows at once.
     pub motion: Prop<Option<PlotMotion>>,
     /// Opts in to the appear (`gpui-base`'s `Plot::appear_generation`):
@@ -379,6 +386,10 @@ struct PlotContext {
     fade: AnimatedValue,
     /// The row under the pointer (`TooltipState::index`).
     hovered: Signal<Option<u32>>,
+    /// The keys (or a screen reader) moved the hover last, not the
+    /// pointer: its parts may glide to the row on `motion.pointer`. What
+    /// the pointer drives follows it in the same frame.
+    keyed: Stored<bool>,
     /// The radial marks' tests of the row under a point (a pie's slice):
     /// with any, the pointer is over what they find, not the row nearest
     /// along the x axis.
@@ -711,6 +722,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let cross = point(animated_value(0.0), animated_value(0.0));
     let fade = animated_value(0.0);
     let hovered = signal(None::<u32>);
+    let keyed = stored(false);
     let hits = signal(Vec::<Hit>::new());
     let bars = signal(Vec::<BarEntry>::new());
     provide_context(PlotContext {
@@ -732,6 +744,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         cross,
         fade,
         hovered,
+        keyed,
         hits,
         interactive: props.interactive,
         dot: HoverDot {
@@ -746,8 +759,11 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let place = TooltipPlace::new(props.tooltip_placement, props.tooltip_offset);
     // `pointer_x`: a radial mark found the row, and the parts follow the
     // pointer rather than the row (`gpui-base`'s pie puts the cross line at
-    // the cursor, and `gpui-component`'s pie tooltip follows it).
-    let follow = move |index: Option<u32>, pointer_x: Option<f32>| {
+    // the cursor, and `gpui-component`'s pie tooltip follows it). `keys`:
+    // the keys or a screen reader moved the hover, which may glide; the
+    // pointer's moves land in the same frame.
+    let follow = move |index: Option<u32>, pointer_x: Option<f32>, keys: bool| {
+        keyed.replace(keys);
         let was = hovered.get_untracked();
         if was == index {
             if let (Some(_), Some(x)) = (index, pointer_x) {
@@ -780,11 +796,12 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         if !across {
             place.row_at(at);
         }
-        // Entering: the parts take the row where they are, then fade in;
-        // over the plot, they glide to the next one on the pointer spring
-        // (`PlotHover::glide`).
+        // Entering: the parts take the row where they are, then fade in.
+        // A step of the keys glides to the next row on the pointer spring
+        // (`PlotHover::glide`); the pointer's moves snap to the row under
+        // it in the same frame, so the hover never trails the hand.
         let entering = was.is_none();
-        let glide = !entering && !still && pointer_x.is_none();
+        let glide = keys && !entering && !still;
         let to = |value: AnimatedValue, target: f32| match m.pointer.filter(|_| glide) {
             Some(spring) => drop(value.spring(target, spring)),
             None => value.set(target),
@@ -864,12 +881,12 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     };
     let key_to = move |index: Option<u32>| {
         let Some(i) = index else {
-            return follow(None, None);
+            return follow(None, None, true);
         };
         if radial() {
             if let Some(p) = slice_at(i) {
                 place.pointer_at(p.y.0);
-                follow(Some(i), Some(p.x.0));
+                follow(Some(i), Some(p.x.0), true);
             }
             return;
         }
@@ -893,7 +910,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 place.pointer_at(at);
             }
         }
-        follow(Some(i), None);
+        follow(Some(i), None, true);
     };
     // Left and Right follow the screen: the rows along a reversed x scale
     // run right to left (a pie's slices keep the rows' order).
@@ -949,7 +966,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                     // The keys' hover goes with the focus; the pointer's
                     // stays.
                     if !pointer_over.get() {
-                        follow(None, None);
+                        follow(None, None, true);
                     }
                 })
                 .accessibility_actions(actions)
@@ -981,7 +998,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 (!all.is_empty()).then(|| all.iter().rev().find_map(|h| (h.at)(e.position)))
             });
             if let Some(index) = found {
-                follow(index, Some(e.position.x.0));
+                follow(index, Some(e.position.x.0), false);
                 return;
             }
             // Across (bands down the y axis): the rows are found along y,
@@ -1002,11 +1019,11 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                     .min_by(|(_, a), (_, b)| (*a - at).abs().total_cmp(&(*b - at).abs()))
                     .map(|(i, _)| i as u32)
             });
-            follow(nearest, None);
+            follow(nearest, None, false);
         })
         .on_mouse_leave(move |_: &MouseEvent| {
             pointer_over.replace(false);
-            follow(None, None);
+            follow(None, None, false);
         })
         .child(props.children)
         // The hover's parts, over the marks; they take no pointer, so the

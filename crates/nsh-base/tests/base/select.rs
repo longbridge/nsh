@@ -170,6 +170,8 @@ struct Seen {
     parents: HashMap<NodeId, NodeId>,
     /// The views inserted into the root view, in order.
     roots: Vec<NodeId>,
+    /// How many mount items came.
+    items: usize,
 }
 
 struct App {
@@ -300,6 +302,7 @@ fn start_on(props: HarnessProps, os: Os, idiom: Idiom, screen_reader: bool) -> A
     let into = seen.clone();
     app.observe(move |_, batch| {
         let mut seen = into.lock().unwrap();
+        seen.items += batch.items.len();
         for item in &batch.items {
             match item {
                 MountItem::ViewProps { id, props } => {
@@ -648,6 +651,28 @@ fn search_filters_the_items_and_their_sections() {
     app.key("enter");
     app.gone("role:listbox");
     app.see("Value: rice");
+}
+
+#[test]
+fn a_search_keystroke_in_a_long_list_sends_only_the_rows_in_view() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(many(5000))
+    });
+    app.open_list();
+    app.see("Item 0");
+    app.type_text("Search", "4").unwrap();
+    app.see(">Item 4");
+    app.idle(Duration::from_millis(50)).unwrap();
+    app.seen.lock().unwrap().items = 0;
+    app.type_text("text:4", "2").unwrap();
+    app.see(">Item 42");
+    app.idle(Duration::from_millis(50)).unwrap();
+    let items = app.seen.lock().unwrap().items;
+    println!("a search keystroke over 5000 items: {items} mount items");
+    // The rows in view change (and their window's): nothing grows with
+    // the items.
+    assert!(items < 600, "{items} mount items for a keystroke");
 }
 
 // 7. Typeahead.

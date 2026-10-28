@@ -114,7 +114,9 @@ export function Appear(props: { index?: number; flex?: boolean; children: JSX.El
  * An animated value that springs to `target` each time it changes (a
  * control's state: 1 while on, 0 while off), natively: JS only starts each
  * spring. A change mid-way turns it from where it is, with its velocity;
- * with reduced motion it lands at once.
+ * with reduced motion it lands at once. For discrete changes only: what
+ * the pointer drives (a dragged thumb, a hover's place) is set in the same
+ * frame, never sprung toward the pointer.
  */
 export function follow(target: () => number, spring: { stiffness: number; damping: number } = motion.control): AnimatedValue {
   const v = createAnimatedValue(target());
