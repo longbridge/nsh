@@ -6423,6 +6423,181 @@ fn base_plot_axis_moves_with_the_domain() {
     assert!(end.iter().all(|&x| x.abs() < 0.01), "{end:?}");
 }
 
+const BASE_PLOT_LABEL: &str = r##"import { mount, View } from "nsh";
+import { Bar, Line, Plot, PlotLabel } from "nsh/base/plot";
+
+const SIZE = "w-[20px] h-[10px]";
+
+function App() {
+  return (
+    <View style={{ padding: 40, gap: 40 }}>
+      <Plot testID="point" data={[{ v: 0 }, { v: 50 }, { v: 100 }]} y="v" style={{ width: 200, height: 100 }}>
+        <Line />
+        <PlotLabel
+          class="text-xs"
+          texts={[
+            { text: "left", x: 1, y: 50, class: SIZE },
+            { text: "center", x: 1, y: 50, align: "center", class: SIZE },
+            { text: "right", x: 1, y: 50, align: "right", style: { width: 20, height: 10 } },
+            { text: "between", x: 0.5, y: 100, class: SIZE },
+          ]}
+        />
+      </Plot>
+      <Plot
+        testID="band"
+        data={[{ v: 1 }, { v: 2 }, { v: 3 }, { v: 4 }]}
+        y="v"
+        xScale={{ type: "band" }}
+        yScale={{ type: "linear", domain: [0, 4] }}
+        style={{ width: 200, height: 100 }}
+      >
+        <Bar />
+        <PlotLabel texts={[{ text: "band", x: 2, y: 2, align: "center", class: SIZE }]} />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The views of `all` up from `id` to `top`, their frames summed: where
+/// `id` is in `top`'s coordinates.
+fn frame_within(all: &[MountBatch], id: u32, top: u32) -> (f32, f32) {
+    let parent_of = |child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut at = id;
+    while at != top {
+        let f = frame_of(all, at).unwrap();
+        x += f.origin.x.0;
+        y += f.origin.y.0;
+        at = parent_of(at);
+    }
+    (x, y)
+}
+
+/// `nsh/base/plot`'s `PlotLabel` (`gpui-base`'s `PlotLabel(Vec<Text>)`):
+/// each text at its `x` and `y`, values of the plot's scales (a row's
+/// index, or a fraction between two, on a point scale; the middle of a
+/// band on a band scale; a value on a linear one), its box's top edge on
+/// the point, and `align` starting it there (the default), centering it
+/// on it or ending it there, as `gpui-base` paints a text at its origin.
+#[test]
+fn base_plot_label_writes_texts_at_values_of_the_scales() {
+    let (_engine, rx) = start(BASE_PLOT_LABEL);
+    let mut all = until(&rx, |b| shows(b, "band"));
+    all.extend(until(&rx, |_| false));
+    let near = |text: &str, plot: &str, (x, y): (f32, f32)| {
+        let id = all
+            .iter()
+            .rev()
+            .find_map(|b| text_ids(b, text))
+            .expect(text);
+        let (lx, ly) = frame_within(&all, id, test_view(&all, plot));
+        assert!(
+            (lx - x).abs() <= 0.5 && (ly - y).abs() <= 0.5,
+            "{text} at ({lx}, {ly}), not ({x}, {y})"
+        );
+    };
+    // Row 1 of 3 is the middle of the plot's width, 50 of 0 to 100 the
+    // middle of its height.
+    near("left", "point", (100.0, 50.0));
+    near("center", "point", (90.0, 50.0));
+    near("right", "point", (80.0, 50.0));
+    near("between", "point", (50.0, 0.0));
+    // Band 2's middle (125 of 200, four bands).
+    near("band", "band", (115.0, 50.0));
+}
+
+const BASE_PLOT_LABEL_GLIDE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Line, Plot, PlotLabel } from "nsh/base/plot";
+
+function App() {
+  const top = signal(2);
+  setTimeout(() => top.set(4), 50);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={[{ t: 0, v: 0 }, { t: 2, v: 1 }]}
+        x="t"
+        y="v"
+        xScale={{ type: "linear", domain: [0, top()] }}
+        motion={{ update: { duration: 200, easing: "linear" } }}
+        style={{ width: 200, height: 100 }}
+      >
+        <Line curve="linear" />
+        <PlotLabel texts={[{ text: "glide", x: 2, y: 1, style: { width: 20, height: 10 } }]} />
+      </Plot>
+      <Text>{`top ${top()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A `PlotLabel` glides with its plot's domain (`motion.update`), as the
+/// marks and the axes do: the text is laid out at its place on the new
+/// scale (2 of 0 to 4: 100 of 200) and moved from where the old domain put
+/// it (2 of 0 to 2: 100 further on) to there, on the platform's animator.
+#[test]
+fn base_plot_label_moves_with_the_domain() {
+    use nsh_core::animation::Animator;
+    let (_engine, rx) = start(BASE_PLOT_LABEL_GLIDE);
+    let mut all = until(&rx, |b| shows(b, "top 4"));
+    all.extend(until(&rx, |_| false));
+    let text = all
+        .iter()
+        .rev()
+        .find_map(|b| text_ids(b, "glide"))
+        .expect("glide");
+    assert_eq!(
+        frame_within(&all, text, test_view(&all, "plot")),
+        (100.0, 0.0)
+    );
+    let anchor = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::Insert { parent, child, .. } if *child == text => Some(*parent),
+            _ => None,
+        })
+        .unwrap();
+    let mut animator = Animator::default();
+    for item in all.iter().flat_map(|b| b.items.iter()) {
+        animator.apply(item);
+    }
+    let moved = |animator: &mut Animator, t: f64| {
+        animator.tick(t);
+        let mut out = (f32::NAN, f32::NAN);
+        animator.write(
+            |id| (id == anchor).then_some(id),
+            |_, values, _| {
+                out = (
+                    values.transform[0].unwrap_or(f32::NAN),
+                    values.transform[1].unwrap_or(f32::NAN),
+                )
+            },
+        );
+        out
+    };
+    let (x, y) = moved(&mut animator, 0.0);
+    assert!((x - 100.0).abs() < 0.01 && y.abs() < 0.01, "({x}, {y})");
+    let (x, y) = moved(&mut animator, 0.25);
+    assert!(x.abs() < 0.01 && y.abs() < 0.01, "({x}, {y})");
+}
+
 const BASE_PLOT_KEYS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Line, Pie, Plot } from "nsh/base/plot";
 

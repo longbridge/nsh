@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie and Arc and its PlotAxis: charts drawn natively from the app's rows, with the scales of the axes and their labels, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie and Arc, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
 order: 20.9
 group: base
 demo: el-plot
@@ -11,7 +11,8 @@ demo: el-plot
 A plot is the frame of a chart: the rows of data it shows, the scales of its x and y axes, the pointer over it and its
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
 per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole) and
-an `Arc` between two angles; a `PlotAxis` labels an edge with the ticks of its scale. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
+an `Arc` between two angles; a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
+points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
 hears of a new row, nothing more. The look is the app's: marks paint with CSS's paint properties of SVG shapes
@@ -80,7 +81,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc` and `PlotAxis` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -395,6 +396,62 @@ or follows the pointer: keep it pure (the same value, the same text). Without it
 `1,500`, `0.25`, `−2`. In Rust, `plot_axis()` makes an axis, its `format` a `TickFormat::from_fn(|value, index| ..)`.
 An axis takes no pointer, and screen readers hear the plot rather than its labels.
 
+## PlotLabel
+
+A `PlotLabel` writes texts at points of the plot: a caption over a peak, a tag at a line's last point, a note at a
+grid line's end. Each of its `texts` names its point with values of the plot's scales, as the marks do: a row's index
+on a `point` or `band` scale (the middle of the row's band), a value on a `linear` one. The text's top edge sits on
+the point, and its `align` starts it there, centers it on it or ends it there. The plot's layout places the texts, so
+they follow the plot's size; they glide with the scales' domains (`motion.update`) and fade in with the appear.
+
+```tsx
+import { Area, Line, Plot, PlotLabel } from "nsh/base/plot";
+
+const rows = [
+  { day: "Mon", visitors: 1820 },
+  { day: "Tue", visitors: 2140 },
+  { day: "Wed", visitors: 1960 },
+  { day: "Thu", visitors: 2480 },
+  { day: "Fri", visitors: 2310 },
+];
+const [peak, last] = [3, rows.length - 1];
+
+<Plot data={rows} y="visitors" yScale={{ type: "linear", domain: [0, 3000] }} class="mr-12 h-40">
+  <Area class="fill-chart-1/20" />
+  <Line class="stroke-chart-1 stroke-2" />
+  {/* The peak's value over it, and a tag right of the last point, its middle at the point's height. */}
+  <PlotLabel
+    class="text-xs tabular-nums text-muted-foreground"
+    texts={[
+      { text: `High ${rows[peak].visitors}`, x: peak, y: rows[peak].visitors, align: "center", class: "-translate-y-full pb-1" },
+      { text: `${rows[last].visitors}`, x: last, y: rows[last].visitors, class: "-translate-y-1/2 ml-2 rounded bg-chart-1 px-1.5 text-white" },
+    ]}
+  />
+</Plot>
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `texts` | `.texts(..)` | `PlotText[]` | `[]` | The texts it writes, each at its own point. |
+
+Each text is a `PlotText`:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `text` | `string` | | What it reads. |
+| `x` | `number` | | Where it goes along the x axis: a value of the x scale, a row's index on a `point` or `band` scale (`0.5` is halfway between the first two rows). |
+| `y` | `number` | | Where its top edge goes along the y axis: a value of the y scale. |
+| `align` | `"left" \| "center" \| "right"` | `"left"` | How it sits along x from its point: starting at it, centered on it, or ending at it. |
+| `class`, `style` | `string`, `StyleProp<TextStyle>` | none | The text's own classes and style, over what it inherits from the label: its box (a tag's background and padding) and its distance from the point. |
+
+The look is the app's: the label's `class` gives every text the text styles they inherit (font, size, color), and a
+text's own `class` and `style` style it alone. A text goes above its point with `-translate-y-full`, and its padding
+is its gap from the point (`pb-1`); a tag beside a line's last point sits in the margin the app leaves on that side
+(`mr-12`), as an axis' labels do. In Rust, `plot_label()` makes a label, each text a
+`PlotText::new(text, x, y)` with `.align(PlotTextAlign::Center)`, `.class(..)` and `.style(..)`. The pointer passes
+through the texts to the plot, and screen readers hear the plot, whose `accessibilityLabel` says what the texts
+point out.
+
 ## Motion
 
 Motion is the app's, and none by default: everything shows at once. `motion` takes the timings of
@@ -403,7 +460,7 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 | Key | Type | What moves |
 |---|---|---|
 | `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |
@@ -581,7 +638,7 @@ A sparkline in a list row is a plot with `interactive={false}`: it draws its mar
 ## Accessibility
 
 - A plot is one element for screen readers, with the image role and the app's `accessibilityLabel`; its marks, its
-  axes' labels and the hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
+  axes' labels, its `PlotLabel`s and the hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
   (the range, the highest value), and give `accessibilityValue` the words for the row under the pointer, so a screen
   reader says the value as it changes.
 - The row under the pointer is reported with `onHoverChange` on platforms with a pointer (desktops, the web, an iPad

@@ -1718,6 +1718,21 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Texts at values of the plot's scales: the middle row of three at 50 of
+# 0 to 100 is the point (100, 50), each text's top edge on it, starting
+# at it, centered on it or ending at it; half a row from the first row
+# at 100 is the top edge.
+expect lab-left
+frame parent:text:lab-left 100 50 0 0
+frame text:lab-left 0 0 20 10
+frame parent:text:lab-center 100 50 0 0
+frame text:lab-center -10 0 20 10
+frame parent:text:lab-right 100 50 0 0
+frame text:lab-right -20 0 20 10
+frame parent:text:lab-top 50 0 0 0
+frame text:lab-top 0 0 20 10
+covers [nsh/base/plot] PlotLabel
+covers [props] PlotLabel.texts
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

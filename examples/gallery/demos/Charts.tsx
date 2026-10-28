@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -70,7 +70,7 @@ const SECONDS = ["−60s", "−45s", "−30s", "−15s", "now"];
 const OPEN = 41.2;
 /** The first tick's time of day, in seconds. */
 const START = 10 * 3600 + 42 * 60;
-/** How a re-fit of the live plot's y domain glides: its marks over `motion.update`, the gutter with the layout. */
+/** How a re-fit of the live plot's y domain glides: its marks and labels over `motion.update`, the newest dot with the layout. */
 const REFIT = { duration: 450, easing: "easeInOut" } as const;
 const refitLayout = {
   duration: REFIT.duration,
@@ -87,13 +87,16 @@ const clock = (t: number) => {
 /**
  * A minute of a price, a tick a second: the newest point is the plot's
  * right edge, its dot breathing while the stream runs, its price tagged in
- * the gutter at its height, inside a channel of each tick's high and low
- * over the last ten (an area whose `y0` is a field of each row: a band).
+ * the gutter at its height and the window's high written over its point
+ * (a `PlotLabel` each, placed by the plot's scales), inside a channel of
+ * each tick's high and low over the last ten (an area whose `y0` is a
+ * field of each row: a band).
  * The y domain holds still while the window fits in it and re-fits only
  * when the price leaves it or uses too little of it, so the grid does not
- * jump with every tick; a re-fit glides, the line, the band and the grid
- * on the plot's `motion.update`, the gutter's labels and the newest dot
- * with a layout animation of the same length.
+ * jump with every tick; a re-fit glides, the line, the band, the grid,
+ * the axis' labels and the two `PlotLabel`s on the plot's
+ * `motion.update`, the newest dot with a layout animation of the same
+ * length.
  */
 function Live() {
   const next = random(29);
@@ -137,6 +140,10 @@ function Live() {
   const grid = () => ticks(domain()[0], domain()[1]);
   const high = () => Math.max(...points().map((p) => p.price));
   const low = () => Math.min(...points().map((p) => p.price));
+  /** The row of the window's high (its first, if it repeats). */
+  const peak = () => points().findIndex((p) => p.price === high());
+  /** The high's text centered over it, kept off the plot's ends. */
+  const peakAlign = (): "left" | "center" | "right" => (peak() < 8 ? "left" : peak() > LIVE_POINTS - 9 ? "right" : "center");
   const breathing = () => running() && !reduceMotion();
   return (
     <Card icon="stocks" title="Live price" subtitle="A tick a second in its ten-second range, the last price tagged at its height">
@@ -210,29 +217,44 @@ function Live() {
             </If>
             <View style={{ position: "absolute", left: -4.5, top: -4.5, width: 9, height: 9, borderRadius: 4.5, borderWidth: 2, borderColor: colors.inset, backgroundColor: toneColor(tone()) }} />
           </View>
-          {/* The gutter: the grid's values clear of the last price's tag, the tag at its height. */}
+          {/* The gutter: the grid's values clear of the last price's tag. */}
           <PlotAxis
             placement="right"
             tickValues={grid().filter((v) => Math.abs(y(v) - y(last())) > 14)}
             format={(v) => fixed(v)}
             labelStyle={{ ...axis, paddingLeft: 10 }}
           />
-          <View
-            style={{
-              position: "absolute",
-              left: "100%",
-              marginLeft: 6,
-              top: y(last()) - 10,
-              height: 20,
-              paddingHorizontal: 6,
-              borderRadius: 6,
-              justifyContent: "center",
-              backgroundColor: toneColor(tone()),
-              pointerEvents: "none",
-            }}
-          >
-            <Text style={{ fontSize: 11, fontFamily: mono, fontWeight: "600", color: colors.surface, fontVariant: ["tabular-nums"] }}>{fixed(last())}</Text>
-          </View>
+          {/* The window's high over its point, and the last price's tag at its height in the gutter. */}
+          <PlotLabel
+            texts={[
+              {
+                text: `High ${fixed(high())}`,
+                x: peak(),
+                y: high(),
+                align: peakAlign(),
+                class: "-translate-y-full",
+                style: { ...axis, color: colors.muted, paddingBottom: 6 },
+              },
+              {
+                text: fixed(last()),
+                x: LIVE_POINTS - 1,
+                y: last(),
+                class: "-translate-y-1/2",
+                style: {
+                  marginLeft: 6,
+                  paddingHorizontal: 6,
+                  lineHeight: 20,
+                  borderRadius: 6,
+                  backgroundColor: toneColor(tone()),
+                  fontSize: 11,
+                  fontFamily: mono,
+                  fontWeight: "600",
+                  color: colors.surface,
+                  fontVariant: ["tabular-nums"],
+                },
+              },
+            ]}
+          />
           {/* The window's seconds under it, the first and last at its ends. */}
           <PlotAxis ticks={SECONDS.length} format={(_, i) => SECONDS[i]} labelStyle={below} />
         </Plot>

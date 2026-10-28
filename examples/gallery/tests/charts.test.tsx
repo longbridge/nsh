@@ -1,6 +1,6 @@
 // The Charts demo: charts an app builds from `nsh/base/plot`'s parts and
 // its own views. A live price streamed a tick a second that pauses and
-// resumes, an order book's depth whose side under the pointer is read out
+// resumes, its window's high written over it and its last price tagged, an order book's depth whose side under the pointer is read out
 // and whose range changes, a drawdown whose day under the pointer or the
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
@@ -57,6 +57,20 @@ test("the live price ticks every second until it is paused", async () => {
   expect(price()).toBe(paused);
   await app.press("Resume");
   await app.waitFor("LIVE");
+});
+
+test("the live price writes its window's high over it and tags its last price", async () => {
+  const after = (label: string) => {
+    const texts = app.texts();
+    return texts[texts.indexOf(label) + 1];
+  };
+  // Over the line, the high the figures under it read; at the line's end,
+  // the price the card's figure reads.
+  expect(app.texts()).toContain(`High ${after("HIGH")}`);
+  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
+  await app.clock.runFor(3000);
+  expect(app.texts()).toContain(`High ${after("HIGH")}`);
+  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
 });
 
 test("the depth reads out the side under the pointer and changes its range", async () => {
