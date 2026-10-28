@@ -131,7 +131,7 @@ export function ToolButton(props: { icon: IconName; label: string; shortcut?: st
       role="button"
       accessibilityLabel={props.label}
       accessibilityState={props.on === undefined ? undefined : { selected: props.on }}
-      tooltip={<Tip label={props.shortcut ? `${props.label}  ${props.shortcut}` : props.label} />}
+      tooltip={<Tip label={props.label} shortcut={props.shortcut} />}
       hoverStyle={hovered()}
       activeStyle={{ backgroundColor: alpha(colors.text, 0.09) }}
       style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}

@@ -49,6 +49,37 @@ pub enum JsKind {
     Other,
 }
 
+/// A value of an array or object read in bulk ([`JsIn::primitives`],
+/// [`JsIn::primitive_entries`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum JsPrimitive {
+    /// Anything else: `undefined`, `null`, an object, a function, ...
+    Other,
+    /// `true` or `false`.
+    Bool(bool),
+    /// A number.
+    Number(f64),
+    /// A string.
+    String(String),
+    /// A `Date`, as milliseconds since the Unix epoch.
+    Date(f64),
+}
+
+/// Value `raw` of `host` as a [`JsPrimitive`].
+fn primitive_of<H: JsHost + ?Sized>(host: &H, raw: JsRaw) -> JsPrimitive {
+    match host.kind(raw) {
+        JsKind::Bool => host.bool(raw).map_or(JsPrimitive::Other, JsPrimitive::Bool),
+        JsKind::Number => host
+            .number(raw)
+            .map_or(JsPrimitive::Other, JsPrimitive::Number),
+        JsKind::String => host
+            .string(raw)
+            .map_or(JsPrimitive::Other, JsPrimitive::String),
+        JsKind::Object => host.date(raw).map_or(JsPrimitive::Other, JsPrimitive::Date),
+        _ => JsPrimitive::Other,
+    }
+}
+
 /// The JS host's side of the direct conversions (`nsh-js` implements it):
 /// reads and makes values of its VM, and the call being made (its
 /// arguments, `this`). Values it returns are owned (one reference the
@@ -78,6 +109,32 @@ pub trait JsHost {
     /// The time `Date` `v` stands for, in milliseconds since the Unix
     /// epoch (`None`: not a `Date`).
     fn date(&self, v: JsRaw) -> Option<f64>;
+    /// The items of array `v` as primitives (`None`: not an array). One
+    /// call for the whole array where a host crosses a boundary for each
+    /// value it reads (the browser's): tables read many rows of them.
+    fn primitives(&self, v: JsRaw) -> Result<Option<Vec<JsPrimitive>>, PropError> {
+        let Some(len) = self.len(v)? else {
+            return Ok(None);
+        };
+        let mut items = Vec::with_capacity(len);
+        for i in 0..len {
+            let item = self.index(v, i)?;
+            items.push(primitive_of(self, item));
+            self.free(item);
+        }
+        Ok(Some(items))
+    }
+    /// The own enumerable string-keyed fields of object `v` as primitives
+    /// (none when it is not one), in one call as [`JsHost::primitives`].
+    fn primitive_entries(&self, v: JsRaw) -> Result<Vec<(String, JsPrimitive)>, PropError> {
+        let mut entries = Vec::new();
+        for key in self.keys(v)? {
+            let field = self.field(v, &key)?;
+            entries.push((key, primitive_of(self, field)));
+            self.free(field);
+        }
+        Ok(entries)
+    }
     /// `v` as JSON (as `JSON.stringify` sees it).
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError>;
     /// A short text showing `v`, for errors (`"abc"`, `{}`).
@@ -137,6 +194,13 @@ pub trait JsHost {
     ) -> Result<JsRaw, PropError> {
         let _ = (data, mime, name, last_modified);
         Err(PropError("a `File` cannot be made here".into()))
+    }
+    /// A function taking nothing and returning `undefined` that runs `f`
+    /// each time it is called ([`super::Stop`]'s). A host without
+    /// functions refuses.
+    fn new_function(&self, f: Box<dyn Fn()>) -> Result<JsRaw, PropError> {
+        drop(f);
+        Err(PropError("a function cannot be made here".into()))
     }
     /// The JS object of `instance`: the one it has, or a new one of its
     /// class.
@@ -255,6 +319,18 @@ impl<'a> JsIn<'a> {
     /// Its own enumerable string keys (none when it is not an object).
     pub fn keys(&self) -> Result<Vec<String>, PropError> {
         self.host.keys(self.raw)
+    }
+
+    /// The items of the array it is, as primitives (`None`: not an array),
+    /// read in one call.
+    pub fn primitives(&self) -> Result<Option<Vec<JsPrimitive>>, PropError> {
+        self.host.primitives(self.raw)
+    }
+
+    /// Its own enumerable string-keyed fields, as primitives (none when it
+    /// is not an object), read in one call.
+    pub fn primitive_entries(&self) -> Result<Vec<(String, JsPrimitive)>, PropError> {
+        self.host.primitive_entries(self.raw)
     }
 
     /// The milliseconds since the Unix epoch of the `Date` it is.

@@ -132,6 +132,12 @@ impl Runtime {
         let runtime = Rc::downgrade(self);
         Box::new(move || {
             let removed = runtime.upgrade().and_then(|runtime| {
+                // Unowned ones wait for the app's end: released, they go
+                // now (a handler listening and stopping again and again).
+                runtime
+                    .outside
+                    .borrow_mut()
+                    .retain(|other| !Rc::ptr_eq(&callback, other));
                 unsafe { runtime.host().graph() }.remove_cleanup(
                     owner,
                     |cleanup| matches!(cleanup,Cleanup::Rust(other) if Rc::ptr_eq(&callback,other)),

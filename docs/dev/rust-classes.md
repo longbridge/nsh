@@ -319,11 +319,17 @@ impl Downloader {
   it alone holds: a `Drop` that moves such an instance out (into a static, a task) keeps the instance, but its
   callbacks are dead (calling fails, posting does nothing). `Trace` never panics, allocates JS values or runs JS
   (it runs in the collector's mark phase), part of its safety contract.
-- **Functions take them too:** `fn watch(path: String, on_change: Callback<String>)` (`on_change` kept and posted
+- **Functions take them too:** `fn on(event: String, listener: Callback<String>) -> Stop` (`listener` kept and posted
   later), and `async` functions and members can `call_async`.
 - **Listeners**: an instance keeps them in a field (`listeners: Vec<Callback<String>>`, added by
-  `on(&mut self, listener: Callback<String>)`) and its tasks post to them (`Later` work cloning the field); the
+  `on(&mut self, event: String, listener: Callback<String>) -> Stop`, below) and its tasks post to them (`Later` work cloning the field); the
   field is traced like any other, so no event machinery is needed for `child.on("stdout", ..)`.
+- **Stopping**: a function or method that registers a listener (`on(event, listener)`, `docs/dev/api-naming.md`
+  "Listening") returns `Stop` (`nsh_core::prelude`, `element/system.rs`; `Stop::new(f)`), which crosses as a JS
+  function (`() => void`). `f` runs once: when JS calls it, or when the owner of the call in JS goes (the reactive
+  owner it runs under, or the module's run under hot module replacement: `JsHost::on_cleanup`), whichever comes
+  first; calling it unregisters the cleanup, so a long-lived owner does not collect stopped listeners. The
+  Node-shaped standard modules keep Node's `on` returning the instance (`child.on(..)` chains).
 
 
 ## How calls cross

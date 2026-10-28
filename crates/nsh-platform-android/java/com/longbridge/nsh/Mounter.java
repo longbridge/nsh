@@ -281,10 +281,13 @@ final class Mounter {
                     // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
                     int selectable = b.getInt();
                     Integer selectionColor = optColor(b);
+                    // The one color all of it is drawn in, if there is one.
+                    Integer uniformColor = optColor(b);
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
                         t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
+                        t.recolor(uniformColor, effects.get(t.id));
                         t.setLinks(linkData, linkEvents);
                         if (links > 0 && t.press == null) t.press = new Pressable(t, this, t.id);
                         t.setClickable(links > 0 || (t.press != null && t.press.ownWanted()));
@@ -1046,7 +1049,7 @@ final class Mounter {
         }
     }
 
-    private static int lerpColor(int a, int b, float t) {
+    static int lerpColor(int a, int b, float t) {
         int r = 0;
         for (int shift = 0; shift < 32; shift += 8) {
             int ca = (a >>> shift) & 0xff, cb = (b >>> shift) & 0xff;

@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie and Arc and its PlotAxis: charts drawn natively from the app's rows, with the scales of the axes and their labels, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine and RadialGrid, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
 order: 20.9
 group: base
 demo: el-plot
@@ -10,8 +10,10 @@ demo: el-plot
 
 A plot is the frame of a chart: the rows of data it shows, the scales of its x and y axes, the pointer over it and its
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
-per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole) and
-an `Arc` between two angles; a `PlotAxis` labels an edge with the ticks of its scale. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
+per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
+`Arc` between two angles, and a `RadialLine` around the center with the rings and spokes of a `RadialGrid` behind it (a
+radar); a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
+points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
 hears of a new row, nothing more. The look is the app's: marks paint with CSS's paint properties of SVG shapes
@@ -80,7 +82,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc` and `PlotAxis` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -101,7 +103,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | none | What screen readers hear as its value: the app's words for the row under the pointer. |
 | `crossLineClass`, `crossLineStyle` | `.cross_line_class(..)`, `.cross_line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The cross line: a view as tall as the plot, centered on the row under the pointer. On a band scale it sits in the row's band, as wide as the band (across the plot on a band y scale). |
-| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line` and `Area`, centered on its point at the row under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
+| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line`, `Area` and `RadialLine`, centered on its point at the row under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
 | `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, placed by `tooltipPlacement` and moved and faded with the cross line. |
 | `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. With the keyboard, it goes beside the first line's or area's point at the row (the middle of a bar's band, the middle of a pie's slice). |
 | `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | The distance between the tooltip and what places it: the top edge for `"top"`, the cross line and the pointer for `"pointer"`. |
@@ -111,7 +113,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), or of the [pie](#pie-and-arc)'s slice under it; `null` once it leaves the plot (over a pie, its slices). |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), of the [pie](#pie-and-arc)'s slice under it, or of a [radial line](#radialline-and-radialgrid)'s row nearest to it by angle; `null` once it leaves the plot (over a pie, its slices; over a radial line, its outer radius). |
 
 `Scale` is `{ type: "point"; reverse? } | { type: "linear"; domain?: [number, number]; reverse? } | { type: "band";
 paddingInner?; paddingOuter?; maxBandWidth?; bandCount?; groupPadding?; reverse? }`. A `domain` is the extent of its
@@ -432,6 +434,114 @@ apart while the scale colors the others. Beside a `background` part, a bar's and
 | `range` | `string[]` | (required) | The colors, in order (CSS colors); category `i` takes color `i % range.length`. |
 | `unknown` | `string` | none | The color of every category outside the domain; without one, each takes the next color. |
 
+## RadialLine and RadialGrid
+
+A `RadialLine` draws a series around the plot's center: a radar's polygon, or a line round a dial. Each row with a value
+is a point at the row's angle, as far out as the plot's y scale puts its value, from `innerRadius` (the domain's
+smallest value) to `outerRadius` (its largest). Without an `angle`, the rows go evenly round the turn from 12 o'clock,
+clockwise, in order, so six rows are a hexagon; `closed` joins the last point to the first. A line strokes its points
+and fills its area down to `innerRadius` (the center by default), so one mark is a radar's outline and its wash. A
+`RadialGrid` draws the radar's grid behind it: `rings` at values of the y scale, polygons through the rows' angles or
+`circular`, and `spokes` out to each row. Over a radial line, the plot reports the row whose angle is nearest to the
+pointer's within the line's outer radius, and each line's hover dot sits on its point of that row.
+
+```tsx
+import { signal, Text, View } from "nsh";
+import { Plot, RadialGrid, RadialLine } from "nsh/base/plot";
+
+type Metric = { name: string; ours: number; theirs: number };
+
+export function Compare(props: { metrics: Metric[] }) {
+  const hovered = signal<number | null>(null);
+  const shown = () => (hovered() == null ? undefined : props.metrics[hovered()!]);
+  return (
+    <View class="items-center gap-3 rounded-xl border border-border bg-card p-4">
+      <Text class="text-sm tabular-nums text-muted-foreground">
+        {shown() ? `${shown()!.name}: ${shown()!.ours} against ${shown()!.theirs}` : "Ours against theirs"}
+      </Text>
+      <Plot
+        data={props.metrics}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        accessibilityLabel="Ours against theirs on six metrics"
+        accessibilityValue={{ text: shown() && `${shown()!.name}: ours ${shown()!.ours}, theirs ${shown()!.theirs}` }}
+        appearGeneration={1}
+        motion={{ appear: { duration: 700, easing: "easeOut" }, update: { duration: 400, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 34 } }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        class="size-56"
+      >
+        <RadialGrid rings={[25, 50, 75, 100]} spokes outerRadius="80%" class="stroke-border" />
+        <RadialLine radius="theirs" closed outerRadius="80%" class="fill-chart-2/15 stroke-chart-2" hoverDotClass="size-2 rounded-full border-2 border-card bg-chart-2" />
+        <RadialLine radius="ours" closed outerRadius="80%" class="fill-chart-1/25 stroke-chart-1 stroke-2" hoverDotClass="size-2.5 rounded-full border-2 border-card bg-chart-1" />
+        {/* Each metric's name past the rim at its row's angle, growing away from the center. */}
+        {props.metrics.map((m, i) => {
+          const angle = (2 * Math.PI * i) / props.metrics.length;
+          const away = (v: number) => (v > 0.01 ? "flex-start" : v < -0.01 ? "flex-end" : "center");
+          const align = (v: number) => (v > 0.01 ? "left" : v < -0.01 ? "right" : "center");
+          return (
+            <View
+              class="absolute size-0"
+              style={{
+                left: `${50 + 44 * Math.sin(angle)}%`,
+                top: `${50 - 44 * Math.cos(angle)}%`,
+                alignItems: away(Math.sin(angle)),
+                justifyContent: away(-Math.cos(angle)),
+                pointerEvents: "none",
+              }}
+            >
+              <Text class="w-24 text-xs text-muted-foreground" style={{ textAlign: align(Math.sin(angle)) }}>{m.name}</Text>
+            </View>
+          );
+        })}
+      </Plot>
+    </View>
+  );
+}
+```
+
+| Mark | Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|---|
+| `RadialLine` | `radius` | `.radius(..)` | `keyof T \| (d: T, index: number) => number` | the plot's `y` | What places each row out from the center: a value of the y scale, from `innerRadius` at the domain's smallest value to `outerRadius` at its largest. A row without one is skipped. |
+| `RadialLine` | `angle` | `.angle(..)` | `keyof T \| (d: T, index: number) => number` | the rows evenly round the turn | Where each row goes round the center: radians from 12 o'clock, clockwise. |
+| `RadialLine`, `RadialGrid` | `startAngle`, `endAngle` | `.start_angle(..)`, `.end_angle(..)` | `number` (radians) | `0`, `2 * Math.PI` | Where the rows go without an `angle`: from `startAngle`, evenly. Round a whole turn they are a step of a turn's `1 / rows` apart, the last a step before the first; over a part of a turn the first is on `startAngle` and the last on `endAngle`. |
+| `RadialLine`, `RadialGrid` | `innerRadius`, `outerRadius` | `.inner_radius(..)`, `.outer_radius(..)` | ``number \| `${number}%` `` | `0`, `"100%"` | Where the y domain's smallest and largest values go: points, or a percentage of the largest circle the plot holds (half its smaller side), as a pie's radii. A line's area fills down to `innerRadius`; a grid's spokes run between the two. |
+| `RadialLine` | `curve` | `.curve(..)` | `"linear" \| "natural" \| "stepAfter"` | `"linear"` | How it connects its points: straight segments, a smooth curve (closed, a smooth loop), or steps. |
+| `RadialLine` | `closed` | `.closed(..)` | `boolean` | `false` | It goes on from its last point back to its first: a radar's polygon. Open, its area closes to the center (or along its inner edge). |
+| `RadialLine` | `dot`, `dotClass`, `dotStyle` | `.dot(..)`, `.dot_class(..)`, `.dot_style(..)` | `boolean`, `string`, `StyleProp<ViewStyle>` | `false` | A dot on every point: a view centered on it, its size, background and border the app's. The dots grow out and move with the line. |
+| `RadialLine` | `backgroundClass`, `backgroundStyle` | `.background_class(..)`, `.background_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its outer circle whose background (`bg-*`, a gradient) shows only inside its area, under its `fill`, as an area's. |
+| `RadialLine` | `hoverDotClass`, `hoverDotStyle` | `.hover_dot_class(..)`, `.hover_dot_style(..)` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point of the row under the pointer, gliding to the next row on the plot's `pointer` spring; `hidden` shows none. |
+| `RadialGrid` | `rings` | `.rings(..)` | `number[]` | none | Where its rings go, as values of the y scale: each as far out as a radial line puts that value. |
+| `RadialGrid` | `spokes` | `.spokes(..)` | `boolean` | `false` | A line from `innerRadius` to `outerRadius` at each row's angle. |
+| `RadialGrid` | `circular` | `.circular(..)` | `boolean` | `false` | Its rings are circles (arcs over a part of a turn). By default they are polygons through the rows' angles, and circles while the plot has fewer than three rows. |
+
+A radial line strokes with `stroke`, `strokeWidth` and `strokeDasharray` (`currentColor`, 1 wide and solid where none
+is set) and fills its area with `fill` (none where none is set); a radial grid strokes as a grid does. Their paint
+inherits from the plot. A line's values, with 0, make the y scale's domain when the plot has none, so a radar of
+positive values grows from its center; a grid's rings do not. Give the plot a y `domain` to keep the rings and the
+radar's scale fixed while the values change.
+
+Labels around a radar are the app's elements laid over the plot, as a donut's center is. Without an `angle`, row `i`
+of `n` sits at `a = 2π·i / n` from 12 o'clock, so in a square plot a box with no size at `left: 50% + r·sin(a)`,
+`top: 50% − r·cos(a)` (`r` a percentage of the plot's side a little past half the outer radius's share) marks the
+place past the rim, and the name grows from it away from the center: right of it on the right half, left of it on the
+left, above it at the top and below it at the bottom, as above.
+
+```rust
+use nsh_base::plot::{plot, radial_grid, radial_line};
+use nsh_core::{element::{RowAccessor, Rows}, prelude::*};
+
+fn compare(ours: Vec<f64>, theirs: Vec<f64>) -> impl IntoElement {
+    let rows = Rows::from_columns(ours.len(), [("ours".into(), ours), ("theirs".into(), theirs)]);
+    plot()
+        .data(rows)
+        .accessibility_label("Ours against theirs")
+        .w(px(224.0))
+        .h(px(224.0))
+        .child(radial_grid().rings(vec![25.0, 50.0, 75.0, 100.0]).spokes(true))
+        .child(radial_line().radius(RowAccessor::key("theirs")).closed(true))
+        .child(radial_line().radius(RowAccessor::key("ours")).closed(true))
+}
+```
+
 ## PlotAxis
 
 A `PlotAxis` labels an edge of the plot with the ticks of the scale that edge carries: the bottom and top edges the x
@@ -488,6 +598,62 @@ or follows the pointer: keep it pure (the same value, the same text). Without it
 `1,500`, `0.25`, `−2`. In Rust, `plot_axis()` makes an axis, its `format` a `TickFormat::from_fn(|value, index| ..)`.
 An axis takes no pointer, and screen readers hear the plot rather than its labels.
 
+## PlotLabel
+
+A `PlotLabel` writes texts at points of the plot: a caption over a peak, a tag at a line's last point, a note at a
+grid line's end. Each of its `texts` names its point with values of the plot's scales, as the marks do: a row's index
+on a `point` or `band` scale (the middle of the row's band), a value on a `linear` one. The text's top edge sits on
+the point, and its `align` starts it there, centers it on it or ends it there. The plot's layout places the texts, so
+they follow the plot's size; they glide with the scales' domains (`motion.update`) and fade in with the appear.
+
+```tsx
+import { Area, Line, Plot, PlotLabel } from "nsh/base/plot";
+
+const rows = [
+  { day: "Mon", visitors: 1820 },
+  { day: "Tue", visitors: 2140 },
+  { day: "Wed", visitors: 1960 },
+  { day: "Thu", visitors: 2480 },
+  { day: "Fri", visitors: 2310 },
+];
+const [peak, last] = [3, rows.length - 1];
+
+<Plot data={rows} y="visitors" yScale={{ type: "linear", domain: [0, 3000] }} class="mr-12 h-40">
+  <Area class="fill-chart-1/20" />
+  <Line class="stroke-chart-1 stroke-2" />
+  {/* The peak's value over it, and a tag right of the last point, its middle at the point's height. */}
+  <PlotLabel
+    class="text-xs tabular-nums text-muted-foreground"
+    texts={[
+      { text: `High ${rows[peak].visitors}`, x: peak, y: rows[peak].visitors, align: "center", class: "-translate-y-full pb-1" },
+      { text: `${rows[last].visitors}`, x: last, y: rows[last].visitors, class: "-translate-y-1/2 ml-2 rounded bg-chart-1 px-1.5 text-white" },
+    ]}
+  />
+</Plot>
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `texts` | `.texts(..)` | `PlotText[]` | `[]` | The texts it writes, each at its own point. |
+
+Each text is a `PlotText`:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `text` | `string` | | What it reads. |
+| `x` | `number` | | Where it goes along the x axis: a value of the x scale, a row's index on a `point` or `band` scale (`0.5` is halfway between the first two rows). |
+| `y` | `number` | | Where its top edge goes along the y axis: a value of the y scale. |
+| `align` | `"left" \| "center" \| "right"` | `"left"` | How it sits along x from its point: starting at it, centered on it, or ending at it. |
+| `class`, `style` | `string`, `StyleProp<TextStyle>` | none | The text's own classes and style, over what it inherits from the label: its box (a tag's background and padding) and its distance from the point. |
+
+The look is the app's: the label's `class` gives every text the text styles they inherit (font, size, color), and a
+text's own `class` and `style` style it alone. A text goes above its point with `-translate-y-full`, and its padding
+is its gap from the point (`pb-1`); a tag beside a line's last point sits in the margin the app leaves on that side
+(`mr-12`), as an axis' labels do. In Rust, `plot_label()` makes a label, each text a
+`PlotText::new(text, x, y)` with `.align(PlotTextAlign::Center)`, `.class(..)` and `.style(..)`. The pointer passes
+through the texts to the plot, and screen readers hear the plot, whose `accessibilityLabel` says what the texts
+point out.
+
 ## Motion
 
 Motion is the app's, and none by default: everything shows at once. `motion` takes the timings of
@@ -495,11 +661,11 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 
 | Key | Type | What moves |
 |---|---|---|
-| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
+| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a radial line grows out of its inner radius, its dots with it. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
-| `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |
+| `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it, and a radial line's hover dot glides on it from one row's point to the next. |
 
 The motion runs on the platform's animator, with no JS per frame, and is complete at once for people who ask for
 reduced motion. A plot that a list makes again for a row that comes back draws in again; give it the row's key as its
@@ -674,14 +840,15 @@ A sparkline in a list row is a plot with `interactive={false}`: it draws its mar
 ## Accessibility
 
 - A plot is one element for screen readers, with the image role and the app's `accessibilityLabel`; its marks, its
-  axes' labels and the hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
+  axes' labels, its `PlotLabel`s and the hover's parts are parts of it and say nothing themselves. Say in the label what the chart shows and what stands out
   (the range, the highest value), and give `accessibilityValue` the words for the row under the pointer, so a screen
   reader says the value as it changes.
 - The row under the pointer is reported with `onHoverChange` on platforms with a pointer (desktops, the web, an iPad
   with a trackpad). Touch screens report no hover: show the values a touch user needs in the app's own elements, or
   offer the rows as text or a list where the numbers matter.
 - Over a pie the row reported is the slice's under the pointer: give `accessibilityValue` its name, value and share
-  (`"Team, 340 seats, 34.0%"`), and say the total and the largest share in the label.
+  (`"Team, 340 seats, 34.0%"`), and say the total and the largest share in the label. Over a radar it is the axis
+  nearest the pointer: give it the axis' name and each series' value there.
 - An interactive plot is a stop of the keyboard focus whose arrow keys move the hover ([Keyboard](#keyboard)), and it
   offers screen readers `increment` and `decrement` to step through the rows (VoiceOver reads it as adjustable); a plot
   with `interactive={false}` is neither, and it takes no presses either way.
@@ -702,6 +869,9 @@ See [Accessibility](../docs/accessibility.md) for labels and roles in general.
 - A pie draws each slice in its own canvas; the slice under the pointer is found in Rust from the slices' angles and
   radii, its lift is a radius and the others' fade an opacity the animator moves, and the appear's sweep moves the
   slices' angles the same way, so neither records a drawing again.
+- A radial line's row under the pointer is found in Rust from its points' angles; its hover dot is a view the animator
+  moves on the `pointer` spring, and while it appears or moves to new values its points are numbers the animator moves
+  from where they were, so the line is recorded once per change.
 - An axis' labels, tick marks and line are the platform's own texts and views, placed by the layout in Rust from the
   plot's size and scales: they move with the marks when the plot's size changes, and a new domain writes the labels
   again.

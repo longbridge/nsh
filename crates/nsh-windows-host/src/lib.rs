@@ -98,6 +98,13 @@ fn parse_size(s: &str) -> Option<(i32, i32)> {
     (w > 0 && h > 0).then_some((w, h))
 }
 
+/// Not on Windows: says so and exits.
+#[cfg(not(windows))]
+pub fn main() -> std::process::ExitCode {
+    eprintln!("nsh-windows-host runs on Windows");
+    std::process::ExitCode::FAILURE
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_size;
@@ -110,11 +117,4 @@ mod tests {
         assert_eq!(parse_size("0x10"), None);
         assert_eq!(parse_size("ax10"), None);
     }
-}
-
-/// Not on Windows: says so and exits.
-#[cfg(not(windows))]
-pub fn main() -> std::process::ExitCode {
-    eprintln!("nsh-windows-host runs on Windows");
-    std::process::ExitCode::FAILURE
 }

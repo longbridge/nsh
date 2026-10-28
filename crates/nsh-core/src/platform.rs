@@ -176,6 +176,10 @@ pub struct Environment {
     /// The app embedding NSH answers `nsh/host`'s calls
     /// ([`crate::Command::HostCall`]); without it, they reject at once.
     pub host: bool,
+    /// The platform picks a color from the screen
+    /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
+    /// no color at once.
+    pub screen_color: bool,
 }
 
 impl Environment {
@@ -207,6 +211,7 @@ impl Default for Environment {
             apple_keyboard: false,
             locale: Locale::EN_US,
             host: false,
+            screen_color: false,
         }
     }
 }

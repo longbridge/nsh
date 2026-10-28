@@ -447,8 +447,9 @@ export function QuantityStepper(props: QuantityStepperProps) {
 
 组件拥有它创建的东西，它创建的一切都随它消失：它的 `<If>` 分支隐藏、它的行被移除或它的页面被弹出时。在 Rust 中，任务、
 定时器和间隔（`spawn`、`set_timeout`、`set_interval`）以及按键绑定（`on_key`）随创建它们时的归属者结束；在 TSX 中，用
-[`cleanup`](./reactivity.md#cleanup) 注册停止操作，或从 effect 中返回它。开始监听的函数返回一个停止监听的函数
-（`() => void`），组件渲染期间注册的内容随组件一起移除，`keymap.bind` 就是如此。
+[`cleanup`](./reactivity.md#cleanup) 注册停止操作，或从 effect 中返回它。监听用 `on(event, listener)`
+（`host.on(name, listener)`、`BackHandler.on("press", listener)`），它返回一个停止监听的函数（`() => void`，Rust 中返回
+`Stop`），组件渲染期间注册的内容随组件一起移除，`keymap.bind` 的绑定也是如此。
 
 某个东西意外地一直在运行时，先检查在组件之外创建的 effect 和 computed 值（在事件处理函数或定时器回调中创建的没有归属者，会
 一直存在）、注册时没有保留停止操作的监听，以及从没有组件归属的 store 启动的工作。被丢弃的 `resource` 加载会中止（TSX 中的
@@ -883,7 +884,7 @@ const liked = signal<Set<number>>(new Set());
 | 其他事件 | `on<Event>`，现在时，一个对象 | `onPress()`、`onSubmit({ text })` |
 | 阶段 | `<act>Start`、`<act>End` | `onPanStart`、`onLoadStart` |
 | 鼠标位于视图上方 | `Enter` / `Move` / `Leave`，与 DOM 相同 | `onMouseEnter`、`onMouseMove`、`onMouseLeave` |
-| 开始监听 | 返回 `() => void` | `keymap.bind(..)` |
+| 开始监听 | `on(event, listener)`，返回 `() => void` | `host.on(name, l)`、`BackHandler.on("press", l)` |
 | 环境中的值 | 访问器，旁边是 `set<Value>` | `colorScheme()`、`setColorScheme` |
 | 只读的布尔值 | `is<Adjective>`、`has<Noun>` | `isAvailable` |
 

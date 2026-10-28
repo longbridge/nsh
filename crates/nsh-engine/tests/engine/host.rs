@@ -188,7 +188,7 @@ let once = 0;
 let all = 0;
 const first = host.on("tick", () => {
   once++;
-  first.remove();
+  first();
 });
 host.on("tick", (payload) => {
   all++;

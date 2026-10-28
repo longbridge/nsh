@@ -257,6 +257,16 @@ impl Runtime {
                 instance.dispose().map_err(nsh_core::element::PropError)?;
                 Ok(Value(0))
             }
+            208 => {
+                self.bindings
+                    .call_function(args.index(0)?.as_number().unwrap_or(0.0) as u32);
+                Ok(Value(0))
+            }
+            209 => {
+                self.bindings
+                    .release_function(args.index(0)?.as_number().unwrap_or(0.0) as u32);
+                Ok(Value(0))
+            }
             203 => {
                 self.bindings
                     .release_instance(args.index(0)?.as_number().unwrap_or(0.0) as u32);

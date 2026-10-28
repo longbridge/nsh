@@ -31,6 +31,11 @@ class and module faces; the same core reactive graph and virtualized list machin
 JS values cross through generation-checked arena handles. Weak tracing connects Rust-owned callbacks and
 payloads to their JS peers; externally held Rust values remain strong. DOM child edges are traced separately,
 so detached trees with callback cycles can be collected. Explicit owner disposal remains deterministic.
+The tracing runs off the calls: an outermost entry promotes weakened values back only when some were demoted, and
+the trace and the demotion run at most every 100ms once the outermost call returned (`Values.schedule`), so a call
+costs the same however many values the app holds. A string crosses in one call, encoded straight into Rust's
+buffer; a row of a table crosses in one (`JsHost::primitives` / `primitive_entries`, op 49, packed by `values.js`
+and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 A node outlives its owner until it is collected: what the engine queued for it, or for a Rust component,
 before the owner was disposed is dropped (a remade row's layout), as nsh-js drops a freed node's; a removed
 modal still hears its `onDismiss`, with no owner. Callbacks escaping a stopped run become inert; pending
@@ -527,7 +532,11 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
-  border overlay gets its own for border colors, widths and radii, since it draws the border.
+  border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
+  color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,
+  so the runs `op_t` makes again inherit it and a change is a CSS transition of the element's `color`
+  (`transition-colors`), from the color on screen; a text of several colors keeps them in its runs and changes at
+  once, as does one that becomes one color (`web/text-browser.test.mjs`).
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
   transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
@@ -640,6 +649,11 @@ as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by t
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Input
+
+`autoComplete` reaches both `<input>` and `<textarea>` as HTML's `autocomplete` attribute.
+`src/encode/input.rs` maps every `AutoFill` variant to its HTML token (`Password` to
+`current-password`, `Birthdate` to `bday`, `Off` to `off`). `Default` leaves the attribute unset;
+returning to it removes an earlier hint. The browser decides which autofill suggestions to offer.
 
 `nsh.js` turns browser input into what the desktop backends report (`docs/dev/linux.md` is the reference), and phone
 browsers' touches into what phones report:

@@ -248,6 +248,25 @@ test("class cycles collect, escaped callbacks stay live, and old callbacks are i
 });
 
 
+test("a Rust stop function runs once and goes with its owner", { skip: !path }, async () => {
+  const f = await fixture();
+  const modules = f.modules();
+  const Box = modules.exports.get("test/browser").CallbackBox;
+  const stop = Box.listen(() => 1);
+  assert.equal(typeof stop, "function");
+  assert.equal(Box.listening(), 1);
+  stop();
+  stop();
+  assert.equal(Box.listening(), 0);
+  let dispose;
+  f.api.root(d => { dispose = d; Box.listen(() => 2); Box.listen(() => 3)(); });
+  assert.equal(Box.listening(), 1);
+  dispose();
+  assert.equal(Box.listening(), 0);
+  modules.dispose();
+  f.close();
+});
+
 test("active memo payloads survive accessor collection until their owner is disposed", { skip: !path || !global.gc }, async () => {
   const { api, close } = await fixture();
   let dispose, payload;

@@ -285,6 +285,19 @@ impl SchemaArg {
 
 // --- Editors ----------------------------------------------------------------
 
+/// The event `on` hears after every change (its overload for it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum RichRevisionEvent {
+    Revision,
+}
+
+/// What a `revision` listener gets.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct RichRevision {
+    /// The new revision.
+    pub(crate) revision: f64,
+}
+
 /// What `createRichEditor` makes an editor with.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[prop(exact)]
@@ -341,7 +354,7 @@ pub(crate) struct RichMarkdownOptions {
 
 /// One live rich text editor that a `RichEditor` view and the app's code
 /// share (`createRichEditor` makes one): it owns the state in Rust, runs
-/// commands, takes transactions, and tells subscribers about changes.
+/// commands, takes transactions, and tells listeners about changes.
 #[class]
 pub(crate) struct RichEditorSession {
     session: EditorSession,
@@ -349,16 +362,37 @@ pub(crate) struct RichEditorSession {
     /// The named commands `command(name)` runs: the built-in ones and the
     /// editor's extensions'.
     commands: Arc<CommandRegistry>,
-    /// The app's `dispatchTransaction` and the subscribers' functions.
+    /// The app's `dispatchTransaction`.
     hooks: Arc<HookRef>,
     /// Transactions handed to `dispatchTransaction`, by id, until applied.
     pending: Arc<std::sync::Mutex<Vec<(u64, Transaction)>>>,
-    subscriptions: Vec<(u64, SubscriptionId)>,
+    /// What `on` added; the stop functions it returned hold it weakly.
+    subscriptions: std::rc::Rc<Subscriptions>,
 }
 
-impl Drop for RichEditorSession {
+/// The listeners one `RichEditorSession` added, removed when it goes.
+struct Subscriptions {
+    session: EditorSession,
+    ids: std::cell::RefCell<Vec<SubscriptionId>>,
+}
+
+impl Subscriptions {
+    fn add(self: &std::rc::Rc<Self>, id: SubscriptionId) -> Stop {
+        self.ids.borrow_mut().push(id);
+        let subscriptions = std::rc::Rc::downgrade(self);
+        Stop::new(move || {
+            // Gone with the editor: its drop removed every listener.
+            if let Some(subscriptions) = subscriptions.upgrade() {
+                subscriptions.ids.borrow_mut().retain(|i| *i != id);
+                subscriptions.session.unsubscribe(id);
+            }
+        })
+    }
+}
+
+impl Drop for Subscriptions {
     fn drop(&mut self) {
-        for (_, id) in self.subscriptions.drain(..) {
+        for id in self.ids.get_mut().drain(..) {
             self.session.unsubscribe(id);
         }
     }
@@ -373,12 +407,15 @@ static NEXT_TR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 impl RichEditorSession {
     fn over(session: EditorSession, schema: Schema) -> Self {
         Self {
-            session,
+            session: session.clone(),
             schema,
             commands: CommandRegistry::builtin(),
             hooks: HookRef::new(),
             pending: Arc::default(),
-            subscriptions: Vec::new(),
+            subscriptions: std::rc::Rc::new(Subscriptions {
+                session,
+                ids: std::cell::RefCell::default(),
+            }),
         }
     }
 
@@ -651,28 +688,28 @@ impl RichEditorSession {
         self.session.set_editable(editable);
     }
 
-    /// Calls `listener` with the payload of every `event` (`update`,
-    /// `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`) after
-    /// it happens, in JS's next turn; returns what `off` takes.
-    pub(crate) fn on(
-        &mut self,
-        event: String,
-        listener: Callback<JsonValue>,
-    ) -> Result<f64, String> {
-        let kind = SessionEventKind::from_name(&event)
-            .ok_or_else(|| format!("no editor event `{event}`"))?;
+    /// Calls `listener` with the payload of every `event` after it
+    /// happens, in JS's next turn: `revision` (`{ revision }`, after every
+    /// change, from any source), `update`, `selectionUpdate`,
+    /// `transaction`, `focus`, `blur`, `delete`. Returns a function that
+    /// stops it; it also stops when what called `on` goes (a component).
+    #[overload(fn(event: RichRevisionEvent, listener: Callback<RichRevision>) -> Stop)]
+    #[overload(fn(event: String, listener: Callback<JsonValue>) -> Stop)]
+    pub(crate) fn on(&self, event: String, listener: Callback<JsonValue>) -> Result<Stop, String> {
         let handle = EventHook::new(listener);
-        let id = self.session.on(
-            kind,
-            Arc::new(move |event: &SessionEvent| handle.post(event.payload.clone())),
-        );
-        self.subscriptions.push((id, id));
-        Ok(id as f64)
-    }
-
-    /// Stops calling a listener `on` added.
-    pub(crate) fn off(&mut self, id: f64) {
-        self.unsubscribe(id);
+        let id = if event == "revision" {
+            self.session.subscribe(Arc::new(move |state: &EditorState| {
+                handle.post(serde_json::json!({ "revision": state.revision() }));
+            }))
+        } else {
+            let kind = SessionEventKind::from_name(&event)
+                .ok_or_else(|| format!("no editor event `{event}`"))?;
+            self.session.on(
+                kind,
+                Arc::new(move |event: &SessionEvent| handle.post(event.payload.clone())),
+            )
+        };
+        Ok(self.subscriptions.add(id))
     }
 
     /// Dispatches a transaction (steps against the current document, as
@@ -847,34 +884,6 @@ impl RichEditorSession {
         tr.set_origin(TransactionOrigin::Plugin(key));
         let _guard = CallGuard::enter();
         session.dispatch(tr).map_err(|e| e.to_string())
-    }
-
-    /// Calls `listener` with the new revision after every change, from any
-    /// source, in JS's next turn; returns what `unsubscribe` takes.
-    pub(crate) fn subscribe(&mut self, #[args(revision)] listener: Callback<f64>) -> f64 {
-        let hooks = HookRef::new();
-        hooks.update(|h| h.update = Some(listener));
-        let held = hooks.clone();
-        let id = self.session.subscribe(Arc::new(move |state: &EditorState| {
-            if let Some(listener) = held.get().and_then(|h| h.update) {
-                listener.post(state.revision() as f64);
-            }
-        }));
-        // The session's subscriber keeps the functions; this keeps the
-        // pair.
-        let key = id;
-        self.subscriptions.push((key, id));
-        drop(hooks);
-        key as f64
-    }
-
-    /// Stops calling a listener `subscribe` added.
-    pub(crate) fn unsubscribe(&mut self, id: f64) {
-        let id = id as u64;
-        if let Some(i) = self.subscriptions.iter().position(|(k, _)| *k == id) {
-            let (_, subscription) = self.subscriptions.remove(i);
-            self.session.unsubscribe(subscription);
-        }
     }
 
     /// Asks the views showing the editor to take the keyboard focus.

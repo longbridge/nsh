@@ -1576,6 +1576,146 @@ covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
 
+# base-color-picker
+tap id:case-base-color-picker
+# The parts as the app laid them out: the area 200 by 100, its thumb on
+# the color (full saturation and brightness: the top right corner), its
+# panel under it; each slider's track in the slider, the thumb centered on
+# the value (the hue at 0, the vertical alpha at its top).
+expect Color #ff0000
+frame id:area 0 0 200 100
+frame label:Area 195 -5 10 10
+style label:Area borderWidth 2
+style label:Area backgroundColor #ff0000ff
+style below:label:Area opacity 0.5
+style below:label:Area borderRadius 8
+frame label:Hue -5 5 10 10
+frame below:label:Hue 0 5 200 10
+style below:label:Hue borderRadius 5
+style label:Hue borderWidth 1
+style label:Hue backgroundColor #ff0000ff
+frame label:Alpha 5 -5 10 10
+frame below:label:Alpha 5 0 10 100
+# Adjustable controls for screen readers: the area's value is the color,
+# a slider's its channel's.
+prop label:Area role adjustable
+prop label:Area accessibilityValue min=0 max=100 now=100 text=#ff0000
+prop label:Hue role adjustable
+prop label:Hue accessibilityValue min=0 max=360 now=0 text=0
+prop label:Alpha accessibilityValue min=0 max=100 now=100 text=100
+prop label:Lightness accessibilityState disabled=true
+# The fields: the whole color as `format` writes it, a channel's number.
+prop label:Hex value #ff0000
+prop label:Hex placeholder Color
+prop label:Red value 255
+# A swatch: its color over a checkerboard (squares of 10 in its 20), the
+# app's content over both; selected while it is the picker's color. The
+# other swatch, without a color, shows the picker's, named by it.
+prop label:Blue role button
+prop label:Blue accessibilityState selected=false
+nostyle label:Blue borderWidth
+drawing below:below:id:check fillStyle #ccccccff
+drawing below:below:id:check fillRect 0 0 10 10
+drawing below:below:id:check fillRect 10 10 10 10
+nodrawing below:below:id:check fillRect 10 0...
+prop id:preview accessibilityLabel #ff0000
+# The eyedropper: a button with the app's content, disabled with no
+# eyedropper on the platform.
+prop label:Eyedropper role button
+prop label:Eyedropper accessibilityState disabled=true
+frame id:dropper 0 0 4 4
+# A press picks the swatch's color: reported in `format`, then the
+# change's end.
+tap label:Blue
+expect Color #0000ff80
+expect Formatted rgb(0 0 255 / 0.5)
+expect end rgb(0 0 255 / 0.5)
+prop label:Blue accessibilityState selected=true
+style label:Blue borderWidth 2
+prop id:preview accessibilityLabel #0000ff80
+prop label:Hex value #0000ff80
+# The whole color in any CSS form, read when the field submits it; a
+# channel's number as it is typed, the change's end when it is left.
+event label:Hex onChange text=lime
+event label:Hex onSubmit text=lime
+expect Color #00ff00ff
+expect end rgb(0 255 0)
+event label:Red onChange text=128
+expect Color #80ff00ff
+expect Formatted rgb(128 255 0)
+expect end rgb(0 255 0)
+event label:Red onBlur
+expect end rgb(128 255 0)
+# A drag of the hue's thumb: a quarter of the track, 90 degrees on.
+touch start label:Hue 5 5
+touch move 55 5
+expect Color #00ffffff
+touch end
+expect end rgb(0 255 255)
+frame label:Hue 95 5 10 10
+# A press on the area picks the color under it, a drag goes on from there.
+touch start id:area 100 50
+touch move 50 75
+touch end
+expect Color #304040ff
+expect end rgb(48 64 64)
+# A screen reader's decrement of the alpha: one percent.
+event label:Alpha onAccessibilityAction actionName=decrement
+expect Color #304040fc
+expect Formatted rgb(48 64 64 / 0.99)
+prop label:Alpha accessibilityValue min=0 max=100 now=99 text=99
+# `disabled`: the parts take nothing.
+tap id:disable
+prop label:Hue accessibilityState disabled=true
+tap label:Blue
+expect Color #304040fc
+# A picker of its own color (`defaultValue`), a drag of its
+# brightness to half, reported in OKLCH.
+touch start label:Brightness 5 5
+touch move -95 5
+touch end
+expect Own oklch(51.8% 0.176 142.5)
+# A swatch outside a picker reports its color.
+tap label:Yellow
+expect Chip #ffff00ff
+covers [nsh/base] ColorPicker
+covers [nsh/base] ColorArea
+covers [nsh/base] ColorSlider
+covers [nsh/base] ColorField
+covers [nsh/base] ColorSwatch
+covers [nsh/base] ColorEyeDropper
+covers [props] value
+covers [props] defaultValue
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [props] placeholder
+covers [props] selectedStyle
+covers [props] ColorPicker.format
+covers [props] ColorArea.panelClass
+covers [props] ColorArea.panelStyle
+covers [props] ColorArea.thumbClass
+covers [props] ColorArea.thumbStyle
+covers [props] ColorArea.fillThumb
+covers [props] ColorSlider.colorSpace
+covers [props] ColorSlider.channel
+covers [props] ColorSlider.axis
+covers [props] ColorSlider.trackClass
+covers [props] ColorSlider.trackStyle
+covers [props] ColorSlider.thumbClass
+covers [props] ColorSlider.thumbStyle
+covers [props] ColorSlider.fillThumb
+covers [props] ColorSlider.checkerboardColor
+covers [props] ColorSlider.checkerboardSize
+covers [props] ColorField.channel
+covers [props] ColorField.colorSpace
+covers [props] ColorField.format
+covers [props] ColorSwatch.color
+covers [props] ColorSwatch.checkerboardColor
+covers [props] ColorSwatch.checkerboardSize
+covers [events] onChange
+covers [events] onPress
+covers [events] ColorPicker.onChangeEnd
+
 # base-slider
 tap id:case-base-slider
 # Each thumb an adjustable element with its label and value, placed by
@@ -1966,6 +2106,60 @@ frame parent:text:l20 0 50 0 0
 frame text:l20 -30 -7 30 14
 frame parent:text:l10 50 30 0 0
 frame parent:text:l5 75 10 0 0
+# A radar on 0 to 10 round (50, 50). The smooth line's rows at its own
+# angles, an eighth of a turn apart from 12 o'clock: near 6 o'clock, 20
+# out (within its 30), the fourth row's at 135° is the nearest.
+expect axis null
+event id:radar onMouseMove position.x=53 position.y=70
+expect axis 3
+# Past the smooth line's 30 but within the closed one's 40 (`outerRadius`
+# 80%): its rows from 9 o'clock to 3 (`startAngle`, `endAngle`), 60°
+# apart; up and left at -45° the second's (-30°), up and right at 50°
+# the third's (30°).
+event id:radar onMouseMove position.x=25 position.y=25
+expect axis 1
+event id:radar onMouseMove position.x=77 position.y=27
+expect axis 2
+# Past both outer radii: none.
+event id:radar onMouseMove position.x=50 position.y=5
+expect axis null
+# A screen reader steps through the rows, from the first.
+event id:radar onAccessibilityAction actionName=increment
+expect axis 0
+event id:radar onMouseLeave
+expect axis null
+# The grids: a circular ring at 5 (20 out of 40) from 3 o'clock, and a
+# spoke per row from 6 out to 40, the first at 12 o'clock.
+drawing id:rings stroke path(moveTo 70 50, arc 50 50 20 0...
+drawing id:spokes stroke path(moveTo 50 44, lineTo 50 10...
+covers [nsh/base/plot] RadialLine
+covers [nsh/base/plot] RadialGrid
+covers [props] RadialLine.radius
+covers [props] RadialLine.angle
+covers [props] RadialLine.startAngle
+covers [props] RadialLine.endAngle
+covers [props] RadialLine.outerRadius
+covers [props] RadialGrid.rings
+covers [props] RadialGrid.circular
+covers [props] RadialGrid.startAngle
+covers [props] RadialGrid.outerRadius
+covers [props] RadialGrid.spokes
+covers [props] RadialGrid.innerRadius
+# Texts at values of the plot's scales: the middle row of three at 50 of
+# 0 to 100 is the point (100, 50), each text's top edge on it, starting
+# at it, centered on it or ending at it; half a row from the first row
+# at 100 is the top edge.
+expect lab-left
+frame parent:text:lab-left 100 50 0 0
+frame text:lab-left 0 0 20 10
+frame parent:text:lab-center 100 50 0 0
+frame text:lab-center -10 0 20 10
+frame parent:text:lab-right 100 50 0 0
+frame text:lab-right -20 0 20 10
+frame parent:text:lab-top 50 0 0 0
+frame text:lab-top 0 0 20 10
+covers [nsh/base/plot] PlotLabel
+covers [props] PlotLabel.texts
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
@@ -2517,9 +2711,9 @@ expect Empty: true
 expect Page: null null ab
 expect Error: thrown
 expect Keys: none
-# The subscriber hears the changes in JS's next turn.
+# The `revision` listener hears the changes in JS's next turn.
 wait 50
-expect Updates: true
+expect Updates: true true function
 covers [nsh/base] RichEditorSession
 covers [nsh/base] RichEditorPlugin
 covers [nsh/base] RichSchema

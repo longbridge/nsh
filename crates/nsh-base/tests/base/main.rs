@@ -2,6 +2,7 @@
 //! what a user does with them and what the app hears and shows.
 
 mod calendar;
+mod color_picker;
 mod combobox;
 mod date_picker;
 mod diff;

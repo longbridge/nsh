@@ -145,19 +145,12 @@ pub(crate) fn extend(cx: Ctx, host: Raw) -> Raw {
             let native_on = js::function(cx, c"on", on, 2)?;
             let arguments = [args.get(0), args.get(1)];
             let native_off = js::call(cx, native_on.raw(), UNDEFINED, &arguments)?;
-            let platform_sub = js::call(cx, captures[0].raw(), UNDEFINED, &arguments)?;
-            let platform_off = js::get(cx, platform_sub.raw(), "remove")?;
-            let off = closure(
-                cx,
-                vec![native_off, platform_sub, platform_off],
-                |cx, values, _| {
-                    js::call(cx, values[0].raw(), UNDEFINED, &[])?;
-                    js::call(cx, values[2].raw(), values[1].raw(), &[])?;
-                    Ok(V::undefined())
-                },
-            )?;
-            // Keep main's subscription form and the SDK's cleanup function.
-            js::define(cx, off.raw(), "remove", off.clone_ref(), true)?;
+            let platform_off = js::call(cx, captures[0].raw(), UNDEFINED, &arguments)?;
+            let off = closure(cx, vec![native_off, platform_off], |cx, values, _| {
+                js::call(cx, values[0].raw(), UNDEFINED, &[])?;
+                js::call(cx, values[1].raw(), UNDEFINED, &[])?;
+                Ok(V::undefined())
+            })?;
             crate::keymap::undo_with_owner(cx, &off);
             Ok(off)
         })?;
@@ -455,14 +448,8 @@ export type HostParams = { readonly [key: string]: HostValue };
 export interface HostEvents {
   /** Whether the platform or native SDK has a configured host. */
   available(): boolean;
-  /** Listens until the subscription is removed. */
-  on(event: string, listener: (payload: unknown) => void): { remove(): void };
-}
-
-/** A cleanup function with the platform subscription's remove method. */
-export interface HostSubscription {
-  (): void;
-  remove(): void;
+  /** Listens until the returned function is called. */
+  on(event: string, listener: (payload: unknown) => void): () => void;
 }
 
 export interface Host {
@@ -479,7 +466,7 @@ export interface Host {
    * after the first listener is added, once the code adding it ran. Returns
    * a function that stops listening; a listener added while a component
    * renders stops with the component. */
-  on<T = HostValue>(name: string, listener: (data: T) => void): HostSubscription;
+  on<T = HostValue>(name: string, listener: (data: T) => void): () => void;
   /** Calls the embedding app's handler of `name` with `data`: the promise
    * resolves with its answer, or rejects with an `Error` with the message the
    * handler gave, or at once when the embedding app handles no `name`. At

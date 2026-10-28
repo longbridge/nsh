@@ -436,6 +436,31 @@ function swapClass(el, slot, name) {
 /** Fills a run with `text`, the characters of links (`parts`: `[from, to,
  * link]`, UTF-16) in spans inside it that name their link (`links`):
  * inline, they keep the run's shaping and bidi order. */
+/**
+ * The one color text view `el` is drawn in (null: several, which its runs
+ * carry): on the element, which the runs inherit it from, so a change of it
+ * transitions as CSS's `color` does (`transition-colors`, from the color on
+ * screen, whatever runs are made meanwhile). A text that was several colors
+ * takes its one color at once, as on the native backends.
+ */
+function setTextColor(el, color) {
+  const shown = el._textColor;
+  if (color === shown) return;
+  el._textColor = color;
+  if (color == null) {
+    el.style.color = "";
+  } else if (shown === null) {
+    // From several colors: no transition from the element's stale color.
+    const transition = el.style.transition;
+    el.style.transition = "none";
+    el.style.color = color;
+    void getComputedStyle(el).color;
+    el.style.transition = transition;
+  } else {
+    el.style.color = color;
+  }
+}
+
 function fillRun(run, text, parts, links) {
   if (!parts) {
     run.textContent = text;
@@ -1589,6 +1614,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      screenColor: typeof window.EyeDropper === "function",
     };
   }
 
@@ -1940,9 +1966,58 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
     const el = this.view(id);
     if (!el) return;
+    setTextColor(el, color ?? null);
+    if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
+    el.classList.toggle("nsh-selectable", !!selectable);
+    el.classList.toggle("nsh-autoselect", selectable == null);
+    el.classList.toggle("nsh-noselect", selectable === false);
+    // Its `--nsh-selection`.
+    swapClass(el, "_selection", this.styleClass(selection));
+    el._textLabel = runs.map((r) => r[2]).join("");
+    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
+  }
+
+  /**
+   * A text whose plain runs are as many as before (a cell's new value, a
+   * counter): its spans take the new texts and places in place, so a text
+   * that changes often makes and removes no nodes. False when the runs
+   * cannot be updated so (backgrounds, links, another count).
+   */
+  updateRuns(el, cx, cy, runs, styles, backgrounds, links) {
+    if (backgrounds?.length || links?.length || !runs.length) return false;
+    const spans = [];
+    for (const child of el.children) {
+      if (child.classList.contains("nsh-run-bg")) return false;
+      if (child.classList.contains("nsh-run")) spans.push(child);
+    }
+    if (spans.length !== runs.length) return false;
+    for (let i = 0; i < runs.length; i++) {
+      const [, , text, , , parts] = runs[i];
+      const node = spans[i].firstChild;
+      // Only a span holding one text node, as `fillRun` leaves plain text.
+      if (parts || !text || !node || node.nodeType !== 3 || node.nextSibling) return false;
+    }
+    runs.forEach(([x, y, text, style, start, , after], i) => {
+      const span = spans[i];
+      const name = this.styleClass(styles[style]);
+      const className = name ? `nsh-run ${name}` : "nsh-run";
+      if (span.className !== className) span.className = className;
+      const left = `${cx + x}px`, top = `${cy + y}px`;
+      if (span.style.left !== left) span.style.left = left;
+      if (span.style.top !== top) span.style.top = top;
+      if (span.firstChild.data !== text) span.firstChild.data = text;
+      span._start = start;
+      if (after) span._after = after;
+      else delete span._after;
+    });
+    return true;
+  }
+
+  /** The runs of a text made again: its spans and their backgrounds. */
+  replaceRuns(el, cx, cy, runs, styles, backgrounds, links) {
     const frag = document.createDocumentFragment();
     // Span backgrounds, behind the runs: one box per span and line.
     for (const [x, y, w, h, r, color] of backgrounds ?? []) {
@@ -1969,14 +2044,8 @@ class Player {
     }
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
-    el.classList.toggle("nsh-selectable", !!selectable);
-    el.classList.toggle("nsh-autoselect", selectable == null);
-    el.classList.toggle("nsh-noselect", selectable === false);
-    // Its `--nsh-selection`.
-    swapClass(el, "_selection", this.styleClass(selection));
-    el._textLabel = runs.map((r) => r[2]).join("");
-    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
+
 
   op_e([, id, events]) {
     const el = this.view(id);
@@ -3409,6 +3478,8 @@ class Player {
     field.readOnly = !config.editable;
     field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = config.autoCorrect;
+    if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
+    else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
     else field.removeAttribute("maxlength");
     el._config = config;
@@ -4381,6 +4452,7 @@ class Player {
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
+      case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
@@ -4438,6 +4510,18 @@ class Player {
    * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
+  // `pickScreenColor`: the browser's eyedropper (`EyeDropper`, which the
+  // environment's `screenColor` reports). The color packed as 0xRRGGBBAA;
+  // none when the user pressed Escape.
+  async pickScreenColor(request) {
+    let color;
+    try {
+      const { sRGBHex } = await new EyeDropper().open();
+      color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
+    } catch {}
+    this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
   // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
   // new tab, another scheme (mailto:, tel:, ...) through the browser's
   // handler. Whether the browser let it open (a blocked pop-up is false).

@@ -17320,6 +17320,53 @@ fn frames_stay_on_device_pixels_at_fractional_ratios() {
 }
 
 #[test]
+fn frames_moved_by_whole_pixels_are_not_sent_again() {
+    // Rows of 28 points at 2.625 (73.5 pixels, every other edge on a half
+    // pixel) in a box a scroll moves by one pixel at a time, as DataTable's
+    // body moves: the rows keep their pixels, so only the box's frame is
+    // sent, never the rows' again with another last bit or the other pixel.
+    let ratio = 2.625;
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for id in 3..43 {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+        ops.push(style_op(id, &[("height", StyleValue::Number(28.0))]));
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    for pixel in 1..400 {
+        let top = (f64::from(pixel) / f64::from(ratio)) as f32;
+        apply(
+            &mut c,
+            vec![style_op(2, &[("marginTop", StyleValue::Number(top))])],
+        );
+        let batch = c.commit().unwrap();
+        let rows = batch
+            .items
+            .iter()
+            .filter(|i| matches!(i, MountItem::Frame { id, .. } if *id != 2))
+            .count();
+        assert_eq!(rows, 0, "{pixel} pixels down: {:?}", batch.items);
+    }
+}
+
+#[test]
 fn image_scales_change_nothing_without_scales() {
     let mut c = core();
     at_ratio(&mut c, 3.0);
@@ -21117,4 +21164,73 @@ mod built_in_scrollbars {
         assert!(c.key(bar).is_err());
         assert!(c.decorated.is_empty());
     }
+}
+
+#[test]
+fn frames_of_a_subtree_moved_by_whole_points_are_not_walked_again() {
+    let mut c = core();
+    let at = |top: f32, left: f32, width: f32, height: f32| {
+        vec![
+            ("position", StyleValue::Str("absolute")),
+            ("top", StyleValue::Number(top)),
+            ("left", StyleValue::Number(left)),
+            ("width", StyleValue::Number(width)),
+            ("height", StyleValue::Number(height)),
+        ]
+    };
+    let mut ops = Vec::new();
+    for (id, parent, style) in [
+        (2, ROOT_ID, at(0.0, 0.0, 200.0, 200.0)),
+        (4, 2, at(5.0, 10.0, 50.0, 20.0)),
+        (6, 4, at(2.0, 3.0, 10.0, 10.0)),
+    ] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    let first = c.commit().unwrap();
+    assert_eq!(frame_of(&first, 6), Some(rect(3.0, 2.0, 10.0, 10.0)));
+    // The rows' origin of a table, scrolled: it moves, what is in it does
+    // not, relative to it.
+    apply(&mut c, vec![style_op(2, &at(-37.0, 0.0, 200.0, 200.0))]);
+    let moved = c.commit().unwrap();
+    assert_eq!(frame_of(&moved, 2), Some(rect(0.0, -37.0, 200.0, 200.0)));
+    assert_eq!(frame_of(&moved, 4), None);
+    assert_eq!(frame_of(&moved, 6), None);
+    // A change deep inside is still sent, and so is a view added there.
+    apply(
+        &mut c,
+        vec![
+            style_op(6, &at(2.0, 3.0, 12.0, 10.0)),
+            Op::Create {
+                id: 8,
+                tag: Tag::View,
+            },
+            style_op(8, &at(1.0, 1.0, 4.0, 4.0)),
+            Op::Insert {
+                parent: 4,
+                child: 8,
+                before: None,
+            },
+        ],
+    );
+    let changed = c.commit().unwrap();
+    assert_eq!(frame_of(&changed, 6), Some(rect(3.0, 2.0, 12.0, 10.0)));
+    assert_eq!(frame_of(&changed, 8), Some(rect(1.0, 1.0, 4.0, 4.0)));
+    assert_eq!(frame_of(&changed, 4), None);
+    // A view shown again gets its frame back though nothing in it changed.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("display", StyleValue::Str("none"))])],
+    );
+    let hidden = c.commit().unwrap();
+    assert_eq!(frame_of(&hidden, 6), Some(Bounds::default()));
+    apply(&mut c, vec![style_op(4, &at(5.0, 10.0, 50.0, 20.0))]);
+    let shown = c.commit().unwrap();
+    assert_eq!(frame_of(&shown, 6), Some(rect(3.0, 2.0, 12.0, 10.0)));
 }

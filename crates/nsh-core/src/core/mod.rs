@@ -568,6 +568,17 @@ struct Node {
     text_queued: bool,
     /// A list cell whose subtree was laid out again this commit.
     relaid: bool,
+    /// Where its layout root had the origin of the view around it (its
+    /// containing block), unrounded, and the pixel ratio, when its frame and
+    /// its subtree's were last emitted: while nothing in the subtree is laid
+    /// out anew, a move of that origin by whole device pixels leaves every
+    /// frame in it as it was ([`Core::emit_frames_in`]). `None` until
+    /// emitted, or once they must be emitted again.
+    emitted: Option<(taffy::Point<f32>, f32)>,
+    /// A view in its subtree is placed in a containing block above it (a
+    /// fixed one, or an absolute one in a static parent), so a move of the
+    /// subtree can move it in its parent.
+    escapes: bool,
     /// A list cell without an item, until the list places it again: it
     /// still shows its last row, so it is hidden from sight, touches and
     /// assistive technology ([`Core::set_spare`]).
@@ -784,6 +795,8 @@ impl Node {
             queued: false,
             text_queued: false,
             relaid: false,
+            emitted: None,
+            escapes: false,
             spare: false,
         }
     }
@@ -4403,6 +4416,11 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let kind = node.kind;
         node.frame = Bounds::UNSET;
+        node.emitted = None;
+        if let Some(layout) = node.layout {
+            self.layout.mark_stale(layout);
+        }
+        let node = &mut self.nodes[key as usize];
         // A list in its parent's viewport is a plain view clipping its
         // cells (`Node::mounted_view_style`), with no scroll view's config.
         let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
@@ -5973,6 +5991,8 @@ impl<M: TextEngine> Core<M> {
         }
         let hidden = hidden || self.layout.style(layout).display == taffy::Display::None;
         if hidden {
+            self.layout.emitted(layout);
+            self.nodes[key as usize].emitted = None;
             self.set_frame(key, Bounds::default());
             if self.nodes[key as usize].kind.is_container() {
                 let children = std::mem::take(&mut self.nodes[key as usize].children);
@@ -5986,8 +6006,42 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let node = &self.nodes[key as usize];
-        let unrounded = self.layout.unrounded_layout(layout);
-        let containing = if self.layout.style(layout).position.is_out_of_flow() {
+        let unrounded = *self.layout.unrounded_layout(layout);
+        // An absolute view in a positioned parent (React Native's default
+        // `relative`) is placed in that parent, whose origin is `origin`,
+        // summed in the same order as `layout_origin` sums it: only one
+        // placed further up walks there (every cell of a table would walk to
+        // the root, each frame the tree is laid out).
+        let position = self.layout.style(layout).position;
+        let escaping = position == Position::Fixed
+            || (position == Position::Absolute
+                && !self
+                    .layout
+                    .parent(layout)
+                    .is_some_and(|p| self.layout.style(p).position.is_positioned()));
+        let ratio = self.pixel_ratio();
+        // Nothing in the subtree was laid out anew and its origin moved by
+        // whole device pixels (or not at all): every frame in it, relative to
+        // its parent, rounds as it did. A scroll that moves a table's rows
+        // walks the rows' origin, not each cell.
+        if !self.layout.stale(layout)
+            && !node.escapes
+            && !node.is_overlay()
+            && node.beside == NO_KEY
+            && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
+            && node.emitted.is_some_and(|(at, r)| {
+                let moved = |a: f32, b: f32| {
+                    let d = (a - b) * ratio;
+                    d == d.round()
+                };
+                r == ratio && moved(origin.x, at.x) && moved(origin.y, at.y)
+            })
+        {
+            self.nodes[key as usize].emitted = Some((origin, ratio));
+            return;
+        }
+        self.layout.emitted(layout);
+        let containing = if escaping {
             self.layout_origin(layout)
         } else {
             origin
@@ -5996,11 +6050,10 @@ impl<M: TextEngine> Core<M> {
             x: containing.x + unrounded.location.x,
             y: containing.y + unrounded.location.y,
         };
-        let ratio = self.pixel_ratio();
-        let l = rounded(unrounded, containing, ratio);
+        let l = rounded(&unrounded, containing, ratio);
         let mut frame = rect(
-            l.location.x + round(containing.x, ratio) - round(origin.x, ratio),
-            l.location.y + round(containing.y, ratio) - round(origin.y, ratio),
+            l.location.x + span(origin.x, containing.x, ratio),
+            l.location.y + span(origin.y, containing.y, ratio),
             l.size.width,
             l.size.height,
         );
@@ -6058,16 +6111,21 @@ impl<M: TextEngine> Core<M> {
         }
         // List cells are positioned by `update_lists`, roots by
         // `layout_roots`.
+        let mut escapes = escaping;
         if kind.is_container() && kind != Kind::List {
             let children = std::mem::take(&mut self.nodes[key as usize].children);
             for &child in &children {
                 if !self.nodes[child as usize].is_layout_root() {
                     self.emit_frames_in(child, false, inner);
+                    escapes |= self.nodes[child as usize].escapes;
                 }
             }
             self.nodes[key as usize].children = children;
             self.update_overflow(key);
         }
+        let node = &mut self.nodes[key as usize];
+        node.escapes = escapes;
+        node.emitted = Some((origin, ratio));
     }
 
     /// Queues node `key`'s frame for its layout listeners once it was laid
@@ -6709,7 +6767,28 @@ const HIDDEN: f32 = 1.0e6;
 /// would make a child a pixel taller than its parent (a scroll view then cuts
 /// its last row of pixels off).
 fn round(value: f32, ratio: f32) -> f32 {
-    (value * ratio + 0.5).floor() / ratio
+    (pixel(value, ratio) / f64::from(ratio)) as f32
+}
+
+/// The device pixel [`round`] puts `value` on, counted from the root's
+/// origin. `value` is an `f32` sum of offsets, a hair off the position it
+/// stands for, and `/ ratio` is never exact at a fractional ratio: snapped
+/// to a 64th of a pixel first, an edge on a half pixel (a 28 point row at
+/// 2.625 is 73.5 pixels) always rounds the same way, wherever a scroll put
+/// it, instead of taking one pixel or the next by that hair.
+fn pixel(value: f32, ratio: f32) -> f64 {
+    let p = f64::from(value) * f64::from(ratio);
+    ((p * 64.0).round() / 64.0 + 0.5).floor()
+}
+
+/// The distance in points from `from` to `to`, each rounded to a device
+/// pixel ([`round`]): computed from the whole pixels between them, so the
+/// same pixels give the same `f32` wherever they are. The difference of two
+/// rounded points (`round(to) - round(from)`) would differ in its last bits
+/// as a scroll moves the edges, and every frame in a scrolled region would
+/// be sent again unchanged.
+fn span(from: f32, to: f32, ratio: f32) -> f32 {
+    ((pixel(to, ratio) - pixel(from, ratio)) / f64::from(ratio)) as f32
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
@@ -6730,29 +6809,41 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
 fn rounded(layout: &taffy::Layout, origin: taffy::Point<f32>, ratio: f32) -> taffy::Layout {
     let mut out = *layout;
     let (x, y) = (origin.x + layout.location.x, origin.y + layout.location.y);
-    out.location.x = round(x, ratio) - round(origin.x, ratio);
-    out.location.y = round(y, ratio) - round(origin.y, ratio);
-    out.size.width = round(x + layout.size.width, ratio) - round(x, ratio);
-    out.size.height = round(y + layout.size.height, ratio) - round(y, ratio);
+    out.location.x = span(origin.x, x, ratio);
+    out.location.y = span(origin.y, y, ratio);
+    out.size.width = span(x, x + layout.size.width, ratio);
+    out.size.height = span(y, y + layout.size.height, ratio);
     out.scrollbar_size.width = round(layout.scrollbar_size.width, ratio);
     out.scrollbar_size.height = round(layout.scrollbar_size.height, ratio);
-    out.border.left = round(x + layout.border.left, ratio) - round(x, ratio);
-    out.border.right = round(x + layout.size.width, ratio)
-        - round(x + layout.size.width - layout.border.right, ratio);
-    out.border.top = round(y + layout.border.top, ratio) - round(y, ratio);
-    out.border.bottom = round(y + layout.size.height, ratio)
-        - round(y + layout.size.height - layout.border.bottom, ratio);
-    out.padding.left = round(x + layout.padding.left, ratio) - round(x, ratio);
-    out.padding.right = round(x + layout.size.width, ratio)
-        - round(x + layout.size.width - layout.padding.right, ratio);
-    out.padding.top = round(y + layout.padding.top, ratio) - round(y, ratio);
-    out.padding.bottom = round(y + layout.size.height, ratio)
-        - round(y + layout.size.height - layout.padding.bottom, ratio);
+    out.border.left = span(x, x + layout.border.left, ratio);
+    out.border.right = span(
+        x + layout.size.width - layout.border.right,
+        x + layout.size.width,
+        ratio,
+    );
+    out.border.top = span(y, y + layout.border.top, ratio);
+    out.border.bottom = span(
+        y + layout.size.height - layout.border.bottom,
+        y + layout.size.height,
+        ratio,
+    );
+    out.padding.left = span(x, x + layout.padding.left, ratio);
+    out.padding.right = span(
+        x + layout.size.width - layout.padding.right,
+        x + layout.size.width,
+        ratio,
+    );
+    out.padding.top = span(y, y + layout.padding.top, ratio);
+    out.padding.bottom = span(
+        y + layout.size.height - layout.padding.bottom,
+        y + layout.size.height,
+        ratio,
+    );
     let o = layout.scrollable_overflow_rect;
-    out.scrollable_overflow_rect.left = round(x + o.left, ratio) - round(x, ratio);
-    out.scrollable_overflow_rect.right = round(x + o.right, ratio) - round(x, ratio);
-    out.scrollable_overflow_rect.top = round(y + o.top, ratio) - round(y, ratio);
-    out.scrollable_overflow_rect.bottom = round(y + o.bottom, ratio) - round(y, ratio);
+    out.scrollable_overflow_rect.left = span(x, x + o.left, ratio);
+    out.scrollable_overflow_rect.right = span(x, x + o.right, ratio);
+    out.scrollable_overflow_rect.top = span(y, y + o.top, ratio);
+    out.scrollable_overflow_rect.bottom = span(y, y + o.bottom, ratio);
     out
 }
 

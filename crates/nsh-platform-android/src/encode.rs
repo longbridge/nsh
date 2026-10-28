@@ -224,6 +224,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     None => 2,
                 });
                 opt_color(&mut e, text.selection_color);
+                // The one color all of it is drawn in, if there is one: a
+                // change of it transitions (`transition-colors`, `TextBox`).
+                opt_color(&mut e, text.uniform_color());
             }
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
@@ -645,7 +648,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Desktop(_)
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
-                    | Command::HostCall { .. } => e.int(-1),
+                    | Command::HostCall { .. }
+                    // No eyedropper (`Environment::screen_color`): the core
+                    // answers no color first.
+                    | Command::PickScreenColor { .. } => e.int(-1),
                 }
             }
         }
