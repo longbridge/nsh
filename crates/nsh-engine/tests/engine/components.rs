@@ -6299,6 +6299,104 @@ fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
     );
 }
 
+const BASE_PLOT_ARC_RETARGET: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Arc, Pie, Plot } from "nsh/base/plot";
+
+function App() {
+  const step = signal(0);
+  setTimeout(() => step.set(1), 50);
+  setTimeout(() => step.set(2), 150);
+  const ends = [Math.PI / 2, Math.PI, 1.5 * Math.PI];
+  const rows = [
+    [{ v: 1 }, { v: 3 }],
+    [{ v: 1 }, { v: 1 }],
+    [{ v: 3 }, { v: 1 }],
+  ];
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows[step()]}
+        y="v"
+        motion={{ update: { duration: 1000 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <Arc endAngle={ends[step()]} innerRadius={30} outerRadius={50} />
+        <Pie innerRadius={10} outerRadius={20} />
+      </Plot>
+      <Text>{`step ${step()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The angles changing again while they move (`motion.update`): the move
+/// stops, the animator is asked how far it had gone, and the next move
+/// starts from the angles drawn there, not from the first move's target;
+/// the arc's and the pie's alike.
+#[test]
+fn base_plot_arc_and_pie_move_on_from_the_angles_drawn() {
+    use std::f32::consts::{FRAC_PI_4, PI};
+
+    use nsh_core::{
+        animation::{AnimationOp, Finished},
+        canvas::Num,
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let reads = |all: &[MountBatch]| -> Vec<u32> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Animation(AnimationOp::Read { request, .. }) => Some(*request),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let (engine, rx) = start(BASE_PLOT_ARC_RETARGET);
+    let mut all = until(&rx, |b| shows(b, "step 2"));
+    if reads(&all).len() < 2 {
+        all.extend(until(&rx, |b| {
+            b.items
+                .iter()
+                .any(|i| matches!(i, MountItem::Animation(AnimationOp::Read { .. })))
+        }));
+    }
+    // The arc's move and the pie's: each asks where it is.
+    let asked = reads(&all);
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    // Halfway, as the platform answers: the first moves draw a quarter
+    // turn and a half (3 o'clock to 6 o'clock) three quarters round.
+    engine.control().animations_finished(
+        asked
+            .iter()
+            .map(|&request| Finished {
+                animation: request,
+                finished: true,
+                value: Some(0.5),
+            })
+            .collect(),
+    );
+    let answered = all.len();
+    all.extend(until(&rx, |_| false));
+    // From there (the canvas's `PI / 4`, 12 o'clock its `-PI / 2`), not
+    // from the first move's target (its `PI / 2`), to three quarters.
+    let arc = rim_ends(&all[answered..], 50.0);
+    let [(arc, Num::Slot(end))] = arc[..] else {
+        panic!("the arc's rim, its end animated: {arc:?}")
+    };
+    let ends = slot_at(&all, arc, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
+    let slices = rim_ends(&all[answered..], 20.0);
+    let (first, Num::Slot(end)) = slices[0] else {
+        panic!("the first slice's rim, its end animated: {slices:?}")
+    };
+    let ends = slot_at(&all, first, end, &[1.0, 3.0]);
+    assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 
