@@ -507,10 +507,10 @@ pub fn photo() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { Image, mount, Scroll, signal, type YNode } from "nsh";
+import { Image, mount, Scroll, type ScrollRef, signal } from "nsh";
 
 function Photo() {
-  let scroll!: YNode;
+  let scroll!: ScrollRef;
   const scale = signal(1);
   return (
     <Scroll
@@ -552,7 +552,7 @@ view().on_press(move || scroller.scroll_to(point(px(0.0), px(0.0)), true))
 ```
 
 ```tsx tabs
-let scroll!: YNode;
+let scroll!: ScrollRef;
 
 <Scroll ref={scroll} style={{ flex: 1 }}>…</Scroll>
 <View onPress={() => scroll.scrollTo({ y: 0 })}>…</View>

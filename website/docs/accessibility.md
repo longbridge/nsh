@@ -252,12 +252,12 @@ fn upload() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, type YNode } from "nsh";
+import { signal, Text, View, type ViewRef } from "nsh";
 import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 
 function Upload() {
   const done = signal(false);
-  let result!: YNode;
+  let result!: ViewRef;
   const finish = () => {
     done.set(true);
     announce("Upload complete");

@@ -355,7 +355,7 @@ view().on_press(open_page).child(
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(e: { bounds: Bounds }) => void` | 每次布局改变视图位置尺寸后，`bounds` 给出相对父视图的 frame `{ origin, size }`。 |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | 原生节点（参见 [ref 方法](#ref-方法)）。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
+| `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | 元素的 ref（参见 [ref 方法](#ref-方法)）：`ViewRef`，或元素自己基于它的类型。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
 | `nativeID` | `.native_id(id)` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
@@ -451,20 +451,21 @@ view()
 
 ## ref 方法
 
-在 TSX 中 `ref` 收到一个 `YNode`；在 Rust 中，`element_ref()` 创建一个 `ElementRef` 句柄，由 `.element_ref(&handle)` 附加到元素上。它们的方法向原生视图发送命令，与同一轮中先前的改动按顺序执行。各元素页面会说明哪些方法适用。
+在 TSX 中 `ref` 收到元素的 ref，类型是元素自己的：`View`、`Text`、`Image`、`Canvas`、`Overlay` 和 `Shader` 是 `ViewRef`（`focus`、`blur`、`measure`），其他元素是在 `ViewRef` 之上加上自身方法的类型：`InputRef`（`Input`）、`ScrollRef`（`Scroll`）、`ListRef`（`List`）、`WebViewRef`（`WebView`）、`VideoRef`（`Video`）和 `NativeComponentRef`（原生组件）。在 Rust 中，`element_ref()` 创建一个 `ElementRef` 句柄，由 `.element_ref(&handle)` 附加到元素上。它们的方法向原生视图发送命令，与同一轮中先前的改动按顺序执行。各元素页面会说明哪些方法适用。ref 变量请按元素自己的类型声明（`<Input>` 用 `let field!: InputRef`）：声明为 `ViewRef` 的变量不能用在 ref 带有自己方法的元素上。
 
-| 方法 | Rust | 适用于 | 说明 |
+| 方法 | Rust | Ref | 说明 |
 |---|---|---|---|
-| `focus()` / `blur()` | `focus()` / `blur()` | `<Input>` | 获取焦点（弹出键盘）/ 失去焦点。 |
-| `setSelection(start, end?)` | `set_selection(start, end)` | `<Input>` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
-| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `<Scroll>`、`List` | 滚动到某个偏移量。 |
-| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | 可缩放的 `<Scroll>` | 围绕内容中的某点缩放到 `scale`。 |
-| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `List` | 沿列表方向滚动到某个偏移量。 |
-| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `List` | 把某一项滚动到可见区域。 |
-| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `List` | 滚动到内容末尾。 |
-| `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebView` | 控制页面。 |
-| `seek(seconds)` | `seek(seconds)` | `Video` | 跳转到某个时间点。 |
-| `command(name, args?)` | `command(name, args)` | 原生组件 | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |
+| `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | 让 `<Input>` 获取焦点（弹出键盘），或让可按下的视图获得键盘焦点 / 失去焦点。 |
+| `measure()` | `measure()` | `ViewRef` | [视图的位置](../docs/touch-and-gestures.md)。 |
+| `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
+| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`、`ListRef` | 滚动到某个偏移量。 |
+| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef`（可缩放的 `<Scroll>`） | 围绕内容中的某点缩放到 `scale`。 |
+| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | 沿列表方向滚动到某个偏移量。 |
+| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | 把某一项滚动到可见区域。 |
+| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`、`ListRef` | 滚动到内容末尾。 |
+| `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebViewRef` | 控制页面。 |
+| `seek(seconds)` | `seek(seconds)` | `VideoRef` | 跳转到某个时间点。 |
+| `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |
 
 ```rust tabs
 let field = element_ref();
@@ -475,10 +476,10 @@ view()
 ```
 
 ```tsx tabs
-import { View, type YNode } from "nsh";
+import { type InputRef, View } from "nsh";
 import { Input } from "nsh/base";
 
-let input!: YNode;
+let input!: InputRef;
 <View onPress={() => input.focus()}>
   <Input ref={input} placeholder="点击这一行开始输入" />
 </View>;

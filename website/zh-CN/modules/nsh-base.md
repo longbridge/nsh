@@ -69,6 +69,7 @@ import type {
   AlertDialogAction,
   AlertDialogOptions,
   AlertDialogPresentation,
+  AlertDialogResult,
   AlertDialogRole,
   ButtonProps,
   CheckboxProps,
@@ -95,6 +96,7 @@ import type {
   EditorDiagnostic,
   EditorProps,
   EditorRef,
+  EditorReplaceAll,
   EditorSearch,
   EditorSearchResult,
   EditorSelection,
@@ -315,7 +317,7 @@ import type {
 
 ### AlertDialog
 
-`AlertDialog.show(options)` 显示平台自己的警告框或操作表，并以用户选择的操作作为结果。见 [AlertDialog](../elements/alert-dialog.md)。
+`AlertDialog.show(options)` 显示平台自己的警告框或操作表，结果是 `{ action }`：用户所选操作的 `id`。见 [AlertDialog](../elements/alert-dialog.md)。
 
 <a id="input"></a>
 

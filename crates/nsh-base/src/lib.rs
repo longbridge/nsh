@@ -62,7 +62,7 @@ pub use nsh_core::element::{Input, input};
 pub use crate::{
     alert_dialog::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
-        AlertDialogRole, alert_dialog,
+        AlertDialogResult, AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
@@ -86,9 +86,9 @@ pub use crate::{
         EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
         EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorRect, EditorScrollBeyond, EditorSearch,
-        EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent, EditorToken,
-        editor,
+        EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll, EditorScrollBeyond,
+        EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
+        EditorToken, editor,
     },
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,

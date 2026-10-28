@@ -397,8 +397,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   - Returns: an object, never a bare value that may need a second field (`AlertDialog.show` → `{ action }`,
     animations → `{ finished }`). Failure rejects (or throws) with the error, never resolves `false` (`Image.prefetch`,
     `getSize`, `fetch`); yes / no questions (`hasText()`, `canUndo()`) return booleans.
-  - Methods take their options as one object (`addPanel(panel, { placement, size })`, `net.connect({ host, port })`),
-    never a second or third positional option.
+  - Methods whose parameters may grow take their options as one object (`net.connect({ host, port })`,
+    `Window.setTitleBar({ style, height })`); parameters the user judged will not grow stay positional
+    (`setSelection(start, end?)`, `seek(seconds)`, `DockArea.addPanel(panel, placement?, size?)`,
+    `DataTable.scrollToRow(row, animated?)`, `Editor.revealPosition(position, center)`, a range's start and end):
+    decided per method by the user (2026-10-28), not changed on reading this rule.
   - Identifiers an app matches on are the app's and required, never derived from a label (`AlertDialogAction.id`).
   - Refs: each element has a ref type of its own (`InputRef`, `ScrollRef`, `VideoRef`, ... over a common `ViewRef`),
     never one type carrying every element's methods.

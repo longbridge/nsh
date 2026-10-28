@@ -128,7 +128,7 @@ touches and UI tests meet each row once.
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `style` | `Styled` methods | `StyleProp<ViewStyle>` | | The list's own style (it needs a bounded size: `flex: 1` or a height). |
 | `testID` | `.test_id(id)` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | | The list's node (see [ref methods](#ref-methods)). |
+| `ref` | `.element_ref(&handle)` | `ListRef \| (node: ListRef) => void` | | The list's ref (see [ref methods](#ref-methods)). |
 
 Lists also take the scrolling props of [`Scroll`](./scroll.md#scrolling) (the `Scrollable` methods in Rust):
 `pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `disableIntervalMomentum`, `decelerationRate`,
@@ -202,7 +202,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 
 ```tsx tabs
 const visible = signal("");
-let list!: YNode;
+let list!: ListRef;
 
 <List
   ref={list}

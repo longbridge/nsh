@@ -130,7 +130,7 @@ scroll()
 ```
 
 ```tsx tabs
-let photo!: YNode;
+let photo!: ScrollRef;
 <Scroll ref={photo} maximumZoomScale={4} centerContent style={{ flex: 1, backgroundColor: "#000" }}>
   <Image src={picture} style={{ width: 390, height: 520 }} onPress={() => photo.zoomTo({ scale: 1, animated: true })} />
 </Scroll>;
@@ -166,7 +166,7 @@ scroller.scroll_to(point(px(0.0), px(0.0)), true);
 ```
 
 ```tsx tabs
-let scroller!: YNode;
+let scroller!: ScrollRef;
 <Scroll ref={scroller}>…</Scroll>;
 scroller.scrollTo({ y: 0, animated: true });
 ```

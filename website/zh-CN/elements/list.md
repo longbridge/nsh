@@ -116,7 +116,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `style` | `Styled` 方法 | `StyleProp<ViewStyle>` | | 列表自身的样式（需要有确定的尺寸：`flex: 1` 或高度）。 |
 | `testID` | `.test_id(id)` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | | 列表的节点（见 [ref 方法](#ref-方法)）。 |
+| `ref` | `.element_ref(&handle)` | `ListRef \| (node: ListRef) => void` | | 列表的 ref（见 [ref 方法](#ref-方法)）。 |
 
 列表同样支持 [`Scroll`](./scroll.md#滚动) 的滚动属性（Rust 中为 `Scrollable` 方法）：`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`disableIntervalMomentum`、`decelerationRate`、`bounces`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`scrollEventThrottle` 和 `scrollable`。列表保持原有比例。
 
@@ -184,7 +184,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 
 ```tsx tabs
 const visible = signal("");
-let list!: YNode;
+let list!: ListRef;
 
 <List
   ref={list}

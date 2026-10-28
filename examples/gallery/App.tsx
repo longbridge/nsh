@@ -1,4 +1,4 @@
-import { computed, effect, mount, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
+import { computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
@@ -247,7 +247,7 @@ function SidebarToggle() {
 /** The sidebar's search: filters the demos by name or group as you type
  * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
 function Search() {
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
   return (
     <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
@@ -444,7 +444,7 @@ function rememberDemo() {
 function App() {
   if (hasWindow) {
     Window.setTitle("Gallery");
-    Window.setTitleBar("hidden", 44);
+    Window.setTitleBar({ style: "hidden", height: 44 });
   }
   rememberDemo();
   return (

@@ -1486,7 +1486,7 @@ pub enum OverlayProp {
     /// root view, as an input's caret `pageBounds`) it is placed against,
     /// following a view as it moves; without one it is laid out as a
     /// `position: fixed` box of its root view.
-    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | Bounds | null", on = OVERLAY)]
+    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "ViewRef | Point | Bounds | null", on = OVERLAY)]
     Anchor(OverlayAnchor),
     /// `placement`: the side of the anchor it goes on (default `"bottom"`);
     /// the other side when only that one has room.

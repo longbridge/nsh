@@ -141,7 +141,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 ))
                 .child(button(
                     "replace-all",
-                    Box::new(move |a| replaced.set(a.replace_all("baz".into()))),
+                    Box::new(move |a| replaced.set(a.replace_all("baz".into()).count)),
                 ))
                 .child(button("fold-0", Box::new(|a| a.fold(0))))
                 .child(button("unfold-0", Box::new(|a| a.unfold(0))))

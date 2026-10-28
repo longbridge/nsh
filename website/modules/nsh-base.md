@@ -81,6 +81,7 @@ import type {
   AlertDialogAction,
   AlertDialogOptions,
   AlertDialogPresentation,
+  AlertDialogResult,
   AlertDialogRole,
   ButtonProps,
   CheckboxProps,
@@ -107,6 +108,7 @@ import type {
   EditorDiagnostic,
   EditorProps,
   EditorRef,
+  EditorReplaceAll,
   EditorSearch,
   EditorSearchResult,
   EditorSelection,
@@ -354,8 +356,8 @@ popup and backdrop are styled by the app. See [Dialog](../elements/dialog.md).
 
 ### AlertDialog
 
-`AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with the action the user
-chose. See [AlertDialog](../elements/alert-dialog.md).
+`AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with `{ action }`, the `id`
+of the action the user chose. See [AlertDialog](../elements/alert-dialog.md).
 
 ## Input
 

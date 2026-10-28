@@ -648,19 +648,19 @@ import { AlertDialog } from "nsh/base";
 
 const shown = signal("waiting");
 setTimeout(async () => {
-  const a = await AlertDialog.show({
+  const { action: a } = await AlertDialog.show({
     title: "Delete the photo?",
     description: "It is gone then.",
     actions: [
-      { label: "Cancel", role: "cancel" },
+      { label: "Cancel", role: "cancel", id: "cancel" },
       { label: "Delete", role: "destructive", id: "delete" },
     ],
   });
-  const b = await AlertDialog.show({
+  const { action: b } = await AlertDialog.show({
     presentation: "actionSheet",
-    actions: [{ label: "Share" }, { label: "Copy" }],
+    actions: [{ label: "Share", id: "share" }, { label: "Copy", id: "copy" }],
   });
-  const c = await AlertDialog.show({ actions: [{ label: "OK" }], closeOnEscape: true });
+  const { action: c } = await AlertDialog.show({ actions: [{ label: "OK", id: "ok" }], closeOnEscape: true });
   let d = "resolved";
   try {
     await AlertDialog.show({ actions: [] });
@@ -673,8 +673,8 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
-/// `AlertDialog.show` resolves with the chosen action's id, else its
-/// label, and with null when it closed without one.
+/// `AlertDialog.show` resolves with `{ action }`: the chosen action's id,
+/// or null when it closed without one.
 #[test]
 fn alert_dialogs_resolve_with_the_action_chosen() {
     let (engine, rx) = start(ALERT);
@@ -719,11 +719,11 @@ fn alert_dialogs_resolve_with_the_action_chosen() {
     let ok = next_dialog();
     assert!(ok.cancelable);
     answer(&ok, -1.0);
-    let batches = until(&rx, |b| shows(b, "answers delete Share null rejected"));
+    let batches = until(&rx, |b| shows(b, "answers delete share null rejected"));
     assert!(
         batches
             .iter()
-            .any(|b| shows(b, "answers delete Share null rejected"))
+            .any(|b| shows(b, "answers delete share null rejected"))
     );
 }
 
@@ -863,12 +863,12 @@ fn runtime_modules() {
     assert_eq!(focused, Some(note));
 }
 
-const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type YNode } from "nsh";
+const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
 
 const shown = signal("waiting");
-let box!: YNode;
-let ghost!: YNode;
-const detached = <View ref={(n: YNode) => (ghost = n)} />;
+let box!: ViewRef;
+let ghost!: ViewRef;
+const detached = <View ref={(n: ViewRef) => (ghost = n)} />;
 setTimeout(async () => {
   const m = (await box.measure())!;
   const none = await ghost.measure();

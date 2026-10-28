@@ -1256,7 +1256,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         } else {
             let _ = write!(
                 out,
-                "/** The ref of `{0}`: its methods. */\nexport interface {0}Ref {{\n  /** The component's host node. */\n  readonly node: YNode;\n",
+                "/** The ref of `{0}`: its methods. */\nexport interface {0}Ref {{\n  /** The component's host node. */\n  readonly node: ViewRef;\n",
                 spec.export
             );
             for m in &spec.methods {

@@ -402,7 +402,7 @@ view()
 ```
 
 ```tsx tabs
-let track!: YNode;
+let track!: ViewRef;
 let origin = 0;
 <View
   ref={track}

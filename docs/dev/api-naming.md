@@ -171,11 +171,15 @@ be navigated by keyboard once open). So `nsh/base`'s `Select` owns that unstyled
 ## Shapes that can grow
 
 Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
-members, so a shape decides what can ever be added to it. These rules are the targets the API is being brought to
-before the first recorded release (item 3 of the API review): where the code still differs (`AlertDialog.show`'s
-bare id, `Image.prefetch`'s `boolean`, the one `YNode` ref type), the rule wins and the code follows.
+members, so a shape decides what can ever be added to it. The API follows these rules before the first recorded
+release (item 3 of the API review); where code differs from one, the rule wins and the code follows.
 
-- Options are one object (`scrollTo({ x, y, animated })`), never a third positional parameter.
+- A method whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`,
+  `net.connect({ host, port })`, `Window.setTitleBar({ style, height })`), never a further positional parameter;
+  parameters the user judged will not grow stay positional (`setSelection(start, end?)`, `seek(seconds)`,
+  `DockArea.addPanel(panel, placement?, size?)`, `DataTable.scrollToRow` / `scrollToColumn(…, animated?)`,
+  `Editor.revealPosition(position, center)`, a range's start and end such as `DataTable.dump(start?, end?)`;
+  decided per method by the user, 2026-10-28, so they are not "fixed" on reading this rule).
 - A mode is a string union, which gains values; never a boolean that later needs a third state.
 - A value has one type: `version: string`, never `string | number`.
 - What a function returns is an object, never a tuple (beside `split`'s, Solid's) or a bare value that may need a second field
@@ -185,9 +189,10 @@ bare id, `Image.prefetch`'s `boolean`, the one `YNode` ref type), the rule wins 
   `RichEditor.setDocJson` as `Image.getSize` and `fetch`; decided by the user, 2026-10-27).
 - An identifier the app matches on is the app's and required, never derived from what is shown
   (`AlertDialogAction.id`: a label changes with the app's language; decided by the user, 2026-10-27).
-- Each element has a ref type of its own (`InputRef`, `ScrollRef`, `ListRef`, `WebViewRef`, `VideoRef` over a common
-  `ViewRef`), never one type carrying every element's methods (approved by the user, 2026-10-27): a method added
-  to one element must not appear on every ref, and splitting later would remove methods apps use.
+- Each element has a ref type of its own (`InputRef`, `ScrollRef`, `ListRef`, `WebViewRef`, `VideoRef`,
+  `NativeComponentRef` over a common `ViewRef`), never one type carrying every element's methods (approved by the
+  user, 2026-10-27; `YNode` split 2026-10-28): a method added to one element must not appear on every ref, and
+  splitting later would remove methods apps use.
 - Event payloads and listening follow the rules above (objects, `() => void`).
 
 ## Renames before the first compatible release
@@ -222,6 +227,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
 | `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout({ bounds }: { bounds: Bounds })` | Geometry | `LayoutEvent` dropped; `onLayout(bounds)` first, one object since 2026-10-27 (Payloads, below) |
 | `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
+| `YNode` (every ref; what primitives return) | `ViewRef` (`focus`, `blur`, `measure`; what an element is, in `JSX.Element`), and per element `InputRef` (`setSelection`), `ScrollRef` (`scrollTo`, `zoomTo`, `scrollToEnd`), `ListRef` (`scrollTo`, `scrollToOffset`, `scrollToIndex`, `scrollToEnd`), `WebViewRef`, `VideoRef` (`seek`), `NativeComponentRef` (`command`) over it; primitives return `JSX.Element` | Shapes that can grow | 2026-10-28: a method added to one element appears on its ref only. `Overlay`'s `anchor`, `setAccessibilityFocus` and a Rust component's ref's `node` take a `ViewRef`; the methods' signatures are unchanged |
 | `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events pass `{ offset: Point }` (Payloads, 2026-10-27, below) |
 | `OverlayPosition` `{ placement, x, y, width, height, availableWidth, availableHeight }` | `{ placement; bounds: Bounds; available: Size }` | Geometry | |
 | `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |
@@ -257,6 +263,9 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
+| `Window.setTitleBar(style, height?)` | `Window.setTitleBar({ style, height? })` (`TitleBarOptions`) | Shapes that can grow | 2026-10-28: options that may grow are one object. Rust's `set_title_bar(style, height)` unchanged |
+| **Standard modules** | | | |
+| `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
 | **`nsh`: the environment** | | | |
 | `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
 | `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
@@ -321,9 +330,9 @@ and `Input`'s React Native names follow the rules as well.
 | `remove(route)` | unchanged | none | |
 | `createNavigator(initial: R \| R[])` | `createNavigator(routes: R[])` | `NavStackState::new` then `push` | One shape |
 | **Alert, ActionSheet** | | | |
-| `Alert.alert(title, message, buttons, options)`, `ActionSheet.show(options)` | `AlertDialog.show({ title, description, actions, presentation, closeOnEscape, closeOnBackdropPress })` → `Promise<string \| null>` | `alert_dialog.rs` `AlertDialog`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`, `AlertDialogCancel` | Resolves with the action's `id` (its `label` without one), `null` when closed without an action |
+| `Alert.alert(title, message, buttons, options)`, `ActionSheet.show(options)` | `AlertDialog.show({ title, description, actions, presentation, closeOnEscape, closeOnBackdropPress })` → `Promise<AlertDialogResult>` | `alert_dialog.rs` `AlertDialog`, `AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`, `AlertDialogCancel` | Resolves with `{ action }`: the action's `id`, `null` when closed without an action (an object since 2026-10-27, Shapes that can grow) |
 | `message` | `description` | `AlertDialogDescription`, `DialogDescription` | |
-| `buttons` / `options` (+ `cancelButtonIndex`, `destructiveButtonIndexes`) | `actions: { label, role?, id? }[]` | `AlertDialogAction`; *guides* fluent property `label` | One shape for both |
+| `buttons` / `options` (+ `cancelButtonIndex`, `destructiveButtonIndexes`) | `actions: { label, role?, id }[]` | `AlertDialogAction`; *guides* fluent property `label` | One shape for both; `id` required since 2026-10-27 (Shapes that can grow): a label changes with the app's language. Rust `.action(id, label)`, `.cancel(id, label)`, `.destructive(id, label)` |
 | `AlertButton.text` | `label` | `gpui-component` `Button::label` | |
 | `AlertButton.style: AlertButtonStyle` | `role: "default" \| "cancel" \| "destructive"` | `AlertDialogCancel`; GPUI `Role`; SwiftUI `ButtonRole` | A role, not a look |
 | `ActionSheet` (a module) | `presentation: "alert" \| "actionSheet"` | none (UIKit `preferredStyle`) | Default `"alert"`; same word as Modal's `presentation` |
