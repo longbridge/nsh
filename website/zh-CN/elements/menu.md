@@ -101,6 +101,23 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 在桌面平台上，辅助按键在指针所在处打开它。在触摸屏上，手指按住触发元素会以 sheet 的形式打开它；触发元素自己的按压和周围的滚动视图照常工作，移动手指会取消这次按住。
 
+<a id="entrance-and-exit"></a>
+
+## 出现与离开
+
+在桌面平台上，弹出层像 [Popover](./popover.md#entrance-and-exit) 一样随你的过渡出现和离开：`popupStartingClass` 是它第一帧的外观，`popupEndingClass` 是关闭后的外观，在 `popupClass` 的 `transition-*` 类播放期间它会保留，随后触发 `onClose`。子菜单使用同样的外观，并随菜单一起关闭。手机上的 sheet 自带滑入和滑出的动作。
+
+```tsx
+<Menu
+  popupClass="min-w-40 rounded-lg bg-white p-1 shadow-lg transition-all duration-100"
+  popupStartingClass="opacity-0 -translate-y-1"
+  popupEndingClass="opacity-0"
+  trigger={<Text>File</Text>}
+>
+  <MenuItem onSelect={newFile}><Text>New</Text></MenuItem>
+</Menu>
+```
+
 <a id="open-state"></a>
 
 ## 打开状态
@@ -122,13 +139,15 @@ import { ContextMenu, MenuItem } from "nsh/base";
 | `offset` | `.offset(..)` | `number` | `0` | 桌面：触发元素与弹出层之间的间距。 |
 | `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（桌面）或 sheet（手机），以及子菜单的弹出层。 |
+| `popupStartingClass`、`popupStartingStyle` | `popup_starting_class`、`popup_starting_style` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层第一帧的外观，叠加在它们自己的外观之上。 |
+| `popupEndingClass`、`popupEndingStyle` | `popup_ending_class`、`popup_ending_style` | `string`、`StyleProp<ViewStyle>` | 无 | 桌面：弹出层关闭后的外观，过渡播放期间保留。 |
 | `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 手机：sheet 后面的背景层。 |
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开它的元素。菜单打开时，它的 `aria-expanded:` 类和 `expandedStyle` 生效。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 条目，每次打开时创建。 |
 
 ### ContextMenu
 
-`open`、`popupClass` / `popupStyle`、`backdropClass` / `backdropStyle`、`trigger` 和 `children` 与 `Menu` 相同，另外还有：
+`open`、`popupClass` / `popupStyle`、起始与结束外观、`backdropClass` / `backdropStyle`、`trigger` 和 `children` 与 `Menu` 相同，另外还有：
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
@@ -164,7 +183,8 @@ import { ContextMenu, MenuItem } from "nsh/base";
 |---|---|---|
 | `onOpenChange`（`Menu`、`ContextMenu`） | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
 | `onOpen`（`Menu`、`ContextMenu`） | `.on_open(\|\| ..)` | 它已显示；以 sheet 呈现时，在它进入之后。 |
-| `onClose`（`Menu`、`ContextMenu`） | `.on_close(\|\| ..)` | 它已消失；以 sheet 呈现时，在它离开之后。应用关闭它时也会触发。 |
+| `onClose`（`Menu`、`ContextMenu`） | `.on_close(\|\| ..)` | 它已消失：以 sheet 呈现时在它离开之后，以弹出层呈现时在离开过渡之后。应用关闭它时也会触发。 |
+| `onPosition`（`Menu`、`ContextMenu`） | `.on_position(\|e\| ..)` | 桌面：弹出层已放置：`placement`（它所在的一侧）、`bounds`、`available`。 |
 | `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择。 |
 

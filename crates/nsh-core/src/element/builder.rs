@@ -832,6 +832,21 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// [`Self::inline_style`] for a style that changes with the
+    /// component's own state (a popup's `popupEndingStyle` over its
+    /// `popupStyle`, [`Style::then`]): the typed styles it has at any time
+    /// apply, also those it has only later.
+    fn state_inline_style(mut self, style: impl Fn() -> Style + 'static) -> Self {
+        Style::apply_bound(
+            self.node(),
+            Rc::new(style),
+            Variant::default(),
+            true,
+            |a, patch| a.inline = patch,
+        );
+        self
+    }
+
     /// Makes the texts in the view select together, as a browser page's
     /// do (TSX `<View selectable>`): a selection runs from text to text,
     /// across views and `TextView`s; texts that are not selectable stay
@@ -903,6 +918,29 @@ impl Style {
         style
     }
 
+    /// This style with `over` after it: where both set a property,
+    /// `over`'s declarations and typed styles win (a state's style over a
+    /// part's).
+    pub fn then(&self, over: &Style) -> Self {
+        if over.0.is_none() && over.1.is_empty() {
+            return self.clone();
+        }
+        if self.0.is_none() && self.1.is_empty() {
+            return over.clone();
+        }
+        let mut style = if self.0.is_none() {
+            Self(over.0.clone(), StyleRefinement::default())
+        } else if over.0.is_none() {
+            Self(self.0.clone(), StyleRefinement::default())
+        } else {
+            Self::from_decls(self.decls().iter().chain(over.decls()).cloned())
+        };
+        let mut typed = self.1.clone();
+        typed.extend_as(Variant::default(), over.1.clone());
+        style.1 = typed;
+        style
+    }
+
     /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
@@ -926,17 +964,27 @@ impl Style {
                     node.style.extend_as(variant, typed);
                 }
             }
-            Reactive::Bound(f) => {
-                let typed = super::untracked(|| !f().1.is_empty());
-                let patch = f.clone();
-                node.bind_attr(move || patch().0, attr);
-                if typed {
-                    // Resolved here: the bound parts of what it adds would
-                    // not run in this resolution.
-                    node.style
-                        .bind(move |s| s.extend_as(variant, f().1.resolved()));
-                }
-            }
+            Reactive::Bound(f) => Self::apply_bound(node, f, variant, false, attr),
+        }
+    }
+
+    /// [`Style::apply`] of a bound style; `typed_later`: its typed styles
+    /// are followed even when it has none as the element is made.
+    pub(crate) fn apply_bound(
+        node: &mut ElNode,
+        f: Rc<dyn Fn() -> Style>,
+        variant: Variant,
+        typed_later: bool,
+        attr: impl Fn(&mut Attrs, Option<std::rc::Rc<crate::StylePatch>>) + 'static,
+    ) {
+        let typed = typed_later || super::untracked(|| !f().1.is_empty());
+        let patch = f.clone();
+        node.bind_attr(move || patch().0, attr);
+        if typed {
+            // Resolved here: the bound parts of what it adds would not run
+            // in this resolution.
+            node.style
+                .bind(move |s| s.extend_as(variant, f().1.resolved()));
         }
     }
 }

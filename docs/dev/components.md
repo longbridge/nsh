@@ -923,13 +923,39 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
   `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
-  motion is over; a popup at once), whoever opened or closed it, the app's `open` included (`lifecycle`, an effect on
-  what is shown). `Tooltip` has these two and `onOpenChange`.
+  motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
+  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `Tooltip` has these two and
+  `onOpenChange`.
+- **`onPosition({ placement, bounds, available })`** (`Popover`, and `Menu` / `ContextMenu` on the desktops): the
+  popup's overlay was placed (the core's `onPosition`, `elements.md` "Overlays"): the side it went on (the other side
+  of `placement` when only that one had room), its frame in the root view, the room on that side, so an app points
+  an arrow or an entrance at its trigger.
 - **`onCancel`**: each attempt of the user to close it without choosing: Escape or back, a press outside, a press on
   the backdrop. It is emitted before `onOpenChange`, whether or not a `closeOn<Trigger>` flag (`closeOnEscape`,
   `closeOnPressOutside`, `closeOnBackdropPress`, read natively when the user acts) let it close, so an app with a flag
   set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
   sheet's submenu goes back a level and is none either.
+
+**Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
+toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
+`Popover`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /
+`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's), `Tooltip`'s `startingClass` / `startingStyle` and
+`endingClass` / `endingStyle` (its own `class` / `style` are the bubble's). `popup.rs`' `PopupPresence` follows the
+open state: opened, the popup is made with its starting look, which it keeps until the next display frame (or 50 ms
+where none comes, as `Toast`'s), so `transition-*` classes run from it; closed, it stays mounted with its ending look
+and `pointer-events-none`, while the touch screens' backdrop goes and presses outside and Escape are no attempts any more,
+for as long as its transitions then run: the platforms run transitions without reporting their end, so it asks the
+core (`ElementRef::transition_time`, an `Action::TransitionTime` the commit answers from the node's resolved
+`transition`, the app's `class`, `style` and theme included: the longest duration plus delay, two seconds at most),
+waits that long, then unmounts, and `onClose` follows. A generation counter keeps a stale frame or exit from acting on
+a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
+never gone, so neither `onClose` nor `onOpen` fires. Without a look for a state, or while the user asks for less
+motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
+for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
+style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
+styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
+closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, `Select`'s list) keeps
+`SheetMotion`.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -939,7 +965,7 @@ is for, never by replacing one popup with another everywhere:
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it (resting on it again while it goes takes it back) | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 

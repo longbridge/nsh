@@ -2,7 +2,10 @@
 //! `Tooltip`, `Sheet`): their open state, controlled or not, and why it
 //! changed. They show their content in the core's overlays
 //! (`nsh_core::element::overlay`), which place it and report presses outside,
-//! Escape and the back button; deciding to close is theirs.
+//! Escape and the back button; deciding to close is theirs. A sheet comes
+//! and goes with its own motion ([`SheetMotion`]); a popup's entrance and
+//! exit are the app's transitions between its look and its states' looks
+//! ([`PopupPresence`]).
 //!
 //! How a popup presents itself follows the device (`auto`, the only
 //! presentation for now): on the desktops (and desktop browsers) a menu is
@@ -13,7 +16,7 @@
 //! (a transparent backdrop takes it). A popover stays anchored to its
 //! trigger everywhere: what it shows belongs next to it.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use nsh_core::{element::Style, prelude::*};
 
@@ -72,9 +75,9 @@ impl OpenState {
     /// The user asks for it to be `open`: when that is a change, `report`
     /// runs (the popup emits `OpenChange`), then its own state follows when
     /// the app does not control it. Reported first: the lifecycle
-    /// ([`lifecycle`]) emits `Open` / `Close` as the state changes, at once
-    /// where the popup has no motion (the desktops, reduced motion), and
-    /// the app hears `onOpenChange` before them.
+    /// ([`lifecycle`]) emits `Open` / `Close` as what is shown changes, at
+    /// once where the popup has no motion (no ending look, reduced motion),
+    /// and the app hears `onOpenChange` before them.
     pub(crate) fn request(self, open: bool, report: impl FnOnce()) {
         if self.get_untracked() == open {
             return;
@@ -88,7 +91,8 @@ impl OpenState {
 
 /// A popup's lifecycle, the same for every one (as `Dialog`'s): `open` once
 /// it is all there (a sheet after it came in), `close` once it is all gone
-/// (after it went), whoever opened or closed it. `shown` is tracked; its
+/// (after it went: a sheet's motion, a popup's exit), whoever opened or
+/// closed it. `shown` is tracked; its
 /// first value only counts when it is shown.
 pub(crate) fn lifecycle(
     shown: impl Fn() -> bool + 'static,
@@ -104,6 +108,235 @@ pub(crate) fn lifecycle(
             _ => {}
         }
     });
+}
+
+/// How long a popup waits for its first display frame before it counts as
+/// past it without one (a surface not on screen), as a toast does.
+const FIRST_FRAME_MS: u64 = 50;
+/// The longest a popup stays mounted through its exit, whatever its
+/// transitions say.
+const EXIT_CAP: Duration = Duration::from_secs(2);
+
+/// `class` with every utility important (`opacity-0` is `opacity-0!`): a
+/// state's classes win over the part's `class` and `style`, as a state's
+/// styles do (`activeStyle`) and as CSS's state selectors do by their
+/// specificity.
+pub(crate) fn important(class: &str) -> SharedString {
+    class
+        .split_whitespace()
+        .map(|t| {
+            if t.ends_with('!') || t.split(':').next_back().is_some_and(|u| u.starts_with('!')) {
+                t.to_owned()
+            } else {
+                format!("{t}!")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .into()
+}
+
+/// Where a popup is in its life, which its state looks follow (Base UI's
+/// `data-starting-style` / `data-ending-style`, a toast's
+/// `transitionStatus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Status {
+    /// Just mounted: its first frame, with its starting look.
+    Starting,
+    /// Open.
+    Open,
+    /// Closed, mounted until its exit's transitions ran.
+    Ending,
+}
+
+/// The app's looks of a popup part's states: `<part>StartingClass` /
+/// `<part>StartingStyle` in its first frame, `<part>EndingClass` /
+/// `<part>EndingStyle` while it goes, over the part's own `class` /
+/// `style` (none: the component's root, which the core gives the app's
+/// `class` and `style` itself).
+#[derive(Clone, Copy)]
+pub(crate) struct StateLooks {
+    pub(crate) class: Option<Prop<Option<SharedString>>>,
+    pub(crate) style: Option<Prop<Style>>,
+    pub(crate) starting_class: Prop<Option<SharedString>>,
+    pub(crate) starting_style: Prop<Style>,
+    pub(crate) ending_class: Prop<Option<SharedString>>,
+    pub(crate) ending_style: Prop<Style>,
+}
+
+impl StateLooks {
+    fn has_starting(self) -> bool {
+        self.starting_class.with_untracked(|c| c.is_some())
+            || self
+                .starting_style
+                .with_untracked(|s| *s != Style::default())
+    }
+
+    fn has_ending(self) -> bool {
+        self.ending_class.with_untracked(|c| c.is_some())
+            || self.ending_style.with_untracked(|s| *s != Style::default())
+    }
+}
+
+/// A popup's presence (`Popover`'s, a desktop menu's and its submenus',
+/// `Tooltip`'s), as a toast's `transitionStatus` and Base UI's
+/// `data-starting-style` / `data-ending-style`: opened, it is mounted with
+/// its starting look until its first display frame, so the app's
+/// `transition-*` classes run its entrance; closed, it stays mounted with
+/// its ending look (taking no presses) for as long as its transitions then
+/// run (the core says, [`ElementRef::transition_time`]; two seconds at
+/// most), then goes. Opened again on its way out, it is taken back (its
+/// transitions run back). Without a look for a state, or when the user
+/// asked for less motion, it skips that state: a popup with no ending look
+/// goes at once, as one with no motion did.
+#[derive(Clone, Copy)]
+pub(crate) struct PopupPresence {
+    /// Mounted: open, or on its way out.
+    mounted: Signal<bool>,
+    status: Signal<Status>,
+    looks: StateLooks,
+    /// The popup part, whose transitions its exit waits for.
+    popup: ElementRef,
+    /// A stale frame, timer or exit cannot finish a newer change.
+    generation: Stored<u64>,
+}
+
+impl PopupPresence {
+    /// The presence of a popup that is open while `open` says so, its
+    /// part carrying `popup` ([`Self::popup`]).
+    pub(crate) fn new(open: impl Fn() -> bool + 'static, looks: StateLooks) -> Self {
+        let presence = Self {
+            mounted: signal(false),
+            status: signal(Status::Open),
+            looks,
+            popup: element_ref(),
+            generation: stored(0),
+        };
+        // Runs again only when it opens or closes (not when what `open`
+        // reads changes and it stays as it was): each run is a change, and
+        // the frames, timers and exit it starts belong to it, ended by the
+        // next.
+        let open = computed(open);
+        effect(move || {
+            let open = open.get();
+            untracked(|| presence.follow(open));
+        });
+        presence
+    }
+
+    fn follow(self, open: bool) {
+        let status = self.status.get_untracked();
+        if open {
+            if self.mounted.get_untracked() {
+                // Opened again on its way out: back to open.
+                if status == Status::Ending {
+                    self.next_change();
+                    self.status.set(Status::Open);
+                }
+                return;
+            }
+            let generation = self.next_change();
+            let starting = !reduce_motion() && self.looks.has_starting();
+            self.status.set(if starting {
+                Status::Starting
+            } else {
+                Status::Open
+            });
+            self.mounted.set(true);
+            if starting {
+                // Open from the next display frame, or a frame's time
+                // where none comes, whichever is first.
+                let enter = move || {
+                    if self.generation.get() == generation
+                        && self.status.get_untracked() == Status::Starting
+                    {
+                        self.status.set(Status::Open);
+                    }
+                };
+                request_animation_frame(move |_| enter());
+                set_timeout(Duration::from_millis(FIRST_FRAME_MS), enter);
+            }
+        } else if self.mounted.get_untracked() && status != Status::Ending {
+            let generation = self.next_change();
+            if reduce_motion() || !self.looks.has_ending() {
+                self.mounted.set(false);
+                self.status.set(Status::Open);
+                return;
+            }
+            self.status.set(Status::Ending);
+            // Gone once: a later change, or the other way here, finds it
+            // gone already.
+            let finish = move || {
+                if self.generation.get() == generation
+                    && self.status.get_untracked() == Status::Ending
+                {
+                    self.mounted.set(false);
+                    // Its look while closed (a tooltip's view stays).
+                    self.status.set(Status::Open);
+                }
+            };
+            // Gone once its transitions with its ending look ran: the core
+            // answers once this change is styled.
+            let popup = self.popup;
+            spawn(async move {
+                let time = popup.transition_time().await.min(EXIT_CAP);
+                if !time.is_zero() {
+                    timer(time).await;
+                }
+                finish();
+            });
+            // And at the latest after the cap, whatever the answer.
+            set_timeout(EXIT_CAP, finish);
+        }
+    }
+
+    /// A new change: what an older one left pending no longer acts.
+    fn next_change(self) -> u64 {
+        let next = self.generation.get().wrapping_add(1);
+        self.generation.replace(next);
+        next
+    }
+
+    /// Whether the popup is mounted (tracked): open, or on its way out.
+    pub(crate) fn mounted(self) -> bool {
+        self.mounted.get()
+    }
+
+    /// The ref its popup part carries.
+    pub(crate) fn popup(self) -> ElementRef {
+        self.popup
+    }
+
+    /// The part's classes now: its own with its state's over them
+    /// (important), and none of its presses while it goes.
+    pub(crate) fn class(self) -> Option<SharedString> {
+        let own = self.looks.class.and_then(|c| c.get());
+        let state = match self.status.get() {
+            Status::Open => return own,
+            Status::Starting => self.looks.starting_class.get().map(|c| important(&c)),
+            Status::Ending => Some(
+                match self.looks.ending_class.get() {
+                    Some(c) => format!("{} pointer-events-none!", important(&c)),
+                    None => "pointer-events-none!".to_owned(),
+                }
+                .into(),
+            ),
+        };
+        match (own, state) {
+            (Some(own), Some(state)) => Some(format!("{own} {state}").into()),
+            (own, state) => state.or(own),
+        }
+    }
+
+    /// The part's inline style now: its own with its state's over it.
+    pub(crate) fn style(self) -> Style {
+        let own = self.looks.style.map(|s| s.get()).unwrap_or_default();
+        match self.status.get() {
+            Status::Open => own,
+            Status::Starting => own.then(&self.looks.starting_style.get()),
+            Status::Ending => own.then(&self.looks.ending_style.get()),
+        }
+    }
 }
 
 /// How long a sheet takes to come in and to go, in milliseconds.
@@ -449,4 +682,15 @@ pub(crate) fn dropdown(
         vec![popup.into_element()]
     })
     .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn state_classes_are_important() {
+        assert_eq!(
+            &*super::important("opacity-0 dark:bg-black/50 !p-2 m-1!"),
+            "opacity-0! dark:bg-black/50! !p-2 m-1!"
+        );
+    }
 }

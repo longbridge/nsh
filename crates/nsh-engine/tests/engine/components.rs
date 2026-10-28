@@ -3286,6 +3286,125 @@ fn popups_report_their_open_change_first_on_touch_screens() {
     popups_report_their_open_change_first(Environment::default());
 }
 
+const POPUP_LOOKS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Popover } from "nsh/base";
+
+function App() {
+  const life = signal<string[]>([]);
+  const side = signal("none");
+  return (
+    <View>
+      <Popover
+        popupClass="transition-opacity duration-200"
+        popupStartingClass="opacity-0"
+        popupEndingStyle={{ opacity: 0.5 }}
+        onOpen={() => life.set([...life(), "open"])}
+        onClose={() => life.set([...life(), "close"])}
+        onPosition={({ placement, bounds, available }) =>
+          side.set(`${placement} ${bounds.size.height} ${available.height > 0}`)}
+        trigger={
+          <View testID="trigger">
+            <Text>Details</Text>
+          </View>
+        }
+      >
+        <Text style={{ height: 40 }}>Body</Text>
+      </Popover>
+      <Text>{`Life: ${life().join(" ")}`}</Text>
+      <Text>{`Side: ${side()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A popover's states' looks and placement from TSX: made with its
+/// starting class, its look from its first frame on, kept with its ending
+/// style through its transition's 200 ms once closed (`onClose` after);
+/// `onPosition` says the side it went on, its frame and its room.
+#[test]
+fn a_popovers_looks_follow_its_presence_from_tsx() {
+    let (engine, rx) = start_in(
+        POPUP_LOOKS,
+        Environment {
+            os: nsh_engine::Os::Windows,
+            ..Environment::default()
+        },
+    );
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let trigger = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some("trigger") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the trigger");
+    let press = || {
+        engine
+            .control()
+            .dispatch_event(trigger, EventKind::Press, EventPayload::None)
+    };
+    // The popup is the view the body's text is inserted into.
+    let popup_of = |batches: &[MountBatch]| {
+        batches.iter().find_map(|b| {
+            let body = text_ids(b, "Body")?;
+            b.items.iter().find_map(|i| match i {
+                MountItem::Insert { parent, child, .. } if *child == body => Some(*parent),
+                _ => None,
+            })
+        })
+    };
+    let opacities = |batches: &[MountBatch], popup: u32| -> Vec<f32> {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == popup => Some(style.opacity),
+                _ => None,
+            })
+            .collect()
+    };
+    press();
+    let mut opened = until(&rx, |b| shows(b, "Side: bottom 40 true"));
+    let popup = popup_of(&opened).expect("the popup");
+    assert_eq!(
+        opacities(&opened, popup).first(),
+        Some(&0.0),
+        "made with its starting class"
+    );
+    if opacities(&opened, popup).last() != Some(&1.0) {
+        opened = until(&rx, |b| {
+            opacities(std::slice::from_ref(b), popup).last() == Some(&1.0)
+        });
+        assert_eq!(
+            opacities(&opened, popup).last(),
+            Some(&1.0),
+            "its look after its first frame"
+        );
+    }
+    press();
+    let closing = until(&rx, |b| {
+        opacities(std::slice::from_ref(b), popup).last() == Some(&0.5)
+    });
+    assert_eq!(
+        opacities(&closing, popup).last(),
+        Some(&0.5),
+        "kept with its ending style"
+    );
+    assert!(!closing.iter().any(|b| shows(b, "Life: open close")));
+    let closed = until(&rx, |b| shows(b, "Life: open close"));
+    assert!(
+        closed.iter().any(|b| shows(b, "Life: open close")),
+        "closed after its exit"
+    );
+}
+
 const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Progress } from "nsh/base";
 

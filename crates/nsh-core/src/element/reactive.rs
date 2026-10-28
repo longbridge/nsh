@@ -625,6 +625,11 @@ impl<T: 'static> Signal<T> {
         read_value(self.handle.expect("a signal"), false, f)
     }
 
+    /// Whether its owner lives: it may be read and written.
+    pub(crate) fn is_live(&self) -> bool {
+        self.handle.live()
+    }
+
     /// The value, or `None` once the signal's owner was disposed.
     pub fn try_get(&self) -> Option<T>
     where

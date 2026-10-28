@@ -380,7 +380,11 @@ impl Headless {
         self.engine.control().advance_clock(by, move || {
             let _ = tx.send(());
         });
-        let _ = rx.recv_timeout(MAX_IDLE);
+        // A gone engine never moves the clock: the steps that wait for it
+        // to move would wait for good.
+        if let Err(crossbeam_channel::RecvTimeoutError::Disconnected) = rx.recv_timeout(MAX_IDLE) {
+            panic!("the engine stopped (its thread panicked?): the manual clock cannot move");
+        }
     }
 
     /// One display frame on the manual clock, `by` after the last: the

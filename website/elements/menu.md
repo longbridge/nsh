@@ -106,6 +106,24 @@ On the desktops the secondary button opens it where the pointer is. On touch scr
 opens it as a sheet; the trigger's own presses and the scroll views around it keep working, and moving the finger
 cancels the hold.
 
+## Entrance and exit
+
+On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
+`popupStartingClass` is its look in its first frame, `popupEndingClass` its look once closed, which it keeps while the
+`transition-*` classes of `popupClass` run, and `onClose` follows. Submenus take the same looks and close with their
+menu. The sheet of phones slides in and out on its own.
+
+```tsx
+<Menu
+  popupClass="min-w-40 rounded-lg bg-white p-1 shadow-lg transition-all duration-100"
+  popupStartingClass="opacity-0 -translate-y-1"
+  popupEndingClass="opacity-0"
+  trigger={<Text>File</Text>}
+>
+  <MenuItem onSelect={newFile}><Text>New</Text></MenuItem>
+</Menu>
+```
+
 ## Open state
 
 Without `open`, a menu keeps its own state (from `defaultOpen` for `Menu`). With `open`, the app owns it and changes
@@ -125,13 +143,16 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 | `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the trigger and the popup. |
 | `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (phones), and the submenus' popups. |
+| `popupStartingClass`, `popupStartingStyle` | `.popup_starting_class(..)`, `.popup_starting_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popups' look in their first frame, over their own. |
+| `popupEndingClass`, `popupEndingStyle` | `.popup_ending_class(..)`, `.popup_ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Desktops: the popups' look once closed, kept while their transitions run. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Phones: the backdrop behind the sheet. |
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it when pressed. While the menu is open its `aria-expanded:` classes and `expandedStyle` apply. |
 | `children` | `.child(..)` | `JSX.Element` | none | The items, made each time it opens. |
 
 ### ContextMenu
 
-`open`, `popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`, `trigger` and `children` as for `Menu`, and:
+`open`, `popupClass` / `popupStyle`, the starting and ending looks, `backdropClass` / `backdropStyle`, `trigger` and
+`children` as for `Menu`, and:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
@@ -165,7 +186,8 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 |---|---|---|
 | `onOpenChange` (`Menu`, `ContextMenu`) | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
 | `onOpen` (`Menu`, `ContextMenu`) | `.on_open(\|\| ..)` | It is shown; as a sheet, once it came in. |
-| `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone; as a sheet, once it went. Also when the app closed it. |
+| `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone: as a sheet once it went, as a popup after its exit. Also when the app closed it. |
+| `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | Desktops: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen. |
 

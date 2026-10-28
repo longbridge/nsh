@@ -9474,6 +9474,54 @@ mod components {
         assert!(events.is_empty(), "nothing for JS: {events:?}");
     }
 
+    /// A drawer in a drawer, both open while one signal says so: closing
+    /// closes both regions in one commit.
+    #[component]
+    fn NestedShelf() -> impl IntoElement {
+        let open = signal(false);
+        view()
+            .child(
+                view()
+                    .h(px(10.0))
+                    .on_press(move |_: &()| open.update(|o| *o = !*o)),
+            )
+            .child(
+                drawer()
+                    .open(open)
+                    .child(drawer().open(open).child(text("deep"))),
+            )
+    }
+
+    /// The outer drawer's region goes first: the run of the view that
+    /// passed the inner drawer its children is disposed, with the signal
+    /// saying whether the inner one places them, before the inner drawer's
+    /// own region (closing in the same commit) says it does not any more.
+    #[test]
+    fn nested_lazy_children_close_together() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<NestedShelf>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        let instances = c.components.instances.len();
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["deep"]);
+        // Both close in one commit: released, nothing written to what the
+        // disposed run made.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit();
+        assert_eq!(c.components.instances.len(), instances);
+        // And open again.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["deep"]);
+    }
+
     /// Pastes the clipboard's text when pressed, if it holds some.
     #[component]
     fn Paster() -> impl IntoElement {

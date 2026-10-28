@@ -253,6 +253,27 @@ impl ElementRef {
     }
 }
 
+impl ElementRef {
+    /// How long the element's transitions run (`transition*`: the
+    /// longest duration plus its delay), with the styles of the commit
+    /// this call goes out with, so a class or style set before it counts;
+    /// zero when it has none or no rendered element carries the ref. The
+    /// platforms run transitions without reporting their end: a component
+    /// that keeps an element through its exit (a popup's ending style)
+    /// waits this long. Await it in a task.
+    pub fn transition_time(&self) -> Answer<std::time::Duration> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::TransitionTime(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(std::time::Duration::ZERO);
+        }
+        answer
+    }
+}
+
 impl PartialEq for ElementRef {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0

@@ -525,6 +525,9 @@ pub(super) struct Components {
     /// Elements to measure once this commit is laid out
     /// ([`crate::element::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
+    /// Elements whose transitions' time to tell once this commit is
+    /// styled ([`crate::element::ElementRef::transition_time`]).
+    pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
@@ -612,6 +615,7 @@ impl Default for Components {
             next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
+            transition_times: Vec::new(),
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
@@ -2368,10 +2372,15 @@ impl<M: TextEngine> Core<M> {
             inst.children_wanted = wanted;
             match self.components.owners.get(&host).copied() {
                 // A view's: what passes them follows (a view that passes
-                // none made no signal).
+                // none made no signal). The run of the view that passed
+                // them may be gone already, in this commit, before what it
+                // made is released: a region of this component and the one
+                // passing its children changed together (a menu and its
+                // submenu ending their exits at once). Nothing reads its
+                // signal then.
                 Some(_) => {
                     if let Some(signal) = inst.lazy_wanted {
-                        signal.set(wanted);
+                        signal.try_set(wanted);
                     }
                 }
                 None => self.events.push(JsEvent::Children { host, wanted }),
@@ -2386,9 +2395,17 @@ impl<M: TextEngine> Core<M> {
         let Some(inst) = self.components.instances.get_mut(&nested) else {
             return crate::element::signal(false);
         };
-        *inst
-            .lazy_wanted
-            .get_or_insert_with(|| crate::element::signal(inst.children_wanted))
+        // Made again under this owner when the one that made it is gone
+        // (the run that passed them before was disposed while the
+        // component stayed).
+        match inst.lazy_wanted {
+            Some(signal) if signal.is_live() => signal,
+            _ => {
+                let signal = crate::element::signal(inst.children_wanted);
+                inst.lazy_wanted = Some(signal);
+                signal
+            }
+        }
     }
 
     /// JS child `child`, placed at `place`, leaves the tree (and the
@@ -4592,6 +4609,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::TransitionTime(id, answer) => {
+                self.components.transition_times.push((id, answer))
+            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;
