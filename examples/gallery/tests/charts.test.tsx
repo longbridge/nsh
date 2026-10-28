@@ -189,8 +189,9 @@ test("the radar reads out the factor nearest the pointer and changes its benchma
 });
 
 test("a quarter's income flows from its segments to net income, and into the next quarter's", async () => {
-  // The flows are one image, named with what they show; each account named beside its node, the margins under them.
+  // The flows are one image, named with what they show; each account named beside its node (once they have drawn in), the margins under them.
   expect(app.count("role:image[Income flows, Q3: $85.5B revenue, $19.9B net income, a net margin of 23.3%]")).toBe(1);
+  await app.clock.runFor(1500);
   for (const name of ["Products", "Gross profit", "Net income"]) expect(app.texts()).toContain(name);
   expect(app.texts()).toContain("46.4%");
   // The next quarter's flows: the readout and the margins follow.

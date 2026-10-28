@@ -183,10 +183,13 @@ fn label(
                 }
             };
             let s = s.left(px(x)).top(px(y));
+            // Always a row, so the content takes its own width (a column
+            // of no width would narrow it to its narrowest, a character
+            // a line where text breaks anywhere, as on the web).
             match side {
                 Side::Before => s.flex_row().justify_end().items_center(),
                 Side::After => s.flex_row().justify_start().items_center(),
-                Side::Above => s.flex_col().justify_end().items_center(),
+                Side::Above => s.flex_row().justify_center().items_end(),
             }
         })
         .child(content)
