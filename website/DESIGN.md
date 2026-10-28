@@ -166,7 +166,7 @@ ones faster, and now and then a meteor crosses. Presses act
 on gravity: a held press is a small mass that bends the starlight toward
 it; released, it sends a gentle wave that carries the stars outward as it
 passes before they settle back, and turns their drift to a new heading. The
-sky shows across the hero, a little weaker behind the copy, every mask
+sky shows across the hero, about half as strong behind the copy, every mask
 a smooth gradient. The colors are the `--hero-*` tokens. It moves all the
 time, pauses off screen and in hidden tabs, draws one still frame and takes
 no presses with reduced motion, never takes pointer events itself, and
