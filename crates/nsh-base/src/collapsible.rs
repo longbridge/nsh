@@ -74,9 +74,31 @@ pub struct CollapsibleProps {
 #[component]
 pub fn Collapsible(props: CollapsibleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let (open, reveal) = (props.open, props.reveal);
+    let mounted = follow_open(open.into_reactive(), reveal.into_reactive());
+    let content = move || props.content.place(|content| content);
+    view().child(props.children).child(
+        when(reveal, move || {
+            view()
+                .overflow_hidden()
+                .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
+                .child(when(mounted, content))
+        })
+        .otherwise(move || when(open, content)),
+    )
+}
+
+/// Follows `open` for a region whose content comes and goes, revealed while
+/// `reveal` holds and motion is not reduced: each change of `open` animates
+/// the commit that makes it ([`REVEAL`]), and the signal returned says
+/// whether the content is in the tree. It turns on with `open`, and off
+/// with it, or once the region has closed after a reveal. The region's
+/// clip (zero high while closed) is the caller's: `Collapsible`'s and
+/// `AccordionPanel`'s.
+pub(crate) fn follow_open(open: Reactive<bool>, reveal: Reactive<bool>) -> Signal<bool> {
+    let initial = untracked(|| open.get());
     // The content is in the tree: while open, and while a reveal closes.
-    let mounted = signal(open.get_untracked());
-    let shown = stored(open.get_untracked());
+    let mounted = signal(initial);
+    let shown = stored(initial);
     // Each change of `open` ends what a closing reveal waits for.
     let generation = stored(0u64);
     effect(move || {
@@ -104,14 +126,5 @@ pub fn Collapsible(props: CollapsibleProps, _cx: Scope<NoEvent>) -> impl IntoEle
             });
         });
     });
-    let content = move || props.content.place(|content| content);
-    view().child(props.children).child(
-        when(reveal, move || {
-            view()
-                .overflow_hidden()
-                .style_with(move |s| if open.get() { s } else { s.h(px(0.0)) })
-                .child(when(mounted, content))
-        })
-        .otherwise(move || when(open, content)),
-    )
+    mounted
 }
